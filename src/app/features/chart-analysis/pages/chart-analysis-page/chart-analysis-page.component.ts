@@ -300,6 +300,7 @@ import type {
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import { ChartTradingComponent } from '../../trading/chart-trading.component';
+import { ChartAnalysisComponent } from '../../analysis/chart-analysis.component';
 import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/trade-timeline';
 import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import type { TicketPrefill } from '../../trading/ticket-model';
@@ -548,6 +549,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     DecimalPipe,
     ChartHostComponent,
     ChartTradingComponent,
+    ChartAnalysisComponent,
     DataWindowComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
@@ -1399,7 +1401,18 @@ export class ChartAnalysisPageComponent {
     ...this.rungMarkers(),
     ...this.closedTradeMarkers(),
     ...this.timelineMarkers(),
+    ...this.analysisMarkers(),
   ]);
+
+  // ── SP-I5 (analysis): the analysis panel, its plan / watch overlay and the watches' fire markers ──
+  /** The analysis panel is open (its overlay stays drawn when it is closed). */
+  readonly analysisOpen = signal(false);
+  /** The symbol's watches' fires, touches, call-offs and script steps (`app-chart-analysis` fills it). */
+  readonly analysisMarkers = signal<ChartMarker[]>([]);
+  /** A trade an analysis proposed, opened in the order ticket (paper, at market — nothing is sent until Submit). */
+  onAnalysisTicket(prefill: TicketPrefill): void {
+    this.ticketPrefill.set({ ...prefill });
+  }
 
   // ── BX-1 (trading): the chart strategy's trade timeline — backtest, live session, paper and broker fills ──
   private readonly scriptStrategies = inject(ScriptStrategyService);

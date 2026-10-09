@@ -1,7 +1,4 @@
-import type {
-  MarketAnalysisRecommendationDto,
-  MarketAnalysisResultDto,
-} from '@core/api/api.types';
+import type { MarketAnalysisRecommendationDto, MarketAnalysisResultDto } from '@core/api/api.types';
 
 import type { ChartMarker } from '../chart/chart-host.component';
 import { resolutionMs, type EngineTimeframe } from '../datafeed/resolution';
@@ -180,13 +177,17 @@ export function originLabel(origin: string): string {
  * Lines for the live watches: the prices each waits at (amber, dashed) or is called off at (dark red, dashed), and
  * its plan. A watch armed by the analysis on screen is labelled with that analysis' id too.
  */
-export function watchLines(data: ChartAnalysisMonitors | null, analysisId: number | null): AnalysisLine[] {
+export function watchLines(
+  data: ChartAnalysisMonitors | null,
+  analysisId: number | null,
+): AnalysisLine[] {
   if (!data) return [];
   const out: AnalysisLine[] = [];
   for (const m of data.monitors) {
     if (!isLive(m)) continue;
     const kindTag = m.isStructureWatch ? 'Structure Watch' : 'Watch';
-    const from = analysisId !== null && m.anchorLlmInvocationId === analysisId ? ` (#${analysisId})` : '';
+    const from =
+      analysisId !== null && m.anchorLlmInvocationId === analysisId ? ` (#${analysisId})` : '';
     for (const l of m.levels) {
       out.push({
         key: `w:${m.id}:${l.kind}:${l.price}`,
@@ -219,13 +220,31 @@ export function watchMarkers(data: ChartAnalysisMonitors | null): ChartMarker[] 
     const tag = `W${e.monitorId}`;
     switch (e.kind) {
       case 'Fired':
-        out.push({ time, position: 'aboveBar', shape: 'arrowDown', color: LEVEL_COLORS.fired, text: `${tag} fired` });
+        out.push({
+          time,
+          position: 'aboveBar',
+          shape: 'arrowDown',
+          color: LEVEL_COLORS.fired,
+          text: `${tag} fired`,
+        });
         break;
       case 'Touched':
-        out.push({ time, position: 'aboveBar', shape: 'circle', color: LEVEL_COLORS.touched, text: `${tag} touched` });
+        out.push({
+          time,
+          position: 'aboveBar',
+          shape: 'circle',
+          color: LEVEL_COLORS.touched,
+          text: `${tag} touched`,
+        });
         break;
       case 'Invalidated':
-        out.push({ time, position: 'aboveBar', shape: 'square', color: LEVEL_COLORS.invalidation, text: `${tag} called off` });
+        out.push({
+          time,
+          position: 'aboveBar',
+          shape: 'square',
+          color: LEVEL_COLORS.invalidation,
+          text: `${tag} called off`,
+        });
         break;
       case 'ScriptStep':
         out.push({

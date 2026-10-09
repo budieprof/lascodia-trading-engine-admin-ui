@@ -54,10 +54,19 @@ describe('analysis-overlay', () => {
   });
 
   it('names the outcome: a trade, a watch, or standing aside', () => {
-    const buy = { action: 'Buy' as const, entryPrice: 1.15, stopLoss: 1.14, takeProfit: 1.17, confidence: 0.6, rationale: '' };
+    const buy = {
+      action: 'Buy' as const,
+      entryPrice: 1.15,
+      stopLoss: 1.14,
+      takeProfit: 1.17,
+      confidence: 0.6,
+      rationale: '',
+    };
     const hold = { ...buy, action: 'Hold' as const };
     expect(analysisOutcome(result({ recommendations: [buy] }))).toBe('TRADE NOW');
-    expect(analysisOutcome(result({ recommendations: [hold], armedMonitorIds: [5] }))).toBe('WATCH');
+    expect(analysisOutcome(result({ recommendations: [hold], armedMonitorIds: [5] }))).toBe(
+      'WATCH',
+    );
     expect(analysisOutcome(result({ recommendations: [hold] }))).toBe('STAND ASIDE');
   });
 
@@ -65,8 +74,22 @@ describe('analysis-overlay', () => {
     const lines = planLines(
       result({
         recommendations: [
-          { action: 'Sell', entryPrice: 1.15, stopLoss: 1.16, takeProfit: 1.13, confidence: 0.6, rationale: '' },
-          { action: 'Hold', entryPrice: 1.2, stopLoss: 1.1, takeProfit: 1.3, confidence: 0.2, rationale: '' },
+          {
+            action: 'Sell',
+            entryPrice: 1.15,
+            stopLoss: 1.16,
+            takeProfit: 1.13,
+            confidence: 0.6,
+            rationale: '',
+          },
+          {
+            action: 'Hold',
+            entryPrice: 1.2,
+            stopLoss: 1.1,
+            takeProfit: 1.3,
+            confidence: 0.2,
+            rationale: '',
+          },
         ],
       }),
     );
@@ -92,7 +115,11 @@ describe('analysis-overlay', () => {
             { price: 1.142, kind: 'invalidation', label: 'called off if a candle closes below' },
           ],
         }),
-        monitor({ id: 9, status: 'Expired', levels: [{ price: 1.2, kind: 'trigger', label: 'x' }] }),
+        monitor({
+          id: 9,
+          status: 'Expired',
+          levels: [{ price: 1.2, kind: 'trigger', label: 'x' }],
+        }),
       ],
     };
     const lines = watchLines(data, 37445);
@@ -110,7 +137,13 @@ describe('analysis-overlay', () => {
       eventsTruncated: false,
       monitors: [],
       events: [
-        { monitorId: 7, kind: 'ScriptStep', occurredAtUtc: '2026-10-09T09:00:00Z', fired: false, note: '10-09 09:00Z step 0→1 close 1.149' },
+        {
+          monitorId: 7,
+          kind: 'ScriptStep',
+          occurredAtUtc: '2026-10-09T09:00:00Z',
+          fired: false,
+          note: '10-09 09:00Z step 0→1 close 1.149',
+        },
         { monitorId: 7, kind: 'Fired', occurredAtUtc: '2026-10-09T10:00:00Z', fired: true },
         { monitorId: 7, kind: 'Invalidated', occurredAtUtc: '2026-10-09T11:00:00Z', fired: false },
         { monitorId: 7, kind: 'Evaluated', occurredAtUtc: '2026-10-09T11:00:00Z', fired: false },

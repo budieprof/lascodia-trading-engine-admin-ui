@@ -109,7 +109,11 @@ export function explainWatch(input: WatchScriptInput): string {
   if (!t) return '';
   const lvl = fmt(input.level, input.precision);
   let text = t.explain.replace('{level}', lvl).replace('{level}', lvl);
-  if (input.calledOff !== null && input.calledOff !== undefined && Number.isFinite(input.calledOff)) {
+  if (
+    input.calledOff !== null &&
+    input.calledOff !== undefined &&
+    Number.isFinite(input.calledOff)
+  ) {
     text += ` Also called off if a candle closes ${t.lean === 'up' ? 'below' : 'above'} ${fmt(input.calledOff, input.precision)}.`;
   }
   return text;
@@ -129,7 +133,8 @@ export function buildWatchScript(input: WatchScriptInput): string {
   const t = watchTemplate(input.template);
   if (!t) throw new Error('unknown watch template');
   const lvl = fmt(input.level, input.precision);
-  const hasOff = input.calledOff !== null && input.calledOff !== undefined && Number.isFinite(input.calledOff);
+  const hasOff =
+    input.calledOff !== null && input.calledOff !== undefined && Number.isFinite(input.calledOff);
   const off = hasOff ? fmt(input.calledOff as number, input.precision) : null;
 
   const head = [
@@ -147,7 +152,10 @@ export function buildWatchScript(input: WatchScriptInput): string {
   const guard =
     off === null
       ? []
-      : [`    if ${t.lean === 'up' ? 'close < calledOff' : 'close > calledOff'}`, '        broken := true'];
+      : [
+          `    if ${t.lean === 'up' ? 'close < calledOff' : 'close > calledOff'}`,
+          '        broken := true',
+        ];
 
   // Every structure block is evaluated on EVERY candle, outside the step logic: the blocks keep history (ATR,
   // previous candles), and calling them only on some candles would feed them a broken series.
@@ -161,7 +169,9 @@ export function buildWatchScript(input: WatchScriptInput): string {
     case 'closeAbove':
     case 'closeBelow':
       readyStep = 1;
-      signals = [`closedBeyond = st.${t.id === 'closeAbove' ? 'closedAbove' : 'closedBelow'}(level)`];
+      signals = [
+        `closedBeyond = st.${t.id === 'closeAbove' ? 'closedAbove' : 'closedBelow'}(level)`,
+      ];
       body = ['    if not broken and step == 0 and closedBeyond', '        step := 1'];
       break;
     case 'dipReclaim':
