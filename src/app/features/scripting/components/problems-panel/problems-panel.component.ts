@@ -1,11 +1,24 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
-import type { ScriptDiagnostic } from '@core/api/scripting.types';
-import { countDiagnostics, sortDiagnostics } from '../../pine/pine-diagnostics';
+import type { ScriptDiagnostic, ScriptDiagnosticFix } from '@core/api/scripting.types';
+import {
+  countDiagnostics,
+  inLibrary,
+  sortDiagnostics,
+  unitLabel,
+} from '../../pine/pine-diagnostics';
+
+/** A quick fix the operator picked on a Problems row. */
+export interface ProblemFix {
+  diagnostic: ScriptDiagnostic;
+  fix: ScriptDiagnosticFix;
+}
 
 /**
  * Every diagnostic of the last compile, in reading order — like the Pine Editor's console.
- * Clicking one moves the editor's cursor to it.
+ * Clicking one moves the editor's cursor to it. A row shows the engine's hint under its message and
+ * offers its quick fixes as buttons; a diagnostic in an imported library's code names the library
+ * (its line numbers are the library's) and does not move the cursor.
  */
 @Component({
   selector: 'app-problems-panel',
@@ -46,14 +59,49 @@ import { countDiagnostics, sortDiagnostics } from '../../pine/pine-diagnostics';
                 type="button"
                 class="problem"
                 [attr.data-severity]="d.severity"
-                (click)="selected.emit(d)"
-                [title]="'Go to line ' + d.line"
+                [class.in-library]="isLibrary(d)"
+                (click)="select(d)"
+                [title]="
+                  isLibrary(d)
+                    ? 'In ' + libraryOf(d) + ' — its line numbers are the library’s'
+                    : 'Go to line ' + d.line
+                "
               >
                 <span class="sev" [attr.aria-label]="d.severity">{{ icon(d.severity) }}</span>
-                <span class="msg">{{ d.message }}</span>
+                <span class="msg">
+                  {{ d.message }}
+                  @if (d.hint) {
+                    <span class="hint">{{ d.hint }}</span>
+                  }
+                </span>
                 <span class="code">{{ d.code }}</span>
-                <span class="pos">Ln {{ d.line }}, Col {{ d.column }}</span>
+                <span class="pos">
+                  @if (isLibrary(d)) {
+                    {{ libraryOf(d) }}, Ln {{ d.line }}
+                  } @else {
+                    Ln {{ d.line }}, Col {{ d.column }}
+                  }
+                </span>
               </button>
+              @if (fixesOf(d).length > 0) {
+                <div class="fixes">
+                  @for (f of fixesOf(d); track $index) {
+                    <button
+                      type="button"
+                      class="fix"
+                      [disabled]="readOnly()"
+                      (click)="fix.emit({ diagnostic: d, fix: f })"
+                      [title]="
+                        readOnly()
+                          ? 'The editor is read-only'
+                          : 'Apply this fix (Ctrl/Cmd-Z undoes it)'
+                      "
+                    >
+                      Fix: {{ f.title }}
+                    </button>
+                  }
+                </div>
+              }
             </li>
           }
         </ul>
@@ -166,6 +214,40 @@ import { countDiagnostics, sortDiagnostics } from '../../pine/pine-diagnostics';
         color: var(--text-tertiary);
         white-space: nowrap;
       }
+      .hint {
+        display: block;
+        margin-top: 2px;
+        color: var(--text-secondary);
+        font-size: 11px;
+      }
+      .problem.in-library {
+        cursor: default;
+      }
+      .fixes {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 0 10px 4px 34px;
+      }
+      .fix {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-primary);
+        color: var(--accent);
+        font: inherit;
+        font-size: 11px;
+        padding: 1px 8px;
+        cursor: pointer;
+      }
+      .fix:hover:not(:disabled),
+      .fix:focus-visible {
+        background: var(--bg-tertiary);
+        outline: none;
+      }
+      .fix:disabled {
+        color: var(--text-tertiary);
+        cursor: default;
+      }
     `,
   ],
 })
@@ -175,7 +257,12 @@ export class ProblemsPanelComponent {
   readonly emptyLabel = input('No problems');
   /** A compile has run — an empty list is then a clean bill, shown in green. */
   readonly compiled = input(true);
+  /** The editor cannot be changed: quick fixes are shown but not offered. */
+  readonly readOnly = input(false);
+  /** A row of the script's own code was clicked (library rows do not move the cursor). */
   readonly selected = output<ScriptDiagnostic>();
+  /** A quick fix was picked. */
+  readonly fix = output<ProblemFix>();
 
   readonly collapsed = signal(false);
   readonly sorted = computed(() => sortDiagnostics(this.diagnostics()));
@@ -183,5 +270,22 @@ export class ProblemsPanelComponent {
 
   icon(severity: string): string {
     return severity === 'warning' ? '▲' : severity === 'info' ? 'ℹ' : '●';
+  }
+
+  isLibrary(d: ScriptDiagnostic): boolean {
+    return inLibrary(d);
+  }
+
+  libraryOf(d: ScriptDiagnostic): string {
+    return unitLabel(d.unit) ?? '';
+  }
+
+  /** The row's quick fixes (none for a library's diagnostics — that code is not in this editor). */
+  fixesOf(d: ScriptDiagnostic): readonly ScriptDiagnosticFix[] {
+    return !inLibrary(d) && Array.isArray(d.fixes) ? d.fixes : [];
+  }
+
+  select(d: ScriptDiagnostic): void {
+    if (!inLibrary(d)) this.selected.emit(d);
   }
 }

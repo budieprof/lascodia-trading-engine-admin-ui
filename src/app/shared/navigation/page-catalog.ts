@@ -178,6 +178,13 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
   },
   { group: 'ML', label: 'Backtests', route: '/backtests' },
   { group: 'ML', label: 'Walk-Forward', route: '/walk-forward', keywords: 'oos out-of-sample' },
+  {
+    group: 'ML',
+    label: 'Portfolio Backtests',
+    route: '/portfolio-backtests',
+    keywords:
+      'portfolio backtest several strategies one account shared equity margin currency exposure limit correlation members combined',
+  },
 
   {
     group: 'Analysis',

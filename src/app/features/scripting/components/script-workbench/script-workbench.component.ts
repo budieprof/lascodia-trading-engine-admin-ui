@@ -22,7 +22,10 @@ import {
 } from '@core/services/scripting.service';
 import { downloadTextFile, readTextFile } from '@shared/utils/download';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
-import { ProblemsPanelComponent } from '../problems-panel/problems-panel.component';
+import {
+  ProblemsPanelComponent,
+  type ProblemFix,
+} from '../problems-panel/problems-panel.component';
 import {
   ScriptStatusBarComponent,
   type CompileState,
@@ -118,7 +121,9 @@ export const COMPILE_DEBOUNCE_MS = 700;
           [diagnostics]="diagnostics()"
           [emptyLabel]="result() ? 'No problems' : 'Not compiled yet'"
           [compiled]="!!result()"
+          [readOnly]="readOnly() || stale()"
           (selected)="reveal($event.line, $event.column)"
+          (fix)="applyFix($event)"
         />
       }
     </div>
@@ -292,6 +297,16 @@ export class ScriptWorkbenchComponent {
 
   reveal(line: number, column = 1): void {
     this.editor?.revealPosition(line, column);
+  }
+
+  /**
+   * A quick fix picked in the Problems panel, applied as an undoable edit. Only while the
+   * diagnostics still describe the text on screen (the panel disables its fixes otherwise): a fix's
+   * position is the compiled source's.
+   */
+  applyFix(picked: ProblemFix): void {
+    if (this.readOnly() || this.stale()) return;
+    this.editor?.applyFix(picked.fix);
   }
 
   /** Replaces the source as an undoable edit in the editor (see PineEditorComponent.replaceSource). */
