@@ -1802,9 +1802,17 @@
       [scriptKind]="run.result.kind"
       [overlay]="run.result.overlay"
       [hasTables]="settingsHasTables()"
+      [symbols]="scriptSymbols()"
+      [pickEnabled]="canPickOnChart()"
+      [confirm]="settings.confirming()"
+      [templates]="settings.templates()"
       (changed)="settings.apply(run.item.key, $event)"
       (displayChange)="setScriptDisplay(run.item.key, $event)"
       (saveDefault)="settings.saveDefault(run.item.key, $event)"
+      (pickOnChart)="onScriptPick($event)"
+      (confirmCancelled)="removeScriptFromChart(run.item.key)"
+      (saveTemplate)="settings.saveTemplate(run.item.key, $event.name, $event.values)"
+      (deleteTemplate)="settings.deleteTemplate(run.item.key, $event)"
       (closed)="settings.close()"
     />
   }

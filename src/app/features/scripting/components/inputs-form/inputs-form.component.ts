@@ -5,11 +5,11 @@ import type {
   ScriptInputValue,
   ScriptInputValues,
 } from '@core/api/scripting.types';
+import { PineColorPickerComponent } from '@shared/pine-chart/components/pine-color-picker.component';
 import {
   SESSION_DAYS,
   alphaToOpacity,
   coerceInputValue,
-  colorToCss,
   formatColor,
   formatSession,
   inputOptions,
@@ -42,6 +42,7 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
   selector: 'app-inputs-form',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [PineColorPickerComponent],
   template: `
     @if (inputs().length === 0) {
       <p class="empty">{{ emptyText() }}</p>
@@ -198,16 +199,14 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
                         }
                         @case ('color') {
                           <span class="in-color">
-                            <span class="swatch" [style.--swatch]="colorCss(inp)">
-                              <input
-                                type="color"
-                                [id]="fieldId(inp)"
-                                [value]="colorHex(inp)"
-                                [disabled]="locked(inp)"
-                                (input)="setColorHex(inp, $any($event.target).value)"
-                                [attr.aria-label]="inp.title + ' colour'"
-                              />
-                            </span>
+                            <!-- TradingView's palette (greys, ten hues in tints and shades,
+                                 opacity, a custom colour) — PC-I12. -->
+                            <app-pine-color-picker
+                              [value]="text(inp)"
+                              [disabled]="locked(inp)"
+                              [label]="inp.title + ' colour'"
+                              (valueChange)="set(inp, $event)"
+                            />
                             <input
                               type="range"
                               min="0"
@@ -408,30 +407,6 @@ const OPTION_KINDS = new Set(['int', 'float', 'string', 'enum', 'source', 'timef
         align-items: center;
         gap: 8px;
       }
-      .swatch {
-        position: relative;
-        width: 30px;
-        height: 22px;
-        border-radius: 5px;
-        border: 1px solid var(--border);
-        overflow: hidden;
-        background-image:
-          linear-gradient(var(--swatch), var(--swatch)),
-          repeating-conic-gradient(#c8c8c8 0% 25%, #fff 0% 50%);
-        background-size:
-          auto,
-          8px 8px;
-      }
-      .swatch input {
-        position: absolute;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-        opacity: 0;
-        cursor: pointer;
-        border: none;
-        padding: 0;
-      }
       .opacity {
         width: 90px;
       }
@@ -546,21 +521,8 @@ export class InputsFormComponent {
   }
 
   // ── colour ──
-  colorHex(inp: ScriptInputDto): string {
-    return (parseColor(this.values()[inp.id])?.hex ?? '#000000').toLowerCase();
-  }
-
   colorOpacity(inp: ScriptInputDto): number {
     return alphaToOpacity(parseColor(this.values()[inp.id])?.alpha ?? 255);
-  }
-
-  colorCss(inp: ScriptInputDto): string {
-    return colorToCss(this.values()[inp.id]);
-  }
-
-  setColorHex(inp: ScriptInputDto, hex: string): void {
-    const alpha = parseColor(this.values()[inp.id])?.alpha ?? 255;
-    this.set(inp, formatColor({ hex: hex.toUpperCase(), alpha }));
   }
 
   setOpacity(inp: ScriptInputDto, opacity: number): void {

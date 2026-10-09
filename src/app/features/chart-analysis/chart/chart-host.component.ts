@@ -137,6 +137,7 @@ import { styleRenderModel } from '../scripts/script-display';
 import {
   placeTooltip,
   topHit,
+  type ChartPick,
   type ScriptHit,
   type ScriptTooltip,
 } from '../scripts/script-hover';
@@ -375,6 +376,11 @@ interface ExternalLineSeries {
         {{ t.text }}
       </div>
     }
+    @if (picking(); as what) {
+      <div class="pick-hint" role="status" data-testid="pick-hint">
+        Click on the chart to set the {{ what }} · Esc to cancel
+      </div>
+    }
     @if (inlineEdit(); as ie) {
       <textarea
         class="inline-edit"
@@ -488,6 +494,20 @@ interface ExternalLineSeries {
       }
       .script-tip.flip-x.flip-y {
         transform: translate(-100%, -100%);
+      }
+      .pick-hint {
+        position: absolute;
+        z-index: 32;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 6px 12px;
+        border-radius: 6px;
+        background: rgba(19, 23, 34, 0.92);
+        color: #fff;
+        font-size: 13px;
+        white-space: nowrap;
+        pointer-events: none;
       }
       .hold-tip {
         position: absolute;
@@ -1204,6 +1224,7 @@ export class ChartHostComponent implements OnDestroy {
     clearTimeout(this.marginTimer);
     if (this.tailStudiesTimer !== null) clearTimeout(this.tailStudiesTimer);
     this.cancelGlide();
+    this.cancelPick();
     this.scriptLayers.dispose();
     cancelAnimationFrame(this.tablesFrame);
     this.paneObserver?.disconnect();
@@ -3073,6 +3094,87 @@ export class ChartHostComponent implements OnDestroy {
     const found = this.scriptHitAt(param);
     if (found?.hit.trades?.length)
       this.scriptTradeClick.emit({ key: found.key, trades: found.hit.trades });
+  }
+
+  // ── Pick on chart: a script's time / price input (PC-I12) ──────────────────
+
+  /** What the next click on the chart sets for a script input; null when nothing is asked. */
+  readonly picking = signal<'time' | 'price' | null>(null);
+  private pickDone: ((p: ChartPick | null) => void) | null = null;
+  private pickOff: (() => void) | null = null;
+
+  /**
+   * The next click on the price pane, for a script's `input.time` / `input.price`: the bar under it
+   * (its open, UTC ms) and the price there, to the symbol's precision. Esc — or another pick —
+   * cancels it (null). The click is the pick's alone: drawings, the hold tooltip, event flags and
+   * the scripts' own click handling never see it. The crosshair keeps moving meanwhile, so the
+   * operator sees the bar and the price the click will take.
+   */
+  pickPoint(kind: 'time' | 'price'): Promise<ChartPick | null> {
+    this.cancelPick();
+    if (!this.chart || !this.price) return Promise.resolve(null);
+    const el = this.container().nativeElement;
+    return new Promise<ChartPick | null>((resolve) => {
+      this.pickDone = resolve;
+      this.picking.set(kind);
+      const swallow = (ev: Event) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+      };
+      const down = (ev: PointerEvent) => {
+        swallow(ev);
+        if (ev.button !== 0) return;
+        const p = this.pickAt(ev.clientX, ev.clientY);
+        if (p) this.endPick(p);
+      };
+      const key = (ev: KeyboardEvent) => {
+        if (ev.key !== 'Escape') return;
+        swallow(ev);
+        this.endPick(null);
+      };
+      const swallowed = ['mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'pointerup'];
+      el.addEventListener('pointerdown', down, true);
+      for (const type of swallowed) el.addEventListener(type, swallow, { capture: true, passive: false });
+      document.addEventListener('keydown', key, true);
+      this.pickOff = () => {
+        el.removeEventListener('pointerdown', down, true);
+        for (const type of swallowed) el.removeEventListener(type, swallow, true);
+        document.removeEventListener('keydown', key, true);
+      };
+    });
+  }
+
+  /** Stop a pick on its way (its script's dialog closed): it answers null. */
+  cancelPick(): void {
+    if (this.pickDone) this.endPick(null);
+  }
+
+  private endPick(p: ChartPick | null): void {
+    const done = this.pickDone;
+    this.pickDone = null;
+    this.pickOff?.();
+    this.pickOff = null;
+    this.picking.set(null);
+    done?.(p);
+  }
+
+  /** The bar and the price at a viewport point on the price pane; null off it. */
+  private pickAt(clientX: number, clientY: number): ChartPick | null {
+    const chart = this.chart;
+    const price = this.price;
+    const row = chart?.panes()[0]?.getHTMLElement();
+    if (!chart || !price || !row || !this.plottedUtc.length) return null;
+    const r = row.getBoundingClientRect();
+    // The plot area: right of a left price scale, inside the time scale's width.
+    const x = clientX - r.left - chart.priceScale('left').width();
+    const y = clientY - r.top;
+    if (y < 0 || y > r.height || x < 0 || x > chart.timeScale().width()) return null;
+    const logical = chart.timeScale().coordinateToLogical(x);
+    const value = price.coordinateToPrice(y);
+    if (logical === null || value === null || !Number.isFinite(value)) return null;
+    const bars = this.plottedUtc;
+    const bar = bars[Math.max(0, Math.min(bars.length - 1, Math.round(logical)))];
+    return { time: bar.time, price: Number(value.toFixed(this.precision())) };
   }
 
   /** The price axes the scripts' own scales are on (`scale.left` / `scale.right`, PC-I10). */

@@ -16,10 +16,12 @@ import {
 import type { ScriptInputDto, ScriptInputValues } from '@core/api/scripting.types';
 import { InputsFormComponent } from '@features/scripting/components/inputs-form/inputs-form.component';
 import {
+  coerceInputValue,
   inputOverrides,
   resolveInputValues,
   sameInputValues,
 } from '@features/scripting/pine/pine-inputs';
+import { MAX_TEMPLATE_NAME, type ScriptInputTemplate } from './script-input-templates';
 import { PineColorPickerComponent } from '@shared/pine-chart/components/pine-color-picker.component';
 import { parsePineColor, toCss } from '@shared/pine-chart/core/color';
 import type { PinePlotStyle } from '@shared/pine-chart/model/pine-outputs.types';
@@ -37,32 +39,50 @@ import {
 /** Edits apply live; a burst of them (a colour being dragged) settles into one re-run. */
 export const SCRIPT_SETTINGS_APPLY_MS = 200;
 
+/** A time or price input picked on the chart (PC-I12). */
+export interface InputPick {
+  inputId: string;
+  kind: 'time' | 'price';
+}
+
 /**
  * TradingView's study Settings dialog for a Pine script on the chart: its inputs laid out as the
  * script declares them (the shared inputs form — `group` headings, `inline` rows, tooltips), its
  * Style (each output's visibility, colours, width and plot style; precision, labels on the price
  * scale, values in the status line, trades on chart, behind or in front of the bars, tables) and
- * its Visibility (the timeframes it shows on), with Defaults ▾ / Cancel / Ok.
+ * its Visibility (the timeframes it shows on), with Defaults ▾ (reset, save as default, named
+ * templates) / Cancel / Ok.
  *
  * Edits preview live on the chart, as in TradingView: each input edit is emitted as `changed` (only
  * the inputs that differ from their defaults) once the edits pause for
  * {@link SCRIPT_SETTINGS_APPLY_MS} — it re-runs the script; a Style or Visibility edit is emitted
  * at once as `displayChange` — it is applied on the client, no re-run. Ok keeps them; Cancel, × and
  * Esc put back what the dialog opened with.
+ *
+ * <p>A time or price input is picked on the chart (PC-I12): the dialog steps aside, emits
+ * `pickOnChart`, and the page hands the picked value back through {@link finishPick}. Opened as
+ * the script is added with `confirm = true` inputs (`confirm`), it asks for those only — the time
+ * and price ones on the chart first — and Cancel takes the script off the chart.</p>
  */
 @Component({
   selector: 'app-script-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [InputsFormComponent, PineColorPickerComponent],
   template: `
-    <div class="sd-backdrop" (pointerdown)="cancel()"></div>
+    <!-- A click beside the confirm prompt does not take the script just added off the chart. -->
+    <div
+      class="sd-backdrop"
+      [class.sd-off]="!!picking()"
+      (pointerdown)="confirm() ? null : cancel()"
+    ></div>
     <div
       #box
       class="sd"
+      [class.sd-off]="!!picking()"
       role="dialog"
       aria-modal="true"
       tabindex="-1"
-      [attr.aria-label]="title() + ' settings'"
+      [attr.aria-label]="title() + (confirm() ? ' — confirm inputs' : ' settings')"
       (keydown)="$event.stopPropagation()"
       (keydown.escape)="cancel()"
     >
@@ -70,6 +90,11 @@ export const SCRIPT_SETTINGS_APPLY_MS = 200;
         <span class="sd-title" [title]="title()">{{ title() }}</span>
         <button type="button" class="sd-x" aria-label="Close" (click)="cancel()">×</button>
       </header>
+      @if (confirm()) {
+        <p class="sd-confirm" data-testid="script-confirm">
+          Confirm the inputs to add it to the chart.
+        </p>
+      }
       <nav class="sd-tabs" role="tablist">
         @for (t of tabs(); track t.id) {
           <button
@@ -257,12 +282,15 @@ export const SCRIPT_SETTINGS_APPLY_MS = 200;
             </div>
           }
           @default {
-            @if (inputs(); as list) {
+            @if (formInputs(); as list) {
               <app-inputs-form
                 [inputs]="list"
                 [overrides]="draft()"
                 (overridesChange)="edit($event)"
                 [showReset]="false"
+                [symbols]="symbols()"
+                [pickOnChartEnabled]="pickEnabled()"
+                (pickOnChart)="startPick($event)"
                 emptyText="This script has no inputs."
               />
             } @else {
@@ -272,41 +300,91 @@ export const SCRIPT_SETTINGS_APPLY_MS = 200;
         }
       </div>
       <footer class="sd-foot">
-        <span class="sd-anchor">
-          <button
-            type="button"
-            class="sd-btn"
-            aria-haspopup="menu"
-            [attr.aria-expanded]="menuOpen()"
-            (click)="menuOpen.set(!menuOpen())"
-          >
-            Defaults ▾
-          </button>
-          @if (menuOpen()) {
-            <div class="sd-menu" role="menu">
-              <button
-                type="button"
-                role="menuitem"
-                [disabled]="!changedCount()"
-                (click)="reset()"
-                title="Put every input back to the script's own defaults"
-              >
-                Reset to defaults
-              </button>
-              @if (canSaveDefault()) {
+        @if (!confirm()) {
+          <span class="sd-anchor">
+            <button
+              type="button"
+              class="sd-btn"
+              aria-haspopup="menu"
+              [attr.aria-expanded]="menuOpen()"
+              (click)="toggleMenu()"
+            >
+              Defaults ▾
+            </button>
+            @if (menuOpen()) {
+              <div class="sd-menu" role="menu" data-testid="script-defaults-menu">
                 <button
                   type="button"
                   role="menuitem"
-                  [disabled]="savingDefault() || !inputs()"
-                  (click)="saveAsDefault()"
-                  title="A copy of this script added to a chart starts with these inputs"
+                  [disabled]="!changedCount()"
+                  (click)="reset()"
+                  title="Put every input back to the script's own defaults"
                 >
-                  {{ savingDefault() ? 'Saving…' : 'Save as default' }}
+                  Reset to defaults
                 </button>
-              }
-            </div>
-          }
-        </span>
+                @if (canSaveDefault()) {
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [disabled]="savingDefault() || !inputs()"
+                    (click)="saveAsDefault()"
+                    title="A copy of this script added to a chart starts with these inputs"
+                  >
+                    {{ savingDefault() ? 'Saving…' : 'Save as default' }}
+                  </button>
+                }
+                <!-- Named templates (PC-I12): saved with the chart preferences, on every chart. -->
+                <div class="sd-sep" role="separator"></div>
+                @if (naming()) {
+                  <form class="sd-name" (submit)="$event.preventDefault(); saveAsTemplate(name.value)">
+                    <input
+                      #name
+                      class="sd-sel"
+                      type="text"
+                      [attr.maxlength]="maxName"
+                      placeholder="Template name"
+                      aria-label="Template name"
+                      (keydown.escape)="naming.set(false); $event.stopPropagation()"
+                    />
+                    <button type="submit" class="sd-btn sd-small">Save</button>
+                  </form>
+                } @else {
+                  <button
+                    type="button"
+                    role="menuitem"
+                    [disabled]="!inputs()"
+                    (click)="startNaming()"
+                    title="Keep these inputs under a name, to apply to this script on any chart"
+                  >
+                    Save as template…
+                  </button>
+                }
+                @for (t of templates(); track t.name) {
+                  <div class="sd-tpl">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="sd-tpl-name"
+                      [title]="'Apply the inputs saved as “' + t.name + '”'"
+                      (click)="applyTemplate(t)"
+                    >
+                      {{ t.name }}
+                    </button>
+                    <button
+                      type="button"
+                      class="sd-tpl-x"
+                      [attr.aria-label]="'Delete the template ' + t.name"
+                      title="Delete this template"
+                      (click)="deleteTemplate.emit(t.name)"
+                    >
+                      ×
+                    </button>
+                  </div>
+                }
+              </div>
+            }
+          </span>
+        }
         @if (changedCount(); as n) {
           <span class="sd-note">{{ n }} changed from default</span>
         }
@@ -535,6 +613,52 @@ export const SCRIPT_SETTINGS_APPLY_MS = 200;
       color: var(--tv-muted, #787b86);
       cursor: default;
     }
+    /* Picking a time or price on the chart: the dialog steps aside until the click. */
+    .sd-off {
+      display: none !important;
+    }
+    .sd-confirm {
+      margin: 0 20px 6px;
+      color: var(--tv-muted, #787b86);
+      font-size: 13px;
+    }
+    .sd-sep {
+      height: 1px;
+      margin: 6px 0;
+      background: var(--tv-line, #e0e3eb);
+    }
+    .sd-name {
+      display: flex;
+      gap: 6px;
+      padding: 4px 10px;
+    }
+    .sd-name .sd-sel {
+      flex: 1;
+      min-width: 0;
+    }
+    .sd-menu .sd-name button.sd-small {
+      width: auto;
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid var(--tv-line, #e0e3eb);
+      border-radius: 4px;
+    }
+    .sd-tpl {
+      display: flex;
+      align-items: center;
+    }
+    .sd-menu .sd-tpl .sd-tpl-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sd-menu .sd-tpl .sd-tpl-x {
+      width: auto;
+      padding: 8px 12px;
+      color: var(--tv-muted, #787b86);
+    }
     @media (max-width: 480px) {
       .sd-note {
         display: none;
@@ -576,6 +700,17 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
   /** Drawn on the price pane: "behind the bars" applies. */
   readonly overlay = input(true);
   readonly hasTables = input(false);
+  /** The symbols an `input.symbol` field suggests (the console's currency pairs). */
+  readonly symbols = input<readonly string[]>([]);
+  /** Time and price inputs can be picked on the chart (the page answers {@link pickOnChart}). */
+  readonly pickEnabled = input(false);
+  /**
+   * The script was just added and declares `confirm = true` inputs: the dialog asks for those
+   * only, the time and price ones on the chart first, and Cancel takes the script off the chart.
+   */
+  readonly confirm = input(false);
+  /** The script's named input templates (Defaults ▾), newest first. */
+  readonly templates = input<readonly ScriptInputTemplate[]>([]);
 
   /** New overrides to run the script with (only the inputs that differ from their defaults). */
   readonly changed = output<ScriptInputValues>();
@@ -584,11 +719,18 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
   /** New display settings, applied at once (Cancel puts back those the dialog opened with). */
   readonly displayChange = output<ScriptDisplaySettings>();
   readonly closed = output<void>();
+  /** Pick this input on the chart; the page answers with {@link finishPick}. */
+  readonly pickOnChart = output<InputPick>();
+  /** Cancel on the confirm prompt: the script just added leaves the chart. */
+  readonly confirmCancelled = output<void>();
+  /** "Save as template…" with this name and these overrides. */
+  readonly saveTemplate = output<{ name: string; values: ScriptInputValues }>();
+  readonly deleteTemplate = output<string>();
 
-  /** TradingView's tabs: Inputs, Style, Visibility. */
+  /** TradingView's tabs: Inputs, Style, Visibility — the confirm prompt has its inputs only. */
   readonly tab = signal<'inputs' | 'style' | 'visibility'>('inputs');
   readonly tabs = computed(() =>
-    this.display() === null
+    this.display() === null || this.confirm()
       ? [{ id: 'inputs' as const, label: 'Inputs' }]
       : [
           { id: 'inputs' as const, label: 'Inputs' },
@@ -596,6 +738,20 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
           { id: 'visibility' as const, label: 'Visibility' },
         ],
   );
+  /** The inputs the form shows: the `confirm = true` ones on the confirm prompt; null while read. */
+  readonly formInputs = computed<readonly ScriptInputDto[] | null>(() => {
+    const list = this.inputs();
+    if (!list || !this.confirm()) return list;
+    return list.filter((i) => i.confirm);
+  });
+  /** The input being picked on the chart: the dialog steps aside meanwhile. */
+  readonly picking = signal<InputPick | null>(null);
+  /** "Save as template…" asks for a name. */
+  readonly naming = signal(false);
+  protected readonly maxName = MAX_TEMPLATE_NAME;
+  /** The confirm prompt's time and price inputs still to pick, in order. */
+  private pickQueue: ScriptInputDto[] = [];
+  private autoPicked = false;
   /** The display settings the tabs show — what the chart shows (they apply at once). */
   readonly draftDisplay = signal<ScriptDisplaySettings>(DEFAULT_DISPLAY);
   /** The display settings the dialog opened with: what Cancel puts back. */
@@ -639,8 +795,86 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
       const display = this.display();
       untracked(() => this.receiveDisplay(display));
     });
+    // The confirm prompt asks for its time and price inputs on the chart first, one after the
+    // other, as TradingView does when such a script is added — once its inputs are known.
+    effect(() => {
+      const shown = this.formInputs();
+      const enabled = this.pickEnabled();
+      untracked(() => {
+        if (this.autoPicked || !shown || !this.confirm() || !enabled) return;
+        this.autoPicked = true;
+        this.pickQueue = shown.filter((i) => i.kind === 'time' || i.kind === 'price');
+        const first = this.pickQueue.shift();
+        if (first) this.startPick({ inputId: first.id, kind: first.kind as InputPick['kind'] });
+      });
+    });
     // Esc works at once, without a click into the dialog first.
     afterNextRender(() => this.box()?.nativeElement.focus());
+  }
+
+  /**
+   * Pick an input on the chart: the dialog steps aside (it keeps every edit) and the page takes
+   * the next click on the chart — or Esc — and answers with {@link finishPick}.
+   */
+  startPick(req: InputPick): void {
+    if (!this.pickEnabled() || this.picking()) return;
+    this.picking.set(req);
+    // Focus leaves the hidden dialog: Esc then reaches the chart, which cancels the pick.
+    const active = document.activeElement as HTMLElement | null;
+    if (active && this.box()?.nativeElement.contains(active)) active.blur();
+    this.pickOnChart.emit(req);
+  }
+
+  /**
+   * The value picked on the chart (bar open, UTC ms, for a time; the price for a price), or null
+   * when the pick was cancelled. The input takes it — applied as any edit is — and the confirm
+   * prompt goes on to its next time or price input; a cancelled pick ends that round.
+   */
+  finishPick(value: number | null): void {
+    const req = this.picking();
+    if (!req) return;
+    this.picking.set(null);
+    const list = this.inputs();
+    const inp = list?.find((i) => i.id === req.inputId);
+    if (value !== null && list && inp) {
+      const next = { ...resolveInputValues(list, this.draft()), [inp.id]: coerceInputValue(inp, value) };
+      this.edit(inputOverrides(list, next));
+    }
+    if (value === null) this.pickQueue = [];
+    const after = this.pickQueue.shift();
+    if (after) {
+      this.startPick({ inputId: after.id, kind: after.kind as InputPick['kind'] });
+      return;
+    }
+    setTimeout(() => this.box()?.nativeElement.focus());
+  }
+
+  toggleMenu(): void {
+    this.naming.set(false);
+    this.menuOpen.set(!this.menuOpen());
+  }
+
+  startNaming(): void {
+    this.naming.set(true);
+    setTimeout(() =>
+      (this.box()?.nativeElement.querySelector('.sd-name input') as HTMLInputElement | null)?.focus(),
+    );
+  }
+
+  /** "Save as template…": the inputs as the form shows them, under `name`. */
+  saveAsTemplate(name: string): void {
+    const clean = name.trim();
+    if (!clean) return;
+    this.naming.set(false);
+    this.menuOpen.set(false);
+    this.saveTemplate.emit({ name: clean, values: this.overridesOf(this.draft()) });
+  }
+
+  /** A template's inputs, applied as an edit (Cancel still puts back what the dialog opened with). */
+  applyTemplate(t: ScriptInputTemplate): void {
+    this.menuOpen.set(false);
+    const list = this.inputs();
+    this.edit(list ? inputOverrides(list, resolveInputValues(list, t.values)) : { ...t.values });
   }
 
   /**
@@ -741,9 +975,19 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
     this.draft.set(values);
   }
 
-  /** An edit in the form: shown at once, applied when the edits pause. */
+  /**
+   * An edit in the form: shown at once, applied when the edits pause. The confirm prompt's form
+   * shows some of the inputs only: the others keep their values.
+   */
   edit(overrides: ScriptInputValues): void {
-    this.draft.set(overrides);
+    const shown = this.formInputs();
+    let next = overrides;
+    if (this.confirm() && shown) {
+      const ids = new Set(shown.map((i) => i.id));
+      const kept = Object.entries(this.draft()).filter(([id]) => !ids.has(id));
+      next = { ...Object.fromEntries(kept), ...overrides };
+    }
+    this.draft.set(next);
     this.clearTimer();
     this.timer = setTimeout(() => this.apply(), SCRIPT_SETTINGS_APPLY_MS);
   }
@@ -780,6 +1024,12 @@ export class ScriptSettingsDialogComponent implements OnDestroy {
     if (this.closedOnce) return;
     this.closedOnce = true;
     this.clearTimer();
+    if (this.confirm()) {
+      // The script was added for these inputs: without them it leaves the chart.
+      this.confirmCancelled.emit();
+      this.closed.emit();
+      return;
+    }
     const opened = this.opened ?? {};
     if (!sameInputValues(opened, this.applied)) {
       this.applied = opened;

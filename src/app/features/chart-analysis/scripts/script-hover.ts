@@ -12,6 +12,15 @@ export interface ScriptHit {
   hit: HitRegion;
 }
 
+/**
+ * A point the operator picked on the chart for a script input (PC-I12, chart-host `pickPoint`):
+ * the bar under the click — its open, UTC ms — and the price there.
+ */
+export interface ChartPick {
+  time: number;
+  price: number;
+}
+
 /** A tooltip as chart-host shows it: its text and where, in the host's px. */
 export interface ScriptTooltip {
   text: string;

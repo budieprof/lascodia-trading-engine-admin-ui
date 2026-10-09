@@ -132,7 +132,10 @@ import {
   type ScriptDisplaySettings,
 } from '../../scripts/script-display';
 import { scriptRenderModel } from '../../scripts/script-model-cache';
-import { ScriptSettingsDialogComponent } from '../../scripts/script-settings-dialog.component';
+import {
+  ScriptSettingsDialogComponent,
+  type InputPick,
+} from '../../scripts/script-settings-dialog.component';
 import { ChartBottomBarComponent, type BottomBarMenu } from './chart-bottom-bar.component';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
@@ -1905,6 +1908,12 @@ export class ChartAnalysisPageComponent {
       });
     });
 
+    // A pick on its way for a Settings dialog that closed (its script left the chart): the chart
+    // stops waiting for the click (PC-I12).
+    effect(() => {
+      if (this.settings.run() === null) untracked(() => this.host()?.cancelPick());
+    });
+
     // Tell the assistant what this page is showing, and what it may do to it.
     //
     // Both halves matter. Without the FACTS the assistant cannot see the chart at all, and
@@ -3521,6 +3530,13 @@ export class ChartAnalysisPageComponent {
       ...(until !== null ? { until } : {}),
       ...(display && Object.keys(display).length ? { display } : {}),
     };
+    // Added just now — not a re-run, an edit of a script on the chart, or a restored layout: a
+    // script with `confirm = true` inputs asks for them (PC-I12).
+    const added =
+      !replace &&
+      !(update?.replaces ?? null) &&
+      !runs.some((r) => r.item.key === key) &&
+      !this.restoringScripts().some((w) => w.key === key);
     // One strategy at a time (its tester owns the bottom panel), in place for a re-run.
     const placed = placeRun(runs, entry, update?.replaces ?? null);
     this.scriptRuns.set(placed.runs);
@@ -3548,6 +3564,8 @@ export class ChartAnalysisPageComponent {
       (result.kind === 'strategy' || resolveDisplay(entry.display).visible)
     )
       this.runScheduler.request(key);
+    // TradingView asks for a script's `confirm = true` inputs as it is added; Cancel takes it off.
+    if (added && result.inputs.some((i) => i.confirm)) this.settings.open(key, true);
     if (result.kind === 'strategy') {
       // The defaults its Strategy Tester inputs are measured against (engine strategies).
       this.settings.loadStoredInputs(item);
@@ -3890,7 +3908,32 @@ export class ChartAnalysisPageComponent {
       this.chartScripts.saveDefaultInputs(id, values).pipe(takeUntilDestroyed(this.destroyRef)),
     notify: (kind, message) =>
       kind === 'success' ? this.notify.success(message) : this.notify.error(message),
+    // Named input templates live with the chart preferences the engine syncs (PC-I12).
+    prefs: this.prefs.storage,
   });
+  /** The open Settings dialog (a picked time or price goes back to it). */
+  private readonly settingsDialog = viewChild(ScriptSettingsDialogComponent);
+  /** A time or price input can be picked on the chart: there is one. */
+  readonly canPickOnChart = computed(() => !!this.host());
+  /** The symbols a script's `input.symbol` suggests: the console's currency pairs (PC-11). */
+  readonly scriptSymbols = computed(() =>
+    this.symbols()
+      .map((p) => p.symbol)
+      .filter((s): s is string => !!s),
+  );
+
+  /**
+   * A time or price input picked on the chart (PC-I12, PC-11): the dialog has stepped aside; the
+   * chart takes the next click (Esc cancels) and the dialog the value — the bar's open for a time,
+   * the price for a price.
+   */
+  async onScriptPick(req: InputPick): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint(req.kind) : null;
+    this.settingsDialog()?.finishPick(
+      point === null ? null : req.kind === 'price' ? point.price : point.time,
+    );
+  }
 
   onEditorSaved(): void {
     // Refresh "My scripts" in the dialog.

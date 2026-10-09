@@ -5,10 +5,13 @@ import { ChangeDetectorRef, computed, signal, type WritableSignal } from '@angul
 
 import type { ScriptInputDto, ScriptInputValues } from '@core/api/scripting.types';
 import { InputsFormComponent } from '@features/scripting/components/inputs-form/inputs-form.component';
+import { PineColorPickerComponent } from '@shared/pine-chart/components/pine-color-picker.component';
 import {
   SCRIPT_SETTINGS_APPLY_MS,
   ScriptSettingsDialogComponent,
+  type InputPick,
 } from './script-settings-dialog.component';
+import type { ScriptInputTemplate } from './script-input-templates';
 import { DEFAULT_DISPLAY, type ScriptDisplaySettings, type StyleOutput } from './script-display';
 
 // Signal inputs cannot be set under the JIT harness before the first render, so the spec swaps the
@@ -84,14 +87,18 @@ describe('ScriptSettingsDialogComponent', () => {
 
   function render(
     start: ScriptInputValues = {},
-    opts: { saveable?: boolean; before?: (cmp: ScriptSettingsDialogComponent) => void } = {},
+    opts: {
+      saveable?: boolean;
+      inputs?: readonly ScriptInputDto[];
+      before?: (cmp: ScriptSettingsDialogComponent) => void;
+    } = {},
   ): void {
     TestBed.configureTestingModule({ imports: [ScriptSettingsDialogComponent] });
     fixture = TestBed.createComponent(ScriptSettingsDialogComponent);
     cmp = fixture.componentInstance;
     opts.before?.(cmp);
     values = signal(start);
-    inputs = signal<readonly ScriptInputDto[] | null>(INPUTS);
+    inputs = signal<readonly ScriptInputDto[] | null>(opts.inputs ?? INPUTS);
     canSaveDefault = signal(!!opts.saveable);
     (cmp as any).title = signal('Smart Algo v2');
     (cmp as any).inputs = inputs;
@@ -113,13 +120,24 @@ describe('ScriptSettingsDialogComponent', () => {
     const de = fixture.debugElement.query(By.directive(InputsFormComponent));
     if (!de) return;
     const form = de.componentInstance as any;
-    form.inputs = computed(() => cmp.inputs() ?? []);
+    form.inputs = computed(() => cmp.formInputs() ?? []);
     form.overrides = Object.assign(() => cmp.draft(), {
       set: (v: ScriptInputValues) => cmp.edit(v),
     });
     form.showReset = signal(false);
     de.injector.get(ChangeDetectorRef).markForCheck();
     fixture.detectChanges();
+  }
+
+  /** The palette of the form's colour input `id`, wired as the form's template wires it. */
+  function wirePicker(id: string): void {
+    const formDe = fixture.debugElement.query(By.directive(InputsFormComponent));
+    const form = formDe.componentInstance as InputsFormComponent;
+    const inp = INPUTS.find((i) => i.id === id)!;
+    const picker = formDe.query(By.directive(PineColorPickerComponent))
+      .componentInstance as PineColorPickerComponent;
+    (picker as any).value = computed(() => form.text(inp));
+    picker.valueChange.subscribe((v) => form.set(inp, v));
   }
 
   beforeEach(() => vi.useFakeTimers());
@@ -160,7 +178,13 @@ describe('ScriptSettingsDialogComponent', () => {
 
   it('a burst of edits (a colour dragged) is one re-run', () => {
     render();
-    const picker = field('Lines::Colour').querySelector('input[type=color]') as HTMLInputElement;
+    // The palette (PC-I12) opens on its swatch; its custom colour is the one dragged.
+    wirePicker('Lines::Colour');
+    (field('Lines::Colour').querySelector('[data-testid="color-swatch"]') as HTMLElement).click();
+    fixture.detectChanges();
+    const picker = field('Lines::Colour').querySelector(
+      '.cp-pop input[type=color]',
+    ) as HTMLInputElement;
     for (const hex of ['#ff0000', '#ee0000', '#dd0000']) {
       picker.value = hex;
       picker.dispatchEvent(new Event('input'));
@@ -355,6 +379,137 @@ describe('ScriptSettingsDialogComponent', () => {
       cmp.cancel();
       expect(displayChange).toHaveBeenLastCalledWith({ ...DEFAULT_DISPLAY, labelsOnScale: false });
       expect(closed).toHaveBeenCalled();
+    });
+  });
+
+  describe('interactive inputs (PC-I12, PC-11)', () => {
+    const START = Date.UTC(2026, 0, 1);
+    const CONFIRM: ScriptInputDto[] = [
+      { id: 'start', kind: 'time', title: 'Start', defaultValue: START, confirm: true },
+      { id: 'level', kind: 'price', title: 'Level', defaultValue: 1.1, confirm: true },
+      { id: 'len', kind: 'int', title: 'Length', defaultValue: 14, confirm: true },
+      { id: 'mult', kind: 'float', title: 'Multiplier', defaultValue: 2 },
+    ];
+    const PICKABLE = CONFIRM.map(({ confirm: _confirm, ...i }) => i as ScriptInputDto);
+    const shown = (): HTMLElement => host.querySelector('.sd') as HTMLElement;
+    const ids = () =>
+      [...host.querySelectorAll('[data-input-id]')].map((e) => e.getAttribute('data-input-id'));
+
+    it('picks a time or price on the chart: the dialog steps aside, then takes the value', () => {
+      const picks: InputPick[] = [];
+      render({}, {
+        inputs: PICKABLE,
+        before: (c) => {
+          (c as any).pickEnabled = signal(true);
+          c.pickOnChart.subscribe((p) => picks.push(p));
+        },
+      });
+      cmp.startPick({ inputId: 'level', kind: 'price' });
+      fixture.detectChanges();
+      expect(picks).toEqual([{ inputId: 'level', kind: 'price' }]);
+      expect(shown().classList).toContain('sd-off');
+      expect(host.querySelector('.sd-backdrop')!.classList).toContain('sd-off');
+
+      cmp.finishPick(1.25);
+      fixture.detectChanges();
+      expect(shown().classList).not.toContain('sd-off');
+      vi.advanceTimersByTime(SCRIPT_SETTINGS_APPLY_MS);
+      expect(changed).toHaveBeenLastCalledWith({ level: 1.25 });
+
+      // Esc on the chart: nothing changes.
+      cmp.startPick({ inputId: 'start', kind: 'time' });
+      cmp.finishPick(null);
+      vi.advanceTimersByTime(SCRIPT_SETTINGS_APPLY_MS);
+      expect(changed).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not pick without a chart to pick on', () => {
+      const picks: InputPick[] = [];
+      render({}, { inputs: PICKABLE, before: (c) => c.pickOnChart.subscribe((p) => picks.push(p)) });
+      cmp.startPick({ inputId: 'level', kind: 'price' });
+      expect(picks).toEqual([]);
+      expect(cmp.picking()).toBeNull();
+    });
+
+    it('asks for the confirm = true inputs as the script is added — time and price on the chart first', () => {
+      const picks: InputPick[] = [];
+      render({ mult: 3 }, {
+        inputs: CONFIRM,
+        before: (c) => {
+          (c as any).confirm = signal(true);
+          (c as any).pickEnabled = signal(true);
+          c.pickOnChart.subscribe((p) => picks.push(p));
+        },
+      });
+      expect(picks).toEqual([{ inputId: 'start', kind: 'time' }]);
+      expect(shown().classList).toContain('sd-off');
+      const at = Date.UTC(2026, 8, 1, 13);
+      cmp.finishPick(at);
+      expect(picks.at(-1)).toEqual({ inputId: 'level', kind: 'price' });
+      cmp.finishPick(1.0876);
+      fixture.detectChanges();
+      expect(shown().classList).not.toContain('sd-off');
+      // Only what it asks to confirm, on one tab; the other inputs keep their values.
+      expect(ids()).toEqual(['start', 'level', 'len']);
+      expect(host.querySelectorAll('.sd-tab')).toHaveLength(1);
+      expect(host.querySelector('[data-testid="script-confirm"]')).not.toBeNull();
+      vi.advanceTimersByTime(SCRIPT_SETTINGS_APPLY_MS);
+      expect(changed).toHaveBeenLastCalledWith({ mult: 3, start: at, level: 1.0876 });
+    });
+
+    it('Cancel on the confirm prompt takes the script off the chart; a click beside it does not', () => {
+      const cancelled = vi.fn();
+      render({}, {
+        inputs: CONFIRM,
+        before: (c) => {
+          (c as any).confirm = signal(true);
+          c.confirmCancelled.subscribe(cancelled);
+        },
+      });
+      // No chart to pick on: the prompt shows at once.
+      expect(shown().classList).not.toContain('sd-off');
+      host.querySelector('.sd-backdrop')!.dispatchEvent(new Event('pointerdown'));
+      expect(closed).not.toHaveBeenCalled();
+      button('Cancel').click();
+      expect(cancelled).toHaveBeenCalledTimes(1);
+      expect(closed).toHaveBeenCalledTimes(1);
+      expect(changed).not.toHaveBeenCalled();
+    });
+
+    it('Defaults ▾ keeps the inputs as a named template, applies one and deletes one', () => {
+      const saveTemplate = vi.fn();
+      const deleteTemplate = vi.fn();
+      const T: ScriptInputTemplate[] = [
+        { name: 'Scalp', values: { 'Signals::Sensitivity': 0.8, 'Gone::input': 1 }, savedAt: 1 },
+      ];
+      render({ [COLOUR]: false }, {
+        before: (c) => {
+          (c as any).templates = signal(T);
+          c.saveTemplate.subscribe(saveTemplate);
+          c.deleteTemplate.subscribe(deleteTemplate);
+        },
+      });
+      const openMenu = () => {
+        button('Defaults ▾').click();
+        fixture.detectChanges();
+      };
+      openMenu();
+      button('Save as template…').click();
+      fixture.detectChanges();
+      (host.querySelector('.sd-name input') as HTMLInputElement).value = '  Swing  ';
+      host.querySelector('.sd-name')!.dispatchEvent(new Event('submit'));
+      expect(saveTemplate).toHaveBeenCalledWith({ name: 'Swing', values: { [COLOUR]: false } });
+
+      // A template is the whole set: what it does not set goes back to the default; an input the
+      // script no longer declares is dropped.
+      openMenu();
+      button('Scalp').click();
+      vi.advanceTimersByTime(SCRIPT_SETTINGS_APPLY_MS);
+      expect(changed).toHaveBeenLastCalledWith({ 'Signals::Sensitivity': 0.8 });
+
+      openMenu();
+      (host.querySelector('.sd-tpl-x') as HTMLButtonElement).click();
+      expect(deleteTemplate).toHaveBeenCalledWith('Scalp');
     });
   });
 });
