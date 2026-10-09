@@ -118,6 +118,7 @@ import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-rend
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
+import { paintLegend, paintTable, placeTable, type LegendRun } from './snapshot';
 import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
@@ -1757,38 +1758,134 @@ export class ChartHostComponent implements OnDestroy {
     }));
   }
 
-  /** PNG data URL of the chart as currently drawn. */
-  snapshot(): string | null {
+  /**
+   * The chart as an image (CC-22): the library's own screenshot of every pane, scale and primitive
+   * (`takeScreenshot`) under a title band, with the legend and the scripts' tables — HTML over the
+   * canvas, so laid out and drawn here from their layout — painted in. Null when the chart is not
+   * drawn or the browser will not render it; the caller says so rather than reporting a save that
+   * did not happen.
+   */
+  snapshotCanvas(title: string): HTMLCanvasElement | null {
+    const chart = this.chart;
     const el = this.container().nativeElement;
-    const sources = [...el.querySelectorAll('canvas')] as HTMLCanvasElement[];
-    if (sources.length === 0) return null;
-    // Lightweight Charts paints across SEVERAL stacked canvases (panes, scales,
-    // the crosshair layer). Grabbing one gives a chart with no axes, so they
-    // are composited in DOM order onto a single surface.
-    const rect = el.getBoundingClientRect();
-    const out = document.createElement('canvas');
-    out.width = Math.max(1, Math.round(rect.width * window.devicePixelRatio));
-    out.height = Math.max(1, Math.round(rect.height * window.devicePixelRatio));
-    const ctx = out.getContext('2d');
-    if (!ctx) return null;
-    ctx.fillStyle = this.palette(this.theme.theme() === 'dark').background;
-    ctx.fillRect(0, 0, out.width, out.height);
-    for (const c of sources) {
-      const cr = c.getBoundingClientRect();
-      if (cr.width === 0 || cr.height === 0) continue;
-      ctx.drawImage(
-        c,
-        (cr.left - rect.left) * window.devicePixelRatio,
-        (cr.top - rect.top) * window.devicePixelRatio,
-        cr.width * window.devicePixelRatio,
-        cr.height * window.devicePixelRatio,
-      );
-    }
+    if (!chart || el.clientWidth === 0) return null;
+    let shot: HTMLCanvasElement;
     try {
-      return out.toDataURL('image/png');
+      shot = chart.takeScreenshot(true, false);
     } catch {
       return null;
     }
+    if (!shot.width || !shot.height) return null;
+    const ratio = shot.width / el.clientWidth;
+    const BAND = 28;
+    const out = document.createElement('canvas');
+    out.width = shot.width;
+    out.height = shot.height + Math.round(BAND * ratio);
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    const p = this.palette(this.theme.theme() === 'dark');
+    ctx.fillStyle = p.background;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(shot, 0, Math.round(BAND * ratio));
+    ctx.scale(ratio, ratio);
+
+    const font = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+    ctx.fillStyle = p.text;
+    ctx.font = `600 13px ${font}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(title, 10, BAND / 2);
+    const stamp = `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+    ctx.font = `12px ${font}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(stamp, el.clientWidth - 10, BAND / 2);
+    ctx.textAlign = 'left';
+
+    // The scripts' tables, where they sit over their panes.
+    const measure = (text: string, cellFont: string) => {
+      ctx.font = cellFont;
+      return ctx.measureText(text).width;
+    };
+    for (const pane of this.scriptTables())
+      for (const table of pane.tables)
+        paintTable(
+          ctx,
+          placeTable(table, pane.width, pane.height, measure),
+          pane.left,
+          BAND + pane.top,
+        );
+
+    paintLegend(ctx, this.legendRuns(p.text), 12, BAND + 8, `12px ${font}`, 18);
+    return out;
+  }
+
+  /** The legend as text runs: prices in the bar's colour, then each study's values in theirs. */
+  private legendRuns(ink: string): LegendRun[][] {
+    const s = this.lastSnapshot;
+    if (!s || s.close === null || s.open === null) return [];
+    const dp = this.precision();
+    const tone = s.close >= s.open ? '#089981' : '#F23645';
+    const price = (v: number | null) => (v === null ? '—' : v.toFixed(dp));
+    const change = changeText(s.change ?? null, s.changePct, this.pipSize() ?? pipSizeFor(dp), dp);
+    const lines: LegendRun[][] = [
+      [
+        { text: `O ${price(s.open)}`, color: tone },
+        { text: `H ${price(s.high)}`, color: tone },
+        { text: `L ${price(s.low)}`, color: tone },
+        { text: `C ${price(s.close)}`, color: tone },
+        ...(change ? [{ text: change, color: tone }] : []),
+        { text: `Vol ${formatVolume(s.volume)}`, color: ink },
+      ],
+    ];
+    for (const ind of s.indicators)
+      lines.push([
+        { text: ind.label, color: ink },
+        ...ind.values.map((v) => ({
+          text: v.value === null ? '—' : v.value.toFixed(Math.min(dp, 4)),
+          color: v.color,
+        })),
+      ]);
+    return lines;
+  }
+
+  /**
+   * The chart's data as rows for a CSV export (CC-I7): each plotted bar's UTC time and prices, then
+   * every value the data window lists for it — the studies' plots, and the scripts' once pine-chart
+   * registers them — one column per value, named "Section · value".
+   */
+  exportRows(): (string | number | null)[][] {
+    const columns: string[] = [];
+    const index = new Map<string, number>();
+    const body: (string | number | null)[][] = [];
+    const precision = this.precision();
+    this.plotted.forEach((bar, i) => {
+      const utcTime = this.plottedUtc[i]?.time ?? bar.time;
+      const values = new Map<number, string | number | null>();
+      for (const section of this.valueProviders.collect({ index: i, bar, utcTime, precision })) {
+        if (section.id === 'bar') continue;
+        for (const row of section.rows) {
+          const name = `${section.title} · ${row.label}`;
+          let col = index.get(name);
+          if (col === undefined) {
+            col = columns.length;
+            columns.push(name);
+            index.set(name, col);
+          }
+          values.set(col, row.raw !== undefined ? row.raw : row.value);
+        }
+      }
+      body.push([
+        new Date(utcTime).toISOString(),
+        bar.open,
+        bar.high,
+        bar.low,
+        bar.close,
+        bar.volume,
+        ...columns.map((_, c) => values.get(c) ?? null),
+      ]);
+    });
+    const header = ['time (UTC)', 'open', 'high', 'low', 'close', 'volume', ...columns];
+    // Rows written before a column first appeared are shorter: pad them to the header.
+    return [header, ...body.map((r) => [...r, ...new Array(header.length - r.length).fill(null)])];
   }
 
   /** Price at a y offset inside the chart, for click-to-act features. */
@@ -3064,6 +3161,7 @@ export class ChartHostComponent implements OnDestroy {
           label: plot.title,
           value: formatStudyValue(computed[plot.key]?.[index], def.target === 'overlay', precision),
           color: plot.color,
+          raw: computed[plot.key]?.[index] ?? null,
         })),
       });
     }

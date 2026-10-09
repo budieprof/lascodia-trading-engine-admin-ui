@@ -63,6 +63,7 @@ import { tradingDateLabel } from '../../chart/trading-date';
 import { pipSizeFor, priceScaleFor } from '../../datafeed/symbol-info';
 import { changeText, formatVolume } from '../../chart/legend-format';
 import { DataWindowComponent } from '../../chart/data-window.component';
+import { toCsv } from '../../chart/snapshot';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
@@ -3776,15 +3777,85 @@ export class ChartAnalysisPageComponent {
     this.layoutStore.removeTemplate(id);
   }
 
-  /** Download the chart as a PNG. */
-  takeSnapshot(): void {
-    const data = this.host()?.snapshot();
+  /** The snapshot's title: symbol, timeframe and style, as the chart's title reads. */
+  private snapshotTitle(): string {
+    return `${this.symbol()} · ${this.resolutionLabel(this.resolution())} · ${this.styleLabel()}`;
+  }
+
+  private exportName(ext: string): string {
+    return `${this.symbol()}-${this.resolutionLabel(this.resolution())}-${new Date()
+      .toISOString()
+      .slice(0, 16)
+      .replace(/[:T]/g, '')}.${ext}`;
+  }
+
+  /**
+   * Download the chart as a PNG — the chart with its legend, the scripts' tables and a title
+   * (CC-22). Says when it could not: the assistant's chart.snapshot reported success with no image.
+   */
+  takeSnapshot(): { ok: boolean; message: string } {
     this.contextMenu.set(null);
-    if (!data) return;
+    const canvas = this.host()?.snapshotCanvas(this.snapshotTitle());
+    let data: string | null = null;
+    try {
+      data = canvas ? canvas.toDataURL('image/png') : null;
+    } catch {
+      data = null;
+    }
+    if (!data || data === 'data:,') {
+      const message =
+        'The chart could not be captured: it is not drawn yet, or the browser refused.';
+      this.notify.error(message);
+      return { ok: false, message };
+    }
+    const name = this.exportName('png');
     const a = document.createElement('a');
     a.href = data;
-    a.download = `${this.symbol()}-${this.resolutionLabel(this.resolution())}-${Date.now()}.png`;
+    a.download = name;
     a.click();
+    return { ok: true, message: `Snapshot saved as ${name}.` };
+  }
+
+  /** Copy the snapshot to the clipboard as an image (CC-I7), where the browser allows it. */
+  async copySnapshot(): Promise<void> {
+    this.contextMenu.set(null);
+    const canvas = this.host()?.snapshotCanvas(this.snapshotTitle());
+    const clipboard = typeof navigator !== 'undefined' ? navigator.clipboard : undefined;
+    if (!canvas) {
+      this.notify.error('The chart could not be captured: it is not drawn yet.');
+      return;
+    }
+    if (!clipboard?.write || typeof ClipboardItem === 'undefined') {
+      this.notify.error('This browser does not allow copying images; use Save image instead.');
+      return;
+    }
+    try {
+      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('no image');
+      await clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      this.notify.success('Chart image copied to the clipboard.');
+    } catch {
+      this.notify.error('The image could not be copied to the clipboard.');
+    }
+  }
+
+  /**
+   * Download the chart's data as CSV (CC-I7): each bar's UTC time, prices and volume, and every
+   * value the data window lists for it — studies, and scripts' plots when they provide them.
+   */
+  exportChartData(): void {
+    this.contextMenu.set(null);
+    const rows = this.host()?.exportRows() ?? [];
+    if (rows.length < 2) {
+      this.notify.error('There are no bars to export yet.');
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([toCsv(rows)], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = this.exportName('csv');
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 
   async toggleFullscreen(): Promise<void> {

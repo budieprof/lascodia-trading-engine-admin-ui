@@ -40,7 +40,8 @@ export interface ChartCommandHost {
   setSplitLayout(id: '1' | '2h' | '2v' | '4' | '6' | '8'): void;
   selectTool(kind: DrawingKind | null): void;
   clearDrawings(): void;
-  takeSnapshot(): void;
+  /** Save a PNG of the chart; whether it could, and what happened. */
+  takeSnapshot(): { ok: boolean; message: string } | void;
   knownSymbols(): readonly string[];
   timezones(): readonly { id: string; label: string }[];
 
@@ -1145,8 +1146,10 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
       id: 'chart.snapshot',
       description: 'Save a PNG of the chart as it currently looks.',
       run: () => {
-        host.takeSnapshot();
-        return ok('Snapshot saved.');
+        // Honest about a failure (CC-22): it used to report success with no image.
+        const r = host.takeSnapshot();
+        if (r && !r.ok) return fail(r.message);
+        return ok(r?.message ?? 'Snapshot saved.');
       },
     },
   ];

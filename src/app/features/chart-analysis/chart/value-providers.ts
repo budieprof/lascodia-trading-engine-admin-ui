@@ -11,6 +11,8 @@ export interface DataWindowRow {
   label: string;
   value: string;
   color?: string;
+  /** The unrounded number behind `value`, for a data export (CC-I7); absent for text. */
+  raw?: number | null;
 }
 
 /** A block of the data window: the bar, a study, a script… */

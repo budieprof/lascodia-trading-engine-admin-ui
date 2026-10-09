@@ -1240,6 +1240,8 @@
               {{ showCountdown() ? '✓ ' : '' }}Countdown to bar close
             </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
+            <button type="button" (click)="copySnapshot()">Copy image</button>
+            <button type="button" (click)="exportChartData()">Export chart data (CSV)</button>
             <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
               Show objects
             </button>
