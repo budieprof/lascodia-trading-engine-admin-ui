@@ -215,6 +215,18 @@ so a new built-in needs no console change.
   virtualised List of trades the chart's fill arrows select in, deep backtest for engine strategies) and Pine
   Logs / trace / profiler — the last session-only. Named input templates are a synced chart pref
   (`lascodia.chart.scriptInputTemplates.v1`).
+- **Bar Replay** (CC-I4, `features/chart-analysis/replay`): a view over the loaded bars (`ReplayController`) —
+  start at a clicked bar or a date (history loaded back to it), step / play / Shift+→ ← ↓, intrabar steps from
+  1m (1h above a day) loaded in chunks; scripts run to the last CLOSED bar, indicators step through the engine's
+  replay sessions (`replay-script-sessions.ts`, only when the engine window lines up; else full runs). Paper
+  trades are browser-only (`paper-broker.ts`: Bid bars, buys at bid + the bar's recorded `spreadPoints`) —
+  replay never calls an order path.
+- **Layout state v2** (CC-I5, `workspace/workspace-state.ts`): the main chart's v1 fields at the top level,
+  the other charts in `charts[]` (own studies, Pine indicators, link group), `link` / `sync`. Every state is
+  read through `migrateWorkspaceState` (v1 split panels → `charts`, nothing dropped). Other charts' scripts
+  reuse the main chart's identical run (`chart-panels.ts sharedRun`) and re-run per new bar, not per tick.
+  One undo history (`undo-history.ts`) covers drawings (store markers), studies, scripts and settings; the
+  page asks in `ScriptDialogService` dialogs (`dialog/chart-dialogs.ts`), never `prompt()` / `confirm()`.
 - **Live scripts are warm, and say what is not final** (PC-I1, PC-I9). An indicator on the live standard
   chart is run with `keepWarm`; the engine then executes only new candles and quotes and pushes `scriptFrame`
   (≤1/s), which `warm-sessions.ts` folds into the run on the chart (`mergeOutputs`, the replay merge) — no run
