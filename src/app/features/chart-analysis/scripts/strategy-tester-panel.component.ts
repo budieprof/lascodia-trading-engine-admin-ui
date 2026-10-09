@@ -329,8 +329,8 @@ interface SummaryRow {
                 @for (s of d.series; track s.title) {
                   <tr>
                     <td><span class="td__dot" [style.background]="s.color"></span>{{ s.title }}</td>
-                    <td>{{ s.entry === null ? '—' : s.entry.toFixed(5) }}</td>
-                    <td>{{ s.exit === null ? '—' : s.exit.toFixed(5) }}</td>
+                    <td>{{ s.entryText }}</td>
+                    <td>{{ s.exitText }}</td>
                   </tr>
                 }
               </tbody>
