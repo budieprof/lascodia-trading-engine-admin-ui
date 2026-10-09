@@ -341,6 +341,25 @@ $pane-gap: 4px;
   display: flex;
   align-items: center;
   gap: 10px;
+
+  // DR-I12: the favourite star, at the row's end; shown on hover, always when starred.
+  .fav-star {
+    margin-left: auto;
+    padding: 0 2px;
+    color: var(--text-muted, #787b86);
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  &:hover .fav-star,
+  .fav-star.on {
+    opacity: 1;
+  }
+
+  .fav-star.on {
+    color: #f7a600;
+  }
+
   width: 100%;
   padding: 6px 8px;
   border: 0;
@@ -497,63 +516,10 @@ $pane-gap: 4px;
 
 // ── Object tree ────────────────────────────────────────────────────────────
 
-.object-tree {
-  position: absolute;
-  top: 44px;
-  right: 76px;
-  z-index: 18;
-  width: 220px;
-  max-height: 300px;
-  overflow-y: auto;
-  padding: 6px 0;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
-  font-size: 12px;
-
-  ul {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-  }
-
-  li {
-    display: flex;
-    align-items: center;
-
-    &.selected {
-      background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-    }
-  }
-}
-
 .tree-title {
   padding: 2px 10px 6px;
   font-weight: 600;
   color: var(--text-muted, #787b86);
-}
-
-.tree-row {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  flex: 1 1 auto;
-  padding: 5px 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-}
-
-.swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  flex: 0 0 auto;
 }
 
 .tree-remove {
@@ -678,6 +644,7 @@ $pane-gap: 4px;
 }
 
 .study-toggle,
+.study-settings,
 .study-remove {
   border: 0;
   background: transparent;
@@ -689,6 +656,38 @@ $pane-gap: 4px;
 
   &:hover {
     color: inherit;
+  }
+}
+
+// Source (DR-16), sessions and picked times (DR-22) on the studies bar.
+.source-input {
+  max-width: 132px;
+  padding: 1px 2px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.study-input input.session-input {
+  width: 84px;
+}
+
+.pick-input {
+  padding: 2px 6px;
+  border: 1px dashed var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: crosshair;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
 }
 
@@ -1217,6 +1216,7 @@ $pane-gap: 4px;
 .menu-action,
 .market-status,
 .study-toggle,
+.study-settings,
 .study-remove,
 .tree-remove,
 .panel-focus {
@@ -1866,6 +1866,7 @@ $strip-width: 46px;
   }
 
   .study-toggle,
+  .study-settings,
   .study-remove {
     justify-content: center;
     min-width: 40px;
@@ -2052,4 +2053,19 @@ $strip-width: 46px;
   &:focus-within > .submenu {
     display: flex;
   }
+}
+
+/* "Create alert on <script>" (PC-I14). */
+.script-alert-dialog {
+  padding: 0;
+  border: 1px solid var(--tv-line, #ddd);
+  border-radius: 8px;
+  background: var(--tv-bg, #fff);
+  color: var(--tv-ink, inherit);
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+.script-alert-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
 }

@@ -1,5 +1,5 @@
 import { distanceToSegment, type Pt } from '../geometry';
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import type { Drawing, DrawingPoint } from '../model';
 import type { ToolBehavior, ToolBehaviorMap, ToolGeometry, ToolOption } from './types';
 import {

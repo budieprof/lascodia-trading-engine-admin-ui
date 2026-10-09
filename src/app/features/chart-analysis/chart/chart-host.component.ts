@@ -42,6 +42,7 @@ import {
   type ISeriesPrimitive,
   type MouseEventParams,
   type SeriesMarker,
+  type SeriesType,
   type TickMarkType,
   type Time,
 } from 'lightweight-charts';
@@ -57,12 +58,34 @@ import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { TradingCalendar, tradingMsBetween, type SessionSpec } from '../datafeed/session-calendar';
 import {
+  aheadKey,
   indicatorById,
   indicatorLabel,
   type IndicatorDef,
   type PlotSpec,
 } from '../indicators/registry';
 import type { DayOf, Maybe, Ohlc } from '../indicators/math';
+import { aheadTimes } from '../indicators/ahead-times';
+import { FillPrimitive } from '../indicators/fill-primitive';
+import {
+  effectivePlot,
+  joinClosed,
+  padResults,
+  parseStudySource,
+  plotColors,
+  sourceBars,
+  studyOrder,
+  type ColorBy,
+  type StudySettings,
+} from '../indicators/study-settings';
+import { isShownOn } from '../drawings/drawing-ops';
+import {
+  autoFib,
+  higherTimeframe,
+  htfLevels,
+  scoredTrendlines,
+  type AutoAnalysisSettings,
+} from '../overlays/auto-analysis';
 import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
 import {
   boxUnit,
@@ -99,7 +122,7 @@ import {
 } from './plotted-bars';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
-import { resolutionMs } from '../datafeed/resolution';
+import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { pipSizeFor } from '../datafeed/symbol-info';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
@@ -125,6 +148,8 @@ import { ValueProviders, type DataWindowSection, type ValueProvider } from './va
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
+import { StudyBarsService } from '../indicators/study-bars.service';
+import { profileResolutionFor, timeRangeIndices, withChartTail } from '../profiles/profile-bars';
 import { PatternRenderer } from '../patterns/pattern-renderer';
 import {
   detectCandlestickPatterns,
@@ -251,7 +276,7 @@ export interface ChartViewState {
   paneHeights: number[];
 }
 
-export interface ActiveIndicator {
+export interface ActiveIndicator extends StudySettings {
   /** Instance id — an indicator can be added more than once with different inputs. */
   uid: string;
   defId: string;
@@ -305,6 +330,8 @@ interface IndicatorPlotSeries {
   sync: SeriesSync<ValueRow>;
   /** The values its rows were built from. */
   values: Maybe[];
+  /** Each bar coloured by its value (DR-I4); the colours the rows carry. */
+  colorBy?: ColorBy;
 }
 
 /** A study's series on the chart (CC-I1: kept across ticks; only their tails are written). */
@@ -312,9 +339,17 @@ interface IndicatorSeries {
   uid: string;
   /** The inputs the series show; other inputs recompute every value. */
   paramsKey: string;
+  /** Where the series draw ({@link ChartHostComponent.placeKeyOf}): a change makes them again elsewhere. */
+  placeKey: string;
+  /** Which plots are drawn and how, the levels, the fill: a change makes them again in the same pane. */
+  styleKey: string;
+  /** The plots' colours and widths: a change is applied to the series as they are. */
+  paintKey: string;
   /** Drawn on the price pane, on its scale (takes the symbol's precision). */
   overlay: boolean;
   series: IndicatorPlotSeries[];
+  /** The band / cloud fills, on the first plot's series. */
+  fill: FillPrimitive | null;
 }
 
 /** An external pane's line on the chart, kept across ticks (CC-02). */
@@ -597,6 +632,10 @@ export class ChartHostComponent implements OnDestroy {
   /** Balance range, value area, stop pools and the events that formed them. */
   readonly showStructure = input<boolean>(false);
   readonly indicators = input<ActiveIndicator[]>([]);
+  /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib; null = off. */
+  readonly autoAnalysis = input<AutoAnalysisSettings | null>(null);
+  /** What a new Long / Short Position tool is filled with (DR-I9): the account's and the symbol's facts. */
+  readonly positionFacts = input<Record<string, unknown> | null>(null);
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
   readonly tool = input<DrawingKind | null>(null);
@@ -1118,19 +1157,35 @@ export class ChartHostComponent implements OnDestroy {
     // (add, drag, style change, undo) repaints without the page wiring an
     // explicit refresh for each one.
     effect(() => {
-      // Filtered by THIS panel's symbol and timeframe rather than the store's
-      // single global scope: in a split layout every panel is on screen at
-      // once, and a global set would paint one panel's trendlines onto another.
+      // Filtered by THIS panel's symbol rather than the store's single global scope: in a split
+      // layout every panel is on screen at once, and a global set would paint one panel's
+      // trendlines onto another. Drawings belong to the symbol (DR-01 / DR-I2) — the controller
+      // keeps those whose Visibility shows them on this panel's timeframe.
       const all = this.drawings.hidden() ? [] : this.drawings.allDrawings();
       const symbol = this.symbol();
-      const resolution = this.resolution();
       const selected = this.drawings.selectedId();
-      untracked(() =>
+      const selectedIds = this.drawings.selectedIds();
+      this.resolution();
+      untracked(() => {
+        this.drawings.ensureSymbol(symbol);
         this.controller.sync(
-          all.filter((d) => d.symbol === symbol && d.resolution === resolution),
+          all.filter((d) => d.symbol === symbol),
           selected,
-        ),
-      );
+          selectedIds,
+        );
+      });
+    });
+
+    // Finer bars for the profile studies, or a higher timeframe's for a multi-timeframe study, landed: profile
+    // and compute again with them (DR-I7 / DR-I5). The other studies answer from their cache.
+    effect(() => {
+      this.profileBars.version();
+      untracked(() => {
+        this.applyProfiles(this.indicators());
+        this.applyIndicators(this.indicators(), this.plotted.length);
+        // The higher timeframe's bars for the auto-analysis levels (DR-I11).
+        if (this.autoAnalysis()?.htfLevels) this.recomputeAnalysis();
+      });
     });
 
     effect(() => {
@@ -1196,6 +1251,7 @@ export class ChartHostComponent implements OnDestroy {
       this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
+      this.autoAnalysis();
       this.calendar();
       untracked(() => this.recomputeAnalysis());
     });
@@ -1310,11 +1366,14 @@ export class ChartHostComponent implements OnDestroy {
     const wantProfile = this.showVolumeProfile();
     const wantLevels = this.showSupportResistance();
     const wantStructure = this.showStructure();
-    if (!wantProfile && !wantLevels && !wantStructure) {
+    const auto = this.autoAnalysis();
+    const wantAuto = !!auto && (auto.trendlines || auto.htfLevels || auto.autoFib);
+    if (!wantProfile && !wantLevels && !wantStructure && !wantAuto) {
       this.analysisRenderer.setProfile(null);
       this.analysisRenderer.setPeriodProfiles([]);
       this.analysisRenderer.setLevels([]);
       this.analysisRenderer.setStructure(null);
+      this.analysisRenderer.setAuto(null);
       return;
     }
 
@@ -1333,6 +1392,30 @@ export class ChartHostComponent implements OnDestroy {
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
+    this.analysisRenderer.setAuto(wantAuto && auto ? this.autoAnalysisOf(auto, window) : null);
+  }
+
+  /**
+   * Auto analysis (DR-I11) for the bars on screen: their trendlines and zig-zag Fib, and the next higher timeframe's
+   * S/R levels over the same span (its bars loaded through StudyBarsService; none until they land).
+   */
+  private autoAnalysisOf(auto: AutoAnalysisSettings, window: readonly Bar[]) {
+    let htf: ReturnType<typeof htfLevels> = [];
+    const tf = auto.htfLevels ? higherTimeframe(this.resolution()) : null;
+    if (tf && window.length) {
+      const tfMs = resolutionMs(tf) ?? 0;
+      // The higher timeframe's last 150 bars up to the window's end: its levels as of now.
+      const to = window[window.length - 1].time;
+      const from = to - tfMs * 150;
+      this.profileBars.ensure(this.symbol(), tf, from, to);
+      const htfBars = this.profileBars.bars(this.symbol(), tf, from, to);
+      htf = htfBars.length >= 30 ? htfLevels(htfBars, formatResolution(tf)) : [];
+    }
+    return {
+      trendlines: auto.trendlines ? scoredTrendlines(window) : [],
+      htf,
+      fib: auto.autoFib ? autoFib(window) : null,
+    };
   }
 
   /**
@@ -1366,7 +1449,13 @@ export class ChartHostComponent implements OnDestroy {
    */
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private scheduleAnalysis(): void {
-    if (!this.showVolumeProfile() && !this.showSupportResistance() && !this.showStructure()) return;
+    if (
+      !this.showVolumeProfile() &&
+      !this.showSupportResistance() &&
+      !this.showStructure() &&
+      !this.autoAnalysis()
+    )
+      return;
     if (this.analysisTimer !== null) clearTimeout(this.analysisTimer);
     this.analysisTimer = setTimeout(() => {
       this.analysisTimer = null;
@@ -1782,6 +1871,15 @@ export class ChartHostComponent implements OnDestroy {
     this.bindHold(el);
 
     this.controller.attach(this.chart, el);
+    // Drawings on the built-in studies' panes (DR-07 / DR-I10): which study a pane is, and its scale.
+    this.controller.paneHost = {
+      keyAt: (paneIndex) => this.studyAtPane(paneIndex),
+      seriesFor: (uid) =>
+        (this.indicatorSeries.find((s) => s.uid === uid)?.series[0]?.api as
+          | ISeriesApi<SeriesType>
+          | undefined) ?? null,
+    };
+    this.controller.positionDefaults = () => this.positionFacts();
     this.controller.onToolComplete = () => this.toolComplete.emit();
     this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
     this.controller.onInlineEdit = (e) => {
@@ -2388,8 +2486,9 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.price) return;
     this.controller.bindSeries(this.price);
     this.controller.sync(
-      this.drawings.forScope(this.symbol(), this.resolution()),
+      this.drawings.forSymbol(this.symbol()),
       this.drawings.selectedId(),
+      this.drawings.selectedIds(),
     );
     this.price.attachPrimitive(this.overlayRenderer);
     this.price.attachPrimitive(this.analysisRenderer);
@@ -2522,7 +2621,8 @@ export class ChartHostComponent implements OnDestroy {
       this.indicators().some((a) => a.visible && studyKind(a.defId) !== 'indicator') ||
       this.showVolumeProfile() ||
       this.showSupportResistance() ||
-      this.showStructure();
+      this.showStructure() ||
+      !!this.autoAnalysis();
     if (!scanning) return;
     this.tailStudiesTimer = setTimeout(() => {
       this.tailStudiesTimer = null;
@@ -2585,22 +2685,57 @@ export class ChartHostComponent implements OnDestroy {
   private applyIndicators(active: ActiveIndicator[], timesFrom: number): void {
     if (!this.chart) return;
 
-    // Drop series for indicators that are gone or hidden, or whose inputs moved them to another
-    // place (an overlay never becomes a pane study, but a removed-and-re-added uid could).
-    const wanted = new Set(active.filter((a) => a.visible).map((a) => a.uid));
-    for (const held of [...this.indicatorSeries]) {
-      if (!wanted.has(held.uid)) this.removeIndicatorSeries(held);
+    // A study whose source is another study is computed (and its pane made) after that one (DR-I5) — a hidden
+    // source still feeds it; one whose Visibility leaves out this timeframe is not drawn here (DR-I4).
+    const resolution = this.resolution();
+    const { order, broken } = studyOrder(active);
+    this.studyBroken = broken;
+    const drawn = order.filter(
+      (a) => a.visible && isShownOn({ visibleOn: a.visibleOn }, resolution),
+    );
+    this.studyDrawn = new Set(drawn.map((a) => a.uid));
+
+    // Drop series for indicators that are gone, hidden or off this timeframe, or whose place changed — and the
+    // studies drawn in a dropped one's pane with it, so they follow it into the pane it is made in again.
+    const wanted = new Map(drawn.map((a) => [a.uid, a]));
+    const dropped = new Set<string>();
+    let more = true;
+    while (more) {
+      more = false;
+      for (const held of [...this.indicatorSeries]) {
+        const item = wanted.get(held.uid);
+        const def = item ? indicatorById(item.defId) : undefined;
+        const host = item ? parseStudySource(item.params['source'])?.uid : undefined;
+        if (
+          !item ||
+          !def ||
+          held.placeKey !== this.placeKeyOf(item, def) ||
+          (host && dropped.has(host))
+        ) {
+          this.removeIndicatorSeries(held);
+          dropped.add(held.uid);
+          more = true;
+        }
+      }
     }
 
     const bars = this.studyBars();
-    for (const item of active) {
-      if (!item.visible) continue;
+    for (const item of drawn) {
       const def = indicatorById(item.defId);
       if (!def) continue;
       const computed = this.computeFor(item, def, bars);
-      const target =
-        this.indicatorSeries.find((s) => s.uid === item.uid) ??
-        this.createIndicatorSeries(item, def);
+      let target = this.indicatorSeries.find((s) => s.uid === item.uid) ?? null;
+      if (target && target.styleKey !== this.styleKeyOf(item, def)) {
+        // Plots switched on or off, drawn another way, levels or fill changed: made again in the same pane — the
+        // new series first, so the pane (and its place and height) never empties.
+        const pane = this.paneIndexOf(target);
+        const fresh = this.createIndicatorSeries(item, def, pane);
+        this.removeIndicatorSeries(target);
+        target = fresh;
+      } else if (target && target.paintKey !== this.paintKeyOf(item, def)) {
+        this.repaintIndicatorSeries(target, item, def);
+      }
+      target ??= this.createIndicatorSeries(item, def);
       if (!target) continue;
       target.paramsKey = JSON.stringify(item.params);
 
@@ -2608,12 +2743,193 @@ export class ChartHostComponent implements OnDestroy {
         const values = computed[s.key] ?? [];
         const from = Math.min(timesFrom, firstChangedValue(s.values, values));
         s.values = values;
-        s.sync.apply(valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows()));
+        const rows = valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows());
+        if (s.colorBy) this.colorRows(rows, values, from, s.colorBy);
+        // Values past the last bar (the cloud ahead, the shifted Alligator) on the bars still to come.
+        const ahead = computed[aheadKey(s.key)];
+        s.sync.apply(ahead?.length ? rows.concat(this.aheadRows(ahead, s.gaps)) : rows);
         if (s.markers) this.writePlotMarkers(s, values);
       }
+      if (target.fill) this.writeFills(target.fill, def, computed);
     }
 
+    // Drawings in a study's pane follow its series when they are made again.
+    this.controller.rebindPanes();
     this.emitLegend();
+  }
+
+  /**
+   * The built-in study a pane (index > 0) belongs to — the one drawn there on its own, not one drawn in it on another
+   * study's plot — for the drawings made in it (DR-07). Null for a pane with none (a script's, a fundamentals pane).
+   */
+  private studyAtPane(paneIndex: number): string | null {
+    let fallback: string | null = null;
+    for (const held of this.indicatorSeries) {
+      if (this.paneIndexOf(held) !== paneIndex) continue;
+      const item = this.indicators().find((a) => a.uid === held.uid);
+      const def = item ? indicatorById(item.defId) : undefined;
+      if (item && def && !this.studyPlace(item, def).host) return held.uid;
+      fallback ??= held.uid;
+    }
+    return fallback;
+  }
+
+  /** Studies whose source reference was dropped (gone, or a loop): computed on `close`. */
+  private studyBroken = new Set<string>();
+  /** The studies drawn on this timeframe (visible, and shown here). */
+  private studyDrawn = new Set<string>();
+
+  /** The study whose plot `item` reads (DR-I5), when that reference holds. */
+  private sourceStudy(item: ActiveIndicator): ActiveIndicator | undefined {
+    if (this.studyBroken.has(item.uid)) return undefined;
+    const ref = parseStudySource(item.params['source']);
+    return ref ? this.indicators().find((a) => a.uid === ref.uid) : undefined;
+  }
+
+  /**
+   * Where a study draws. An oscillator (a `pane` study) has its own units, so its own pane, whatever it reads. A
+   * study in its input's units (an average, a band) on another study's plot draws where that one draws — in its
+   * pane, on its scale: an SMA of RSI under the RSI — and, while that one is hidden, where it would draw (the price
+   * pane when the chain starts on price, else a pane of its own). `host` is the drawn study it shares a pane with.
+   */
+  private studyPlace(
+    item: ActiveIndicator,
+    def: IndicatorDef,
+  ): { host?: string; overlay: boolean } {
+    if (def.target !== 'overlay') return { overlay: false };
+    let source = this.sourceStudy(item);
+    if (!source) return { overlay: true };
+    if (this.studyDrawn.has(source.uid)) return { host: source.uid, overlay: false };
+    // The hidden chain's first study that is not itself on a study decides.
+    for (let hops = 0; hops < 32; hops++) {
+      const next = this.sourceStudy(source);
+      if (!next) break;
+      source = next;
+    }
+    return { overlay: indicatorById(source.defId)?.target === 'overlay' };
+  }
+
+  /** Where a study's series draw ({@link studyPlace}), and which study it is. */
+  private placeKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    return JSON.stringify([this.studyPlace(item, def), def.id]);
+  }
+
+  /** Which plots are drawn and how, the levels and the fill (inputs only change values; colours, {@link paintKeyOf}). */
+  private styleKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    const plots = def.plots
+      .map((p) => effectivePlot(p, item.style))
+      .filter((p) => p.visible)
+      .map((p) => `${p.key}:${p.kind}`);
+    return JSON.stringify([plots, item.style?.levels ?? null, item.style?.fill ?? null]);
+  }
+
+  /** The drawn plots' colours and widths. */
+  private paintKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    return JSON.stringify(
+      def.plots
+        .map((p) => effectivePlot(p, item.style))
+        .filter((p) => p.visible)
+        .map((p) => [p.color, p.lineWidth ?? null]),
+    );
+  }
+
+  /** A study's new colours and widths, on its series as they are (no new series, no new pane). */
+  private repaintIndicatorSeries(target: IndicatorSeries, item: ActiveIndicator, def: IndicatorDef): void {
+    const plots = new Map(def.plots.map((p) => [p.key, effectivePlot(p, item.style)]));
+    for (const s of target.series) {
+      const plot = plots.get(s.key);
+      if (!plot) continue;
+      s.color = plot.color;
+      try {
+        s.api.applyOptions(
+          plot.kind === 'histogram'
+            ? { color: plot.color }
+            : { color: plot.color, lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4> },
+        );
+      } catch {
+        // Went with a rebuilt chart.
+      }
+      // Markers carry the plot's colour: write them again.
+      if (s.markers) s.markers.last = '';
+    }
+    target.paintKey = this.paintKeyOf(item, def);
+  }
+
+  /** The pane a study's series are in; undefined when they have none any more. */
+  private paneIndexOf(held: IndicatorSeries): number | undefined {
+    try {
+      return held.series[0]?.api.getPane().paneIndex();
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Per-bar colours on the rows written from `from` (the rows before keep theirs). */
+  private colorRows(rows: ValueRow[], values: readonly Maybe[], from: number, by: ColorBy): void {
+    if (!rows.length) return;
+    const colors = plotColors(by, values, this.plotted);
+    const start =
+      from < this.plotted.length ? (asTime(this.plotted[from].time) as number) : Infinity;
+    let i = this.plotted.length - 1;
+    for (let r = rows.length - 1; r >= 0; r--) {
+      const row = rows[r] as ValueRow & { color?: string };
+      const t = row.time as number;
+      if (t < start) break;
+      while (i > 0 && (asTime(this.plotted[i].time) as number) > t) i--;
+      if (row.value !== undefined && colors[i]) row.color = colors[i];
+    }
+  }
+
+  /** The band / cloud fills of a study, over its bars and the values past the last bar. */
+  private writeFills(
+    fill: FillPrimitive,
+    def: IndicatorDef,
+    computed: Record<string, Maybe[]>,
+  ): void {
+    const times = this.plotted.map((b) => asTime(b.time) as number);
+    const models = (def.fills ?? []).map((f) => {
+      const aheadA = computed[aheadKey(f.a)] ?? [];
+      const aheadB = computed[aheadKey(f.b)] ?? [];
+      const ahead = this.aheadRows(
+        new Array<Maybe>(Math.max(aheadA.length, aheadB.length)).fill(0),
+        'break',
+      ).map((r) => r.time as number);
+      return {
+        times: [...times, ...ahead],
+        a: [...(computed[f.a] ?? []), ...aheadA],
+        b: [...(computed[f.b] ?? []), ...aheadB],
+        color: f.color,
+        colorBelow: f.colorBelow,
+      };
+    });
+    fill.setFills(models);
+  }
+
+  /**
+   * Rows for a study's values past the last bar, at the open times of the bars still to come on the symbol's
+   * trading time ({@link aheadTimes} — what `logicalAtMs` counts upcoming events by), shifted into the display
+   * zone like the bars.
+   */
+  private aheadRows(values: readonly Maybe[], gaps: GapPolicy): ValueRow[] {
+    const last = this.plottedUtc[this.plottedUtc.length - 1];
+    const lastPlotted = this.plotted[this.plotted.length - 1];
+    const step = resolutionMs(this.resolution());
+    if (!last || !lastPlotted || !step) return [];
+    const calendar =
+      this.resolution() === '1W' || this.resolution() === '1M' ? null : this.calendar();
+    const times = aheadTimes(last, step, values.length, calendar);
+    const rows: ValueRow[] = [];
+    let prev = asTime(lastPlotted.time) as number;
+    times.forEach((utc, k) => {
+      let time = asTime(utc + this.timezoneShiftMs(utc)) as number;
+      if (time <= prev) time = prev + 1; // strictly after the row before, as the library requires
+      prev = time;
+      const v = values[k];
+      if (v === null || v === undefined || !Number.isFinite(v)) {
+        if (gaps === 'break') rows.push({ time: time as Time });
+      } else rows.push({ time: time as Time, value: v });
+    });
+    return rows;
   }
 
   /** A `markers` plot's shapes: one per bar with a value, at that value. */
@@ -2660,19 +2976,107 @@ export class ChartHostComponent implements OnDestroy {
       this.computedFor = this.dataVersion;
     }
     // Compare studies also depend on the other symbol's bars, so those are part of the key; the
-    // day-based ones, on the trading days they count in.
+    // day-based ones, on the trading days they count in; a study on another study, on that one's inputs; a
+    // multi-timeframe one, on the higher timeframe's bars.
     const symbol = def.needsCompare ? String(item.params['symbol'] ?? '').toUpperCase() : '';
     const compare = symbol ? this.compareBars()[symbol] : undefined;
-    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${symbol}:${compare?.length ?? 0}:${compare?.[compare.length - 1]?.close ?? ''}:${this.sessionKey()}`;
+    const ref = this.studyBroken.has(item.uid) ? null : parseStudySource(item.params['source']);
+    const dep = ref ? this.indicators().find((a) => a.uid === ref.uid) : undefined;
+    const depDef = dep ? indicatorById(dep.defId) : undefined;
+    // A timeframe not above the chart's is the chart's own.
+    const htf =
+      !ref &&
+      item.timeframe &&
+      (resolutionMs(item.timeframe) ?? 0) > (resolutionMs(this.resolution()) ?? Infinity)
+        ? item.timeframe
+        : '';
+    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${symbol}:${compare?.length ?? 0}:${compare?.[compare.length - 1]?.close ?? ''}:${this.sessionKey()}:${dep ? JSON.stringify(dep.params) + (dep.timeframe ?? '') : ''}:${htf}:${htf ? this.profileBars.version() : ''}`;
     const hit = this.computedCache.get(cacheKey);
     if (hit) return hit;
-    const computed = def.compute(ohlc, item.params, {
+    const context = {
       // Same zone shift as the plotted bars, or alignByTime would pair the wrong bars.
       ...(compare ? { compareBars: this.shiftForTimezone(compare, this.timezone()) } : {}),
       tradingDay: this.plottedDayOf(),
-    });
+      // What reads the clock itself (the sessions) needs the bars' real instants, not the display zone's.
+      utcTimes: this.studyUtcTimes(),
+      barIntervalMs: resolutionMs(this.resolution()) ?? undefined,
+      tradingDaysPerYear: this.tradingDaysPerYear(),
+    };
+    let computed: Record<string, Maybe[]>;
+    if (dep && depDef && ref) {
+      // Indicator on indicator (DR-I5): the source study's plot, as bars, from its first value.
+      const values = this.computeFor(dep, depDef, ohlc)[ref.plot] ?? [];
+      const src = sourceBars(ohlc, values);
+      const results = def.compute(
+        src.bars,
+        { ...item.params, source: 'close' },
+        { ...context, utcTimes: context.utcTimes.slice(src.offset) },
+      );
+      computed = padResults(results, src.offset);
+    } else if (htf) {
+      computed = this.computeOnHigherTimeframe(item, def, htf);
+    } else {
+      computed = def.compute(ohlc, item.params, context);
+    }
     this.computedCache.set(cacheKey, computed);
     return computed;
+  }
+
+  /**
+   * A built-in computed on a HIGHER timeframe's bars (DR-I5) — with 500 of them before the chart's first bar to
+   * warm up — and joined onto the chart's bars on CLOSED bars only ({@link joinClosed}): the higher bar still
+   * forming is left out, so nothing repaints. Empty (no values) until those bars have loaded.
+   */
+  private computeOnHigherTimeframe(
+    item: ActiveIndicator,
+    def: IndicatorDef,
+    tf: TvResolution,
+  ): Record<string, Maybe[]> {
+    const chartMs = resolutionMs(this.resolution()) ?? 0;
+    const htfMs = resolutionMs(tf) ?? 0;
+    const utc = this.plottedUtc;
+    const from = (utc[0]?.time ?? 0) - htfMs * 500;
+    const to = (utc[utc.length - 1]?.time ?? 0) + chartMs;
+    if (utc.length) this.profileBars.ensure(this.symbol(), tf, from, to);
+    const htf = utc.length ? this.profileBars.bars(this.symbol(), tf, from, to) : [];
+    const out: Record<string, Maybe[]> = {};
+    if (!htf.length) {
+      for (const p of def.plots) out[p.key] = utc.map((): Maybe => null);
+      return out;
+    }
+    const results = def.compute(htf, item.params, {
+      tradingDay: this.calendar()?.dayOf,
+      utcTimes: htf.map((b) => b.time),
+      barIntervalMs: htfMs,
+      tradingDaysPerYear: this.tradingDaysPerYear(),
+    });
+    const now = this.serverClock.now();
+    const htfClose = htf.map((b) => b.closeTime ?? b.time + htfMs);
+    const chartClose = utc.map((b) => b.closeTime ?? b.time + chartMs);
+    for (const p of def.plots) {
+      const values = (results[p.key] ?? []).map((v, j) => (htfClose[j] > now ? null : v));
+      out[p.key] = joinClosed(chartClose, htfClose, values);
+    }
+    return out;
+  }
+
+  /** {@link plottedUtc}'s times, made once per change of the bars (the studies' cache key). */
+  private studyUtcCache: { version: number; times: number[] } | null = null;
+  private studyUtcTimes(): number[] {
+    if (this.studyUtcCache?.version !== this.dataVersion) {
+      this.studyUtcCache = { version: this.dataVersion, times: this.plottedUtc.map((b) => b.time) };
+    }
+    return this.studyUtcCache.times;
+  }
+
+  /** The symbol's trading days a year (Historical Volatility): 5 a week → 260, every day → 365. */
+  private tradingDaysPerYear(): number {
+    const calendar = this.calendar();
+    if (!calendar) return 365;
+    const monday = Date.UTC(2026, 0, 5);
+    let days = 0;
+    for (let d = 0; d < 7; d++) if (calendar.isTradingDay(monday + d * 86_400_000)) days++;
+    return days >= 7 ? 365 : days * 52;
   }
 
   /** External panes' lines by pane uid: made once, kept across ticks (CC-02). */
@@ -3295,7 +3699,14 @@ export class ChartHostComponent implements OnDestroy {
   /** Candlestick + chart-pattern studies → the shared pattern renderer. */
   private applyPatterns(active: ActiveIndicator[]): void {
     const bars = this.plotted;
-    const studies = active.filter((a) => a.visible && studyKind(a.defId) !== 'indicator');
+    // Per-timeframe Visibility (DR-I4) as for the built-ins.
+    const resolution = this.resolution();
+    const studies = active.filter(
+      (a) =>
+        a.visible &&
+        studyKind(a.defId) !== 'indicator' &&
+        isShownOn({ visibleOn: a.visibleOn }, resolution),
+    );
     const candles = studies.filter((a) => studyKind(a.defId) === 'candle-pattern');
     const charts = studies.filter((a) => studyKind(a.defId) === 'chart-pattern');
     this.patternRenderer.setBars(bars);
@@ -3344,7 +3755,13 @@ export class ChartHostComponent implements OnDestroy {
    */
   private applyProfiles(active: ActiveIndicator[]): void {
     if (!this.price) return;
-    const wanted = active.filter((a) => a.visible && studyKind(a.defId) === 'profile');
+    const resolution = this.resolution();
+    const wanted = active.filter(
+      (a) =>
+        a.visible &&
+        studyKind(a.defId) === 'profile' &&
+        isShownOn({ visibleOn: a.visibleOn }, resolution),
+    );
     const keep = new Set(wanted.map((a) => a.uid));
     for (const [uid, r] of [...this.profileRenderers]) {
       if (!keep.has(uid)) {
@@ -3354,24 +3771,76 @@ export class ChartHostComponent implements OnDestroy {
     }
     const bars = this.bars();
     const range = this.chart?.timeScale().getVisibleLogicalRange() ?? null;
+    const checkpoints = bars.map((b) => b.time);
     for (const a of wanted) {
       let r = this.profileRenderers.get(a.uid);
       if (!r) {
-        r = new ProfileRenderer(() => this.price, this.utcToX);
+        // Snapped to the chart bar holding an instant: profiles built from finer bars start and end inside one.
+        r = new ProfileRenderer(() => this.price, this.utcToBarX);
         this.price.attachPrimitive(r);
         this.profileRenderers.set(a.uid, r);
       }
+      const id = profileIdOf(a.defId);
+      const input = this.profileInput(id, a.params, bars);
+      // The visible range is in chart bars; on finer bars it is the same stretch of time.
+      let visible: { from: number; to: number } | null = range
+        ? { from: range.from, to: range.to }
+        : null;
+      if (visible && input.lowerMs) visible = timeRangeIndices(input.bars, bars, visible);
       r.setModel(
-        computeProfileStudy(
-          profileIdOf(a.defId),
-          bars,
-          a.params,
-          range ? { from: range.from, to: range.to } : null,
-          this.calendar() ?? undefined,
-        ),
+        computeProfileStudy(id, input.bars, a.params, visible, this.calendar() ?? undefined, {
+          checkpoints,
+          lowerTimeframeMs: input.lowerMs,
+        }),
       );
     }
   }
+
+  private readonly profileBars = inject(StudyBarsService);
+
+  /**
+   * The bars a profile study is built from (DR-I7 / DR-20): the chart's range at a LOWER timeframe when one fits
+   * ({@link profileResolutionFor}; for TPO, one no wider than its bracket), with the chart's own bars for the part the
+   * finer bars do not reach yet. TPO takes only the finer bars — a coarse bar would put all its letters in one
+   * bracket. Until finer bars have loaded: the chart's own (TPO then says why it draws nothing).
+   */
+  private profileInput(
+    id: ReturnType<typeof profileIdOf>,
+    params: Record<string, number | string>,
+    bars: readonly Bar[],
+  ): { bars: Bar[]; lowerMs: number } {
+    const chartMs = resolutionMs(this.resolution());
+    if (!bars.length || !chartMs) return { bars: [...bars], lowerMs: 0 };
+    const from = bars[0].time;
+    const to = bars[bars.length - 1].time + chartMs;
+    const bracketMs = (Number(params['bracketMinutes']) || 30) * 60_000;
+    const ltf = profileResolutionFor(this.resolution(), to - from, {
+      maxMs: id === 'tpo' ? bracketMs : undefined,
+    });
+    if (!ltf) return { bars: [...bars], lowerMs: 0 };
+    this.profileBars.ensure(this.symbol(), ltf, from, to);
+    const lower = this.profileBars.bars(this.symbol(), ltf, from, to);
+    if (!lower.length) return { bars: [...bars], lowerMs: 0 };
+    const ltfMs = resolutionMs(ltf) ?? 0;
+    if (id === 'tpo') return { bars: lower, lowerMs: ltfMs };
+    const head = bars.filter((b) => b.time + chartMs <= lower[0].time);
+    return { bars: [...head, ...withChartTail(lower, bars)], lowerMs: ltfMs };
+  }
+
+  /** UTC ms → x of the chart bar holding it; null before the first bar. */
+  private readonly utcToBarX = (ms: number): number | null => {
+    const utc = this.plottedUtc;
+    if (!utc.length || ms < utc[0].time) return null;
+    let lo = 0;
+    let hi = utc.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (utc[mid].time <= ms) lo = mid;
+      else hi = mid - 1;
+    }
+    const x = this.chart?.timeScale().timeToCoordinate(asTime(this.plotted[lo].time));
+    return x === null || x === undefined ? null : Number(x);
+  };
 
   /** The visible-range profile follows pans; debounced like the analysis overlays. */
   private profileTimer: ReturnType<typeof setTimeout> | null = null;
@@ -3384,14 +3853,22 @@ export class ChartHostComponent implements OnDestroy {
     }, 120);
   }
 
-  private createIndicatorSeries(item: ActiveIndicator, def: IndicatorDef): IndicatorSeries | null {
+  private createIndicatorSeries(
+    item: ActiveIndicator,
+    def: IndicatorDef,
+    inPane?: number,
+  ): IndicatorSeries | null {
     const chart = this.chart;
     if (!chart) return null;
-    // Overlays live on the price pane (0); everything else gets its own pane,
-    // which is what makes RSI and MACD behave like TradingView studies rather
-    // than lines squashed onto the price scale.
-    const overlay = def.target === 'overlay';
-    const paneIndex = overlay ? 0 : chart.panes().length;
+    // Overlays live on the price pane (0); everything else gets its own pane, which is what makes RSI and MACD
+    // behave like TradingView studies rather than lines squashed onto the price scale. A study on another study's
+    // plot draws in that study's pane (an SMA of RSI under the RSI), on its scale ({@link studyPlace}).
+    // Made again in place: the pane it was in.
+    const place = this.studyPlace(item, def);
+    const host = place.host ? this.indicatorSeries.find((s) => s.uid === place.host) : undefined;
+    const hostPane = inPane ?? (host ? this.paneIndexOf(host) : undefined);
+    const overlay = hostPane !== undefined ? hostPane === 0 : place.overlay;
+    const paneIndex = hostPane ?? (overlay ? 0 : chart.panes().length);
     // An overlay shares the price scale; without the symbol's precision the axis
     // falls back to the library default of 2 decimals (1.14 for EURUSD).
     const overlayFormat = overlay
@@ -3404,8 +3881,12 @@ export class ChartHostComponent implements OnDestroy {
         }
       : {};
 
-    const series = def.plots.map((plot): IndicatorPlotSeries => {
+    // The Style tab's overrides; a plot switched off is not drawn at all (DR-I4).
+    const plots = def.plots.map((p) => effectivePlot(p, item.style)).filter((p) => p.visible);
+    const series = plots.map((plot): IndicatorPlotSeries => {
       const markers = plot.kind === 'markers';
+      // A dot per value, never a line (Parabolic SAR — a joined line drew a vertical stroke at each flip).
+      const points = plot.kind === 'points';
       const api =
         plot.kind === 'histogram'
           ? chart.addSeries(
@@ -3423,6 +3904,9 @@ export class ChartHostComponent implements OnDestroy {
                 // A markers plot draws only its shapes: the series carries the values (for the
                 // legend and the autoscale) with no line of its own (DR-17).
                 ...(markers ? { lineVisible: false, crosshairMarkerVisible: false } : {}),
+                ...(points
+                  ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 2 }
+                  : {}),
                 ...overlayFormat,
                 // On the price's own scale, whichever side it sits on.
                 ...(overlay ? { priceScaleId: this.scaleSide() } : {}),
@@ -3434,7 +3918,7 @@ export class ChartHostComponent implements OnDestroy {
         api: api as ISeriesApi<'Line' | 'Histogram'>,
         color: plot.color,
         title: plot.title,
-        gaps: markers ? 'break' : (plot.gaps ?? 'join'),
+        gaps: markers || points ? 'break' : (plot.gaps ?? 'join'),
         markers:
           markers && plot.marker
             ? {
@@ -3445,12 +3929,16 @@ export class ChartHostComponent implements OnDestroy {
             : null,
         sync: new SeriesSync<ValueRow>(api as unknown as SyncTarget<ValueRow>, sameValueRow),
         values: [],
+        ...(plot.colorBy && plot.kind !== 'markers' ? { colorBy: plot.colorBy } : {}),
       };
     });
 
-    // Reference levels (RSI 30/70, MACD zero) as price lines on the first plot.
-    if (def.levels?.length && series.length) {
-      for (const level of def.levels) {
+    // Reference levels (RSI 30/70, MACD zero) as price lines on the first plot — the Style tab's when it has any.
+    const levels = (item.style?.levels ?? def.levels ?? []).filter(
+      (l) => (l as { visible?: boolean }).visible !== false,
+    );
+    if (levels.length && series.length) {
+      for (const level of levels) {
         series[0].api.createPriceLine({
           price: level.value,
           color: level.color,
@@ -3462,11 +3950,34 @@ export class ChartHostComponent implements OnDestroy {
       }
     }
 
+    // The band / cloud, when both of its plots are drawn and the Style tab has not switched it off.
+    let fill: FillPrimitive | null = null;
+    const shown = new Set(series.map((s) => s.key));
+    if (
+      series.length &&
+      item.style?.fill !== false &&
+      def.fills?.some((f) => shown.has(f.a) && shown.has(f.b))
+    ) {
+      const first = series[0].api;
+      fill = new FillPrimitive(
+        () => first as unknown as ISeriesApi<SeriesType>,
+        (t) => {
+          const x = this.chart?.timeScale().timeToCoordinate(t as Time);
+          return x === null || x === undefined ? null : Number(x);
+        },
+      );
+      first.attachPrimitive(fill);
+    }
+
     const entry: IndicatorSeries = {
       uid: item.uid,
       paramsKey: JSON.stringify(item.params),
+      placeKey: this.placeKeyOf(item, def),
+      styleKey: this.styleKeyOf(item, def),
+      paintKey: this.paintKeyOf(item, def),
       overlay,
       series,
+      fill,
     };
     this.indicatorSeries.push(entry);
     return entry;
@@ -3474,6 +3985,11 @@ export class ChartHostComponent implements OnDestroy {
 
   private removeIndicatorSeries(held: IndicatorSeries): void {
     if (!this.chart) return;
+    try {
+      if (held.fill) held.series[0]?.api.detachPrimitive(held.fill);
+    } catch {
+      // Went with its series.
+    }
     for (const s of held.series) {
       try {
         s.markers?.api.detach();

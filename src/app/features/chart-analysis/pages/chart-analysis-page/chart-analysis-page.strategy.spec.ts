@@ -7,6 +7,7 @@ import type { ChartScriptItem } from '../../scripts/chart-script.service';
 import type { ChartScriptResult } from '../../scripts/chart-script.model';
 import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
+import { realtimePageState } from './chart-analysis-page.realtime.testing';
 
 // The page's own runScript, run against just the state it touches (as the editor and dock specs
 // do): the component's prototype with the runs' signals, a scheduler, and an engine that answers
@@ -50,6 +51,8 @@ function page(runs: ChartScriptRun[] = []) {
     (it: ChartScriptItem): Observable<ChartScriptResult> => held.get(it.key) ?? of(resultOf(it)),
   );
   Object.assign(p, {
+    // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
+    ...realtimePageState(),
     // The dock's Pine Logs (PC-I6): closed.
     logsKey: signal(null),
     logsFront: signal(false),

@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import { distanceToSegment, type Pt } from '../geometry';
 import type { ToolOption } from './types';
 

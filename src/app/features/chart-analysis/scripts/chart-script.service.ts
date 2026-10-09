@@ -84,6 +84,11 @@ export interface ChartRunOptions {
   trace?: { fromBar: number; toBar: number };
   /** Time each source line: the Pine Logs dock's profiler (PC-I6). */
   profile?: boolean;
+  /**
+   * PC-I1 (scripting API §3c): keep the run warm on the engine — its `session` then streams the changes (frames) and
+   * the chart stops asking for the whole run on every tick. Indicators on a live, standard chart.
+   */
+  keepWarm?: boolean;
 }
 
 export interface ChartScriptCatalog {
@@ -372,6 +377,8 @@ export class ChartScriptService {
         req.liveBar = liveBar;
       if (opts.trace) req.trace = opts.trace;
       if (opts.profile) req.profile = true;
+      if (opts.keepWarm && req.mode === 'preview' && chartType === 'standard' && toMs === null && !opts.trace && !opts.profile)
+        req.keepWarm = true;
       return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };
     if (!inputs || !Object.keys(inputs).length) return run(undefined);

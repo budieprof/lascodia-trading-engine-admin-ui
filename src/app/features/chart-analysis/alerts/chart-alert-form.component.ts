@@ -330,6 +330,13 @@ export class ChartAlertFormComponent {
   /** The alert to edit (or a template to copy, with `copy`). */
   readonly edit = input<ChartAlertDto | null>(null);
   readonly copy = input<boolean>(false);
+  /**
+   * A NEW alert to start from, saved as a new alert (DR-I6: a drawing's alert from the drawing toolbar — its
+   * geometry, drawing id and kind filled in). Ignored while `edit` is set.
+   */
+  readonly draft = input<ChartAlertDto | null>(null);
+  /** What the form starts from: the alert edited, else the draft. */
+  private readonly base = computed(() => this.edit() ?? this.draft());
 
   readonly saved = output<ChartAlertDto>();
   readonly cancelled = output<void>();
@@ -358,21 +365,23 @@ export class ChartAlertFormComponent {
   /** Set once the operator typed a level — re-defaulting must not overwrite it. */
   private touchedLevel = false;
 
-  protected readonly isDrawing = computed(() => this.edit()?.kind === 'Drawing');
+  protected readonly isDrawing = computed(() => this.base()?.kind === 'Drawing');
   protected readonly isChannel = computed(() => isChannelDirection(this.direction()));
   protected readonly step = computed(() => 10 ** -Math.max(0, this.precision()));
   protected readonly heading = computed(() => {
     const e = this.edit();
     if (e && !this.copy()) return `Edit alert · ${e.symbol}`;
+    const draft = e ? null : this.draft();
+    if (draft?.kind === 'Drawing') return `Drawing alert · ${draft.symbol.toUpperCase()}`;
     return `${this.copy() ? 'Copy alert' : 'Price alert'} · ${(e?.symbol ?? this.symbol()).toUpperCase()}`;
   });
   protected readonly drawingLabel = computed(() =>
-    (this.edit()?.drawingKind ?? 'drawing').replace(/-/g, ' '),
+    (this.base()?.drawingKind ?? 'drawing').replace(/-/g, ' '),
   );
 
   /** A channel drawing takes enter/exit only; a line or a level takes the crossings. */
   protected readonly directionChoices = computed(() => {
-    const e = this.edit();
+    const e = this.base();
     if (e?.kind === 'Drawing') {
       const channel = e.geometry?.shape === 'channel';
       return DIRECTIONS.filter((d) => isChannelDirection(d.id) === channel);
@@ -381,7 +390,7 @@ export class ChartAlertFormComponent {
   });
 
   private readonly alertSymbol = computed(() =>
-    (this.edit()?.symbol ?? this.symbol()).toUpperCase(),
+    (this.base()?.symbol ?? this.symbol()).toUpperCase(),
   );
 
   protected readonly livePrice = computed<string | null>(() => {
@@ -416,7 +425,7 @@ export class ChartAlertFormComponent {
   constructor() {
     // Load the edited alert (or the defaults) whenever the input changes.
     effect(() => {
-      const e = this.edit();
+      const e = this.base();
       const preset = this.presetPrice();
       untracked(() => this.reset(e, preset));
     });
@@ -446,7 +455,7 @@ export class ChartAlertFormComponent {
 
   /** The input the form describes. */
   toInput(): ChartAlertInput {
-    const e = this.edit();
+    const e = this.base();
     const channel = this.isChannel();
     return {
       name: this.name().trim() || null,

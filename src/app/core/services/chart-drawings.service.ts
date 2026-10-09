@@ -10,46 +10,73 @@ export interface ChartDrawingDto {
   id: number;
   clientId: string;
   symbol: string;
+  /** The resolution the drawing was CREATED on; it shows wherever `visibleOn` allows (DR-I2). */
   resolution: string;
   kind: string;
   pointsJson: string;
   styleJson: string;
   locked: boolean;
   createdAt: string;
+  /** The drawing's version, to the millisecond: what a write names as its `baseUpdatedAt`. */
   updatedAt: string;
   /** Tool settings (Fib levels, extend…), JSON. Absent on engines before feat/drawing-options. */
   optionsJson?: string;
   hidden?: boolean;
-  /** Comma-separated resolutions the drawing shows on; empty = all. */
+  /** Comma-separated resolutions the drawing shows on; empty = every resolution of the symbol. */
   visibleOn?: string;
   zIndex?: number;
+  /** 1 = a per-timeframe row from before DR-I2 (read where it showed), 2 = per symbol. */
+  visibilityModel?: number;
 }
 
-export interface ChartDrawingInput {
-  clientId: string;
+/** A drawing's content in a write. */
+export interface ChartDrawingUpsert {
+  symbol: string;
+  /** The resolution it was created on. */
+  resolution: string;
   kind: string;
   pointsJson: string;
   styleJson: string;
   locked: boolean;
+  optionsJson: string;
+  hidden: boolean;
+  visibleOn: string;
+  zIndex: number;
   createdAt: string;
-  /** Tool settings (Fib levels, extend…), JSON. Absent on engines before feat/drawing-options. */
-  optionsJson?: string;
-  hidden?: boolean;
-  /** Comma-separated resolutions the drawing shows on; empty = all. */
-  visibleOn?: string;
-  zIndex?: number;
+}
+
+/** One write of a batch: a drawing saved or deleted against the version it was made from. */
+export interface ChartDrawingOp {
+  op: 'upsert' | 'delete';
+  clientId: string;
+  /** The server version this write was made from; null when none was ever acknowledged. */
+  baseUpdatedAt: string | null;
+  /** For a delete with no base: the drawing's creation time. */
+  createdAt?: string;
+  drawing?: ChartDrawingUpsert;
+}
+
+/** What happened to one write: `00` applied, `-409` stale (`drawing` = the server's current row), `-11` refused. */
+export interface ChartDrawingOpResult {
+  clientId: string;
+  code: string;
+  message?: string | null;
+  drawing?: ChartDrawingDto | null;
+}
+
+/** The SignalR `chartDrawingsChanged` payload: which symbols changed, and the tab that wrote. */
+export interface ChartDrawingsChanged {
+  symbols: string[];
+  origin?: string | null;
 }
 
 /**
- * Client for `/chart-drawings` — durable, cross-device storage for chart
- * drawings.
+ * Client for `/chart-drawings` — durable, cross-device storage for chart drawings (engine
+ * `docs/api/chart-drawings-api.md`).
  *
- * The write side is a whole-scope REPLACE rather than per-drawing CRUD. The
- * browser already holds every drawing for the chart it is showing, and one
- * drag produces a change per animation frame; sending the set makes the request
- * idempotent and self-correcting, where a stream of individual writes can
- * arrive out of order and a dropped delete leaves a drawing the operator
- * removed.
+ * Drawings are read per SYMBOL and written one by one (DR-I2 / DR-I3): each write names the version it was made
+ * from, so another machine's newer edit is never overwritten — the engine answers `-409` with its row instead. The
+ * whole-chart replace this used before let a stale tab erase work it had never seen.
  */
 @Injectable({ providedIn: 'root' })
 export class ChartDrawingsService {
@@ -57,34 +84,32 @@ export class ChartDrawingsService {
   private readonly auth = inject(AuthService);
   private readonly baseUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl}/api/v1/lascodia-trading-engine`;
 
-  list(symbol: string, resolution: string): Observable<ResponseData<ChartDrawingDto[]>> {
-    return this.api.post(`/chart-drawings/list`, { symbol, resolution });
+  /** Every drawing the caller owns on `symbol`, with its effective visibility. */
+  list(symbol: string): Observable<ResponseData<ChartDrawingDto[]>> {
+    return this.api.post(`/chart-drawings/list`, { symbol });
   }
 
-  replaceScope(
-    symbol: string,
-    resolution: string,
-    drawings: ChartDrawingInput[],
-  ): Observable<ResponseData<number>> {
-    return this.api.put(`/chart-drawings/scope`, { symbol, resolution, drawings });
+  /** Save / delete drawings one by one; `origin` (this tab) comes back in the realtime push. */
+  sync(origin: string, ops: ChartDrawingOp[]): Observable<ResponseData<ChartDrawingOpResult[]>> {
+    return this.api.post(`/chart-drawings/batch`, { origin, ops });
   }
 
   /**
-   * Same write, but able to outlive the page: `fetch(..., { keepalive: true })` is the one request
-   * the browser still delivers after a tab closes or reloads. Used only to flush unsaved edits on
-   * `pagehide` — an HttpClient call started there is cancelled with the document.
+   * The same write, able to outlive the page: `fetch(..., { keepalive: true })` is the one request the browser
+   * still delivers after a tab closes or reloads (an HttpClient call started on `pagehide` is cancelled with the
+   * document). Best effort only — the writes are also kept in this browser and sent on the next load.
    */
-  replaceScopeOnUnload(symbol: string, resolution: string, drawings: ChartDrawingInput[]): void {
+  syncOnUnload(origin: string, ops: ChartDrawingOp[]): void {
     const token = this.auth.getToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     // The cookie sentinel is not a bearer token; the HttpOnly cookie travels via `credentials`.
     if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
-    void fetch(`${this.baseUrl}/chart-drawings/scope`, {
-      method: 'PUT',
+    void fetch(`${this.baseUrl}/chart-drawings/batch`, {
+      method: 'POST',
       keepalive: true,
       credentials: 'include',
       headers,
-      body: JSON.stringify({ symbol, resolution, drawings }),
+      body: JSON.stringify({ origin, ops }),
     }).catch(() => undefined);
   }
 }

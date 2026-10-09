@@ -1,11 +1,5 @@
-import {
-  atr,
-  periodKey,
-  volumeProfile,
-  type DayOf,
-  type Ohlc,
-  type VolumeProfileBin,
-} from '../indicators/math';
+import { atr, periodKey, type DayOf, type Ohlc, type VolumeProfileBin } from '../indicators/math';
+import { volumeProfile as volumeProfileOf } from '../profiles/profile-math';
 
 /**
  * Analytical overlays computed from the loaded bars: volume profile, auto-detected
@@ -28,16 +22,6 @@ export interface VolumeProfileResult {
 }
 
 /**
- * Volume by price for a window of bars, with its POC and value area.
- *
- * <p>Delegates the bucketing to {@link volumeProfile} rather than re-deriving it. That
- * matters: this app briefly had TWO volume profiles that disagreed — the indicator spread
- * each bar's volume across its high-low range, while the drawing tool dumped it all at the
- * close — so drawing the tool and adding the study on the same chart produced two different
- * shapes. Spreading is the convention and the better answer; one implementation is the
- * point.</p>
- */
-/**
  * How many price buckets to profile a window into.
  *
  * <p>Fixed at 40 the bars came out as thick slabs — on a tall pane each one was thirty-odd
@@ -52,47 +36,39 @@ export function binsForWindow(barCount: number): number {
   return Math.max(48, Math.min(180, Math.round(barCount * 0.8)));
 }
 
+/**
+ * Volume by price for a window of bars, with its POC and value area — the profile engine's one profile
+ * (`profiles/profile-math.ts`, DR-19), in the overlay's bin shape. That matters: this app had THREE volume profiles
+ * that split a bar's volume differently (an even share per bucket here, overlap-weighted in the profile studies and
+ * the drawing tools), so the overlay, a profile study and a profile drawing on one chart disagreed. One
+ * implementation is the point.
+ */
 export function profileWithValueArea(
   bars: readonly Ohlc[],
   bins = binsForWindow(bars.length),
   valueAreaPct = 0.7,
 ): VolumeProfileResult | null {
-  const computed = volumeProfile(bars as Ohlc[], bins);
-  if (computed.length === 0) return null;
-
-  const total = computed.reduce((sum, b) => sum + b.volume, 0);
-  if (total <= 0) return null;
-
-  let pocIndex = 0;
-  for (let i = 1; i < computed.length; i++) {
-    if (computed[i].volume > computed[pocIndex].volume) pocIndex = i;
-  }
-
-  // Grow outward from the POC, always taking the fuller neighbour, until the band holds the
-  // target share. This is the standard construction; taking a fixed number of bins either
-  // side would centre the band on the POC rather than on where volume actually sits.
-  let low = pocIndex;
-  let high = pocIndex;
-  let inside = computed[pocIndex].volume;
-  const target = total * valueAreaPct;
-  while (inside < target && (low > 0 || high < computed.length - 1)) {
-    const below = low > 0 ? computed[low - 1].volume : -1;
-    const above = high < computed.length - 1 ? computed[high + 1].volume : -1;
-    if (above >= below) {
-      high += 1;
-      inside += computed[high].volume;
-    } else {
-      low -= 1;
-      inside += computed[low].volume;
-    }
-  }
-
+  const p = volumeProfileOf(bars, { rows: bins, valueAreaPct: valueAreaPct * 100 });
+  if (!p || p.totalVolume <= 0) return null;
+  const computed: VolumeProfileBin[] = p.rows.map((r) => ({
+    price: (r.priceLow + r.priceHigh) / 2,
+    volume: r.upVol + r.downVol,
+    up: r.upVol,
+    down: r.downVol,
+  }));
+  const row = (price: number, edge: 'priceLow' | 'priceHigh') =>
+    computed[
+      Math.max(
+        0,
+        p.rows.findIndex((r) => r[edge] === price),
+      )
+    ];
   return {
     bins: computed,
-    poc: computed[pocIndex].price,
-    valueAreaLow: computed[low].price,
-    valueAreaHigh: computed[high].price,
-    peak: computed[pocIndex].volume,
+    poc: computed[p.pocIndex].price,
+    valueAreaLow: row(p.val, 'priceLow').price,
+    valueAreaHigh: row(p.vah, 'priceHigh').price,
+    peak: computed[p.pocIndex].volume,
   };
 }
 

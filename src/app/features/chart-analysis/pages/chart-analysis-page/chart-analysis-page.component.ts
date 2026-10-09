@@ -112,6 +112,7 @@ import {
 import {
   ChartScriptService,
   editorRunKey,
+  savedScriptId,
   startingValues,
   type ChartScriptCatalog,
   type ChartScriptItem,
@@ -132,6 +133,16 @@ import {
   type ScriptDisplaySettings,
 } from '../../scripts/script-display';
 import { scriptRenderModel } from '../../scripts/script-model-cache';
+import { WarmSessionBook, applyFrame, formingIndexOf } from '../../scripts/warm-sessions';
+import { detectRepaint, markUnconfirmed, repaintText } from '../../scripts/realtime-truth';
+import { ScriptingRealtimeService } from '@core/realtime/scripting-realtime.service';
+import { ScriptingService } from '@core/services/scripting.service';
+import type { ScriptSessionFrame } from '@core/api/scripting.types';
+import {
+  ChartScriptAlertFormComponent,
+  type ScriptAlertTarget,
+} from '../../alerts/chart-script-alert-form.component';
+import type { ChartScriptAlertDto } from '../../alerts/chart-script-alerts.types';
 import {
   ScriptSettingsDialogComponent,
   type InputPick,
@@ -143,6 +154,7 @@ import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
 import {
   detectScriptKind,
   editorReport,
+  runTimeframeFor,
   scriptBasisOf,
   type ScriptBasis,
 } from '../../scripts/chart-script.model';
@@ -209,6 +221,29 @@ import {
 import { ChartAlertsService } from '../../alerts/chart-alerts.service';
 import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
 import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
+import { ObjectTreeComponent } from '../../drawings/ui/object-tree.component';
+import {
+  StudySettingsDialogComponent,
+  type StudyPick,
+} from '../../indicators/study-settings-dialog.component';
+import { drawingAlertDraft } from '../../drawings/drawing-alert';
+import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
+import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
+import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog.component';
+import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
+import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
+import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
+import {
+  CreateSignalDialogComponent,
+  type SignalPrefill,
+} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
+import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
+import {
+  parseStudyInput,
+  parseStudySource,
+  sourceGroups,
+  type SourceGroup,
+} from '../../indicators/study-settings';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
 import { inputOf } from '../../alerts/chart-alert-rules';
@@ -253,7 +288,13 @@ import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
 import { EconomicCalendarPaneComponent } from '../../panels/economic-calendar-pane.component';
 import { EconomicEventModalComponent } from '../../panels/economic-event-modal.component';
 import { ZonedDatePipe } from '../../panels/zoned-time';
-import { ArticleFlagsPipe, headlineAge, mergeArticles } from '../../panels/news-pane';
+import {
+  ArticleFlagsPipe,
+  concernsPane,
+  headlineAge,
+  mergeArticles,
+  type NewsArticleIngestedPayload,
+} from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
@@ -489,6 +530,16 @@ function loadWatchlistOpen(): boolean {
   }
 }
 
+/** TradingView's drawing hotkeys (Alt + key), by `KeyboardEvent.code` (DR-I12). */
+const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
+  KeyT: 'trend-line',
+  KeyH: 'horizontal-line',
+  KeyJ: 'horizontal-ray',
+  KeyV: 'vertical-line',
+  KeyC: 'cross-line',
+  KeyF: 'fib-retracement',
+};
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -524,6 +575,12 @@ function loadWatchlistOpen(): boolean {
     ScriptStatusLineComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
+    ObjectTreeComponent,
+    StudySettingsDialogComponent,
+    CreateSignalDialogComponent,
+    FavoritesBarComponent,
+    PatternScorecardDialogComponent,
+    ChartScriptAlertFormComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -554,6 +611,9 @@ export class ChartAnalysisPageComponent {
    * roll a bar early or late (the countdown reads the same clock).
    */
   private readonly serverClock = inject(ServerClock);
+  /** PC-I1: warm sessions' frames (`/api/hubs/scripting`), and their resync and end calls. */
+  private readonly scriptHub = inject(ScriptingRealtimeService);
+  private readonly scriptingApi = inject(ScriptingService);
 
   /** Fetched FX-fundamental series, keyed by the study's uid. */
   readonly externalPanes = signal<ExternalPane[]>([]);
@@ -660,9 +720,36 @@ export class ChartAnalysisPageComponent {
 
   /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
   readonly alertPreset = signal<number | null>(null);
+  /** A drawing's alert the form starts from (DR-I6: "Add alert" on the drawing toolbar); null = a price alert. */
+  readonly alertDraft = signal<ChartAlertDto | null>(null);
   openAlertDraft(ev: Event): void {
     this.alertPreset.set(null);
+    this.alertDraft.set(null);
     this.toggleMenu('alert', ev);
+  }
+
+  /**
+   * "Add alert" on a selected line / channel / Fib level (DR-I6): the alert form opens pre-filled with the drawing's
+   * anchors (the engine follows the shape bar by bar on this timeframe); nothing is armed until the operator saves.
+   */
+  addDrawingAlert(e: { id: string; level?: number }): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === e.id);
+    const draft = d
+      ? drawingAlertDraft(d, {
+          timeframe: this.resolution(),
+          level: e.level,
+          logScale: this.scaleMode() === 'log',
+        })
+      : null;
+    if (!draft) {
+      this.notify.error(
+        'An alert can watch a line, a channel or a Fib level drawn on the price, with two different times.',
+      );
+      return;
+    }
+    this.alertPreset.set(null);
+    this.alertDraft.set(draft);
+    this.openMenu.set('alert');
   }
 
   readonly rangePresets = RANGE_PRESETS;
@@ -976,6 +1063,8 @@ export class ChartAnalysisPageComponent {
     const viaUpdate = new Set(updates.values());
     const unavailable = this.scriptsUnavailable();
     const head = this.replayHead();
+    const repaints = this.scriptRepaints();
+    const warm = this.warmKeys();
     const chip = (
       key: string,
       name: string,
@@ -1004,6 +1093,8 @@ export class ChartAnalysisPageComponent {
           run && !failure && !unavailable && (visible || kind === 'strategy')
             ? replayLag(run, head)
             : null,
+        repaint: repaints.get(key) ?? null,
+        warm: warm.has(key),
       };
     };
     const runs = this.scriptRuns();
@@ -1552,6 +1643,55 @@ export class ChartAnalysisPageComponent {
   readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
   /** Drawing whose Settings dialog is open. */
   readonly settingsFor = signal<string | null>(null);
+  /** Built-in study whose Settings dialog is open (DR-I4). */
+  readonly studySettingsFor = signal<string | null>(null);
+  readonly studySettingsStudy = computed(
+    () => this.active().find((i) => i.uid === this.studySettingsFor()) ?? null,
+  );
+  /**
+   * What a new Long / Short Position is placed with (DR-I9): the account in scope (one account, or the only live
+   * one), its equity and currency, and this symbol's contract size, pip and quote→account rate.
+   */
+  readonly positionFacts = computed(() => {
+    const selected = this.accountScope.selected();
+    const live = this.accountScope.liveAccounts();
+    const account =
+      typeof selected === 'number'
+        ? (this.accountScope.accounts().find((a) => a.id === selected) ?? null)
+        : live.length === 1
+          ? live[0]
+          : null;
+    const facts = positionAccountFacts({
+      account,
+      pair: this.currentPair() ?? null,
+      pipSize: this.pipSize(),
+      price: this.bars().at(-1)?.close ?? 0,
+    });
+    return facts ? { ...facts } : null;
+  });
+  /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
+  readonly stagePrefill = signal<SignalPrefill | null>(null);
+
+  /** "Stage…" on a Long / Short Position: the manual-signal dialog, filled in. The chart sends nothing itself. */
+  stageOrder(id: string): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === id);
+    const prefill = d ? positionOrderPrefill(d) : null;
+    if (prefill) this.stagePrefill.set(prefill);
+  }
+
+  /** The operator created the signal in the dialog: it waits as Pending for approval and the risk checks. */
+  onStagedSignal(id: number): void {
+    this.stagePrefill.set(null);
+    this.notify.success(
+      `Signal #${id} queued as Pending — approval and the risk checks decide whether it trades.`,
+    );
+  }
+
+  /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
+  readonly studyLabels = computed(() =>
+    Object.fromEntries(this.active().map((i) => [i.uid, this.labelFor(i)])),
+  );
+  private readonly studyDialog = viewChild(StudySettingsDialogComponent);
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
   readonly scaleMode = signal<ScaleMode>('normal');
@@ -1713,6 +1853,88 @@ export class ChartAnalysisPageComponent {
     this.railFlyout.set(name);
   }
 
+  // ── Auto analysis (DR-I11) ────────────────────────────────────────────────────
+  /** Which auto-analysis layers are on (a synced chart preference). */
+  readonly autoAnalysis = signal<AutoAnalysisSettings>({
+    trendlines: false,
+    htfLevels: false,
+    autoFib: false,
+    ...readPref<Partial<AutoAnalysisSettings>>('autoAnalysis', {}),
+  });
+  readonly autoAnalysisOn = computed(() => {
+    const a = this.autoAnalysis();
+    return a.trendlines || a.htfLevels || a.autoFib;
+  });
+  readonly autoAnalysisLayers: { id: keyof AutoAnalysisSettings; label: string; hint: string }[] = [
+    { id: 'trendlines', label: 'Trendlines', hint: 'Fitted trendlines, scored by touches, age and recency' },
+    { id: 'htfLevels', label: 'HTF levels', hint: "The next higher timeframe's support and resistance" },
+    { id: 'autoFib', label: 'Auto Fib', hint: 'Fibonacci retracement of the last zig-zag leg' },
+  ];
+
+  /** The menu's main switch: all layers on, or all off. */
+  toggleAutoAnalysis(): void {
+    const on = !this.autoAnalysisOn();
+    this.setAutoAnalysis({ trendlines: on, htfLevels: on, autoFib: on });
+  }
+
+  toggleAutoLayer(id: keyof AutoAnalysisSettings): void {
+    this.setAutoAnalysis({ ...this.autoAnalysis(), [id]: !this.autoAnalysis()[id] });
+  }
+
+  private setAutoAnalysis(next: AutoAnalysisSettings): void {
+    this.autoAnalysis.set(next);
+    writePref('autoAnalysis', next);
+  }
+
+  // ── Pattern & structure scorecard (DR-I8) ─────────────────────────────────────
+  readonly scorecardOpen = signal(false);
+  /** The live spread (ask − bid), for the scorecard's cost; null before a quote. */
+  readonly liveSpread = computed(() => {
+    const q = this.liveQuote();
+    return q && q.ask !== null && q.ask > q.bid ? q.ask - q.bid : null;
+  });
+  /** The candlestick studies' trend filter (the first one's), as the scorecard reads them. */
+  readonly scorecardTrend = computed<CandleTrendFilter>(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'candle-pattern');
+    return c?.params['trend'] === 'none' ? 'none' : 'sma50';
+  });
+  /** The chart-pattern study's swing size (the first one's), else 5. */
+  readonly scorecardDepth = computed(() => {
+    const c = this.active().find((a) => studyKind(a.defId) === 'chart-pattern');
+    const d = Number(c?.params['pivotDepth'] ?? 5);
+    return Number.isFinite(d) && d >= 1 ? d : 5;
+  });
+
+  openScorecard(): void {
+    this.openMenu.set(null);
+    this.scorecardOpen.set(true);
+  }
+
+  /**
+   * A scorecard row exported as a Pine strategy (DR-I8): a NEW, unsaved script in the Pine Editor — nothing is saved,
+   * added to the chart or run until the operator does it.
+   */
+  openPineDraft(d: { name: string; source: string }): void {
+    this.scorecardOpen.set(false);
+    this.assistSource.set(null);
+    this.editorKey.set(null);
+    this.editorCleared.set(true);
+    this.editorDraft.set({ key: null, text: d.source });
+    this.assistSource.set({ text: d.source, seq: ++this.assistSeq });
+    this.editorOpen.set(true);
+    this.frontDock('editor');
+    this.notify.success(`${d.name} is in the Pine Editor as an unsaved draft.`);
+  }
+
+  /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
+  readonly favoriteTools = inject(DrawingFavorites);
+
+  /** Star / unstar a tool in a rail flyout (the click does not arm it). */
+  toggleFavoriteTool(kind: DrawingKind, ev: Event): void {
+    ev.stopPropagation();
+    this.favoriteTools.toggle(kind);
+  }
+
   pickRailTool(group: string, kind: DrawingKind): void {
     this.railPick.update((m) => ({ ...m, [group]: kind }));
     this.railFlyout.set(null);
@@ -1792,6 +2014,7 @@ export class ChartAnalysisPageComponent {
     drawingTemplates.useStorage(this.prefs.storage);
     prefsRef = this.prefs;
     this.layoutStore.reload();
+    this.favoriteTools.reload();
     this.magnetStrength.set(readPref('magnetStrength', 'weak'));
     this.stayInDrawing.set(readPref('stayInDrawing', false));
     const deepLink = !!this.route.snapshot.paramMap.get('symbol');
@@ -1943,7 +2166,11 @@ export class ChartAnalysisPageComponent {
     // the scheduler like every other re-run: a slow script's minute re-run used to start beside its
     // live re-run still in flight.
     const liveTimer = setInterval(() => {
-      if (!this.replayActive()) rerunScripts(() => true);
+      if (this.replayActive()) return;
+      // PC-I1: a script whose warm session the hub keeps current is not run again — it is asked what changed instead
+      // (a quiet market pushes nothing, and this is how a session that ended is found).
+      rerunScripts((r) => !this.warmCovered(r.item.key));
+      for (const s of this.warmSessions.all()) if (this.warmCovered(s.key)) this.resyncWarm(s.key);
     }, 60_000);
     this.destroyRef.onDestroy(() => clearInterval(liveTimer));
 
@@ -1961,7 +2188,8 @@ export class ChartAnalysisPageComponent {
       untracked(() => {
         // A hidden tab still requests: the scheduler holds them until it is visible.
         if (!sig || this.replayActive()) return;
-        rerunScripts((r) => r.result.kind !== 'strategy');
+        // PC-I1: a warm session's frames keep its script current: no run per tick for it.
+        rerunScripts((r) => r.result.kind !== 'strategy' && !this.warmCovered(r.item.key));
       });
     });
 
@@ -2199,6 +2427,32 @@ export class ChartAnalysisPageComponent {
       wanted.delete('');
       untracked(() => this.syncPriceSubscriptions(wanted));
     });
+
+    // PC-I1: warm sessions' frames, and a resync after the scripting hub came back (frames may have been missed).
+    this.scriptHub.frames$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((frame) => this.onScriptFrame(frame));
+    this.scriptHub.reconnected$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        for (const s of this.warmSessions.all()) this.resyncWarm(s.key);
+      });
+    this.destroyRef.onDestroy(() => {
+      for (const s of this.warmSessions.all()) this.releaseWarm(s.key);
+    });
+    // EV-1: a headline labelled for the pair's currencies re-reads the news pane (and the watchlist's headline).
+    let newsTimer: ReturnType<typeof setTimeout> | undefined;
+    this.destroyRef.onDestroy(() => clearTimeout(newsTimer));
+    this.realtime
+      .on<NewsArticleIngestedPayload>('newsArticleIngested')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((article) => {
+        if (this.sidePane() !== 'news' && !this.watchlistOpen()) return;
+        if (!concernsPane(article, this.pairCurrencies())) return;
+        // A classification batch pushes several at once: one re-read for all of them.
+        clearTimeout(newsTimer);
+        newsTimer = setTimeout(() => this.loadNews(), 1500);
+      });
 
     // Ticking clock, and presets applied once their interval's bars are in.
     this.tickClock();
@@ -3488,6 +3742,10 @@ export class ChartAnalysisPageComponent {
           liveBar,
           chartType: basis,
           toMs: head ? barCloseMs(head, resolution) : null,
+          // PC-I1: an indicator on the live chart stays warm on the engine, which then streams what changes.
+          ...(!head && item.kind !== 'strategy' && basis === 'standard' && this.scriptHub.usable()
+            ? { keepWarm: true }
+            : {}),
         })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
@@ -3518,7 +3776,7 @@ export class ChartAnalysisPageComponent {
                 item,
                 result,
                 values,
-                { symbol, resolution, requestedBars, basis, until },
+                { symbol, resolution, requestedBars, basis, until, forming: liveBar !== null },
                 replace,
                 update,
               );
@@ -3587,6 +3845,8 @@ export class ChartAnalysisPageComponent {
       requestedBars: number;
       basis: ScriptBasis;
       until?: number | null;
+      /** The run ended on the chart's forming bar (it was sent as `liveBar`): its last bar is unconfirmed (PC-I9). */
+      forming?: boolean;
     },
     replace: boolean,
     update: ScriptUpdate | undefined,
@@ -3594,6 +3854,20 @@ export class ChartAnalysisPageComponent {
     const { symbol, resolution, requestedBars, basis } = on;
     const until = on.until ?? null;
     const key = item.key;
+    // PC-I9: what is on the forming bar shows as unconfirmed, and a closed bar whose value moved since the run on the
+    // chart is a repaint. PC-I1: its warm session (if the engine kept one) streams its changes from here on.
+    const before = this.scriptRuns().find((r) => r.item.key === key);
+    const comparable =
+      !!before &&
+      !update &&
+      before.symbol === symbol &&
+      before.resolution === resolution &&
+      (before.chartType ?? 'standard') === basis &&
+      (before.until ?? null) === until &&
+      before.item.pineSource === item.pineSource &&
+      JSON.stringify(before.values) === JSON.stringify(values);
+    result = this.truthful(key, result, result.session?.lastBarForming ?? on.forming === true, comparable ? 'run' : null);
+    this.attachWarm(key, result);
     // The overrides as they apply to the script that ran: one for an input its source no longer
     // declares, or declares with another type, range or options, is dropped — that input runs on
     // its default (the run fell back to that) and leaves the layout.
@@ -3663,6 +3937,219 @@ export class ChartAnalysisPageComponent {
         if (previous) this.offerUndoReplace(previous, entry);
       }
     }
+  }
+
+  // ── PC-I1 warm sessions · PC-I9 realtime truthfulness · PC-I14 alerts on a script ────────────
+
+  /** Each script's warm session on the engine (PC-I1). */
+  private readonly warmSessions = new WarmSessionBook();
+  /** The scripts their warm session keeps current — the chip's live mark. */
+  readonly warmKeys = signal<ReadonlySet<string>>(new Set());
+  /** PC-I9: per script, the first repaint seen — its chip says it until the script leaves the chart. */
+  readonly scriptRepaints = signal<ReadonlyMap<string, string>>(new Map());
+  /** PC-I9: per script, the bar_index of the forming bar of the run on the chart (null: none). */
+  private readonly formingByKey = new Map<string, number | null>();
+  /** Resyncs in flight, by script. */
+  private readonly resyncing = new Set<string>();
+
+  /** Whether `key`'s warm session keeps it current: one is attached and the scripting hub is connected. */
+  private warmCovered(key: string): boolean {
+    return this.warmSessions.get(key) !== null && this.scriptHub.isConnected();
+  }
+
+  /**
+   * PC-I9: the run with what sits on its forming bar marked unconfirmed (faded; drawings made there provisional), and —
+   * when `compareWith` says the run on the chart is the same script on the same window — a plot that changed its value
+   * on a bar that was already closed recorded as a repaint (a full re-run's newest closed bar is left out: it can be a
+   * candle the engine replaced with the stored one, not a repaint).
+   */
+  private truthful(
+    key: string,
+    result: ChartScriptResult,
+    lastBarForming: boolean,
+    compareWith: 'run' | 'frame' | null,
+  ): ChartScriptResult {
+    const outputs = result.run?.outputs;
+    if (!result.run || !outputs) {
+      this.formingByKey.delete(key);
+      return result;
+    }
+    const forming = formingIndexOf(result, lastBarForming);
+    if (compareWith && !this.scriptRepaints().has(key)) {
+      const previous = this.scriptRuns().find((r) => r.item.key === key)?.result.run?.outputs ?? null;
+      const prevForming = this.formingByKey.get(key) ?? null;
+      const prevEnd = previous ? previous.bars.firstIndex + previous.bars.times.length : null;
+      const closedBefore = prevForming ?? prevEnd;
+      const limit = closedBefore === null ? null : compareWith === 'run' ? closedBefore - 1 : closedBefore;
+      const found = detectRepaint(previous, outputs, limit);
+      if (found)
+        this.scriptRepaints.update((m) =>
+          new Map(m).set(key, repaintText(found, (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')),
+        );
+    }
+    this.formingByKey.set(key, forming);
+    return forming === null ? result : { ...result, run: { ...result.run, outputs: markUnconfirmed(outputs, forming) } };
+  }
+
+  private forgetTruth(key: string): void {
+    this.formingByKey.delete(key);
+    if (!this.scriptRepaints().has(key)) return;
+    this.scriptRepaints.update((m) => {
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  /**
+   * PC-I1: a run landed — its warm session (if the engine kept one) streams the script's changes from now on, and the
+   * session it replaces is let go. A session the hub cannot take is let go at once: the script is re-run per tick as
+   * before.
+   */
+  private attachWarm(key: string, result: ChartScriptResult): void {
+    const replaced = this.warmSessions.attach(key, result.session, Date.now());
+    if (replaced) this.letGo(replaced.sessionId);
+    const now = this.warmSessions.get(key);
+    this.setWarmKey(key, now !== null);
+    if (!now) return;
+    const id = now.sessionId;
+    void this.scriptHub.subscribe(id).then((sub) => {
+      if (this.warmSessions.get(key)?.sessionId !== id) return;
+      if (!sub) {
+        this.releaseWarm(key);
+        return;
+      }
+      // Frames went out before the room was joined: catch up.
+      if (sub.seq > now.seq) this.resyncWarm(key);
+    });
+  }
+
+  /** Lets go of `key`'s warm session (the script left, was re-run without one, or its session cannot be followed). */
+  private releaseWarm(key: string): void {
+    const s = this.warmSessions.detach(key);
+    if (s) this.letGo(s.sessionId);
+    this.setWarmKey(key, false);
+  }
+
+  private letGo(sessionId: string): void {
+    void this.scriptHub.unsubscribe(sessionId);
+    this.scriptingApi.endSession(sessionId).subscribe();
+  }
+
+  private setWarmKey(key: string, warm: boolean): void {
+    if (this.warmKeys().has(key) === warm) return;
+    this.warmKeys.update((set) => {
+      const next = new Set(set);
+      if (warm) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
+  /** A pushed frame: folded into its script's run, a resync after a gap, or a full re-run when its session ended. */
+  private onScriptFrame(frame: ScriptSessionFrame): void {
+    const d = this.warmSessions.decide(frame);
+    switch (d.kind) {
+      case 'apply':
+        if (!this.applyWarmFrame(d.key, frame)) this.resyncWarm(d.key);
+        return;
+      case 'resync':
+        this.resyncWarm(d.key);
+        return;
+      case 'ended':
+        this.endWarm(d.key);
+        return;
+    }
+  }
+
+  /** Folds a frame into the run on the chart; false when it cannot (the run is not there or the frame leaves a hole). */
+  private applyWarmFrame(key: string, frame: ScriptSessionFrame): boolean {
+    const chart = { symbol: this.symbol(), resolution: this.resolution() };
+    const run = this.scriptRuns().find((r) => r.item.key === key);
+    if (!run || !sameSeries(run, chart)) return false;
+    const merged = applyFrame(run.result, frame);
+    if (!merged) return false;
+    const next = this.truthful(key, merged, frame.lastBarForming, 'frame');
+    this.scriptRuns.update((runs) =>
+      runs.map((r) => (r.item.key === key ? { ...r, result: next, landedAt: Date.now() } : r)),
+    );
+    this.warmSessions.applied(key, frame, Date.now());
+    return true;
+  }
+
+  /**
+   * Asks the session for everything since the last frame folded in (`GET scripting/sessions/{id}/frame?sinceSeq=`): after
+   * a gap, a reconnect, and once a minute (a quiet market pushes nothing; a session that ended is found this way).
+   */
+  private resyncWarm(key: string): void {
+    const s = this.warmSessions.get(key);
+    if (!s || this.resyncing.has(key)) return;
+    this.resyncing.add(key);
+    const sessionId = s.sessionId;
+    this.scriptingApi
+      .sessionFrame(sessionId, s.seq)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (frame) => {
+          this.resyncing.delete(key);
+          if (this.warmSessions.get(key)?.sessionId !== sessionId) return;
+          if (frame.reset) {
+            this.endWarm(key);
+            return;
+          }
+          if (!this.applyWarmFrame(key, frame)) this.endWarm(key);
+        },
+        error: (err: unknown) => {
+          this.resyncing.delete(key);
+          if (this.warmSessions.get(key)?.sessionId !== sessionId) return;
+          // Busy (C5): asked again at the next minute; anything else (-14: it ended) runs the script again.
+          if (!isBusy(err)) this.endWarm(key);
+        },
+      });
+  }
+
+  /** The warm session ended (or cannot be followed): let it go and run the script again — a new session comes with it. */
+  private endWarm(key: string): void {
+    this.releaseWarm(key);
+    if (this.scriptRuns().some((r) => r.item.key === key)) this.runScheduler.request(key);
+  }
+
+  /** "Create alert on <script>" (PC-I14): the alert form for a script on the chart, in a dialog. */
+  readonly scriptAlertTarget = signal<ScriptAlertTarget | null>(null);
+  private readonly scriptAlertDialog = viewChild<ElementRef<HTMLDialogElement>>('scriptAlertDialog');
+
+  openScriptAlert(key: string): void {
+    const run = this.scriptRuns().find((r) => r.item.key === key);
+    if (!run) return;
+    const id = savedScriptId(run.item);
+    if (id === null) {
+      this.notify.warning(
+        run.item.source === 'strategy'
+          ? `“${run.item.name}” is an engine strategy: its alerts are set on the strategy (its Live tab).`
+          : `Save “${run.item.name}” to My scripts first: an alert runs a saved copy of the script, whether or not this chart is open.`,
+      );
+      return;
+    }
+    const source = run.item.pineSource ?? '';
+    this.scriptAlertTarget.set({
+      chartScriptId: Number(id),
+      scriptName: run.result.title || run.item.name,
+      alertConditions: (run.result.run?.outputs?.alertConditions ?? []).map((a) => a.title).filter(Boolean),
+      // A library it imports may call alert() too: the engine checks and says so when it does not.
+      callsAlert: /(?<![\w.])alert\s*\(/.test(source) || /^\s*import\s+/m.test(source),
+      isStrategy: run.result.kind === 'strategy',
+      symbol: this.symbol(),
+      timeframe: runTimeframeFor(this.resolution()),
+      inputs: Object.keys(run.values).length ? { ...run.values } : null,
+    });
+    queueMicrotask(() => this.scriptAlertDialog()?.nativeElement.showModal());
+  }
+
+  closeScriptAlert(saved?: ChartScriptAlertDto): void {
+    this.scriptAlertDialog()?.nativeElement.close();
+    this.scriptAlertTarget.set(null);
+    if (saved)
+      this.notify.success(`Alert “${saved.displayName}” armed — the engine watches it whether or not this chart is open.`);
   }
 
   /**
@@ -3765,6 +4252,7 @@ export class ChartAnalysisPageComponent {
   private abortAllRuns(why: string): void {
     for (const key of [...this.runsInFlight.keys()]) this.abortRun(key, why);
     this.runScheduler.cancelAll();
+    for (const s of this.warmSessions.all()) this.releaseWarm(s.key);
     this.runningKeys.set(new Map());
     this.waitingScripts.set(new Map());
     this.scriptUpdates.set(new Map());
@@ -3889,6 +4377,8 @@ export class ChartAnalysisPageComponent {
     }
     this.abortRun(key, 'The script was removed from the chart.');
     this.runScheduler.cancel(key);
+    this.releaseWarm(key);
+    this.forgetTruth(key);
     this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
     this.dropPending(key);
     this.dropFailure(key);
@@ -4087,7 +4577,52 @@ export class ChartAnalysisPageComponent {
   }
 
   removeIndicator(uid: string): void {
-    this.active.update((list) => list.filter((i) => i.uid !== uid));
+    // Studies read from its plots go back to the close (DR-I5), rather than keeping a reference to nothing.
+    this.active.update((list) =>
+      list
+        .filter((i) => i.uid !== uid)
+        .map((i) =>
+          parseStudySource(i.params['source'])?.uid === uid
+            ? { ...i, params: { ...i.params, source: 'close' } }
+            : i,
+        ),
+    );
+    if (this.studySettingsFor() === uid) this.studySettingsFor.set(null);
+  }
+
+  /** A study as its Settings dialog left it (live preview; Cancel sends back the one it opened with). */
+  replaceStudy(next: ActiveIndicator): void {
+    this.active.update((list) => list.map((i) => (i.uid === next.uid ? next : i)));
+  }
+
+  /** The Settings dialog asks for a time on the chart (DR-22): the next click's bar. */
+  async onStudyPick(req: StudyPick): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint(req.kind) : null;
+    this.studyDialog()?.finishPick(point === null ? null : point.time);
+  }
+
+  /** A time input picked straight from the studies bar (DR-22: it was typed as UTC milliseconds). */
+  async pickStudyTime(uid: string, key: string): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint('time') : null;
+    if (point !== null) this.setParam(uid, key, String(point.time));
+  }
+
+  /** A time input's value on the studies bar: the picked bar (UTC), or what to do. */
+  studyTimeLabel(v: number | string | undefined): string {
+    const ms = Number(v);
+    return Number.isFinite(ms) && ms > 0
+      ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+      : 'Pick on chart';
+  }
+
+  /** The Source dropdown's choices for a study (DR-16 / DR-I5). */
+  sourceGroupsFor(item: ActiveIndicator): SourceGroup[] {
+    return sourceGroups(item, this.active(), (s) => {
+      const def = indicatorById(s.defId);
+      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
+    });
   }
 
   toggleIndicator(uid: string): void {
@@ -4099,17 +4634,18 @@ export class ChartAnalysisPageComponent {
   setParam(uid: string, key: string, raw: string): void {
     const item = this.active().find((i) => i.uid === uid);
     const input = item ? studyMeta(item.defId)?.inputs.find((i) => i.key === key) : undefined;
-    // Select and symbol inputs are strings; everything else must parse as a number.
-    let value: number | string;
-    if (input && (input.type === 'select' || input.type === 'symbol')) {
-      value = input.type === 'symbol' ? raw.trim().toUpperCase() : raw;
-      if (!value) return;
-    } else {
-      value = Number(raw);
-      if (!Number.isFinite(value)) return;
-    }
+    // By the input's type (DR-16: a Source went through Number and became NaN, so 38 built-ins were stuck on close);
+    // a value the input does not take is ignored.
+    const value = parseStudyInput(input, raw);
+    if (value === null) return;
     this.active.update((list) =>
-      list.map((i) => (i.uid === uid ? { ...i, params: { ...i.params, [key]: value } } : i)),
+      list.map((i) => {
+        if (i.uid !== uid) return i;
+        const next: ActiveIndicator = { ...i, params: { ...i.params, [key]: value } };
+        // On another study's plot it is on that one's bars: no timeframe of its own.
+        if (key === 'source' && parseStudySource(value)) delete next.timeframe;
+        return next;
+      }),
     );
   }
 
@@ -4117,8 +4653,14 @@ export class ChartAnalysisPageComponent {
     return studyLabel(item.defId, item.params);
   }
 
+  /** A candlestick- or chart-pattern study (its row offers the scorecard, DR-I8). */
+  isPatternStudy(item: ActiveIndicator): boolean {
+    const k = studyKind(item.defId);
+    return k === 'candle-pattern' || k === 'chart-pattern';
+  }
+
   inputsFor(item: ActiveIndicator) {
-    return studyMeta(item.defId)?.inputs.filter((i) => i.type !== 'source') ?? [];
+    return studyMeta(item.defId)?.inputs ?? [];
   }
 
   onLegend(snapshot: LegendSnapshot): void {
@@ -4686,13 +5228,20 @@ export class ChartAnalysisPageComponent {
     const price = menu?.price;
     if (price === null || price === undefined || !Number.isFinite(price) || price <= 0) return;
     this.alertPreset.set(price);
+    this.alertDraft.set(null);
     this.openMenu.set('alert');
   }
 
   /** The form saved an alert. */
   onAlertSaved(): void {
     this.openMenu.set(null);
-    this.notify.success('Alert set — it fires when price crosses the level.');
+    const drawing = this.alertDraft() !== null;
+    this.alertDraft.set(null);
+    this.notify.success(
+      drawing
+        ? 'Alert set — it fires when price crosses the drawing.'
+        : 'Alert set — it fires when price crosses the level.',
+    );
   }
 
   /** The alert manager (right rail) and the alert a bell link asked to show. */
@@ -4707,7 +5256,23 @@ export class ChartAnalysisPageComponent {
   closeAlertManager(): void {
     this.alertManagerOpen.set(false);
     this.alertFocusId.set(null);
+    this.scriptAlertFocusId.set(null);
   }
+
+  /** The alert on a chart script a bell link asked to show (`?scriptAlert=12`, SS-I1). */
+  readonly scriptAlertFocusId = signal<number | null>(null);
+  private readonly scriptAlertQuery = toSignal(
+    this.route.queryParamMap.pipe(map((q) => q.get('scriptAlert'))),
+    { initialValue: null },
+  );
+  private readonly followScriptAlertQuery = effect(() => {
+    const id = Number(this.scriptAlertQuery());
+    if (!Number.isFinite(id) || id <= 0) return;
+    untracked(() => {
+      this.scriptAlertFocusId.set(id);
+      this.alertManagerOpen.set(true);
+    });
+  });
 
   /** `?alert=12` (the bell's link to a fired chart alert): open the manager on it. */
   private readonly alertQuery = toSignal(
@@ -4985,12 +5550,23 @@ export class ChartAnalysisPageComponent {
       return;
     }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
-      const id = this.drawings.selectedId();
-      if (id) {
+      if (this.drawings.selectedIds().size) {
         ev.preventDefault();
-        this.drawings.remove(id);
+        // Locked drawings stay: the lock is what stops a stray key deleting one (DR-06). Every other
+        // selected drawing goes (a multi-selection, DR-I10).
+        this.drawings.removeSelectedUnlocked();
       }
       return;
+    }
+    // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
+    // (Alt+T types "†") do not get in the way.
+    if (ev.altKey && !mod) {
+      const kind = DRAWING_HOTKEYS[ev.code];
+      if (kind) {
+        ev.preventDefault();
+        this.tool.set(kind);
+        return;
+      }
     }
     if (ev.key.startsWith('Arrow') && this.drawings.selectedId() && !mod) {
       // Nudge: one bar sideways / one pixel vertically; Shift ×10.

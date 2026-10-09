@@ -1,6 +1,6 @@
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
-import type { TpoProfile, VolumeProfile } from './profile-math';
+import type { DevelopingProfile, NakedPoc, TpoProfile, VolumeProfile } from './profile-math';
 import type { ProfileBlock, ProfileRenderModel } from './profile-studies';
 
 export interface ProfileColors {
@@ -78,10 +78,15 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
       const width = scope.mediaSize.width;
       if (model.kind === 'volume') {
-        for (const block of model.blocks) this.drawVolume(ctx, series, width, block, model.anchor);
+        for (const block of model.blocks) {
+          this.drawVolume(ctx, series, width, block, model.anchor);
+          if (block.developing) this.drawDeveloping(ctx, series, block.developing);
+        }
+        for (const n of model.naked ?? []) this.drawNaked(ctx, series, width, n);
       } else {
         for (const s of model.sessions) this.drawTpo(ctx, series, width, s);
       }
+      if (model.notice) this.drawNotice(ctx, model.notice);
       ctx.restore();
     });
   }
@@ -149,7 +154,12 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
     this.hLine(ctx, series, vp.val, left, right, c.vaLine, 1, [4, 3]);
   }
 
-  private drawTpo(ctx: CanvasRenderingContext2D, series: ISeriesApi<SeriesType>, width: number, tpo: TpoProfile): void {
+  private drawTpo(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    width: number,
+    tpo: TpoProfile,
+  ): void {
     const s = this.span(tpo.t0, tpo.t1, width);
     if (!s) return;
     const [left, right] = s;
@@ -157,7 +167,8 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
     const rowPx =
       tpo.rows.length > 0
         ? Math.abs(
-            (series.priceToCoordinate(tpo.rows[0].priceLow) ?? 0) - (series.priceToCoordinate(tpo.rows[0].priceHigh) ?? 0),
+            (series.priceToCoordinate(tpo.rows[0].priceLow) ?? 0) -
+              (series.priceToCoordinate(tpo.rows[0].priceHigh) ?? 0),
           )
         : 0;
     const maxLetters = Math.max(1, ...tpo.rows.map((r) => r.letters.length));
@@ -180,7 +191,8 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       const single = tpo.singlePrints.includes(i);
       if (useLetters) {
         ctx.globalAlpha = 1;
-        ctx.fillStyle = i === tpo.pocIndex ? c.poc : single ? c.down : inVa ? c.valueArea : c.tpoText;
+        ctx.fillStyle =
+          i === tpo.pocIndex ? c.poc : single ? c.down : inVa ? c.valueArea : c.tpoText;
         row.letters.forEach((l, k) => ctx.fillText(l, left + k * cell, y + h / 2));
       } else {
         ctx.globalAlpha = inVa ? 0.55 : 0.25;
@@ -199,6 +211,82 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       ctx.fillStyle = c.ib;
       ctx.fillRect(left - 3, Math.min(ibTop, ibBot), 2, Math.abs(ibBot - ibTop));
     }
+  }
+
+  /** The developing POC and value area: step lines through the period, one step per chart bar. */
+  private drawDeveloping(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    d: DevelopingProfile,
+  ): void {
+    const c = this.colors;
+    const line = (values: number[], color: string, lw: number, dash: number[]) => {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = lw;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      let started = false;
+      let prevY = 0;
+      for (let i = 0; i < values.length; i++) {
+        const x = this.timeToX(d.t[i]);
+        const y = series.priceToCoordinate(values[i]);
+        if (x === null || y === null) {
+          started = false;
+          continue;
+        }
+        if (!started) ctx.moveTo(x, y);
+        else {
+          ctx.lineTo(x, prevY); // step: the level held until this bar
+          ctx.lineTo(x, y);
+        }
+        started = true;
+        prevY = y;
+      }
+      ctx.stroke();
+      ctx.restore();
+    };
+    line(d.poc, c.poc, 1.5, []);
+    line(d.vah, c.vaLine, 1, [2, 2]);
+    line(d.val, c.vaLine, 1, [2, 2]);
+  }
+
+  /** A naked POC: from its period's end to the bar that traded through it, or on to the right edge. */
+  private drawNaked(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    width: number,
+    n: NakedPoc,
+  ): void {
+    const x0 = this.timeToX(n.from);
+    if (x0 === null || x0 > width) return;
+    const x1 = n.until === null ? width : this.timeToX(n.until);
+    if (x1 === null || x1 < 0) return;
+    this.hLine(
+      ctx,
+      series,
+      n.price,
+      x0,
+      x1,
+      this.colors.poc,
+      1,
+      n.until === null ? [6, 3] : [1, 3],
+    );
+  }
+
+  /** Why nothing is drawn, in the pane's top-left corner. */
+  private drawNotice(ctx: CanvasRenderingContext2D, text: string): void {
+    ctx.save();
+    ctx.font = '12px sans-serif';
+    ctx.textBaseline = 'top';
+    const w = Math.min(ctx.measureText(text).width + 12, 560);
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = 'rgba(19, 23, 34, 0.75)';
+    ctx.fillRect(8, 30, w, 20);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(text, 14, 34, w - 12);
+    ctx.restore();
   }
 
   private hLine(

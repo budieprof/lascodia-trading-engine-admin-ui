@@ -84,6 +84,17 @@ export const REALTIME_EVENTS = [
   // ── In-app alert delivery (contract C2, 2026-10-09): a chart or script alert fired on the
   //    InApp channel (IInAppAlertPublisher, broadcast). Drives the alert pop-ups. ──
   'alertFired',
+  // ── Chart drawings (DR-I3, 2026-10-09): an operator's drawings changed on these symbols
+  //    ({ symbols, origin }, broadcast, no drawing and no operator in it). A chart showing one of
+  //    them reloads its own drawings unless `origin` is its own tab. ──
+  'chartDrawingsChanged',
+  // ── Live data for the chart's panes (EV-1, 2026-10-09). `economicEventActualRecorded`: a release's actual was stored
+  //    — the row as the calendar pane lists it (forecast, actual, Beat/Miss), folded in place instead of polled.
+  //    `newsArticleIngested`: an article is stored WITH its currency labels — `{ id, title, source, currencies,
+  //    firstSeenUtc, publishedAtUtc }`; the news pane re-reads when it concerns the pair. Warm chart sessions'
+  //    `scriptFrame` is NOT here: it comes on the scripting hub (`ScriptingRealtimeService`, `/api/hubs/scripting`). ──
+  'economicEventActualRecorded',
+  'newsArticleIngested',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 

@@ -28,6 +28,13 @@ export interface ScriptChip {
    * outside replay, at the head, and when no run to the head is due (hidden, failed, unavailable).
    */
   replay: 'ahead' | 'behind' | null;
+  /**
+   * PC-I9: a plot of it changed its value on a bar that had already closed (between two runs or frames of the same
+   * window) — the line saying which and where; absent/null when none was seen.
+   */
+  repaint?: string | null;
+  /** PC-I1: its run is kept warm on the engine and advanced by pushed frames (no re-run per tick). */
+  warm?: boolean;
 }
 
 /**
@@ -98,6 +105,19 @@ export interface ScriptChip {
       @if (c.unavailable; as u) {
         <span class="state muted" data-testid="script-unavailable">{{ u }}</span>
       }
+      @if (c.repaint; as r) {
+        <span class="badge repaint" [title]="r" role="status" data-testid="script-repaint">
+          <app-chart-icon name="warning" [size]="14" />Repaints
+        </span>
+      }
+      @if (c.warm && c.placed && !c.failure) {
+        <span
+          class="live"
+          title="Kept live by the engine: new bars and quotes update it as they come, without running it again"
+          aria-label="Live"
+          data-testid="script-warm"
+        ></span>
+      }
       @if (c.failure; as f) {
         <span
           class="badge"
@@ -153,6 +173,18 @@ export interface ScriptChip {
           data-testid="script-logs"
         >
           <app-chart-icon name="logs" [size]="16" />
+        </button>
+      }
+      @if (c.placed && c.kind !== 'library') {
+        <button
+          type="button"
+          class="ic"
+          (click)="alert.emit()"
+          title="Create an alert on this script"
+          [attr.aria-label]="'Create an alert on ' + c.name"
+          data-testid="script-alert"
+        >
+          <app-chart-icon name="alert" [size]="16" />
         </button>
       }
       @if (c.kind === 'strategy' && c.placed) {
@@ -256,8 +288,16 @@ export interface ScriptChip {
       min-width: 0;
       color: var(--danger, #ef5350);
     }
-    .badge.stale {
+    .badge.stale,
+    .badge.repaint {
       color: var(--warning, #f59e0b);
+    }
+    .live {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--tv-up, #26a69a);
+      flex: none;
     }
     .msg {
       max-width: 320px;
@@ -294,6 +334,8 @@ export class ScriptChipComponent {
   readonly tester = output<void>();
   /** Its Pine Logs, trace and profiler in the dock (PC-I6). */
   readonly logs = output<void>();
+  /** "Create alert on <script>" (PC-I14, SS-I1). */
+  readonly alert = output<void>();
   readonly removed = output<void>();
   /** The failure's line: open the editor there (PC-I7). */
   readonly openAt = output<{ line: number; column: number }>();

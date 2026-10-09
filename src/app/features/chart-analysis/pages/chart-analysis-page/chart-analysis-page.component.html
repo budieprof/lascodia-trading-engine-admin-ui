@@ -459,6 +459,41 @@
           >
             <app-chart-icon name="structure" [size]="28" /> Market structure
           </button>
+          <!-- DR-I11: auto analysis — fitted trendlines, higher-timeframe levels, the zig-zag Fib. -->
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="autoAnalysisOn()"
+            (click)="toggleAutoAnalysis()"
+            title="Trendlines fitted and scored, the next higher timeframe's levels, Fib of the last zig-zag leg"
+          >
+            <app-chart-icon name="sr-levels" [size]="28" /> Auto analysis
+          </button>
+          @if (autoAnalysisOn()) {
+            <div class="tb-menu-chips">
+              @for (l of autoAnalysisLayers; track l.id) {
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="tb-chip"
+                  [class.on]="autoAnalysis()[l.id]"
+                  (click)="toggleAutoLayer(l.id)"
+                  [title]="l.hint"
+                >
+                  {{ l.label }}
+                </button>
+              }
+            </div>
+          }
+          <!-- DR-I8: how the patterns and structure events have behaved on these bars. -->
+          <button
+            type="button"
+            class="tb-menu-item"
+            (click)="openScorecard()"
+            title="Sample size, hit rate, mean R, MFE/MAE net of spread — and export as Pine"
+          >
+            <app-chart-icon name="structure" [size]="28" /> Pattern scorecard…
+          </button>
           <button
             type="button"
             class="tb-menu-item tb-check"
@@ -498,6 +533,7 @@
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
             [presetPrice]="alertPreset()"
+            [draft]="alertDraft()"
             (saved)="onAlertSaved()"
             (cancelled)="openMenu.set(null)"
           />
@@ -554,16 +590,31 @@
       @case ('offline') {
         <span
           class="status sync-warn"
-          title="Drawings are saved in this browser only — the engine is unreachable"
+          [title]="
+            'Drawings are kept in this browser and sent when the engine answers (' +
+            drawings.pending() +
+            ' waiting)'
+          "
         >
           <app-chart-icon name="warning" [size]="16" /> local only
         </span>
       }
       @case ('error') {
-        <span class="status sync-warn" title="The engine rejected the last drawing sync"
+        <span class="status sync-warn" title="The engine refused the last drawing write; it is retried"
           ><app-chart-icon name="warning" [size]="16" /> not saved</span
         >
       }
+    }
+    @if (drawings.notice(); as note) {
+      <!-- A drawing changed elsewhere replaced ours, or the engine refused one (DR-I3). -->
+      <button
+        type="button"
+        class="status sync-warn"
+        [title]="note + ' — click to dismiss'"
+        (click)="drawings.notice.set(null)"
+      >
+        <app-chart-icon name="info" [size]="16" /> {{ note }}
+      </button>
     }
 
     @if (loading()) {
@@ -945,6 +996,17 @@
             >
               <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
               <span>{{ t.label }}</span>
+              <!-- DR-I12: star a tool for the Favourites bar. -->
+              <span
+                class="fav-star"
+                role="button"
+                tabindex="-1"
+                [class.on]="favoriteTools.has(t.kind)"
+                [attr.aria-label]="(favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'"
+                [title]="favoriteTools.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'"
+                (click)="toggleFavoriteTool(t.kind, $event)"
+                >{{ favoriteTools.has(t.kind) ? '★' : '☆' }}</span
+              >
             </button>
           }
         }
@@ -1008,8 +1070,8 @@
         class="strip-btn"
         [class.active]="objectTreeOpen()"
         (click)="objectTreeOpen.set(!objectTreeOpen())"
-        [disabled]="!drawings.visible().length"
-        [title]="'Object tree (' + drawings.visible().length + ')'"
+        [disabled]="!drawings.symbolDrawings().length"
+        [title]="'Object tree (' + drawings.symbolDrawings().length + ')'"
       >
         <app-chart-icon name="object-tree" [size]="28" />
       </button>
@@ -1136,6 +1198,8 @@
           [style]="style()"
           [showVolume]="showVolume()"
           [indicators]="active()"
+          [positionFacts]="positionFacts()"
+          [autoAnalysis]="autoAnalysisOn() ? autoAnalysis() : null"
           [precision]="precision()"
           [tool]="tool()"
           [magnet]="magnetMode()"
@@ -1185,9 +1249,17 @@
           (dismissed)="replacedNotice.set(null)"
         />
 
+        <!-- DR-I12: the starred drawing tools, one click to arm. -->
+        <app-drawing-favorites-bar [tool]="tool()" (pick)="selectTool($event)" />
+
         <!-- TradingView's floating drawing toolbar for the selected drawing. -->
         @if (drawings.selected(); as sel) {
-          <app-drawing-toolbar [drawing]="sel" (settings)="settingsFor.set($event)" />
+          <app-drawing-toolbar
+            [drawing]="sel"
+            (settings)="settingsFor.set($event)"
+            (addAlert)="addDrawingAlert($event)"
+            (stageOrder)="stageOrder($event)"
+          />
         }
 
         <!-- Right-click menu on a drawing. -->
@@ -1498,27 +1570,13 @@
           </aside>
         }
 
-        <!-- Object tree. -->
-        @if (objectTreeOpen() && drawings.visible().length) {
-          <div class="object-tree">
-            <div class="tree-title">Objects</div>
-            <ul>
-              @for (d of drawings.visible(); track d.id) {
-                <li [class.selected]="drawings.selectedId() === d.id">
-                  <button type="button" class="tree-row" (click)="selectDrawing(d.id)">
-                    <span class="swatch" [style.background]="d.style.color"></span>
-                    <span>{{ drawingLabel(d) }}</span>
-                    @if (d.locked) {
-                      <span class="muted"><app-chart-icon name="lock" [size]="14" /></span>
-                    }
-                  </button>
-                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">
-                    <app-chart-icon name="close" [size]="14" />
-                  </button>
-                </li>
-              }
-            </ul>
-          </div>
+        <!-- Object tree (DR-03 / DR-I10): every drawing of the symbol, hidden ones included. -->
+        @if (objectTreeOpen() && drawings.symbolDrawings().length) {
+          <app-drawing-object-tree
+            [resolution]="resolution()"
+            [paneLabels]="studyLabels()"
+            (closed)="objectTreeOpen.set(false)"
+          />
         }
 
         <!-- Alert manager (alerts v2, SP-I2). -->
@@ -1529,9 +1587,25 @@
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
             [focusId]="alertFocusId()"
+            [scriptAlertFocusId]="scriptAlertFocusId()"
             (closed)="closeAlertManager()"
           />
         }
+        <!-- "Create alert on <script>" (PC-I14, SS-I1): a native dialog, so it sits above the chart and traps focus. -->
+        <dialog
+          #scriptAlertDialog
+          class="script-alert-dialog"
+          aria-label="Create an alert on a script"
+          (close)="scriptAlertTarget.set(null)"
+        >
+          @if (scriptAlertTarget(); as t) {
+            <app-chart-script-alert-form
+              [target]="t"
+              (saved)="closeScriptAlert($event)"
+              (cancelled)="closeScriptAlert()"
+            />
+          }
+        </dialog>
       </div>
 
       @for (panel of comparePanels(); track panel.id) {
@@ -1725,6 +1799,7 @@
           (source)="openScriptSource(c.key)"
           (tester)="testerOpen.set(!testerOpen())"
           (logs)="openLogs(c.key)"
+          (alert)="openScriptAlert(c.key)"
           (removed)="removeScriptFromChart(c.key)"
           (openAt)="openScriptAt(c.key, $event)"
         />
@@ -1752,33 +1827,95 @@
           @for (input of inputsFor(item); track input.key) {
             <label class="study-input">
               {{ input.label }}
-              @if (input.type === 'select') {
-                <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
-                  @for (opt of input.options ?? []; track opt) {
-                    <option [value]="opt" [selected]="item.params[input.key] === opt">
-                      {{ opt }}
-                    </option>
-                  }
-                </select>
-              } @else if (input.type === 'symbol') {
-                <input
-                  type="text"
-                  class="symbol-input"
-                  [value]="item.params[input.key]"
-                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
-                />
-              } @else {
-                <input
-                  type="number"
-                  [value]="item.params[input.key]"
-                  [min]="input.min ?? 0"
-                  [max]="input.max ?? 100000"
-                  step="any"
-                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
-                />
+              @switch (input.type) {
+                @case ('select') {
+                  <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
+                    @for (opt of input.options ?? []; track opt) {
+                      <option [value]="opt" [selected]="item.params[input.key] === opt">
+                        {{ opt }}
+                      </option>
+                    }
+                  </select>
+                }
+                @case ('source') {
+                  <!-- DR-16 / DR-I5: a price, or another study's plot. -->
+                  <select
+                    class="source-input"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  >
+                    @for (g of sourceGroupsFor(item); track g.label) {
+                      <optgroup [label]="g.label">
+                        @for (c of g.choices; track c.value) {
+                          <option [value]="c.value" [selected]="item.params[input.key] === c.value">
+                            {{ c.label }}
+                          </option>
+                        }
+                      </optgroup>
+                    }
+                  </select>
+                }
+                @case ('symbol') {
+                  <input
+                    type="text"
+                    class="symbol-input"
+                    [value]="item.params[input.key]"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
+                @case ('session') {
+                  <input
+                    type="text"
+                    class="session-input"
+                    placeholder="0800-1700"
+                    [value]="item.params[input.key]"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
+                @case ('time') {
+                  <!-- DR-22: picked on the chart, never typed as milliseconds. -->
+                  <button
+                    type="button"
+                    class="pick-input"
+                    [disabled]="!canPickOnChart()"
+                    (click)="pickStudyTime(item.uid, input.key)"
+                  >
+                    {{ studyTimeLabel(item.params[input.key]) }}
+                  </button>
+                }
+                @default {
+                  <input
+                    type="number"
+                    [value]="item.params[input.key]"
+                    [min]="input.min ?? 0"
+                    [max]="input.max ?? 100000"
+                    step="any"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
               }
             </label>
           }
+          @if (isPatternStudy(item)) {
+            <!-- DR-I8: the scorecard of the patterns this study marks. -->
+            <button
+              type="button"
+              class="study-settings"
+              (click)="openScorecard()"
+              title="Pattern scorecard"
+              aria-label="Pattern scorecard"
+            >
+              <app-chart-icon name="structure" [size]="14" />
+            </button>
+          }
+          <button
+            type="button"
+            class="study-settings"
+            (click)="studySettingsFor.set(item.uid)"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <app-chart-icon name="settings" [size]="14" />
+          </button>
           <button
             type="button"
             class="study-remove"
@@ -1790,6 +1927,41 @@
         </div>
       }
     </aside>
+  }
+  <!-- DR-I8: the pattern & structure scorecard; a row can open as a Pine strategy draft. -->
+  @if (scorecardOpen()) {
+    <app-pattern-scorecard-dialog
+      [bars]="bars()"
+      [symbol]="symbol()"
+      [resolution]="resolution()"
+      [pipSize]="pipSize()"
+      [spread]="liveSpread()"
+      [trend]="scorecardTrend()"
+      [pivotDepth]="scorecardDepth()"
+      (closed)="scorecardOpen.set(false)"
+      (exportPine)="openPineDraft($event)"
+    />
+  }
+  <!-- A position tool staged as a manual signal (DR-I9): the existing dialog, filled in; nothing is sent until Create. -->
+  @if (stagePrefill(); as pf) {
+    <app-create-signal-dialog
+      [prefill]="pf"
+      (closed)="stagePrefill.set(null)"
+      (created)="onStagedSignal($event)"
+    />
+  }
+  <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->
+  @if (studySettingsStudy(); as st) {
+    <app-study-settings-dialog
+      [study]="st"
+      [studies]="active()"
+      [resolutions]="resolutions"
+      [chartResolution]="resolution()"
+      [canPick]="canPickOnChart()"
+      (changed)="replaceStudy($event)"
+      (pick)="onStudyPick($event)"
+      (closed)="studySettingsFor.set(null)"
+    />
   }
   <!-- A Pine script's Settings: its inputs, applied live; Ok keeps them, Cancel puts them back. -->
   @if (settings.run(); as run) {

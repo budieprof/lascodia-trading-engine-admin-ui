@@ -2,6 +2,7 @@ import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
 import type { PeriodProfile, SrLevel, VolumeProfileResult } from './analysis-overlays';
 import type { MarketStructure } from './market-structure';
+import type { AutoAnalysis } from './auto-analysis';
 
 /**
  * Draws the analytical overlays on the price pane: the volume profile and the
@@ -55,6 +56,8 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
   private periods: readonly PeriodProfile[] = [];
   private levels: readonly SrLevel[] = [];
   private structure: MarketStructure | null = null;
+  /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib. */
+  private auto: AutoAnalysis | null = null;
   private requestUpdate?: () => void;
 
   constructor(
@@ -93,6 +96,11 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  setAuto(auto: AutoAnalysis | null): void {
+    this.auto = auto;
+    this.requestUpdate?.();
+  }
+
   updateAllViews(): void {
     /* projection is recomputed inside draw() */
   }
@@ -123,6 +131,7 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       this.drawProfile(ctx, series, width, height);
       this.drawPeriodProfiles(ctx, series, width, height);
       this.drawLevels(ctx, series, width);
+      this.drawAuto(ctx, series, width);
       ctx.restore();
     });
   }
@@ -301,6 +310,99 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
         colour,
         'left',
       );
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Auto analysis (DR-I11): each trendline from its first anchor out to the right edge, labelled with its touches and
+   * score; the higher timeframe's levels as dotted lines labelled with it; the zig-zag Fib from the leg's end.
+   */
+  private drawAuto(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    width: number,
+  ): void {
+    const auto = this.auto;
+    if (!auto) return;
+    const placed: number[] = [];
+    ctx.save();
+    for (const line of auto.trendlines) {
+      const xa = this.timeToX(line.a.time);
+      const xb = this.timeToX(line.b.time);
+      const ya = series.priceToCoordinate(line.a.price);
+      const yb = series.priceToCoordinate(line.b.price);
+      if (xa === null || xb === null || ya === null || yb === null || xb === xa) continue;
+      const k = (yb - ya) / (xb - xa);
+      const yEnd = ya + k * (width - xa);
+      const colour = line.kind === 'resistance' ? '#EF5350' : '#26A69A';
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = Math.min(3, 1 + (line.touches - 2) * 0.5);
+      ctx.globalAlpha = 0.85;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(xa, ya);
+      ctx.lineTo(width, yEnd);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      const yLabel = nudge(ya + k * (width - 70 - xa), placed);
+      this.tag(
+        ctx,
+        `${line.touches} touches · ${line.score.toFixed(1)}`,
+        width - 70,
+        yLabel,
+        colour,
+        'right',
+      );
+    }
+    for (const level of auto.htf) {
+      const y = series.priceToCoordinate(level.price);
+      if (y === null) continue;
+      const colour = level.kind === 'resistance' ? '#AB47BC' : '#5C6BC0';
+      ctx.strokeStyle = colour;
+      ctx.lineWidth = 1 + level.strength;
+      ctx.globalAlpha = 0.7;
+      ctx.setLineDash([2, 3]);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([]);
+      this.tag(
+        ctx,
+        `${level.timeframe} ${level.kind === 'resistance' ? 'R' : 'S'} ${level.touches}×`,
+        width - 4,
+        nudge(y, placed),
+        colour,
+        'right',
+      );
+    }
+    const fib = auto.fib;
+    if (fib) {
+      const x0 = this.timeToX(fib.to.time) ?? 0;
+      for (const l of fib.levels) {
+        const y = series.priceToCoordinate(l.price);
+        if (y === null) continue;
+        ctx.strokeStyle = '#FF9800';
+        ctx.lineWidth = l.ratio === 0.618 || l.ratio === 0.5 ? 1.5 : 1;
+        ctx.globalAlpha = 0.8;
+        ctx.setLineDash(l.ratio === 0 || l.ratio === 1 ? [] : [4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(Math.max(0, x0), y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([]);
+        this.tag(
+          ctx,
+          `${l.ratio} (${l.price.toFixed(this.precision())})`,
+          Math.max(4, x0 + 4),
+          nudge(y, placed),
+          '#FF9800',
+          'left',
+        );
+      }
     }
     ctx.restore();
   }
