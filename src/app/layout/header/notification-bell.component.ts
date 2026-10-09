@@ -17,6 +17,8 @@ import type { NotificationFeedItem } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AlertPopupsService } from '@core/alerts/alert-popups.service';
+import { AlertPopupsComponent } from './alert-popups.component';
 
 const ALL_SEVERITIES = ['Info', 'Medium', 'High', 'Critical'] as const;
 type Severity = (typeof ALL_SEVERITIES)[number];
@@ -42,7 +44,7 @@ type Severity = (typeof ALL_SEVERITIES)[number];
   selector: 'app-notification-bell',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, RouterLink, RelativeTimePipe],
+  imports: [DatePipe, RouterLink, RelativeTimePipe, AlertPopupsComponent],
   template: `
     <div class="bell-wrap">
       <button
@@ -213,6 +215,30 @@ type Severity = (typeof ALL_SEVERITIES)[number];
             }
           </div>
 
+          <div class="bell-prefs" aria-label="Alert pop-up settings">
+            <label title="Play a short chime when an alert pops up (this browser)">
+              <input
+                type="checkbox"
+                [checked]="popups.soundOn()"
+                (change)="popups.setSound($any($event.target).checked)"
+              />
+              Sound
+            </label>
+            <label
+              title="Also show fired alerts as browser notifications (this browser; asks for permission)"
+            >
+              <input
+                type="checkbox"
+                [checked]="popups.browserOn()"
+                (change)="popups.setBrowser($any($event.target).checked)"
+              />
+              Browser notifications
+            </label>
+            @if (popups.browserProblem(); as problem) {
+              <span class="bell-prefs-problem">{{ problem }}</span>
+            }
+          </div>
+
           <footer class="bell-footer">
             <span class="footer-mode" [class.footer-mode--live]="realtime.isConnected()">
               {{ realtime.isConnected() ? '⚡ Live' : '⏱ Polling' }}
@@ -339,6 +365,8 @@ type Severity = (typeof ALL_SEVERITIES)[number];
         </div>
       }
     </div>
+    <!-- Fired alerts delivered in-app (contract C2) — on every page, since the bell is. -->
+    <app-alert-popups />
   `,
   styles: [
     `
@@ -703,6 +731,28 @@ type Severity = (typeof ALL_SEVERITIES)[number];
         word-break: break-all;
       }
 
+      /* ── Alert pop-up settings ─────────────────────────────────────── */
+      .bell-prefs {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2) var(--space-4);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .bell-prefs label {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+      }
+      .bell-prefs-problem {
+        flex-basis: 100%;
+        color: var(--loss, #ff3b30);
+      }
+
       /* ── Footer ────────────────────────────────────────────────────── */
       .bell-footer {
         display: flex;
@@ -942,6 +992,7 @@ export class NotificationBellComponent {
   protected readonly realtime = inject(RealtimeService);
   private readonly notify = inject(NotificationService);
   private readonly router = inject(Router);
+  protected readonly popups = inject(AlertPopupsService);
 
   /** Cap the displayed badge — "9+" once we cross the threshold. */
   private static readonly BADGE_CAP = 9;
@@ -992,6 +1043,14 @@ export class NotificationBellComponent {
     // The hub auto-connects via RealtimeService elsewhere in the app shell.
     this.realtime
       .on<{ atUtc: string; advancedSec: number }>('notificationsChanged')
+      .pipe(takeUntilDestroyed())
+      .subscribe(() => this.resource.refresh());
+
+    // In-app alerts (contract C2): pop-ups on every page, and the bell refreshed at once — the delivered
+    // in-app row is already its entry, ahead of the dispatcher's 10 s tickle.
+    this.popups.start();
+    this.realtime
+      .on('alertFired')
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.resource.refresh());
   }
@@ -1185,6 +1244,12 @@ export class NotificationBellComponent {
         return 'Rejection';
       case 'EAState':
         return 'EA State';
+      case 'AnalysisMonitor':
+        return 'Monitor';
+      case 'ChartAlert':
+        return 'Chart alert';
+      case 'ScriptAlert':
+        return 'Script alert';
       default:
         return source;
     }
