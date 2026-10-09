@@ -1377,9 +1377,38 @@ export class ChartAnalysisPageComponent {
     saveDockLayout(layout);
   });
 
-  /** A layout button: pressing Maximise or Beside again goes back to docked. */
+  /** The watchlist was open when the panel went beside the chart: it comes back when the panel leaves. */
+  private watchlistBeforeSide = false;
+  /** The panel opening (or closing) in a remembered Beside layout folds (or restores) the watchlist the same way. */
+  private readonly foldWatchlistBeside = effect(() => {
+    const open = !!this.dockTab();
+    untracked(() => {
+      if (this.dockMode() !== 'side') return;
+      if (open && this.watchlistOpen()) {
+        this.watchlistBeforeSide = true;
+        this.watchlistOpen.set(false);
+      } else if (!open && this.watchlistBeforeSide) {
+        this.watchlistOpen.set(true);
+        this.watchlistBeforeSide = false;
+      }
+    });
+  });
+
+  /**
+   * A layout button: pressing Maximise or Beside again goes back to docked. Beside folds the watchlist away (code,
+   * chart and watchlist do not fit side by side) and brings it back after; the strip still reopens it meanwhile.
+   */
   setDockMode(mode: DockMode): void {
-    this.dockMode.set(this.dockMode() === mode ? 'docked' : mode);
+    const from = this.dockMode();
+    const to = from === mode ? 'docked' : mode;
+    if (to === 'side' && from !== 'side') {
+      this.watchlistBeforeSide = this.watchlistOpen();
+      this.watchlistOpen.set(false);
+    } else if (from === 'side' && to !== 'side' && this.watchlistBeforeSide) {
+      this.watchlistOpen.set(true);
+      this.watchlistBeforeSide = false;
+    }
+    this.dockMode.set(to);
   }
 
   /**
