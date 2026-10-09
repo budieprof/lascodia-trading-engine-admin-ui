@@ -18,9 +18,9 @@ import { formatResolution, type TvResolution } from '../../datafeed/resolution';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [ChartIconComponent],
   template: `
-    <div class="ot" role="region" aria-label="Object tree" (pointerdown)="$event.stopPropagation()">
+    <div class="ot" role="region" aria-label="Drawings" (pointerdown)="$event.stopPropagation()">
       <div class="ot-head">
-        <span class="ot-title">Objects</span>
+        <span class="ot-title">Drawings</span>
         <span class="ot-count">{{ rows().length }}</span>
         <button type="button" class="ot-icon" title="Close" (click)="closed.emit()">
           <app-chart-icon name="close" [size]="16" />

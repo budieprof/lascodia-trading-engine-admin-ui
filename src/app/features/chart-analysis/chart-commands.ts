@@ -1069,7 +1069,7 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     {
       id: 'chart.setPanel',
       description:
-        'Show or hide the watchlist and the object tree — the toggles to the right of the split-layout buttons.',
+        'Show or hide the watchlist and the drawings list — the toggles to the right of the split-layout buttons.',
       params: [
         {
           name: 'panel',

@@ -107,6 +107,9 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M14 5.5a5.5 5.5 0 0 0-5.5 5.5v4.5L6.5 19h15l-2-3.5V11A5.5 5.5 0 0 0 14 5.5z"/><path d="M12 21.5a2 2 0 0 0 4 0"/>',
   'goto-date':
     '<rect x="5.5" y="7.5" width="17" height="15" rx="1.5"/><path d="M5.5 11.5h17M10.5 5v4M17.5 5v4"/><path d="M12 17h6M16 15l2 2-2 2"/>',
+  // Data window: a label | value table (the object tree keeps its tree icon).
+  'data-window':
+    '<rect x="4.5" y="5.5" width="19" height="17" rx="1.5"/><path d="M4.5 11.5h19M4.5 16.5h19M12.5 5.5v17"/>',
   'object-tree':
     '<path d="M7.5 6.5h6M7.5 6.5v15M7.5 13.5h6M7.5 21.5h6"/><rect x="15.5" y="4.5" width="7" height="4" rx="1"/><rect x="15.5" y="11.5" width="7" height="4" rx="1"/><rect x="15.5" y="19.5" width="7" height="4" rx="1"/>',
 
