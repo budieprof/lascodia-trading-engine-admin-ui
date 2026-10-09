@@ -521,6 +521,23 @@ describe('ScriptingService — strategy script saves (PE-01)', () => {
     expect(post).toHaveBeenCalledWith('/scripting/libraries', body, { silent: true });
     expect(err.isConflict).toBe(true);
   });
+
+  it('reads the strategy’s trial ledger for the test count (PE-I1)', async () => {
+    const get = vi
+      .fn()
+      .mockReturnValueOnce(
+        of({ status: true, data: { effectiveTrials: 12 }, message: null, responseCode: '00' }),
+      );
+    get.mockReturnValueOnce(
+      of({ status: false, data: null, message: 'Strategy not found', responseCode: '-14' }),
+    );
+    const svc = make({ get } as any);
+    const ledger = await firstValueFrom(svc.getTrialLedger(41));
+    expect(get).toHaveBeenCalledWith('/strategy-feedback/41/trials', { silent: true });
+    expect(ledger.effectiveTrials).toBe(12);
+    const err = await firstValueFrom(svc.getTrialLedger(42)).catch((e) => e);
+    expect(err.isNotFound).toBe(true);
+  });
 });
 
 describe('helpers', () => {

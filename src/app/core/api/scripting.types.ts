@@ -653,3 +653,27 @@ export interface ScriptLibraryUsageDto {
   }[];
   libraries: { id: number; publisher: string; name: string; version: number; direct: boolean }[];
 }
+
+/**
+ * `GET strategy-feedback/{strategyId}/trials` — the strategy lineage's multiple-testing ledger
+ * (engine BT-I4). `effectiveTrials` is the count the promotion gates deflate the Sharpe by.
+ */
+export interface StrategyTrialLedgerDto {
+  strategyId: number;
+  lineageRootStrategyId: number;
+  rowsByKind: Record<string, number>;
+  distinctConfigurations: number;
+  foldSearchCandidates: number;
+  ledgerTrials: number;
+  peerStrategies: number;
+  effectiveTrials: number;
+  optimizationRuns: {
+    optimizationRunId: number;
+    status: string;
+    completedAt?: string | null;
+    candidates: number;
+    candidatesWithFolds: number;
+    pbo?: number | null;
+    whyNot?: string | null;
+  }[];
+}

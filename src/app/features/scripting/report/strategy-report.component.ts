@@ -32,12 +32,16 @@ import { ReportTradesGridComponent } from './report-trades-grid.component';
 import type { TradeOriginOf } from './report-trades-columns';
 import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.component';
 import { ReportPropertiesComponent } from './report-properties.component';
+import { ReportRAnalysisComponent, type ReportTestCount } from './report-r-analysis.component';
+import { RunProvenanceComponent } from './run-provenance.component';
+import { parseEngineRun } from './engine-run';
 
 export type ReportTabId =
   | 'overview'
   | 'performance'
   | 'trades-analysis'
   | 'risk'
+  | 'r-analysis'
   | 'capital'
   | 'trades'
   | 'monthly'
@@ -48,6 +52,7 @@ export const REPORT_TABS: readonly { id: ReportTabId; label: string }[] = [
   { id: 'performance', label: 'Performance' },
   { id: 'trades-analysis', label: 'Trades analysis' },
   { id: 'risk', label: 'Risk & returns' },
+  { id: 'r-analysis', label: 'R analysis' },
   { id: 'capital', label: 'Capital efficiency' },
   { id: 'trades', label: 'List of trades' },
   { id: 'monthly', label: 'Monthly returns' },
@@ -59,6 +64,12 @@ export type ReportNoticeLevel = 'critical' | 'warning' | 'info';
 export interface ReportNotice {
   level: ReportNoticeLevel;
   text: string;
+}
+
+/** The stored run behind a report (a backtest's `BacktestRunDto` fits): provenance, engine R, costs. */
+export interface ReportRunSource {
+  strategyId?: number | null;
+  resultJson?: string | null;
 }
 
 let nextReportUid = 0;
@@ -86,6 +97,8 @@ let nextReportUid = 0;
     ReportTradesGridComponent,
     ReportMonthlyHeatmapComponent,
     ReportPropertiesComponent,
+    ReportRAnalysisComponent,
+    RunProvenanceComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -142,6 +155,11 @@ let nextReportUid = 0;
 
         @if (exportError()) {
           <p class="export-error" role="alert">{{ exportError() }}</p>
+        }
+
+        <!-- PE-13 / PE-I1: how a stored backtest was made (script hash vs now, inputs, warnings). -->
+        @if (provenance(); as p) {
+          <app-run-provenance [provenance]="p" [strategyId]="run()?.strategyId ?? null" />
         }
 
         @if (notices().length > 0) {
@@ -216,6 +234,15 @@ let nextReportUid = 0;
             }
             @case ('risk') {
               <app-report-metric-list [groups]="riskGroups" [report]="r" [currency]="currency()" />
+            }
+            @case ('r-analysis') {
+              <app-report-r-analysis
+                [report]="r"
+                [engine]="engine()"
+                [strategyId]="run()?.strategyId ?? null"
+                [testCount]="testCount()"
+                [currency]="currency()"
+              />
             }
             @case ('capital') {
               <app-report-metric-list
@@ -441,6 +468,13 @@ export class StrategyReportComponent {
   readonly tradeOrigin = input<TradeOriginOf | null>(null);
   /** A List-of-trades row was clicked. */
   readonly tradeClick = output<ReportTrade>();
+  /**
+   * The stored run behind the report (a backtest run): its `resultJson` adds the provenance strip,
+   * the engine trade list's R and its cost totals, and its strategy's trial ledger the test count.
+   */
+  readonly run = input<ReportRunSource | null>(null);
+  /** A test count the host keeps when there is no run (the editor counts its previews). */
+  readonly testCount = input<ReportTestCount | null>(null);
 
   readonly uid = `rpt-${nextReportUid++}`;
   readonly tabs = REPORT_TABS;
@@ -455,6 +489,9 @@ export class StrategyReportComponent {
   readonly exportError = signal<string | null>(null);
 
   readonly data = computed(() => normalizeStrategyReport(this.report()));
+  /** The engine's stored result (parsed once per run). */
+  readonly engine = computed(() => parseEngineRun(this.run()?.resultJson ?? null));
+  readonly provenance = computed(() => this.engine()?.provenance ?? null);
   readonly currency = computed(() => {
     const r = this.data();
     return r ? reportCurrency(r) : '';

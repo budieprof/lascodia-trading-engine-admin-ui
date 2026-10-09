@@ -31,6 +31,7 @@ import type {
   ScriptLibraryDto,
   ScriptLibraryFilter,
   ScriptLibraryUsageDto,
+  StrategyTrialLedgerDto,
   ScriptLibraryVisibility,
   ScriptPublisherDto,
   ScriptRunRequest,
@@ -320,6 +321,21 @@ export class ScriptingService {
         map((res) => envelopeData(res, 'The library usage could not be loaded.')),
         catchError((err) =>
           throwError(() => toScriptingError(err, 'The library usage could not be loaded.')),
+        ),
+      );
+  }
+
+  /**
+   * `GET strategy-feedback/{strategyId}/trials` — how many configurations the strategy's lineage
+   * tried (PE-I1's test count; the promotion gates deflate the Sharpe by `effectiveTrials`).
+   */
+  getTrialLedger(strategyId: number): Observable<StrategyTrialLedgerDto> {
+    return this.api
+      .get<ResponseData<StrategyTrialLedgerDto>>(`/strategy-feedback/${strategyId}/trials`, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The trial count could not be loaded.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The trial count could not be loaded.')),
         ),
       );
   }
