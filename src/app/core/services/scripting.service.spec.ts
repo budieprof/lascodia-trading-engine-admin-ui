@@ -684,3 +684,18 @@ describe('ScriptingService — AI assist (PE-I6)', () => {
     ).rejects.toMatchObject({ message: 'The AI did not answer.' });
   });
 });
+
+describe('ScriptingService — port (PE-I6)', () => {
+  it('posts the pasted source with the chart context', async () => {
+    const post = vi.fn(() =>
+      of({ status: true, responseCode: '00', message: 'ok', data: { source: 's', checklist: [] } }),
+    );
+    const svc = make({ post });
+    expect((await firstValueFrom(svc.port('src', 'EURUSD', null))).source).toBe('s');
+    expect(post).toHaveBeenCalledWith(
+      '/scripting/port',
+      { source: 'src', symbol: 'EURUSD', timeframe: undefined },
+      { silent: true },
+    );
+  });
+});

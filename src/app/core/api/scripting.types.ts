@@ -938,3 +938,29 @@ export interface ScriptAssistResult {
   llmInvocationId: number;
   model: string;
 }
+
+/** §2f one line of the "Port from TradingView" checklist. */
+export interface ScriptPortCheck {
+  id:
+    | 'version'
+    | 'compile'
+    | 'kind'
+    | 'size'
+    | 'margin'
+    | 'stops'
+    | 'lookahead'
+    | 'repaint'
+    | string;
+  status: 'ok' | 'check' | 'problem';
+  title: string;
+  detail: string;
+  line?: number | null;
+}
+
+/** §2f response: the script to use (converted when it was v4/v5), its compile and the broker checklist. */
+export interface ScriptPortResult {
+  source: string;
+  conversion?: Omit<ScriptConversion, 'source' | 'compile'> | null;
+  compile: ScriptCompileResult;
+  checklist: ScriptPortCheck[];
+}

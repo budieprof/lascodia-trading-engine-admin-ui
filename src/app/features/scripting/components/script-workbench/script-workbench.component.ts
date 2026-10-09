@@ -18,6 +18,7 @@ import { firstValueFrom } from 'rxjs';
 import type {
   ScriptAssistRequest,
   ScriptCompileResult,
+  ScriptPortResult,
   ScriptDiagnostic,
 } from '@core/api/scripting.types';
 import {
@@ -39,6 +40,7 @@ import {
 import {
   assistProposal,
   conversionProposal,
+  portProposal,
   versionOf,
   type ScriptProposal,
 } from '../../pine/pine-proposal';
@@ -117,6 +119,16 @@ export const COMPILE_DEBOUNCE_MS = 700;
             title="Rewrite this Pine v4/v5 script for v6 — shown as a comparison you accept or reject"
           >
             {{ converting() ? 'Converting…' : 'Convert to v6' }}
+          </button>
+        }
+        @if (!readOnly()) {
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            (click)="openPort()"
+            title="Paste a TradingView script: converted to v6 if needed, compiled and checked for what differs on a broker account"
+          >
+            Port from TradingView
           </button>
         }
         @if (aiAssist()) {
@@ -280,6 +292,70 @@ export const COMPILE_DEBOUNCE_MS = 700;
                 "
               >
                 Propose a change
+              </button>
+            </div>
+          </form>
+        }
+      </dialog>
+
+      <dialog
+        #portBox
+        class="rename port"
+        aria-label="Port from TradingView"
+        (close)="portOpen.set(false)"
+      >
+        @if (portOpen()) {
+          <form method="dialog" (submit)="$event.preventDefault()">
+            <label>
+              Paste the script from TradingView's Pine Editor
+              <textarea
+                rows="8"
+                spellcheck="false"
+                [value]="portSource()"
+                (input)="portSource.set($any($event.target).value); portResult.set(null)"
+              ></textarea>
+            </label>
+            @if (portError(); as e) {
+              <p class="error" role="alert">{{ e }}</p>
+            }
+            @if (portResult(); as r) {
+              <ul class="checklist" role="list">
+                @for (c of r.checklist; track c.id) {
+                  <li [attr.data-status]="c.status">
+                    <span class="mark" aria-hidden="true">{{
+                      c.status === 'ok' ? '✓' : c.status === 'problem' ? '✕' : '!'
+                    }}</span>
+                    <span>
+                      <strong>{{ c.title }}</strong>
+                      @if (c.line) {
+                        <span class="muted"> (line {{ c.line }})</span>
+                      }
+                      <span class="detail">{{ c.detail }}</span>
+                    </span>
+                  </li>
+                }
+              </ul>
+            }
+            <div class="actions">
+              <button type="button" class="btn btn-ghost btn-sm" (click)="closePort()">
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                [disabled]="porting() || !portSource().trim()"
+                (click)="checkPort()"
+              >
+                {{ porting() ? 'Checking…' : 'Check' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                [disabled]="!portResult()"
+                (click)="reviewPort()"
+                title="Compare with the editor's script, then accept or reject"
+              >
+                Review and open
               </button>
             </div>
           </form>
@@ -508,7 +584,39 @@ export const COMPILE_DEBOUNCE_MS = 700;
         max-height: 240px;
         overflow-y: auto;
       }
-      .ask textarea {
+      .port textarea {
+        font-family: var(--font-mono, monospace);
+        font-size: 12px;
+      }
+      .checklist {
+        list-style: none;
+        margin: 8px 0;
+        padding: 0;
+        max-height: 260px;
+        overflow-y: auto;
+        font-size: 12px;
+      }
+      .checklist li {
+        display: grid;
+        grid-template-columns: 16px 1fr;
+        gap: 6px;
+        padding: 3px 0;
+      }
+      .checklist li[data-status='ok'] .mark {
+        color: #1f8a3b;
+      }
+      .checklist li[data-status='check'] .mark {
+        color: #b25e00;
+      }
+      .checklist li[data-status='problem'] .mark {
+        color: var(--loss);
+      }
+      .checklist .detail {
+        display: block;
+        color: var(--text-secondary);
+      }
+      .ask textarea,
+      .port textarea {
         display: block;
         width: 100%;
         margin-top: 4px;
@@ -646,6 +754,14 @@ export class ScriptWorkbenchComponent {
       ? `About ${this.askTarget()}.`
       : 'About the whole script (select lines first to ask about just those).',
   );
+
+  // ── Port from TradingView (PE-I6) ──
+  @ViewChild('portBox') private portBox?: ElementRef<HTMLDialogElement>;
+  readonly portOpen = signal(false);
+  readonly portSource = signal('');
+  readonly portResult = signal<ScriptPortResult | null>(null);
+  readonly portError = signal<string | null>(null);
+  readonly porting = signal(false);
 
   private readonly scripting = inject(ScriptingService);
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -818,6 +934,53 @@ export class ScriptWorkbenchComponent {
     } finally {
       this.converting.set(false);
     }
+  }
+
+  openPort(): void {
+    this.portResult.set(null);
+    this.portError.set(null);
+    this.portOpen.set(true);
+    const box = this.portBox?.nativeElement;
+    if (box && !box.open) {
+      if (typeof box.showModal === 'function') box.showModal();
+      else box.setAttribute('open', '');
+    }
+  }
+
+  closePort(): void {
+    const box = this.portBox?.nativeElement;
+    if (box?.open) {
+      if (typeof box.close === 'function') box.close();
+      else box.removeAttribute('open');
+    }
+    this.portOpen.set(false);
+  }
+
+  /** The engine converts (v4/v5), compiles and checks the pasted script. */
+  async checkPort(): Promise<void> {
+    const pasted = this.portSource().replace(/\r\n?/g, '\n');
+    if (!pasted.trim() || this.porting()) return;
+    this.porting.set(true);
+    this.portError.set(null);
+    try {
+      this.portResult.set(
+        await firstValueFrom(this.scripting.port(pasted, this.symbol(), this.timeframe())),
+      );
+    } catch (err) {
+      this.portResult.set(null);
+      this.portError.set(toScriptingError(err, 'The engine could not check the script.').message);
+    } finally {
+      this.porting.set(false);
+    }
+  }
+
+  /** The ported script as a proposal over the editor's text (accept / reject). */
+  reviewPort(): void {
+    const r = this.portResult();
+    if (!r || this.readOnly()) return;
+    const proposal = portProposal(this.currentSource(), r);
+    this.closePort();
+    this.showProposal(proposal);
   }
 
   /** Opens the Ask AI dialog for the editor's selection (or the whole script). */

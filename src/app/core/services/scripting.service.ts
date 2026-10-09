@@ -38,6 +38,7 @@ import type {
   ScriptFormatResult,
   ScriptAssistRequest,
   ScriptAssistResult,
+  ScriptPortResult,
   ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
@@ -265,6 +266,24 @@ export class ScriptingService {
   }
 
   /** `POST scripting/convert` (§2c) — a Pine v4/v5 script converted to v6 (or kept on v5, with the reasons). */
+  /** PE-I6 Port from TradingView (§2f): convert when v4/v5, compile, broker checklist. Persists nothing. */
+  port(
+    source: string,
+    symbol?: string | null,
+    timeframe?: string | null,
+  ): Observable<ScriptPortResult> {
+    return this.api
+      .post<
+        ResponseData<ScriptPortResult>
+      >('/scripting/port', { source, symbol: symbol ?? undefined, timeframe: timeframe ?? undefined }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not check the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not check the script.')),
+        ),
+      );
+  }
+
   convert(source: string): Observable<ScriptConversion> {
     return this.api
       .post<ResponseData<ScriptConversion>>('/scripting/convert', { source }, SILENT)

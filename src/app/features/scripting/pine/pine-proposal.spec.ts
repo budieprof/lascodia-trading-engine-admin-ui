@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { assistProposal, conversionProposal, versionOf } from './pine-proposal';
+import { assistProposal, conversionProposal, portProposal, versionOf } from './pine-proposal';
 
 describe('converter results as proposals (PR-I10)', () => {
   const before = '//@version=4\nstudy("x")\nplot(sma(close, 3))\n';
@@ -92,5 +92,37 @@ describe('AI fixes as proposals (PE-I6)', () => {
     expect(assistProposal(before, { ...base, explanation: '', source: before }, 'x').problem).toBe(
       'The AI did not propose a change.',
     );
+  });
+});
+
+describe('Port from TradingView as a proposal (PE-I6)', () => {
+  it('lists conversion changes as notes and open checklist lines as warnings, problems first', () => {
+    const p = portProposal('', {
+      source: '//@version=6\nstrategy("tv")\n',
+      conversion: {
+        fromVersion: 4,
+        toVersion: 6,
+        changes: [{ line: 2, what: 'study → x' }],
+        refusals: [],
+      },
+      compile: { success: true, diagnostics: [] } as never,
+      checklist: [
+        { id: 'version', status: 'ok', title: 'Converted', detail: '' },
+        { id: 'margin', status: 'check', title: 'No margin set', detail: 'Backtest assumes 100%.' },
+        {
+          id: 'stops',
+          status: 'problem',
+          title: 'No protective stop',
+          detail: 'Add one.',
+          line: 4,
+        },
+      ],
+    });
+    expect(p.title).toBe('Port from TradingView (converted from v4)');
+    expect(p.notes).toEqual(['Line 2: study → x']);
+    expect(p.warnings).toEqual([
+      'Fix — No protective stop (line 4): Add one.',
+      'Check — No margin set: Backtest assumes 100%.',
+    ]);
   });
 });

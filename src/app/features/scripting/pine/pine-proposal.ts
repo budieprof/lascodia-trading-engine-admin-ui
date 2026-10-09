@@ -1,4 +1,8 @@
-import type { ScriptAssistResult, ScriptConversion } from '@core/api/scripting.types';
+import type {
+  ScriptAssistResult,
+  ScriptConversion,
+  ScriptPortResult,
+} from '@core/api/scripting.types';
 
 /**
  * A change proposed to the script — by the converter (PR-I10) or the AI (PE-I6) — that the operator
@@ -78,6 +82,31 @@ export function assistProposal(
       acceptLabel: 'Use the AI’s change',
     },
     problem: null,
+  };
+}
+
+/**
+ * A ported TradingView script (PE-I6) as a proposal replacing the editor's text: the conversion's
+ * changes as notes; every checklist line that is not `ok` as a warning, problems first.
+ */
+export function portProposal(before: string, r: ScriptPortResult): ScriptProposal {
+  const open = r.checklist.filter((c) => c.status !== 'ok');
+  const ordered = [
+    ...open.filter((c) => c.status === 'problem'),
+    ...open.filter((c) => c.status !== 'problem'),
+  ];
+  return {
+    title: r.conversion?.fromVersion
+      ? `Port from TradingView (converted from v${r.conversion.fromVersion})`
+      : 'Port from TradingView',
+    before,
+    after: r.source,
+    notes: (r.conversion?.changes ?? []).map((x) => `Line ${x.line}: ${x.what}`),
+    warnings: ordered.map(
+      (c) =>
+        `${c.status === 'problem' ? 'Fix' : 'Check'} — ${c.title}${c.line ? ` (line ${c.line})` : ''}: ${c.detail}`,
+    ),
+    acceptLabel: 'Open the ported script',
   };
 }
 
