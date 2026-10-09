@@ -30,7 +30,10 @@ export function utcDay(ms: number): number {
   return Math.floor(ms / 86_400_000) * 86_400_000;
 }
 
-/** The lines, drawn between the last bar of a day and the first of the next. */
+/**
+ * The lines, drawn between the last bar of a day and the first of the next — on the price pane as a series primitive,
+ * on each study or script pane below it as a pane primitive (the same breaks), so a day reads as a day in every pane.
+ */
 export class SessionBreaksRenderer implements ISeriesPrimitive<Time> {
   private indexes: number[] = [];
   private requestUpdate?: () => void;
@@ -48,10 +51,16 @@ export class SessionBreaksRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate = undefined;
   }
 
-  /** The bars that open a day (plotted indexes); empty: no lines. */
+  /** The bars that open a day (plotted indexes); empty: no lines. The same breaks again change nothing. */
   setBreaks(indexes: readonly number[]): void {
+    if (indexes.length === this.indexes.length && indexes.every((v, i) => v === this.indexes[i])) return;
     this.indexes = [...indexes];
     this.requestUpdate?.();
+  }
+
+  /** The breaks drawn now (the study and script panes draw the price pane's). */
+  breaks(): readonly number[] {
+    return this.indexes;
   }
 
   updateAllViews(): void {

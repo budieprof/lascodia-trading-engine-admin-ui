@@ -37,6 +37,7 @@ import {
   type ChartOptions,
   type DeepPartial,
   type IChartApi,
+  type IPaneApi,
   type ISeriesApi,
   type Logical,
   type ISeriesMarkersPluginApi,
@@ -1367,6 +1368,43 @@ export class ChartHostComponent implements OnDestroy {
         dayOf,
       ),
     );
+    this.syncPaneBreaks();
+  }
+
+  /** The session breaks on the panes below the price pane, one renderer per pane (their element tells them apart). */
+  private paneBreaks: { el: HTMLElement | null; pane: IPaneApi<Time>; renderer: SessionBreaksRenderer }[] = [];
+
+  /**
+   * Session breaks across the study and script panes, not only the price pane: a renderer on each pane below it,
+   * drawing the price pane's breaks. Panes come and go with studies and scripts; the renderers follow (nothing is
+   * re-attached while the panes stay the same, so a tick costs a comparison).
+   */
+  private syncPaneBreaks(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const panes = chart.panes().slice(1);
+    const same =
+      panes.length === this.paneBreaks.length &&
+      panes.every((p, i) => p.getHTMLElement() === this.paneBreaks[i].el);
+    if (!same) {
+      for (const b of this.paneBreaks) {
+        try {
+          b.pane.detachPrimitive(b.renderer);
+        } catch {
+          // Its pane went with a study.
+        }
+      }
+      this.paneBreaks = panes.map((pane) => {
+        const renderer = new SessionBreaksRenderer(
+          () => this.chart,
+          () => this.theme.theme() === 'dark',
+        );
+        pane.attachPrimitive(renderer);
+        return { el: pane.getHTMLElement(), pane, renderer };
+      });
+    }
+    const breaks = this.sessionBreaksRenderer.breaks();
+    for (const b of this.paneBreaks) b.renderer.setBreaks(breaks);
   }
 
   /**
@@ -1798,6 +1836,7 @@ export class ChartHostComponent implements OnDestroy {
     this.price = null;
     this.volume = null;
     this.markerApi = null;
+    this.paneBreaks = [];
     this.indicatorSeries = [];
     this.externalSeries.clear();
     this.seriesStyle = null;
@@ -2789,8 +2828,9 @@ export class ChartHostComponent implements OnDestroy {
       if (target.fill) this.writeFills(target.fill, def, computed);
     }
 
-    // Drawings in a study's pane follow its series when they are made again.
+    // Drawings in a study's pane follow its series when they are made again; session breaks reach a new pane.
     this.controller.rebindPanes();
+    this.syncPaneBreaks();
     this.emitLegend();
   }
 
@@ -3306,6 +3346,8 @@ export class ChartHostComponent implements OnDestroy {
           topLeftOffset: index === 0 ? legendBottom : scriptPanes.has(index) ? 22 : 0,
         });
       }
+      // Script panes take the session breaks too.
+      this.syncPaneBreaks();
       this.scriptTables.set(out);
       // Once the tables are on screen: room for them under the top of their panes.
       requestAnimationFrame(() => this.reserveTableMargins());
