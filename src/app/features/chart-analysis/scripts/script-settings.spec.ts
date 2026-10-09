@@ -234,6 +234,26 @@ describe('ScriptSettings — confirm inputs and named templates (PC-I12)', () =>
     ]);
     again.deleteTemplate('mine:7', 'Swing');
     expect(again.templates().map((t) => t.name)).toEqual(['Scalp']);
-    expect(JSON.parse(prefs.raw.get('lascodia.chart.scriptInputTemplates.v1')!)['mine:7']).toHaveLength(1);
+    expect(
+      JSON.parse(prefs.raw.get('lascodia.chart.scriptInputTemplates.v1')!)['mine:7'],
+    ).toHaveLength(1);
+  });
+
+  it('PC-I5: Properties re-run a strategy with its overrides, kept on its item; {} clears them', () => {
+    const strat = item('strategy:7', { kind: 'strategy', strategyId: 7 });
+    const ind = item('mine:5');
+    const { list, host, settings } = make([runOf(strat, { x: 2 }), runOf(ind)]);
+
+    settings.applyProperties('strategy:7', { initialCapital: 25_000, pyramiding: 2 });
+    const withProps = list()[0].item;
+    expect(withProps.strategyProperties).toEqual({ initialCapital: 25_000, pyramiding: 2 });
+    expect(host.run).toHaveBeenLastCalledWith(withProps, { x: 2 });
+
+    settings.applyProperties('strategy:7', {});
+    expect('strategyProperties' in list()[0].item).toBe(false);
+    expect(host.run).toHaveBeenCalledTimes(2);
+
+    settings.applyProperties('mine:5', { pyramiding: 1 }); // an indicator has no strategy() properties
+    expect(host.run).toHaveBeenCalledTimes(2);
   });
 });

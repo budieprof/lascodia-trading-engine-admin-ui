@@ -1,4 +1,4 @@
-import type { ScriptInputValues } from '@core/api/scripting.types';
+import type { ScriptInputValues, ScriptStrategyPropertyOverrides } from '@core/api/scripting.types';
 import type { ScriptBacktestRequest } from '@features/scripting/api/scripting-api.types';
 import { validateBacktestForm } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { resolutionSource, type EngineTimeframe } from '../datafeed/resolution';
@@ -82,6 +82,7 @@ export function deepBacktestRequest(
   target: DeepBacktestTarget,
   form: { fromDate: string; toDate: string },
   inputs: ScriptInputValues,
+  strategyProperties?: ScriptStrategyPropertyOverrides | null,
 ): ScriptBacktestRequest | string {
   const symbol = target.chartSymbol.trim().toUpperCase();
   const problem = validateBacktestForm({ ...form, symbolOverride: symbol });
@@ -98,5 +99,8 @@ export function deepBacktestRequest(
   const tf = target.chartTimeframe;
   if (tf && tf !== target.strategyTimeframe) req.timeframeOverride = tf;
   if (Object.keys(inputs).length) req.inputs = { ...inputs };
+  // PC-I5: the Properties the chart runs it with go along (the engine records them; never evidence).
+  if (strategyProperties && Object.keys(strategyProperties).length)
+    req.strategyProperties = { ...strategyProperties };
   return req;
 }

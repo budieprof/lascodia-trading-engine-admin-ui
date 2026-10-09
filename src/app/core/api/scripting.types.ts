@@ -780,3 +780,38 @@ export interface ScriptDiagnostic {
   /** Text edits that apply the hint; absent when there are none. */
   fixes?: readonly ScriptDiagnosticFix[] | null;
 }
+
+// ── runtime2: strategy() property overrides (PC-I5, scripting API §3d) ──
+
+/**
+ * The Strategy Tester's Properties for one run, over the script's `strategy()`: every field optional
+ * (absent = the script's own). The engine refuses a bad value or an unknown field (`-11`, naming it).
+ */
+export interface ScriptStrategyPropertyOverrides {
+  initialCapital?: number;
+  /** ISO code or `NONE` (the symbol's currency). */
+  currency?: string;
+  defaultQtyType?: 'fixed' | 'cash' | 'percent_of_equity';
+  defaultQtyValue?: number;
+  pyramiding?: number;
+  commissionType?: 'percent' | 'cash_per_contract' | 'cash_per_order';
+  commissionValue?: number;
+  /** "Verify price for limit orders", ticks. */
+  backtestFillLimitsAssumption?: number;
+  /** Ticks. */
+  slippage?: number;
+  marginLong?: number;
+  marginShort?: number;
+  processOrdersOnClose?: boolean;
+  calcOnOrderFills?: boolean;
+  calcOnEveryTick?: boolean;
+  useBarMagnifier?: boolean;
+  fillOrdersOnStandardOhlc?: boolean;
+  closeEntriesRule?: 'FIFO' | 'ANY';
+  riskFreeRate?: number;
+}
+
+/** `scripting/run` / `scripting/replay` accept the overrides (merged into `ScriptRunRequest`). */
+export interface ScriptRunRequest {
+  strategyProperties?: ScriptStrategyPropertyOverrides;
+}

@@ -30,8 +30,12 @@ describe('Strategy Tester helpers (PC-I5, PC-12)', () => {
 
   it('orders the trades by number, newest first on request', () => {
     const t = (number: number) => ({ number }) as never;
-    expect(orderTrades([t(2), t(1), t(3)], false).map((x: { number: number }) => x.number)).toEqual([1, 2, 3]);
-    expect(orderTrades([t(2), t(1), t(3)], true).map((x: { number: number }) => x.number)).toEqual([3, 2, 1]);
+    expect(orderTrades([t(2), t(1), t(3)], false).map((x: { number: number }) => x.number)).toEqual(
+      [1, 2, 3],
+    );
+    expect(orderTrades([t(2), t(1), t(3)], true).map((x: { number: number }) => x.number)).toEqual([
+      3, 2, 1,
+    ]);
   });
 
   it('a backtest timeframe is one of the six stored ones, served as stored', () => {
@@ -52,7 +56,9 @@ describe('Strategy Tester helpers (PC-I5, PC-12)', () => {
       chartSymbol: 'eurusd',
       chartTimeframe: 'H1' as const,
     };
-    expect(deepBacktestRequest(target, { fromDate: '2025-01-01', toDate: '2025-06-01' }, {})).toEqual({
+    expect(
+      deepBacktestRequest(target, { fromDate: '2025-01-01', toDate: '2025-06-01' }, {}),
+    ).toEqual({
       strategyId: 7,
       symbol: 'EURUSD',
       timeframe: 'H1',
@@ -71,5 +77,23 @@ describe('Strategy Tester helpers (PC-I5, PC-12)', () => {
     expect(deepBacktestRequest(target, { fromDate: '', toDate: '2025-06-01' }, {})).toBe(
       'Choose a start and an end date.',
     );
+    // PC-I5: the Properties the chart runs it with go along; none → no field.
+    expect(
+      deepBacktestRequest(
+        target,
+        { fromDate: '2025-01-01', toDate: '2025-06-01' },
+        {},
+        { pyramiding: 2 },
+      ),
+    ).toMatchObject({ strategyProperties: { pyramiding: 2 } });
+    expect(
+      'strategyProperties' in
+        (deepBacktestRequest(
+          target,
+          { fromDate: '2025-01-01', toDate: '2025-06-01' },
+          {},
+          {},
+        ) as object),
+    ).toBe(false);
   });
 });

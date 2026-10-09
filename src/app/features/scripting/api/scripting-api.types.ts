@@ -1,5 +1,8 @@
 import type { AlertChannel, StrategyDto } from '@core/api/api.types';
-import type { ScriptStrategyProperties } from '@core/api/scripting.types';
+import type {
+  ScriptStrategyProperties,
+  ScriptStrategyPropertyOverrides,
+} from '@core/api/scripting.types';
 
 import type { TradeOrigin } from '../report/trade-origin';
 
@@ -262,6 +265,11 @@ export interface ScriptBacktestRequest {
   deep?: boolean;
   /** Overrides the script's `use_bar_magnifier`; omitted = the script's own setting. */
   barMagnifier?: boolean;
+  /**
+   * PC-I5: the Strategy Tester's Properties over the script's `strategy()` (scripting API §3d). Recorded with the run;
+   * such a run is never evidence about the strategy as deployed.
+   */
+  strategyProperties?: ScriptStrategyPropertyOverrides;
 }
 
 // ── §10 Alerts ────────────────────────────────────────────────────────────────
