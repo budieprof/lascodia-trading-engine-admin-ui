@@ -1356,8 +1356,8 @@ export class ChartAnalysisPageComponent {
    * martingale-rung markers. The position lines are re-drawn from these on every live price (their
    * P&L), never re-fetched for it.
    */
-  private readonly openPositions = signal<ChartPosition[]>([]);
-  private readonly workingOrders = signal<OrderDto[]>([]);
+  protected readonly openPositions = signal<ChartPosition[]>([]);
+  protected readonly workingOrders = signal<OrderDto[]>([]);
   private readonly closedPositions = signal<ChartPosition[]>([]);
   private readonly signalMarkers = signal<ChartMarker[]>([]);
   private readonly rungMarkers = signal<ChartMarker[]>([]);
@@ -1674,11 +1674,18 @@ export class ChartAnalysisPageComponent {
   });
   /** SP-I4 (trading): the order ticket is open, and the values a "Stage…" opens it with. */
   readonly ticketOpen = signal(false);
+  /** The account scope's ids, for the chart's trading lines (the same filter the trade layer draws with). */
+  readonly accountIdsInScope = computed(() => this.accountScope.accountIds());
   readonly ticketPrefill = signal<TicketPrefill | null>(null);
 
   /** A ticket went through: the trade layers show the new position / order once the engine reports it. */
   onTicketSubmitted(): void {
     this.scheduleTradeRefresh({ symbol: this.symbol() });
+  }
+
+  /** SP-I3: a position or order was changed from the chart (or a change was refused): re-read the trade layers. */
+  onChartTradeChanged(): void {
+    this.loadTradingOverlays();
   }
 
   /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */

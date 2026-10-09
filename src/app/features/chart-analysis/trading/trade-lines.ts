@@ -8,9 +8,12 @@ export type TradeLineKind =
   | 'ticketEntry'
   | 'ticketStop'
   | 'ticketTarget'
+  | 'positionEntry'
   | 'positionStop'
   | 'positionTarget'
   | 'orderPrice'
+  | 'orderStop'
+  | 'orderTarget'
   | 'pending';
 
 export interface TradeLine {
@@ -23,6 +26,8 @@ export interface TradeLine {
   color: string;
   /** Can be grabbed and dragged. */
   draggable: boolean;
+  /** Can be clicked (a position's entry: close it; an order's price: cancel it). */
+  clickable?: boolean;
   /**
    * Drawn by this layer. False for a position's or order's own lines, which the trade layer's overlay already draws:
    * this layer only makes them grabbable and draws them while they move.
@@ -37,17 +42,21 @@ export interface TradeLine {
 /** Pixels from a line within which a press grabs it. */
 export const TRADE_GRAB_TOLERANCE_PX = 5;
 
-/** The draggable line a press at `y` grabs (the nearest within the tolerance), or null. */
+/**
+ * The line a press at `y` takes (the nearest draggable or clickable one within the tolerance), or null. With `only`
+ * = 'draggable' clickable-only lines are passed over.
+ */
 export function grabbedTradeLine(
   lines: readonly TradeLine[],
   y: number,
   toY: (price: number) => number | null,
   tolerancePx = TRADE_GRAB_TOLERANCE_PX,
+  only: 'any' | 'draggable' = 'any',
 ): TradeLine | null {
   let best: TradeLine | null = null;
   let bestDistance = tolerancePx + 1e-9;
   for (const line of lines) {
-    if (!line.draggable) continue;
+    if (!line.draggable && (only === 'draggable' || !line.clickable)) continue;
     const ly = toY(line.price);
     if (ly === null) continue;
     const d = Math.abs(ly - y);

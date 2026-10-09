@@ -1263,7 +1263,12 @@
           [quote]="liveQuote()"
           [(open)]="ticketOpen"
           [prefill]="ticketPrefill()"
+          [lotStep]="currentPair()?.lotStep || 0.01"
+          [positions]="openPositions()"
+          [orders]="workingOrders()"
+          [accountIds]="accountIdsInScope()"
           (submitted)="onTicketSubmitted()"
+          (changed)="onChartTradeChanged()"
         />
 
         <!-- A strategy the operator added replaced the one on the chart: say so, with Undo. -->

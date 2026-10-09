@@ -110,3 +110,53 @@ export interface ManualTradeResult {
   preview: ManualTradePreview;
   message: string;
 }
+
+/** `POST position/{id}/change-preview` — the confirm dialog of a stop / target move or a (partial) close (SP-I3). */
+export interface PositionChangePreview {
+  positionId: number;
+  tradingAccountId: number;
+  accountId: string;
+  accountName: string;
+  accountType: string;
+  currency: string;
+  symbol: string;
+  isLong: boolean;
+  openLots: number;
+  entry: number;
+  initialStop: number | null;
+  currentStop: number | null;
+  currentTarget: number | null;
+  /** Bid for a long, ask for a short; null without a fresh quote. */
+  triggerPrice: number | null;
+  pipSize: number;
+  pipValuePerLot: number | null;
+  atr: ManualTradeAtr | null;
+  newStop: number | null;
+  stopDistancePips: number | null;
+  stopDistanceAtr: number | null;
+  pnlAtNewStop: number | null;
+  rAtNewStop: number | null;
+  newTarget: number | null;
+  pnlAtNewTarget: number | null;
+  rAtNewTarget: number | null;
+  closeLots: number | null;
+  closePnl: number | null;
+  gates: TradeGate[];
+  canApply: boolean;
+  refusedReason: string | null;
+}
+
+/** `GET position/command-status?correlationId=` — the EA command an operator action queued. */
+export interface EaCommandStatus {
+  commandId: number;
+  commandType: string;
+  symbol: string;
+  targetTicket: number | null;
+  acknowledged: boolean;
+  /** True = applied; false = refused (or retries ran out); null = not acknowledged yet. */
+  succeeded: boolean | null;
+  result: string | null;
+  retryCount: number;
+  createdAt: string;
+  acknowledgedAt: string | null;
+}

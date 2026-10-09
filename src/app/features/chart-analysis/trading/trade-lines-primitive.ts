@@ -17,6 +17,9 @@ export interface TradeLineMove {
   price: number;
 }
 
+/** Pixels a press may move and still count as a click on a clickable line. */
+const CLICK_SLOP_PX = 3;
+
 /**
  * Trading lines on the price pane (SP-I3 / SP-I4), on the alerts' draggable-line pattern: the press is taken in the
  * capture phase so the chart does not pan, scrolling and scaling are off for the drag, Escape cancels, and the drop is
@@ -40,9 +43,12 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     restore: { handleScroll: unknown; handleScale: unknown };
   } | null = null;
 
+  private press: { line: TradeLine; pointerId: number; y: number } | null = null;
+
   constructor(
     private readonly precision: () => number,
     private readonly onMove: (move: TradeLineMove) => void,
+    private readonly onClick: (line: TradeLine) => void = () => undefined,
   ) {}
 
   setLines(lines: TradeLine[]): void {
@@ -190,6 +196,11 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     // Ours: the chart must not start a pan or a drawing from this press.
     ev.preventDefault();
     ev.stopPropagation();
+    if (!line.draggable) {
+      // A clickable line (a position's entry, an order's price): a click, if the pointer does not travel.
+      this.press = { line, pointerId: ev.pointerId, y };
+      return;
+    }
     const options = this.chart.options() as unknown as {
       handleScroll: unknown;
       handleScale: unknown;
@@ -214,11 +225,16 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
     const y = this.paneY(ev);
     const toY = this.projection();
     if (!series || y === null || !toY) return;
+    if (this.press && ev.pointerId === this.press.pointerId) {
+      if (Math.abs(y - this.press.y) > CLICK_SLOP_PX) this.press = null;
+      return;
+    }
     if (!this.drag) {
-      const over = !!grabbedTradeLine(this.lines, y, toY);
-      if (this.element && over !== this.hovering) {
-        this.element.style.cursor = over ? 'ns-resize' : '';
-        this.hovering = over;
+      const over = grabbedTradeLine(this.lines, y, toY);
+      const hovering = !!over;
+      if (this.element && (hovering !== this.hovering || hovering)) {
+        this.element.style.cursor = !over ? '' : over.draggable ? 'ns-resize' : 'pointer';
+        this.hovering = hovering;
       }
       return;
     }
@@ -233,6 +249,14 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
   };
 
   private readonly onPointerUp = (ev: PointerEvent): void => {
+    const press = this.press;
+    if (press && ev.pointerId === press.pointerId) {
+      this.press = null;
+      ev.preventDefault();
+      ev.stopPropagation();
+      this.onClick(press.line);
+      return;
+    }
     const drag = this.drag;
     if (!drag || ev.pointerId !== drag.pointerId) return;
     ev.preventDefault();
@@ -246,6 +270,7 @@ export class TradeLinesPrimitive implements ISeriesPrimitive<Time> {
   };
 
   private readonly onKeyDown = (ev: KeyboardEvent): void => {
+    this.press = null;
     if (ev.key === 'Escape' && this.drag) {
       ev.stopPropagation();
       this.cancelDrag();
