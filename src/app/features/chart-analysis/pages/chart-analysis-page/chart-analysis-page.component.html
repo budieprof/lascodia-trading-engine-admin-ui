@@ -19,6 +19,8 @@
             placeholder="Search symbol…"
             [ngModel]="symbolQuery()"
             (ngModelChange)="symbolQuery.set($event)"
+            (keydown.enter)="pickFirstSymbol()"
+            (keydown.escape)="symbolMenuOpen.set(false)"
             autocomplete="off"
           />
           <ul class="menu-list">
@@ -53,23 +55,63 @@
       </button>
       @if (openMenu() === 'interval') {
         <div class="tb-menu" role="menu" (click)="$event.stopPropagation()">
+          <!-- TradingView's "change interval": any interval the engine can lay out (45, 3h, 2D…). -->
+          <label class="tb-menu-field">
+            <input
+              #intervalInput
+              type="text"
+              placeholder="Type an interval: 45, 3h, 2D"
+              aria-label="Interval"
+              autocomplete="off"
+              [value]="intervalDraft()"
+              (input)="intervalDraft.set($any($event.target).value); intervalError.set(null)"
+              (keydown.enter)="submitInterval()"
+              (keydown.escape)="openMenu.set(null)"
+            />
+          </label>
+          @if (intervalError(); as err) {
+            <div class="tb-menu-empty" role="alert">{{ err }}</div>
+          }
           @for (g of resolutionGroups; track g.label) {
             <div class="tb-menu-heading">{{ g.label }}</div>
             @for (r of g.items; track r.id) {
-              <button
-                type="button"
-                role="menuitemradio"
-                class="tb-menu-item"
-                [class.selected]="resolution() === r.id"
-                (click)="selectResolution(r.id); openMenu.set(null)"
-              >
-                {{ r.name }}
-              </button>
+              <div class="tb-menu-row">
+                <button
+                  type="button"
+                  role="menuitemradio"
+                  class="tb-menu-item"
+                  [class.selected]="resolution() === r.id"
+                  (click)="selectResolution(r.id); openMenu.set(null)"
+                >
+                  {{ r.name }}
+                </button>
+                <button
+                  type="button"
+                  class="tb-menu-x"
+                  [attr.aria-pressed]="isFavourite(r.id)"
+                  [title]="isFavourite(r.id) ? 'Remove from favourites' : 'Add to favourites'"
+                  (click)="toggleFavourite(r.id, $event)"
+                >
+                  {{ isFavourite(r.id) ? '★' : '☆' }}
+                </button>
+              </div>
             }
           }
         </div>
       }
     </div>
+    <!-- Starred intervals, one click away (CC-I8). -->
+    @for (r of favouriteIntervals(); track r) {
+      <button
+        type="button"
+        class="tb-btn tb-text"
+        [class.active]="resolution() === r"
+        (click)="selectResolution(r)"
+        [title]="'Switch to ' + resolutionLabel(r)"
+      >
+        {{ resolutionLabel(r) }}
+      </button>
+    }
 
     <div class="tb-sep"></div>
 
@@ -104,19 +146,84 @@
               </button>
             }
           }
-          @if (priceBasedStyle()) {
+          @if (boxStyle()) {
             <div class="tb-menu-sep"></div>
-            <label class="tb-menu-field" title="Box / range size as a multiple of ATR(14)">
-              Box size
+            <div class="tb-menu-heading">{{ boxLabel() }}</div>
+            <div class="tb-menu-chips" role="radiogroup" aria-label="Box size method">
+              <button
+                type="button"
+                role="radio"
+                class="tb-chip"
+                [class.on]="boxMethod() === 'atr'"
+                [attr.aria-checked]="boxMethod() === 'atr'"
+                (click)="boxMethod.set('atr')"
+                title="A multiple of ATR(14), measured once from the bars that had closed when the chart loaded"
+              >
+                ATR
+              </button>
+              <button
+                type="button"
+                role="radio"
+                class="tb-chip"
+                [class.on]="boxMethod() === 'pips'"
+                [attr.aria-checked]="boxMethod() === 'pips'"
+                (click)="boxMethod.set('pips')"
+                title="A fixed number of pips, the same on every timeframe"
+              >
+                Pips
+              </button>
+            </div>
+            @if (boxMethod() === 'atr') {
+              <label class="tb-menu-field" title="Box size as a multiple of ATR(14)">
+                Size
+                <input
+                  type="number"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  [value]="boxSizeAtr()"
+                  (change)="setBoxSize($any($event.target).value)"
+                />
+                × ATR
+              </label>
+            } @else {
+              <label class="tb-menu-field" title="Box size in pips">
+                Size
+                <input
+                  type="number"
+                  min="0.1"
+                  max="10000"
+                  step="0.1"
+                  [value]="boxPips()"
+                  (change)="setBoxPips($any($event.target).value)"
+                />
+                pips
+              </label>
+            }
+            @if (style() === 'renko') {
+              <button
+                type="button"
+                class="tb-menu-item tb-check"
+                [class.on]="renkoWicks()"
+                (click)="renkoWicks.set(!renkoWicks())"
+                title="Each brick's wick reaches the furthest price traded against it before it formed"
+              >
+                Show wicks
+              </button>
+            }
+          }
+          @if (style() === 'line-break') {
+            <div class="tb-menu-sep"></div>
+            <label class="tb-menu-field" title="How many lines a reversal must break">
+              Lines
               <input
                 type="number"
-                min="0.1"
-                max="20"
-                step="0.1"
-                [value]="boxSizeAtr()"
-                (change)="setBoxSize($any($event.target).value)"
+                min="1"
+                max="10"
+                step="1"
+                [value]="lineBreakLines()"
+                (change)="setLineBreakLines($any($event.target).value)"
               />
-              × ATR
             </label>
           }
         </div>
@@ -248,6 +355,26 @@
           >
             <app-chart-icon name="trades" [size]="28" /> Signals
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showClosedTrades()"
+            (click)="showClosedTrades.set(!showClosedTrades())"
+            title="Entry and exit fills of this symbol's closed trades for the selected account (paper in purple)"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Closed trades
+          </button>
+          @if (showPositions() || showOrders()) {
+            <button
+              type="button"
+              class="tb-menu-item tb-check"
+              [class.on]="fitTradeLines()"
+              (click)="fitTradeLines.set(!fitTradeLines())"
+              title="Keep every position and order line in view (off: a distant target no longer squashes the candles)"
+            >
+              <app-chart-icon name="trades" [size]="28" /> Fit trade lines
+            </button>
+          }
           <div class="tb-menu-row">
             <button
               type="button"
@@ -267,8 +394,27 @@
               >
                 {{ minEventImpact() }}+
               </button>
+              <button
+                type="button"
+                class="tb-chip"
+                [class.on]="showBlackout()"
+                [attr.aria-pressed]="showBlackout()"
+                (click)="showBlackout.set(!showBlackout())"
+                [title]="blackoutTitle()"
+              >
+                Blackout
+              </button>
             }
           </div>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="sessionBreaks()"
+            (click)="sessionBreaks.set(!sessionBreaks())"
+            title="A line where each trading day begins (17:00 New York for FX) on intraday charts"
+          >
+            <app-chart-icon name="calendar" [size]="28" /> Session breaks
+          </button>
           <div class="tb-menu-sep"></div>
           <div class="tb-menu-heading">Analysis</div>
           <button
@@ -843,6 +989,20 @@
       >
         <app-chart-icon name="calendar" [size]="28" />
       </button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'notes'" (click)="openPanel('notes')" title="Notes and ideas" data-testid="notes-button"><app-chart-icon name="pencil" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'depth'" (click)="openPanel('depth')" title="Broker depth (DOM)" data-testid="depth-button"><app-chart-icon name="layers" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'sentiment'" (click)="openPanel('sentiment')" title="Sentiment: news pressure and COT positioning" data-testid="sentiment-button"><app-chart-icon name="delta" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'account'" (click)="openPanel('account')" title="Account: positions, orders, signals, paper trades" data-testid="account-button"><app-chart-icon name="trades" [size]="28" /></button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="sidePane() === 'datawindow'"
+        (click)="openSidePane('datawindow')"
+        title="Data window — every value at the crosshair"
+        data-testid="datawindow-button"
+      >
+        <app-chart-icon name="object-tree" [size]="28" />
+      </button>
       <button
         type="button"
         class="strip-btn"
@@ -933,8 +1093,13 @@
               <span
                 >C<b>{{ l.close | number: '1.' + precision() + '-' + precision() }}</b></span
               >
-              @if (l.changePct !== null) {
-                <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
+              @if (legendChange(); as change) {
+                <span class="change" data-testid="legend-change">{{ change }}</span>
+              }
+              @if (legendVolume(); as vol) {
+                <span
+                  >Vol<b>{{ vol }}</b></span
+                >
               }
             </div>
             <div class="legend-time muted">{{ l.dateLabel ?? formatTime(l.time) }}</div>
@@ -961,6 +1126,9 @@
           [showCountdown]="showCountdown()"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
+          [dataKey]="dataKey()"
+          [historyComplete]="historyComplete()"
+          [dataWindowOpen]="sidePane() === 'datawindow'"
           [style]="style()"
           [showVolume]="showVolume()"
           [indicators]="active()"
@@ -969,10 +1137,21 @@
           [magnet]="magnetMode()"
           [stayInDrawingMode]="stayInDrawing()"
           [scaleMode]="scaleMode()"
+          [invertScale]="invertScale()"
+          [scaleSide]="scaleSide()"
+          [sessionBreaks]="sessionBreaks()"
+          (autoScaleChange)="autoScaleOn.set($event)"
           [timezone]="timezone()"
-          [events]="events()"
+          [events]="chartEvents()"
           [minEventImpact]="minEventImpact()"
+          [eventBands]="eventBands()"
+          (eventOpen)="calendarEvent.set($event)"
           [boxSizeAtr]="boxSizeAtr()"
+          [boxMethod]="boxMethod()"
+          [boxPips]="boxPips()"
+          [pipSize]="pipSize()"
+          [renkoWicks]="renkoWicks()"
+          [lineBreakLines]="lineBreakLines()"
           [showVolumeProfile]="showVolumeProfile()"
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"
@@ -981,6 +1160,7 @@
           [resolution]="resolution()"
           [session]="sessionSpec()"
           [overlays]="overlays()"
+          [fitTradeLines]="fitTradeLines()"
           [markers]="markers()"
           [compareBars]="compareBars()"
           [scriptResults]="scriptResults()"
@@ -1076,6 +1256,32 @@
             <button
               type="button"
               role="menuitemcheckbox"
+              [attr.aria-checked]="invertScale()"
+              (click)="invertScale.set(!invertScale()); closeContextMenu()"
+            >
+              {{ invertScale() ? '✓ ' : '' }}Invert scale
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              [attr.aria-checked]="scaleMode() === 'indexed'"
+              (click)="
+                scaleMode.set(scaleMode() === 'indexed' ? 'normal' : 'indexed'); closeContextMenu()
+              "
+            >
+              {{ scaleMode() === 'indexed' ? '✓ ' : '' }}Indexed to 100
+            </button>
+            <button
+              type="button"
+              (click)="
+                scaleSide.set(scaleSide() === 'right' ? 'left' : 'right'); closeContextMenu()
+              "
+            >
+              Move scale to the {{ scaleSide() === 'right' ? 'left' : 'right' }}
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
               data-testid="countdown-toggle"
               [attr.aria-checked]="showCountdown()"
               (click)="showCountdown.set(!showCountdown()); closeContextMenu()"
@@ -1083,6 +1289,8 @@
               {{ showCountdown() ? '✓ ' : '' }}Countdown to bar close
             </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
+            <button type="button" (click)="copySnapshot()">Copy image</button>
+            <button type="button" (click)="exportChartData()">Export chart data (CSV)</button>
             <button type="button" (click)="objectTreeOpen.set(true); closeContextMenu()">
               Show objects
             </button>
@@ -1175,7 +1383,7 @@
 
         @if (sidePane() === 'news') {
           <aside class="side-pane">
-            <div class="tree-title">News · {{ details().base }}</div>
+            <div class="tree-title">News · {{ details().base }} / {{ details().quote }}</div>
 
             <!--
               The module's read on the PAIR, above the raw headlines.
@@ -1242,7 +1450,15 @@
                   >
                     <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
                     <div class="muted news-meta">
-                      {{ a.sourceName }} · {{ a.publishedAtUtc | date: 'MMM d HH:mm' }}
+                      {{ a.sourceName }} · {{ a.publishedAtUtc | zonedDate: timezone() : 'dateTime' }}
+                      @for (f of a | articleFlags: calendarCurrencies(); track f.currency) {
+                        <span
+                          style="margin-left: 4px; white-space: nowrap"
+                          [style.color]="f.direction === 'Bullish' ? '#089981' : f.direction === 'Bearish' ? '#f23645' : null"
+                          [title]="f.title"
+                          >{{ f.flag || f.currency }} {{ f.arrow }}</span
+                        >
+                      }
                     </div>
                   </li>
                 }
@@ -1255,10 +1471,24 @@
           <aside class="side-pane">
             <app-economic-calendar-pane
               [currencies]="calendarCurrencies()"
+              [timeZone]="timezone()"
               [(allCurrencies)]="calendarAll"
               [(minImpact)]="calendarMinImpact"
               (opened)="calendarEvent.set($event)"
             />
+          </aside>
+        }
+        @if (chartPanels.open(); as panel) {
+          @if (sidePane() === 'none') {
+            <aside class="side-pane">
+              <app-chart-panels-dock [panel]="panel" [symbol]="symbol()" [timeframe]="resolutionLabel(resolution())" [digits]="precision()" [timeZone]="timezone()" (symbolSelected)="selectSymbol($event)" />
+            </aside>
+          }
+        }
+
+        @if (sidePane() === 'datawindow') {
+          <aside class="side-pane">
+            <app-data-window [sections]="dataWindowSections()" />
           </aside>
         }
 
@@ -1338,8 +1568,49 @@
               <app-chart-icon name="swap" [size]="18" />
             </button>
           </div>
+          @if (panelLegends()[panel.id]; as pl) {
+            @if (pl.close !== null) {
+              <div
+                class="legend-ohlc panel-legend"
+                [class.up]="pl.close >= (pl.open ?? pl.close)"
+                [class.down]="pl.close < (pl.open ?? pl.close)"
+              >
+                <span
+                  >O<b>{{
+                    pl.open
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >H<b>{{
+                    pl.high
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >L<b>{{
+                    pl.low
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >C<b>{{
+                    pl.close
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+              </div>
+            }
+          }
           <app-chart-host
+            #panelHost
             [bars]="panel.bars"
+            [dataKey]="panel.symbol + '|' + panel.resolution"
+            [historyComplete]="!!panel.historyComplete"
             [style]="style()"
             [showVolume]="false"
             [indicators]="[]"
@@ -1348,6 +1619,8 @@
             [timezone]="timezone()"
             [symbol]="panel.symbol"
             [resolution]="panel.resolution"
+            (loadMore)="loadPanelOlder(panel.id)"
+            (legend)="onPanelLegend(panel.id, $event)"
           />
         </div>
       }
@@ -1386,6 +1659,7 @@
     [timezone]="timezone()"
     [timezones]="timezones"
     [scaleMode]="scaleMode()"
+    [autoScaleOn]="autoScaleOn()"
     [dockTab]="dockTab()"
     [hasStrategy]="!!strategyRun()"
     [menu]="openMenu()"

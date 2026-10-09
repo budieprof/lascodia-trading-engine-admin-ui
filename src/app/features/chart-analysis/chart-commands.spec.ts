@@ -3,6 +3,7 @@ import { chartCommands, type ChartCommandHost } from './chart-commands';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import type { ActiveIndicator, ChartStyle } from './chart/chart-host.component';
 import { SUPPORTED_RESOLUTIONS } from './datafeed/resolution';
+import type { DrawingKind } from './drawings/model';
 
 /** A signal-shaped stub: callable, with `.set`. */
 function sig<T>(initial: T) {
@@ -33,7 +34,7 @@ let activeCount: () => number;
 
 let placed: Array<{
   id: string;
-  kind: string;
+  kind: DrawingKind;
   points: { time: number; price: number }[];
   color?: string;
   text?: string;
@@ -684,5 +685,26 @@ describe('analysis overlays', () => {
     });
     const r = await byId(chartCommands(empty), 'chart.readLevels').run({});
     expect(r.message).toMatch(/No levels detected/);
+  });
+});
+
+describe('chart.snapshot — honest about the result (CC-22)', () => {
+  it('reports a failure when no image was made', async () => {
+    const cmds = chartCommands(
+      makeHost({
+        takeSnapshot: () => ({ ok: false, message: 'The chart could not be captured.' }),
+      }),
+    );
+    const r = await byId(cmds, 'chart.snapshot').run({});
+    expect(r.ok).toBe(false);
+    expect(r.message).toBe('The chart could not be captured.');
+  });
+
+  it('reports the saved file', async () => {
+    const cmds = chartCommands(
+      makeHost({ takeSnapshot: () => ({ ok: true, message: 'Snapshot saved as EURUSD-1h.png.' }) }),
+    );
+    const r = await byId(cmds, 'chart.snapshot').run({});
+    expect(r).toMatchObject({ ok: true, message: 'Snapshot saved as EURUSD-1h.png.' });
   });
 });

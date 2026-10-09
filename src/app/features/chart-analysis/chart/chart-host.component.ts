@@ -29,6 +29,7 @@ import {
   LineStyle,
   LineType,
   MismatchDirection,
+  PriceScaleMode,
   createChartEx,
   createSeriesMarkers,
   type CandlestickData,
@@ -36,13 +37,12 @@ import {
   type DeepPartial,
   type IChartApi,
   type ISeriesApi,
+  type Logical,
   type ISeriesMarkersPluginApi,
   type ISeriesPrimitive,
-  type MouseEventParams,
-  type SeriesDataItemTypeMap,
+  type SeriesMarker,
   type TickMarkType,
   type Time,
-  type UTCTimestamp,
 } from 'lightweight-charts';
 import {
   TradingDateTimeScale,
@@ -54,18 +54,52 @@ import {
 } from './trading-date';
 import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
-import { TradingCalendar, type SessionSpec } from '../datafeed/session-calendar';
-import { indicatorById, indicatorLabel, type IndicatorDef } from '../indicators/registry';
-import type { DayOf, Ohlc } from '../indicators/math';
-import { HiLoSeries, VolCandleSeries, type OhlcvData } from './custom-series';
+import { TradingCalendar, tradingMsBetween, type SessionSpec } from '../datafeed/session-calendar';
 import {
-  averageTrueRange,
+  indicatorById,
+  indicatorLabel,
+  type IndicatorDef,
+  type PlotSpec,
+} from '../indicators/registry';
+import type { DayOf, Maybe, Ohlc } from '../indicators/math';
+import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
+import {
+  boxUnit,
   toKagi,
   toRangeBars,
   toLineBreak,
   toPointAndFigure,
   toRenko,
 } from './price-transforms';
+import {
+  asTime,
+  barPaint,
+  firstChangedValue,
+  ohlcOf,
+  ohlcRows,
+  ohlcvRows,
+  plottedSeconds,
+  priceRowsFrom,
+  samePriceRow,
+  valueRowsFrom,
+  volumeRowsFrom,
+  type GapPolicy,
+  type PriceRow,
+  type RowPalette,
+  type ValueRow,
+  type VolumeRow,
+} from './chart-rows';
+import {
+  PlottedBars,
+  barContaining,
+  indexAtTime,
+  type PlotTransform,
+  type PlotUpdate,
+} from './plotted-bars';
+import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
+import { xAtLogical } from './time-x';
+import { resolutionMs } from '../datafeed/resolution';
+import { pipSizeFor } from '../datafeed/symbol-info';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { MagnetMode } from '../drawings/drawing-ops';
@@ -82,6 +116,12 @@ import {
 import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
+import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
+import { changeText, formatStudyValue, formatVolume } from './legend-format';
+import { paintLegend, paintTable, placeTable, type LegendRun } from './snapshot';
+import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
+import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
 import { PatternRenderer } from '../patterns/pattern-renderer';
@@ -100,8 +140,6 @@ import {
   sameBarColors,
   savedRightOffset,
   scriptRightOffset,
-  withBarColor,
-  type BarPaint,
 } from '../scripts/run-on-host';
 import { PineTableOverlayComponent } from '@shared/pine-chart/components/pine-table-overlay.component';
 import type { TableLayout } from '@shared/pine-chart/render/render-model';
@@ -137,6 +175,9 @@ export type ChartStyle =
   | 'line-break'
   | 'range';
 
+/** The price scale's modes (TradingView's Regular, Logarithmic, Percent, Indexed to 100). */
+export type ScaleMode = 'normal' | 'log' | 'percent' | 'indexed';
+
 /** Styles whose bars are built from price movement, not time. */
 /** Styles whose last-value label is the line colour rather than the bar's up/down colour. */
 const LINE_LIKE: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
@@ -171,6 +212,14 @@ const BAR_COLOR_STYLES: ReadonlySet<ChartStyle> = new Set<ChartStyle>([
   'hilo',
   'vol-candle',
 ]);
+
+/**
+ * The price series. Includes 'Histogram' because the Column style plots the close as bars on the
+ * price scale — it is a price series here, not the volume overlay.
+ */
+type PriceSeries = ISeriesApi<
+  'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline' | 'Histogram' | 'Custom'
+>;
 
 /** A pane of externally fetched series (FX fundamentals). */
 export interface ExternalPane {
@@ -209,6 +258,8 @@ export interface LegendSnapshot {
   low: number | null;
   close: number | null;
   volume: number | null;
+  /** Close minus the previous bar's close (null on the first bar). */
+  change?: number | null;
   changePct: number | null;
   indicators: Array<{
     uid: string;
@@ -217,15 +268,48 @@ export interface LegendSnapshot {
   }>;
 }
 
+export type {
+  DataWindowContext,
+  DataWindowRow,
+  DataWindowSection,
+  ValueProvider,
+} from './value-providers';
+
+/** One plot of a study on the chart, and what was last written to it. */
+interface IndicatorPlotSeries {
+  key: string;
+  api: ISeriesApi<'Line' | 'Histogram'>;
+  color: string;
+  title: string;
+  gaps: GapPolicy;
+  /** A `markers` plot: its shapes, through the markers plugin on its (invisible) series. */
+  markers: {
+    api: ISeriesMarkersPluginApi<Time>;
+    spec: NonNullable<PlotSpec['marker']>;
+    last: string;
+  } | null;
+  sync: SeriesSync<ValueRow>;
+  /** The values its rows were built from. */
+  values: Maybe[];
+}
+
+/** A study's series on the chart (CC-I1: kept across ticks; only their tails are written). */
 interface IndicatorSeries {
   uid: string;
-  paneIndex: number;
-  series: Array<{
-    key: string;
-    api: ISeriesApi<'Line' | 'Histogram'>;
-    color: string;
-    title: string;
-  }>;
+  /** The inputs the series show; other inputs recompute every value. */
+  paramsKey: string;
+  /** Drawn on the price pane, on its scale (takes the symbol's precision). */
+  overlay: boolean;
+  series: IndicatorPlotSeries[];
+}
+
+/** An external pane's line on the chart, kept across ticks (CC-02). */
+interface ExternalLineSeries {
+  api: ISeriesApi<'Line'>;
+  sync: SeriesSync<ValueRow>;
+  /** The points it was sampled from; new points re-sample every bar. */
+  points: readonly PanePoint[];
+  values: Maybe[];
 }
 
 /**
@@ -283,6 +367,34 @@ interface IndicatorSeries {
           </div>
         }
       </div>
+    }
+    @if (eventTip(); as tip) {
+      <div
+        class="hold-tip event-tip"
+        [style.left.px]="tip.x"
+        [style.top.px]="tip.y"
+        role="tooltip"
+        aria-live="polite"
+        data-testid="event-tip"
+      >
+        <div class="event-head">
+          <span class="event-ccy" [class]="'event-' + tip.card.impact.toLowerCase()">{{
+            tip.card.currency
+          }}</span>
+          <b>{{ tip.card.title }}</b>
+        </div>
+        <div class="row date">{{ tip.card.when }} · {{ tip.card.impact }} impact</div>
+        @for (r of tip.card.rows; track r.label) {
+          <div class="row">
+            <span>{{ r.label }}</span
+            ><b>{{ r.value }}</b>
+          </div>
+        }
+        @if (tip.card.surprise) {
+          <div class="event-surprise">{{ tip.card.surprise }}</div>
+        }
+        <div class="row date">Click for the event's reading</div>
+      </div>
     }`,
   styles: [
     `
@@ -336,6 +448,35 @@ interface IndicatorSeries {
         font-weight: 500;
         font-variant-numeric: tabular-nums;
       }
+      .event-tip {
+        width: 240px;
+      }
+      .event-head {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 2px;
+        line-height: 18px;
+      }
+      .event-ccy {
+        flex: none;
+        padding: 0 4px;
+        border-radius: 3px;
+        color: #fff;
+        font-size: 11px;
+        background: #787b86;
+      }
+      .event-ccy.event-high {
+        background: #ef5350;
+      }
+      .event-ccy.event-medium {
+        background: #ffa726;
+      }
+      .event-surprise {
+        margin-top: 2px;
+        line-height: 18px;
+        font-weight: 500;
+      }
     `,
   ],
 })
@@ -352,6 +493,13 @@ export class ChartHostComponent implements OnDestroy {
   );
 
   readonly bars = input.required<Bar[]>();
+  /**
+   * Which series `bars` hold (`symbol|resolution`), as the page knows it once they have LANDED — the
+   * page's symbol switches before the new bars arrive. A change rebuilds every series rather than
+   * diffing one instrument's bars against another's, and re-measures the price-based box. Empty:
+   * this chart's symbol and resolution.
+   */
+  readonly dataKey = input<string>('');
   readonly style = input<ChartStyle>('candles');
   readonly showVolume = input<boolean>(true);
   /** Volume-by-price histogram down the right edge, with POC and value area. */
@@ -370,19 +518,44 @@ export class ChartHostComponent implements OnDestroy {
   readonly magnet = input<MagnetMode>('off');
   /** TV "Stay in drawing mode": keep the tool armed after a drawing completes. */
   readonly stayInDrawingMode = input<boolean>(false);
-  /** Price scale mode — normal, logarithmic or percentage. */
-  readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
+  /** Price scale mode — normal, logarithmic, percentage or indexed to 100 (CC-I9). */
+  readonly scaleMode = input<ScaleMode>('normal');
+  /** Turn the price scale upside down (TradingView's "Invert scale"). */
+  readonly invertScale = input<boolean>(false);
+  /** Which side the price scale sits on; the studies on the price pane move with it. */
+  readonly scaleSide = input<'right' | 'left'>('right');
+  /** Lines where each trading day begins on an intraday chart (17:00 New York for FX). */
+  readonly sessionBreaks = input<boolean>(false);
   /** Engine-derived price levels: position entry/SL/TP and pending orders. */
   readonly overlays = input<PriceOverlay[]>([]);
+  /** Whether those lines widen the price scale's fit (CC-10); off keeps the candles' own range. */
+  readonly fitTradeLines = input<boolean>(true);
   /** Bar markers for trade signals, fills and economic events. */
   readonly markers = input<ChartMarker[]>([]);
   /** IANA zone for the time axis; bar data itself stays UTC. */
   readonly timezone = input<string>('UTC');
-  /** Economic events on the time axis. Times are UTC; shifted like the bars. */
+  /** Economic events on the time axis. Times are UTC; placed on the display clock between bars. */
   readonly events = input<EventMark[]>([]);
   readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
-  /** Multiplier on the ATR-derived Renko / P&F / Kagi box size. */
+  /**
+   * Spans to shade (UTC ms): the news blackout around Tier-1 events — the window live refuses new
+   * entries in (`GET economic-event/news-blackout`). Empty: no shading.
+   */
+  readonly eventBands = input<{ from: number; to: number }[]>([]);
+  /** Multiplier on the ATR-derived Renko / P&F / Kagi / Range box size. */
   readonly boxSizeAtr = input<number>(1);
+  /**
+   * How the price-based box is sized (TradingView's "box size assignment method"): `atr` — a multiple
+   * of ATR(14), measured once at load; `pips` — a fixed number of pips (`boxPips`), "Traditional".
+   */
+  readonly boxMethod = input<'atr' | 'pips'>('atr');
+  readonly boxPips = input<number>(10);
+  /** One pip in price (the page knows the symbol's asset class); null: from {@link precision}. */
+  readonly pipSize = input<number | null>(null);
+  /** Renko "Show wicks": the furthest price traded against each brick before it formed. */
+  readonly renkoWicks = input<boolean>(false);
+  /** Line break: how many lines a reversal must break (TradingView's default 3). */
+  readonly lineBreakLines = input<number>(3);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
   /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
@@ -400,6 +573,13 @@ export class ChartHostComponent implements OnDestroy {
    * session and periodic profiles. Null: UTC days.
    */
   readonly session = input<SessionSpec | null>(null);
+  /**
+   * The bars reach back to the start of the engine's history: scrolling to the left edge stops
+   * asking for more (CC-14 — every pan to the edge used to fetch again, for nothing).
+   */
+  readonly historyComplete = input<boolean>(false);
+  /** The data window is open: it is filled on every crosshair move (CC-I6), and only then. */
+  readonly dataWindowOpen = input(false);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
@@ -463,15 +643,46 @@ export class ChartHostComponent implements OnDestroy {
   readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
   /** Zoom/scroll or a pane resize settled — the page auto-saves {@link viewState}. */
   readonly viewChanged = output<void>();
+  /** An economic event's flag (or the next-event chip) was clicked: open its reading. */
+  readonly eventOpen = output<UpcomingEconomicEvent>();
+  /**
+   * Whether the price scale fits the visible bars on its own (TradingView's "auto"), as the chart
+   * really is — dragging the scale turns it off, a double-click or "auto" back on (CC-19: the button
+   * lit whenever the mode was "normal").
+   */
+  readonly autoScaleChange = output<boolean>();
 
   private chart: IChartApi | null = null;
-  // Includes 'Histogram' because the Column style plots the close as bars on
-  // the price scale — it is a price series here, not the volume overlay.
-  private price: ISeriesApi<
-    'Candlestick' | 'Bar' | 'Line' | 'Area' | 'Baseline' | 'Histogram' | 'Custom'
-  > | null = null;
+  private price: PriceSeries | null = null;
   private volume: ISeriesApi<'Histogram'> | null = null;
   private indicatorSeries: IndicatorSeries[] = [];
+  /**
+   * The rows on the price and volume series, kept by {@link SeriesSync}: a tick is one `update()` of
+   * the forming bar, not the whole series re-sent — and the price series is replaced only when the
+   * style changes (CC-I1). Before, every tick removed and re-added it, re-sent every row and
+   * re-rendered every script, marker and pane.
+   */
+  private readonly priceSync = new SeriesSync<PriceRow>(null, samePriceRow);
+  private readonly volumeSync = new SeriesSync<VolumeRow>(null, sameValueRow);
+  /** The style the price series was CREATED for (a style change replaces it). */
+  private seriesStyle: ChartStyle | null = null;
+  /** The script colours the price rows were built with ({@link adoptRepaintedRows}). */
+  private rowsColors: (string | null)[] | null = null;
+  /** The bars as plotted, kept in step from the first bar that changed. */
+  private readonly plotter = new PlottedBars();
+  /**
+   * The price-based styles' box (Renko brick, P&F box, range size) in price, measured once per series
+   * and style from the bars that had closed (CC-16): TradingView sizes an ATR box at load and keeps
+   * it, rather than letting the forming bar move every brick on each tick.
+   */
+  private box: { key: string; unit: number } | null = null;
+  /** Bumped on every change of the plotted bars: the studies' cache is keyed on it. */
+  private dataVersion = 0;
+  /**
+   * The bar time (plotted seconds) the crosshair rests on, or null when it is off the chart: the
+   * legend re-reads that bar after a tick instead of jumping to the newest one (CC-04).
+   */
+  private crosshairTime: number | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private readonly loadMorePending = signal(false);
   /**
@@ -485,6 +696,8 @@ export class ChartHostComponent implements OnDestroy {
     date: string;
     rows: Array<{ label: string; value: string; color: string }>;
   } | null>(null);
+  /** The economic event under the pointer, as a card above its flag (CC-I2). */
+  readonly eventTip = signal<{ x: number; y: number; card: EventCard } | null>(null);
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private holdOrigin: { x: number; y: number } | null = null;
   private holding = false;
@@ -701,7 +914,6 @@ export class ChartHostComponent implements OnDestroy {
     this.lastValueColor = color;
     series.applyOptions({ priceLineColor: color });
   }
-  private computedCache = new Map<string, Record<string, Array<number | null>>>();
   private readonly overlayRenderer = new OverlayRenderer(
     () => this.price,
     () => this.precision(),
@@ -715,7 +927,14 @@ export class ChartHostComponent implements OnDestroy {
     },
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
-  private readonly eventRenderer = new EventMarksRenderer(() => this.chart);
+  private readonly sessionBreaksRenderer = new SessionBreaksRenderer(
+    () => this.chart,
+    () => this.theme.theme() === 'dark',
+  );
+  private readonly eventRenderer = new EventMarksRenderer(
+    (ms) => this.eventX(ms),
+    () => this.serverClock.now(),
+  );
   /** One renderer per active profile study, keyed by the study's uid. */
   private profileRenderers = new Map<string, ProfileRenderer>();
   /** Every active pattern study paints through this one renderer. */
@@ -738,6 +957,14 @@ export class ChartHostComponent implements OnDestroy {
     this.zone.runOutsideAngular(() => {
       this.countdownTimer = setInterval(() => this.tickCountdown(), 1000);
     });
+    // The data window's own sections go through the registry like any other provider's.
+    this.registerValueProvider('bar', this.barValues);
+    this.registerValueProvider('studies', this.studyValues);
+
+    // Opening the data window fills it at once, for the bar the legend shows.
+    effect(() => {
+      if (this.dataWindowOpen()) untracked(() => this.emitLegend());
+    });
     // Create once the view exists, then keep it in step with inputs. Each
     // effect reads exactly one input and does its work untracked, so changing
     // the bar set never rebuilds the indicator panes and vice versa.
@@ -747,29 +974,48 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => (this.chart ? this.retheme(dark) : this.rebuildChart(el, dark)));
     });
 
+    // The bars and everything drawn from them, by the least the chart has to redraw (CC-I1): a tick
+    // rewrites the forming bar's rows on the price, volume and study series; a new series, style,
+    // time zone, theme or box size, or history loaded on the left, rebuilds them (syncData).
     effect(() => {
-      const bars = this.bars();
-      const style = this.style();
-      const showVolume = this.showVolume();
-      const precision = this.precision();
+      this.bars();
+      this.dataKey();
+      this.style();
+      this.timezone();
       this.boxSizeAtr();
-      untracked(() => this.applyData(bars, style, showVolume, precision));
+      this.boxMethod();
+      this.boxPips();
+      this.pipSize();
+      this.renkoWicks();
+      this.lineBreakLines();
+      this.theme.theme();
+      untracked(() => this.syncData());
     });
 
     effect(() => {
+      const show = this.showVolume();
+      untracked(() => this.syncVolumeSeries(show));
+    });
+
+    effect(() => {
+      const precision = this.precision();
+      untracked(() => this.applyPrecision(precision));
+    });
+
+    // Studies: their inputs, and the trading days the day-based ones count in (they recount when the
+    // symbol's session becomes known). A change of the chart's own bars reaches them through syncData,
+    // which writes only their tails.
+    effect(() => {
       const active = this.indicators();
-      // Depend on style as well: a price-based style replaces the bar array,
-      // and the studies have to be recomputed against what is actually drawn.
-      this.bars();
-      this.style();
-      this.compareBars();
-      // The day-based studies recount when the symbol's session becomes known.
       this.calendar();
-      untracked(() => {
-        this.applyIndicators(active, this.plotted);
-        this.applyPatterns(active);
-        this.applyProfiles(active);
-      });
+      untracked(() => this.applyStudies(active));
+    });
+
+    // The other symbols' bars the compare studies read: they follow those symbols' live prices and
+    // scroll-back (CC-13), so only the series are rewritten here — not the patterns and profiles.
+    effect(() => {
+      this.compareBars();
+      untracked(() => this.applyIndicators(this.indicators(), this.plotted.length));
     });
 
     // Drawing state → renderer. Reads the store's signals so any mutation
@@ -806,35 +1052,33 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const mode = this.scaleMode();
-      untracked(() => this.applyScaleMode(mode));
+      const invert = this.invertScale();
+      const side = this.scaleSide();
+      untracked(() => this.applyScale(mode, invert, side));
     });
 
     effect(() => {
-      // Re-plot on a timezone change: the shift is applied to the bar TIMES
-      // handed to the library, since Lightweight Charts has no timezone option
-      // of its own and renders whatever instants it is given.
-      this.timezone();
-      untracked(() =>
-        this.applyData(this.bars(), this.style(), this.showVolume(), this.precision()),
-      );
+      this.sessionBreaks();
+      this.calendar();
+      untracked(() => this.syncSessionBreaks());
     });
 
-    // Pine runs. Re-rendered when the price series is replaced (style, timezone, theme),
-    // because the script's primitives and panes hang off that series.
+    // Pine runs: re-rendered when their results change, and on a rebuild (syncData) — never on a
+    // tick (the contract with pine-chart). Ticks write the forming bar's row, which carries its
+    // barcolor (priceRowsFrom), and the price series is replaced only by a style change.
     effect(() => {
       const results = this.scriptResults();
       const trades = this.showScriptTrades();
-      this.style();
-      this.timezone();
-      this.theme.theme();
-      untracked(() => this.applyScripts(results, trades));
+      untracked(() => {
+        this.applyScripts(results, trades);
+        this.adoptRepaintedRows();
+      });
     });
 
+    // Fundamentals panes: their series live as long as their study (CC-02), so a pane keeps the
+    // height and place the operator gave it; the bars reach them through syncData.
     effect(() => {
       const panes = this.externalPanes();
-      this.timezone();
-      this.theme.theme();
-      this.bars();
       untracked(() => this.applyExternalPanes(panes));
     });
 
@@ -843,10 +1087,14 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.overlayRenderer.setOverlays(overlays));
     });
 
-    // Analytical overlays. Recomputed when the bars or the toggles change, and — via
-    // `onVisibleRangeChanged` — whenever the operator pans or zooms.
     effect(() => {
-      this.bars();
+      const fit = this.fitTradeLines();
+      untracked(() => this.overlayRenderer.setFit(fit));
+    });
+
+    // Analytical overlays. Recomputed when the toggles change, after ticks (syncData, throttled) and
+    // — via `onVisibleRangeChanged` — whenever the operator pans or zooms.
+    effect(() => {
       this.showVolumeProfile();
       this.volumeProfileMode();
       this.showSupportResistance();
@@ -860,24 +1108,24 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.applyMarkers(markers));
     });
 
+    // Events are placed by their UTC instant between bars (eventX), so a zone change moves them with
+    // the bars and needs nothing here.
     effect(() => {
       const events = this.events();
       const minImpact = this.minEventImpact();
-      // Shifted with the bars so an event sits where it happened on the
-      // displayed clock, not where it happened in UTC.
-      this.timezone();
-      untracked(() =>
-        this.eventRenderer.setMarks(
-          events.map((e) => ({ ...e, time: e.time + this.timezoneShiftMs(e.time) })),
-          minImpact,
-        ),
-      );
+      untracked(() => this.eventRenderer.setMarks(events, minImpact));
+    });
+
+    effect(() => {
+      const bands = this.eventBands();
+      untracked(() => this.eventRenderer.setBands(bands));
     });
   }
 
   ngOnDestroy(): void {
     clearInterval(this.countdownTimer);
     clearTimeout(this.marginTimer);
+    if (this.tailStudiesTimer !== null) clearTimeout(this.tailStudiesTimer);
     this.cancelGlide();
     for (const h of this.scriptHandles) h.dispose();
     this.scriptHandles = [];
@@ -890,13 +1138,61 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
-   * Price scale mode. Percentage and indexed-to-100 are relative to the first
-   * visible bar, which is why switching mode rescales rather than re-fetching.
+   * The price scale: its side, mode and direction (CC-I9). Percentage and indexed-to-100 are
+   * relative to the first visible bar, which is why switching mode rescales rather than re-fetching.
+   * The price series and the studies drawn on its scale move to the chosen side together; the
+   * volume overlay keeps its own scale.
    */
-  private applyScaleMode(mode: 'normal' | 'log' | 'percent'): void {
-    this.chart?.priceScale('right').applyOptions({
-      mode: mode === 'log' ? 1 : mode === 'percent' ? 2 : 0,
+  private applyScale(mode: ScaleMode, invert: boolean, side: 'right' | 'left'): void {
+    const chart = this.chart;
+    if (!chart) return;
+    chart.applyOptions({
+      leftPriceScale: { visible: side === 'left' },
+      rightPriceScale: { visible: side === 'right' },
     });
+    this.price?.applyOptions({ priceScaleId: side });
+    for (const s of this.indicatorSeries)
+      if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceScaleId: side });
+    chart.priceScale(side).applyOptions({
+      mode:
+        mode === 'log'
+          ? PriceScaleMode.Logarithmic
+          : mode === 'percent'
+            ? PriceScaleMode.Percentage
+            : mode === 'indexed'
+              ? PriceScaleMode.IndexedTo100
+              : PriceScaleMode.Normal,
+      invertScale: invert,
+    });
+    this.checkAutoScale();
+  }
+
+  /** The autoscale state as last reported ({@link autoScaleChange}). */
+  private autoScaleOn: boolean | null = null;
+
+  /** Report the price scale's real autoscale state when it changed. */
+  private checkAutoScale(): void {
+    const on = this.chart?.priceScale(this.scaleSide()).options().autoScale;
+    if (on === undefined || on === this.autoScaleOn) return;
+    this.autoScaleOn = on;
+    this.autoScaleChange.emit(on);
+  }
+
+  /** Session breaks on the plotted bars: intraday only, on the symbol's trading days. */
+  private syncSessionBreaks(): void {
+    const resolution = this.resolution();
+    const intraday = !['1D', '1W', '1M'].includes(resolution) && !PRICE_BASED.has(this.style());
+    if (!this.sessionBreaks() || !intraday || this.plottedUtc.length < 2) {
+      this.sessionBreaksRenderer.setBreaks([]);
+      return;
+    }
+    const dayOf = this.calendar()?.dayOf ?? utcDay;
+    this.sessionBreaksRenderer.setBreaks(
+      sessionBreakIndexes(
+        this.plottedUtc.map((b) => b.time),
+        dayOf,
+      ),
+    );
   }
 
   /**
@@ -939,6 +1235,14 @@ export class ChartHostComponent implements OnDestroy {
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
+  }
+
+  /**
+   * The bars on screen — the window the analysis overlays describe. The assistant's levels read the
+   * same window (CC-21: they were computed on every loaded bar while the chart drew the visible ones).
+   */
+  visibleWindow(): Bar[] {
+    return this.visibleBars(this.bars());
   }
 
   /** The slice of `bars` currently on screen. */
@@ -1037,10 +1341,19 @@ export class ChartHostComponent implements OnDestroy {
     if (!scale) return false;
     const from = Math.min(fromMs, toMs);
     const to = Math.max(fromMs, toMs);
+    // By bar index, on the display clock (CC-15): the bars' times are zone-shifted, so a window of
+    // UTC seconds landed hours off on a New York axis — and between bars, or past the last one,
+    // the time scale has no time to land on.
+    const a = this.logicalAtMs(from);
+    const b = this.logicalAtMs(to);
+    if (a !== null && b !== null && b > a) {
+      scale.setVisibleLogicalRange({ from: a as Logical, to: b as Logical });
+      return true;
+    }
     try {
       scale.setVisibleRange({
-        from: Math.floor(from / 1000) as unknown as Time,
-        to: Math.floor(to / 1000) as unknown as Time,
+        from: Math.floor((from + this.timezoneShiftMs(from)) / 1000) as unknown as Time,
+        to: Math.floor((to + this.timezoneShiftMs(to)) / 1000) as unknown as Time,
       });
       return true;
     } catch {
@@ -1132,15 +1445,32 @@ export class ChartHostComponent implements OnDestroy {
     this.glideCleanup = null;
   }
 
-  /** Fractional bar index of a UTC instant on the plotted (zone-shifted) bars; extrapolates past either end. */
+  /**
+   * Fractional bar index of a UTC instant on the plotted (zone-shifted) bars: between two bars by
+   * time; before the first by the average bar width; past the last one — an upcoming economic event —
+   * inside the forming bar by its own span, and beyond it by the TRADING time to it in bars of this
+   * resolution (the symbol's session, when known), so Monday's release lands on Monday's bar rather
+   * than two days' worth of bars past Friday's.
+   */
   private logicalAtMs(utcMs: number): number | null {
     const bars = this.plotted;
     if (bars.length < 2) return null;
     const t = utcMs + this.timezoneShiftMs(utcMs);
     const last = bars.length - 1;
-    const step = (bars[last].time - bars[0].time) / last || 3_600_000;
-    if (t <= bars[0].time) return (t - bars[0].time) / step;
-    if (t >= bars[last].time) return last + (t - bars[last].time) / step;
+    const avg = (bars[last].time - bars[0].time) / last || 3_600_000;
+    if (t <= bars[0].time) return (t - bars[0].time) / avg;
+    if (t >= bars[last].time) {
+      const lastUtc = this.plottedUtc[last]?.time ?? utcMs;
+      const step = resolutionMs(this.resolution()) ?? avg;
+      const end = this.lastBarEnd();
+      if (!Number.isFinite(end) || end <= lastUtc) return last + (utcMs - lastUtc) / step;
+      if (utcMs < end) return last + (utcMs - lastUtc) / (end - lastUtc);
+      // Weeks and months are counted on the calendar: their bars span the weekends anyway.
+      const calendar =
+        this.resolution() === '1W' || this.resolution() === '1M' ? null : this.calendar();
+      const span = calendar ? tradingMsBetween(calendar, end, utcMs) : utcMs - end;
+      return last + 1 + span / step;
+    }
     let lo = 0;
     let hi = last;
     while (hi - lo > 1) {
@@ -1151,10 +1481,37 @@ export class ChartHostComponent implements OnDestroy {
     return lo + (t - bars[lo].time) / (bars[hi].time - bars[lo].time);
   }
 
+  /** UTC ms → x on the price pane: an economic event's place, between bars or past the last one. */
+  private eventX(utcMs: number): number | null {
+    const logical = this.logicalAtMs(utcMs);
+    const scale = this.chart?.timeScale();
+    return logical === null || !scale ? null : xAtLogical(scale, logical);
+  }
+
+  /**
+   * The event card under the pointer (CC-I2), above its flag; none elsewhere. From the crosshair's
+   * point on the price pane.
+   */
+  private updateEventTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
+    const mark = point && (paneIndex ?? 0) === 0 ? this.eventRenderer.hit(point.x, point.y) : null;
+    if (!mark) {
+      if (this.eventTip()) this.eventTip.set(null);
+      return;
+    }
+    const when = formatEventTime(mark.time, Math.round(this.timezoneShiftMs(mark.time) / 60_000));
+    const card = eventCard(mark, when, this.serverClock.now());
+    const el = this.container().nativeElement;
+    const height = 92 + card.rows.length * 20 + (card.surprise ? 18 : 0);
+    const x = Math.max(4, Math.min(point!.x + 10, el.clientWidth - 248));
+    const y = Math.max(4, point!.y - height - 12);
+    this.eventTip.set({ x, y, card });
+  }
+
   /** Show the most recent `count` bars. */
   showLastBars(count: number): boolean {
     const scale = this.chart?.timeScale();
-    const total = this.bars().length;
+    // The plotted bars: on a price-based style the time scale's slots are its bricks.
+    const total = this.plotted.length;
     if (!scale || total === 0) return false;
     const from = Math.max(0, total - count);
     scale.setVisibleLogicalRange({ from, to: total - 1 });
@@ -1207,25 +1564,21 @@ export class ChartHostComponent implements OnDestroy {
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
       rightPriceScale: { borderColor: p.border },
+      leftPriceScale: { borderColor: p.border },
       timeScale: { borderColor: p.border },
       crosshair: {
         vertLine: { color: p.crosshair, labelBackgroundColor: p.crosshairLabel },
         horzLine: { color: p.crosshair, labelBackgroundColor: p.crosshairLabel },
       },
     });
-    // Series colours come from the palette when the data is applied. Replacing the price
-    // series drops the profile primitives that hang off it, so the studies are re-applied as
-    // a style change does.
-    this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
-    const active = this.indicators();
-    this.applyIndicators(active, this.plotted);
-    this.applyPatterns(active);
-    this.applyProfiles(active);
+    // The series keep their rows: the up/down colours are the same in both themes. The labels drawn
+    // over the canvas (last value, countdown) blend with the background, and the data effect,
+    // which tracks the theme, rebuilds what is drawn from the bars.
   }
 
   private rebuildChart(el: HTMLElement, dark: boolean): void {
     this.chart?.remove();
-    // Every series handle died with that chart. Left set, applyData below hands
+    // Every series handle died with that chart. Left set, syncData below would hand
     // the old price series to the NEW chart's removeSeries, which throws "Value
     // is undefined" for a series it never owned — a theme switch then left the
     // chart empty — and the old volume series would be written to, not re-added.
@@ -1233,6 +1586,12 @@ export class ChartHostComponent implements OnDestroy {
     this.volume = null;
     this.markerApi = null;
     this.indicatorSeries = [];
+    this.externalSeries.clear();
+    this.seriesStyle = null;
+    this.priceSync.attach(null);
+    this.volumeSync.attach(null);
+    this.plotter.reset();
+    this.plotKey = null;
     const p = this.palette(dark);
 
     // The library's time scale, but weighing and labelling 1D/1W/1M bars by trading date — the
@@ -1257,6 +1616,7 @@ export class ChartHostComponent implements OnDestroy {
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
       rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
+      leftPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: {
         borderColor: p.border,
         timeVisible: true,
@@ -1292,6 +1652,11 @@ export class ChartHostComponent implements OnDestroy {
       timeScale,
       options,
     ) as unknown as IChartApi;
+    // The price pane stays when its last series goes: with volume off and only pane studies on, the
+    // style switch's old price series used to be the pane's last, the library deleted the pane, and
+    // the candles came back in the first study's pane (CC-03). syncData also adds the new series
+    // before it removes the old one.
+    this.chart.panes()[0]?.setPreserveEmptyPane(true);
 
     this.sizeToContainer(el);
     this.resizeObserver?.disconnect();
@@ -1301,7 +1666,21 @@ export class ChartHostComponent implements OnDestroy {
     });
     this.resizeObserver.observe(el);
 
-    this.chart.subscribeCrosshairMove((param) => this.emitLegend(param));
+    this.chart.subscribeCrosshairMove((param) => {
+      // Remembered so a tick re-reads the bar under the pointer rather than the newest (CC-04).
+      this.crosshairTime =
+        param.point && param.time !== undefined && param.time !== null
+          ? (param.time as number)
+          : null;
+      this.emitLegend();
+      this.updateEventTip(param.point, param.paneIndex);
+    });
+    // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
+    this.chart.subscribeClick((param) => {
+      if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
+      const mark = this.eventRenderer.hit(param.point.x, param.point.y);
+      if (mark) this.eventOpen.emit(mark.event);
+    });
     this.bindHold(el);
 
     this.controller.attach(this.chart, el);
@@ -1328,7 +1707,7 @@ export class ChartHostComponent implements OnDestroy {
     // frame of a drag, and without it one flick queues dozens of fetches.
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range || this.plotted.length === 0) return;
-      if (range.from < 10 && !this.loadMorePending()) {
+      if (range.from < 10 && !this.loadMorePending() && !this.historyComplete()) {
         this.loadMorePending.set(true);
         this.loadMore.emit();
       }
@@ -1344,9 +1723,17 @@ export class ChartHostComponent implements OnDestroy {
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());
+    // The price scale's autoscale has no change event either: dragging or wheeling the scale turns
+    // it off, a double-click on it back on. Read it after each, once the chart has handled it.
+    for (const type of ['pointerup', 'wheel', 'dblclick'] as const)
+      el.addEventListener(type, () => requestAnimationFrame(() => this.checkAutoScale()), {
+        passive: true,
+      });
 
-    this.applyData(this.bars(), this.style(), this.showVolume(), this.precision());
-    this.applyIndicators(this.indicators(), this.bars());
+    this.syncVolumeSeries(this.showVolume());
+    this.syncData();
+    this.applyStudies(this.indicators());
+    this.applyExternalPanes(this.externalPanes());
   }
 
   /**
@@ -1371,38 +1758,134 @@ export class ChartHostComponent implements OnDestroy {
     }));
   }
 
-  /** PNG data URL of the chart as currently drawn. */
-  snapshot(): string | null {
+  /**
+   * The chart as an image (CC-22): the library's own screenshot of every pane, scale and primitive
+   * (`takeScreenshot`) under a title band, with the legend and the scripts' tables — HTML over the
+   * canvas, so laid out and drawn here from their layout — painted in. Null when the chart is not
+   * drawn or the browser will not render it; the caller says so rather than reporting a save that
+   * did not happen.
+   */
+  snapshotCanvas(title: string): HTMLCanvasElement | null {
+    const chart = this.chart;
     const el = this.container().nativeElement;
-    const sources = [...el.querySelectorAll('canvas')] as HTMLCanvasElement[];
-    if (sources.length === 0) return null;
-    // Lightweight Charts paints across SEVERAL stacked canvases (panes, scales,
-    // the crosshair layer). Grabbing one gives a chart with no axes, so they
-    // are composited in DOM order onto a single surface.
-    const rect = el.getBoundingClientRect();
-    const out = document.createElement('canvas');
-    out.width = Math.max(1, Math.round(rect.width * window.devicePixelRatio));
-    out.height = Math.max(1, Math.round(rect.height * window.devicePixelRatio));
-    const ctx = out.getContext('2d');
-    if (!ctx) return null;
-    ctx.fillStyle = this.palette(this.theme.theme() === 'dark').background;
-    ctx.fillRect(0, 0, out.width, out.height);
-    for (const c of sources) {
-      const cr = c.getBoundingClientRect();
-      if (cr.width === 0 || cr.height === 0) continue;
-      ctx.drawImage(
-        c,
-        (cr.left - rect.left) * window.devicePixelRatio,
-        (cr.top - rect.top) * window.devicePixelRatio,
-        cr.width * window.devicePixelRatio,
-        cr.height * window.devicePixelRatio,
-      );
-    }
+    if (!chart || el.clientWidth === 0) return null;
+    let shot: HTMLCanvasElement;
     try {
-      return out.toDataURL('image/png');
+      shot = chart.takeScreenshot(true, false);
     } catch {
       return null;
     }
+    if (!shot.width || !shot.height) return null;
+    const ratio = shot.width / el.clientWidth;
+    const BAND = 28;
+    const out = document.createElement('canvas');
+    out.width = shot.width;
+    out.height = shot.height + Math.round(BAND * ratio);
+    const ctx = out.getContext('2d');
+    if (!ctx) return null;
+    const p = this.palette(this.theme.theme() === 'dark');
+    ctx.fillStyle = p.background;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(shot, 0, Math.round(BAND * ratio));
+    ctx.scale(ratio, ratio);
+
+    const font = "-apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif";
+    ctx.fillStyle = p.text;
+    ctx.font = `600 13px ${font}`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(title, 10, BAND / 2);
+    const stamp = `${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+    ctx.font = `12px ${font}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(stamp, el.clientWidth - 10, BAND / 2);
+    ctx.textAlign = 'left';
+
+    // The scripts' tables, where they sit over their panes.
+    const measure = (text: string, cellFont: string) => {
+      ctx.font = cellFont;
+      return ctx.measureText(text).width;
+    };
+    for (const pane of this.scriptTables())
+      for (const table of pane.tables)
+        paintTable(
+          ctx,
+          placeTable(table, pane.width, pane.height, measure),
+          pane.left,
+          BAND + pane.top,
+        );
+
+    paintLegend(ctx, this.legendRuns(p.text), 12, BAND + 8, `12px ${font}`, 18);
+    return out;
+  }
+
+  /** The legend as text runs: prices in the bar's colour, then each study's values in theirs. */
+  private legendRuns(ink: string): LegendRun[][] {
+    const s = this.lastSnapshot;
+    if (!s || s.close === null || s.open === null) return [];
+    const dp = this.precision();
+    const tone = s.close >= s.open ? '#089981' : '#F23645';
+    const price = (v: number | null) => (v === null ? '—' : v.toFixed(dp));
+    const change = changeText(s.change ?? null, s.changePct, this.pipSize() ?? pipSizeFor(dp), dp);
+    const lines: LegendRun[][] = [
+      [
+        { text: `O ${price(s.open)}`, color: tone },
+        { text: `H ${price(s.high)}`, color: tone },
+        { text: `L ${price(s.low)}`, color: tone },
+        { text: `C ${price(s.close)}`, color: tone },
+        ...(change ? [{ text: change, color: tone }] : []),
+        { text: `Vol ${formatVolume(s.volume)}`, color: ink },
+      ],
+    ];
+    for (const ind of s.indicators)
+      lines.push([
+        { text: ind.label, color: ink },
+        ...ind.values.map((v) => ({
+          text: v.value === null ? '—' : v.value.toFixed(Math.min(dp, 4)),
+          color: v.color,
+        })),
+      ]);
+    return lines;
+  }
+
+  /**
+   * The chart's data as rows for a CSV export (CC-I7): each plotted bar's UTC time and prices, then
+   * every value the data window lists for it — the studies' plots, and the scripts' once pine-chart
+   * registers them — one column per value, named "Section · value".
+   */
+  exportRows(): (string | number | null)[][] {
+    const columns: string[] = [];
+    const index = new Map<string, number>();
+    const body: (string | number | null)[][] = [];
+    const precision = this.precision();
+    this.plotted.forEach((bar, i) => {
+      const utcTime = this.plottedUtc[i]?.time ?? bar.time;
+      const values = new Map<number, string | number | null>();
+      for (const section of this.valueProviders.collect({ index: i, bar, utcTime, precision })) {
+        if (section.id === 'bar') continue;
+        for (const row of section.rows) {
+          const name = `${section.title} · ${row.label}`;
+          let col = index.get(name);
+          if (col === undefined) {
+            col = columns.length;
+            columns.push(name);
+            index.set(name, col);
+          }
+          values.set(col, row.raw !== undefined ? row.raw : row.value);
+        }
+      }
+      body.push([
+        new Date(utcTime).toISOString(),
+        bar.open,
+        bar.high,
+        bar.low,
+        bar.close,
+        bar.volume,
+        ...columns.map((_, c) => values.get(c) ?? null),
+      ]);
+    });
+    const header = ['time (UTC)', 'open', 'high', 'low', 'close', 'volume', ...columns];
+    // Rows written before a column first appeared are shorter: pad them to the header.
+    return [header, ...body.map((r) => [...r, ...new Array(header.length - r.length).fill(null)])];
   }
 
   /** Price at a y offset inside the chart, for click-to-act features. */
@@ -1430,15 +1913,19 @@ export class ChartHostComponent implements OnDestroy {
     };
   }
 
-  /** Reset both scales to fit the data, as double-clicking the axis does. */
-  /** Fit the price axis to the visible data, leaving the time window alone (TradingView's "auto"). */
+  /**
+   * Fit the price axis to the visible data, leaving the time window — and the scale's mode: log,
+   * percent, indexed — alone (TradingView's "auto"; CC-19: it used to switch the mode to normal).
+   */
   autoScalePrice(): void {
-    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+    this.chart?.priceScale(this.scaleSide()).applyOptions({ autoScale: true });
+    this.checkAutoScale();
   }
 
+  /** Reset both scales to fit the data, as double-clicking the axis does. */
   resetScales(): void {
     this.chart?.timeScale().fitContent();
-    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+    this.autoScalePrice();
   }
 
   private sizeToContainer(el: HTMLElement): void {
@@ -1454,45 +1941,217 @@ export class ChartHostComponent implements OnDestroy {
     this.loadMorePending.set(false);
   }
 
-  private applyData(bars: Bar[], style: ChartStyle, showVolume: boolean, precision: number): void {
-    if (!this.chart) return;
-    this.plotted = bars;
-    this.computedCache.clear();
-    // Before the series are set: the time scale weighs and labels their times by these.
-    this.tradingDates = tradingDatesByPlottedTime(bars, this.resolution(), (t) =>
-      this.timezoneShiftMs(t),
+  /** The key the plotted bars were last built under (series, style, zone, theme, box). */
+  private plotKey: string | null = null;
+
+  /**
+   * Keep every series drawn from the bars in step with them, by the least the chart has to redraw
+   * (CC-I1).
+   *
+   * <ul>
+   *   <li>A tick or a minute resync changes the newest bar or two: the plotted bars are redone from
+   *       the first bar that changed (`PlottedBars`), and each series is written from there — one
+   *       `update()` of the forming bar on the price, volume and study series, nothing re-sent.</li>
+   *   <li>A new series (`dataKey`), style, time zone, theme or box size, or history loaded on the
+   *       left: every bar is redone and re-sent, and what hangs off the bars (studies, markers,
+   *       scripts) is redrawn. Only a style change replaces the price series — its type is
+   *       structural in Lightweight Charts — and the new one is added before the old goes, so the
+   *       price pane never empties (CC-03).</li>
+   * </ul>
+   *
+   * <p>Scripts are re-rendered on a rebuild and when their results change, never on a tick (the
+   * contract with pine-chart): their `barcolor()` is in the price rows, so the forming bar keeps its
+   * colour through `update()`.</p>
+   */
+  private syncData(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const raw = this.bars();
+    const style = this.style();
+    const zone = this.timezone();
+    const dark = this.theme.theme() === 'dark';
+    const series = this.dataKey() || `${this.symbol()}|${this.resolution()}`;
+    const unit = PRICE_BASED.has(style) ? this.boxUnitFor(raw, series, style) : null;
+    // What else a price-based style is built with: Renko's wicks, Line break's lines.
+    const shape =
+      style === 'renko'
+        ? `wicks:${this.renkoWicks()}`
+        : style === 'line-break'
+          ? `lines:${this.lineBreakLines()}`
+          : '';
+    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}`;
+    // Another of the effect's inputs re-ran it with nothing changed.
+    if (raw === this.plotter.raw && key === this.plotKey) return;
+
+    const update = this.plotter.update(
+      raw,
+      key,
+      this.plotTransform(style, unit ?? 0),
+      zone === 'UTC' ? null : (t) => this.timezoneShiftMs(t),
     );
-    if (this.labelsFor !== this.resolution()) {
-      this.labelsFor = this.resolution();
+    this.plotKey = key;
+    this.plotted = this.plotter.plotted;
+    this.plottedUtc = this.plotter.utc;
+    this.utcByPlotted = null;
+    this.dataVersion++;
+    this.studyBarsCache = null;
+    // Before the series are written: the time scale weighs and labels their times by these.
+    this.labelTradingDates(raw, update);
+
+    const replaced = this.ensurePriceSeries(style);
+    const full = update.rebuild || replaced;
+    if (full) {
+      // The scripts' colours on these bars, from the runs on the chart now (pine-chart's handles
+      // read no chart state); the re-render below brings any change with it.
+      this.barColors = this.scriptBarColors(style, this.plotted);
+      if (style === 'baseline') this.applyBaseline();
+    }
+    this.priceStyle = style;
+    this.writePriceRows(full ? 0 : update.from);
+    this.writeVolumeRows(full ? 0 : update.from);
+
+    if (full) {
+      const active = this.indicators();
+      this.applyIndicators(active, 0);
+      this.applyPatterns(active);
+      this.applyProfiles(active);
+      this.recomputeAnalysis();
+      this.applyMarkers(this.markers());
+      this.writeExternalPanes(0);
+      this.applyScripts(this.scriptResults(), this.showScriptTrades());
+      this.adoptRepaintedRows();
+    } else {
+      this.applyIndicators(this.indicators(), update.from);
+      this.writeExternalPanes(update.from);
+      // A bar opened (or replay moved): markers outside the range may be in it now.
+      if (this.markersFor !== this.markerRangeKey()) this.applyMarkers(this.markers());
+      this.scheduleTailStudies();
+    }
+    if (full || this.breaksFor !== this.plottedUtc.length) {
+      this.breaksFor = this.plottedUtc.length;
+      this.syncSessionBreaks();
+    }
+    this.tickCountdown();
+    this.syncLastValueLabel();
+    this.emitLegend();
+  }
+
+  /** The bar count the session breaks were last found for: a tick changes no day. */
+  private breaksFor = -1;
+
+  /** How the bars of `style` are plotted; `unit` is a price-based style's box. */
+  private plotTransform(style: ChartStyle, unit: number): PlotTransform {
+    if (style === 'heikin-ashi') return { kind: 'heikin-ashi' };
+    if (!PRICE_BASED.has(style)) return { kind: 'none' };
+    return { kind: 'full', build: (raw) => this.priceBasedBars(raw as Bar[], style, unit) };
+  }
+
+  /**
+   * The price-based styles' box in price (CC-I10). By ATR: `boxSizeAtr` × ATR(14) of the bars that
+   * had CLOSED when the series loaded (`boxBase`), kept until the series, the style or the multiplier
+   * changes (CC-16) — re-measured per tick it moved with the forming bar and redrew every brick. By
+   * pips ("Traditional"): `boxPips` pips, the same on every timeframe.
+   */
+  private boxUnitFor(raw: readonly Bar[], series: string, style: ChartStyle): number {
+    const method = this.boxMethod();
+    const opts = {
+      method,
+      bars: raw,
+      atrMultiple: this.boxSizeAtr(),
+      pips: this.boxPips(),
+      pipSize: this.pipSize() ?? pipSizeFor(this.precision()),
+    };
+    if (method === 'pips') return boxUnit(opts);
+    const key = `${series}|${style}|${this.boxSizeAtr()}`;
+    if (this.box?.key === key) return this.box.unit;
+    const unit = boxUnit(opts);
+    // Not remembered before the bars arrive: the first real ones measure it.
+    if (raw.length > 0) this.box = { key, unit };
+    return unit;
+  }
+
+  /**
+   * Rebuild the bar array for styles that are not time-based, with a box of `unit` (price).
+   *
+   * By ATR, brick and box sizes follow the timeframe: a 10-pip brick is reasonable on EURUSD H1 and
+   * absurd on the same pair's D1. Line break takes no box: a reversal breaks `lineBreakLines` lines.
+   */
+  private priceBasedBars(bars: Bar[], style: ChartStyle, unit: number): Bar[] {
+    if (bars.length === 0) return [];
+    if (style === 'line-break')
+      return toLineBreak(bars, Math.max(1, Math.round(this.lineBreakLines())));
+    if (!(unit > 0)) return [];
+    switch (style) {
+      case 'renko':
+        return toRenko(bars, unit, { wicks: this.renkoWicks() });
+      case 'pnf':
+        return toPointAndFigure(bars, unit, 3);
+      case 'kagi':
+        // The reversal amount is the box: ATR(14) at the default multiplier, TradingView's default.
+        return toKagi(bars, unit);
+      case 'range':
+        return toRangeBars(bars, unit);
+      default:
+        return bars;
+    }
+  }
+
+  /** The trading dates the time scale labels 1D/1W/1M bars by: all of them on a rebuild, else the changed tail. */
+  private labelTradingDates(raw: readonly Bar[], update: PlotUpdate): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const resolution = this.resolution();
+    const shift = (t: number) => this.timezoneShiftMs(t);
+    if (update.rebuild) {
+      this.tradingDates = tradingDatesByPlottedTime(raw, resolution, shift);
+    } else {
+      for (const [seconds, date] of tradingDatesByPlottedTime(
+        raw.slice(update.fromRaw),
+        resolution,
+        shift,
+      ))
+        this.tradingDates.set(seconds, date);
+    }
+    if (this.labelsFor !== resolution) {
+      this.labelsFor = resolution;
       // The library caches tick labels by time: re-setting the formatter clears them, so a switch
       // to or from 1D/1W/1M relabels every tick.
-      this.chart.applyOptions({ timeScale: { tickMarkFormatter: this.tickMarkFormatter } });
+      chart.applyOptions({ timeScale: { tickMarkFormatter: this.tickMarkFormatter } });
     }
+  }
 
+  /**
+   * Make the price series the one `style` needs. A style change REPLACES it (series type is part of
+   * the chart's structure, not an option); everything hung on it — drawings, overlays, alert lines,
+   * profiles, markers — moves to the new one. Returns whether it was replaced.
+   */
+  private ensurePriceSeries(style: ChartStyle): boolean {
+    const chart = this.chart;
+    if (!chart || (this.price && this.seriesStyle === style)) return false;
+    const old = this.price;
+    const next = this.createPriceSeries(chart, style);
+    next.applyOptions({ priceScaleId: this.scaleSide() });
+    this.price = next;
+    this.seriesStyle = style;
+    this.priceSync.attach(next as unknown as SyncTarget<PriceRow>);
+    // Added before the old one goes, so pane 0 is never empty in between (CC-03); just above the
+    // volume overlay, so studies draw over the candles as TradingView draws them.
+    if (old) {
+      try {
+        chart.removeSeries(old);
+      } catch {
+        // Went with a rebuilt chart.
+      }
+    }
+    next.setSeriesOrder(this.volume ? 1 : 0);
+    this.attachToPriceSeries();
+    return true;
+  }
+
+  /** A new price series for `style`, empty — {@link writePriceRows} fills it. */
+  private createPriceSeries(chart: IChartApi, style: ChartStyle): PriceSeries {
     const p = this.palette(this.theme.theme() === 'dark');
-    const unshifted = this.transformed(bars, style);
-    const source = this.shiftForTimezone(unshifted, this.timezone());
-    // Indicators and the legend follow the PLOTTED bars, so a price-based
-    // style recomputes both against its synthetic series rather than against
-    // the time bars underneath — otherwise an RSI on a Renko chart would be
-    // reading a different series from the one on screen.
-    this.plotted = source;
-    this.plottedUtc = unshifted;
-    this.utcByPlotted = null;
-    // Scripts' barcolor() goes into the rows themselves. The series is rebuilt on every tick, so
-    // colours applied to it afterwards would drop out and back with each one. The handles still
-    // hold the current runs (re-rendered below) and read no chart state, so they can be asked now.
-    const barColors = this.scriptBarColors(style, source);
-    this.barColors = barColors;
-    this.priceStyle = style;
-
-    // Series type is part of the chart's structure, not its options, so a style
-    // change means replacing the series rather than setting an option.
-    if (this.price) {
-      this.chart.removeSeries(this.price);
-      this.price = null;
-    }
-
+    const precision = this.precision();
     const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
     // TradingView's last-price line: dotted, in the series colour (the
     // library colours it per the last bar's direction for OHLC series), with
@@ -1503,71 +2162,51 @@ export class ChartHostComponent implements OnDestroy {
       priceLineStyle: LineStyle.Dotted,
       priceLineWidth: 1 as const,
     };
-
-    if (
-      style === 'line' ||
-      style === 'area' ||
-      style === 'baseline' ||
-      style === 'stepline' ||
-      style === 'line-markers' ||
-      style === 'hlc-area' ||
-      style === 'kagi'
-    ) {
-      // HLC area plots the close but autoscales to the high/low, so its value
-      // series is the close while the band it occupies comes from the bar.
-      const data = source.map((b) => ({ time: asTime(b.time), value: b.close }));
-      if (style === 'line' || style === 'kagi') {
-        this.price = this.chart.addSeries(LineSeries, {
+    switch (style) {
+      case 'line':
+      case 'kagi':
+        return chart.addSeries(LineSeries, {
           color: style === 'kagi' ? '#787B86' : p.line,
           lineWidth: 2,
           priceFormat,
           ...lastPrice,
         });
-      } else if (style === 'stepline') {
-        this.price = this.chart.addSeries(LineSeries, {
+      case 'stepline':
+        return chart.addSeries(LineSeries, {
           color: p.line,
           lineWidth: 2,
           lineType: 1, // with-steps
           priceFormat,
           ...lastPrice,
         });
-      } else if (style === 'line-markers') {
-        this.price = this.chart.addSeries(LineSeries, {
+      case 'line-markers':
+        return chart.addSeries(LineSeries, {
           color: p.line,
           lineWidth: 2,
           pointMarkersVisible: true,
           priceFormat,
           ...lastPrice,
         });
-      } else if (style === 'hlc-area') {
-        this.price = this.chart.addSeries(AreaSeries, {
+      case 'area':
+        return chart.addSeries(AreaSeries, {
           lineColor: p.line,
           topColor: 'rgba(41,98,255,0.28)',
           bottomColor: 'rgba(41,98,255,0)',
           priceFormat,
           ...lastPrice,
         });
-      } else if (style === 'area') {
-        this.price = this.chart.addSeries(AreaSeries, {
-          lineColor: p.line,
-          topColor: 'rgba(41,98,255,0.28)',
-          bottomColor: 'rgba(41,98,255,0)',
+      case 'hlc-area':
+        // TradingView's HLC area: the high and low lines, the close, and the bands between them
+        // (custom-series.ts). It was the Area series under another name until 2026-10 (CC-23).
+        return chart.addCustomSeries(new HlcAreaSeries(), {
+          upColor: p.up,
+          downColor: p.down,
           priceFormat,
           ...lastPrice,
         });
-      } else {
-        // TradingView's baseline defaults to the price at 50% of the visible
-        // price range. Lightweight Charts' base value is a fixed price, so the
-        // midpoint of the loaded bars' high/low range stands in for it.
-        let lo = Infinity;
-        let hi = -Infinity;
-        for (const b of source) {
-          lo = Math.min(lo, b.low);
-          hi = Math.max(hi, b.high);
-        }
-        const base = source.length ? (lo + hi) / 2 : 0;
-        this.price = this.chart.addSeries(BaselineSeries, {
-          baseValue: { type: 'price', price: base },
+      case 'baseline':
+        return chart.addSeries(BaselineSeries, {
+          baseValue: { type: 'price', price: this.baselinePrice() },
           topLineColor: p.up,
           topFillColor1: 'rgba(8,153,129,0.28)',
           topFillColor2: 'rgba(8,153,129,0.05)',
@@ -1578,231 +2217,355 @@ export class ChartHostComponent implements OnDestroy {
           priceFormat,
           ...lastPrice,
         });
-      }
-      this.price.setData(data as SeriesDataItemTypeMap['Line'][]);
-    } else if (style === 'bars' || style === 'hlc-bars') {
-      // Dropping the open tick is what makes a bar series HLC bars. True
-      // HiLo (no ticks at all) needs a custom series and is not shipped.
-      this.price = this.chart.addSeries(BarSeries, {
-        upColor: p.up,
-        downColor: p.down,
-        openVisible: style !== 'hlc-bars',
-        thinBars: style !== 'hlc-bars',
-        priceFormat,
-        ...lastPrice,
-      });
-      this.price.setData(ohlcRows(source, barColors, 'bar') as SeriesDataItemTypeMap['Bar'][]);
-    } else if (style === 'hilo' || style === 'vol-candle') {
-      // The only two styles with no built-in series: HiLo draws the range with
-      // neither tick, and VolCandle varies body width by volume. Both are
-      // custom series — see custom-series.ts.
-      const view = style === 'hilo' ? new HiLoSeries() : new VolCandleSeries();
-      const custom = this.chart.addCustomSeries(view, {
-        upColor: p.up,
-        downColor: p.down,
-        priceFormat,
-        ...lastPrice,
-      });
-      custom.setData(ohlcvRows(source, barColors));
-      this.price = custom;
-    } else if (style === 'column') {
-      const column = this.chart.addSeries(HistogramSeries, {
-        color: p.up,
-        priceFormat,
-        ...lastPrice,
-      });
-      column.setData(
-        source.map((b) => ({
-          time: asTime(b.time),
-          value: b.close,
-          color: b.close >= b.open ? p.up : p.down,
-        })),
-      );
-      this.price = column;
-    } else {
-      const hollow = style === 'hollow';
-      this.price = this.chart.addSeries(CandlestickSeries, {
-        upColor: hollow ? 'rgba(0,0,0,0)' : p.up,
-        downColor: hollow ? 'rgba(0,0,0,0)' : p.down,
-        borderUpColor: p.up,
-        borderDownColor: p.down,
-        wickUpColor: p.up,
-        wickDownColor: p.down,
-        priceFormat,
-        ...lastPrice,
-      });
-      this.price.setData(
-        ohlcRows(source, barColors, hollow ? 'hollow' : 'candle') as CandlestickData<Time>[],
-      );
-    }
-
-    // Re-bind drawings: the series above is a NEW object whenever the style
-    // changes, and primitives live on the series, not the chart.
-    if (this.price) {
-      this.controller.bindSeries(this.price);
-      this.controller.sync(
-        this.drawings.forScope(this.symbol(), this.resolution()),
-        this.drawings.selectedId(),
-      );
-      // Overlays and markers live on the series too, so they follow it through
-      // every style change for the same reason drawings do.
-      this.price.attachPrimitive(this.overlayRenderer);
-      this.price.attachPrimitive(this.analysisRenderer);
-      this.price.attachPrimitive(this.eventRenderer);
-      this.price.attachPrimitive(this.patternRenderer);
-      this.price.attachPrimitive(this.countdown);
-      for (const primitive of this.extraPricePrimitives) this.price.attachPrimitive(primitive);
-      this.tickCountdown();
-      this.lastValueColor = ''; // a new series starts on the library's own colouring
-      this.syncLastValueLabel();
-      // The series was replaced (style change, or new bars), and every primitive hanging off
-      // the old one went with it: profiles are re-made by the indicators effect, Pine runs here.
-      this.profileRenderers.clear();
-      this.applyScripts(this.scriptResults(), this.showScriptTrades());
-      this.markerApi = createSeriesMarkers(this.price, []);
-      this.applyMarkers(this.markers());
-    }
-
-    if (showVolume) {
-      if (!this.volume) {
-        this.volume = this.chart.addSeries(HistogramSeries, {
-          priceFormat: { type: 'volume' },
-          priceScaleId: 'volume',
+      case 'bars':
+      case 'hlc-bars':
+        // Dropping the open tick is what makes a bar series HLC bars. True
+        // HiLo (no ticks at all) is the custom series below.
+        return chart.addSeries(BarSeries, {
+          upColor: p.up,
+          downColor: p.down,
+          openVisible: style !== 'hlc-bars',
+          thinBars: style !== 'hlc-bars',
+          priceFormat,
+          ...lastPrice,
         });
-        // Pin volume to the bottom fifth of the price pane, the way TradingView
-        // overlays it, rather than giving it a pane and halving the chart.
-        this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      case 'hilo':
+      case 'vol-candle':
+        // The two styles with no built-in series: HiLo draws the range with
+        // neither tick, and VolCandle varies body width by volume. Both are
+        // custom series — see custom-series.ts.
+        return chart.addCustomSeries(style === 'hilo' ? new HiLoSeries() : new VolCandleSeries(), {
+          upColor: p.up,
+          downColor: p.down,
+          priceFormat,
+          ...lastPrice,
+        });
+      case 'column':
+        return chart.addSeries(HistogramSeries, { color: p.up, priceFormat, ...lastPrice });
+      default: {
+        const hollow = style === 'hollow';
+        return chart.addSeries(CandlestickSeries, {
+          upColor: hollow ? 'rgba(0,0,0,0)' : p.up,
+          downColor: hollow ? 'rgba(0,0,0,0)' : p.down,
+          borderUpColor: p.up,
+          borderDownColor: p.down,
+          wickUpColor: p.up,
+          wickDownColor: p.down,
+          priceFormat,
+          ...lastPrice,
+        });
       }
-      this.volume.setData(
-        source.map((b) => ({
-          time: asTime(b.time),
-          value: b.volume,
-          color: b.close >= b.open ? p.volumeUp : p.volumeDown,
-        })),
-      );
-    } else if (this.volume) {
-      this.chart.removeSeries(this.volume);
-      this.volume = null;
     }
-
-    this.emitLegend(null);
   }
 
   /**
-   * Rebuild the bar array for styles that are not time-based.
-   *
-   * Brick and box sizes default to a fraction of ATR rather than a fixed price:
-   * a 10-pip brick is reasonable on EURUSD H1 and absurd on the same pair's D1,
-   * so a constant would make these chart types useless on most timeframes.
+   * TradingView's baseline defaults to the price at 50% of the visible price range. Lightweight
+   * Charts' base value is a fixed price, so the midpoint of the loaded bars' high/low range stands
+   * in for it.
    */
-  private transformed(bars: Bar[], style: ChartStyle): Bar[] {
-    if (!PRICE_BASED.has(style)) {
-      return style === 'heikin-ashi' ? toHeikinAshi(bars) : bars;
+  private baselinePrice(): number {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const b of this.plotted) {
+      lo = Math.min(lo, b.low);
+      hi = Math.max(hi, b.high);
     }
-    if (bars.length === 0) return bars;
-    const atr = averageTrueRange(bars, 14);
-    const base = atr > 0 ? atr : Math.abs(bars[bars.length - 1].close) * 0.001;
-    const unit = base * Math.max(0.1, this.boxSizeAtr());
+    return this.plotted.length ? (lo + hi) / 2 : 0;
+  }
 
-    switch (style) {
-      case 'renko':
-        return toRenko(bars, unit);
-      case 'line-break':
-        return toLineBreak(bars, 3);
-      case 'pnf':
-        return toPointAndFigure(bars, unit, 3);
-      case 'kagi':
-        return toKagi(bars, unit * 2);
-      case 'range':
-        return toRangeBars(bars, unit);
-      default:
-        return bars;
-    }
+  /** Re-centre the baseline on new bars (another series, history loaded). */
+  private applyBaseline(): void {
+    if (this.seriesStyle !== 'baseline') return;
+    (this.price as unknown as ISeriesApi<'Baseline'> | null)?.applyOptions({
+      baseValue: { type: 'price', price: this.baselinePrice() },
+    });
   }
 
   /**
-   * Bar markers for signals, fills and events.
+   * Everything that lives on the price series rather than the chart, onto the price series: drawings,
+   * trade overlays, analysis, economic events, patterns, the bar countdown, other features' primitives
+   * (alert lines), the profile studies and the markers. After every replacement of the series.
+   */
+  private attachToPriceSeries(): void {
+    if (!this.price) return;
+    this.controller.bindSeries(this.price);
+    this.controller.sync(
+      this.drawings.forScope(this.symbol(), this.resolution()),
+      this.drawings.selectedId(),
+    );
+    this.price.attachPrimitive(this.overlayRenderer);
+    this.price.attachPrimitive(this.analysisRenderer);
+    this.price.attachPrimitive(this.eventRenderer);
+    this.price.attachPrimitive(this.patternRenderer);
+    this.price.attachPrimitive(this.countdown);
+    this.price.attachPrimitive(this.sessionBreaksRenderer);
+    for (const primitive of this.extraPricePrimitives) this.price.attachPrimitive(primitive);
+    for (const r of this.profileRenderers.values()) this.price.attachPrimitive(r);
+    this.lastValueColor = ''; // a new series starts on the library's own colouring
+    this.markerApi = createSeriesMarkers(this.price, []);
+    this.markersFor = '';
+  }
+
+  /** The palette's bar colours (the same in both themes). */
+  private rowPalette(): RowPalette {
+    return this.palette(this.theme.theme() === 'dark');
+  }
+
+  /**
+   * Write the price rows from plotted bar `from` on (0: all), with the scripts' colours. New colours
+   * rebuild every row: the colour is part of each.
+   */
+  private writePriceRows(from: number): void {
+    const style = this.seriesStyle;
+    if (!this.price || !style) return;
+    const colors = this.barColors;
+    const all = from === 0 || colors !== this.rowsColors;
+    const rows = priceRowsFrom(
+      style,
+      this.plotted,
+      colors,
+      this.rowPalette(),
+      all ? 0 : from,
+      this.priceSync.rows(),
+    );
+    this.rowsColors = colors;
+    this.priceSync.apply(rows);
+  }
+
+  /**
+   * The scripts re-painted the price series (pine-chart's `refreshBarColors`, from `applyScripts`):
+   * it holds this chart's plotted bars in the scripts' new colours. Take those rows as written, so
+   * the next tick is diffed against what is really on the series.
+   */
+  private adoptRepaintedRows(): void {
+    const style = this.seriesStyle;
+    if (!this.price || !style || this.barColors === this.rowsColors) return;
+    this.priceSync.adopt(
+      priceRowsFrom(style, this.plotted, this.barColors, this.rowPalette(), 0, []),
+    );
+    this.rowsColors = this.barColors;
+  }
+
+  private writeVolumeRows(from: number): void {
+    if (!this.volume) return;
+    this.volumeSync.apply(
+      volumeRowsFrom(this.plotted, this.rowPalette(), from, this.volumeSync.rows()),
+    );
+  }
+
+  /** Volume on or off: its series is added or removed, never re-made on a tick. */
+  private syncVolumeSeries(show: boolean): void {
+    const chart = this.chart;
+    if (!chart) return;
+    if (show && !this.volume) {
+      this.volume = chart.addSeries(HistogramSeries, {
+        priceFormat: { type: 'volume' },
+        priceScaleId: 'volume',
+        // The overlay's own last value ("17") and price line belong to no price scale anyone reads,
+        // and sat on the price axis among the prices (CC-08).
+        lastValueVisible: false,
+        priceLineVisible: false,
+      });
+      // Pin volume to the bottom fifth of the price pane, the way TradingView
+      // overlays it, rather than giving it a pane and halving the chart.
+      this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+      // Behind the candles.
+      this.volume.setSeriesOrder(0);
+      this.volumeSync.attach(this.volume as unknown as SyncTarget<VolumeRow>);
+      this.writeVolumeRows(0);
+    } else if (!show && this.volume) {
+      try {
+        chart.removeSeries(this.volume);
+      } catch {
+        // Went with a rebuilt chart.
+      }
+      this.volume = null;
+      this.volumeSync.attach(null);
+    }
+  }
+
+  /** The symbol's decimals on the price scale and every study drawn on it. */
+  private applyPrecision(precision: number): void {
+    const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
+    this.price?.applyOptions({ priceFormat });
+    for (const s of this.indicatorSeries)
+      if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceFormat });
+  }
+
+  /** What the markers were last pinned to: the bar count and the newest bar. */
+  private markersFor = '';
+  private markerRangeKey(): string {
+    const last = this.plottedUtc[this.plottedUtc.length - 1];
+    return `${this.plottedUtc.length}|${last?.time ?? ''}|${this.lastBarEnd()}`;
+  }
+
+  /**
+   * When the newest input bar's period ends (UTC ms): the session grid says so per bar; on the stored
+   * grid it is a fixed width. Markers and events past it are outside the loaded range — in replay,
+   * past the head.
+   */
+  private lastBarEnd(): number {
+    const raw = this.bars();
+    const last = raw[raw.length - 1];
+    if (!last) return -Infinity;
+    if (last.closeTime !== undefined && Number.isFinite(last.closeTime)) return last.closeTime;
+    const step = resolutionMs(this.resolution());
+    return step ? last.time + step : Infinity;
+  }
+
+  /**
+   * After ticks, the studies that scan the whole window (patterns, profiles, the analysis overlays)
+   * are recomputed once the ticks pause for 400 ms — not on each — and only when one is on.
+   */
+  private tailStudiesTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduleTailStudies(): void {
+    if (this.tailStudiesTimer !== null) return;
+    const scanning =
+      this.indicators().some((a) => a.visible && studyKind(a.defId) !== 'indicator') ||
+      this.showVolumeProfile() ||
+      this.showSupportResistance() ||
+      this.showStructure();
+    if (!scanning) return;
+    this.tailStudiesTimer = setTimeout(() => {
+      this.tailStudiesTimer = null;
+      const active = this.indicators();
+      this.applyPatterns(active);
+      this.applyProfiles(active);
+      this.recomputeAnalysis();
+    }, 400);
+  }
+
+  /**
+   * Bar markers for signals, fills and martingale rungs.
    *
-   * Snapped to the nearest plotted bar: a signal fired at 10:37 has no H1 bar
-   * of its own, and an unsnapped marker is dropped by the library without a
-   * word rather than drawn at the nearest candle.
+   * Pinned to the bar the instant belongs to — the last plotted bar that opened at or before it, on
+   * the bars' UTC times — and drawn at that bar's PLOTTED time, so they follow the display time zone
+   * like the bars do (CC-05: they sat on UTC times, four H1 bars late on a New York axis). An instant
+   * before the first bar or after the end of the last is dropped rather than stacked on the edge bar
+   * (CC-06) — in replay, that is everything after the head.
    */
   private applyMarkers(markers: ChartMarker[]): void {
     if (!this.markerApi) return;
-    const bars = this.plotted;
-    if (bars.length === 0) {
+    const utc = this.plottedUtc;
+    const plotted = this.plotted;
+    this.markersFor = this.markerRangeKey();
+    if (utc.length === 0) {
       this.markerApi.setMarkers([]);
       return;
     }
-    const snapped = markers
-      .map((m) => {
-        const bar = nearestBarTime(bars, m.time);
-        if (bar === null) return null;
-        return {
-          time: asTime(bar),
-          position: m.position,
-          color: m.color,
-          shape: m.shape,
-          text: m.text,
-        };
-      })
-      .filter((m): m is NonNullable<typeof m> => m !== null)
-      .sort((a, b) => (a.time as number) - (b.time as number));
-    this.markerApi.setMarkers(snapped);
+    const lastEnd = this.lastBarEnd();
+    const pinned: SeriesMarker<Time>[] = [];
+    for (const m of markers) {
+      const i = barContaining(utc, m.time, lastEnd);
+      if (i < 0) continue;
+      pinned.push({
+        time: asTime(plotted[i].time),
+        position: m.position,
+        color: m.color,
+        shape: m.shape,
+        text: m.text,
+      });
+    }
+    pinned.sort((a, b) => (a.time as number) - (b.time as number));
+    this.markerApi.setMarkers(pinned);
   }
 
-  private applyIndicators(active: ActiveIndicator[], bars: Bar[]): void {
+  /** The studies of `active`: their series, the patterns and the profiles. */
+  private applyStudies(active: ActiveIndicator[]): void {
+    // The bars' times are unchanged here: each plot is rewritten from its first changed value.
+    this.applyIndicators(active, this.plotted.length);
+    this.applyPatterns(active);
+    this.applyProfiles(active);
+  }
+
+  /**
+   * Keep every visible study's series in step (CC-I1): values are recomputed (cached per change of
+   * the bars), and each plot is written from the first bar whose value — or time — changed: a tick
+   * is an `update()` of the forming bar's value, not every value re-sent. `timesFrom`: the first
+   * plotted bar whose TIME changed (0 on a rebuild).
+   */
+  private applyIndicators(active: ActiveIndicator[], timesFrom: number): void {
     if (!this.chart) return;
 
-    // Drop series for indicators that are gone or hidden.
+    // Drop series for indicators that are gone or hidden, or whose inputs moved them to another
+    // place (an overlay never becomes a pane study, but a removed-and-re-added uid could).
     const wanted = new Set(active.filter((a) => a.visible).map((a) => a.uid));
     for (const held of [...this.indicatorSeries]) {
       if (!wanted.has(held.uid)) this.removeIndicatorSeries(held);
     }
 
-    const ohlc: Ohlc[] = bars.map((b) => ({
-      time: b.time,
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-      volume: b.volume,
-    }));
-
+    const bars = this.studyBars();
     for (const item of active) {
       if (!item.visible) continue;
       const def = indicatorById(item.defId);
       if (!def) continue;
-      const computed = this.computeFor(item, def, ohlc);
-      const existing = this.indicatorSeries.find((s) => s.uid === item.uid);
-      const target = existing ?? this.createIndicatorSeries(item, def);
+      const computed = this.computeFor(item, def, bars);
+      const target =
+        this.indicatorSeries.find((s) => s.uid === item.uid) ??
+        this.createIndicatorSeries(item, def);
       if (!target) continue;
+      target.paramsKey = JSON.stringify(item.params);
 
       for (const s of target.series) {
         const values = computed[s.key] ?? [];
-        s.api.setData(
-          bars
-            .map((b, i) => ({ time: asTime(b.time), value: values[i] }))
-            .filter(
-              (d): d is { time: Time; value: number } => d.value !== null && d.value !== undefined,
-            ),
-        );
+        const from = Math.min(timesFrom, firstChangedValue(s.values, values));
+        s.values = values;
+        s.sync.apply(valueRowsFrom(this.plotted, values, s.gaps, from, s.sync.rows()));
+        if (s.markers) this.writePlotMarkers(s, values);
       }
     }
 
-    this.emitLegend(null);
+    this.emitLegend();
   }
+
+  /** A `markers` plot's shapes: one per bar with a value, at that value. */
+  private writePlotMarkers(s: IndicatorPlotSeries, values: readonly Maybe[]): void {
+    const markers = s.markers;
+    if (!markers) return;
+    const out: SeriesMarker<Time>[] = [];
+    for (let i = 0; i < this.plotted.length; i++) {
+      const v = values[i];
+      if (v === null || v === undefined || !Number.isFinite(v)) continue;
+      out.push({
+        time: asTime(this.plotted[i].time),
+        position: markers.spec.position === 'above' ? 'atPriceTop' : 'atPriceBottom',
+        price: v,
+        shape: markers.spec.shape,
+        color: s.color,
+        size: 0.6,
+      });
+    }
+    // Most ticks leave every fractal where it was.
+    const key = out.map((m) => `${m.time as number}:${m.price}`).join(',');
+    if (key === markers.last) return;
+    markers.last = key;
+    markers.api.setMarkers(out);
+  }
+
+  /** The plotted bars as the study maths takes them, made once per change of the bars. */
+  private studyBarsCache: Ohlc[] | null = null;
+  private studyBars(): Ohlc[] {
+    return (this.studyBarsCache ??= ohlcOf(this.plotted));
+  }
+
+  /** Each study's values per change of the bars ({@link dataVersion}), inputs and context. */
+  private computedCache = new Map<string, Record<string, Maybe[]>>();
+  private computedFor = -1;
 
   private computeFor(
     item: ActiveIndicator,
     def: IndicatorDef,
     ohlc: Ohlc[],
-  ): Record<string, Array<number | null>> {
+  ): Record<string, Maybe[]> {
+    if (this.computedFor !== this.dataVersion) {
+      this.computedCache.clear();
+      this.computedFor = this.dataVersion;
+    }
     // Compare studies also depend on the other symbol's bars, so those are part of the key; the
     // day-based ones, on the trading days they count in.
     const symbol = def.needsCompare ? String(item.params['symbol'] ?? '').toUpperCase() : '';
     const compare = symbol ? this.compareBars()[symbol] : undefined;
-    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${ohlc.length}:${ohlc[0]?.time ?? 0}:${symbol}:${compare?.length ?? 0}:${this.sessionKey()}`;
+    const cacheKey = `${item.uid}:${JSON.stringify(item.params)}:${symbol}:${compare?.length ?? 0}:${compare?.[compare.length - 1]?.close ?? ''}:${this.sessionKey()}`;
     const hit = this.computedCache.get(cacheKey);
     if (hit) return hit;
     const computed = def.compute(ohlc, item.params, {
@@ -1814,55 +2577,89 @@ export class ChartHostComponent implements OnDestroy {
     return computed;
   }
 
-  private externalSeries: ISeriesApi<'Line'>[] = [];
+  /** External panes' lines by pane uid: made once, kept across ticks (CC-02). */
+  private readonly externalSeries = new Map<string, ExternalLineSeries[]>();
+
+  /**
+   * The fundamentals panes. A pane is made when its study arrives and removed when it goes; its
+   * series stay in between, so a resized pane keeps its height and its place (CC-02: every tick
+   * removed and re-added them at the bottom at their default height, and a saved layout's heights
+   * were overwritten). New points re-sample the line; the bars reach it through syncData.
+   */
   private applyExternalPanes(panes: ExternalPane[]): void {
-    if (!this.chart) return;
-    for (const s of this.externalSeries) {
-      try {
-        this.chart.removeSeries(s);
-      } catch {
-        // Went with a rebuilt chart.
+    const chart = this.chart;
+    if (!chart) return;
+    const byUid = new Map(panes.map((p) => [p.uid, p]));
+    for (const [uid, lines] of [...this.externalSeries]) {
+      const pane = byUid.get(uid);
+      if (pane && pane.lines.length === lines.length) continue;
+      for (const l of lines) {
+        try {
+          chart.removeSeries(l.api);
+        } catch {
+          // Went with a rebuilt chart.
+        }
       }
+      this.externalSeries.delete(uid);
     }
-    this.externalSeries = [];
     for (const pane of panes) {
-      const paneIndex = this.chart.panes().length;
-      for (const line of pane.lines) {
-        const s = this.chart.addSeries(
-          LineSeries,
-          {
-            color: line.color,
-            lineWidth: 2,
-            // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
-            lineType: LineType.WithSteps,
-            priceLineVisible: false,
-            title: line.title,
-            priceFormat: {
-              type: 'price',
-              precision: line.precision ?? 2,
-              minMove: 10 ** -(line.precision ?? 2),
+      let lines = this.externalSeries.get(pane.uid);
+      if (!lines) {
+        const paneIndex = chart.panes().length;
+        lines = pane.lines.map((line) => {
+          const api = chart.addSeries(
+            LineSeries,
+            {
+              color: line.color,
+              lineWidth: 2,
+              // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
+              lineType: LineType.WithSteps,
+              priceLineVisible: false,
+              title: line.title,
+              priceFormat: {
+                type: 'price',
+                precision: line.precision ?? 2,
+                minMove: 10 ** -(line.precision ?? 2),
+              },
             },
-          },
-          paneIndex,
-        );
-        // Sampled onto the chart's own bars: every distinct time a series carries becomes a
-        // slot on the SHARED time axis, so a feed with its own cadence (news roll-ups every few
-        // minutes) would otherwise wedge thousands of slots between the bars and squash them.
-        const raw = this.bars();
-        const values = alignToBars(line.points, raw);
-        s.setData(
-          raw
-            .map((b, i) => ({
-              time: asTime(b.time + this.timezoneShiftMs(b.time)),
-              value: values[i],
-            }))
-            .filter(
-              (d): d is { time: Time; value: number } => d.value !== null && d.value !== undefined,
-            ),
-        );
-        this.externalSeries.push(s);
+            paneIndex,
+          );
+          return {
+            api,
+            sync: new SeriesSync<ValueRow>(api as unknown as SyncTarget<ValueRow>, sameValueRow),
+            points: [],
+            values: [],
+          };
+        });
+        this.externalSeries.set(pane.uid, lines);
       }
+      pane.lines.forEach((line, i) => {
+        const held = lines[i];
+        held.api.applyOptions({ color: line.color, title: line.title });
+        if (held.points !== line.points) {
+          held.points = line.points;
+          this.writeExternalLine(held, 0);
+        }
+      });
     }
+  }
+
+  /** Every external line, written from plotted bar `from` on (the bars changed). */
+  private writeExternalPanes(from: number): void {
+    for (const lines of this.externalSeries.values())
+      for (const l of lines) this.writeExternalLine(l, from);
+  }
+
+  /**
+   * One external line, sampled onto the chart's own bars: every distinct time a series carries
+   * becomes a slot on the SHARED time axis, so a feed with its own cadence (news roll-ups every few
+   * minutes) would otherwise wedge thousands of slots between the bars and squash them.
+   */
+  private writeExternalLine(l: ExternalLineSeries, timesFrom: number): void {
+    const values = alignToBars(l.points, this.plottedUtc);
+    const from = Math.min(timesFrom, firstChangedValue(l.values, values));
+    l.values = values;
+    l.sync.apply(valueRowsFrom(this.plotted, values, 'join', from, l.sync.rows()));
   }
 
   private scriptHandles: ScriptRenderHandle[] = [];
@@ -2126,38 +2923,47 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   private createIndicatorSeries(item: ActiveIndicator, def: IndicatorDef): IndicatorSeries | null {
-    if (!this.chart) return null;
+    const chart = this.chart;
+    if (!chart) return null;
     // Overlays live on the price pane (0); everything else gets its own pane,
     // which is what makes RSI and MACD behave like TradingView studies rather
     // than lines squashed onto the price scale.
-    const paneIndex = def.target === 'overlay' ? 0 : this.chart.panes().length;
+    const overlay = def.target === 'overlay';
+    const paneIndex = overlay ? 0 : chart.panes().length;
+    // An overlay shares the price scale; without the symbol's precision the axis
+    // falls back to the library default of 2 decimals (1.14 for EURUSD).
+    const overlayFormat = overlay
+      ? {
+          priceFormat: {
+            type: 'price' as const,
+            precision: this.precision(),
+            minMove: 1 / 10 ** this.precision(),
+          },
+        }
+      : {};
 
-    const series = def.plots.map((plot) => {
+    const series = def.plots.map((plot): IndicatorPlotSeries => {
+      const markers = plot.kind === 'markers';
       const api =
         plot.kind === 'histogram'
-          ? this.chart!.addSeries(
+          ? chart.addSeries(
               HistogramSeries,
               { color: plot.color, priceFormat: { type: 'price', precision: 5, minMove: 0.00001 } },
               paneIndex,
             )
-          : this.chart!.addSeries(
+          : chart.addSeries(
               LineSeries,
               {
                 color: plot.color,
                 lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4>,
                 priceLineVisible: false,
-                lastValueVisible: def.target === 'overlay',
-                // An overlay shares the price scale; without the symbol's precision the axis
-                // falls back to the library default of 2 decimals (1.14 for EURUSD).
-                ...(def.target === 'overlay'
-                  ? {
-                      priceFormat: {
-                        type: 'price' as const,
-                        precision: this.precision(),
-                        minMove: 1 / 10 ** this.precision(),
-                      },
-                    }
-                  : {}),
+                lastValueVisible: overlay && !markers,
+                // A markers plot draws only its shapes: the series carries the values (for the
+                // legend and the autoscale) with no line of its own (DR-17).
+                ...(markers ? { lineVisible: false, crosshairMarkerVisible: false } : {}),
+                ...overlayFormat,
+                // On the price's own scale, whichever side it sits on.
+                ...(overlay ? { priceScaleId: this.scaleSide() } : {}),
               },
               paneIndex,
             );
@@ -2166,6 +2972,17 @@ export class ChartHostComponent implements OnDestroy {
         api: api as ISeriesApi<'Line' | 'Histogram'>,
         color: plot.color,
         title: plot.title,
+        gaps: markers ? 'break' : (plot.gaps ?? 'join'),
+        markers:
+          markers && plot.marker
+            ? {
+                api: createSeriesMarkers(api, [], { autoScale: true }),
+                spec: plot.marker,
+                last: '',
+              }
+            : null,
+        sync: new SeriesSync<ValueRow>(api as unknown as SyncTarget<ValueRow>, sameValueRow),
+        values: [],
       };
     });
 
@@ -2183,7 +3000,12 @@ export class ChartHostComponent implements OnDestroy {
       }
     }
 
-    const entry: IndicatorSeries = { uid: item.uid, paneIndex, series };
+    const entry: IndicatorSeries = {
+      uid: item.uid,
+      paramsKey: JSON.stringify(item.params),
+      overlay,
+      series,
+    };
     this.indicatorSeries.push(entry);
     return entry;
   }
@@ -2192,6 +3014,7 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.chart) return;
     for (const s of held.series) {
       try {
+        s.markers?.api.detach();
         this.chart.removeSeries(s.api);
       } catch {
         // Series already detached with its pane; nothing to undo.
@@ -2201,13 +3024,14 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
-   * Build the legend for the crosshair position, or for the last bar when the
-   * pointer is away — which is what TradingView shows at rest.
+   * Build the legend for the bar under the crosshair, or for the last bar when the pointer is away —
+   * which is what TradingView shows at rest. After a tick it re-reads the bar the pointer still
+   * rests on ({@link crosshairTime}); it used to jump back to the newest bar every second (CC-04).
    */
-  private emitLegend(param: MouseEventParams<Time> | null): void {
+  private emitLegend(): void {
     const bars = this.plotted;
     if (bars.length === 0) {
-      this.legend.emit({
+      this.emitSnapshot({
         time: null,
         open: null,
         high: null,
@@ -2220,23 +3044,11 @@ export class ChartHostComponent implements OnDestroy {
       return;
     }
 
-    let index = bars.length - 1;
-    if (param?.time !== undefined && param.time !== null) {
-      const t = (param.time as number) * 1000;
-      const found = bars.findIndex((b) => b.time === t);
-      if (found >= 0) index = found;
-    }
-
+    const under = this.crosshairTime === null ? -1 : indexAtTime(bars, this.crosshairTime * 1000);
+    const index = under >= 0 ? under : bars.length - 1;
     const bar = bars[index];
     const prev = index > 0 ? bars[index - 1] : null;
-    const ohlc: Ohlc[] = bars.map((b) => ({
-      time: b.time,
-      open: b.open,
-      high: b.high,
-      low: b.low,
-      close: b.close,
-      volume: b.volume,
-    }));
+    const ohlc = this.studyBars();
 
     const indicators = this.indicators()
       .filter((a) => a.visible)
@@ -2265,10 +3077,96 @@ export class ChartHostComponent implements OnDestroy {
       low: bar.low,
       close: bar.close,
       volume: bar.volume,
+      change: prev ? bar.close - prev.close : null,
       changePct: prev && prev.close !== 0 ? ((bar.close - prev.close) / prev.close) * 100 : null,
       indicators,
     });
+    if (this.dataWindowOpen()) this.fillDataWindow(index);
   }
+
+  // ── Data window (CC-I6) ──────────────────────────────────────────────────
+
+  /** Every value at the crosshair, section by section, in the order the providers registered. */
+  readonly dataWindow = signal<DataWindowSection[]>([]);
+  private readonly valueProviders = new ValueProviders();
+
+  /**
+   * List `provider`'s sections in the data window under `id`, after the chart's own (the bar, the
+   * studies); registering an id again replaces it. Returns the function that takes it out again.
+   * This is how the scripts' plots reach the data window.
+   */
+  registerValueProvider(id: string, provider: ValueProvider): () => void {
+    return this.valueProviders.register(id, provider);
+  }
+
+  private fillDataWindow(index: number): void {
+    const bar = this.plotted[index];
+    this.dataWindow.set(
+      bar
+        ? this.valueProviders.collect({
+            index,
+            bar,
+            utcTime: this.plottedUtc[index]?.time ?? bar.time,
+            precision: this.precision(),
+          })
+        : [],
+    );
+  }
+
+  /** The bar itself: its date, prices, change and volume. */
+  private readonly barValues: ValueProvider = ({ index, bar, utcTime, precision }) => {
+    const prev = index > 0 ? this.plotted[index - 1] : null;
+    const change = prev ? bar.close - prev.close : null;
+    const pct = prev && prev.close !== 0 ? ((bar.close - prev.close) / prev.close) * 100 : null;
+    const tradingDate = this.tradingDateAt(Math.floor(bar.time / 1000));
+    const when =
+      tradingDate === null
+        ? formatEventTime(utcTime, Math.round(this.timezoneShiftMs(utcTime) / 60_000))
+        : formatTradingDate(tradingDate, this.resolution());
+    const price = (v: number) => v.toFixed(precision);
+    return [
+      {
+        id: 'bar',
+        title: this.symbol() || 'Bar',
+        rows: [
+          { label: tradingDate === null ? 'Time' : 'Date', value: when },
+          { label: 'Open', value: price(bar.open) },
+          { label: 'High', value: price(bar.high) },
+          { label: 'Low', value: price(bar.low) },
+          { label: 'Close', value: price(bar.close) },
+          {
+            label: 'Change',
+            value:
+              changeText(change, pct, this.pipSize() ?? pipSizeFor(precision), precision) ?? '—',
+          },
+          { label: 'Volume', value: formatVolume(bar.volume) },
+        ],
+      },
+    ];
+  };
+
+  /** Each visible study's plots at the bar. */
+  private readonly studyValues: ValueProvider = ({ index, precision }) => {
+    const ohlc = this.studyBars();
+    const out: DataWindowSection[] = [];
+    for (const item of this.indicators()) {
+      if (!item.visible) continue;
+      const def = indicatorById(item.defId);
+      if (!def) continue;
+      const computed = this.computeFor(item, def, ohlc);
+      out.push({
+        id: `study:${item.uid}`,
+        title: indicatorLabel(def, item.params),
+        rows: def.plots.map((plot) => ({
+          label: plot.title,
+          value: formatStudyValue(computed[plot.key]?.[index], def.target === 'overlay', precision),
+          color: plot.color,
+          raw: computed[plot.key]?.[index] ?? null,
+        })),
+      });
+    }
+    return out;
+  };
 
   private emitSnapshot(snap: LegendSnapshot): void {
     this.lastSnapshot = snap;
@@ -2284,94 +3182,4 @@ export interface ChartMarker {
   shape: 'circle' | 'square' | 'arrowUp' | 'arrowDown';
   color: string;
   text: string;
-}
-
-/** Nearest plotted bar time to `timeMs`, or null when there are no bars. */
-function nearestBarTime(bars: Bar[], timeMs: number): number | null {
-  if (bars.length === 0) return null;
-  let lo = 0;
-  let hi = bars.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (bars[mid].time < timeMs) lo = mid + 1;
-    else hi = mid;
-  }
-  const candidate = bars[lo];
-  const previous = bars[Math.max(0, lo - 1)];
-  return Math.abs(candidate.time - timeMs) <= Math.abs(previous.time - timeMs)
-    ? candidate.time
-    : previous.time;
-}
-
-/** Lightweight Charts takes seconds; our bars carry milliseconds. */
-export function asTime(ms: number): Time {
-  return Math.floor(ms / 1000) as UTCTimestamp;
-}
-
-function toOhlcData(b: Bar) {
-  return { time: asTime(b.time), open: b.open, high: b.high, low: b.low, close: b.close };
-}
-
-/** The plotted bars' times as the time scale holds them (zone-shifted seconds). */
-function plottedSeconds(bars: readonly Bar[]): number[] {
-  return bars.map((b) => Math.floor(b.time / 1000));
-}
-
-/** How a script's colour paints a bar of `style` (one of BAR_COLOR_STYLES). */
-function barPaint(style: ChartStyle): BarPaint {
-  if (style === 'hollow') return 'hollow';
-  return style === 'candles' || style === 'heikin-ashi' ? 'candle' : 'bar';
-}
-
-/** Candle / bar rows, each bar a script coloured painted per `paint` (body, border, wick…). */
-function ohlcRows(
-  source: readonly Bar[],
-  colors: readonly (string | null)[] | null,
-  paint: BarPaint,
-) {
-  return source.map((b, i) => withBarColor(toOhlcData(b), colors?.[i], paint));
-}
-
-/** Rows of the HiLo and volume-candle custom series; a script's colour is the bar's one colour. */
-function ohlcvRows(source: readonly Bar[], colors: readonly (string | null)[] | null): OhlcvData[] {
-  return source.map((b, i) =>
-    withBarColor<OhlcvData>(
-      {
-        time: asTime(b.time),
-        open: b.open,
-        high: b.high,
-        low: b.low,
-        close: b.close,
-        volume: b.volume,
-      },
-      colors?.[i],
-      'bar',
-    ),
-  );
-}
-
-/**
- * Heikin-Ashi transform.
- *
- * Close is the bar's own average; open is the running average of the PREVIOUS
- * HA bar, so the series is recursive and cannot be computed per-bar in
- * isolation — which is why it is a transform over the whole array here rather
- * than a formatting option on the series.
- */
-export function toHeikinAshi(bars: Bar[]): Bar[] {
-  const out: Bar[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    const b = bars[i];
-    const close = (b.open + b.high + b.low + b.close) / 4;
-    const open = i === 0 ? (b.open + b.close) / 2 : (out[i - 1].open + out[i - 1].close) / 2;
-    out.push({
-      time: b.time,
-      open,
-      close,
-      high: Math.max(b.high, open, close),
-      low: Math.min(b.low, open, close),
-      volume: b.volume,
-    });
-  }
-  return out;
 }

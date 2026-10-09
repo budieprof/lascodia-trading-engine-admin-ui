@@ -918,6 +918,16 @@ $pane-gap: 4px;
   align-items: center;
 }
 
+// A split panel's OHLC under its bar (CC-12); colours and spacing are the legend's (.legend-ohlc).
+.panel-legend {
+  position: absolute;
+  top: 30px;
+  left: 10px;
+  z-index: 14;
+  pointer-events: none;
+  font-size: 11px;
+}
+
 .panel-select {
   padding: 2px 4px;
   border: 1px solid var(--border, #e6e9ef);

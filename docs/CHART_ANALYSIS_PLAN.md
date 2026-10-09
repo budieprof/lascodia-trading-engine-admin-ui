@@ -198,11 +198,15 @@ The only phase that does not need the library, so it is the one to start on whil
 
 ### 5.2 Resolution mapping + aggregation
 
-| TV resolution                | Source                | Notes |
-| ---------------------------- | --------------------- | ----- |
-| `1`,`5`,`15`,`60`,`240`,`1D` | stored directly       | —     |
-| `30`                         | aggregate ×2 from M15 | cheap |
-| `1W`,`1M`                    | aggregate from D1     | cheap |
+As built (2026-10-09) — the source of truth is `RESOLUTION_SOURCES` in
+`datafeed/resolution.ts`; `SUPPORTED_RESOLUTIONS` is derived from it.
+
+| TV resolution                                           | Source                                       | Notes                                                                                                                                           |
+| ------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1`,`5`,`15`,`60`                                       | stored directly                              | —                                                                                                                                               |
+| `2`,`3` / `10` / `30`                                   | folded from M1 / M5 / M15                    | the UTC epoch grid is the session grid at these widths (17:00 New York is a whole multiple)                                                     |
+| `45`,`120`,`180`,`240`,`360`,`480`,`720`,`1D`,`1W`,`1M` | engine session grid (`scripting/chart-bars`) | bars anchored at the session open, as a Pine run lays them out; 45m does not fold on the epoch grid (22:00 UTC is not a multiple of 45 minutes) |
+| typed intervals (`20`, `2D`, `2W`, `3M` …)              | engine session grid                          | `parseInterval`; seconds and ticks are refused (no tick history)                                                                                |
 
 Aggregation rule: `open` = first, `close` = last, `high`/`low` = extremes, `volume` =
 sum, bucket start = the TradingView bar time. **Weekly bars must align to the FX
@@ -524,8 +528,11 @@ None outstanding.
   (`SubscribePrice`/`UnsubscribePrice`) rather than the per-route
   `EnterRoom`/`LeaveRoom` pattern. The live bar used to filter client-side on
   the tick's symbol, which worked but over-subscribed the hub.
-- **Renko / P&F box sizing** — an operator input, not a fixed ATR derivation.
-  The `Box n ×ATR` control appears in the toolbar for price-based styles only.
+- **Renko / P&F box sizing** — an operator input, not a fixed ATR derivation:
+  `n × ATR(14)` over closed bars (frozen per series and style, so a tick never
+  re-sizes the bricks) or a fixed number of pips (the engine's pip rule). The
+  box control appears for Renko, Point & figure, Kagi and Range; Line break has
+  its own line count; Renko wicks are a toggle. Saved per layout.
 
 ## Sources
 

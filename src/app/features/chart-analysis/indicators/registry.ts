@@ -126,7 +126,11 @@ import {
  * the settings dialog, `plots` drives the legend and the series creation.
  */
 
-export type PlotKind = 'line' | 'histogram' | 'area';
+/**
+ * `markers`: one shape per bar that has a value and nothing in between — a study whose values are
+ * events, not a series (Williams fractals). Joined as a line they zig-zagged across every swing.
+ */
+export type PlotKind = 'line' | 'histogram' | 'area' | 'markers';
 
 export interface PlotSpec {
   key: string;
@@ -135,6 +139,13 @@ export interface PlotSpec {
   color: string;
   /** Dashed reference levels (RSI 30/70 etc.), drawn in the indicator's pane. */
   lineWidth?: number;
+  /**
+   * Bars without a value: `join` (default) draws the line straight across them — a zig zag joins its
+   * pivots; `break` leaves a gap — a session's high and low end with the session (DR-17).
+   */
+  gaps?: 'join' | 'break';
+  /** For `markers`: the shape, and whether it sits on top of or under the value. */
+  marker?: { shape: 'arrowUp' | 'arrowDown' | 'circle' | 'square'; position: 'above' | 'below' };
 }
 
 /**
@@ -1495,9 +1506,22 @@ export const INDICATORS: readonly IndicatorDef[] = [
     keywords: ['fractal'],
     target: 'overlay',
     inputs: [{ key: 'size', label: 'Periods', type: 'number', default: 2, min: 1, max: 10 }],
+    // TradingView's triangles: an up fractal over the swing high, a down fractal under the swing low.
     plots: [
-      { key: 'up', title: 'Up Fractal', kind: 'line', color: '#EF5350' },
-      { key: 'down', title: 'Down Fractal', kind: 'line', color: '#26A69A' },
+      {
+        key: 'up',
+        title: 'Up Fractal',
+        kind: 'markers',
+        color: '#EF5350',
+        marker: { shape: 'arrowUp', position: 'above' },
+      },
+      {
+        key: 'down',
+        title: 'Down Fractal',
+        kind: 'markers',
+        color: '#26A69A',
+        marker: { shape: 'arrowDown', position: 'below' },
+      },
     ],
     compute: (bars, p) => fractals(bars, num(p, 'size', 2)),
   },
@@ -2135,13 +2159,14 @@ export const INDICATORS: readonly IndicatorDef[] = [
       NUM('nyStart', 'New York start (UTC h)', 12, 0, 23),
       NUM('nyEnd', 'New York end (UTC h)', 21, 0, 24),
     ],
+    // Each session's high and low end with the session: a gap overnight, never a line across it.
     plots: [
-      { key: 'asiaHigh', title: 'Asia H', kind: 'line', color: '#AB47BC' },
-      { key: 'asiaLow', title: 'Asia L', kind: 'line', color: '#AB47BC' },
-      { key: 'londonHigh', title: 'London H', kind: 'line', color: '#2962FF' },
-      { key: 'londonLow', title: 'London L', kind: 'line', color: '#2962FF' },
-      { key: 'nyHigh', title: 'NY H', kind: 'line', color: '#FF6D00' },
-      { key: 'nyLow', title: 'NY L', kind: 'line', color: '#FF6D00' },
+      { key: 'asiaHigh', title: 'Asia H', kind: 'line', color: '#AB47BC', gaps: 'break' },
+      { key: 'asiaLow', title: 'Asia L', kind: 'line', color: '#AB47BC', gaps: 'break' },
+      { key: 'londonHigh', title: 'London H', kind: 'line', color: '#2962FF', gaps: 'break' },
+      { key: 'londonLow', title: 'London L', kind: 'line', color: '#2962FF', gaps: 'break' },
+      { key: 'nyHigh', title: 'NY H', kind: 'line', color: '#FF6D00', gaps: 'break' },
+      { key: 'nyLow', title: 'NY L', kind: 'line', color: '#FF6D00', gaps: 'break' },
     ],
     compute: (bars, p) => {
       const a = sessionHighLow(bars, num(p, 'asiaStart', 0), num(p, 'asiaEnd', 9));

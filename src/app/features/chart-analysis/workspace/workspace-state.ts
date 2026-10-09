@@ -71,10 +71,24 @@ export interface ChartWorkspaceState {
   resolution?: TvResolution;
   style?: ChartStyle;
   showVolume?: boolean;
-  scaleMode?: 'normal' | 'log' | 'percent';
+  scaleMode?: 'normal' | 'log' | 'percent' | 'indexed';
+  /** The price scale upside down (default off). */
+  invertScale?: boolean;
+  /** The side the price scale sits on (default right). */
+  scaleSide?: 'right' | 'left';
+  /** Session-break lines on intraday charts (default off). */
+  sessionBreaks?: boolean;
   /** Countdown to bar close on the price scale (default on). */
   countdown?: boolean;
   timezone?: string;
+  /** How the price-based styles are built (CC-I10); absent: ATR × 1, no wicks, 3 lines. */
+  priceBased?: {
+    boxMethod?: 'atr' | 'pips';
+    boxSizeAtr?: number;
+    boxPips?: number;
+    renkoWicks?: boolean;
+    lineBreakLines?: number;
+  };
   indicators?: ActiveIndicator[];
   scripts?: WorkspaceScript[];
   view?: ChartViewState | null;
@@ -91,11 +105,22 @@ export interface ChartWorkspaceState {
     showStructure?: boolean;
     showEvents?: boolean;
     minEventImpact?: 'High' | 'Medium' | 'Low';
+    /** Shade the news blackout around Tier-1 events (default on). */
+    showBlackout?: boolean;
+    /** Fill markers of closed trades (default off). */
+    showClosedTrades?: boolean;
+    /** Whether the trade lines widen the price scale's fit (default on). */
+    fitTradeLines?: boolean;
+  };
+  /** The split view: its arrangement and each comparison panel's series (CC-12). */
+  split?: {
+    layout?: string;
+    panels?: { symbol: string; resolution: string }[];
   };
   panel?: {
     watchlistOpen?: boolean;
     width?: number;
-    sidePane?: 'none' | 'details' | 'news' | 'calendar';
+    sidePane?: 'none' | 'details' | 'news' | 'calendar' | 'datawindow';
     calendarAll?: boolean;
     calendarMinImpact?: 'Low' | 'Medium' | 'High';
   };
@@ -112,6 +137,32 @@ export interface ChartWorkspaceState {
      * only when set; a layout without it is not cleared.
      */
     editorCleared?: boolean;
+  };
+}
+
+/** How the price-based styles are built, as the page holds it (CC-I10). */
+export interface PriceBasedSettings {
+  boxMethod: 'atr' | 'pips';
+  boxSizeAtr: number;
+  boxPips: number;
+  renkoWicks: boolean;
+  lineBreakLines: number;
+}
+
+/**
+ * A layout's price-based settings with the chart's defaults for anything missing or out of range: a
+ * layout saved before they existed opens Renko as it always did (1 × ATR, no wicks, 3 lines).
+ */
+export function restoredPriceBased(pb: ChartWorkspaceState['priceBased']): PriceBasedSettings {
+  const positive = (v: number | undefined, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
+  const lines = pb?.lineBreakLines;
+  return {
+    boxMethod: pb?.boxMethod === 'pips' ? 'pips' : 'atr',
+    boxSizeAtr: positive(pb?.boxSizeAtr, 1),
+    boxPips: positive(pb?.boxPips, 10),
+    renkoWicks: pb?.renkoWicks === true,
+    lineBreakLines: typeof lines === 'number' && lines >= 1 && lines <= 10 ? Math.round(lines) : 3,
   };
 }
 

@@ -3,9 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   currencyFlag,
   eventCountdown,
+  eventSurprise,
+  FAST_REFRESH_MS,
   groupByDay,
   impactDots,
   isEventPast,
+  parseEventNumber,
+  refreshInterval,
+  releaseStatus,
+  SLOW_REFRESH_MS,
   SOON_MS,
 } from './economic-calendar';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
@@ -52,5 +58,35 @@ describe('economic calendar helpers', () => {
     const at = '2026-10-06T12:40:00Z';
     expect(isEventPast({ scheduledAt: at }, Date.parse(at) + 60_000)).toBe(false);
     expect(isEventPast({ scheduledAt: at }, Date.parse(at) + 120_000)).toBe(true);
+  });
+
+  it('groups by day in the chart zone (SP-09)', () => {
+    const late = ev(1, '2026-10-09T23:30:00Z');
+    const next = ev(2, '2026-10-10T01:00:00Z');
+    expect(groupByDay([late, next], 'UTC').map((d) => d.key)).toEqual(['2026-10-09', '2026-10-10']);
+    expect(groupByDay([late, next], 'Asia/Tokyo').map((d) => d.key)).toEqual(['2026-10-10']);
+  });
+
+  it('surprise is actual − forecast in the same unit, nothing when the units differ', () => {
+    expect(parseEventNumber('0.3%')).toEqual({ value: 0.3, unit: '%' });
+    expect(parseEventNumber('-215K')).toEqual({ value: -215, unit: 'K' });
+    expect(parseEventNumber('1,234')).toBeNull();
+    expect(eventSurprise({ actual: '0.5%', forecast: '0.3%' })).toEqual({ value: 0.2, text: '+0.2%' });
+    expect(eventSurprise({ actual: '180K', forecast: '215K' })).toEqual({ value: -35, text: '−35K' });
+    expect(eventSurprise({ actual: '0.3%', forecast: '0.3%' })?.text).toBe('±0%');
+    expect(eventSurprise({ actual: '0.5%', forecast: '215K' })).toBeNull();
+    expect(eventSurprise({ actual: null, forecast: '0.3%' })).toBeNull();
+  });
+
+  it('release status and the refresh cadence around a release', () => {
+    const now = Date.parse('2026-10-09T12:00:00Z');
+    expect(releaseStatus(ev(1, '2026-10-09T12:25:00Z'), now)).toBe('in 25 min');
+    expect(releaseStatus(ev(1, '2026-10-09T14:30:00Z'), now)).toBe('in 2h 30m');
+    expect(releaseStatus(ev(1, '2026-10-09T11:48:00Z', '0.4%'), now)).toBe('released 12 min ago');
+    expect(releaseStatus(ev(1, '2026-10-09T11:50:00Z'), now)).toBe('due now — no actual yet');
+    expect(refreshInterval([ev(1, '2026-10-09T12:01:00Z')], now)).toBe(FAST_REFRESH_MS);
+    expect(refreshInterval([ev(1, '2026-10-09T11:40:00Z')], now)).toBe(FAST_REFRESH_MS);
+    expect(refreshInterval([ev(1, '2026-10-09T11:40:00Z', '0.4%')], now)).toBe(SLOW_REFRESH_MS);
+    expect(refreshInterval([ev(1, '2026-10-09T15:00:00Z')], now)).toBe(SLOW_REFRESH_MS);
   });
 });
