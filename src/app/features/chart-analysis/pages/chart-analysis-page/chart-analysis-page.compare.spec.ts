@@ -23,7 +23,7 @@ describe('chart page — compare overlays (CC-I12)', () => {
     p.addCompare({ id: 'a', kind: 'compare', symbols: ['GBPUSD'], color: '#FF6D00' });
     expect(p.compareSeries()).toHaveLength(1);
     expect(p.scaleMode()).toBe('percent');
-    expect(p.notify.info).toHaveBeenCalled();
+    expect(p['notify'].info).toHaveBeenCalled();
   });
 
   it('indexed to 100 already compares; a ratio in its own pane leaves the scale alone', () => {

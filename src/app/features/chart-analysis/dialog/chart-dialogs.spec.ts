@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
+import type { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 import { askName, confirmDelete } from './chart-dialogs';
 
-const dialogs = (choice: string | null, text = '') => ({
-  ask: vi.fn(() => Promise.resolve({ choice, text })),
-  confirm: vi.fn(() => Promise.resolve(choice === 'confirm')),
-});
+const dialogs = (choice: string | null, text = '') =>
+  ({
+    ask: vi.fn(() => Promise.resolve({ choice, text })),
+    confirm: vi.fn(() => Promise.resolve(choice === 'confirm')),
+  }) as unknown as ScriptDialogService & { ask: Mock; confirm: Mock };
 
 describe('chart dialogs (CC-I11)', () => {
   it('asks for a name in the console dialog and answers it trimmed', async () => {

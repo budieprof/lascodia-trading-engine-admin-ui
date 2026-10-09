@@ -52,7 +52,7 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     }),
   });
   Object.defineProperty(p, 'panelScriptChoices', {
-    value: computed(() => [...p.scriptCatalog().mine, ...p.scriptCatalog().examples]),
+    value: computed(() => [...p.scriptCatalog()!.mine, ...p.scriptCatalog()!.examples]),
   });
   // As the page derives the layout's other charts (v2 `charts`, CC-I5).
   Object.defineProperty(p, 'panelStates', {
@@ -148,7 +148,7 @@ describe('chart page — the other charts’ studies and scripts (CC-I5)', () =>
     p.comparePanels.set([panel()]);
     p.panelAdd('a', 'script:mine:7');
     p['runPanelScript']('a', 'mine:7');
-    expect(p.chartScripts.runOnChart).toHaveBeenCalledWith(
+    expect(p['chartScripts'].runOnChart).toHaveBeenCalledWith(
       expect.objectContaining({ key: 'mine:7' }),
       'GBPUSD',
       '60',
@@ -158,7 +158,7 @@ describe('chart page — the other charts’ studies and scripts (CC-I5)', () =>
     );
     const s = p.comparePanels()[0].scripts[0];
     expect(s.result).toMatchObject({ title: 'run' });
-    expect(s.ranTo).toBe(p.comparePanels()[0].bars.at(-1).time);
+    expect(s.ranTo).toBe(p.comparePanels()[0].bars.at(-1)!.time);
   });
 });
 

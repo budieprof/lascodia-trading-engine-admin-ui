@@ -59,10 +59,10 @@ describe('chart page — layout memory per symbol (CC-I11)', () => {
     const view = { barSpacing: 9, rightOffset: -20, paneHeights: [500] };
     p.rememberPerSymbol.set(true);
     p.resolution.set('240');
-    p.viewSnapshot.set(view);
+    p['viewSnapshot'].set(view);
     p.selectSymbol('USDJPY'); // EURUSD left on 4h with that zoom
     p.resolution.set('15');
-    p.viewSnapshot.set(null);
+    p['viewSnapshot'].set(null);
     p.selectSymbol('EURUSD');
     expect(p.resolution()).toBe('240');
     expect(feed.getBars).toHaveBeenLastCalledWith('EURUSD', '240', 0, expect.any(Number), 1500);
@@ -77,7 +77,7 @@ describe('chart page — layout memory per symbol (CC-I11)', () => {
     p.resolution.set('15');
     p.selectSymbol('EURUSD');
     expect(p.resolution()).toBe('15');
-    expect(p.symbolMemory().EURUSD).toEqual({ resolution: '240' });
+    expect(p.symbolMemory()['EURUSD']).toEqual({ resolution: '240' });
   });
 });
 
