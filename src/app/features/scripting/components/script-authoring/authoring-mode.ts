@@ -49,9 +49,15 @@ export interface ScriptDraft {
  * A new strategy's starting point — a complete, compiling Pine v6 strategy. Every entry carries a
  * protective stop sized to the market's noise (ATR) and a target: live accounts reject an entry
  * without a stop (PS9002), so a script started from here can go live as written (PE-09).
+ *
+ * Sized at 100% of equity: at the old 10% of 10,000 every EURUSD order (≈ 900 units) fell below the
+ * engine's 1,000-unit minimum and was rejected, so the starting script never traded (PE-I9).
  */
 export const DEFAULT_STRATEGY_SCRIPT = `//@version=6
-strategy("My strategy", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)
+strategy("My strategy", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)
+// Each trade's size: 100% of equity as notional (no leverage), in units as on TradingView. The engine
+// rounds every order down to the symbol's lot step (0.01 lot = 1,000 EURUSD units): a smaller share
+// of this capital rounds to nothing and the strategy never trades.
 
 //#region Inputs
 fastLength = input.int(9, "Fast length", minval = 1, group = "Moving averages")

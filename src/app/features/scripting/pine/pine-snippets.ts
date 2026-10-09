@@ -18,7 +18,7 @@ export const PINE_SNIPPETS: readonly PineSnippet[] = [
     lineStart: true,
     template: [
       '//@version=6',
-      'strategy("${My strategy}", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 10)',
+      'strategy("${My strategy}", overlay = true, initial_capital = 10000, default_qty_type = strategy.percent_of_equity, default_qty_value = 100)',
       '',
       'fastLength = input.int(9, "Fast length", minval = 1)',
       'slowLength = input.int(21, "Slow length", minval = 1)',

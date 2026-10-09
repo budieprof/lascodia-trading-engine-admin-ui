@@ -16,6 +16,7 @@ import {
   type TradeChartSelection,
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 import type { ReportTrade } from '../../report/strategy-report.model';
+import { wasPreviewed } from '../../onboarding/previewed-scripts';
 
 // The editor's Preview: it runs the script, hosts the Pine chart (app-pine-preview) in its chart
 // slot fed by the run, routes the chart's source-line jumps to the editor and, for a strategy,
@@ -367,5 +368,13 @@ describe('ScriptPreviewComponent', () => {
     await preview();
     expect(report()!.testCount).toMatchObject({ count: 2 });
     expect((report()!.testCount as { label: string }).label).toContain('every look is a test');
+  });
+  it('PE-I9: remembers that this exact script was previewed (the first-strategy checklist)', async () => {
+    localStorage.clear();
+    render();
+    expect(wasPreviewed(SOURCE)).toBe(false);
+    await preview();
+    expect(wasPreviewed(SOURCE)).toBe(true);
+    expect(wasPreviewed(SOURCE + ' ')).toBe(false);
   });
 });

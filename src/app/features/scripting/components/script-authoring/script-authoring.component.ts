@@ -49,7 +49,15 @@ import { InputsFormComponent } from '../inputs-form/inputs-form.component';
 import { ScriptPreviewComponent } from '../script-preview/script-preview.component';
 import { ScriptWorkbenchComponent } from '../script-workbench/script-workbench.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
-import { baseFor, draftFor, type ScriptBase, type ScriptDraft } from './authoring-mode';
+import {
+  DEFAULT_STRATEGY_SCRIPT,
+  baseFor,
+  draftFor,
+  type ScriptBase,
+  type ScriptDraft,
+} from './authoring-mode';
+import { ExampleGalleryComponent } from '../../onboarding/example-gallery.component';
+import type { StrategyExample } from '../../onboarding/strategy-examples';
 
 type SideTab = 'inputs' | 'properties';
 
@@ -76,6 +84,7 @@ type SideTab = 'inputs' | 'properties';
     InputsFormComponent,
     DeclarationSummaryComponent,
     ScriptPreviewComponent,
+    ExampleGalleryComponent,
   ],
   template: `
     @if (restorable(); as r) {
@@ -96,6 +105,27 @@ type SideTab = 'inputs' | 'properties';
     }
     <div class="authoring-grid">
       <div class="col-editor">
+        <!-- PE-I9: complete example strategies to start from. -->
+        <div class="examples-bar">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            data-testid="examples-toggle"
+            [attr.aria-expanded]="galleryOpen()"
+            (click)="galleryOpen.set(!galleryOpen())"
+          >
+            Examples
+          </button>
+          @if (!strategy()) {
+            <span class="muted small"
+              >Start from a complete strategy with a stop: reversions, breakouts, a trend
+              follower.</span
+            >
+          }
+        </div>
+        @if (galleryOpen()) {
+          <app-example-gallery (picked)="useExample($event)" (closed)="galleryOpen.set(false)" />
+        }
         <app-script-workbench
           [source]="draft().source"
           (sourceChange)="setSource($event)"
@@ -248,6 +278,12 @@ type SideTab = 'inputs' | 'properties';
       .restore-actions {
         display: inline-flex;
         gap: 6px;
+      }
+      .examples-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
       }
       .authoring-grid {
         display: grid;
@@ -475,6 +511,31 @@ export class ScriptAuthoringComponent {
 
   setInputs(inputs: ScriptInputValues): void {
     this.draft.update((d) => ({ ...d, inputs }));
+  }
+
+  /** PE-I9: the example gallery is open above the editor. */
+  readonly galleryOpen = signal(false);
+
+  /**
+   * Puts an example in the editor as an undoable edit. A script the operator has written (not the
+   * starting script, not this example already) is only replaced after asking.
+   */
+  async useExample(example: StrategyExample): Promise<void> {
+    const current = this.currentSource();
+    const untouched =
+      !current.trim() || current === DEFAULT_STRATEGY_SCRIPT || current === example.source;
+    if (!untouched) {
+      const ok = await this.dialogs.confirm({
+        title: `Replace the script with “${example.title}”?`,
+        message:
+          "The editor's script is replaced by the example. Undo in the editor (Ctrl-Z / Cmd-Z) brings it back.",
+        confirmLabel: 'Replace the script',
+        tone: 'danger',
+      });
+      if (!ok) return;
+    }
+    this.replaceSource(example.source);
+    this.galleryOpen.set(false);
   }
 
   readonly exitsNote = EXITS_NEVER_BLOCKED;

@@ -66,6 +66,8 @@ import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-aler
 import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
+import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
+import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
 import { OPERATOR_PERMISSION } from '@features/scripting/shared/permissions';
 import {
@@ -106,6 +108,7 @@ import {
     ScriptBacktestLauncherComponent,
     RouterLink,
     StrategyScriptCardComponent,
+    FirstStrategyChecklistComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -305,6 +308,16 @@ import {
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
+              <!-- PE-I9: a new script strategy's path to a demo account (hides itself when done). -->
+              @if (isScript() && strategy(); as s) {
+                <app-first-strategy-checklist
+                  [strategy]="s"
+                  [backtests]="totalBacktests()"
+                  [canOperate]="canOperate()"
+                  [canStartPaper]="canStartPaperTrading()"
+                  (actionRequested)="onChecklistAction($event)"
+                />
+              }
               <!-- 8-card KPI strip — quick scan of life-to-date activity.
                    The run-count cards double as nav shortcuts to the
                    matching tabs further down. -->
@@ -1724,6 +1737,24 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       if (await confirmDiscard(this.dialogs, unsaved)) this.activeTab.set(tab);
     } finally {
       this.tabQuestionOpen = false;
+    }
+  }
+
+  /** PE-I9: a checklist step's action — the editor, a tab, or starting paper trading. */
+  onChecklistAction(action: ChecklistAction): void {
+    switch (action) {
+      case 'edit':
+        this.openEdit();
+        break;
+      case 'backtests':
+        this.requestTab('backtests');
+        break;
+      case 'execution':
+        this.openExecutionTab();
+        break;
+      case 'paper':
+        if (this.canStartPaperTrading()) this.onStartPaperTrading();
+        break;
     }
   }
 

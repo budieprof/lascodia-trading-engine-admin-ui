@@ -36,6 +36,7 @@ import type { ReportTrade } from '../../report/strategy-report.model';
 import { engineTimeframe } from '../../backtest/run-chart.model';
 import type { ReportTestCount } from '../../report/report-r-analysis.component';
 import { scriptSourceHash } from '../../shared/sha256';
+import { markPreviewed } from '../../onboarding/previewed-scripts';
 
 const BAR_CHOICES = [500, 1000, 2000, 5000, 10000] as const;
 
@@ -484,6 +485,8 @@ export class ScriptPreviewComponent {
         ].join('|'),
       );
       this.variantCount.set(this.variants.size);
+      // PE-I9: the first-strategy checklist ticks "preview it" for the script that ran.
+      if (r.compile?.success !== false) markPreviewed(request.source);
     } catch (err) {
       this.error.set(toScriptingError(err, 'The preview failed.').message);
     } finally {

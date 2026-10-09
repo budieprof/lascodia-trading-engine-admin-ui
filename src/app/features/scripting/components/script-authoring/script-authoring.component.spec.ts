@@ -10,7 +10,8 @@ import type { ScriptCompileResult } from '@core/api/scripting.types';
 import { ScriptingService } from '@core/services/scripting.service';
 import { ScriptDialogService } from '../../shared/script-dialog.service';
 import { ScriptAuthoringComponent } from './script-authoring.component';
-import { draftFor, type ScriptDraft } from './authoring-mode';
+import { DEFAULT_STRATEGY_SCRIPT, draftFor, type ScriptDraft } from './authoring-mode';
+import { STRATEGY_EXAMPLES } from '../../onboarding/strategy-examples';
 
 // The script panel's own behaviour: what it hands the strategy form to save, and the exact
 // `PUT strategy/{id}/script` it sends (HTTP through the real ScriptingService against
@@ -340,14 +341,12 @@ describe('ScriptAuthoringComponent', () => {
         .expectOne(`${BASE}/strategy/7/account-bindings`)
         .flush({ status: true, data: [], message: null, responseCode: '00' });
       await tick();
-      http
-        .expectOne(`${BASE}/strategy/7/script`)
-        .flush({
-          status: true,
-          data: { scriptRevision: 'x' },
-          message: 'Saved',
-          responseCode: '00',
-        });
+      http.expectOne(`${BASE}/strategy/7/script`).flush({
+        status: true,
+        data: { scriptRevision: 'x' },
+        message: 'Saved',
+        responseCode: '00',
+      });
       expect(await done).toBe(true);
       expect(confirm).not.toHaveBeenCalled();
     });
@@ -380,14 +379,12 @@ describe('ScriptAuthoringComponent', () => {
 
       const done = cmp.saveScript(7);
       await tick();
-      http
-        .expectOne(`${BASE}/strategy/7/script`)
-        .flush({
-          status: true,
-          data: { scriptRevision: 'r2' },
-          message: 'Saved',
-          responseCode: '00',
-        });
+      http.expectOne(`${BASE}/strategy/7/script`).flush({
+        status: true,
+        data: { scriptRevision: 'r2' },
+        message: 'Saved',
+        responseCode: '00',
+      });
       expect(await done).toBe(true);
       expect(localStorage.getItem(KEY)).toBeNull();
     });
@@ -451,6 +448,36 @@ describe('ScriptAuthoringComponent', () => {
       expect(draft().executionPolicy).toBe('Standard');
       cmp.setPolicy('Nonsense' as any);
       expect(draft().executionPolicy).toBe('Direct');
+    });
+  });
+  describe('PE-I9: example gallery', () => {
+    const example = STRATEGY_EXAMPLES.find((e) => e.id === 'rsi-reversion')!;
+
+    function withEditor(text: string) {
+      const editor = { replaceSource: vi.fn(), currentSource: vi.fn(() => text) };
+      cmp.workbench = { ...workbench, ...editor } as any;
+      return editor;
+    }
+
+    it('puts an example in a new strategy’s editor without asking', async () => {
+      setup(null, compile());
+      cmp.galleryOpen.set(true);
+      const editor = withEditor(DEFAULT_STRATEGY_SCRIPT);
+      await cmp.useExample(example);
+      expect(dialogs.confirm).not.toHaveBeenCalled();
+      expect(editor.replaceSource).toHaveBeenCalledWith(example.source);
+      expect(cmp.galleryOpen()).toBe(false);
+    });
+
+    it('asks before replacing a script the operator wrote, and keeps it on No', async () => {
+      setup(STRATEGY, compile());
+      const editor = withEditor(SCRIPT);
+      await cmp.useExample(example);
+      expect(dialogs.confirm.mock.calls[0][0].title).toContain('RSI reversion');
+      expect(editor.replaceSource).not.toHaveBeenCalled();
+      dialogs.confirm.mockResolvedValueOnce(true);
+      await cmp.useExample(example);
+      expect(editor.replaceSource).toHaveBeenCalledWith(example.source);
     });
   });
 });
