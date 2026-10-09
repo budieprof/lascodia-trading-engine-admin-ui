@@ -20,7 +20,12 @@ import {
 } from '@shared/pine-chart/components/pine-chart.component';
 import type { PineChartData } from '@shared/pine-chart/model/chart-data';
 import { normalizeRunResult } from '@shared/pine-chart/model/normalize';
-import type { PineRunRequest, PineRunResult } from '@shared/pine-chart/model/pine-outputs.types';
+import type {
+  PineCallFrame,
+  PineRunRequest,
+  PineRunResult,
+} from '@shared/pine-chart/model/pine-outputs.types';
+import { callFrameText, unitLabel } from '../pine/pine-diagnostics';
 import {
   PineLogsPaneComponent,
   type PineLineJump,
@@ -102,13 +107,32 @@ type DockTab = 'logs' | 'trace' | 'profiler';
     @if (current()?.runtimeError; as err) {
       <div class="banner runtime" role="alert">
         <b>{{ err.code || 'Runtime error' }}</b> {{ err.message }}
-        @if (err.line) {
+        @if (err.line && !libraryOf(err.unit)) {
           <button type="button" (click)="jumpToLine.emit({ line: err.line, column: err.column })">
             Line {{ err.line }}
           </button>
+        } @else if (err.line) {
+          <span class="where">line {{ err.line }} of {{ libraryOf(err.unit) }}</span>
         }
         @if (err.barIndex !== null && err.barIndex !== undefined) {
           <button type="button" (click)="goToBar(err.barIndex)">Bar {{ err.barIndex }}</button>
+        }
+        @if (err.callStack?.length) {
+          <ol class="call-stack" aria-label="Call stack, innermost first">
+            @for (frame of err.callStack; track $index) {
+              <li>
+                {{ frameText(frame) }}
+                @if (frame.line && !libraryOf(frame.unit)) {
+                  <button
+                    type="button"
+                    (click)="jumpToLine.emit({ line: frame.line, column: frame.column ?? 1 })"
+                  >
+                    Line {{ frame.line }}
+                  </button>
+                }
+              </li>
+            }
+          </ol>
         }
       </div>
     }
@@ -269,6 +293,19 @@ type DockTab = 'logs' | 'trace' | 'profiler';
       }
       .banner.hint {
         background: color-mix(in srgb, var(--accent, #0071e3) 10%, transparent);
+      }
+      .banner .where {
+        color: var(--text-secondary, #6e6e73);
+      }
+      .banner .call-stack {
+        flex-basis: 100%;
+        margin: 0;
+        padding-left: 18px;
+        font-size: 11px;
+        color: var(--text-secondary, #6e6e73);
+      }
+      .banner .call-stack li {
+        margin: 1px 0;
       }
       .banner button,
       .tabs button {
@@ -492,6 +529,16 @@ export class PinePreviewComponent {
     this.highlight.set(bar);
     this.traceBar.set(bar);
     this.chart()?.scrollToBar(bar);
+  }
+
+  /** "library publisher/name/version" for a runtime location in an imported library; null for the script's own. */
+  libraryOf(unit: string | null | undefined): string | null {
+    return unitLabel(unit);
+  }
+
+  /** A call-stack frame in plain words ("in f(), called on line 12"). */
+  frameText(frame: PineCallFrame): string {
+    return callFrameText(frame);
   }
 
   startResize(e: PointerEvent): void {
