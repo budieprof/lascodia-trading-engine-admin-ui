@@ -647,3 +647,40 @@ describe('ScriptingService — rename, convert, format (runtime2)', () => {
     });
   });
 });
+
+describe('ScriptingService — AI assist (PE-I6)', () => {
+  it('posts the request once and returns the proposal; no answer rejects with the reason', async () => {
+    const post = vi.fn(() =>
+      of({
+        status: true,
+        responseCode: '00',
+        message: 'ok',
+        data: { mode: 'fix', explanation: 'Closed it.', source: 'plot(close)\n', warnings: [] },
+      }),
+    );
+    const svc = make({ post });
+    const r = await firstValueFrom(
+      svc.assist({
+        mode: 'fix',
+        source: 'plot(close',
+        problem: { code: 'PS1001', message: 'x', line: 1 },
+      }),
+    );
+    expect(r.source).toBe('plot(close)\n');
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      '/scripting/assist',
+      { mode: 'fix', source: 'plot(close', problem: { code: 'PS1001', message: 'x', line: 1 } },
+      { silent: true },
+    );
+
+    const down = make({
+      post: vi.fn(() =>
+        of({ status: false, responseCode: '-19', message: 'The AI did not answer.', data: null }),
+      ),
+    });
+    await expect(
+      firstValueFrom(down.assist({ mode: 'explain', source: 'plot(close)' })),
+    ).rejects.toMatchObject({ message: 'The AI did not answer.' });
+  });
+});

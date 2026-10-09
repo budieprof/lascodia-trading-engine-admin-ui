@@ -79,6 +79,8 @@ export interface PineEditorOptions {
 export interface PineEditorHandle {
   readonly view: EditorView;
   getValue(): string;
+  /** The main selection as document offsets [from, to); null when nothing is selected. */
+  getSelection(): { from: number; to: number } | null;
   /** Replaces the document. External loads stay out of the undo history by default. */
   setValue(doc: string, addToHistory?: boolean): void;
   setReadOnly(readOnly: boolean): void;
@@ -233,6 +235,10 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
   return {
     view,
     getValue: () => view.state.doc.toString(),
+    getSelection: () => {
+      const r = view.state.selection.main;
+      return r.empty ? null : { from: r.from, to: r.to };
+    },
     setValue(doc, addToHistory = false) {
       if (doc === view.state.doc.toString()) return;
       view.dispatch({

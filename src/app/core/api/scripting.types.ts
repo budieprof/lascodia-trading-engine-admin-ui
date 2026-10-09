@@ -917,3 +917,24 @@ export interface ScriptFormatResult {
   changed: boolean;
   problem?: string | null;
 }
+
+/** §2e AI explain / fix request (PE-I6). */
+export interface ScriptAssistRequest {
+  mode: 'explain' | 'fix';
+  source: string;
+  selectionFrom?: number;
+  selectionTo?: number;
+  problem?: { code: string; message: string; line: number };
+  question?: string;
+}
+
+/** §2e response: an explanation, and for `fix` a proposed script (never applied by the engine). */
+export interface ScriptAssistResult {
+  mode: 'explain' | 'fix';
+  explanation: string;
+  source?: string | null;
+  compile?: ScriptCompileResult | null;
+  warnings: string[];
+  llmInvocationId: number;
+  model: string;
+}

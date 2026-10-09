@@ -15,7 +15,11 @@ import {
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
-import type { ScriptCompileResult, ScriptDiagnostic } from '@core/api/scripting.types';
+import type {
+  ScriptAssistRequest,
+  ScriptCompileResult,
+  ScriptDiagnostic,
+} from '@core/api/scripting.types';
 import {
   ScriptingService,
   normaliseCompile,
@@ -25,13 +29,19 @@ import { downloadTextFile, readTextFile } from '@shared/utils/download';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
 import {
   ProblemsPanelComponent,
+  type ProblemAsk,
   type ProblemFix,
 } from '../problems-panel/problems-panel.component';
 import {
   ScriptStatusBarComponent,
   type CompileState,
 } from '../script-status-bar/script-status-bar.component';
-import { conversionProposal, versionOf, type ScriptProposal } from '../../pine/pine-proposal';
+import {
+  assistProposal,
+  conversionProposal,
+  versionOf,
+  type ScriptProposal,
+} from '../../pine/pine-proposal';
 import { flattenOutline } from '../../pine/pine-semantic';
 import { ScriptDiffComponent } from '../../shared/script-diff.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
@@ -107,6 +117,17 @@ export const COMPILE_DEBOUNCE_MS = 700;
             title="Rewrite this Pine v4/v5 script for v6 — shown as a comparison you accept or reject"
           >
             {{ converting() ? 'Converting…' : 'Convert to v6' }}
+          </button>
+        }
+        @if (aiAssist()) {
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            (click)="openAsk()"
+            [disabled]="asking() || !source().trim()"
+            title="Ask the AI about the selected lines (or the whole script), or for a change you review before it is used"
+          >
+            {{ asking() ? 'Asking the AI…' : 'Ask AI' }}
           </button>
         }
         <button
@@ -206,6 +227,65 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [cursor]="cursor()"
       />
 
+      @if (aiAnswer(); as a) {
+        <section class="ai-answer" aria-label="The AI's answer">
+          <header>
+            <strong>{{ a.title }}</strong>
+            <span class="muted">AI ({{ a.model }}) — check it against the script</span>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs"
+              (click)="aiAnswer.set(null)"
+              aria-label="Close the answer"
+            >
+              ✕
+            </button>
+          </header>
+          <p>{{ a.text }}</p>
+        </section>
+      }
+
+      <dialog #askBox class="rename ask" aria-label="Ask the AI" (close)="askOpen.set(false)">
+        @if (askOpen()) {
+          <form method="dialog" (submit)="$event.preventDefault()">
+            <p class="muted">{{ askScope() }}</p>
+            <label>
+              Your question or the change you want (optional for Explain)
+              <textarea
+                rows="3"
+                maxlength="1000"
+                [value]="askQuestion()"
+                (input)="askQuestion.set($any($event.target).value)"
+              ></textarea>
+            </label>
+            <p class="muted">
+              A change comes back as a comparison: nothing is used until you accept it.
+            </p>
+            <div class="actions">
+              <button type="button" class="btn btn-ghost btn-sm" (click)="closeAsk()">
+                Cancel
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" (click)="submitAsk('explain')">
+                Explain
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                [disabled]="readOnly() || (!askSelection() && !askQuestion().trim())"
+                (click)="submitAsk('fix')"
+                [title]="
+                  readOnly()
+                    ? 'The editor is read-only'
+                    : 'Select lines or describe the change first'
+                "
+              >
+                Propose a change
+              </button>
+            </div>
+          </form>
+        }
+      </dialog>
+
       <dialog
         #proposalBox
         class="proposal"
@@ -296,6 +376,8 @@ export const COMPILE_DEBOUNCE_MS = 700;
           [readOnly]="readOnly() || stale()"
           (selected)="reveal($event.line, $event.column)"
           (fix)="applyFix($event)"
+          [assist]="aiAssist()"
+          (ask)="askAboutProblem($event)"
         />
       }
     </div>
@@ -404,6 +486,34 @@ export const COMPILE_DEBOUNCE_MS = 700;
       .rename .error {
         color: var(--loss);
       }
+      .ai-answer {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .ai-answer header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .ai-answer header .muted {
+        flex: 1;
+        font-size: 11px;
+      }
+      .ai-answer p {
+        margin: 6px 0 0;
+        white-space: pre-wrap;
+        max-height: 240px;
+        overflow-y: auto;
+      }
+      .ask textarea {
+        display: block;
+        width: 100%;
+        margin-top: 4px;
+        font: inherit;
+      }
       .proposal {
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -465,6 +575,8 @@ export class ScriptWorkbenchComponent {
    * shortcut means the same in every Pine editor of the console.
    */
   readonly saveShortcut = input<'save' | 'validate'>('validate');
+  /** Offer the AI's Explain / fix (PE-I6; needs operator access on the engine). */
+  readonly aiAssist = input(true);
 
   /** Every compile result applied to the current source. */
   readonly compiled = output<ScriptCompileResult>();
@@ -511,6 +623,29 @@ export class ScriptWorkbenchComponent {
     const v = versionOf(this.source());
     return v === 4 || v === 5;
   });
+
+  // ── AI explain / fix (PE-I6) ──
+  @ViewChild('askBox') private askBox?: ElementRef<HTMLDialogElement>;
+  readonly asking = signal(false);
+  readonly askOpen = signal(false);
+  readonly askQuestion = signal('');
+  readonly askSelection = signal<{ from: number; to: number } | null>(null);
+  readonly aiAnswer = signal<{ title: string; text: string; model: string } | null>(null);
+  /** What the Ask AI dialog is about: "line 3", "lines 3–5" or "the whole script". */
+  readonly askTarget = computed(() => {
+    const sel = this.askSelection();
+    if (!sel) return 'the whole script';
+    const text = this.source();
+    const line = (o: number) => text.slice(0, o).split('\n').length;
+    const a = line(sel.from);
+    const b = line(Math.max(sel.from, sel.to - 1));
+    return a === b ? `line ${a}` : `lines ${a}–${b}`;
+  });
+  readonly askScope = computed(() =>
+    this.askSelection()
+      ? `About ${this.askTarget()}.`
+      : 'About the whole script (select lines first to ask about just those).',
+  );
 
   private readonly scripting = inject(ScriptingService);
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -682,6 +817,87 @@ export class ScriptWorkbenchComponent {
       this.notice.set(toScriptingError(err, 'The engine could not convert the script.').message);
     } finally {
       this.converting.set(false);
+    }
+  }
+
+  /** Opens the Ask AI dialog for the editor's selection (or the whole script). */
+  openAsk(): void {
+    this.askSelection.set(this.editor?.selection() ?? null);
+    this.askOpen.set(true);
+    const box = this.askBox?.nativeElement;
+    if (box && !box.open) {
+      if (typeof box.showModal === 'function') box.showModal();
+      else box.setAttribute('open', '');
+    }
+  }
+
+  closeAsk(): void {
+    const box = this.askBox?.nativeElement;
+    if (box?.open) {
+      if (typeof box.close === 'function') box.close();
+      else box.removeAttribute('open');
+    }
+    this.askOpen.set(false);
+  }
+
+  submitAsk(mode: 'explain' | 'fix'): void {
+    const sel = this.askSelection();
+    const question = this.askQuestion().trim();
+    this.closeAsk();
+    void this.askAi(
+      mode,
+      {
+        selectionFrom: sel?.from,
+        selectionTo: sel?.to,
+        question: question || undefined,
+      },
+      this.askTarget(),
+    );
+  }
+
+  /** Explain / AI fix on a Problems row. */
+  askAboutProblem(a: ProblemAsk): void {
+    void this.askAi(
+      a.mode,
+      {
+        problem: {
+          code: a.diagnostic.code,
+          message: a.diagnostic.message,
+          line: a.diagnostic.line,
+        },
+      },
+      `${a.diagnostic.code} on line ${a.diagnostic.line}`,
+    );
+  }
+
+  /**
+   * PE-I6: one AI call. An explanation shows in the answer panel; a fix opens the proposal dialog
+   * (diff, warnings, Reject / accept) for the exact text it was asked about.
+   */
+  async askAi(
+    mode: 'explain' | 'fix',
+    extra: Omit<ScriptAssistRequest, 'mode' | 'source'>,
+    what: string,
+  ): Promise<void> {
+    if (this.asking()) return;
+    if (mode === 'fix' && this.readOnly()) return;
+    const before = this.currentSource();
+    if (!before.trim()) return;
+    this.asking.set(true);
+    try {
+      const r = await firstValueFrom(this.scripting.assist({ mode, source: before, ...extra }));
+      if (mode === 'explain') {
+        this.aiAnswer.set({ title: `About ${what}`, text: r.explanation, model: r.model });
+        return;
+      }
+      const { proposal, problem } = assistProposal(before, r, what);
+      if (proposal) this.showProposal(proposal);
+      else
+        this.aiAnswer.set({ title: `No change for ${what}`, text: problem ?? '', model: r.model });
+    } catch (err) {
+      this.notice.set(toScriptingError(err, 'The AI could not answer.').message);
+    } finally {
+      this.asking.set(false);
     }
   }
 

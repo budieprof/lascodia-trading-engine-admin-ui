@@ -36,6 +36,8 @@ import type {
   ScriptPublisherDto,
   ScriptConversion,
   ScriptFormatResult,
+  ScriptAssistRequest,
+  ScriptAssistResult,
   ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
@@ -238,6 +240,19 @@ export class ScriptingService {
   }
 
   /** `POST scripting/format` (§2d) — TradingView spacing, proven token-identical by the engine. */
+  /**
+   * PE-I6: asks the AI to explain or fix (§2e). A fix comes back as a proposal — the caller shows
+   * it for review; nothing is applied here. No retries: every call is a paid model call.
+   */
+  assist(request: ScriptAssistRequest): Observable<ScriptAssistResult> {
+    return this.api
+      .post<ResponseData<ScriptAssistResult>>('/scripting/assist', request, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The AI could not answer.')),
+        catchError((err) => throwError(() => toScriptingError(err, 'The AI could not answer.'))),
+      );
+  }
+
   format(source: string): Observable<ScriptFormatResult> {
     return this.api
       .post<ResponseData<ScriptFormatResult>>('/scripting/format', { source }, SILENT)

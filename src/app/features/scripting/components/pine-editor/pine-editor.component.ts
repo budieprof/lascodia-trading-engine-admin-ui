@@ -308,6 +308,11 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
     return this.handle?.applyEdits(source, edits) ?? false;
   }
 
+  /** The editor's selection as offsets [from, to); null when nothing is selected. */
+  selection(): { from: number; to: number } | null {
+    return this.handle?.getSelection() ?? null;
+  }
+
   /** The live source (the editor's own document, even mid-keystroke). */
   currentValue(): string {
     return this.handle?.getValue() ?? this.value();

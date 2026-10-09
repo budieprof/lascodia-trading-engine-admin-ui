@@ -1,4 +1,4 @@
-import type { ScriptConversion } from '@core/api/scripting.types';
+import type { ScriptAssistResult, ScriptConversion } from '@core/api/scripting.types';
 
 /**
  * A change proposed to the script — by the converter (PR-I10) or the AI (PE-I6) — that the operator
@@ -45,6 +45,37 @@ export function conversionProposal(
       notes: c.changes.map((x) => `Line ${x.line}: ${x.what}`),
       warnings,
       acceptLabel: c.toVersion === 6 ? 'Use the v6 script' : 'Use the converted v5 script',
+    },
+    problem: null,
+  };
+}
+
+/**
+ * The AI's fix (PE-I6) as a proposal; null (with the AI's words in `problem`) when it proposed no
+ * change. The engine's warnings come first, then any compile error of the proposed script.
+ */
+export function assistProposal(
+  before: string,
+  r: ScriptAssistResult,
+  what: string,
+): { proposal: ScriptProposal | null; problem: string | null } {
+  if (!r.source || r.source === before) {
+    return { proposal: null, problem: r.explanation || 'The AI did not propose a change.' };
+  }
+  const warnings = [...(r.warnings ?? [])];
+  const errors = (r.compile?.diagnostics ?? []).filter((d) => d.severity === 'error' && !d.unit);
+  for (const d of errors) {
+    const line = `Line ${d.line}: ${d.message}`;
+    if (!warnings.some((w) => w.includes(d.message))) warnings.push(line);
+  }
+  return {
+    proposal: {
+      title: `AI fix: ${what}`,
+      before,
+      after: r.source,
+      notes: r.explanation ? [r.explanation] : [],
+      warnings,
+      acceptLabel: 'Use the AI’s change',
     },
     problem: null,
   };
