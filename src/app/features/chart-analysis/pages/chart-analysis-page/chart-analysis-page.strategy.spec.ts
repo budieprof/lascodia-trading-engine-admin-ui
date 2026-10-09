@@ -25,6 +25,8 @@ const resultOf = (it: ChartScriptItem): ChartScriptResult =>
     diagnostics: [],
     error: null,
     errorAt: null,
+    errorUnit: null,
+    errorStack: [],
     strategy: null,
     run: null,
   }) as ChartScriptResult;

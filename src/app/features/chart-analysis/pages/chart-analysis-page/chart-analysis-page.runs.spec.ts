@@ -89,7 +89,11 @@ const onChart = (it: ChartScriptItem, values: ScriptInputValues = {}): ChartScri
   requestedBars: 1500,
 });
 
-type Page = ChartAnalysisPageComponent & Record<string, any>;
+/**
+ * The page as these specs drive it: its prototype's methods and the state they touch, private ones
+ * included (the run machinery is private to the page) — so untyped.
+ */
+type Page = any;
 
 function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = []) {
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;

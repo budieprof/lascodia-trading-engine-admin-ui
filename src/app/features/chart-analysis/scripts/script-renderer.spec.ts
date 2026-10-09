@@ -465,7 +465,7 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
   function drawn(times: number[], shift = 0) {
     const { result } = decorated();
     const r = rig(times.map((t) => t + shift / 1000));
-    (r.host as { shiftMs: () => number }).shiftMs = () => shift;
+    (r.host as { shiftMs: (utcMs: number) => number }).shiftMs = () => shift;
     const s = new ScriptRenderer(r.host, 'k');
     s.update(result, scriptRenderModel(result, 5), DEFAULT_DISPLAY);
     return { s, rig: r, result };
@@ -537,7 +537,7 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.barColors(shifted)![1]).toBe(RED);
     expect(s.barColors(times)).toBeNull();
     // The zone switches back to UTC: the same renderer finds the run at the UTC times.
-    (r.host as { shiftMs: () => number }).shiftMs = () => 0;
+    (r.host as { shiftMs: (utcMs: number) => number }).shiftMs = () => 0;
     expect(s.barColors(times)![1]).toBe(RED);
   });
 
