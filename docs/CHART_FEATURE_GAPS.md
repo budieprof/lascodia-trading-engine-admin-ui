@@ -42,6 +42,19 @@ drawing tools, UI chrome — already at parity).
   cadence wedged thousands of slots between hourly bars and squashed the chart.
 - **Overlay line series need the symbol's `priceFormat`.** Without it the
   shared price axis drops to the library's 2 decimals (EURUSD 1.14).
-- **The price series is rebuilt on every bar update**, so anything attached to
-  it (Pine layers, profiles) must be re-attached in `applyData`, not only when
-  its own input changes.
+- **The price series is replaced only on a style change** (since 2026-10-09,
+  CC-I1; it used to be rebuilt on every bar update). Ticks reach every series
+  as `update()` on the tail, `setData` only on a rebuild (series, style, zone,
+  theme, box, history prepend) or a deep change. Anything attached to the price
+  series (event marks, patterns, Pine layers, other features' primitives via
+  `attachPricePrimitive`) is attached in `attachToPriceSeries`, which runs for
+  every new price series — not only when its own input changes.
+- **`timeScale().logicalToCoordinate` answers whole indexes only.** Lightweight
+  Charts 5.2 returns 0 for a fractional logical index, so anything placed
+  between bars (an event at 13:30 on 1h, a session break) needs `xAtLogical`
+  (`chart/time-x.ts`): the whole index's x plus the fraction of a bar.
+- **The first time-axis label is clipped at the left edge by the library.**
+  Labels are drawn centred on their tick; Lightweight Charts slides an edge
+  label inside the pane only with `fixLeftEdge`, which would stop scroll-back.
+  The stray "0" at the bottom-left is the tail of such a label (CC-25), not an
+  overlay.
