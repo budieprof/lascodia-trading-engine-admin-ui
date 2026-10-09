@@ -400,6 +400,16 @@
           >
             <app-chart-icon name="trades" [size]="28" /> Trade timeline
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showWatchMarks()"
+            (click)="showWatchMarks.set(!showWatchMarks())"
+            title="This symbol's watches and monitors: their fired, step and called-off marks and their price lines"
+            data-testid="toggle-watch-marks"
+          >
+            <app-chart-icon name="alert" [size]="28" /> Watches &amp; monitors
+          </button>
           @if (showPositions() || showOrders()) {
             <button
               type="button"
@@ -1387,6 +1397,7 @@
           [lastPrice]="bars().at(-1)?.close ?? null"
           [windowFrom]="bars()[0]?.time ?? null"
           [(open)]="analysisOpen"
+          [(showWatches)]="showWatchMarks"
           (markersChange)="analysisMarkers.set($event)"
           (ticket)="onAnalysisTicket($event)"
         />

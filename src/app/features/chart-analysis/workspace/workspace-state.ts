@@ -156,6 +156,8 @@ export interface ChartWorkspaceState {
     showClosedTrades?: boolean;
     /** Whether the trade lines widen the price scale's fit (default on). */
     fitTradeLines?: boolean;
+    /** Watch / monitor marks and lines (default on). */
+    showWatches?: boolean;
   };
   /** The split view: its arrangement — and, in v1, each comparison panel's series (CC-12; v2: `charts`). */
   split?: {

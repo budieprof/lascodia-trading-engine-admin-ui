@@ -1485,6 +1485,8 @@ export class ChartAnalysisPageComponent {
   readonly analysisOpen = signal(false);
   /** The symbol's watches' fires, touches, call-offs and script steps (`app-chart-analysis` fills it). */
   readonly analysisMarkers = signal<ChartMarker[]>([]);
+  /** Watches and monitors on the chart — fire / step / call-off marks and their price lines (overlays menu; saved with the layout). */
+  readonly showWatchMarks = signal(true);
   /** A trade an analysis proposed, opened in the order ticket (paper, at market — nothing is sent until Submit). */
   onAnalysisTicket(prefill: TicketPrefill): void {
     this.ticketPrefill.set({ ...prefill });
@@ -5427,6 +5429,7 @@ export class ChartAnalysisPageComponent {
         showBlackout: this.showBlackout(),
         showClosedTrades: this.showClosedTrades(),
         fitTradeLines: this.fitTradeLines(),
+        showWatches: this.showWatchMarks(),
       },
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
@@ -5866,6 +5869,7 @@ export class ChartAnalysisPageComponent {
     this.showBlackout.set(o.showBlackout ?? true);
     this.showClosedTrades.set(o.showClosedTrades ?? false);
     this.fitTradeLines.set(o.fitTradeLines ?? true);
+    this.showWatchMarks.set(o.showWatches ?? true);
   }
 
   private flushPendingView(): void {
