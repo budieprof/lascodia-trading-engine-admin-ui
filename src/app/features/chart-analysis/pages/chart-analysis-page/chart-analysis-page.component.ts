@@ -295,6 +295,14 @@ import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.co
 import { ReplayController } from '../../replay/replay-controller';
 import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 import { askName, confirmDelete } from '../../dialog/chart-dialogs';
+import {
+  UndoHistory,
+  describeChange,
+  sameUndoable,
+  undoableOf,
+  type UndoEntry,
+  type UndoableChart,
+} from '../../workspace/undo-history';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
@@ -2129,6 +2137,20 @@ export class ChartAnalysisPageComponent {
       // Nothing saves before the saved state was applied, nor while applying it.
       if (!this.restored || this.applyingState) return;
       untracked(() => this.workspace.markDirty(state));
+    });
+    // CC-I11: one undo history. Drawing steps arrive from the drawing store; studies, scripts and chart settings are
+    // recorded here as the operator changes them (a burst of changes within half a second is one step).
+    this.drawings.undoHook = {
+      recorded: (symbol) => this.undoHistory.record({ kind: 'drawing', symbol }),
+      dropped: (symbol) => this.undoHistory.dropDrawing(symbol),
+    };
+    this.destroyRef.onDestroy(() => {
+      this.drawings.undoHook = null;
+      clearTimeout(this.undoTimer);
+    });
+    effect(() => {
+      const now = this.undoableState();
+      untracked(() => this.noteUndoable(now));
     });
     // A live price belongs to one symbol: a switch waits for the new symbol's first tick.
     effect(() => {
@@ -5139,6 +5161,132 @@ export class ChartAnalysisPageComponent {
     return [...waiting, ...runs].sort((a, b) => a.key.localeCompare(b.key));
   }
 
+  // ── One undo history (CC-I11) ────────────────────────────────────────────
+
+  readonly undoHistory = new UndoHistory();
+  /** What undo covers of the chart as it stands (studies, scripts, settings), changing only when that changes. */
+  private readonly undoableState = computed(() => undoableOf(this.captureState()), { equal: sameUndoable });
+  /** The chart as the last recorded step left it. */
+  private undoBaseline: UndoableChart | null = null;
+  /** The chart before a burst of changes still settling; recorded as one step when it settles. */
+  private undoPending: UndoableChart | null = null;
+  private undoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True while an undo / redo puts the chart back: that is not a new step. */
+  private undoing = false;
+
+  /** A step of the history applies to the chart on screen: chart steps always, drawing steps of this symbol. */
+  private readonly undoApplies = (e: UndoEntry): boolean =>
+    e.kind === 'chart' || e.symbol === this.symbol();
+
+  readonly undoTitle = computed(() => {
+    this.undoHistory.revision();
+    const e = this.undoHistory.peekUndo(this.undoApplies);
+    return e ? `Undo ${this.undoEntryLabel(e)} (⌘Z)` : 'Nothing to undo';
+  });
+  readonly redoTitle = computed(() => {
+    this.undoHistory.revision();
+    const e = this.undoHistory.peekRedo(this.undoApplies);
+    return e ? `Redo ${this.undoEntryLabel(e)} (⇧⌘Z)` : 'Nothing to redo';
+  });
+  readonly canUndo = computed(() => {
+    this.undoHistory.revision();
+    this.drawings.canUndo();
+    return this.undoHistory.peekUndo(this.undoApplies) !== null;
+  });
+  readonly canRedo = computed(() => {
+    this.undoHistory.revision();
+    this.drawings.canRedo();
+    return this.undoHistory.peekRedo(this.undoApplies) !== null;
+  });
+
+  private undoEntryLabel(e: UndoEntry): string {
+    return e.kind === 'drawing' ? 'drawing' : e.label;
+  }
+
+  /** The undoable chart changed: a new step once the burst settles (not while a layout or an undo is applied). */
+  private noteUndoable(now: UndoableChart): void {
+    if (!this.restored || this.applyingState || this.undoing) {
+      if (!this.undoPending) this.undoBaseline = now;
+      return;
+    }
+    if (!this.undoBaseline) {
+      this.undoBaseline = now;
+      return;
+    }
+    if (sameUndoable(now, this.undoBaseline)) return;
+    this.undoPending ??= this.undoBaseline;
+    this.undoBaseline = now;
+    clearTimeout(this.undoTimer);
+    this.undoTimer = setTimeout(() => this.commitUndoStep(), 500);
+  }
+
+  private commitUndoStep(): void {
+    clearTimeout(this.undoTimer);
+    const before = this.undoPending;
+    const after = this.undoBaseline;
+    this.undoPending = null;
+    if (!before || !after || sameUndoable(before, after)) return;
+    this.undoHistory.record({
+      kind: 'chart',
+      before,
+      after,
+      label: describeChange(before, after, (i) => this.labelFor(i)),
+    });
+  }
+
+  /** Ctrl+Z, the toolbar and the context menu: the newest step that applies to this chart goes back. */
+  undo(): void {
+    this.commitUndoStep();
+    const e = this.undoHistory.undo(this.undoApplies);
+    if (!e) return;
+    if (e.kind === 'drawing') this.drawings.undo();
+    else this.restoreUndoable(e.before);
+  }
+
+  redo(): void {
+    this.commitUndoStep();
+    const e = this.undoHistory.redo(this.undoApplies);
+    if (!e) return;
+    if (e.kind === 'drawing') this.drawings.redo();
+    else this.restoreUndoable(e.after);
+  }
+
+  /**
+   * Put the chart's studies, scripts and settings back as `u` held them. Scripts that left come back (run again
+   * with their inputs), scripts that came go, scripts whose inputs changed run again with the old ones; a change of
+   * display only is applied in place.
+   */
+  private restoreUndoable(u: UndoableChart): void {
+    this.undoing = true;
+    try {
+      this.applyChartSettings(u.settings);
+      this.active.set(u.indicators.map((i) => ({ ...i, params: { ...i.params } })));
+      const target = new Map(u.scripts.map((w) => [w.key, w]));
+      for (const w of this.workspaceScripts()) if (!target.has(w.key)) this.removeScriptFromChart(w.key);
+      for (const w of u.scripts) {
+        const run = this.scriptRuns().find((r) => r.item.key === w.key);
+        if (run && JSON.stringify(run.values) === JSON.stringify(w.values)) {
+          if (JSON.stringify(run.display ?? {}) !== JSON.stringify(w.display ?? {}))
+            this.scriptRuns.update((list) =>
+              list.map((r) => (r === run ? { ...r, display: w.display ? { ...w.display } : undefined } : r)),
+            );
+          continue;
+        }
+        if (!run) this.restoringScripts.update((l) => [...l.filter((x) => x.key !== w.key), w]);
+        this.runScript(
+          run?.item ?? restoredScriptItem(w, this.chartScripts.savedScripts()),
+          { ...w.values },
+          true,
+        );
+      }
+    } finally {
+      queueMicrotask(() => {
+        this.undoBaseline = this.undoableState();
+        this.undoing = false;
+      });
+    }
+  }
+
   /** Zoom/scroll/pane heights waiting for the chart's first data. */
   private pendingView: ChartWorkspaceState['view'] = null;
   /** True while a saved state is being applied, so applying it does not save it back. */
@@ -5163,35 +5311,8 @@ export class ChartAnalysisPageComponent {
         if (s.resolution && isSupportedResolution(s.resolution)) this.resolution.set(s.resolution);
         else this.resolution.set('60');
       }
-      this.style.set(s.style ?? 'candles');
-      this.showVolume.set(s.showVolume ?? true);
-      this.scaleMode.set(s.scaleMode ?? 'normal');
-      this.invertScale.set(s.invertScale === true);
-      this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
-      this.sessionBreaks.set(s.sessionBreaks === true);
-      this.showCountdown.set(s.countdown ?? true);
-      this.timezone.set(s.timezone ?? 'UTC');
-      const pb = restoredPriceBased(s.priceBased);
-      this.boxMethod.set(pb.boxMethod);
-      this.boxSizeAtr.set(pb.boxSizeAtr);
-      this.boxPips.set(pb.boxPips);
-      this.renkoWicks.set(pb.renkoWicks);
-      this.lineBreakLines.set(pb.lineBreakLines);
+      this.applyChartSettings(s);
       this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
-      const o = s.overlays ?? {};
-      // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
-      this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
-      this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
-      this.showOverlays.set(o.showOverlays ?? false);
-      this.showVolumeProfile.set(o.showVolumeProfile ?? false);
-      if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
-      this.showSupportResistance.set(o.showSupportResistance ?? false);
-      this.showStructure.set(o.showStructure ?? false);
-      this.showEvents.set(o.showEvents ?? true);
-      this.minEventImpact.set(o.minEventImpact ?? 'Medium');
-      this.showBlackout.set(o.showBlackout ?? true);
-      this.showClosedTrades.set(o.showClosedTrades ?? false);
-      this.fitTradeLines.set(o.fitTradeLines ?? true);
       const p = s.panel ?? {};
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
       if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);
@@ -5226,8 +5347,48 @@ export class ChartAnalysisPageComponent {
         this.workspace.rebase(this.captureState());
         this.applyingState = false;
         this.restored = true;
+        // Another layout's chart: its steps are not this one's to undo (drawing steps stay, they are per symbol).
+        clearTimeout(this.undoTimer);
+        this.undoPending = null;
+        this.undoBaseline = this.undoableState();
+        this.undoHistory.clearChart();
       });
     }
+  }
+
+  /**
+   * A layout's chart settings — style, volume, scales, session breaks, countdown, zone, price-based boxes, overlays —
+   * with the chart's defaults for whatever it leaves out (a layout, or an undo step: CC-I11).
+   */
+  private applyChartSettings(s: UndoableChart['settings']): void {
+    this.style.set(s.style ?? 'candles');
+    this.showVolume.set(s.showVolume ?? true);
+    this.scaleMode.set(s.scaleMode ?? 'normal');
+    this.invertScale.set(s.invertScale === true);
+    this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
+    this.sessionBreaks.set(s.sessionBreaks === true);
+    this.showCountdown.set(s.countdown ?? true);
+    this.timezone.set(s.timezone ?? 'UTC');
+    const pb = restoredPriceBased(s.priceBased);
+    this.boxMethod.set(pb.boxMethod);
+    this.boxSizeAtr.set(pb.boxSizeAtr);
+    this.boxPips.set(pb.boxPips);
+    this.renkoWicks.set(pb.renkoWicks);
+    this.lineBreakLines.set(pb.lineBreakLines);
+    const o = s.overlays ?? {};
+    // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
+    this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
+    this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
+    this.showOverlays.set(o.showOverlays ?? false);
+    this.showVolumeProfile.set(o.showVolumeProfile ?? false);
+    if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
+    this.showSupportResistance.set(o.showSupportResistance ?? false);
+    this.showStructure.set(o.showStructure ?? false);
+    this.showEvents.set(o.showEvents ?? true);
+    this.minEventImpact.set(o.minEventImpact ?? 'Medium');
+    this.showBlackout.set(o.showBlackout ?? true);
+    this.showClosedTrades.set(o.showClosedTrades ?? false);
+    this.fitTradeLines.set(o.fitTradeLines ?? true);
   }
 
   private flushPendingView(): void {
@@ -5742,13 +5903,13 @@ export class ChartAnalysisPageComponent {
     const mod = ev.metaKey || ev.ctrlKey;
     if (mod && ev.key.toLowerCase() === 'z') {
       ev.preventDefault();
-      if (ev.shiftKey) this.drawings.redo();
-      else this.drawings.undo();
+      if (ev.shiftKey) this.redo();
+      else this.undo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'y') {
       ev.preventDefault();
-      this.drawings.redo();
+      this.redo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'c' && !ev.shiftKey) {

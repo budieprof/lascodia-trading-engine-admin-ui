@@ -582,18 +582,18 @@
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="drawings.undo()"
-      [disabled]="!drawings.canUndo()"
-      title="Undo (⌘Z)"
+      (click)="undo()"
+      [disabled]="!canUndo()"
+      [title]="undoTitle()"
     >
       <app-chart-icon name="undo" [size]="28" />
     </button>
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="drawings.redo()"
-      [disabled]="!drawings.canRedo()"
-      title="Redo (⇧⌘Z)"
+      (click)="redo()"
+      [disabled]="!canRedo()"
+      [title]="redoTitle()"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
@@ -801,8 +801,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="drawings.undo(); openMenu.set(null)"
-            [disabled]="!drawings.canUndo()"
+            (click)="undo(); openMenu.set(null)"
+            [disabled]="!canUndo()"
           >
             <app-chart-icon name="undo" [size]="28" /> Undo
           </button>
@@ -810,8 +810,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="drawings.redo(); openMenu.set(null)"
-            [disabled]="!drawings.canRedo()"
+            (click)="redo(); openMenu.set(null)"
+            [disabled]="!canRedo()"
           >
             <app-chart-icon name="redo" [size]="28" /> Redo
           </button>

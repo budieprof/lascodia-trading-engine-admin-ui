@@ -159,6 +159,12 @@ export class DrawingStore {
 
   /** Bumped on every mutation so the undo flags recalculate. */
   private readonly undoRevision = signal(0);
+  /**
+   * Told of every new undo step (a change or a gesture's start) and of a step taken back by itself (a gesture that
+   * changed nothing, a cancelled dialog) — the chart page's one undo history across drawings, studies, scripts and
+   * settings keeps a marker per step (CC-I11).
+   */
+  undoHook: { recorded(symbol: string): void; dropped(symbol: string): void } | null = null;
   private readonly undoStacks = new Map<string, Drawing[][]>();
   private readonly redoStacks = new Map<string, Drawing[][]>();
 
@@ -569,7 +575,10 @@ export class DrawingStore {
       return;
     }
     const undo = this.undoStacks.get(g.symbol);
-    if (undo?.at(-1) === g.snapshot) undo.pop();
+    if (undo?.at(-1) === g.snapshot) {
+      undo.pop();
+      this.undoHook?.dropped(g.symbol);
+    }
     this.redoStacks.set(g.symbol, g.redo);
     this.undoRevision.update((v) => v + 1);
   }
@@ -580,8 +589,10 @@ export class DrawingStore {
     this.gesture = null;
     const symbol = g?.symbol ?? this.scope().symbol;
     const undo = this.undoStacks.get(symbol);
-    const snapshot = g ? (undo?.at(-1) === g.snapshot ? undo.pop() : g.snapshot) : undo?.pop();
+    const popped = !g || undo?.at(-1) === g.snapshot;
+    const snapshot = g ? (popped ? undo!.pop() : g.snapshot) : undo?.pop();
     if (!snapshot) return;
+    if (popped) this.undoHook?.dropped(symbol);
     if (g) this.redoStacks.set(symbol, g.redo);
     this.restoreSymbol(symbol, snapshot);
   }
@@ -630,6 +641,7 @@ export class DrawingStore {
     const s = this.stack(this.undoStacks, symbol);
     s.push(snapshot);
     if (s.length > UNDO_DEPTH) s.shift();
+    this.undoHook?.recorded(symbol);
   }
 
   private stack(map: Map<string, Drawing[][]>, symbol: string): Drawing[][] {

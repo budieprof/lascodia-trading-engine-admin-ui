@@ -355,6 +355,20 @@ describe('undo, redo and the lock (DR-04 / DR-05 / DR-06)', () => {
     expect(store.visible()[0].points).toEqual([P(1, 1), P(2, 2)]);
   });
 
+  it('tells the chart’s one undo history of each new step and of a step it took back (CC-I11)', () => {
+    const { store } = makeStore();
+    const seen: string[] = [];
+    store.undoHook = { recorded: (s) => seen.push(`+${s}`), dropped: (s) => seen.push(`-${s}`) };
+    const a = store.add('trend-line', [P(1, 1), P(2, 2)], styleFor('trend-line'));
+    store.beginGesture(a.id);
+    store.endGesture(); // changed nothing: its step goes back
+    store.beginGesture(a.id);
+    store.update(a.id, { points: [P(3, 3), P(4, 4)] }, false);
+    store.endGesture();
+    store.undo(); // the store's own undo is not a new step
+    expect(seen).toEqual(['+EURUSD', '+EURUSD', '-EURUSD', '+EURUSD']);
+  });
+
   it('the Delete key path leaves a locked drawing alone', () => {
     const { store } = makeStore();
     const a = store.add('trend-line', [P(1, 1), P(2, 2)], styleFor('trend-line'));
