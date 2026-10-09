@@ -214,7 +214,7 @@ export interface StudyPick {
                       (change)="setPlot(p.key, { width: +$any($event.target).value })"
                     >
                       @for (w of widths; track w) {
-                        <option [value]="w" [selected]="(p.lineWidth ?? 2) === w">{{ w }}px</option>
+                        <option [value]="w" [selected]="(p.lineWidth ?? 1) === w">{{ w }}px</option>
                       }
                     </select>
                     <select

@@ -3036,7 +3036,7 @@ export class ChartHostComponent implements OnDestroy {
         s.api.applyOptions(
           plot.kind === 'histogram'
             ? { color: plot.color }
-            : { color: plot.color, lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4> },
+            : { color: plot.color, lineWidth: (plot.lineWidth ?? 1) as DeepPartial<1 | 2 | 3 | 4> },
         );
       } catch {
         // Went with a rebuilt chart.
@@ -4092,16 +4092,24 @@ export class ChartHostComponent implements OnDestroy {
         plot.kind === 'histogram'
           ? chart.addSeries(
               HistogramSeries,
-              { color: plot.color, priceFormat: { type: 'price', precision: 5, minMove: 0.00001 } },
+              {
+                color: plot.color,
+                priceFormat: { type: 'price', precision: 5, minMove: 0.00001 },
+                // TradingView's indicator defaults: the last value as a chip on the pane's scale, no price line.
+                lastValueVisible: true,
+                priceLineVisible: false,
+              },
               paneIndex,
             )
           : chart.addSeries(
               LineSeries,
               {
                 color: plot.color,
-                lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4>,
+                // TradingView draws built-in indicator lines 1px unless the study says otherwise.
+                lineWidth: (plot.lineWidth ?? 1) as DeepPartial<1 | 2 | 3 | 4>,
                 priceLineVisible: false,
-                lastValueVisible: overlay && !markers,
+                // Every plot's last value sits on its pane's scale (MACD: Hist, MACD and Signal), as on TradingView.
+                lastValueVisible: !markers,
                 // A markers plot draws only its shapes: the series carries the values (for the
                 // legend and the autoscale) with no line of its own (DR-17).
                 ...(markers ? { lineVisible: false, crosshairMarkerVisible: false } : {}),
