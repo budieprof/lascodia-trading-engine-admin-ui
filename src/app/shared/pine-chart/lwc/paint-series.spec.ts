@@ -410,7 +410,49 @@ describe('paintFill', () => {
       [0, CSS_RED],
       [1, CSS_BLUE],
     ]);
-    expect([g.y0, g.y1]).toEqual([96, 100]);
+    // One unit gradient (0…1), stretched onto each segment's top…bottom by the fill's transform —
+    // the segment's own path untouched (PC-I13).
+    expect([g.y0, g.y1]).toEqual([0, 1]);
+    const t = fills[0].transform;
+    expect([t.f, t.d + t.f]).toEqual([96, 100]);
+    // The path keeps the plots' own y (upper 1 → 2 over the first segment, lower 0).
+    expect(pathPoints(fills[0].path)).toEqual([
+      [0, 99],
+      [10, 98],
+      [10, 100],
+      [0, 100],
+    ]);
+    // Every segment of the same colours paints with the same gradient object; the transform is put
+    // back after each.
+    expect(new Set(fills.map((f) => f.style)).size).toBe(1);
+    expect(ctx.getTransform()).toEqual({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 });
+  });
+
+  it('a gradient fill on a scaled canvas composes onto its pixel ratio', () => {
+    const ctx = new RecordingContext();
+    ctx.setTransform(2, 0, 0, 2, 0, 0);
+    const top = buildColorTrack(null, [RED, RED], 2);
+    const bottom = buildColorTrack(null, [BLUE, BLUE], 2);
+    paintFill(
+      ctx.asCtx(),
+      proj(),
+      fill({
+        kind: 'gradient',
+        upper: { kind: 'plot', layer: plotLayer([4, 4]) },
+        lower: { kind: 'plot', layer: plotLayer([0, 0]) },
+        gradient: {
+          start: 0,
+          topValues: Float64Array.of(4, 4),
+          bottomValues: Float64Array.of(0, 0),
+          topColors: top,
+          bottomColors: bottom,
+        },
+      }),
+    );
+    const t = ctx.fills()[0].transform;
+    // Device y = 2 · (96 + 4 · unit y).
+    expect([t.a, t.d, t.f]).toEqual([2, 8, 192]);
+    expect(ctx.getTransform()).toEqual({ a: 2, b: 0, c: 0, d: 2, e: 0, f: 0 });
   });
 
   it('respects show_last through visibleFrom', () => {

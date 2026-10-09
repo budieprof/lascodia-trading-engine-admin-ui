@@ -266,6 +266,81 @@ describe('paintDrawings', () => {
     expect(size).toBeGreaterThan(6);
   });
 
+  it('fits size.auto text once per text and box: a frame later it is not searched again (PC-I13)', () => {
+    const box: BoxDrawing = {
+      id: 1,
+      left: 0,
+      right: 4,
+      top: 60,
+      bottom: 40,
+      borderColor: null,
+      borderWidth: 0,
+      borderStyle: 'solid',
+      extend: 'none',
+      bgColor: null,
+      text: 'FITTED ONCE',
+      fontSize: 0,
+      textColor: 'rgb(0, 0, 0)',
+      hAlign: 'center',
+      vAlign: 'center',
+      wrap: false,
+      fontFamily: FONT_DEFAULT,
+      bold: true,
+      italic: false,
+    };
+    /** Every font of the box's text the painter sets on `ctx` (it is bold): the sizes it tries. */
+    const fonts = (ctx: RecordingContext) => {
+      const set: string[] = [];
+      let font = ctx.font;
+      Object.defineProperty(ctx, 'font', {
+        get: () => font,
+        set: (f: string) => {
+          font = f;
+          if (f.startsWith('bold ')) set.push(f);
+        },
+      });
+      return set;
+    };
+    const first = new RecordingContext();
+    const searched = fonts(first);
+    paintDrawings(first.asCtx(), proj(), set({ boxes: [box] }), null, []);
+    const again = new RecordingContext();
+    const tried = fonts(again);
+    paintDrawings(again.asCtx(), proj(), set({ boxes: [box] }), null, []);
+    // The first frame tried sizes down from 40 px; the next one sets the fitted size only.
+    expect(new Set(searched).size).toBeGreaterThan(1);
+    expect(new Set(tried).size).toBe(1);
+    expect(again.texts()[0].font).toBe(first.texts()[0].font);
+  });
+
+  it('draws a long polyline after a short one, every point of each (PC-I13: shared buffers)', () => {
+    const line = (n: number, curved: boolean): PolylineDrawing => ({
+      id: n,
+      xs: Float64Array.from({ length: n }, (_, i) => i % 40),
+      ys: Float64Array.from({ length: n }, (_, i) => 10 + (i % 7)),
+      curved,
+      closed: false,
+      lineColor: 'rgb(1, 2, 3)',
+      fillColor: null,
+      lineStyle: 'solid',
+      lineWidth: 1,
+    });
+    const ctx = new RecordingContext();
+    paintDrawings(
+      ctx.asCtx(),
+      proj(),
+      set({ polylines: [line(3, false), line(300, false), line(5, true)] }),
+      null,
+      [],
+    );
+    const [a, b, c] = ctx.strokes('rgb(1, 2, 3)');
+    expect(pathPoints(a.path)).toHaveLength(3);
+    expect(pathPoints(b.path)).toHaveLength(300);
+    expect(pathPoints(b.path)[299]).toEqual([(299 % 40) * 10, 100 - (10 + (299 % 7))]);
+    // A curve through 5 points: 4 segments, not one per slot of the (longer) buffer.
+    expect(c.path.filter((cmd) => cmd.c === 'B')).toHaveLength(4);
+  });
+
   it('draws polylines: closed and filled, curved as Béziers', () => {
     const pl: PolylineDrawing = {
       id: 1,
