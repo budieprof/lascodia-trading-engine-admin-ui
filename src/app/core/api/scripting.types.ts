@@ -910,3 +910,10 @@ export interface ScriptConversion {
   problem?: string | null;
   compile?: ScriptCompileResult | null;
 }
+
+/** §2d: a formatted script (or the input unchanged with the reason). */
+export interface ScriptFormatResult {
+  source: string;
+  changed: boolean;
+  problem?: string | null;
+}

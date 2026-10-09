@@ -35,6 +35,7 @@ import type {
   ScriptLibraryVisibility,
   ScriptPublisherDto,
   ScriptConversion,
+  ScriptFormatResult,
   ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
@@ -234,6 +235,18 @@ export class ScriptingService {
         return e.compile ? of(normaliseCompile(e.compile)) : throwError(() => e);
       }),
     );
+  }
+
+  /** `POST scripting/format` (§2d) — TradingView spacing, proven token-identical by the engine. */
+  format(source: string): Observable<ScriptFormatResult> {
+    return this.api
+      .post<ResponseData<ScriptFormatResult>>('/scripting/format', { source }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not format the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not format the script.')),
+        ),
+      );
   }
 
   /** `POST scripting/convert` (§2c) — a Pine v4/v5 script converted to v6 (or kept on v5, with the reasons). */

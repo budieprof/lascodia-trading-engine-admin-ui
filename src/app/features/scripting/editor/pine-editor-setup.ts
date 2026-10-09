@@ -70,6 +70,8 @@ export interface PineEditorOptions {
   onCursor(line: number, column: number): void;
   /** Mod-S inside the editor. */
   onSave?(): void;
+  /** Shift-Alt-F inside the editor: format the script. */
+  onFormat?(): void;
   /** Go to definition / references / rename (PR-I8, PE-I5). */
   semantic?: SemanticHost;
 }
@@ -192,6 +194,7 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     search({ top: true }),
     keymap.of([
       { key: 'Mod-s', preventDefault: true, run: () => (opts.onSave?.(), true) },
+      { key: 'Shift-Alt-f', preventDefault: true, run: () => (opts.onFormat?.(), true) },
       ...closeBracketsKeymap,
       ...defaultKeymap,
       ...searchKeymap,

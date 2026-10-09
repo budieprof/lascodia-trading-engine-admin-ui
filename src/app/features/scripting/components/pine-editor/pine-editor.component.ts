@@ -145,6 +145,8 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
   readonly cursorChange = output<{ line: number; column: number }>();
   /** Mod-S pressed in the editor. */
   readonly saveRequested = output<void>();
+  /** Shift-Alt-F in the editor. */
+  readonly formatRequested = output<void>();
   /** F2 on a name of the script: the host asks for the new name and plans the rename. */
   readonly renameRequested = output<{ offset: number; name: string }>();
   /** Go to definition reached a name declared in an imported library. */
@@ -220,6 +222,7 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
             onCursor: (line, column) =>
               this.zone.run(() => this.cursorChange.emit({ line, column })),
             onSave: () => this.zone.run(() => this.saveRequested.emit()),
+            onFormat: () => this.zone.run(() => this.formatRequested.emit()),
             semantic: {
               onRename: (offset, name) =>
                 this.zone.run(() => this.renameRequested.emit({ offset, name })),

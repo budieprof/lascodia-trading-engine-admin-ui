@@ -87,6 +87,17 @@ export const COMPILE_DEBOUNCE_MS = 700;
         >
           Outline
         </button>
+        @if (!readOnly()) {
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            (click)="format()"
+            [disabled]="formatting() || !source().trim()"
+            title="Format the spacing the TradingView way (Shift-Alt-F); the engine checks nothing else changes"
+          >
+            Format
+          </button>
+        }
         @if (!readOnly() && convertible()) {
           <button
             type="button"
@@ -139,6 +150,7 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [semantic]="result()?.semantic ?? null"
         [semanticSource]="resultSource()"
         (renameRequested)="openRename($event)"
+        (formatRequested)="format()"
         (libraryDefinition)="notice.set(libraryNotice($event))"
         (notice)="notice.set($event)"
       />
@@ -493,6 +505,7 @@ export class ScriptWorkbenchComponent {
   readonly proposal = signal<ScriptProposal | null>(null);
   readonly proposalError = signal<string | null>(null);
   readonly converting = signal(false);
+  readonly formatting = signal(false);
   /** A Pine v4/v5 script (its //@version line). */
   readonly convertible = computed(() => {
     const v = versionOf(this.source());
@@ -627,6 +640,32 @@ export class ScriptWorkbenchComponent {
     this.replaceSource(p.after);
     this.closeProposal();
     this.notice.set(`${p.title}: applied (Ctrl/Cmd-Z undoes it).`);
+  }
+
+  /**
+   * Formats the script (engine §2d, token-identical so it compiles the same) as one undoable edit —
+   * only when the text is still what was sent.
+   */
+  async format(): Promise<void> {
+    if (this.readOnly() || this.formatting()) return;
+    const before = this.currentSource();
+    if (!before.trim()) return;
+    this.formatting.set(true);
+    try {
+      const r = await firstValueFrom(this.scripting.format(before));
+      if (r.problem) this.notice.set(r.problem);
+      else if (!r.changed) this.notice.set('Already formatted.');
+      else if (this.currentSource() !== before)
+        this.notice.set('The script changed while formatting — try again.');
+      else {
+        this.replaceSource(r.source);
+        this.notice.set('Formatted (Ctrl/Cmd-Z undoes it).');
+      }
+    } catch (err) {
+      this.notice.set(toScriptingError(err, 'The engine could not format the script.').message);
+    } finally {
+      this.formatting.set(false);
+    }
   }
 
   /** PR-I10: the engine converts the script; the result is a proposal. */
