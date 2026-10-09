@@ -15,7 +15,7 @@ import { ThemeService } from '@core/theme/theme.service';
 import { SCRIPTING_UI_STYLES } from '../components/scripting-ui.styles';
 import { reportPalette } from '../report/report-charts';
 import { describeFailure } from '../shared/api-error';
-import { heatmapGrid, plateauReadout } from './heatmap.model';
+import { heatmapGrid, plateauReadout, type PlateauGate } from './heatmap.model';
 import { ResearchApiService } from './research-api.service';
 import type { OptimizationHeatmapDto } from './research.types';
 
@@ -224,6 +224,8 @@ export class ParameterHeatmapComponent {
   private readonly theme = inject(ThemeService);
 
   readonly runId = input.required<number>();
+  /** The engine's plateau gate settings (from the run's candidates), when known. */
+  readonly gate = input<PlateauGate | null>(null);
 
   readonly bins = HEATMAP_BINS;
   readonly dto = signal<OptimizationHeatmapDto | null>(null);
@@ -239,7 +241,7 @@ export class ParameterHeatmapComponent {
   });
   readonly readout = computed(() => {
     const d = this.dto();
-    return d ? plateauReadout(d) : { level: 'unknown' as const, lines: [] };
+    return d ? plateauReadout(d, this.gate()) : { level: 'unknown' as const, lines: [] };
   });
 
   constructor() {

@@ -74,22 +74,34 @@ export type PlateauLevel = 'plateau' | 'mixed' | 'spike' | 'losing' | 'unknown';
 /** The promotion gate's default minimum plateau score (`Promotion:Plateau:MinScore`; the gate is off by default). */
 export const GATE_DEFAULT_MIN_PLATEAU = 0.5;
 
+/** The promotion gate's plateau check as the engine reports it configured (candidates `selection`). */
+export interface PlateauGate {
+  enabled: boolean;
+  minScore: number;
+}
+
 /**
  * The neighbourhood-stability readout, in words, from the engine's two plateau scores: the slice's (the peak cell's
  * 8 neighbours on these two axes) and the full space's (the best candidate's 8 nearest neighbours over every parameter).
+ * With the engine's gate settings (`gate`) the spike line quotes the configured minimum and whether the gate runs;
+ * without them (an older engine) it names the gate's default.
  */
-export function plateauReadout(dto: OptimizationHeatmapDto): {
+export function plateauReadout(
+  dto: OptimizationHeatmapDto,
+  gate: PlateauGate | null = null,
+): {
   level: PlateauLevel;
   lines: string[];
 } {
   const lines: string[] = [];
   const full = dto.plateau;
   const slice = dto.heatmap;
+  const minScore = gate?.minScore ?? GATE_DEFAULT_MIN_PLATEAU;
   let level: PlateauLevel = 'unknown';
   if (full) {
     if (full.peakExpectancyR <= 0) level = 'losing';
-    else if (full.score >= 0.7) level = 'plateau';
-    else if (full.score >= GATE_DEFAULT_MIN_PLATEAU) level = 'mixed';
+    else if (full.score >= Math.max(0.7, minScore)) level = 'plateau';
+    else if (full.score >= minScore) level = 'mixed';
     else level = 'spike';
     lines.push(
       `Across every parameter, the best candidate's ${full.neighbours} nearest neighbours keep ${formatPercent(full.score * 100, { decimals: 0 })} ` +
@@ -119,8 +131,8 @@ export function plateauReadout(dto: OptimizationHeatmapDto): {
       break;
     case 'spike':
       lines.push(
-        `A spike: small changes to the best settings lose most of the edge (below the promotion gate's default minimum of ` +
-          `${GATE_DEFAULT_MIN_PLATEAU}). Treat the best result as fragile.`,
+        `A spike: small changes to the best settings lose most of the edge (below ${gateText(gate)}). ` +
+          'Treat the best result as fragile.',
       );
       break;
     case 'losing':
@@ -128,4 +140,11 @@ export function plateauReadout(dto: OptimizationHeatmapDto): {
       break;
   }
   return { level, lines };
+}
+
+function gateText(gate: PlateauGate | null): string {
+  if (!gate) return `the promotion gate's default minimum of ${GATE_DEFAULT_MIN_PLATEAU}`;
+  return gate.enabled
+    ? `the promotion gate's minimum of ${gate.minScore}, so approval would be refused`
+    : `the promotion gate's minimum of ${gate.minScore}; that gate is off (Promotion:Plateau:Enabled)`;
 }

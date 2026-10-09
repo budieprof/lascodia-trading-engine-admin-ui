@@ -13,7 +13,7 @@ import { ParameterHeatmapComponent } from './parameter-heatmap.component';
 import type { OptimizationCandidatesDto, OptimizationHeatmapDto } from './research.types';
 
 declareSignalIo(OptimizationRunDetailComponent, { inputs: ['runId'] });
-declareSignalIo(ParameterHeatmapComponent, { inputs: ['runId'] });
+declareSignalIo(ParameterHeatmapComponent, { inputs: ['runId', 'gate'] });
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
@@ -76,6 +76,8 @@ function candidates(): OptimizationCandidatesDto {
       pboWhyNot: null,
       maxPbo: 0.3,
       degradationSlope: -0.8,
+      plateauGateEnabled: false,
+      minPlateauScore: 0.4,
       warnings: [
         'Probability of backtest overfitting is 45 %, above the promotion limit of 30 %: …',
       ],
@@ -208,8 +210,11 @@ describe('OptimizationRunDetailComponent (PE-I4, BT-I4, BT-I7)', () => {
     expect(card.querySelector('[data-testid="plateau-readout"]')!.textContent).toContain(
       'keep 30%',
     );
-    expect(card.querySelector('[data-testid="plateau-readout"]')!.getAttribute('data-level')).toBe(
-      'spike',
+    const readout = card.querySelector('[data-testid="plateau-readout"]')!;
+    expect(readout.getAttribute('data-level')).toBe('spike');
+    // The threshold is the engine's (Promotion:Plateau:MinScore 0.4 here), not a client-side one.
+    expect(readout.textContent).toContain(
+      "the promotion gate's minimum of 0.4; that gate is off (Promotion:Plateau:Enabled)",
     );
   });
 });

@@ -114,6 +114,30 @@ describe('research charts and heatmap (BT-I5, BT-I7, PE-I4)', () => {
     expect(losing.level).toBe('losing');
   });
 
+  it('quotes the plateau gate as the engine configured it', () => {
+    const at = (score: number) =>
+      heatmapDto({
+        plateau: {
+          score,
+          peakExpectancyR: 0.5,
+          neighboursMeanExpectancyR: 0.5 * score,
+          neighbours: 8,
+          positiveShare: 0.6,
+        },
+      });
+    // An engine minimum of 0.65 turns a 0.6 score into a spike the default 0.5 would call mixed.
+    expect(plateauReadout(at(0.6)).level).toBe('mixed');
+    const strict = plateauReadout(at(0.6), { enabled: true, minScore: 0.65 });
+    expect(strict.level).toBe('spike');
+    expect(strict.lines.at(-1)).toContain(
+      "promotion gate's minimum of 0.65, so approval would be refused",
+    );
+    const off = plateauReadout(at(0.3), { enabled: false, minScore: 0.5 });
+    expect(off.lines.at(-1)).toContain('that gate is off (Promotion:Plateau:Enabled)');
+    // A minimum above the plateau line still needs to be met to read as a plateau.
+    expect(plateauReadout(at(0.75), { enabled: true, minScore: 0.8 }).level).toBe('spike');
+  });
+
   it('fits a least-squares line and refuses one without spread', () => {
     expect(
       leastSquares([

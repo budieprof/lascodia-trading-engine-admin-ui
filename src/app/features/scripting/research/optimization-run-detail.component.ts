@@ -18,6 +18,7 @@ import { reportPalette } from '../report/report-charts';
 import { formatNumber, formatRatio } from '../report/report-format';
 import { describeFailure } from '../shared/api-error';
 import { valueText } from './parameter-space.model';
+import type { PlateauGate } from './heatmap.model';
 import { ParameterHeatmapComponent } from './parameter-heatmap.component';
 import { ResearchApiService } from './research-api.service';
 import { isOosScatterOptions, logitHistogramOptions } from './research-charts';
@@ -223,7 +224,7 @@ const SPACE_MARKER = '__ScriptInputs';
           }
         </section>
 
-        <app-parameter-heatmap [runId]="d.optimizationRunId" />
+        <app-parameter-heatmap [runId]="d.optimizationRunId" [gate]="plateauGate()" />
       }
     </div>
   `,
@@ -350,6 +351,12 @@ export class OptimizationRunDetailComponent {
   readonly evidence = computed(() => {
     const d = this.dto();
     return d ? evidenceRows(d.selection) : [];
+  });
+  /** The promotion gate's plateau settings as the engine reports them (null from an older engine). */
+  readonly plateauGate = computed<PlateauGate | null>(() => {
+    const sel = this.dto()?.selection;
+    if (!sel || typeof sel.minPlateauScore !== 'number') return null;
+    return { enabled: !!sel.plateauGateEnabled, minScore: sel.minPlateauScore };
   });
   readonly paramColumns = computed(() => {
     const seen = new Set<string>();

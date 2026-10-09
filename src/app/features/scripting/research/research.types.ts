@@ -142,6 +142,9 @@ export interface OptimizationSelectionDto {
   pboWhyNot: string | null;
   maxPbo: number;
   degradationSlope: number | null;
+  /** The promotion gate's plateau check as configured (`Promotion:Plateau:Enabled` / `:MinScore`); older engines omit it. */
+  plateauGateEnabled?: boolean;
+  minPlateauScore?: number;
   warnings: string[];
 }
 
