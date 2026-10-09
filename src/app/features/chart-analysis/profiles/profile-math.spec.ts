@@ -17,7 +17,14 @@ import { TradingCalendar } from '../datafeed/session-calendar';
 import { vwap, vwapBands } from '../indicators/math';
 import { anchoredVwap, volumeProfileRows } from '../drawings/tools/forecast-math';
 import { profileWithValueArea } from '../overlays/analysis-overlays';
-import { volumeProfile as volumeProfileOf, vwapRun } from './profile-math';
+import {
+  compositeProfile,
+  developingProfile,
+  nakedPocs,
+  periodicProfiles as periodicOf,
+  volumeProfile as volumeProfileOf,
+  vwapRun,
+} from './profile-math';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -142,17 +149,23 @@ describe('session splitting', () => {
     );
   });
 
-  it('asia wraps midnight into one session', () => {
-    const bars = walk(48, HOUR, T0 - 2 * HOUR); // starts 22:00 UTC
+  it('named sessions are on their own clocks: Tokyo 09:00-18:00, London 08:00-17:00 (DR-18)', () => {
+    const bars = walk(48, HOUR, T0 - 2 * HOUR); // from Mon 31 Aug 22:00 UTC (summer)
     const asia = sessionProfiles(bars, { session: 'asia' });
-    // 23:00..07:00 = 9 bars.
+    // 09:00-18:00 Tokyo = 00:00-09:00 UTC: 9 bars.
     expect(asia[0].endIdx - asia[0].startIdx + 1).toBe(9);
-    expect(asia[0].sessionStart).toBe(T0 - HOUR);
-    expect(sessionStartOf(T0 + 3 * HOUR, 'asia')).toBe(T0 - HOUR);
+    expect(asia[0].sessionStart).toBe(T0);
+    expect(sessionStartOf(T0 + 3 * HOUR, 'asia')).toBe(T0);
     expect(sessionStartOf(T0 + 10 * HOUR, 'asia')).toBeNull();
     const ldn = sessionProfiles(bars, { session: 'london' });
-    expect(ldn[0].profile.t0).toBe(T0 + 7 * HOUR);
+    expect(ldn[0].profile.t0).toBe(T0 + 7 * HOUR); // 08:00 BST
     expect(ldn[0].endIdx - ldn[0].startIdx + 1).toBe(9);
+    // Winter: London opens at 08:00 UTC.
+    const jan = walk(24, HOUR, Date.UTC(2026, 0, 14));
+    expect(sessionProfiles(jan, { session: 'london' })[0].profile.t0).toBe(
+      Date.UTC(2026, 0, 14, 8),
+    );
+    expect(sessionStartOf(Date.UTC(2026, 0, 14, 10), 'london')).toBe(Date.UTC(2026, 0, 14, 8));
   });
 
   it('periodic week/month boundaries', () => {
@@ -212,10 +225,16 @@ describe('profile studies catalogue', () => {
       if (m.kind === 'volume') {
         expect(m.blocks.length).toBeGreaterThan(0);
         expect(s.description).toContain('(tick volume)');
-      } else expect(m.sessions.length).toBe(10);
+      } else {
+        // TPO refuses H1 bars for 30-minute brackets (DR-20); on M5 it draws a profile a day.
+        expect(m.sessions.length).toBe(0);
+        const m5 = computeProfileStudy(s.id, walk(288 * 10, 5 * MIN), {});
+        expect(m5.kind === 'tpo' && m5.sessions.length).toBe(10);
+      }
     }
+    // Ten days from Tuesday 1 September: London trades on the eight weekdays among them.
     const sess = computeProfileStudy('vp-session', bars, { session: 'london' });
-    expect(sess.kind === 'volume' && sess.blocks.length).toBe(10);
+    expect(sess.kind === 'volume' && sess.blocks.length).toBe(8);
   });
 });
 
@@ -272,7 +291,8 @@ describe('profiles on FX trading sessions', () => {
   });
 
   it('computeProfileStudy passes the sessions on', () => {
-    const m = computeProfileStudy('tpo', bars, {}, null, FX);
+    const m5 = walk(30 * 12, 5 * MIN, START);
+    const m = computeProfileStudy('tpo', m5, {}, null, FX);
     expect(m.kind === 'tpo' && m.sessions[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21));
   });
 });
@@ -327,5 +347,70 @@ describe('one VWAP for every caller (DR-19)', () => {
     expect(tool.poc).toBe(study.pocIndex);
     expect(overlay.poc).toBeCloseTo(study.poc, 12);
     expect(overlay.bins.map((b) => b.volume)).toEqual(study.rows.map((r) => r.upVol + r.downVol));
+  });
+});
+
+describe('developing POC / VA, naked POCs, composite (DR-I7)', () => {
+  const M = 60_000;
+  const t0 = Date.UTC(2026, 8, 1, 0, 0);
+  const b = (i: number, low: number, high: number, volume = 100) => ({
+    time: t0 + i * 5 * M,
+    open: low,
+    high,
+    low,
+    close: high,
+    volume,
+  });
+
+  it('a developing point knows only the bars before it', () => {
+    // Twelve M5 bars around 1.10, then a burst at 1.20 in the second hour.
+    const bars = [
+      ...Array.from({ length: 12 }, (_, i) => b(i, 1.1, 1.101)),
+      ...Array.from({ length: 12 }, (_, i) => b(12 + i, 1.2, 1.201, 500)),
+    ];
+    const checkpoints = [t0, t0 + 60 * M];
+    const d = developingProfile(bars, 0, bars.length - 1, checkpoints, { rows: 24 });
+    expect(d.t[0]).toBe(t0 + 60 * M);
+    expect(d.poc[0]).toBeLessThan(1.102); // the first hour's POC: the second hour has not happened yet
+    expect(d.poc[d.poc.length - 1]).toBeGreaterThan(1.19); // by the end the burst holds it
+  });
+
+  it('a naked POC stays open until a later bar trades through it', () => {
+    const day1 = Array.from({ length: 6 }, (_, i) => b(i, 1.1, 1.102));
+    const day2 = [b(300, 1.2, 1.21), b(301, 1.15, 1.19), b(302, 1.09, 1.12)];
+    const bars = [...day1, ...day2];
+    const periods = periodicOf(bars, { period: 'day', rows: 12 });
+    const naked = nakedPocs(bars, periods);
+    expect(naked[0].until).toBe(bars[8].time); // the third bar of day 2 came back down through it
+    expect(naked[naked.length - 1].until).toBeNull(); // the last day's own POC is still naked
+  });
+
+  it('a composite profile takes the last N trading days together', () => {
+    const H = HOUR;
+    const days = [0, 1, 2].flatMap((d) =>
+      Array.from({ length: 4 }, (_, i) => ({
+        ...b(i, 1.1 + d * 0.01, 1.1 + d * 0.01 + 0.002),
+        time: t0 + d * 86_400_000 + i * H,
+      })),
+    );
+    const two = compositeProfile(days, { periods: 2, rows: 12 })!;
+    expect(two.t0).toBe(t0 + 86_400_000);
+    expect(two.totalVolume).toBe(800);
+    expect(compositeProfile(days, { periods: 5, rows: 12 })!.totalVolume).toBe(1200);
+  });
+
+  it('TPO on bars wider than its bracket draws nothing and says why (DR-20)', () => {
+    const H = HOUR;
+    const h1 = Array.from({ length: 30 }, (_, i) => ({ ...b(i, 1.1, 1.102), time: t0 + i * H }));
+    const m = computeProfileStudy('tpo', h1, { bracketMinutes: 30 });
+    expect(m.kind).toBe('tpo');
+    expect(m.kind === 'tpo' && m.sessions.length).toBe(0);
+    expect(m.notice).toMatch(/30 minutes or less/);
+    const m5 = Array.from({ length: 30 }, (_, i) => b(i, 1.1, 1.102));
+    const ok = computeProfileStudy('tpo', m5, { bracketMinutes: 30 }, null, undefined, {
+      lowerTimeframeMs: 5 * M,
+    });
+    expect(ok.notice).toBeUndefined();
+    expect(ok.kind === 'tpo' && ok.sessions.length).toBeGreaterThan(0);
   });
 });

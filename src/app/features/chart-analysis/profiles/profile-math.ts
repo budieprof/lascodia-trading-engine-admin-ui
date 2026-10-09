@@ -1,6 +1,12 @@
 import type { Ohlc } from '../indicators/math';
 import { periodKey } from '../indicators/periods';
 import type { TradingDays } from '../datafeed/session-calendar';
+import {
+  SESSION_WINDOWS as NAMED_SESSIONS,
+  minutesOfDay,
+  sessionDayOf,
+} from '../indicators/sessions';
+import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 
 /**
  * Profile studies — pure math, and THE one volume profile and VWAP of the chart (DR-19): the profile
@@ -287,17 +293,11 @@ export function vwapRun(
 export type SessionName = 'daily' | 'asia' | 'london' | 'newyork';
 
 /**
- * Session windows in minutes-of-day on the clock shifted by `tzOffsetMinutes` (0 = UTC).
- * Asia wraps midnight (23:00–08:00 UTC, Tokyo open through London pre-open).
+ * The named sessions are the Sessions indicator's (`indicators/sessions.ts`, DR-18): Tokyo 09:00–18:00, London and
+ * New York 08:00–17:00, each on its own clock with its daylight saving, Monday to Friday. (They were fixed UTC hours —
+ * London 07:00–16:00 UTC all year, an hour early in winter — and Asia a different window from the indicator's.)
  */
-export const SESSION_WINDOWS: Record<
-  Exclude<SessionName, 'daily'>,
-  { start: number; end: number }
-> = {
-  asia: { start: 23 * 60, end: 8 * 60 },
-  london: { start: 7 * 60, end: 16 * 60 },
-  newyork: { start: 12 * 60, end: 21 * 60 },
-};
+export const SESSION_WINDOWS = NAMED_SESSIONS;
 
 export interface SessionProfile {
   /** Session start (UTC ms, on the true clock). */
@@ -309,7 +309,7 @@ export interface SessionProfile {
 
 export interface SessionOptions extends ProfileOptions {
   session: SessionName;
-  /** Offset of the session clock from UTC in minutes (e.g. -300 for New York EST). */
+  /** For the `daily` session only: a midnight-to-midnight day on this clock (minutes from UTC). */
   tzOffsetMinutes?: number;
   /** The symbol's trading days: what a `daily` session is when no clock offset is set. */
   days?: TradingDays;
@@ -329,16 +329,17 @@ export function sessionStartOf(
   days?: TradingDays,
 ): number | null {
   if (session === 'daily' && days && tzOffsetMinutes === 0) return days.sessionAt(t).start;
-  const off = tzOffsetMinutes * MIN;
-  const local = t + off;
-  const dayStart = Math.floor(local / DAY) * DAY;
-  if (session === 'daily') return dayStart - off;
-  const { start, end } = SESSION_WINDOWS[session];
-  const m = (local - dayStart) / MIN;
-  if (start < end) return m >= start && m < end ? dayStart + start * MIN - off : null;
-  if (m >= start) return dayStart + start * MIN - off;
-  if (m < end) return dayStart - DAY + start * MIN - off;
-  return null;
+  if (session === 'daily') {
+    const off = tzOffsetMinutes * MIN;
+    return Math.floor((t + off) / DAY) * DAY - off;
+  }
+  const w = SESSION_WINDOWS[session];
+  const localDay = sessionDayOf(t, w);
+  if (localDay === null) return null;
+  // The open's instant: its local time on that date, less the zone's offset there.
+  const openLocal = localDay + minutesOfDay(w.start) * MIN;
+  const guess = openLocal - timezoneOffsetMinutes(w.zone, openLocal) * MIN;
+  return openLocal - timezoneOffsetMinutes(w.zone, guess) * MIN;
 }
 
 function groupProfiles(
@@ -583,4 +584,117 @@ function buildTpo(
     singlePrints: counts.flatMap((c, r) => (c === 1 ? [r] : [])),
     bracketCount: maxBracket + 1,
   };
+}
+
+// ── Developing POC / value area, naked POCs, composite (DR-I7) ────────────────
+
+export interface DevelopingProfile {
+  /** One point per checkpoint: the time (UTC ms) it holds from, and the profile of the period so far. */
+  t: number[];
+  poc: number[];
+  vah: number[];
+  val: number[];
+}
+
+/**
+ * How a period's POC and value area developed, as TradingView's "Developing POC / VA" draw them: at each checkpoint
+ * (the chart's bar opens inside the period) the profile of the period's bars SO FAR — its own grid over its own
+ * range, so a point never knows a later bar's price. `bars[from..to]` is the period (lower-timeframe bars when the
+ * chart has them); `checkpoints` ascending UTC ms.
+ */
+export function developingProfile(
+  bars: readonly Ohlc[],
+  from: number,
+  to: number,
+  checkpoints: readonly number[],
+  opts: ProfileOptions = {},
+): DevelopingProfile {
+  const out: DevelopingProfile = { t: [], poc: [], vah: [], val: [] };
+  if (to < from) return out;
+  const t0 = bars[from].time;
+  const t1 = bars[to].time;
+  let k = from;
+  // Each checkpoint takes the bars that OPENED before it (the period up to that bar), plus the last one at the end.
+  const points = checkpoints.filter((c) => c > t0 && c <= t1);
+  points.push(Number.POSITIVE_INFINITY);
+  for (const c of points) {
+    while (k + 1 <= to && bars[k + 1].time < c) k++;
+    const p = profileRange(bars, from, k, opts);
+    if (!p) continue;
+    out.t.push(c === Number.POSITIVE_INFINITY ? bars[k].time : c);
+    out.poc.push(p.poc);
+    out.vah.push(p.vah);
+    out.val.push(p.val);
+  }
+  return out;
+}
+
+export interface NakedPoc {
+  price: number;
+  /** When the period whose POC it is ended (its last bar's open, UTC ms). */
+  from: number;
+  /** The first later bar that traded through it (UTC ms), or null: still naked. */
+  until: number | null;
+}
+
+/**
+ * The POCs of `periods` that price has not revisited — "naked" (virgin) POCs: each one from its period's end until
+ * the first LATER bar whose range holds it, or still open. Only the latest `limit` stay (a long scroll-back
+ * otherwise draws hundreds).
+ */
+export function nakedPocs(
+  bars: readonly Ohlc[],
+  periods: readonly SessionProfile[],
+  limit = 20,
+): NakedPoc[] {
+  const out: NakedPoc[] = [];
+  for (const s of periods) {
+    const price = s.profile.poc;
+    let until: number | null = null;
+    for (let i = s.endIdx + 1; i < bars.length; i++) {
+      if (bars[i].low <= price && bars[i].high >= price) {
+        until = bars[i].time;
+        break;
+      }
+    }
+    out.push({ price, from: s.profile.t1, until });
+  }
+  return out.slice(Math.max(0, out.length - limit));
+}
+
+/**
+ * One profile of the last `periods` trading days (a composite): their bars together, as TradingView's composite /
+ * multi-session profile — the levels a market has built over a week rather than within a day.
+ */
+export function compositeProfile(
+  bars: readonly Ohlc[],
+  opts: ProfileOptions & { periods: number; days?: TradingDays },
+): VolumeProfile | null {
+  if (bars.length === 0) return null;
+  const want = Math.max(1, Math.round(opts.periods));
+  let seen = 1;
+  let start = bars.length - 1;
+  let key = periodStartOf(bars[start].time, 'day', opts.days);
+  for (let i = bars.length - 2; i >= 0; i--) {
+    const k = periodStartOf(bars[i].time, 'day', opts.days);
+    if (k !== key) {
+      if (seen === want) break;
+      seen++;
+      key = k;
+    }
+    start = i;
+  }
+  return profileRange(bars, start, bars.length - 1, opts);
+}
+
+/** The interval of `bars` (the median gap, so weekends do not count), ms; 0 for fewer than two bars. */
+export function barIntervalOf(bars: readonly { time: number }[]): number {
+  const gaps: number[] = [];
+  for (let i = 1; i < bars.length && gaps.length < 400; i++) {
+    const g = bars[i].time - bars[i - 1].time;
+    if (g > 0) gaps.push(g);
+  }
+  if (!gaps.length) return 0;
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
 }

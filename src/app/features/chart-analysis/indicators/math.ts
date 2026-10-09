@@ -2726,43 +2726,6 @@ export function linRegChannel(
 }
 
 /**
- * Session high/low: within each occurrence of the UTC window [startHour,
- * endHour) the running high and low, null outside it (so separate sessions
- * are not joined). Windows that wrap midnight are supported.
- */
-export function sessionHighLow(
-  bars: Ohlc[],
-  startHour: number,
-  endHour: number,
-): { high: Maybe[]; low: Maybe[] } {
-  const n = bars.length;
-  const high: Maybe[] = nulls(n);
-  const low: Maybe[] = nulls(n);
-  let hh = -Infinity;
-  let ll = Infinity;
-  let inPrev = false;
-  for (let i = 0; i < n; i++) {
-    const h = new Date(bars[i].time).getUTCHours();
-    const inside =
-      startHour <= endHour ? h >= startHour && h < endHour : h >= startHour || h < endHour;
-    if (!inside) {
-      inPrev = false;
-      continue;
-    }
-    if (!inPrev) {
-      hh = -Infinity;
-      ll = Infinity;
-    }
-    inPrev = true;
-    hh = Math.max(hh, bars[i].high);
-    ll = Math.min(ll, bars[i].low);
-    high[i] = hh;
-    low[i] = ll;
-  }
-  return { high, low };
-}
-
-/**
  * Rolling Pearson correlation of two aligned series (`ta.correlation`), in two passes around the window means: the
  * one-pass sums lose the digits that matter when prices sit far from zero (EURUSD near 1.16 moving 1e-4).
  */

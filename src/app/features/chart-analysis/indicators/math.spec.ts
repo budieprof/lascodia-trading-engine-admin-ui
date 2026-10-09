@@ -1253,15 +1253,6 @@ describe('fifth wave', () => {
     expect(r.upper[2]).toBeCloseTo(2);
   });
 
-  it('sessionHighLow tracks the running extreme inside the window only', () => {
-    const b = [0, 1, 2, 3].map((h) => mk(h, 1, 1 + h, 1 - h, 1));
-    const r = M5.sessionHighLow(b, 1, 3);
-    expect(r.high).toEqual([null, 2, 3, null]);
-    expect(r.low).toEqual([null, 0, -1, null]);
-    // wrapping window 22→2
-    expect(M5.sessionHighLow(b, 22, 2).high).toEqual([1, 2, null, null]);
-  });
-
   it('correlation is ±1 for linear relations and null over gaps', () => {
     const a = [1, 2, 3, 4, 5];
     expect(M5.correlation(a, [2, 4, 6, 8, 10], 3)[4]).toBeCloseTo(1);

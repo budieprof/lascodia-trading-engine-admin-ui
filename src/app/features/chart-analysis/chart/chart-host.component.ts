@@ -126,6 +126,8 @@ import { ValueProviders, type DataWindowSection, type ValueProvider } from './va
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
+import { ProfileBarsService } from '../profiles/profile-bars.service';
+import { profileResolutionFor, timeRangeIndices, withChartTail } from '../profiles/profile-bars';
 import { PatternRenderer } from '../patterns/pattern-renderer';
 import {
   detectCandlestickPatterns,
@@ -1041,6 +1043,12 @@ export class ChartHostComponent implements OnDestroy {
           selectedIds,
         );
       });
+    });
+
+    // Finer bars for the profile studies landed: profile again with them (DR-I7).
+    effect(() => {
+      this.profileBars.version();
+      untracked(() => this.applyProfiles(this.indicators()));
     });
 
     effect(() => {
@@ -2952,24 +2960,76 @@ export class ChartHostComponent implements OnDestroy {
     }
     const bars = this.bars();
     const range = this.chart?.timeScale().getVisibleLogicalRange() ?? null;
+    const checkpoints = bars.map((b) => b.time);
     for (const a of wanted) {
       let r = this.profileRenderers.get(a.uid);
       if (!r) {
-        r = new ProfileRenderer(() => this.price, this.utcToX);
+        // Snapped to the chart bar holding an instant: profiles built from finer bars start and end inside one.
+        r = new ProfileRenderer(() => this.price, this.utcToBarX);
         this.price.attachPrimitive(r);
         this.profileRenderers.set(a.uid, r);
       }
+      const id = profileIdOf(a.defId);
+      const input = this.profileInput(id, a.params, bars);
+      // The visible range is in chart bars; on finer bars it is the same stretch of time.
+      let visible: { from: number; to: number } | null = range
+        ? { from: range.from, to: range.to }
+        : null;
+      if (visible && input.lowerMs) visible = timeRangeIndices(input.bars, bars, visible);
       r.setModel(
-        computeProfileStudy(
-          profileIdOf(a.defId),
-          bars,
-          a.params,
-          range ? { from: range.from, to: range.to } : null,
-          this.calendar() ?? undefined,
-        ),
+        computeProfileStudy(id, input.bars, a.params, visible, this.calendar() ?? undefined, {
+          checkpoints,
+          lowerTimeframeMs: input.lowerMs,
+        }),
       );
     }
   }
+
+  private readonly profileBars = inject(ProfileBarsService);
+
+  /**
+   * The bars a profile study is built from (DR-I7 / DR-20): the chart's range at a LOWER timeframe when one fits
+   * ({@link profileResolutionFor}; for TPO, one no wider than its bracket), with the chart's own bars for the part the
+   * finer bars do not reach yet. TPO takes only the finer bars — a coarse bar would put all its letters in one
+   * bracket. Until finer bars have loaded: the chart's own (TPO then says why it draws nothing).
+   */
+  private profileInput(
+    id: ReturnType<typeof profileIdOf>,
+    params: Record<string, number | string>,
+    bars: readonly Bar[],
+  ): { bars: Bar[]; lowerMs: number } {
+    const chartMs = resolutionMs(this.resolution());
+    if (!bars.length || !chartMs) return { bars: [...bars], lowerMs: 0 };
+    const from = bars[0].time;
+    const to = bars[bars.length - 1].time + chartMs;
+    const bracketMs = (Number(params['bracketMinutes']) || 30) * 60_000;
+    const ltf = profileResolutionFor(this.resolution(), to - from, {
+      maxMs: id === 'tpo' ? bracketMs : undefined,
+    });
+    if (!ltf) return { bars: [...bars], lowerMs: 0 };
+    this.profileBars.ensure(this.symbol(), ltf, from, to);
+    const lower = this.profileBars.bars(this.symbol(), ltf, from, to);
+    if (!lower.length) return { bars: [...bars], lowerMs: 0 };
+    const ltfMs = resolutionMs(ltf) ?? 0;
+    if (id === 'tpo') return { bars: lower, lowerMs: ltfMs };
+    const head = bars.filter((b) => b.time + chartMs <= lower[0].time);
+    return { bars: [...head, ...withChartTail(lower, bars)], lowerMs: ltfMs };
+  }
+
+  /** UTC ms → x of the chart bar holding it; null before the first bar. */
+  private readonly utcToBarX = (ms: number): number | null => {
+    const utc = this.plottedUtc;
+    if (!utc.length || ms < utc[0].time) return null;
+    let lo = 0;
+    let hi = utc.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (utc[mid].time <= ms) lo = mid;
+      else hi = mid - 1;
+    }
+    const x = this.chart?.timeScale().timeToCoordinate(asTime(this.plotted[lo].time));
+    return x === null || x === undefined ? null : Number(x);
+  };
 
   /** The visible-range profile follows pans; debounced like the analysis overlays. */
   private profileTimer: ReturnType<typeof setTimeout> | null = null;

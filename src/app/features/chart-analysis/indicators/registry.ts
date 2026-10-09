@@ -96,7 +96,6 @@ import {
   priceOscillator,
   rci,
   relativeStrength,
-  sessionHighLow,
   smi,
   spreadRatio,
   t3,
@@ -115,6 +114,13 @@ import {
   type Maybe,
   type Ohlc,
 } from './math';
+import {
+  SESSION_WINDOWS,
+  SESSION_ZONES,
+  parseSessionWindow,
+  sessionHighLow,
+  type SessionWindow,
+} from './sessions';
 
 /**
  * The indicator catalogue.
@@ -162,12 +168,15 @@ export interface PlotSpec {
 /**
  * `number` and `source` as before; `select` picks one of `options`; `symbol` is
  * an engine symbol for a compare series (the host fetches its bars and passes
- * them in `IndicatorContext.compareBars`).
+ * them in `IndicatorContext.compareBars`); `session` is a local `HHMM-HHMM`
+ * window (its zone is a separate `select`); `time` is an instant picked on the
+ * chart (UTC ms, 0 = not set) — shown as a date, never typed as milliseconds
+ * (DR-22).
  */
 export interface IndicatorInput {
   key: string;
   label: string;
-  type: 'number' | 'source' | 'select' | 'symbol';
+  type: 'number' | 'source' | 'select' | 'symbol' | 'session' | 'time';
   default: number | string;
   min?: number;
   max?: number;
@@ -311,6 +320,13 @@ const SELECT = (
   type: 'select',
   default: def,
   options,
+});
+
+const SESSION_INPUT = (key: string, label: string, w: SessionWindow): IndicatorInput => ({
+  key,
+  label,
+  type: 'session',
+  default: `${w.start}-${w.end}`,
 });
 
 const SYMBOL: IndicatorInput = {
@@ -2018,12 +2034,13 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'anchored-vwap',
     name: 'Anchored VWAP',
     category: 'Volume',
-    description: 'VWAP from a chosen anchor (bars back, or a UTC timestamp) with deviation bands.',
+    description: 'VWAP from an anchor picked on the chart (or bars back) with deviation bands.',
     keywords: ['avwap', 'anchor'],
     target: 'overlay',
     inputs: [
       NUM('barsBack', 'Anchor bars back', 100, 1, 100000),
-      NUM('anchorTime', 'Anchor time (UTC ms, 0 = use bars back)', 0, 0, 1e14),
+      // Picked on the chart (DR-22: it was typed as UTC milliseconds); not set = use bars back.
+      { key: 'anchorTime', label: 'Anchor (pick on chart)', type: 'time', default: 0 },
       NUM('mult1', 'Band 1 ×', 1, 0.1, 10),
       NUM('mult2', 'Band 2 ×', 2, 0.1, 10),
     ],
@@ -2208,16 +2225,19 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'sessions',
     name: 'Sessions',
     category: 'Sessions',
-    description: 'Running high and low of the Asia, London and New York sessions (UTC hours).',
+    description:
+      'Running high and low of the Tokyo, London and New York sessions, on their own clocks (DST included).',
     keywords: ['asia', 'london', 'new york', 'tokyo', 'session box'],
     target: 'overlay',
+    // Each session is a local window in its own zone (DR-18); the keys changed from the old fixed UTC hours
+    // (asiaStart…), so a saved layout's hours are not read as local times — it takes these defaults.
     inputs: [
-      NUM('asiaStart', 'Asia start (UTC h)', 0, 0, 23),
-      NUM('asiaEnd', 'Asia end (UTC h)', 9, 0, 24),
-      NUM('londonStart', 'London start (UTC h)', 7, 0, 23),
-      NUM('londonEnd', 'London end (UTC h)', 16, 0, 24),
-      NUM('nyStart', 'New York start (UTC h)', 12, 0, 23),
-      NUM('nyEnd', 'New York end (UTC h)', 21, 0, 24),
+      SESSION_INPUT('asiaSession', 'Asia session', SESSION_WINDOWS.asia),
+      SELECT('asiaZone', 'Asia zone', SESSION_ZONES, SESSION_WINDOWS.asia.zone),
+      SESSION_INPUT('londonSession', 'London session', SESSION_WINDOWS.london),
+      SELECT('londonZone', 'London zone', SESSION_ZONES, SESSION_WINDOWS.london.zone),
+      SESSION_INPUT('nySession', 'New York session', SESSION_WINDOWS.newyork),
+      SELECT('nyZone', 'New York zone', SESSION_ZONES, SESSION_WINDOWS.newyork.zone),
     ],
     // Each session's high and low end with the session: a gap overnight, never a line across it.
     plots: [
@@ -2228,10 +2248,13 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'nyHigh', title: 'NY H', kind: 'line', color: '#FF6D00', gaps: 'break' },
       { key: 'nyLow', title: 'NY L', kind: 'line', color: '#FF6D00', gaps: 'break' },
     ],
-    compute: (bars, p) => {
-      const a = sessionHighLow(bars, num(p, 'asiaStart', 0), num(p, 'asiaEnd', 9));
-      const l = sessionHighLow(bars, num(p, 'londonStart', 7), num(p, 'londonEnd', 16));
-      const n = sessionHighLow(bars, num(p, 'nyStart', 12), num(p, 'nyEnd', 21));
+    compute: (bars, p, ctx) => {
+      const w = (key: string, zoneKey: string, fallback: SessionWindow): SessionWindow =>
+        parseSessionWindow(str(p, key, ''), str(p, zoneKey, fallback.zone)) ?? fallback;
+      const t = ctx?.utcTimes;
+      const a = sessionHighLow(bars, w('asiaSession', 'asiaZone', SESSION_WINDOWS.asia), t);
+      const l = sessionHighLow(bars, w('londonSession', 'londonZone', SESSION_WINDOWS.london), t);
+      const n = sessionHighLow(bars, w('nySession', 'nyZone', SESSION_WINDOWS.newyork), t);
       return {
         asiaHigh: a.high,
         asiaLow: a.low,
