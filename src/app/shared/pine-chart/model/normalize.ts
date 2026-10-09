@@ -78,6 +78,7 @@ export function normalizeRunResult(raw: unknown): PineRunResult | null {
           line: num(p['line'], 0),
           executions: num(p['executions'], 0),
           totalMicros: num(p['totalMicros'], 0),
+          unit: typeof p['unit'] === 'string' && p['unit'] !== '' ? p['unit'] : null,
         }),
       ),
     runtimeError: normalizeRuntimeError(raw['runtimeError']),

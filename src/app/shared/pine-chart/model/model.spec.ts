@@ -62,6 +62,19 @@ describe('normalize', () => {
     expect(run.profile).toEqual([]);
   });
 
+  it('keeps the library a profiled line belongs to', () => {
+    const run = normalizeRunResult({
+      profile: [
+        { line: 3, executions: 10, totalMicros: 50 },
+        { line: 3, executions: 4, totalMicros: 9, unit: 'me/lib/2' },
+      ],
+    })!;
+    expect(run.profile).toEqual([
+      { line: 3, executions: 10, totalMicros: 50, unit: null },
+      { line: 3, executions: 4, totalMicros: 9, unit: 'me/lib/2' },
+    ]);
+  });
+
   it('accepts bars in either shape', () => {
     expect(normalizeBars([{ t: 1, o: 1, h: 2, l: 0, c: 1.5, v: 3 }])).toHaveLength(1);
     expect(normalizeBars([{ time: 1, open: 1, high: 2, low: 0, close: 1.5 }])).toEqual([

@@ -19,6 +19,7 @@ import type {
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
 import { ThemeService } from '@core/theme/theme.service';
+import type { PineProfileLine, PineRunResult } from '@shared/pine-chart/model/pine-outputs.types';
 import type { PineLineJump } from '@shared/pine-chart/panes/pine-logs-pane.component';
 import { PinePreviewComponent } from '../../pine-preview/pine-preview.component';
 import { StrategyReportComponent } from '../../report/strategy-report.component';
@@ -193,6 +194,7 @@ export type PreviewView = 'chart' | 'report';
             [symbol]="symbol() ?? ''"
             [timeframe]="timeframe() ?? ''"
             (jumpToLine)="onJump($event)"
+            (resultChange)="onPreviewResult($event)"
           />
         </div>
       }
@@ -348,6 +350,8 @@ export class ScriptPreviewComponent {
 
   /** Jump the editor to a line. */
   readonly reveal = output<{ line: number; column: number }>();
+  /** A profiled run (the chart's Profiler): per-line times and the source that ran, for the editor's gutter. */
+  readonly profiled = output<{ lines: readonly PineProfileLine[]; source: string | null }>();
 
   private readonly scripting = inject(ScriptingService);
   private readonly theme = inject(ThemeService);
@@ -496,6 +500,12 @@ export class ScriptPreviewComponent {
 
   showView(view: PreviewView): void {
     this.selectedView.set(view);
+  }
+
+  /** The chart's own re-runs: a profiled one hands its per-line times to the editor's gutter. */
+  onPreviewResult(result: PineRunResult): void {
+    if (result.profile.length === 0) return;
+    this.profiled.emit({ lines: result.profile, source: this.lastRequest()?.source ?? null });
   }
 
   onJump(jump: PineLineJump): void {

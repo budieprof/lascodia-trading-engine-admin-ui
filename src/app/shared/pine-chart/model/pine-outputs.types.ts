@@ -552,6 +552,8 @@ export interface PineProfileLine {
   line: number;
   executions: number;
   totalMicros: number;
+  /** The imported library (`publisher/name/version`) the line is in; null for the script's own lines. */
+  unit?: string | null;
 }
 
 /** A user-function call a runtime error happened inside (innermost first). */

@@ -245,6 +245,7 @@ type SideTab = 'inputs' | 'properties';
           [timeframe]="timeframe()"
           [kind]="shown()?.declaration?.kind ?? null"
           (reveal)="workbench?.reveal($event.line, $event.column)"
+          (profiled)="workbench?.showProfile($event.lines, $event.source)"
         />
       } @placeholder {
         <div class="preview-placeholder muted small">The preview loads here.</div>
