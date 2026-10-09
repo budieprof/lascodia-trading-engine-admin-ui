@@ -15,6 +15,7 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
+import { clampSize, loadDockLayout, saveDockLayout, type DockLayout, type DockMode } from './dock-layout';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
@@ -1354,6 +1355,62 @@ export class ChartAnalysisPageComponent {
   frontDock(which: 'editor' | 'tester'): void {
     this.logsFront.set(false);
     this.dockPreference.set(which);
+  }
+
+  // ── Dock layout: the Pine Editor / Strategy Tester / Pine Logs panel docked below the chart, maximised over it
+  //    (a strip of the live chart stays visible above), or beside it full height — sizes drag-adjustable, the choice
+  //    remembered in this browser. Full screen is the chart page's own (the dock is inside it). ──
+  readonly dockMode = signal<DockMode>(loadDockLayout().mode);
+  /** Docked: the panel's height (px). */
+  readonly dockHeight = signal(loadDockLayout().height);
+  /** Maximised: the height of the live chart strip kept above the panel (px). */
+  readonly dockChartStrip = signal(loadDockLayout().strip);
+  /** Beside: the panel's width (px). */
+  readonly dockSideWidth = signal(loadDockLayout().side);
+  private readonly persistDockLayout = effect(() => {
+    const layout: DockLayout = {
+      mode: this.dockMode(),
+      height: this.dockHeight(),
+      strip: this.dockChartStrip(),
+      side: this.dockSideWidth(),
+    };
+    saveDockLayout(layout);
+  });
+
+  /** A layout button: pressing Maximise or Beside again goes back to docked. */
+  setDockMode(mode: DockMode): void {
+    this.dockMode.set(this.dockMode() === mode ? 'docked' : mode);
+  }
+
+  /**
+   * Drag the dock's edge: its height (docked), the chart strip above it (maximised) or its width (beside). Sizes
+   * are clamped so the chart and the panel both stay usable.
+   */
+  startPanelResize(ev: PointerEvent): void {
+    const page = document.querySelector('.chart-page');
+    if (!page || ev.button !== 0) return;
+    ev.preventDefault();
+    const box = page.getBoundingClientRect();
+    const bodyTop = page.querySelector('.chart-body')?.getBoundingClientRect().top ?? box.top;
+    const mode = this.dockMode();
+    const move = (e: PointerEvent): void => {
+      if (mode === 'side') this.dockSideWidth.set(clampSize(box.right - e.clientX, 360, box.width - 320));
+      else if (mode === 'max') this.dockChartStrip.set(clampSize(e.clientY - bodyTop, 80, box.height - 260));
+      else this.dockHeight.set(clampSize(box.bottom - e.clientY, 140, box.height - 200));
+    };
+    // No text selection and the resize cursor everywhere while dragging (the pointer leaves the thin handle).
+    const body = document.body.style;
+    const before = { cursor: body.cursor, select: body.userSelect };
+    const up = (): void => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      body.cursor = before.cursor;
+      body.userSelect = before.select;
+    };
+    body.cursor = mode === 'side' ? 'ew-resize' : 'ns-resize';
+    body.userSelect = 'none';
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   }
 
   /** A dock tab clicked. */
@@ -6367,6 +6424,13 @@ export class ChartAnalysisPageComponent {
    * or an indicator input never deletes the selected drawing.
    */
   onKeydown(ev: KeyboardEvent): void {
+    // Ctrl/Cmd+Shift+M: maximise ⇄ restore the Pine Editor / Tester dock — before the editable check, so it also
+    // works while typing in the editor (CodeMirror binds nothing to it).
+    if (this.dockTab() && (ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'm') {
+      ev.preventDefault();
+      this.setDockMode('max');
+      return;
+    }
     const target = ev.target as HTMLElement | null;
     // The Pine editor is a contenteditable, not a field: typing "m" there toggled the magnet, and
     // Backspace deleted the selected drawing.

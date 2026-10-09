@@ -1,4 +1,11 @@
-<div class="chart-page">
+<div
+  class="chart-page"
+  [class.dock-max]="!!dockTab() && dockMode() === 'max'"
+  [class.dock-side]="!!dockTab() && dockMode() === 'side'"
+  [style.--dock-h.px]="dockHeight()"
+  [style.--dock-strip.px]="dockChartStrip()"
+  [style.--dock-side.px]="dockSideWidth()"
+>
   <!-- Top toolbar — symbol, timeframes, style, studies. -->
   <header class="toolbar">
     <div class="symbol-picker">
@@ -2233,8 +2240,16 @@
     />
   }
   @if (dockTab(); as tab) {
-    <section class="bottom-panel">
-      @if (dockTabs().length > 1) {
+    <section class="bottom-panel" [attr.data-mode]="dockMode()">
+      <!-- Drag to resize: the panel's height (docked), the chart strip above it (maximised) or its width (beside). -->
+      <div
+        class="dock-grip"
+        role="separator"
+        [attr.aria-orientation]="dockMode() === 'side' ? 'vertical' : 'horizontal'"
+        [title]="dockMode() === 'side' ? 'Drag to widen or narrow the panel' : 'Drag to resize'"
+        (pointerdown)="startPanelResize($event)"
+      ></div>
+      <div class="dock-bar">
         <nav class="dock-tabs" role="tablist">
           @for (d of dockTabs(); track d.id) {
             <button
@@ -2248,7 +2263,48 @@
             </button>
           }
         </nav>
-      }
+        <div class="dock-layout" role="group" aria-label="Panel layout">
+          <button
+            type="button"
+            [class.on]="dockMode() === 'docked'"
+            (click)="setDockMode('docked')"
+            title="Below the chart"
+            aria-label="Dock below the chart"
+          >
+            <app-chart-icon name="dock-bottom" [size]="20" />
+          </button>
+          <button
+            type="button"
+            [class.on]="dockMode() === 'side'"
+            (click)="setDockMode('side')"
+            title="Beside the chart — code and chart side by side"
+            aria-label="Dock beside the chart"
+            data-testid="dock-side"
+          >
+            <app-chart-icon name="dock-right" [size]="20" />
+          </button>
+          <button
+            type="button"
+            [class.on]="dockMode() === 'max'"
+            (click)="setDockMode('max')"
+            [title]="(dockMode() === 'max' ? 'Restore' : 'Maximise — a strip of the chart stays in view') + ' (Ctrl/⌘+Shift+M)'"
+            [attr.aria-label]="dockMode() === 'max' ? 'Restore the panel' : 'Maximise the panel'"
+            data-testid="dock-max"
+          >
+            <app-chart-icon [name]="dockMode() === 'max' ? 'panel-restore' : 'panel-max'" [size]="20" />
+          </button>
+          <span class="dock-sep" aria-hidden="true"></span>
+          <button
+            type="button"
+            [class.on]="isFullscreen()"
+            (click)="toggleFullscreen()"
+            [title]="isFullscreen() ? 'Exit full screen (Esc)' : 'Full screen — the chart page fills the screen'"
+            [attr.aria-label]="isFullscreen() ? 'Exit full screen' : 'Full screen'"
+          >
+            <app-chart-icon name="fullscreen" [size]="20" />
+          </button>
+        </div>
+      </div>
       @if (tab === 'logs' && logsRun(); as lr) {
         <!-- Pine Logs, trace and profiler of a script on the chart (PC-I6). -->
         <app-script-logs-panel
