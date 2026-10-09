@@ -204,7 +204,7 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
         <button
           type="button"
           class="dt-btn dt-text-btn"
-          title="Stage as a manual signal (it enters the queue as Pending; approval and every risk check apply)"
+          title="Open the order ticket with this position's side, stop and target — in paper; nothing is sent until you submit"
           data-testid="dt-stage"
           (click)="pop.set(null); stageOrder.emit(d.id)"
         >
@@ -484,7 +484,7 @@ export class DrawingToolbarComponent {
   readonly settings = output<string>();
   /** Add an alert on the drawing (DR-I6); `level` for a Fib retracement. */
   readonly addAlert = output<{ id: string; level?: number }>();
-  /** Stage a position tool as a manual trade signal (DR-I9). */
+  /** Stage a position tool in the order ticket, paper by default (DR-I9, SP-I4). */
   readonly stageOrder = output<string>();
 
   readonly pop = signal<Pop>(null);

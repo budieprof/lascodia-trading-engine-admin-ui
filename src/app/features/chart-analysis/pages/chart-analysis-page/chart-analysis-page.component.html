@@ -1971,14 +1971,6 @@
       (exportPine)="openPineDraft($event)"
     />
   }
-  <!-- A position tool staged as a manual signal (DR-I9): the existing dialog, filled in; nothing is sent until Create. -->
-  @if (stagePrefill(); as pf) {
-    <app-create-signal-dialog
-      [prefill]="pf"
-      (closed)="stagePrefill.set(null)"
-      (created)="onStagedSignal($event)"
-    />
-  }
   <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->
   @if (studySettingsStudy(); as st) {
     <app-study-settings-dialog

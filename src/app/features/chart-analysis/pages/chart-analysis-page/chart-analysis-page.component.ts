@@ -233,10 +233,6 @@ import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog
 import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
 import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
-import {
-  CreateSignalDialogComponent,
-  type SignalPrefill,
-} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
@@ -580,7 +576,6 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ChartAlertManagerComponent,
     ObjectTreeComponent,
     StudySettingsDialogComponent,
-    CreateSignalDialogComponent,
     FavoritesBarComponent,
     PatternScorecardDialogComponent,
     ChartScriptAlertFormComponent,
@@ -1688,22 +1683,21 @@ export class ChartAnalysisPageComponent {
     this.loadTradingOverlays();
   }
 
-  /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
-  readonly stagePrefill = signal<SignalPrefill | null>(null);
-
-  /** "Stage…" on a Long / Short Position: the manual-signal dialog, filled in. The chart sends nothing itself. */
+  /**
+   * "Stage…" on a Long / Short Position (DR-I9 → SP-I4): the order ticket opens with the tool's side, stop and target,
+   * in paper at market (the drawn entry is kept for a live "At price" order). The chart sends nothing until Submit,
+   * and the engine judges the ticket again then.
+   */
   stageOrder(id: string): void {
     const d = this.drawings.allDrawings().find((x) => x.id === id);
     const prefill = d ? positionOrderPrefill(d) : null;
-    if (prefill) this.stagePrefill.set(prefill);
-  }
-
-  /** The operator created the signal in the dialog: it waits as Pending for approval and the risk checks. */
-  onStagedSignal(id: number): void {
-    this.stagePrefill.set(null);
-    this.notify.success(
-      `Signal #${id} queued as Pending — approval and the risk checks decide whether it trades.`,
-    );
+    if (!prefill?.direction) return;
+    this.ticketPrefill.set({
+      direction: prefill.direction,
+      entry: prefill.entryPrice ?? null,
+      stop: prefill.stopLoss ?? null,
+      target: prefill.takeProfit ?? null,
+    });
   }
 
   /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
