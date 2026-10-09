@@ -5,7 +5,13 @@ import type { CandleDto } from '@core/api/api.types';
 import type { ChartBarDto, ChartBarsRequest } from '@core/api/scripting.types';
 import { MarketDataService } from '@core/services/market-data.service';
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
-import { CandleFeedService, normaliseRows, toBar, toSessionBar } from './candle-feed.service';
+import {
+  CandleFeedService,
+  MAX_CACHED_SERIES,
+  normaliseRows,
+  toBar,
+  toSessionBar,
+} from './candle-feed.service';
 
 function row(iso: string, o: number, h: number, l: number, c: number, v = 1): CandleDto {
   return {
@@ -72,7 +78,7 @@ describe('normaliseRows', () => {
   });
 
   it('returns nothing for an unsupported resolution', () => {
-    expect(normaliseRows(descendingPage, '3')).toEqual([]);
+    expect(normaliseRows(descendingPage, '30S')).toEqual([]);
   });
 });
 
@@ -352,5 +358,62 @@ describe('toSessionBar', () => {
       forming: true,
     });
     expect('closeTime' in toSessionBar({ ...dto, tc: Number.NaN })).toBe(false);
+  });
+});
+
+describe('CandleFeedService — the stored grid reports failures (CC-14) and forgets old series (CC-24)', () => {
+  function storedFeed(listCandles: () => unknown) {
+    const injector = Injector.create({
+      providers: [
+        { provide: ScriptingService, useValue: { chartBars: vi.fn() } },
+        { provide: MarketDataService, useValue: { listCandles: vi.fn(listCandles) } },
+        { provide: CandleFeedService, useClass: CandleFeedService },
+      ],
+    });
+    return runInInjectionContext(injector, () => injector.get(CandleFeedService));
+  }
+
+  it('rejects when the engine cannot be reached — not "no candles stored"', async () => {
+    const feed = storedFeed(() =>
+      throwError(() => new Error('Http failure response: 0 Unknown Error')),
+    );
+    await expect(feed.getBars('EURUSD', '60', 0, Date.now(), 100)).rejects.toMatchObject({
+      message: 'Http failure response: 0 Unknown Error',
+    });
+  });
+
+  it('rejects when the engine refuses, with its message', async () => {
+    const feed = storedFeed(() =>
+      of({ status: false, message: 'not stored by the engine', data: null }),
+    );
+    await expect(feed.getBars('EURUSD', '60', 0, Date.now(), 100)).rejects.toMatchObject({
+      message: 'not stored by the engine',
+    });
+  });
+
+  it('an empty answer is still "no data"', async () => {
+    const feed = storedFeed(() => of({ status: true, data: { data: [] } }));
+    expect(await feed.getBars('EURUSD', '60', 0, Date.now(), 100)).toEqual({
+      bars: [],
+      noData: true,
+    });
+  });
+
+  it(`keeps at most ${MAX_CACHED_SERIES} series, dropping the least recently used`, async () => {
+    const listCandles = vi.fn(() =>
+      of({ status: true, data: { data: [row('2026-10-07T13:00:00Z', 1, 1, 1, 1)] } }),
+    );
+    const feed = storedFeed(listCandles);
+    for (let i = 0; i <= MAX_CACHED_SERIES; i++)
+      await feed.getBars(`SYM${i}`, '60', 0, Date.now(), 1);
+    expect(feed.cachedSeries()).toBe(MAX_CACHED_SERIES);
+    // A window the cache covers is served from it for a series still held …
+    const at = Date.parse('2026-10-07T13:00:00Z');
+    const calls = listCandles.mock.calls.length;
+    await feed.getBars(`SYM${MAX_CACHED_SERIES}`, '60', at, at, 1);
+    expect(listCandles.mock.calls.length).toBe(calls);
+    // … and asked for again for SYM0, the least recently used, which was dropped.
+    await feed.getBars('SYM0', '60', at, at, 1);
+    expect(listCandles.mock.calls.length).toBe(calls + 1);
   });
 });

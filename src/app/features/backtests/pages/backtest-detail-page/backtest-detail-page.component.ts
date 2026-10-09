@@ -196,6 +196,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
             <app-strategy-report
               [report]="report"
               [backtestRunId]="bt.id"
+              [run]="bt"
               [tradesClickable]="true"
               (tradeClick)="openReportTrade($event)"
             />

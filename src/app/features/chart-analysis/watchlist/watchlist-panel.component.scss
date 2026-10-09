@@ -15,6 +15,7 @@
   --wl-hover: #f0f3fa;
   --wl-line: #e0e3eb;
   --wl-gutter: #e0e3eb;
+  --wl-bg: var(--surface, #fff);
   font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
 }
 
@@ -110,6 +111,11 @@ button {
     &.danger {
       color: var(--wl-down);
     }
+
+    &:disabled {
+      cursor: default;
+      opacity: 0.5;
+    }
   }
 
   hr {
@@ -141,6 +147,16 @@ button {
   display: flex;
   gap: 2px;
   padding: 2px 10px 4px;
+
+  small {
+    margin-left: 2px;
+    font-size: 10px;
+    color: var(--text-muted, #787b86);
+  }
+
+  .active {
+    background: var(--wl-hover);
+  }
 }
 
 // ── add symbol ──
@@ -202,27 +218,35 @@ button {
 }
 
 // ── list ──
+// The body is the one scroller, both ways: the column picker can add more columns than the dock is wide.
 .wl-body {
   display: flex;
   flex-direction: column;
   flex: 0 0 55%;
   min-height: 80px;
+  overflow: auto;
 }
 
 .wl-columns,
 .wl-row {
   display: grid;
-  // Numbers take their natural width (never ellipsised); the symbol column absorbs the squeeze.
-  grid-template-columns: 16px minmax(64px, 1fr) 76px 66px 58px;
+  // The tracks are bound per list (flag, symbol, then one per chosen column); numbers take their natural width
+  // (never ellipsised) and the symbol column absorbs the squeeze.
+  grid-template-columns: 16px minmax(84px, 1fr) 76px 66px 58px;
   align-items: center;
   column-gap: 10px;
   padding: 0 6px 0 4px;
+  min-width: max-content;
 }
 
 .wl-columns {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   flex: none;
   height: 26px;
   border-bottom: 1px solid var(--wl-line);
+  background: var(--wl-bg);
   font-size: 12px;
   color: var(--text-muted, #787b86);
 
@@ -249,8 +273,113 @@ button {
 
 .wl-rows {
   flex: 1;
-  overflow-y: auto;
   min-height: 0;
+}
+
+.wl-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 8px 6px;
+  padding: 5px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: rgba(242, 54, 69, 0.08);
+  color: var(--wl-down);
+
+  &.wl-undo {
+    background: var(--wl-hover);
+    color: var(--text, #131722);
+  }
+
+  button {
+    margin-left: auto;
+    font-weight: 600;
+    color: var(--accent, #2962ff);
+  }
+}
+
+.wl-hot-note {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.wl-hot-value {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent, #2962ff);
+}
+
+.wl-event.soon {
+  color: var(--wl-down);
+  font-weight: 600;
+}
+
+.wl-session {
+  font-size: 11px;
+  color: var(--text-muted, #787b86);
+
+  &.home {
+    color: var(--text, #131722);
+  }
+}
+
+.wl-spark {
+  display: inline-flex;
+  justify-content: flex-end;
+
+  polyline {
+    fill: none;
+    stroke-width: 1.2;
+    stroke: var(--text-muted, #787b86);
+
+    &.up {
+      stroke: var(--wl-up);
+    }
+
+    &.down {
+      stroke: var(--wl-down);
+    }
+  }
+}
+
+.wl-columns-menu {
+  min-width: 260px;
+}
+
+.wl-check {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 14px;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--wl-hover);
+  }
+
+  small {
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.wl-alert-dialog {
+  width: min(380px, 92vw);
+  padding: 0;
+  border: 1px solid var(--wl-line);
+  border-radius: 8px;
+  background: var(--wl-bg);
+  color: inherit;
+
+  &::backdrop {
+    background: rgba(0, 0, 0, 0.32);
+  }
 }
 
 .wl-section {
@@ -644,6 +773,7 @@ button {
   --wl-hover: #2a2a2a;
   --wl-line: #2e2e2e;
   --wl-gutter: #2e2e2e;
+  --wl-bg: #0f0f0f;
   background: #0f0f0f;
   color: #dbdbdb;
 }

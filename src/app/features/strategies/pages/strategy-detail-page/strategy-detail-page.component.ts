@@ -66,6 +66,19 @@ import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-aler
 import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
+import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
+import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
+import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
+import { AuthService } from '@core/auth/auth.service';
+import { OPERATOR_PERMISSION } from '@features/scripting/shared/permissions';
+import {
+  ScriptDialogService,
+  confirmDiscard,
+} from '@features/scripting/shared/script-dialog.service';
+import {
+  warnBeforeUnload,
+  type HasUnsavedChanges,
+} from '@features/scripting/shared/unsaved-changes';
 
 @Component({
   selector: 'app-strategy-detail-page',
@@ -96,6 +109,8 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
     ScriptBacktestLauncherComponent,
     RouterLink,
     StrategyScriptCardComponent,
+    FirstStrategyChecklistComponent,
+    RunComparisonComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -166,7 +181,15 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
               Pause
             </button>
           }
-          <button class="btn btn-secondary" (click)="openEdit()">Edit</button>
+          <!-- PE-I13: the engine refuses edits without operator access. -->
+          <button
+            class="btn btn-secondary"
+            (click)="openEdit()"
+            [disabled]="!canOperate()"
+            [title]="canOperate() ? 'Edit this strategy' : 'Editing needs operator access'"
+          >
+            Edit
+          </button>
           <button
             type="button"
             class="btn btn-secondary"
@@ -278,10 +301,25 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
           </div>
         }
 
-        <ui-tabs [tabs]="visibleDetailTabs()" [(activeTab)]="activeTab">
+        <!-- PE-14: a tab switch asks first when the tab being left holds unsaved changes. -->
+        <ui-tabs
+          [tabs]="visibleDetailTabs()"
+          [activeTab]="activeTab()"
+          (tabChange)="requestTab($event)"
+        >
           <!-- Config Tab -->
           @if (activeTab() === 'config') {
             <div class="detail-layout">
+              <!-- PE-I9: a new script strategy's path to a demo account (hides itself when done). -->
+              @if (isScript() && strategy(); as s) {
+                <app-first-strategy-checklist
+                  [strategy]="s"
+                  [backtests]="totalBacktests()"
+                  [canOperate]="canOperate()"
+                  [canStartPaper]="canStartPaperTrading()"
+                  (actionRequested)="onChecklistAction($event)"
+                />
+              }
               <!-- 8-card KPI strip — quick scan of life-to-date activity.
                    The run-count cards double as nav shortcuts to the
                    matching tabs further down. -->
@@ -561,6 +599,8 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
               [fetchData]="fetchBacktests"
               (rowClick)="onBacktestRowClick($event)"
             />
+            <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
+            <app-run-comparison [strategyId]="strategyId" />
           }
 
           <!-- Walk-Forward Tab — runs filtered to this strategy. -->
@@ -1303,7 +1343,7 @@ import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackou
     `,
   ],
 })
-export class StrategyDetailPageComponent implements OnInit {
+export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly strategiesService = inject(StrategiesService);
@@ -1642,7 +1682,94 @@ export class StrategyDetailPageComponent implements OnInit {
   openExecutionTab(): void {
     this.showEditForm.set(false);
     this.updateError.set(null);
-    this.activeTab.set('execution');
+    this.requestTab('execution');
+  }
+
+  // ── PE-14: unsaved changes on a tab / PE-I13: operator access ───────────
+  private readonly auth = inject(AuthService);
+  private readonly dialogs = inject(ScriptDialogService);
+  /** The engine requires operator access to edit a strategy (and to change its execution). */
+  readonly canOperate = computed(() => this.auth.hasPermission(OPERATOR_PERMISSION));
+
+  @ViewChild(TabsComponent) private tabsBar?: TabsComponent;
+  @ViewChild(StrategyFormComponent) private editForm?: StrategyFormComponent;
+  @ViewChild(StrategyExecutionPanelComponent)
+  private executionPanel?: StrategyExecutionPanelComponent;
+  @ViewChild(ScriptAlertsTabComponent) private alertsTab?: ScriptAlertsTabComponent;
+
+  /** A tab switch is waiting for the operator's answer. */
+  private tabQuestionOpen = false;
+
+  // Closing or reloading the browser tab with a tab's edit unsaved asks the browser's question
+  // (the edit form registers its own).
+  private readonly unloadGuard = warnBeforeUnload(() => this.tabUnsavedNote() !== null);
+
+  /** What the tab on show holds unsaved, in the operator's words; null when nothing. */
+  tabUnsavedNote(): string | null {
+    switch (this.activeTab()) {
+      case 'execution':
+        return this.executionPanel?.hasUnsavedChanges()
+          ? 'The account-binding or news-blackout changes on the Execution tab are not saved'
+          : null;
+      case 'alerts':
+        return this.alertsTab?.dirty() ? 'The alert changes on the Alerts tab are not saved' : null;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Show another tab. Leaving one with unsaved changes asks first; "Keep editing" stays put (and
+   * puts the tab bar back on the tab being kept).
+   */
+  requestTab(tab: string): void {
+    if (tab === this.activeTab()) return;
+    const unsaved = this.tabUnsavedNote();
+    if (!unsaved) {
+      this.activeTab.set(tab);
+      return;
+    }
+    void this.confirmTabSwitch(tab, unsaved);
+  }
+
+  private async confirmTabSwitch(tab: string, unsaved: string): Promise<void> {
+    // The tab bar already shows the clicked tab; it shows the kept one again unless discarded.
+    this.tabsBar?.activeTab.set(this.activeTab());
+    if (this.tabQuestionOpen) return;
+    this.tabQuestionOpen = true;
+    try {
+      if (await confirmDiscard(this.dialogs, unsaved)) this.activeTab.set(tab);
+    } finally {
+      this.tabQuestionOpen = false;
+    }
+  }
+
+  /** PE-I9: a checklist step's action — the editor, a tab, or starting paper trading. */
+  onChecklistAction(action: ChecklistAction): void {
+    switch (action) {
+      case 'edit':
+        this.openEdit();
+        break;
+      case 'backtests':
+        this.requestTab('backtests');
+        break;
+      case 'execution':
+        this.openExecutionTab();
+        break;
+      case 'paper':
+        if (this.canStartPaperTrading()) this.onStartPaperTrading();
+        break;
+    }
+  }
+
+  /** The route guard asks before leaving with an unsaved edit (the edit form, or a tab's). */
+  hasUnsavedChanges(): boolean {
+    return (this.editForm?.hasUnsavedChanges() ?? false) || this.tabUnsavedNote() !== null;
+  }
+
+  unsavedChangesNote(): string {
+    if (this.editForm?.hasUnsavedChanges()) return this.editForm.unsavedChangesNote();
+    return this.tabUnsavedNote() ?? 'This page has unsaved changes';
   }
 
   // ── Submit for approval (ADR-0027 DEC-10) ────────────────────────────────
@@ -1727,7 +1854,7 @@ export class StrategyDetailPageComponent implements OnInit {
   /** The Promotion tab's gate history records every evaluation, including a lost response's. */
   openPromotionHistory(): void {
     this.approvalTarget.set(null);
-    this.activeTab.set('promotion');
+    this.requestTab('promotion');
   }
 
   readonly signalColumns: ColDef[] = [
@@ -2149,6 +2276,7 @@ export class StrategyDetailPageComponent implements OnInit {
   }
 
   openEdit(): void {
+    if (!this.canOperate()) return;
     this.updateError.set(null);
     this.showEditForm.set(true);
   }

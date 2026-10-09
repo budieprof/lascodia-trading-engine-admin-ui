@@ -918,6 +918,16 @@ $pane-gap: 4px;
   align-items: center;
 }
 
+// A split panel's OHLC under its bar (CC-12); colours and spacing are the legend's (.legend-ohlc).
+.panel-legend {
+  position: absolute;
+  top: 30px;
+  left: 10px;
+  z-index: 14;
+  pointer-events: none;
+  font-size: 11px;
+}
+
 .panel-select {
   padding: 2px 4px;
   border: 1px solid var(--border, #e6e9ef);
@@ -1660,8 +1670,34 @@ $pane-gap: 4px;
   }
 }
 
+// Alerts v2: the toolbar popover hosts the full alert form.
 .tb-alert-menu {
   min-width: 240px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 0;
+}
+
+.alert-move-dialog {
+  max-width: 360px;
+  padding: 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--tv-bg);
+  color: var(--tv-ink);
+  box-shadow:
+    var(--tv-menu-shadow),
+    0 0 0 1px var(--tv-line);
+  font-size: 13px;
+
+  p {
+    margin: 0 0 12px;
+  }
+}
+
+.alert-move-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 // ── Left rail ──────────────────────────────────────────────────────────────

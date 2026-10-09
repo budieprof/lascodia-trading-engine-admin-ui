@@ -28,7 +28,39 @@
 	# from outside, hence the proxy. This also carries the SignalR hub at
 	# /api/hubs/trading; reverse_proxy upgrades WebSockets automatically.
 	handle /api/* {
-		reverse_proxy localhost:5081
+		# SS-08: the API's JSON is compressed HERE. A chart's script run or a
+		# screener answer is hundreds of kB of JSON that shrinks ~10x, and it
+		# went out uncompressed (only the static UI below was encoded).
+		#
+		# Compressing in Caddy rather than in the engine keeps the CPU off the
+		# money-path process, so the client's Accept-Encoding is NOT forwarded:
+		# the engine (which can compress /api/v1 JSON itself for direct callers,
+		# EngineConfig ApiCompression:*) then always answers this proxy plain.
+		#
+		# Left alone on purpose:
+		#   - EA traffic (remote instances reach the engine through this tunnel;
+		#     their HTTP client always sends X-EA-Instance-ID): the money path
+		#     keeps its exact bytes.
+		#   - the SignalR hub (WebSocket upgrade, long polling).
+		#   - /auth (token bodies next to a caller-chosen login are what
+		#     BREACH-style length attacks need).
+		#   - anything that is not JSON (`match` below), so an event stream can
+		#     never be held back by an encoder.
+		@compressible_api {
+			header !X-EA-Instance-ID
+			not path /api/hubs/*
+			not path /api/v1/lascodia-trading-engine/auth/*
+		}
+		encode @compressible_api zstd gzip {
+			minimum_length 1024
+			match {
+				header Content-Type application/json*
+				header Content-Type application/problem+json*
+			}
+		}
+		reverse_proxy localhost:5081 {
+			header_up -Accept-Encoding
+		}
 	}
 
 	# Health probes live at the SERVER ROOT (/health, /health/live,

@@ -56,12 +56,25 @@ const DAY = 24 * HOUR;
  */
 export const RESOLUTION_SOURCES: Readonly<Record<TvResolution, ResolutionSource>> = {
   '1': { kind: 'stored', timeframe: 'M1', aggregate: 1 },
+  // 2, 3 and 10 minutes fold on the UTC epoch grid (CC-I8). The engine anchors intraday bars at the
+  // session open — 17:00 New York, 21:00 or 22:00 UTC — and both are whole multiples of 2, 3 and 10
+  // minutes, so the folds are exactly the bars a Pine run computes on.
+  '2': { kind: 'stored', timeframe: 'M1', aggregate: 2 },
+  '3': { kind: 'stored', timeframe: 'M1', aggregate: 3 },
   '5': { kind: 'stored', timeframe: 'M5', aggregate: 1 },
+  '10': { kind: 'stored', timeframe: 'M5', aggregate: 2 },
   '15': { kind: 'stored', timeframe: 'M15', aggregate: 1 },
   '30': { kind: 'stored', timeframe: 'M15', aggregate: 2 },
+  // 45 minutes does NOT fold on the epoch grid: 22:00 UTC (the winter session open) is not a multiple
+  // of 45 minutes, so an epoch fold sat 15 minutes off the engine's bars every winter. The session grid.
+  '45': { kind: 'session', nominalMs: 45 * MINUTE },
   '60': { kind: 'stored', timeframe: 'H1', aggregate: 1 },
   '120': { kind: 'session', nominalMs: 2 * HOUR },
+  '180': { kind: 'session', nominalMs: 3 * HOUR },
   '240': { kind: 'session', nominalMs: 4 * HOUR },
+  '360': { kind: 'session', nominalMs: 6 * HOUR },
+  '480': { kind: 'session', nominalMs: 8 * HOUR },
+  '720': { kind: 'session', nominalMs: 12 * HOUR },
   '1D': { kind: 'session', nominalMs: DAY },
   '1W': { kind: 'session', nominalMs: 7 * DAY },
   '1M': { kind: 'session', nominalMs: 31 * DAY },
@@ -72,12 +85,83 @@ export const SUPPORTED_RESOLUTIONS: readonly TvResolution[] = Object.keys(
   RESOLUTION_SOURCES,
 ) as TvResolution[];
 
+/**
+ * Where `resolution`'s bars come from. Besides the listed ones, any interval an operator types
+ * (`parseInterval`: 20 minutes, 2 days, 2 weeks…) comes from the engine's session grid
+ * (`scripting/chart-bars` lays out any Pine timeframe on the symbol's session, as a run does).
+ */
 export function resolutionSource(resolution: TvResolution): ResolutionSource | null {
-  return RESOLUTION_SOURCES[resolution] ?? null;
+  return RESOLUTION_SOURCES[resolution] ?? typedSource(resolution);
 }
 
 export function isSupportedResolution(resolution: TvResolution): boolean {
-  return resolution in RESOLUTION_SOURCES;
+  return resolutionSource(resolution) !== null;
+}
+
+/** The session-grid source of a canonical typed interval ("20", "2D", "2W", "3M"), or null. */
+function typedSource(resolution: TvResolution): ResolutionSource | null {
+  const m = /^(\d+)([DWM]?)$/.exec(resolution);
+  if (!m) return null;
+  const n = Number(m[1]);
+  switch (m[2]) {
+    case '':
+      return n >= 1 && n <= 1440 ? { kind: 'session', nominalMs: n * MINUTE } : null;
+    case 'D':
+      return n >= 1 && n <= 365 ? { kind: 'session', nominalMs: n * DAY } : null;
+    case 'W':
+      return n >= 1 && n <= 52 ? { kind: 'session', nominalMs: n * 7 * DAY } : null;
+    default:
+      return n >= 1 && n <= 12 ? { kind: 'session', nominalMs: n * 31 * DAY } : null;
+  }
+}
+
+/**
+ * An interval as typed into the chart (TradingView's "change interval"): "45" or "45m" (minutes),
+ * "3h", "2D", "1W", "3M" (months — a capital M; a small m is minutes) — as the canonical Pine
+ * timeframe the chart and the engine use ("45", "180", "2D", "1W", "3M"). Null when it is not one,
+ * or out of Pine's range; seconds and ticks are refused (`{ error }`): the engine stores no tick
+ * history to build them from.
+ */
+export function parseInterval(text: string): TvResolution | { error: string } | null {
+  const m = /^\s*(\d+)\s*(m|min|h|H|d|D|w|W|M|s|S|t|T)?\s*$/.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]);
+  if (!Number.isInteger(n) || n < 1) return null;
+  let out: TvResolution;
+  switch (m[2]) {
+    case undefined:
+    case 'm':
+    case 'min':
+      out = String(n);
+      break;
+    case 'h':
+    case 'H':
+      out = String(n * 60);
+      break;
+    case 'd':
+    case 'D':
+      out = `${n}D`;
+      break;
+    case 'w':
+    case 'W':
+      out = `${n}W`;
+      break;
+    case 'M':
+      out = `${n}M`;
+      break;
+    default:
+      return {
+        error: 'Seconds and tick charts need tick history, which the engine does not store.',
+      };
+  }
+  return resolutionSource(out) ? out : null;
+}
+
+/** An interval as the toolbar prints it: "1m", "45m", "1h", "3h", "1D", "2W", "3M". */
+export function formatResolution(resolution: TvResolution): string {
+  if (!/^\d+$/.test(resolution)) return resolution;
+  const minutes = Number(resolution);
+  return minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
 }
 
 /** Whether `resolution`'s bars come from the engine's session grid (`scripting/chart-bars`). */

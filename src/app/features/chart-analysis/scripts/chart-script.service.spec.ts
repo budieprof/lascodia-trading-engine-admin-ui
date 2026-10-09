@@ -174,7 +174,7 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
       of(dto(9, req.name, req.pineSource)),
     );
     const { svc } = make({ createChartScript });
-    await firstValueFrom(svc.saveScript('Fixme', 'fixed'));
+    await firstValueFrom(svc.saveScript({ name: 'Fixme', source: 'fixed' }));
     expect(createChartScript).toHaveBeenCalledWith({ name: 'Fixme', pineSource: 'fixed' });
     expect(svc.savedScripts().map((s) => s.id)).toEqual(['9', 'draft-y']);
     await firstValueFrom(svc.deleteScript('draft-y'));
@@ -193,24 +193,118 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     expect(cat.mineError).toBe('Engine down');
   });
 
-  it('saves by name: POST for a new name, PUT for an existing one', async () => {
+  it('PE-07: a save without a target always creates — never overwrites a script by its name', async () => {
     const createChartScript = vi.fn((req: { name: string; pineSource: string }) =>
       of(dto(5, req.name, req.pineSource)),
     );
-    const updateChartScript = vi.fn((id: number, req: { name: string; pineSource: string }) =>
-      of(dto(id, req.name, req.pineSource)),
-    );
+    const updateChartScript = vi.fn();
     const { svc } = make({
       listChartScripts: () => of([dto(3, 'Existing')]),
-      getChartScript: (id: number) => of(dto(id, 'Existing')),
       createChartScript,
       updateChartScript,
     });
-    await firstValueFrom(svc.saveScript(' New ', 'src'));
-    expect(createChartScript).toHaveBeenCalledWith({ name: 'New', pineSource: 'src' });
-    await firstValueFrom(svc.saveScript('Existing', 'src2'));
-    expect(updateChartScript).toHaveBeenCalledWith(3, { name: 'Existing', pineSource: 'src2' });
-    expect(svc.savedScripts().map((s) => s.id)).toEqual(['3', '5']);
+    await firstValueFrom(svc.saveScript({ name: ' Existing ', source: 'src' }));
+    expect(createChartScript).toHaveBeenCalledWith({ name: 'Existing', pineSource: 'src' });
+    expect(updateChartScript).not.toHaveBeenCalled();
+    expect(svc.savedScripts().map((s) => s.id)).toEqual(['5', '3']);
+  });
+
+  it('C4: an update sends the revision it started from and the inputs saved with the script', async () => {
+    const updateChartScript = vi.fn(
+      (id: number, req: { name: string; pineSource: string; inputs?: ScriptInputValues | null }) =>
+        of({
+          ...dto(id, req.name, req.pineSource, req.inputs ?? null),
+          revision: 'r2',
+          latestVersion: 4,
+        }),
+    );
+    const { svc } = make({ listChartScripts: () => of([dto(3, 'Existing')]), updateChartScript });
+    const saved = await firstValueFrom(
+      svc.saveScript({
+        name: 'Existing',
+        source: 'src2',
+        note: '  tighter  ',
+        target: { id: '3', revision: 'r1', inputs: { len: 9 } },
+      }),
+    );
+    expect(updateChartScript).toHaveBeenCalledWith(3, {
+      name: 'Existing',
+      pineSource: 'src2',
+      inputs: { len: 9 },
+      expectedRevision: 'r1',
+      note: 'tighter',
+    });
+    expect([saved.revision, saved.latestVersion]).toEqual(['r2', 4]);
+  });
+
+  it('C4: a stale save comes back as a conflict and the list is unchanged', async () => {
+    const updateChartScript = vi.fn(() =>
+      throwError(() => new ScriptingApiError('changed since it was loaded', '-409')),
+    );
+    const { svc } = make({ listChartScripts: () => of([dto(3, 'Existing')]), updateChartScript });
+    const err = await firstValueFrom(
+      svc.saveScript({ name: 'Existing', source: 'x', target: { id: '3', revision: 'r0' } }),
+    ).catch((e) => e);
+    expect(err.isConflict).toBe(true);
+    expect(svc.savedScripts()[0].source).not.toBe('x');
+  });
+
+  it('an import is created with its origin recorded', async () => {
+    const createChartScript = vi.fn((req: { name: string; pineSource: string }) =>
+      of(dto(8, req.name, req.pineSource)),
+    );
+    const { svc } = make({ createChartScript });
+    await firstValueFrom(
+      svc.saveScript({
+        name: 'EMA',
+        source: 's',
+        origin: {
+          sourceUrl: 'https://www.tradingview.com/script/x/',
+          licence: 'MIT License',
+          author: 'jo',
+        },
+      }),
+    );
+    expect(createChartScript).toHaveBeenCalledWith({
+      name: 'EMA',
+      pineSource: 's',
+      sourceUrl: 'https://www.tradingview.com/script/x/',
+      licence: 'MIT License',
+      author: 'jo',
+    });
+  });
+
+  it('reads the C4 fields; another operator’s shared script is listed but not "mine" by name', async () => {
+    const { svc } = make({
+      listChartScripts: () =>
+        of([
+          {
+            ...dto(1, 'EMA'),
+            visibility: 'Shared',
+            ownedByMe: false,
+            createdBy: 'bob',
+            revision: 'b1',
+          },
+          { ...dto(2, 'Mine'), visibility: 'Shared', ownedByMe: true, latestVersion: 3 },
+          dto(4, 'Old engine'),
+        ]),
+    });
+    expect(svc.savedScripts().map((s) => [s.id, s.visibility, s.ownedByMe])).toEqual([
+      ['1', 'Shared', false],
+      ['2', 'Shared', true],
+      ['4', 'Private', true],
+    ]);
+    expect(svc.findOwnByName('EMA')).toBeNull();
+    expect(svc.findOwnByName(' Mine ')?.id).toBe('2');
+    expect(svc.findOwnByName('Mine', '2')).toBeNull();
+    expect(svc.freeName('Mine')).toBe('Mine (2)');
+    expect(svc.freeName('New')).toBe('New');
+    const cat = await firstValueFrom(svc.listItems());
+    expect(cat.mine.map((m) => m.description)).toEqual([
+      'Indicator · shared by bob',
+      'Indicator · shared',
+      'Indicator',
+    ]);
   });
 
   it('deletes through the engine and drops the row', async () => {
@@ -317,6 +411,7 @@ describe('ChartScriptService — saved default inputs ("Save as default")', () =
 
     const saved = await firstValueFrom(svc.saveDefaultInputs('20', COLOUR_OFF));
     expect(getChartScript).toHaveBeenCalledWith(20);
+    // An engine without C4 sends no revision: nothing to check against.
     expect(updateChartScript).toHaveBeenCalledWith(20, {
       name: 'Renamed elsewhere',
       pineSource: 'newer src',
@@ -340,23 +435,28 @@ describe('ChartScriptService — saved default inputs ("Save as default")', () =
     expect(getChartScript).not.toHaveBeenCalled();
   });
 
-  it('saving the source again keeps the inputs saved with it — as the engine has them now', async () => {
-    const updateChartScript = vi.fn(
-      (id: number, req: { name: string; pineSource: string; inputs?: ScriptInputValues | null }) =>
-        of(dto(id, req.name, req.pineSource, req.inputs ?? null)),
+  it('C4: "Save as default" sends the revision it read, and retries once when it raced an edit', async () => {
+    let reads = 0;
+    const getChartScript = vi.fn((id: number) =>
+      of({ ...dto(id, 'Smart Algo v2', `src ${++reads}`), revision: `r${reads}` }),
     );
+    const updateChartScript = vi
+      .fn()
+      .mockReturnValueOnce(throwError(() => new ScriptingApiError('changed', '-409')))
+      .mockImplementationOnce(
+        (
+          id: number,
+          req: { name: string; pineSource: string; inputs?: ScriptInputValues | null },
+        ) => of(dto(id, req.name, req.pineSource, req.inputs ?? null)),
+      );
     const { svc } = make({
       listChartScripts: () => of([dto(20, 'Smart Algo v2', 'old src')]),
-      // Saved as default from another tab after this page loaded its list.
-      getChartScript: (id: number) => of(dto(id, 'Smart Algo v2', 'old src', COLOUR_OFF)),
+      getChartScript,
       updateChartScript,
     });
-    const saved = await firstValueFrom(svc.saveScript('Smart Algo v2', 'edited src'));
-    expect(updateChartScript).toHaveBeenCalledWith(20, {
-      name: 'Smart Algo v2',
-      pineSource: 'edited src',
-      inputs: COLOUR_OFF,
-    });
+    const saved = await firstValueFrom(svc.saveDefaultInputs('20', COLOUR_OFF));
+    expect(updateChartScript.mock.calls.map((c) => c[1].expectedRevision)).toEqual(['r1', 'r2']);
+    expect(updateChartScript.mock.calls[1][1].pineSource).toBe('src 2');
     expect(saved.inputs).toEqual(COLOUR_OFF);
   });
 

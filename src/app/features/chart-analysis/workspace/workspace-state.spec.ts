@@ -5,6 +5,7 @@ import {
   dockStateOf,
   isWorkspaceState,
   restoredDock,
+  restoredPriceBased,
   restoredScriptItem,
   workspaceScriptOf,
   type ChartWorkspaceState,
@@ -170,5 +171,42 @@ describe('workspace persistence of the dock', () => {
       dock({ editorOpen: true, testerOpen: false, preference: 'editor', editorKey: 'mine:5' }),
     );
     expect(restoredDock(undefined)).toEqual(dock());
+  });
+});
+
+describe('restoredPriceBased (CC-I10)', () => {
+  it('opens an older layout as the chart always drew it', () => {
+    expect(restoredPriceBased(undefined)).toEqual({
+      boxMethod: 'atr',
+      boxSizeAtr: 1,
+      boxPips: 10,
+      renkoWicks: false,
+      lineBreakLines: 3,
+    });
+  });
+
+  it('keeps what the layout saved, survives the engine round trip', () => {
+    const state: ChartWorkspaceState = {
+      v: 1,
+      priceBased: {
+        boxMethod: 'pips',
+        boxSizeAtr: 2,
+        boxPips: 15,
+        renkoWicks: true,
+        lineBreakLines: 2,
+      },
+    };
+    expect(restoredPriceBased(throughTheEngine(state).priceBased)).toEqual({
+      boxMethod: 'pips',
+      boxSizeAtr: 2,
+      boxPips: 15,
+      renkoWicks: true,
+      lineBreakLines: 2,
+    });
+  });
+
+  it('falls back on values out of range', () => {
+    const pb = restoredPriceBased({ boxSizeAtr: -1, boxPips: 0, lineBreakLines: 40 });
+    expect(pb).toMatchObject({ boxSizeAtr: 1, boxPips: 10, lineBreakLines: 3 });
   });
 });

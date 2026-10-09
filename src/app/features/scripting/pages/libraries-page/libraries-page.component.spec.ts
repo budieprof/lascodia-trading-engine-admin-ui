@@ -8,6 +8,7 @@ import type { ScriptLibraryDetailDto, ScriptLibraryDto } from '@core/api/scripti
 import { ScriptingApiError, ScriptingService } from '@core/services/scripting.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PineCatalogService } from '../../services/pine-catalog.service';
+import { ScriptDialogService } from '../../shared/script-dialog.service';
 import {
   LibrariesPageComponent,
   NEW_LIBRARY_TEMPLATE,
@@ -69,6 +70,7 @@ describe('LibrariesPageComponent', () => {
   let language: { refreshLibraries: ReturnType<typeof vi.fn> };
   let notify: Record<string, ReturnType<typeof vi.fn>>;
   let navigate: ReturnType<typeof vi.fn>;
+  let dialogs: { ask: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
 
   const flush = async () => {
     for (let i = 0; i < 10; i++) await Promise.resolve();
@@ -86,6 +88,30 @@ describe('LibrariesPageComponent', () => {
       createLibrary: vi.fn().mockReturnValue(of({ ...MINE_V2, id: 12, version: 3 })),
       deleteLibrary: vi.fn().mockReturnValue(of(undefined)),
       getMyPublisher: vi.fn().mockReturnValue(of('ola')),
+      getLibraryUsage: vi.fn().mockReturnValue(
+        of({
+          libraryId: 11,
+          importPath: 'ola/Tools/2',
+          strategies: [
+            {
+              id: 4,
+              name: 'Breakout',
+              symbol: 'EURUSD',
+              timeframe: 'H1',
+              status: 'Active',
+              lifecycleStage: 'Active',
+              direct: true,
+              blocksDelete: true,
+            },
+          ],
+          chartScripts: [],
+          libraries: [],
+        }),
+      ),
+    };
+    dialogs = {
+      ask: vi.fn(async () => ({ choice: null, text: '' })),
+      confirm: vi.fn(async () => false),
     };
     language = { refreshLibraries: vi.fn().mockResolvedValue(undefined) };
     notify = { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() };
@@ -104,6 +130,7 @@ describe('LibrariesPageComponent', () => {
           useValue: { snapshot: { queryParamMap: convertToParamMap({}) } },
         },
         { provide: Router, useValue: { navigate } },
+        { provide: ScriptDialogService, useValue: dialogs },
       ],
     });
     cmp = TestBed.createComponent(LibrariesPageComponent).componentInstance;
@@ -178,6 +205,8 @@ describe('LibrariesPageComponent', () => {
         description: 'Helpers',
         visibility: 'Shared',
         source: NEW_LIBRARY_TEMPLATE,
+        // PE-I12: a new library knows no version yet.
+        basedOnVersion: 0,
       });
       await flush();
       expect(cmp.draft()).toBeNull();
@@ -187,17 +216,19 @@ describe('LibrariesPageComponent', () => {
 
     it('publishes a new version under the same name, from the current source', async () => {
       await cmp.select(11);
-      cmp.startNewVersion(MINE_V2);
+      await cmp.startNewVersion(MINE_V2);
       expect(cmp.draft()).toMatchObject({
         baseId: 11,
         name: 'Tools',
         source: LIBRARY_SOURCE,
         visibility: 'Private',
+        basedOnVersion: 2,
       });
+      expect(dialogs.ask).not.toHaveBeenCalled();
       cmp.patchDraft({ source: `${LIBRARY_SOURCE}export g(float x) => x * 2\n` });
       await cmp.publish();
       expect(api['createLibrary']).toHaveBeenCalledWith(
-        expect.objectContaining({ name: 'Tools', visibility: 'Private' }),
+        expect.objectContaining({ name: 'Tools', visibility: 'Private', basedOnVersion: 2 }),
       );
     });
 
@@ -275,6 +306,146 @@ describe('LibrariesPageComponent', () => {
       await cmp.confirmDelete();
       expect(cmp.deleteError()).toBe('Forbidden');
       expect(cmp.deleteTarget()).toEqual(OTHER);
+    });
+  });
+  describe('PE-I12 / PE-14: versions', () => {
+    const sources: Record<number, string> = {
+      10: '//@version=6\nlibrary("Tools")\nexport f(float x) => x\nexport g(float x) => x * 2\n',
+      11: LIBRARY_SOURCE,
+    };
+    const exportsById: Record<number, { kind: string; name: string; signature?: string }[]> = {
+      10: [
+        { kind: 'function', name: 'f', signature: 'f(float x) → float' },
+        { kind: 'function', name: 'g', signature: 'g(float x) → float' },
+      ],
+      11: [{ kind: 'function', name: 'f', signature: 'f(float x) → float' }],
+    };
+
+    beforeEach(() => {
+      api['getLibrary'].mockImplementation((id: number) =>
+        of({
+          ...[STD, MINE_V1, MINE_V2, OTHER].find((l) => l.id === id)!,
+          source: sources[id] ?? LIBRARY_SOURCE,
+          exports: exportsById[id],
+        } as ScriptLibraryDetailDto),
+      );
+    });
+
+    it('starting a new version from an older one asks which version to start from', async () => {
+      await cmp.select(10);
+      dialogs.ask.mockResolvedValueOnce({ choice: 'newest', text: '' });
+      await cmp.startNewVersion(MINE_V1);
+      expect(dialogs.ask.mock.calls[0][0].message).toContain('v2 is');
+      expect(cmp.draft()).toMatchObject({ source: LIBRARY_SOURCE, basedOnVersion: 2 });
+
+      cmp.draft.set(null);
+      dialogs.ask.mockResolvedValueOnce({ choice: 'this', text: '' });
+      await cmp.startNewVersion(MINE_V1);
+      // Still based on v2: the engine compares against the newest version, whichever source.
+      expect(cmp.draft()).toMatchObject({ source: sources[10], basedOnVersion: 2 });
+
+      cmp.draft.set(null);
+      dialogs.ask.mockResolvedValueOnce({ choice: null, text: '' });
+      await cmp.startNewVersion(MINE_V1);
+      expect(cmp.draft()).toBeNull();
+    });
+
+    it('asks before publishing a version that drops exports the newest one has', async () => {
+      await cmp.select(10);
+      dialogs.ask.mockResolvedValueOnce({ choice: 'this', text: '' });
+      await cmp.startNewVersion(MINE_V1);
+      // Based on v2 (exports f only): compiled exports without f.
+      cmp.draftCompile.set({
+        success: true,
+        diagnostics: [],
+        declaration: { kind: 'library', title: 'Tools' },
+        inputs: [],
+        exports: [{ kind: 'function', name: 'g' }],
+      });
+      await cmp.publish();
+      expect(dialogs.confirm.mock.calls[0][0].message).toContain('drops an export v2 has: f');
+      expect(api['createLibrary']).not.toHaveBeenCalled();
+      dialogs.confirm.mockResolvedValueOnce(true);
+      await cmp.publish();
+      expect(api['createLibrary']).toHaveBeenCalledTimes(1);
+    });
+
+    it('opens a comparison when a newer version was published meanwhile, and can publish anyway', async () => {
+      await cmp.select(11);
+      await cmp.startNewVersion(MINE_V2);
+      const v3 = { ...MINE_V2, id: 12, version: 3 };
+      api['listLibraries'].mockReturnValue(of([MINE_V1, MINE_V2, v3, STD]));
+      api['createLibrary']
+        .mockReturnValueOnce(
+          refuse(
+            new ScriptingApiError(
+              'ola/Tools/3 was published after the version this source started from (v2).',
+              '-409',
+            ),
+          ),
+        )
+        .mockReturnValueOnce(of({ ...MINE_V2, id: 13, version: 4 }));
+      dialogs.ask.mockResolvedValueOnce({ choice: 'publish', text: '' });
+      await cmp.publish();
+      await flush();
+      const asked = dialogs.ask.mock.calls[0][0];
+      expect(asked.title).toBe('A newer version was published');
+      expect(asked.compare).toMatchObject({ beforeLabel: 'v3', afterLabel: 'Your draft' });
+      expect(api['createLibrary']).toHaveBeenLastCalledWith(
+        expect.objectContaining({ basedOnVersion: 3 }),
+      );
+      expect(notify['success']).toHaveBeenCalledWith('Published ola/Tools/4');
+    });
+
+    it('keeps the draft with a note when the operator keeps editing instead', async () => {
+      await cmp.select(11);
+      await cmp.startNewVersion(MINE_V2);
+      api['listLibraries'].mockReturnValue(of([MINE_V2, { ...MINE_V2, id: 12, version: 3 }]));
+      api['createLibrary'].mockReturnValueOnce(
+        refuse(new ScriptingApiError('ola/Tools/3 was published after …', '-409')),
+      );
+      await cmp.publish();
+      await flush();
+      expect(cmp.draft()).not.toBeNull();
+      expect(cmp.publishError()).toContain('v3 was published after this draft started');
+      expect(api['createLibrary']).toHaveBeenCalledTimes(1);
+    });
+
+    it('compares a version with the previous one, sources and exports', async () => {
+      await cmp.select(11);
+      cmp.openChanges(MINE_V2);
+      await flush();
+      expect(cmp.compareId()).toBe(10);
+      const pair = cmp.comparePair()!;
+      expect([pair.older.version, pair.newer.version]).toEqual([1, 2]);
+      expect(cmp.exportDiff()!.removed.map((e) => e.name)).toEqual(['g']);
+      expect(cmp.otherVersions(MINE_V2).map((l) => l.id)).toEqual([10]);
+    });
+
+    it('lists what imports a version', async () => {
+      await cmp.select(11);
+      await cmp.openUsage(MINE_V2);
+      expect(api['getLibraryUsage']).toHaveBeenCalledWith(11);
+      expect(cmp.usage()!.strategies[0].name).toBe('Breakout');
+      api['getLibraryUsage'].mockReturnValueOnce(refuse(new ScriptingApiError('Engine down')));
+      await cmp.select(10);
+      await cmp.openUsage(MINE_V1);
+      expect(cmp.usageError()).toBe('Engine down');
+    });
+
+    it('asks before an unpublished draft is thrown away', async () => {
+      cmp.startNew();
+      expect(cmp.hasUnsavedChanges()).toBe(false);
+      cmp.patchDraft({ source: NEW_LIBRARY_TEMPLATE + '// more\n' });
+      expect(cmp.hasUnsavedChanges()).toBe(true);
+      await cmp.select(1);
+      expect(dialogs.confirm).toHaveBeenCalledTimes(1);
+      expect(cmp.draft()).not.toBeNull();
+      await cmp.cancelDraft();
+      expect(cmp.draft()).not.toBeNull();
+      dialogs.confirm.mockResolvedValueOnce(true);
+      await cmp.cancelDraft();
+      expect(cmp.draft()).toBeNull();
     });
   });
 });

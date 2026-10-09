@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
@@ -11,6 +12,7 @@ import {
   validateBacktestForm,
 } from './script-backtest-launcher.component';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
+import { BasketMatrixComponent } from './basket-matrix.component';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { BREAKOUT_SOURCE } from '../testing/pine-sources';
 
@@ -19,6 +21,17 @@ declareSignalIo(InputOverridesEditorComponent, {
   inputs: ['inputs', 'baseline', 'disabled'],
   outputs: ['overridesChange', 'validityChange'],
 });
+
+/** The matrix polls the engine; here it only has to show which runs it was given. */
+@Component({
+  selector: 'app-basket-matrix',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '<span class="matrix-stub">{{ runIds.join(",") }}</span>',
+})
+class BasketMatrixStubComponent {
+  @Input() runIds: readonly number[] = [];
+}
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
 const CAPITAL_CONFIG_URL = `${BASE}/config/ScriptBacktest:InitialCapital`;
@@ -111,6 +124,11 @@ describe('ScriptBacktestLauncherComponent', () => {
         provideRouter([]),
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
       ],
+    });
+    // The basket matrix polls the engine; these specs only check which runs it is given.
+    TestBed.overrideComponent(ScriptBacktestLauncherComponent, {
+      remove: { imports: [BasketMatrixComponent] },
+      add: { imports: [BasketMatrixStubComponent] },
     });
     http = TestBed.inject(HttpTestingController);
   });
@@ -289,6 +307,90 @@ describe('ScriptBacktestLauncherComponent', () => {
     });
     expect(el.textContent).toContain('PS2003: undeclared identifier');
     expect(el.querySelector('app-input-overrides-editor .add')).not.toBeNull();
+  });
+
+  describe('PE-I7: basket backtests', () => {
+    const settle = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    const nextQueue = () =>
+      http.expectOne((r) => r.method === 'POST' && r.url === `${BASE}/backtest`);
+
+    it('queues its own market, then one override run per basket market, and shows the matrix', async () => {
+      render();
+      openForm();
+      set('Basket', 'gbpusd, usdjpy  eurusd gbpusd', 'input');
+      expect(el.textContent!.replace(/\s+/g, ' ')).toContain('3 runs: EURUSD and GBPUSD, USDJPY');
+      expect(el.querySelector('button[type="submit"]')!.textContent).toContain('Queue 3 backtests');
+      submit();
+
+      const own = nextQueue();
+      expect(own.request.body.symbolOverride).toBeUndefined();
+      expect(own.request.body.symbol).toBe('EURUSD');
+      own.flush(ok(901));
+      await settle();
+      const gbp = nextQueue();
+      expect(gbp.request.body).toMatchObject({ symbol: 'EURUSD', symbolOverride: 'GBPUSD' });
+      gbp.flush(ok(902));
+      await settle();
+      const jpy = nextQueue();
+      expect(jpy.request.body.symbolOverride).toBe('USDJPY');
+      jpy.flush(ok(903));
+      await settle();
+      fixture.detectChanges();
+
+      expect(el.querySelector('.matrix-stub')!.textContent).toBe('901,902,903');
+      expect(queued).toEqual([901]);
+    });
+
+    it('fills the majors without the strategy’s own market', () => {
+      render();
+      openForm();
+      [...el.querySelectorAll<HTMLButtonElement>('.basket .btn')][0].click();
+      fixture.detectChanges();
+      const text = (field('Basket') as HTMLInputElement).value;
+      expect(text).toContain('GBPUSD');
+      expect(text).not.toContain('EURUSD');
+    });
+
+    it('names a market the engine refuses and still queues the others', async () => {
+      render();
+      openForm();
+      set('Basket', 'XAGUSD, GBPUSD', 'input');
+      submit();
+      nextQueue().flush(ok(901));
+      await settle();
+      nextQueue().flush({
+        data: 0,
+        status: false,
+        message: 'No candles for XAGUSD',
+        responseCode: '-11',
+      });
+      await settle();
+      nextQueue().flush(ok(903));
+      await settle();
+      fixture.detectChanges();
+      expect(el.querySelector('[role="alert"]')!.textContent).toContain(
+        'XAGUSD: No candles for XAGUSD',
+      );
+      expect(el.querySelector('.matrix-stub')!.textContent).toBe('901,903');
+    });
+
+    it('refuses a basket together with a symbol override, and a bad symbol', () => {
+      render();
+      openForm();
+      set('Symbol override', 'gbpusd', 'input');
+      set('Basket', 'USDJPY', 'input');
+      submit();
+      expect(el.querySelector('[role="alert"]')!.textContent).toContain(
+        'Clear the symbol override',
+      );
+      set('Symbol override', '', 'input');
+      set('Basket', 'EUR/USD', 'input');
+      submit();
+      expect(el.querySelector('[role="alert"]')!.textContent).toContain('is not a symbol');
+      http.expectNone((r) => r.method === 'POST' && r.url === `${BASE}/backtest`);
+    });
   });
 });
 

@@ -5,6 +5,7 @@ import {
   alphaToOpacity,
   coerceInputValue,
   colorToCss,
+  effectiveOverrides,
   engineToPineTimeframe,
   formatColor,
   formatSession,
@@ -21,6 +22,7 @@ import {
   parseSession,
   pruneInputValues,
   resolveInputValues,
+  sameEffectiveInputs,
   sameInputValues,
   timeframeLabel,
   utcInputToMs,
@@ -304,6 +306,33 @@ describe('sameInputValues', () => {
     expect(sameInputValues({ a: 1 }, { a: 2 })).toBe(false);
     expect(sameInputValues({ a: 1 }, { a: 1, b: false })).toBe(false);
     expect(sameInputValues({}, {})).toBe(true);
+  });
+});
+
+describe('effective overrides — PE-04 / PE-05', () => {
+  const DEFS: ScriptInputDto[] = [
+    input({ id: 'MA::Fast', kind: 'int', defaultValue: 9, minValue: 1, maxValue: 50 }),
+    input({ id: 'MA::Slow', kind: 'int', defaultValue: 21 }),
+    input({ id: 'Mode', kind: 'string', defaultValue: 'Trend', options: ['Trend', 'Range'] }),
+  ];
+
+  it('an override equal to the default and no override run the script the same way', () => {
+    // The optimizer stores every searched input, defaults included; the form holds only the changed ones.
+    const stored = { 'MA::Fast': 9, 'MA::Slow': 30, Mode: 'Trend' };
+    const form = { 'MA::Slow': 30 };
+    expect(sameEffectiveInputs(DEFS, stored, form)).toBe(true);
+    expect(sameEffectiveInputs(DEFS, stored, { 'MA::Slow': 31 })).toBe(false);
+    // An id the script does not declare acts on nothing.
+    expect(sameEffectiveInputs(DEFS, form, { ...form, 'Old group::Fast': 12 })).toBe(true);
+    // Without the compiled inputs nothing is assumed.
+    expect(sameEffectiveInputs(null, stored, form)).toBe(false);
+  });
+
+  it('effective overrides coerce declared values, drop defaults and keep undeclared ids untouched', () => {
+    expect(
+      effectiveOverrides(DEFS, { 'MA::Fast': 80, 'MA::Slow': 21, 'Renamed::Fast': 12 }),
+    ).toEqual({ 'MA::Fast': 50, 'Renamed::Fast': 12 });
+    expect(effectiveOverrides(null, { a: 1 })).toEqual({ a: 1 });
   });
 });
 

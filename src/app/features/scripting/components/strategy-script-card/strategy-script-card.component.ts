@@ -16,15 +16,30 @@ import { filter, firstValueFrom } from 'rxjs';
 
 import type { StrategyDto } from '@core/api/api.types';
 import type { ScriptCompileResult } from '@core/api/scripting.types';
-import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
+import {
+  ScriptingService,
+  toScriptingError,
+  type ScriptingApiError,
+} from '@core/services/scripting.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AuthService } from '@core/auth/auth.service';
 import { downloadTextFile } from '@shared/utils/download';
 import { inputOverrides, parseSavedInputs, resolveInputValues } from '../../pine/pine-inputs';
+import { OPERATOR_PERMISSION } from '../../shared/permissions';
 import { DeclarationSummaryComponent } from '../declaration-summary/declaration-summary.component';
 import { InputsFormComponent } from '../inputs-form/inputs-form.component';
 import { PineEditorComponent } from '../pine-editor/pine-editor.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
+
+/**
+ * The engine said no (a refusal envelope, 4xx) — as opposed to not answering (transport) or
+ * failing (5xx), when the console's own copy of the source is a fair stand-in.
+ */
+function isRefusal(e: ScriptingApiError): boolean {
+  if (e.httpStatus === 0 || e.httpStatus >= 500) return false;
+  return e.httpStatus >= 400 || e.code !== null;
+}
 
 /**
  * A script strategy's Pine source on its detail page: read-only editor, the compiled declaration
@@ -73,17 +88,24 @@ import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
         }
         <span class="spacer"></span>
         <button type="button" class="btn btn-ghost btn-sm" (click)="copy()">Copy</button>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm"
-          (click)="export()"
-          [disabled]="exporting()"
-        >
-          Export .pine
-        </button>
-        <button type="button" class="btn btn-primary btn-sm" (click)="editRequested.emit()">
-          Edit script
-        </button>
+        <!-- PE-11 / PE-I13: exporting and editing need operator access in the engine. -->
+        @if (canOperate()) {
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            (click)="export()"
+            [disabled]="exporting()"
+          >
+            Export .pine
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" (click)="editRequested.emit()">
+            Edit script
+          </button>
+        } @else {
+          <span class="muted small" title="Exporting and editing need operator access"
+            >Read-only</span
+          >
+        }
       </header>
 
       <div class="card-body">
@@ -219,6 +241,10 @@ export class StrategyScriptCardComponent {
   private readonly scripting = inject(ScriptingService);
   private readonly strategies = inject(StrategiesService);
   private readonly notifications = inject(NotificationService);
+  private readonly auth = inject(AuthService);
+
+  /** PE-I13: Export and Edit need operator access in the engine. */
+  readonly canOperate = computed(() => this.auth.hasPermission(OPERATOR_PERMISSION));
 
   /** The strategy as last read — refreshed when its script is saved from the form. */
   readonly current = linkedSignal(() => this.strategy());
@@ -282,6 +308,11 @@ export class StrategyScriptCardComponent {
     }
   }
 
+  /**
+   * `GET strategy/{id}/export`. When the engine cannot be reached (or fails) the source the
+   * console holds is downloaded instead — but a refusal (no permission, not found, refused) is
+   * shown as such and nothing is downloaded around it (PE-11).
+   */
   async export(): Promise<void> {
     const s = this.current();
     this.exporting.set(true);
@@ -289,11 +320,18 @@ export class StrategyScriptCardComponent {
       const file = await firstValueFrom(this.scripting.exportStrategy(s.id));
       downloadTextFile(file.fileName || `${s.name ?? 'strategy'}.pine`, file.content);
     } catch (err) {
+      const e = toScriptingError(err, 'Exporting failed.');
+      if (isRefusal(e)) {
+        this.notifications.error(
+          e.httpStatus === 401 || e.httpStatus === 403
+            ? 'You do not have permission to export this strategy.'
+            : e.message,
+        );
+        return;
+      }
       // The engine's export is the canonical file; if it is unavailable, the source still is.
       downloadTextFile(`${(s.name ?? 'strategy').replace(/\s+/g, '_')}.pine`, this.source());
-      this.notifications.info(
-        `Exported the source held by the console (${toScriptingError(err, 'export unavailable').message}).`,
-      );
+      this.notifications.info(`Exported the source held by the console (${e.message}).`);
     } finally {
       this.exporting.set(false);
     }

@@ -19,6 +19,7 @@ import {
   DEFAULT_STRATEGY_SCRIPT,
   type ScriptDraft,
 } from '@features/scripting/components/script-authoring/authoring-mode';
+import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 
 // Script authoring inside the strategy form: Pine as the only rules authoring, what the form renders in
 // each mode, and the payloads script mode submits. The script panel's own HTTP (compile, PUT
@@ -111,8 +112,23 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     return stub;
   }
 
+  /** Questions the form asks (unsaved changes, rollback), answered per test. */
+  let dialogs: { ask: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
+  let strategiesApi: Record<string, ReturnType<typeof vi.fn>>;
+
   beforeEach(() => {
     notify = { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() };
+    dialogs = { ask: vi.fn(), confirm: vi.fn(async () => true) };
+    strategiesApi = {
+      listTemplates: vi.fn(() => of({ status: true, data: [] })),
+      listPreviewSnapshots: vi.fn(() => of({ status: true, data: [] })),
+      getParameterSchema: vi.fn(() => of({ status: true, data: null })),
+      getVersions: vi.fn(() => of({ status: true, data: [] })),
+      rollbackVersion: vi.fn(() => of({ status: true, data: 1, message: 'Rolled back' })),
+      getById: vi.fn(() =>
+        of({ status: true, data: { ...STRATEGY, scriptSource: `${SCRIPT}// v3\n` } }),
+      ),
+    };
     TestBed.configureTestingModule({
       imports: [StrategyFormComponent],
       // The script panel's preview (chart + report) is a deferred chunk: keep it on its placeholder.
@@ -122,15 +138,8 @@ describe('StrategyFormComponent — Pine script authoring', () => {
         provideHttpClientTesting(),
         provideRouter([]),
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
-        {
-          provide: StrategiesService,
-          useValue: {
-            listTemplates: () => of({ status: true, data: [] }),
-            listPreviewSnapshots: () => of({ status: true, data: [] }),
-            getParameterSchema: () => of({ status: true, data: null }),
-            getVersions: () => of({ status: true, data: [] }),
-          },
-        },
+        { provide: StrategiesService, useValue: strategiesApi },
+        { provide: ScriptDialogService, useValue: dialogs },
         {
           provide: RiskProfilesService,
           useValue: { list: () => of({ status: true, data: { data: [] } }) },
@@ -321,7 +330,12 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     beforeEach(() => create(STRATEGY));
 
     describe('saveScriptForAssistant (assistant strategy.save)', () => {
-      function assistPanel(draft: ScriptDraft | null, dirty: boolean, saves = true, failure: string | null = null) {
+      function assistPanel(
+        draft: ScriptDraft | null,
+        dirty: boolean,
+        saves = true,
+        failure: string | null = null,
+      ) {
         const stub = { ...panel(draft, dirty, saves), message: signal<string | null>(null) };
         stub.saveScript.mockImplementation(async () => {
           if (!saves) stub.message.set(failure);
@@ -332,7 +346,11 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       }
 
       it('records the change reason and saves through the submit path', async () => {
-        const draft: ScriptDraft = { source: `${SCRIPT}// x\n`, inputs: { in_3_len: 20 }, executionPolicy: 'Direct' };
+        const draft: ScriptDraft = {
+          source: `${SCRIPT}// x\n`,
+          inputs: { in_3_len: 20 },
+          executionPolicy: 'Direct',
+        };
         const stub = assistPanel(draft, true);
         const r = await cmp.saveScriptForAssistant('tighter stop');
         expect(cmp.updateChangeReason()).toBe('tighter stop');
@@ -352,7 +370,12 @@ describe('StrategyFormComponent — Pine script authoring', () => {
       });
 
       it('reports the panel refusal as a failure', async () => {
-        assistPanel({ source: `${SCRIPT}//y`, inputs: {}, executionPolicy: 'Direct' }, true, false, 'The engine refused the script: bad');
+        assistPanel(
+          { source: `${SCRIPT}//y`, inputs: {}, executionPolicy: 'Direct' },
+          true,
+          false,
+          'The engine refused the script: bad',
+        );
         const r = await cmp.saveScriptForAssistant('r');
         expect(r).toEqual({ ok: false, message: 'The engine refused the script: bad' });
       });
@@ -480,6 +503,113 @@ describe('StrategyFormComponent — Pine script authoring', () => {
         'textarea[formcontrolname="parametersJson"]',
       ) as HTMLTextAreaElement;
       expect(params.readOnly).toBe(true);
+    });
+  });
+
+  describe('PE-06 — unsaved changes are never lost silently', () => {
+    beforeEach(() => create(STRATEGY));
+
+    function editablePanel(dirty: boolean) {
+      const stub = panel(
+        { source: SCRIPT, inputs: {}, executionPolicy: 'Direct' },
+        dirty,
+      ) as PanelStub & {
+        discardLocalDraft: ReturnType<typeof vi.fn>;
+      };
+      stub.discardLocalDraft = vi.fn();
+      return stub;
+    }
+
+    it('closes at once when nothing is unsaved', async () => {
+      editablePanel(false);
+      expect(cmp.hasUnsavedChanges()).toBe(false);
+      await cmp.requestClose();
+      expect(dialogs.confirm).not.toHaveBeenCalled();
+      expect(cancelled).toBe(1);
+    });
+
+    it('a click outside, ×, Escape or Cancel asks first; keeping on editing keeps the form open', async () => {
+      const stub = editablePanel(true);
+      expect(cmp.hasUnsavedChanges()).toBe(true);
+      expect(cmp.unsavedChangesNote()).toBe('The script has unsaved changes');
+      dialogs.confirm.mockResolvedValueOnce(false);
+      await cmp.requestClose();
+      expect(cancelled).toBe(0);
+      expect(stub.discardLocalDraft).not.toHaveBeenCalled();
+
+      dialogs.confirm.mockResolvedValueOnce(true);
+      await cmp.requestClose();
+      expect(cancelled).toBe(1);
+      expect(stub.discardLocalDraft).toHaveBeenCalled();
+      // Discarded on purpose: a route guard behind the form must not ask again.
+      expect(cmp.hasUnsavedChanges()).toBe(false);
+    });
+
+    it('the overlay click goes through the same question (the dialog layout)', () => {
+      editablePanel(true);
+      const overlay = host.querySelector('.overlay') as HTMLElement;
+      overlay.click();
+      expect(dialogs.confirm).toHaveBeenCalled();
+    });
+
+    it('settings edits count too, and the note says what is unsaved', () => {
+      editablePanel(true);
+      cmp.form.patchValue({ name: 'Renamed' });
+      cmp.form.markAsDirty();
+      expect(cmp.unsavedChangesNote()).toBe(
+        'The script and the strategy settings have unsaved changes',
+      );
+    });
+
+    it('after a successful save the form closes with nothing left to ask', async () => {
+      panel({ source: `${SCRIPT}// x\n`, inputs: {}, executionPolicy: 'Direct' }, true);
+      await cmp.submitScript();
+      expect(cancelled).toBe(1);
+      expect(cmp.hasUnsavedChanges()).toBe(false);
+    });
+
+    it('⌘S in the script editor saves through the same path as Update', async () => {
+      const stub = panel(
+        { source: `${SCRIPT}// x\n`, inputs: {}, executionPolicy: 'Direct' },
+        true,
+      );
+      cmp.onSaveShortcut();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(stub.prepareSubmit).toHaveBeenCalled();
+    });
+  });
+
+  describe('PE-03 — rolling back refreshes the script editor', () => {
+    beforeEach(() => create(STRATEGY));
+
+    it('confirms, rolls back, and puts the restored script (and its revision) in the editor', async () => {
+      const stub = panel(
+        { source: SCRIPT, inputs: {}, executionPolicy: 'Direct' },
+        true,
+      ) as PanelStub & {
+        applySaved: ReturnType<typeof vi.fn>;
+      };
+      stub.applySaved = vi.fn();
+      await cmp.rollbackToVersion({ id: 9, versionNumber: 3 } as any);
+      expect(dialogs.confirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: ['Your unsaved script edit is replaced by the script of that version.'],
+        }),
+      );
+      expect(strategiesApi['rollbackVersion']).toHaveBeenCalledWith(42, 9);
+      expect(stub.applySaved).toHaveBeenCalledWith(
+        expect.objectContaining({ scriptSource: `${SCRIPT}// v3\n` }),
+      );
+      // The host re-reads the strategy too.
+      expect(changed).toBe(1);
+    });
+
+    it('does nothing when the operator declines', async () => {
+      panel({ source: SCRIPT, inputs: {}, executionPolicy: 'Direct' }, false);
+      dialogs.confirm.mockResolvedValueOnce(false);
+      await cmp.rollbackToVersion({ id: 9, versionNumber: 3 } as any);
+      expect(strategiesApi['rollbackVersion']).not.toHaveBeenCalled();
     });
   });
 });

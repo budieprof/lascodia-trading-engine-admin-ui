@@ -378,6 +378,166 @@ describe('ScriptingService — chart scripts (scripting/indicators)', () => {
     await firstValueFrom(make({ put } as any).updateChartScript(20, body));
     expect(put).toHaveBeenCalledWith('/scripting/indicators/20', body, { silent: true });
   });
+
+  it('C4: a stale expectedRevision comes back as a conflict', async () => {
+    const put = vi.fn().mockReturnValue(
+      of({
+        status: false,
+        data: null,
+        message: '"Smart Algo v2" changed since it was loaded (it is now revision bbb…',
+        responseCode: '-409',
+      }),
+    );
+    const body = { name: 'x', pineSource: 'src', expectedRevision: 'aaa' };
+    const err = await firstValueFrom(make({ put } as any).updateChartScript(20, body)).catch(
+      (e) => e,
+    );
+    expect(put).toHaveBeenCalledWith('/scripting/indicators/20', body, { silent: true });
+    expect(err).toBeInstanceOf(ScriptingApiError);
+    expect(err.isConflict).toBe(true);
+  });
+
+  it('builds the version, restore, visibility and import calls', async () => {
+    const ok = (data: unknown) => of({ status: true, data, message: null, responseCode: '00' });
+    const get = vi.fn().mockReturnValue(ok([]));
+    const post = vi.fn().mockReturnValue(ok(saved));
+    const put = vi.fn().mockReturnValue(ok(saved));
+    const svc = make({ get, post, put } as any);
+
+    await firstValueFrom(svc.listChartScriptVersions(20, 50));
+    expect(get).toHaveBeenLastCalledWith('/scripting/indicators/20/versions?limit=50', {
+      silent: true,
+    });
+    get.mockReturnValue(ok({ id: 3, pineSource: 'v1' }));
+    await firstValueFrom(svc.getChartScriptVersion(20, 3));
+    expect(get).toHaveBeenLastCalledWith('/scripting/indicators/20/versions/3', { silent: true });
+    await firstValueFrom(svc.restoreChartScriptVersion(20, 3, 'rev'));
+    expect(post).toHaveBeenLastCalledWith(
+      '/scripting/indicators/20/versions/3/restore',
+      { expectedRevision: 'rev' },
+      { silent: true },
+    );
+    await firstValueFrom(svc.setChartScriptVisibility(20, 'Shared'));
+    expect(put).toHaveBeenLastCalledWith(
+      '/scripting/indicators/20/visibility',
+      { visibility: 'Shared' },
+      { silent: true },
+    );
+    post.mockReturnValue(ok({ name: 'EMA', pineSource: 'src' }));
+    await firstValueFrom(svc.importTradingViewScript('https://www.tradingview.com/script/x/'));
+    expect(post).toHaveBeenLastCalledWith(
+      '/scripting/indicators/import/tradingview',
+      { url: 'https://www.tradingview.com/script/x/' },
+      { silent: true },
+    );
+  });
+
+  it('a refused import keeps the engine reason (licence, protected script)', async () => {
+    const post = vi.fn().mockReturnValue(
+      of({
+        status: false,
+        data: null,
+        message: '"X" is published under Creative Commons NonCommercial: …',
+        responseCode: '-11',
+      }),
+    );
+    await expect(
+      firstValueFrom(make({ post } as any).importTradingViewScript('PUB;x')),
+    ).rejects.toMatchObject({ code: '-11', message: expect.stringContaining('NonCommercial') });
+  });
+});
+
+describe('ScriptingService — strategy script saves (PE-01)', () => {
+  it('sends expectedScriptRevision and resolves with the saved revision', async () => {
+    const put = vi.fn().mockReturnValue(
+      of({
+        status: true,
+        data: { success: true, diagnostics: [], scriptRevision: 'beef' },
+        message: 'Saved — the script’s session restarts from a clean warm-up at the next bar',
+        responseCode: '00',
+      }),
+    );
+    const svc = make({ put } as any);
+    const saved: number[] = [];
+    svc.strategyScriptSaved$.subscribe((id) => saved.push(id));
+    const body = { source: 's', inputs: {}, expectedScriptRevision: 'cafe' };
+    const r = await firstValueFrom(svc.updateStrategyScript(3, body));
+    expect(put).toHaveBeenCalledWith('/strategy/3/script', body, { silent: true });
+    expect(r).toEqual({
+      scriptRevision: 'beef',
+      message: expect.stringContaining('Saved'),
+      unchanged: false,
+    });
+    expect(saved).toEqual([3]);
+  });
+
+  it('reads "Unchanged" and rejects a stale revision as a conflict', async () => {
+    const put = vi
+      .fn()
+      .mockReturnValueOnce(
+        of({
+          status: true,
+          data: { scriptRevision: 'beef' },
+          message: 'Unchanged',
+          responseCode: '00',
+        }),
+      )
+      .mockReturnValueOnce(
+        of({
+          status: false,
+          data: null,
+          message: 'changed since it was loaded',
+          responseCode: '-409',
+        }),
+      );
+    const svc = make({ put } as any);
+    const first = await firstValueFrom(svc.updateStrategyScript(3, { source: 's', inputs: {} }));
+    expect(first.unchanged).toBe(true);
+    const err = await firstValueFrom(
+      svc.updateStrategyScript(3, { source: 's', inputs: {}, expectedScriptRevision: 'old' }),
+    ).catch((e) => e);
+    expect(err.isConflict).toBe(true);
+  });
+
+  it('builds the library usage and guarded publish calls (PE-I12)', async () => {
+    const get = vi
+      .fn()
+      .mockReturnValue(
+        of({ status: true, data: { libraryId: 5 }, message: null, responseCode: '00' }),
+      );
+    const post = vi.fn().mockReturnValue(
+      of({
+        status: false,
+        data: null,
+        message: 'v3 was published after',
+        responseCode: '-409',
+      }),
+    );
+    const svc = make({ get, post } as any);
+    await firstValueFrom(svc.getLibraryUsage(5));
+    expect(get).toHaveBeenCalledWith('/scripting/libraries/5/usage', { silent: true });
+    const body = { name: 'core', visibility: 'Private' as const, source: 's', basedOnVersion: 2 };
+    const err = await firstValueFrom(svc.createLibrary(body)).catch((e) => e);
+    expect(post).toHaveBeenCalledWith('/scripting/libraries', body, { silent: true });
+    expect(err.isConflict).toBe(true);
+  });
+
+  it('reads the strategy’s trial ledger for the test count (PE-I1)', async () => {
+    const get = vi
+      .fn()
+      .mockReturnValueOnce(
+        of({ status: true, data: { effectiveTrials: 12 }, message: null, responseCode: '00' }),
+      );
+    get.mockReturnValueOnce(
+      of({ status: false, data: null, message: 'Strategy not found', responseCode: '-14' }),
+    );
+    const svc = make({ get } as any);
+    const ledger = await firstValueFrom(svc.getTrialLedger(41));
+    expect(get).toHaveBeenCalledWith('/strategy-feedback/41/trials', { silent: true });
+    expect(ledger.effectiveTrials).toBe(12);
+    const err = await firstValueFrom(svc.getTrialLedger(42)).catch((e) => e);
+    expect(err.isNotFound).toBe(true);
+  });
 });
 
 describe('helpers', () => {

@@ -14,6 +14,7 @@ import {
   SetAlertChannelEnabledRequest,
   SetAlertChannelEnabledResultDto,
 } from '@core/api/api.types';
+import type { AlertDispatchLogDto, ScriptAlertDeliveryDto } from '@core/api/alerts.types';
 
 @Injectable({ providedIn: 'root' })
 export class AlertsService {
@@ -21,8 +22,9 @@ export class AlertsService {
 
   // ── Alert rules ──────────────────────────────────────────────────────
 
-  getById(id: number): Observable<ResponseData<AlertDto>> {
-    return this.api.get(`/alert/${id}`);
+  /** `silent`: no error toast (a link to an alert that may have been deleted handles the "not found" itself). */
+  getById(id: number, opts?: { silent?: boolean }): Observable<ResponseData<AlertDto>> {
+    return this.api.get(`/alert/${id}`, opts?.silent ? { silent: true } : undefined);
   }
 
   list(params: PagerRequest): Observable<ResponseData<PagedData<AlertDto>>> {
@@ -39,6 +41,21 @@ export class AlertsService {
 
   delete(id: number): Observable<ResponseData<string>> {
     return this.api.delete(`/alert/${id}`);
+  }
+
+  /** What happened on each channel every time an alert was sent, newest first (Sent / Skipped / Failed). */
+  dispatchLog(id: number, limit = 50): Observable<ResponseData<AlertDispatchLogDto[]>> {
+    return this.api.get(`/alert/${id}/dispatch-log?limit=${limit}`, { silent: true });
+  }
+
+  /** A script strategy's alert deliveries (outbox rows), newest first. */
+  scriptDeliveries(
+    strategyId: number,
+    limit = 50,
+  ): Observable<ResponseData<ScriptAlertDeliveryDto[]>> {
+    return this.api.get(`/alert/script-deliveries?strategyId=${strategyId}&limit=${limit}`, {
+      silent: true,
+    });
   }
 
   // ── Channel configuration ───────────────────────────────────────────

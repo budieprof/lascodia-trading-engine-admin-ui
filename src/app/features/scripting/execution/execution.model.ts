@@ -137,18 +137,60 @@ export function requiresTypedConfirmation(row: Pick<BindingRow, 'environment'>):
 
 /**
  * Rows that would start (or keep) live-money delivery without a confirmation from this edit
- * session: a live-money binding that is new, or was saved disabled and is now enabled. The save
- * refuses while this is non-empty — the dialog is the normal path, this is the backstop.
+ * session: a live-money binding that is new, or was saved disabled and is now enabled — or
+ * (PE-10) whose lot multiplier was raised above the largest one confirmed for it (the saved one,
+ * or one typed-confirmed in this session). The save refuses while this is non-empty — the dialogs
+ * are the normal path, this is the backstop.
  */
 export function unconfirmedLiveChanges(
   rows: readonly BindingRow[],
   confirmedAccountIds: ReadonlySet<number>,
+  confirmedMultipliers: ReadonlyMap<number, number> = new Map(),
 ): BindingRow[] {
   return rows.filter((r) => {
-    if (!isLiveMoney(r.environment) || confirmedAccountIds.has(r.tradingAccountId)) return false;
+    if (!isLiveMoney(r.environment)) return false;
+    if (raisesUnconfirmed(r, confirmedMultipliers)) return true;
+    if (confirmedAccountIds.has(r.tradingAccountId)) return false;
     if (r.saved === null) return true;
     return r.isEnabled && !r.saved.isEnabled;
   });
+}
+
+/**
+ * The largest lot multiplier the operator has accepted for a live-money row: the saved one, or one
+ * confirmed by typing in this session (a bind, an enable or a raise), whichever is larger.
+ */
+export function confirmedMultiplierCeiling(
+  row: Pick<BindingRow, 'tradingAccountId' | 'saved'>,
+  confirmedMultipliers: ReadonlyMap<number, number>,
+): number {
+  return Math.max(
+    row.saved?.lotMultiplier ?? 0,
+    confirmedMultipliers.get(row.tradingAccountId) ?? 0,
+  );
+}
+
+/**
+ * PE-10: raising a REAL (or unverifiable) account's lot multiplier past what was accepted for it
+ * multiplies the money at risk on every order, so it needs the same typed confirmation as binding
+ * one. Lowering it never does.
+ */
+export function requiresRaiseConfirmation(
+  row: Pick<BindingRow, 'environment' | 'tradingAccountId' | 'saved'>,
+  newMultiplier: number,
+  confirmedMultipliers: ReadonlyMap<number, number>,
+): boolean {
+  return (
+    isLiveMoney(row.environment) &&
+    Number.isFinite(newMultiplier) &&
+    newMultiplier > confirmedMultiplierCeiling(row, confirmedMultipliers)
+  );
+}
+
+function raisesUnconfirmed(r: BindingRow, confirmed: ReadonlyMap<number, number>): boolean {
+  // A new binding's multiplier is accepted by the bind confirmation (recorded in `confirmed`).
+  if (r.saved === null && !confirmed.has(r.tradingAccountId)) return false;
+  return Number(r.lotMultiplier) > confirmedMultiplierCeiling(r, confirmed);
 }
 
 export function validateMultiplier(v: unknown): string | null {

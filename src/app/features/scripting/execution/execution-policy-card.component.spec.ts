@@ -11,7 +11,7 @@ import type { ExecutionPolicy } from '../api/scripting-api.types';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(ExecutionPolicyCardComponent, {
-  inputs: ['strategyId', 'policy', 'isScript'],
+  inputs: ['strategyId', 'policy', 'isScript', 'readOnly'],
   outputs: ['policyChanged'],
 });
 declareSignalIo(TypedConfirmDialogComponent, {
@@ -130,5 +130,16 @@ describe('ExecutionPolicyCardComponent', () => {
     expect(el.textContent).toContain('did not report');
     const labels = [...el.querySelectorAll('.option .btn')].map((b) => b.textContent!.trim());
     expect(labels).toEqual(['Set Standard…', 'Set Direct…']);
+  });
+
+  it('PE-I13: shows the policy without a way to change it when read-only', () => {
+    fixture = TestBed.createComponent(ExecutionPolicyCardComponent);
+    fixture.componentRef.setInput('strategyId', 41);
+    fixture.componentRef.setInput('policy', 'Direct');
+    fixture.componentRef.setInput('readOnly', true);
+    fixture.detectChanges();
+    el = fixture.nativeElement as HTMLElement;
+    expect(current()).toBe('Direct');
+    expect(el.querySelectorAll('.option .btn')).toHaveLength(0);
   });
 });
