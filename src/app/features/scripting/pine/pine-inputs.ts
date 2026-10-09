@@ -456,6 +456,43 @@ export function pruneInputValues(
   return dropped ? out : values;
 }
 
+/**
+ * The overrides as they act on the script (PE-04/PE-05): a declared input's value coerced to its
+ * current range, and dropped when it equals the default; an id the script does not declare kept as
+ * it is — it acts on nothing, but it is the operator's (a group renamed mid-typing comes back to
+ * its tuned value), so it is cleaned out only when the script is saved.
+ */
+export function effectiveOverrides(
+  inputs: readonly ScriptInputDto[] | null | undefined,
+  values: ScriptInputValues | null | undefined,
+): ScriptInputValues {
+  const v = values ?? {};
+  if (!inputs) return { ...v };
+  const declared = new Set(inputs.map((i) => i.id));
+  const out = inputOverrides(inputs, resolveInputValues(inputs, v));
+  for (const [id, value] of Object.entries(v)) {
+    if (!declared.has(id)) out[id] = value;
+  }
+  return out;
+}
+
+/**
+ * Two override sets that run the script the same way: every declared input resolves to the same
+ * value (an override equal to its default and no override are the same; so are 9 and 9.0). Ids the
+ * script does not declare act on nothing and do not count. Without the compiled inputs the sets
+ * are compared as they are.
+ */
+export function sameEffectiveInputs(
+  inputs: readonly ScriptInputDto[] | null | undefined,
+  a: ScriptInputValues | null | undefined,
+  b: ScriptInputValues | null | undefined,
+): boolean {
+  if (!inputs) return sameInputValues(a ?? {}, b ?? {});
+  const ra = resolveInputValues(inputs, a);
+  const rb = resolveInputValues(inputs, b);
+  return inputs.every((i) => sameValue(ra[i.id], rb[i.id]));
+}
+
 /** Same ids with the same values, in any order. */
 export function sameInputValues(a: ScriptInputValues, b: ScriptInputValues): boolean {
   if (a === b) return true;

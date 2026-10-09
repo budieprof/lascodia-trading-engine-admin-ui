@@ -15,8 +15,11 @@ import type {
   ChartBarDto,
   ChartBarsRequest,
   ChartBarsResult,
-  ChartIndicatorScriptDto,
-  CreateScriptLibraryRequest,
+  ChartIndicatorScriptDetailDto,
+  ChartScriptVersionDetailDto,
+  ChartScriptVersionDto,
+  CreateChartScriptRequest,
+  CreateScriptLibraryRequestV2,
   ImportStrategyRequest,
   PineCatalog,
   ScriptCompileRequest,
@@ -27,12 +30,16 @@ import type {
   ScriptLibraryDetailDto,
   ScriptLibraryDto,
   ScriptLibraryFilter,
+  ScriptLibraryUsageDto,
+  ScriptLibraryVisibility,
   ScriptPublisherDto,
   ScriptRunRequest,
-  SaveChartIndicatorScriptRequest,
   ScriptRunResult,
   StrategyExportDto,
-  UpdateStrategyScriptRequest,
+  StrategyScriptSaveResult,
+  TradingViewScriptImportDto,
+  UpdateChartScriptRequest,
+  UpdateStrategyScriptRequestV2,
 } from '@core/api/scripting.types';
 
 /**
@@ -266,9 +273,10 @@ export class ScriptingService {
 
   /**
    * `POST scripting/libraries` — compiles (the source must declare `library()`) and stores
-   * version 1, or the next version of that name.
+   * version 1, or the next version of that name. With `basedOnVersion`, a newer version published
+   * since rejects with `-409` (PE-I12).
    */
-  createLibrary(req: CreateScriptLibraryRequest): Observable<ScriptLibraryDto> {
+  createLibrary(req: CreateScriptLibraryRequestV2): Observable<ScriptLibraryDto> {
     return this.api.post<ResponseData<ScriptLibraryDto>>('/scripting/libraries', req, SILENT).pipe(
       map((res) => envelopeData(res, 'The engine did not publish the library.')),
       catchError((err) =>
@@ -301,6 +309,21 @@ export class ScriptingService {
       );
   }
 
+  /**
+   * `GET scripting/libraries/{id}/usage` — what imports a version, directly or through other
+   * libraries: script strategies (with whether they block a delete), chart scripts, libraries.
+   */
+  getLibraryUsage(id: number): Observable<ScriptLibraryUsageDto> {
+    return this.api
+      .get<ResponseData<ScriptLibraryUsageDto>>(`/scripting/libraries/${id}/usage`, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The library usage could not be loaded.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The library usage could not be loaded.')),
+        ),
+      );
+  }
+
   /** `GET scripting/libraries/me` — the operator's own publisher name (their username). */
   getMyPublisher(): Observable<string | null> {
     return this.api.get<ResponseData<ScriptPublisherDto>>('/scripting/libraries/me', SILENT).pipe(
@@ -311,10 +334,10 @@ export class ScriptingService {
 
   // ── §7b Chart scripts ───────────────────────────────────────────────────
 
-  /** `GET scripting/indicators` — the operator's saved chart scripts, with sources. */
-  listChartScripts(): Observable<ChartIndicatorScriptDto[]> {
+  /** `GET scripting/indicators` — the operator's chart scripts and every shared one, with sources. */
+  listChartScripts(): Observable<ChartIndicatorScriptDetailDto[]> {
     return this.api
-      .get<ResponseData<ChartIndicatorScriptDto[]>>('/scripting/indicators', SILENT)
+      .get<ResponseData<ChartIndicatorScriptDetailDto[]>>('/scripting/indicators', SILENT)
       .pipe(
         map((res) => envelopeData(res, 'Your scripts could not be loaded.') ?? []),
         catchError((err) =>
@@ -323,10 +346,10 @@ export class ScriptingService {
       );
   }
 
-  /** `GET scripting/indicators/{id}` — one saved chart script as the engine has it now. */
-  getChartScript(id: number): Observable<ChartIndicatorScriptDto> {
+  /** `GET scripting/indicators/{id}` — one chart script as the engine has it now. */
+  getChartScript(id: number): Observable<ChartIndicatorScriptDetailDto> {
     return this.api
-      .get<ResponseData<ChartIndicatorScriptDto>>(`/scripting/indicators/${id}`, SILENT)
+      .get<ResponseData<ChartIndicatorScriptDetailDto>>(`/scripting/indicators/${id}`, SILENT)
       .pipe(
         map((res) => envelopeData(res, 'The script could not be loaded.')),
         catchError((err) =>
@@ -336,28 +359,117 @@ export class ScriptingService {
   }
 
   /**
-   * `POST scripting/indicators` — compiles and saves. A compile error (or a `library()`) rejects
-   * with `-11` and the compile response attached.
+   * `POST scripting/indicators` — compiles and saves as version 1. A compile error (or a
+   * `library()`) rejects with `-11` and the compile response attached; an import whose header
+   * licence forbids reuse with `-11`.
    */
-  createChartScript(req: SaveChartIndicatorScriptRequest): Observable<ChartIndicatorScriptDto> {
+  createChartScript(req: CreateChartScriptRequest): Observable<ChartIndicatorScriptDetailDto> {
     return this.api
-      .post<ResponseData<ChartIndicatorScriptDto>>('/scripting/indicators', req, SILENT)
+      .post<ResponseData<ChartIndicatorScriptDetailDto>>('/scripting/indicators', req, SILENT)
       .pipe(
         map((res) => envelopeData(res, 'The engine did not save the script.')),
         catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
       );
   }
 
-  /** `PUT scripting/indicators/{id}` — replaces name, source and inputs (recompiled). */
+  /**
+   * `PUT scripting/indicators/{id}` — replaces name, source and inputs (recompiled) and records
+   * the next version. With `expectedRevision`, a script changed since rejects with `-409`
+   * (`ScriptingApiError.isConflict`) — contract C4.
+   */
   updateChartScript(
     id: number,
-    req: SaveChartIndicatorScriptRequest,
-  ): Observable<ChartIndicatorScriptDto> {
+    req: UpdateChartScriptRequest,
+  ): Observable<ChartIndicatorScriptDetailDto> {
     return this.api
-      .put<ResponseData<ChartIndicatorScriptDto>>(`/scripting/indicators/${id}`, req, SILENT)
+      .put<ResponseData<ChartIndicatorScriptDetailDto>>(`/scripting/indicators/${id}`, req, SILENT)
       .pipe(
         map((res) => envelopeData(res, 'The engine did not save the script.')),
         catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
+      );
+  }
+
+  /** `PUT scripting/indicators/{id}/visibility` — share with every operator, or make private. */
+  setChartScriptVisibility(
+    id: number,
+    visibility: ScriptLibraryVisibility,
+  ): Observable<ChartIndicatorScriptDetailDto> {
+    return this.api
+      .put<
+        ResponseData<ChartIndicatorScriptDetailDto>
+      >(`/scripting/indicators/${id}/visibility`, { visibility }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine did not change who can see the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'Changing who can see the script failed.')),
+        ),
+      );
+  }
+
+  /** `GET scripting/indicators/{id}/versions` — newest first, without sources. */
+  listChartScriptVersions(id: number, limit = 100): Observable<ChartScriptVersionDto[]> {
+    return this.api
+      .get<
+        ResponseData<ChartScriptVersionDto[]>
+      >(`/scripting/indicators/${id}/versions?limit=${limit}`, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The version history could not be loaded.') ?? []),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The version history could not be loaded.')),
+        ),
+      );
+  }
+
+  /** `GET scripting/indicators/{id}/versions/{versionId}` — one version with its source. */
+  getChartScriptVersion(id: number, versionId: number): Observable<ChartScriptVersionDetailDto> {
+    return this.api
+      .get<
+        ResponseData<ChartScriptVersionDetailDto>
+      >(`/scripting/indicators/${id}/versions/${versionId}`, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The version could not be loaded.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The version could not be loaded.')),
+        ),
+      );
+  }
+
+  /**
+   * `POST scripting/indicators/{id}/versions/{versionId}/restore` — the version becomes the
+   * current state, saved as the next version. A stale `expectedRevision` rejects with `-409`; a
+   * version that no longer compiles with `-11`.
+   */
+  restoreChartScriptVersion(
+    id: number,
+    versionId: number,
+    expectedRevision: string | null,
+  ): Observable<ChartIndicatorScriptDetailDto> {
+    return this.api
+      .post<
+        ResponseData<ChartIndicatorScriptDetailDto>
+      >(`/scripting/indicators/${id}/versions/${versionId}/restore`, { expectedRevision }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine did not restore the version.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'Restoring the version failed.')),
+        ),
+      );
+  }
+
+  /**
+   * `POST scripting/indicators/import/tradingview` — fetches an open-source TradingView script
+   * (page URL or `PUB;…` id) to open as an unsaved draft. Nothing is stored.
+   */
+  importTradingViewScript(url: string): Observable<TradingViewScriptImportDto> {
+    return this.api
+      .post<
+        ResponseData<TradingViewScriptImportDto>
+      >('/scripting/indicators/import/tradingview', { url }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'TradingView did not return the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'Importing from TradingView failed.')),
+        ),
       );
   }
 
@@ -380,22 +492,37 @@ export class ScriptingService {
 
   /**
    * `PUT strategy/{id}/script` — compiles, captures a strategy version and updates live sessions
-   * at the next bar. A compile failure rejects with the compile response attached.
+   * at the next bar. A compile failure rejects with the compile response attached; a save made on
+   * a stale `expectedScriptRevision` rejects with `-409` (`isConflict`). Resolves with the saved
+   * script's revision (the next save's `expectedScriptRevision`).
    */
-  updateStrategyScript(id: number, body: UpdateStrategyScriptRequest): Observable<void> {
-    return this.api.put<ResponseData<unknown>>(`/strategy/${id}/script`, body, SILENT).pipe(
-      map((res) => {
-        if (!res?.status) {
-          throw new ScriptingApiError(
-            res?.message || 'The engine did not save the script.',
-            res?.responseCode ?? null,
-            compileResultOf(res?.data),
-          );
-        }
-      }),
-      tap(() => this.scriptSaved.next(id)),
-      catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
-    );
+  updateStrategyScript(
+    id: number,
+    body: UpdateStrategyScriptRequestV2,
+  ): Observable<StrategyScriptSaveResult> {
+    return this.api
+      .put<
+        ResponseData<{ scriptRevision?: string | null } | null>
+      >(`/strategy/${id}/script`, body, SILENT)
+      .pipe(
+        map((res) => {
+          if (!res?.status) {
+            throw new ScriptingApiError(
+              res?.message || 'The engine did not save the script.',
+              res?.responseCode ?? null,
+              compileResultOf(res?.data),
+            );
+          }
+          const message = res.message || 'Saved';
+          return {
+            scriptRevision: res.data?.scriptRevision ?? null,
+            message,
+            unchanged: message === 'Unchanged',
+          };
+        }),
+        tap(() => this.scriptSaved.next(id)),
+        catchError((err) => throwError(() => toScriptingError(err, 'Saving the script failed.'))),
+      );
   }
 
   /** `GET strategy/{id}/export` — `.pine` for script strategies, a JSON bundle for legacy DSL rows. */

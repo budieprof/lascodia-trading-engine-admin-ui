@@ -501,3 +501,155 @@ export interface StrategyScriptFields {
   executionPolicy?: ScriptExecutionPolicy | null;
   accountBindingCount?: number | null;
 }
+
+// ── Editor vertical (2026-10-09): revisions, versions, sharing, import, library usage ──────────
+// Appended (not edited above) so other verticals' additions merge cleanly. Wire contract: the
+// engine's docs/api/scripting-api.md §7, §7b (contract C4) and §8.
+
+/** C4 fields of a chart script (`scripting/indicators`); an older engine omits them. */
+export interface ChartIndicatorScriptLifecycleFields {
+  /** Digest of name + source + inputs: send it back as `expectedRevision` (stale → `-409`). */
+  revision?: string | null;
+  /** `Private` (its owner only) or `Shared` (listed and readable for every operator). */
+  visibility?: ScriptLibraryVisibility | string | null;
+  /** The caller owns it: only the owner saves, restores, shares or deletes it. */
+  ownedByMe?: boolean | null;
+  /** Newest version number; 0 = saved before version history existed and unchanged since. */
+  latestVersion?: number | null;
+  /** The TradingView script an imported script came from. */
+  sourceUrl?: string | null;
+  licence?: string | null;
+  author?: string | null;
+}
+
+/** A chart script with its C4 fields. */
+export type ChartIndicatorScriptDetailDto = ChartIndicatorScriptDto &
+  ChartIndicatorScriptLifecycleFields;
+
+/** Body of `POST scripting/indicators` (C4 additions optional). */
+export interface CreateChartScriptRequest extends SaveChartIndicatorScriptRequest {
+  visibility?: ScriptLibraryVisibility | null;
+  /** Recorded on version 1. */
+  note?: string | null;
+  /** An import from TradingView: the script page it came from (and what the import reported). */
+  sourceUrl?: string | null;
+  licence?: string | null;
+  author?: string | null;
+}
+
+/** Body of `PUT scripting/indicators/{id}` (C4 additions optional). */
+export interface UpdateChartScriptRequest extends SaveChartIndicatorScriptRequest {
+  /** The `revision` the edit started from; a newer saved state answers `-409`. */
+  expectedRevision?: string | null;
+  /** Omitted keeps the current visibility. */
+  visibility?: ScriptLibraryVisibility | null;
+  /** Recorded on the version this save writes. */
+  note?: string | null;
+}
+
+export type ChartScriptVersionAction = 'Created' | 'Saved' | 'Restored' | 'Imported' | 'Baseline';
+
+/** `GET scripting/indicators/{id}/versions` rows (newest first, no source). */
+export interface ChartScriptVersionDto {
+  id: number;
+  scriptId: number;
+  versionNumber: number;
+  name: string;
+  kind: 'indicator' | 'strategy' | string;
+  inputs?: ScriptInputValues | null;
+  revision: string;
+  action: ChartScriptVersionAction | string;
+  note?: string | null;
+  createdBy?: string | null;
+  createdAt: string;
+  /** The script's current state (same revision). */
+  isCurrent: boolean;
+}
+
+/** `GET scripting/indicators/{id}/versions/{versionId}`. */
+export interface ChartScriptVersionDetailDto extends ChartScriptVersionDto {
+  pineSource: string;
+}
+
+/** A script licence as read from its header comments. */
+export interface PineLicenceDto {
+  name: string;
+  spdx?: string | null;
+  /** False when it forbids this engine's (commercial) use — such an import is refused. */
+  allowsReuse: boolean;
+  notice?: string | null;
+}
+
+/** `POST scripting/indicators/import/tradingview` — a fetched script, NOT saved. */
+export interface TradingViewScriptImportDto {
+  name: string;
+  pineSource: string;
+  kind: 'indicator' | 'strategy' | 'library' | string;
+  sourceUrl: string;
+  publicationId: string;
+  version?: string | null;
+  author?: string | null;
+  licence: PineLicenceDto;
+  updatedAt?: string | null;
+}
+
+/** `PUT strategy/{id}/script` with the revision check (§8). */
+export interface UpdateStrategyScriptRequestV2 extends UpdateStrategyScriptRequest {
+  /** The strategy's `scriptRevision` the edit started from; a newer saved script answers `-409`. */
+  expectedScriptRevision?: string | null;
+}
+
+/** What a script save returns. */
+export interface StrategyScriptSaveResult {
+  /** The saved script's revision — the next save's `expectedScriptRevision`. */
+  scriptRevision: string | null;
+  /** The engine's message ("Saved — …", "Unchanged"). */
+  message: string;
+  /** Nothing changed: no version written, the session not restarted. */
+  unchanged: boolean;
+}
+
+/** `GET strategy/{id}` script fields this editor reads beyond {@link StrategyScriptFields}. */
+export interface StrategyScriptRevisionField {
+  /** Digest of the saved script + inputs (not the row's RowVersion). */
+  scriptRevision?: string | null;
+}
+
+/** `GET strategy/{id}/versions` script fields (PE-02; the engine has sent them since ADR-0027). */
+export interface StrategyVersionScriptFields {
+  scriptSource?: string | null;
+  /** The input overrides as stored (JSON object text). */
+  scriptInputsJson?: string | null;
+}
+
+/** `POST scripting/libraries` with the stale-version guard (PE-I12). */
+export interface CreateScriptLibraryRequestV2 extends CreateScriptLibraryRequest {
+  /** The newest version the editor knew about (0 for a new library); a newer one answers `-409`. */
+  basedOnVersion?: number | null;
+}
+
+/** `GET scripting/libraries/{id}/usage` (PE-I12). */
+export interface ScriptLibraryUsageDto {
+  libraryId: number;
+  importPath: string;
+  strategies: {
+    id: number;
+    name: string;
+    symbol: string;
+    timeframe: string;
+    status: string;
+    lifecycleStage: string;
+    /** Imports the version itself (false: through another library). */
+    direct: boolean;
+    /** Live, approved, shadow-live or paper trading: a delete needs force. */
+    blocksDelete: boolean;
+  }[];
+  chartScripts: {
+    id: number;
+    name: string;
+    ownedByMe: boolean;
+    createdBy?: string | null;
+    direct: boolean;
+  }[];
+  libraries: { id: number; publisher: string; name: string; version: number; direct: boolean }[];
+}

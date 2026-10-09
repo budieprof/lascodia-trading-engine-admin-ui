@@ -8,6 +8,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { StrategyDto } from '@core/api/api.types';
 import type { ScriptCompileResult } from '@core/api/scripting.types';
 import { ScriptingService } from '@core/services/scripting.service';
+import { ScriptDialogService } from '../../shared/script-dialog.service';
 import { ScriptAuthoringComponent } from './script-authoring.component';
 import { draftFor, type ScriptDraft } from './authoring-mode';
 
@@ -68,13 +69,21 @@ describe('ScriptAuthoringComponent', () => {
     cmp.workbench = workbench as any;
   }
 
+  /** The questions the panel asks (conflicts, PS9002), answered per test. */
+  let dialogs: { ask: ReturnType<typeof vi.fn>; confirm: ReturnType<typeof vi.fn> };
+
   beforeEach(() => {
+    dialogs = {
+      ask: vi.fn(async () => ({ choice: null, text: '' })),
+      confirm: vi.fn(async () => false),
+    };
     TestBed.configureTestingModule({
       imports: [ScriptAuthoringComponent],
       providers: [
         provideHttpClient(),
         provideHttpClientTesting(),
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
+        { provide: ScriptDialogService, useValue: dialogs },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -191,6 +200,215 @@ describe('ScriptAuthoringComponent', () => {
     });
   });
 
+  describe('PE-01 — saves carry the revision they started from', () => {
+    const REVISED = { ...STRATEGY, scriptRevision: 'r1' } as unknown as StrategyDto;
+    const ok = (rev: string) => ({
+      status: true,
+      data: { success: true, diagnostics: [], scriptRevision: rev },
+      message: 'Saved',
+      responseCode: '00',
+    });
+
+    it('sends expectedScriptRevision, then the revision of its own last save', async () => {
+      setup(REVISED, compile());
+      const first = cmp.saveScript(7, {
+        source: `${SCRIPT}// a`,
+        inputs: {},
+        executionPolicy: 'Direct',
+      });
+      await tick();
+      const r1 = http.expectOne(`${BASE}/strategy/7/script`);
+      expect(r1.request.body.expectedScriptRevision).toBe('r1');
+      r1.flush(ok('r2'));
+      expect(await first).toBe(true);
+      expect(cmp.base().revision).toBe('r2');
+
+      const second = cmp.saveScript(7, {
+        source: `${SCRIPT}// b`,
+        inputs: {},
+        executionPolicy: 'Direct',
+      });
+      await tick();
+      const r2 = http.expectOne(`${BASE}/strategy/7/script`);
+      expect(r2.request.body.expectedScriptRevision).toBe('r2');
+      r2.flush(ok('r3'));
+      expect(await second).toBe(true);
+    });
+
+    async function conflictThen(choice: 'overwrite' | 'reload' | null) {
+      const ask = dialogs.ask;
+      ask.mockImplementation(async () => ({ choice, text: '' }));
+      setup(REVISED, compile());
+      (workbench as Record<string, unknown>)['currentSource'] = vi.fn(() => SCRIPT);
+      (workbench as Record<string, unknown>)['replaceSource'] = vi.fn();
+      const mine: ScriptDraft = {
+        source: `${SCRIPT}// mine`,
+        inputs: { len: 30 },
+        executionPolicy: 'Direct',
+      };
+      const done = cmp.saveScript(7, mine);
+      await tick();
+      http.expectOne(`${BASE}/strategy/7/script`).flush({
+        status: false,
+        data: null,
+        message: 'changed since it was loaded',
+        responseCode: '-409',
+      });
+      await tick();
+      http.expectOne(`${BASE}/strategy/7`).flush({
+        status: true,
+        data: {
+          ...STRATEGY,
+          scriptSource: `${SCRIPT}// theirs`,
+          scriptInputs: {},
+          scriptRevision: 'r9',
+        },
+        message: null,
+        responseCode: '00',
+      });
+      await tick();
+      return { ask, done };
+    }
+
+    it('a stale save compares mine with theirs; "save over it" resends on their revision', async () => {
+      const { ask, done } = await conflictThen('overwrite');
+      await tick();
+      const opts = (
+        ask.mock.calls[0] as unknown as [{ compare: { before: string; after: string } }]
+      )[0];
+      expect(opts.compare.before).toContain('// theirs');
+      expect(opts.compare.after).toContain('// mine');
+      const retry = http.expectOne(`${BASE}/strategy/7/script`);
+      expect(retry.request.body.expectedScriptRevision).toBe('r9');
+      retry.flush(ok('r10'));
+      expect(await done).toBe(true);
+    });
+
+    it('"load the saved script" replaces the draft and does not save', async () => {
+      const { done } = await conflictThen('reload');
+      expect(await done).toBe(false);
+      expect(draft().source).toContain('// theirs');
+      expect(cmp.base().revision).toBe('r9');
+      expect(cmp.message()).toContain('Loaded the saved script');
+      http.verify();
+    });
+
+    it('keeping on editing saves nothing and says why', async () => {
+      const { done } = await conflictThen(null);
+      expect(await done).toBe(false);
+      expect(cmp.message()).toContain('changed since you opened it');
+      http.verify();
+    });
+  });
+
+  describe('PE-09 — a script without a stop on live bindings', () => {
+    const PS9002 = {
+      code: 'PS9002',
+      severity: 'warning' as const,
+      message: 'Live accounts require a stop-loss',
+      line: 3,
+      column: 5,
+      endLine: 3,
+      endColumn: 9,
+    };
+
+    it('asks before saving, and saves nothing when declined', async () => {
+      const confirm = dialogs.confirm;
+      setup(STRATEGY, compile({ diagnostics: [PS9002] }));
+      await cmp.prepareSubmit();
+      const done = cmp.saveScript(7);
+      await tick();
+      http.expectOne(`${BASE}/strategy/7/account-bindings`).flush({
+        status: true,
+        data: [{ tradingAccountId: 3, accountName: 'Demo 1', lotMultiplier: 1, isEnabled: true }],
+        message: null,
+        responseCode: '00',
+      });
+      expect(await done).toBe(false);
+      expect(confirm).toHaveBeenCalled();
+      expect(cmp.message()).toContain('Add a protective stop');
+      http.verify();
+    });
+
+    it('saves without asking when no account is bound', async () => {
+      const confirm = dialogs.confirm;
+      setup(STRATEGY, compile({ diagnostics: [PS9002] }));
+      await cmp.prepareSubmit();
+      const done = cmp.saveScript(7);
+      await tick();
+      http
+        .expectOne(`${BASE}/strategy/7/account-bindings`)
+        .flush({ status: true, data: [], message: null, responseCode: '00' });
+      await tick();
+      http
+        .expectOne(`${BASE}/strategy/7/script`)
+        .flush({
+          status: true,
+          data: { scriptRevision: 'x' },
+          message: 'Saved',
+          responseCode: '00',
+        });
+      expect(await done).toBe(true);
+      expect(confirm).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('PE-I3 — local draft of an unsaved edit', () => {
+    const KEY = 'lascodia.pine.draft.v1:strategy:7';
+    beforeEach(() => localStorage.clear());
+
+    it('offers a kept draft that differs from the saved script, restores it, and a save clears it', async () => {
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          source: `${SCRIPT}// kept`,
+          inputs: { len: 33 },
+          baseRevision: 'r0',
+          savedAt: Date.now(),
+        }),
+      );
+      setup({ ...STRATEGY, scriptRevision: 'r1' } as unknown as StrategyDto, compile());
+      (workbench as Record<string, unknown>)['replaceSource'] = vi.fn((s: string) =>
+        cmp.setSource(s),
+      );
+      (cmp as unknown as { offerLocalDraft(k: string): void }).offerLocalDraft(KEY);
+      expect(cmp.restorable()?.source).toContain('// kept');
+      expect(cmp.restoreOverNewer()).toBe(true);
+      cmp.restoreLocalDraft();
+      expect(draft().source).toContain('// kept');
+      expect(draft().inputs).toEqual({ len: 33 });
+
+      const done = cmp.saveScript(7);
+      await tick();
+      http
+        .expectOne(`${BASE}/strategy/7/script`)
+        .flush({
+          status: true,
+          data: { scriptRevision: 'r2' },
+          message: 'Saved',
+          responseCode: '00',
+        });
+      expect(await done).toBe(true);
+      expect(localStorage.getItem(KEY)).toBeNull();
+    });
+
+    it('a kept draft equal to the saved script is not offered and is removed', () => {
+      localStorage.setItem(
+        KEY,
+        JSON.stringify({
+          source: SCRIPT,
+          inputs: { len: 20 },
+          baseRevision: null,
+          savedAt: Date.now(),
+        }),
+      );
+      setup(STRATEGY, compile());
+      (cmp as unknown as { offerLocalDraft(k: string): void }).offerLocalDraft(KEY);
+      expect(cmp.restorable()).toBeNull();
+      expect(localStorage.getItem(KEY)).toBeNull();
+    });
+  });
+
   describe('draft bookkeeping', () => {
     it('knows when the script or its inputs differ from the saved strategy', () => {
       setup(STRATEGY, compile());
@@ -202,14 +420,29 @@ describe('ScriptAuthoringComponent', () => {
       expect(cmp.isDirty()).toBe(true);
     });
 
-    it('prunes overrides the compiled script no longer declares, but not on a failed compile', () => {
+    it('PE-04: a background compile never rewrites the overrides — they are cleaned only at save', async () => {
       setup(STRATEGY, compile());
-      draft.set({ ...draft(), inputs: { len: 20, removed: 5 } });
+      draft.set({ ...draft(), inputs: { len: 99, renamedGroup: 5 } });
       cmp.onCompiled(compile({ declaration: null, success: false }));
-      expect(draft().inputs).toEqual({ len: 20, removed: 5 });
       cmp.onCompiled(compile());
-      expect(draft().inputs).toEqual({ len: 20 });
+      // A group renamed mid-typing changes the input ids: the tuned values must survive it.
+      expect(draft().inputs).toEqual({ len: 99, renamedGroup: 5 });
       expect(cmp.shown()?.inputs).toHaveLength(1);
+      // The preview runs with the values as they act on the script…
+      expect(cmp.effectiveInputs()).toEqual({ len: 50, renamedGroup: 5 });
+      // …and the save sends them cleaned.
+      expect((await cmp.prepareSubmit())?.inputs).toEqual({ len: 50 });
+    });
+
+    it('PE-05: stored overrides equal to their defaults do not make the form look edited', () => {
+      // An approved optimization stores every searched input, defaults included.
+      setup({ ...STRATEGY, scriptInputs: { len: 14 } } as unknown as StrategyDto, compile());
+      cmp.onCompiled(compile());
+      expect(cmp.isDirty()).toBe(false);
+      cmp.setInputs({});
+      expect(cmp.isDirty()).toBe(false);
+      cmp.setInputs({ len: 15 });
+      expect(cmp.isDirty()).toBe(true);
     });
 
     it('only allows the two execution policies', () => {
