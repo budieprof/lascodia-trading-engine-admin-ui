@@ -28,6 +28,13 @@ import {
   summarizeNewsBlackout,
   type NewsBlackoutSummary,
 } from '../../script-news-blackout';
+import {
+  backtestBenchmarksOf,
+  formatBenchmarkPct,
+  formatBenchmarkR,
+  summarizeBenchmarks,
+  type BenchmarksView,
+} from '../../backtest-benchmarks';
 import type { ReportTrade } from '@features/scripting/report/strategy-report.model';
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
@@ -443,6 +450,133 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
               </div>
             </div>
           </div>
+        }
+
+        <!-- ── Benchmarks (BT-I10): a script run against holding the instrument with its carry and
+             against its own trades entered at random bars with the same exits. Older and
+             rule-engine runs carry none and show nothing. ───────────────────────────────────── -->
+        @if (benchmarks(); as bm) {
+          <section class="info-card benchmarks" data-testid="benchmarks" aria-label="Benchmarks">
+            <header class="info-head">
+              <h3>Benchmarks</h3>
+              <span class="muted">What the run is measured against</span>
+            </header>
+            <div class="bm-grid">
+              <div class="bm-block" data-testid="bm-hold">
+                <h4>Buy &amp; hold</h4>
+                <dl class="bm-rows">
+                  <div>
+                    <dt>Price return</dt>
+                    <dd
+                      [class.pos]="bm.buyAndHold.pricePct > 0"
+                      [class.neg]="bm.buyAndHold.pricePct < 0"
+                    >
+                      {{ fmtPct(bm.buyAndHold.pricePct) }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>
+                      Carry (swap{{
+                        bm.buyAndHold.nights ? ', ' + bm.buyAndHold.nights + ' nights' : ''
+                      }})
+                    </dt>
+                    <dd>
+                      {{
+                        bm.buyAndHold.carryPct === null
+                          ? 'Not modelled'
+                          : fmtPct(bm.buyAndHold.carryPct)
+                      }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>With carry</dt>
+                    <dd
+                      [class.pos]="(bm.buyAndHold.adjustedPct ?? 0) > 0"
+                      [class.neg]="(bm.buyAndHold.adjustedPct ?? 0) < 0"
+                    >
+                      {{ fmtPct(bm.buyAndHold.adjustedPct) }}
+                    </dd>
+                  </div>
+                  @if (bm.runReturnPct !== null) {
+                    <div>
+                      <dt>This run</dt>
+                      <dd [class.pos]="bm.runReturnPct > 0" [class.neg]="bm.runReturnPct < 0">
+                        {{ fmtPct(bm.runReturnPct) }}
+                      </dd>
+                    </div>
+                  }
+                </dl>
+                @if (bm.buyAndHold.comparison) {
+                  <p class="bm-sentence">{{ bm.buyAndHold.comparison }}</p>
+                }
+              </div>
+              <div class="bm-block" data-testid="bm-random">
+                <h4>Random entries, same exits</h4>
+                @if (bm.random; as rnd) {
+                  <dl class="bm-rows">
+                    <div>
+                      <dt>This run (sum of R)</dt>
+                      <dd
+                        [class.pos]="rnd.view.strategySumR > 0"
+                        [class.neg]="rnd.view.strategySumR < 0"
+                      >
+                        {{ fmtR(rnd.view.strategySumR) }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Random median</dt>
+                      <dd>{{ fmtR(rnd.view.randomMedianSumR) }}</dd>
+                    </div>
+                    <div>
+                      <dt>Random 5th – 95th percentile</dt>
+                      <dd>
+                        {{ fmtR(rnd.view.randomP5SumR) }} to {{ fmtR(rnd.view.randomP95SumR) }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Random runs that did as well</dt>
+                      <dd>{{ (rnd.view.shareAtLeastStrategy * 100).toFixed(1) }}%</dd>
+                    </div>
+                  </dl>
+                  <div
+                    class="bm-strip"
+                    role="img"
+                    [attr.aria-label]="
+                      'Random 5th to 95th percentile ' +
+                      fmtR(rnd.view.randomP5SumR) +
+                      ' to ' +
+                      fmtR(rnd.view.randomP95SumR) +
+                      ', this run ' +
+                      fmtR(rnd.view.strategySumR)
+                    "
+                  >
+                    <span
+                      class="bm-band"
+                      [style.left.%]="rnd.axis.p5"
+                      [style.width.%]="rnd.axis.p95 - rnd.axis.p5"
+                    ></span>
+                    <span class="bm-median" [style.left.%]="rnd.axis.median"></span>
+                    <span
+                      class="bm-run"
+                      [attr.data-tone]="rnd.tone"
+                      [style.left.%]="rnd.axis.run"
+                    ></span>
+                  </div>
+                  <p class="bm-sentence" [attr.data-tone]="rnd.tone">{{ rnd.verdict }}</p>
+                  <p class="bm-detail">{{ rnd.detail }}</p>
+                } @else {
+                  <p class="bm-detail">Not measured for this run (see the note below).</p>
+                }
+              </div>
+            </div>
+            @if (bm.notes.length) {
+              <ul class="bm-notes">
+                @for (n of bm.notes; track $index) {
+                  <li>{{ n }}</li>
+                }
+              </ul>
+            }
+          </section>
         }
 
         <!-- ── Monte Carlo in R (BT-I6): the engine resamples the completed run's R multiples; it
@@ -1065,6 +1199,89 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         line-height: 1.5;
         overflow-wrap: anywhere;
       }
+      .bm-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: var(--space-4);
+      }
+      .bm-block h4 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .bm-rows {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-1);
+        font-size: var(--text-sm);
+      }
+      .bm-rows > div {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-3);
+      }
+      .bm-rows dt {
+        color: var(--text-secondary);
+      }
+      .bm-rows dd {
+        margin: 0;
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--font-semibold);
+      }
+      .bm-rows dd.pos {
+        color: var(--profit);
+      }
+      .bm-rows dd.neg {
+        color: var(--loss);
+      }
+      .bm-strip {
+        position: relative;
+        height: 14px;
+        margin: var(--space-3) 0 var(--space-2);
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+      }
+      .bm-band {
+        position: absolute;
+        top: 3px;
+        bottom: 3px;
+        border-radius: var(--radius-full);
+        background: var(--border);
+      }
+      .bm-median,
+      .bm-run {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 2px;
+        transform: translateX(-1px);
+        background: var(--text-secondary);
+      }
+      .bm-run {
+        width: 4px;
+        transform: translateX(-2px);
+        background: var(--accent);
+      }
+      .bm-run[data-tone='below'] {
+        background: var(--loss);
+      }
+      .bm-sentence {
+        margin: var(--space-2) 0 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+      .bm-detail,
+      .bm-notes {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .bm-notes {
+        margin-top: var(--space-3);
+        padding-left: var(--space-4);
+      }
     `,
   ],
 })
@@ -1091,6 +1308,10 @@ export class BacktestDetailPageComponent implements OnInit {
   );
   /** How a script run modelled the news blackout; null on older and non-script runs. */
   readonly newsBlackout = signal<NewsBlackoutSummary | null>(null);
+  /** A script run's benchmarks (BT-I10); null on older and rule-engine runs. */
+  readonly benchmarks = signal<BenchmarksView | null>(null);
+  protected readonly fmtPct = formatBenchmarkPct;
+  protected readonly fmtR = formatBenchmarkR;
   readonly parseError = signal<string | null>(null);
   /** Set when the run itself could not be fetched (distinct from a payload that parsed badly). */
   readonly loadError = signal<string | null>(null);
@@ -1795,6 +2016,8 @@ export class BacktestDetailPageComponent implements OnInit {
         this.backtest.set(data);
         const blackout = scriptNewsBlackoutOf(data.resultJson);
         this.newsBlackout.set(blackout ? summarizeNewsBlackout(blackout) : null);
+        const bench = backtestBenchmarksOf(data.resultJson);
+        this.benchmarks.set(bench ? summarizeBenchmarks(bench, data.totalReturn ?? null) : null);
         // Script strategies' runs carry a Strategy report, not the DSL BacktestResult.
         const report = extractStrategyReport(data.resultJson);
         this.scriptReport.set(report);

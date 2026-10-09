@@ -169,5 +169,28 @@ describe('BacktestDetailPageComponent (result shape)', () => {
     http.expectOne(RUN_URL).flush(run(JSON.stringify(strategyReportFixture())));
     expect(cmp.scriptReport()).not.toBeNull();
     expect(cmp.newsBlackout()).toBeNull();
+    expect(cmp.benchmarks()).toBeNull();
+  });
+
+  it('shows a script run’s benchmarks against the run’s own return', () => {
+    const result = {
+      report: strategyReportFixture(),
+      Benchmarks: {
+        BuyAndHoldPriceReturnPct: 2,
+        BuyAndHoldCarryPct: 0.5,
+        CarryAdjustedBuyAndHoldReturnPct: 2.5,
+        CarryNights: 260,
+        RandomEntry: null,
+        Notes: ['Random entries: only 7 trades with a stop (need 10).'],
+      },
+    };
+    http.expectOne(RUN_URL).flush(run(JSON.stringify(result)));
+    const bm = cmp.benchmarks()!;
+    expect(bm.runReturnPct).toBe(6.41);
+    expect(bm.buyAndHold.comparison).toContain(
+      '3.91 points more than holding a long with its swap',
+    );
+    expect(bm.random).toBeNull();
+    expect(bm.notes).toEqual(['Random entries: only 7 trades with a stop (need 10).']);
   });
 });
