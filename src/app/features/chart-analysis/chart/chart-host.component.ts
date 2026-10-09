@@ -13,6 +13,7 @@ import {
   viewChild,
   OnDestroy,
 } from '@angular/core';
+import { appearanceKey, applyAppearance, gridVisibility, type ChartAppearance } from './appearance';
 import { ServerClock } from '@core/time/server-clock';
 import { BarCountdownPrimitive, axisLabelHeight } from './bar-countdown-primitive';
 import { countdownText } from './bar-countdown';
@@ -36,6 +37,7 @@ import {
   type ChartOptions,
   type DeepPartial,
   type IChartApi,
+  type IPaneApi,
   type ISeriesApi,
   type Logical,
   type ISeriesMarkersPluginApi,
@@ -86,7 +88,7 @@ import {
   scoredTrendlines,
   type AutoAnalysisSettings,
 } from '../overlays/auto-analysis';
-import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
+import { HiLoSeries, HlcAreaSeries, KagiSeries, PnfSeries, VolCandleSeries } from './custom-series';
 import {
   boxUnit,
   toKagi,
@@ -143,7 +145,7 @@ import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-rend
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
-import { paintLegend, paintTable, placeTable, type LegendRun } from './snapshot';
+import { paintLegend, paintTable, placeTable, stackTables, type LegendRun } from './snapshot';
 import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
@@ -264,6 +266,13 @@ type PriceSeries = ISeriesApi<
 export interface ExternalPane {
   uid: string;
   lines: { title: string; color: string; points: PanePoint[]; precision?: number }[];
+  /**
+   * Where it draws: its own pane below (default), or on the price pane on the price's scale (`price`, CC-I12 compare
+   * overlays — the percent scale rebases each line at the first bar on screen).
+   */
+  target?: 'pane' | 'price';
+  /** Step lines (default: values hold until the next, as policy rates do); false for prices. */
+  stepped?: boolean;
 }
 
 /** An indicator the operator has added to this chart. */
@@ -353,6 +362,9 @@ interface IndicatorSeries {
 }
 
 /** An external pane's line on the chart, kept across ticks (CC-02). */
+/** Uids of the external lines drawn on the price pane, on the price's scale. */
+type PriceExternal = Set<string>;
+
 interface ExternalLineSeries {
   api: ISeriesApi<'Line'>;
   sync: SeriesSync<ValueRow>;
@@ -681,6 +693,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly renkoWicks = input<boolean>(false);
   /** Line break: how many lines a reversal must break (TradingView's default 3). */
   readonly lineBreakLines = input<number>(3);
+  /** Point & Figure: boxes a close must move against a column to start the next one (CC-I10). */
+  readonly pnfReversal = input<number>(3);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
   /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
@@ -708,6 +722,13 @@ export class ChartHostComponent implements OnDestroy {
   readonly dataWindowOpen = input(false);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
+  /** Candle colours, grid lines and background over the theme's palette (CC-I11 chart settings); null: the theme's. */
+  readonly appearance = input<ChartAppearance | null>(null);
+  /**
+   * Where the page's floating legend ends, in px from the top of the container the chart sits in (the page measures
+   * it, `appMeasuredBottom`): the price pane's top-left script tables go below it. Null: no legend.
+   */
+  readonly legendBottom = input<number | null>(null);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
   readonly liveAt = input<number | null>(null);
 
@@ -769,6 +790,13 @@ export class ChartHostComponent implements OnDestroy {
   readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
   /** Zoom/scroll or a pane resize settled — the page auto-saves {@link viewState}. */
   readonly viewChanged = output<void>();
+  /**
+   * The operator moved the crosshair (CC-I5 linked charts): the open (UTC ms) of the bar under it, or null when the
+   * pointer left the chart. Crosshairs set from another chart ({@link syncCrosshair}) are not reported back.
+   */
+  readonly crosshairSync = output<number | null>();
+  /** The operator panned or zoomed (CC-I5 linked charts): the first and last bar on screen (UTC opens). */
+  readonly rangeSync = output<{ fromMs: number; toMs: number }>();
   /** An economic event's flag (or the next-event chip) was clicked: open its reading. */
   readonly eventOpen = output<UpcomingEconomicEvent>();
   /**
@@ -799,6 +827,8 @@ export class ChartHostComponent implements OnDestroy {
   private readonly volumeSync = new SeriesSync<VolumeRow>(null, sameValueRow);
   /** The style the price series was CREATED for (a style change replaces it). */
   private seriesStyle: ChartStyle | null = null;
+  /** The appearance the price series was made with ({@link appearanceKey}): a new one replaces the series. */
+  private seriesLook = '';
   /** The script colours the price rows were built with ({@link adoptRepaintedRows}). */
   private rowsColors: (string | null)[] | null = null;
   /** The bars as plotted, kept in step from the first bar that changed. */
@@ -1096,6 +1126,14 @@ export class ChartHostComponent implements OnDestroy {
     // The Pine scripts' values at the bar (PC-I2): in the data window and the CSV export.
     this.registerValueProvider('scripts', this.scriptValues);
 
+    // The legend grew or shrank: the top-left script tables move with it.
+    effect(() => {
+      this.legendBottom();
+      untracked(() => {
+        if (this.scriptTables().length) this.layoutScriptTables();
+      });
+    });
+
     // Opening the data window fills it at once, for the bar the legend shows.
     effect(() => {
       if (this.dataWindowOpen()) untracked(() => this.emitLegend());
@@ -1106,6 +1144,7 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const el = this.container().nativeElement;
       const dark = this.theme.theme() === 'dark';
+      this.appearance();
       untracked(() => (this.chart ? this.retheme(dark) : this.rebuildChart(el, dark)));
     });
 
@@ -1123,7 +1162,9 @@ export class ChartHostComponent implements OnDestroy {
       this.pipSize();
       this.renkoWicks();
       this.lineBreakLines();
+      this.pnfReversal();
       this.theme.theme();
+      this.appearance();
       untracked(() => this.syncData());
     });
 
@@ -1276,6 +1317,7 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    cancelAnimationFrame(this.rangeSyncFrame);
     clearInterval(this.countdownTimer);
     clearTimeout(this.marginTimer);
     if (this.tailStudiesTimer !== null) clearTimeout(this.tailStudiesTimer);
@@ -1306,6 +1348,9 @@ export class ChartHostComponent implements OnDestroy {
     this.price?.applyOptions({ priceScaleId: side });
     for (const s of this.indicatorSeries)
       if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceScaleId: side });
+    // The compare overlays share the price's scale (CC-I12).
+    for (const uid of this.priceExternal)
+      for (const l of this.externalSeries.get(uid) ?? []) l.api.applyOptions({ priceScaleId: side });
     chart.priceScale(side).applyOptions({
       mode:
         mode === 'log'
@@ -1347,6 +1392,43 @@ export class ChartHostComponent implements OnDestroy {
         dayOf,
       ),
     );
+    this.syncPaneBreaks();
+  }
+
+  /** The session breaks on the panes below the price pane, one renderer per pane (their element tells them apart). */
+  private paneBreaks: { el: HTMLElement | null; pane: IPaneApi<Time>; renderer: SessionBreaksRenderer }[] = [];
+
+  /**
+   * Session breaks across the study and script panes, not only the price pane: a renderer on each pane below it,
+   * drawing the price pane's breaks. Panes come and go with studies and scripts; the renderers follow (nothing is
+   * re-attached while the panes stay the same, so a tick costs a comparison).
+   */
+  private syncPaneBreaks(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const panes = chart.panes().slice(1);
+    const same =
+      panes.length === this.paneBreaks.length &&
+      panes.every((p, i) => p.getHTMLElement() === this.paneBreaks[i].el);
+    if (!same) {
+      for (const b of this.paneBreaks) {
+        try {
+          b.pane.detachPrimitive(b.renderer);
+        } catch {
+          // Its pane went with a study.
+        }
+      }
+      this.paneBreaks = panes.map((pane) => {
+        const renderer = new SessionBreaksRenderer(
+          () => this.chart,
+          () => this.theme.theme() === 'dark',
+        );
+        pane.attachPrimitive(renderer);
+        return { el: pane.getHTMLElement(), pane, renderer };
+      });
+    }
+    const breaks = this.sessionBreaksRenderer.breaks();
+    for (const b of this.paneBreaks) b.renderer.setBreaks(breaks);
   }
 
   /**
@@ -1424,6 +1506,82 @@ export class ChartHostComponent implements OnDestroy {
    */
   visibleWindow(): Bar[] {
     return this.visibleBars(this.bars());
+  }
+
+  // ── Linked charts (CC-I5): crosshair and time range ────────────────────────
+
+  /** The UTC open of the plotted bar at `seconds` (the time scale's, zone-shifted); null when there is none. */
+  private utcAtPlottedSeconds(seconds: number): number | null {
+    const i = this.plottedIndexAtSeconds(seconds);
+    return i === null ? null : (this.plottedUtc[i]?.time ?? null);
+  }
+
+  /** The index of the last plotted bar at or before `seconds`; null before the first. */
+  private plottedIndexAtSeconds(seconds: number): number | null {
+    const bars = this.plotted;
+    let lo = 0;
+    let hi = bars.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (Math.floor(bars[mid].time / 1000) <= seconds) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo > 0 ? lo - 1 : null;
+  }
+
+  /**
+   * Put the crosshair on the bar containing `utcMs` (another chart's crosshair moved), or take it off (null). The
+   * legend follows it as it does the pointer.
+   */
+  syncCrosshair(utcMs: number | null): void {
+    const chart = this.chart;
+    const series = this.price;
+    if (!chart || !series) return;
+    if (utcMs === null) {
+      chart.clearCrosshairPosition();
+      return;
+    }
+    const utc = this.plottedUtc;
+    let lo = 0;
+    let hi = utc.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (utc[mid].time <= utcMs) lo = mid + 1;
+      else hi = mid;
+    }
+    const i = lo - 1;
+    if (i < 0 || !this.plotted[i]) {
+      chart.clearCrosshairPosition();
+      return;
+    }
+    const bar = this.plotted[i];
+    chart.setCrosshairPosition(bar.close, asTime(bar.time), series);
+  }
+
+  /** Set from another chart: the next range changes are that, not the operator's. */
+  private rangeFromSync = false;
+  private rangeSyncFrame = 0;
+
+  /** Report the range on screen to linked charts, once per frame of a pan — not one set from another chart. */
+  private scheduleRangeSync(): void {
+    if (this.rangeFromSync) return;
+    cancelAnimationFrame(this.rangeSyncFrame);
+    this.rangeSyncFrame = requestAnimationFrame(() => {
+      const range = this.chart?.timeScale().getVisibleLogicalRange();
+      const utc = this.plottedUtc;
+      if (!range || utc.length === 0) return;
+      const from = utc[Math.max(0, Math.min(utc.length - 1, Math.floor(range.from)))].time;
+      const to = utc[Math.max(0, Math.min(utc.length - 1, Math.ceil(range.to)))].time;
+      if (to > from) this.rangeSync.emit({ fromMs: from, toMs: to });
+    });
+  }
+
+  /** Show [fromMs, toMs] (UTC) because a linked chart moved there; not reported back. */
+  syncRange(fromMs: number, toMs: number): void {
+    this.rangeFromSync = true;
+    this.setVisibleRange(fromMs, toMs);
+    // The library reports the change on its next frame: the flag holds until the one after.
+    requestAnimationFrame(() => requestAnimationFrame(() => (this.rangeFromSync = false)));
   }
 
   /** The slice of `bars` currently on screen. */
@@ -1705,6 +1863,11 @@ export class ChartHostComponent implements OnDestroy {
     return true;
   }
 
+  /** The palette the chart draws with: the theme's, with the chart's appearance settings over it (CC-I11). */
+  private palette(dark: boolean) {
+    return applyAppearance(this.themePalette(dark), this.appearance());
+  }
+
   /**
    * TradingView's 2026 chart palette.
    *
@@ -1717,7 +1880,7 @@ export class ChartHostComponent implements OnDestroy {
    * line whose axis labels sit on a dark #131722 chip in light mode and a
    * #363A45 chip in dark mode, as TradingView draws them.
    */
-  private palette(dark: boolean) {
+  private themePalette(dark: boolean) {
     return {
       background: dark ? '#0F0F0F' : '#FFFFFF',
       text: dark ? '#DBDBDB' : '#131722',
@@ -1743,13 +1906,14 @@ export class ChartHostComponent implements OnDestroy {
   private retheme(dark: boolean): void {
     if (!this.chart) return;
     const p = this.palette(dark);
+    const g = gridVisibility(this.appearance());
     this.chart.applyOptions({
       layout: {
         background: { type: ColorType.Solid, color: p.background },
         textColor: p.text,
         panes: { separatorColor: p.border, separatorHoverColor: p.border },
       },
-      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      grid: { vertLines: { color: p.grid, visible: g.vert }, horzLines: { color: p.grid, visible: g.horz } },
       rightPriceScale: { borderColor: p.border },
       leftPriceScale: { borderColor: p.border },
       timeScale: { borderColor: p.border },
@@ -1772,9 +1936,12 @@ export class ChartHostComponent implements OnDestroy {
     this.price = null;
     this.volume = null;
     this.markerApi = null;
+    this.paneBreaks = [];
     this.indicatorSeries = [];
     this.externalSeries.clear();
+    this.priceExternal.clear();
     this.seriesStyle = null;
+    this.seriesLook = '';
     this.priceSync.attach(null);
     this.volumeSync.attach(null);
     this.plotter.reset();
@@ -1801,7 +1968,10 @@ export class ChartHostComponent implements OnDestroy {
         attributionLogo: false,
         panes: { separatorColor: p.border, separatorHoverColor: p.border, enableResize: true },
       },
-      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      grid: {
+        vertLines: { color: p.grid, visible: gridVisibility(this.appearance()).vert },
+        horzLines: { color: p.grid, visible: gridVisibility(this.appearance()).horz },
+      },
       rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       leftPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: {
@@ -1861,7 +2031,11 @@ export class ChartHostComponent implements OnDestroy {
           : null;
       this.emitLegend();
       this.updateEventTip(param.point, param.paneIndex);
+      // Only the operator's own moves go to linked charts (a set position has no source event).
+      if (param.sourceEvent && this.crosshairTime !== null)
+        this.crosshairSync.emit(this.utcAtPlottedSeconds(this.crosshairTime));
     });
+    el.addEventListener('mouseleave', () => this.crosshairSync.emit(null));
     // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
     this.chart.subscribeClick((param) => {
       if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
@@ -1916,6 +2090,7 @@ export class ChartHostComponent implements OnDestroy {
       this.scheduleMarginSync();
       // The last-value label moves to the last bar on screen, and takes that bar's colour.
       this.syncLastValueLabel();
+      this.scheduleRangeSync();
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());
@@ -2001,14 +2176,17 @@ export class ChartHostComponent implements OnDestroy {
       ctx.font = cellFont;
       return ctx.measureText(text).width;
     };
+    // Laid out as the chart shows them: tables at one anchor stack one under the other, the top-left
+    // ones below the legend.
     for (const pane of this.scriptTables())
-      for (const table of pane.tables)
-        paintTable(
-          ctx,
-          placeTable(table, pane.width, pane.height, measure),
-          pane.left,
-          BAND + pane.top,
-        );
+      for (const placed of stackTables(
+        pane.tables.filter((t) => t.cells.length > 0).map((t) => placeTable(t, pane.width, pane.height, measure)),
+        pane.tables.filter((t) => t.cells.length > 0).map((t) => String(t.position)),
+        pane.width,
+        pane.height,
+        pane.topLeftOffset,
+      ))
+        paintTable(ctx, placed, pane.left, BAND + pane.top);
 
     paintLegend(ctx, this.legendRuns(p.text), 12, BAND + 8, `12px ${font}`, 18);
     return out;
@@ -2174,8 +2352,11 @@ export class ChartHostComponent implements OnDestroy {
         ? `wicks:${this.renkoWicks()}`
         : style === 'line-break'
           ? `lines:${this.lineBreakLines()}`
-          : '';
-    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}`;
+          : style === 'pnf'
+            ? `reversal:${this.pnfReversal()}`
+            : '';
+    const look = appearanceKey(this.appearance());
+    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}|${look}`;
     // Another of the effect's inputs re-ran it with nothing changed.
     if (raw === this.plotter.raw && key === this.plotKey) return;
 
@@ -2281,7 +2462,7 @@ export class ChartHostComponent implements OnDestroy {
       case 'renko':
         return toRenko(bars, unit, { wicks: this.renkoWicks() });
       case 'pnf':
-        return toPointAndFigure(bars, unit, 3);
+        return toPointAndFigure(bars, unit, this.pnfReversal());
       case 'kagi':
         // The reversal amount is the box: ATR(14) at the default multiplier, TradingView's default.
         return toKagi(bars, unit);
@@ -2323,12 +2504,14 @@ export class ChartHostComponent implements OnDestroy {
    */
   private ensurePriceSeries(style: ChartStyle): boolean {
     const chart = this.chart;
-    if (!chart || (this.price && this.seriesStyle === style)) return false;
+    const look = appearanceKey(this.appearance());
+    if (!chart || (this.price && this.seriesStyle === style && this.seriesLook === look)) return false;
     const old = this.price;
     const next = this.createPriceSeries(chart, style);
     next.applyOptions({ priceScaleId: this.scaleSide() });
     this.price = next;
     this.seriesStyle = style;
+    this.seriesLook = look;
     this.priceSync.attach(next as unknown as SyncTarget<PriceRow>);
     // Added before the old one goes, so pane 0 is never empty in between (CC-03); just above the
     // volume overlay, so studies draw over the candles as TradingView draws them.
@@ -2359,10 +2542,18 @@ export class ChartHostComponent implements OnDestroy {
       priceLineWidth: 1 as const,
     };
     switch (style) {
-      case 'line':
+      case 'pnf':
       case 'kagi':
+        // X / O columns on the box grid, and Kagi's thick / thin line (custom-series.ts, CC-I10).
+        return chart.addCustomSeries(style === 'pnf' ? new PnfSeries() : new KagiSeries(), {
+          upColor: p.up,
+          downColor: p.down,
+          priceFormat,
+          ...lastPrice,
+        });
+      case 'line':
         return chart.addSeries(LineSeries, {
-          color: style === 'kagi' ? '#787B86' : p.line,
+          color: p.line,
           lineWidth: 2,
           priceFormat,
           ...lastPrice,
@@ -2753,8 +2944,9 @@ export class ChartHostComponent implements OnDestroy {
       if (target.fill) this.writeFills(target.fill, def, computed);
     }
 
-    // Drawings in a study's pane follow its series when they are made again.
+    // Drawings in a study's pane follow its series when they are made again; session breaks reach a new pane.
     this.controller.rebindPanes();
+    this.syncPaneBreaks();
     this.emitLegend();
   }
 
@@ -3081,6 +3273,7 @@ export class ChartHostComponent implements OnDestroy {
 
   /** External panes' lines by pane uid: made once, kept across ticks (CC-02). */
   private readonly externalSeries = new Map<string, ExternalLineSeries[]>();
+  private readonly priceExternal: PriceExternal = new Set();
 
   /**
    * The fundamentals panes. A pane is made when its study arrives and removed when it goes; its
@@ -3094,7 +3287,9 @@ export class ChartHostComponent implements OnDestroy {
     const byUid = new Map(panes.map((p) => [p.uid, p]));
     for (const [uid, lines] of [...this.externalSeries]) {
       const pane = byUid.get(uid);
-      if (pane && pane.lines.length === lines.length) continue;
+      if (pane && pane.lines.length === lines.length && (pane.target === 'price') === this.priceExternal.has(uid))
+        continue;
+      this.priceExternal.delete(uid);
       for (const l of lines) {
         try {
           chart.removeSeries(l.api);
@@ -3107,7 +3302,9 @@ export class ChartHostComponent implements OnDestroy {
     for (const pane of panes) {
       let lines = this.externalSeries.get(pane.uid);
       if (!lines) {
-        const paneIndex = chart.panes().length;
+        const onPrice = pane.target === 'price';
+        const paneIndex = onPrice ? 0 : chart.panes().length;
+        if (onPrice) this.priceExternal.add(pane.uid);
         lines = pane.lines.map((line) => {
           const api = chart.addSeries(
             LineSeries,
@@ -3115,9 +3312,10 @@ export class ChartHostComponent implements OnDestroy {
               color: line.color,
               lineWidth: 2,
               // Policy rates, swaps and roll-ups are step functions: a value holds until the next.
-              lineType: LineType.WithSteps,
+              lineType: pane.stepped === false ? LineType.Simple : LineType.WithSteps,
               priceLineVisible: false,
               title: line.title,
+              ...(onPrice ? { priceScaleId: this.scaleSide() } : {}),
               priceFormat: {
                 type: 'price',
                 precision: line.precision ?? 2,
@@ -3248,11 +3446,13 @@ export class ChartHostComponent implements OnDestroy {
         return r ? r.top - host.top : 0;
       };
       // The top-left corner's tables go below what sits there: the page's legend over the price
-      // pane (its OHLC line, studies and overlay scripts' status lines), a pane script's status line.
-      const legend = this.hostEl.nativeElement.parentElement?.querySelector(':scope > .legend');
-      const legendBottom = legend
-        ? Math.max(0, legend.getBoundingClientRect().bottom - host.top - topOf(0))
-        : 0;
+      // pane (its OHLC line, studies and overlay scripts' status lines) — as far down as the page
+      // says it reaches (`legendBottom`) — and a pane script's status line.
+      const legendEnd = this.legendBottom();
+      const legendBottom =
+        legendEnd === null
+          ? 0
+          : Math.max(0, legendEnd - (this.hostEl.nativeElement as HTMLElement).offsetTop - topOf(0));
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
         if (!panes[index]) continue;
@@ -3268,6 +3468,8 @@ export class ChartHostComponent implements OnDestroy {
           topLeftOffset: index === 0 ? legendBottom : scriptPanes.has(index) ? 22 : 0,
         });
       }
+      // Script panes take the session breaks too.
+      this.syncPaneBreaks();
       this.scriptTables.set(out);
       // Once the tables are on screen: room for them under the top of their panes.
       requestAnimationFrame(() => this.reserveTableMargins());
@@ -3278,15 +3480,14 @@ export class ChartHostComponent implements OnDestroy {
       if (tops.size !== before.size || [...tops].some(([i, t]) => before.get(i) !== t))
         this.scriptPaneTops.set(tops);
       if (this.scriptRowLeft() !== left + 8) this.scriptRowLeft.set(left + 8);
-      // Pane separators can be dragged with no chart event; watch the pane rows themselves — and the
-      // legend, whose height moves the top-left tables.
+      // Pane separators can be dragged with no chart event; watch the pane rows themselves. (The
+      // legend's height arrives as `legendBottom`.)
       this.paneObserver?.disconnect();
       this.paneObserver ??= new ResizeObserver(() => this.layoutScriptTables());
       for (const p of panes) {
         const row = p.getHTMLElement();
         if (row) this.paneObserver.observe(row);
       }
-      if (legend) this.paneObserver.observe(legend);
     });
   }
 

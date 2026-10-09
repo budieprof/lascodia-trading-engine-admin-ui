@@ -74,6 +74,7 @@ function page(runs: ChartScriptRun[] = []) {
     barsFor: signal(null),
     replayActive: signal(false),
     displayBars: signal([]),
+    replayClosedHead: signal(null),
     replayHead: signal(null),
     serverClock: { now: () => Date.now() },
     chartScripts: { runOnChart },

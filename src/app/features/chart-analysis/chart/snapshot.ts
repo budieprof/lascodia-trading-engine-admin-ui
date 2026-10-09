@@ -106,6 +106,58 @@ export function placeTable(
   };
 }
 
+/** Px between a pane's edge and its tables, and between tables stacked at one anchor — as the chart's overlay. */
+export const TABLE_EDGE = 4;
+export const TABLE_GAP = 4;
+
+/**
+ * Lay a pane's placed tables out as the chart shows them (the Pine table overlay): tables at the same anchor stack
+ * one under the other in the order they come, `TABLE_GAP` apart, the stack aligned to its corner or centre and
+ * `TABLE_EDGE` from the pane's edges; the top-left stack starts `topLeftOffset` lower (the legend or a status line is
+ * there). `positions[i]` is `tables[i]`'s Pine position. Returns the tables moved, in their input order.
+ */
+export function stackTables(
+  tables: readonly PlacedTable[],
+  positions: readonly string[],
+  width: number,
+  height: number,
+  topLeftOffset = 0,
+): PlacedTable[] {
+  const groups = new Map<string, number[]>();
+  tables.forEach((_, i) => {
+    const pos = positions[i] ?? 'top_right';
+    groups.set(pos, [...(groups.get(pos) ?? []), i]);
+  });
+  const out = [...tables];
+  for (const [pos, members] of groups) {
+    const groupW = Math.max(...members.map((i) => tables[i].w));
+    const groupH = members.reduce((h, i) => h + tables[i].h, 0) + TABLE_GAP * (members.length - 1);
+    const gx = pos.endsWith('right')
+      ? width - TABLE_EDGE - groupW
+      : pos.endsWith('center')
+        ? (width - groupW) / 2
+        : TABLE_EDGE;
+    let y = pos.startsWith('bottom')
+      ? height - TABLE_EDGE - groupH
+      : pos.startsWith('middle')
+        ? (height - groupH) / 2
+        : TABLE_EDGE + (pos === 'top_left' ? topLeftOffset : 0);
+    for (const i of members) {
+      const t = tables[i];
+      const x = pos.endsWith('right') ? gx + groupW - t.w : pos.endsWith('center') ? gx + (groupW - t.w) / 2 : gx;
+      out[i] = moveTable(t, x, y);
+      y += t.h + TABLE_GAP;
+    }
+  }
+  return out;
+}
+
+function moveTable(t: PlacedTable, x: number, y: number): PlacedTable {
+  const dx = x - t.x;
+  const dy = y - t.y;
+  return { ...t, x, y, cells: t.cells.map((c) => ({ ...c, x: c.x + dx, y: c.y + dy })) };
+}
+
 /** Paint a placed table at an offset (the pane's position on the snapshot). */
 export function paintTable(
   ctx: CanvasRenderingContext2D,

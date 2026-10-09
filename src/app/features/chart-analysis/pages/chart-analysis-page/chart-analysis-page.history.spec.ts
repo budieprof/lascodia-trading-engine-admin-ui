@@ -3,6 +3,7 @@ import { signal } from '@angular/core';
 
 import type { Bar } from '../../datafeed/candle-feed.service';
 import { ChartAnalysisPageComponent } from './chart-analysis-page.component';
+import { ReplayController } from '../../replay/replay-controller';
 
 // Scroll-back paging (`loadOlder`) run against just the state it touches, as the page's other
 // specs do: the replay head keeps its bar when history is prepended (CC-11), and an empty page
@@ -21,14 +22,23 @@ function setup(older: Bar[]) {
   };
   const host = { historyLoaded: vi.fn() };
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
+  const bars = signal(range(100, 200));
+  const replay = new ReplayController({
+    bars,
+    resolution: () => '60',
+    digits: () => 5,
+    symbolFacts: () => ({ pipSize: 0.0001, contractSize: 100_000 }),
+    fetchIntrabar: () => Promise.resolve([]),
+  });
   Object.assign(p, {
     symbol: signal('EURUSD'),
     resolution: signal('60'),
-    bars: signal(range(100, 200)),
+    bars,
     barsFor: signal({ symbol: 'EURUSD', resolution: '60' }),
     loading: signal(false),
-    replayActive: signal(false),
-    replayIndex: signal(0),
+    replay,
+    replayActive: replay.active,
+    replayIndex: replay.index,
     historyStart: signal<string | null>(null),
     compareBars: signal({}),
     compareRequest: 0,
@@ -52,8 +62,8 @@ describe('chart page — scroll-back', () => {
 
   it('keeps the replay head on its bar when history is prepended (CC-11)', async () => {
     const { p } = setup(range(40, 100));
-    p.replayActive.set(true);
-    p.replayIndex.set(70); // the 70th bar: time 169 h
+    p.replay.intrabar.set(false);
+    p.replay.start(70); // the 70th bar: time 169 h
     const before = p.bars()[69].time;
     await p.loadOlder();
     expect(p.replayIndex()).toBe(130);

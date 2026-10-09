@@ -17,6 +17,8 @@ import { ZonedDatePipe } from '../zoned-time';
 import { ChartPanelsService } from './chart-panels.service';
 import { captureChart } from './chart-snapshot';
 import type { ChartNote, NoteBias } from './chart-panels.types';
+import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
+import { confirmDelete } from '../../dialog/chart-dialogs';
 
 /**
  * Notes and trade ideas on the chart (SP-I9), stored in the engine (`chart-note`), private to the operator: text, an
@@ -297,6 +299,7 @@ export class NotesPanelComponent {
   private readonly api = inject(ChartPanelsService);
   private readonly workspace = inject(ChartWorkspaceSync);
   private readonly host = inject(ElementRef<HTMLElement>);
+  private readonly dialogs = inject(ScriptDialogService);
 
   readonly symbol = input.required<string>();
   /** The chart's resolution label ("1h", "1D"), stored with a new note. */
@@ -414,7 +417,7 @@ export class NotesPanelComponent {
   }
 
   async remove(n: ChartNote): Promise<void> {
-    if (!confirm(`Delete the note "${n.title || this.firstLine(n.text)}"?`)) return;
+    if (!(await confirmDelete(this.dialogs, `the note “${n.title || this.firstLine(n.text)}”`))) return;
     try {
       await firstValueFrom(this.api.deleteNote(n.id));
       this.notes.update((list) => list.filter((x) => x.id !== n.id));

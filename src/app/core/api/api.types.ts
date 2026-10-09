@@ -862,6 +862,8 @@ export interface CandleDto {
   volume: number;
   timestamp: string;
   isClosed: boolean;
+  /** The spread the broker recorded for the bar, MT5 points; null/absent for bars written without one. */
+  spreadPoints?: number | null;
 }
 
 /** A change's end-to-end outcome scorecard row (algo-engineer agent, ADR-0020). */
