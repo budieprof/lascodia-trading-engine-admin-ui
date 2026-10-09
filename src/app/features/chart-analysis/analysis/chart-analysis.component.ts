@@ -577,7 +577,8 @@ export class ChartAnalysisComponent {
   readonly running = signal<AnalysisRequestMode | null>(null);
   readonly error = signal<string | null>(null);
   readonly showPlan = signal(true);
-  readonly showWatches = signal(true);
+  /** Watch / monitor marks and lines on the chart — two-way with the page's overlays menu (saved with the layout). */
+  readonly showWatches = model(true);
   readonly monitors = signal<ChartAnalysisMonitors | null>(null);
   readonly watchError = signal<string | null>(null);
 
