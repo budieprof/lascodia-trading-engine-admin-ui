@@ -58,8 +58,17 @@
 				header Content-Type application/problem+json*
 			}
 		}
-		reverse_proxy localhost:5081 {
-			header_up -Accept-Encoding
+		# SS-I4 (chart + Pine program, 2026-10-09): the scripting API and its hub run in the research process (Pine CPU
+		# off the money path; research publishes 127.0.0.1:5083). strategy/{id}/script/* stays on api (the live sessions
+		# live there). Roll back: put back the single `reverse_proxy localhost:5081 { header_up -Accept-Encoding }`.
+		@scripting path /api/v1/lascodia-trading-engine/scripting/* /api/hubs/scripting /api/hubs/scripting/*
+		route {
+			reverse_proxy @scripting localhost:5083 {
+				header_up -Accept-Encoding
+			}
+			reverse_proxy localhost:5081 {
+				header_up -Accept-Encoding
+			}
 		}
 	}
 
