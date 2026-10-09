@@ -1,4 +1,4 @@
-import { PairIconComponent, pairFlags } from './pair-icon.component';
+import { PairIconComponent, pairFlags, pairName } from './pair-icon.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -122,6 +122,14 @@ type PairMeta = CurrencyPairDto & { assetClass?: string | null };
  * list, flagged lists and server-side hotlists, live ticks with the changed digits coloured up/down, colour flags, drag-to-reorder, ↑/↓ to
  * walk the chart through the list, Delete with Undo, an alert from any row, and the selected symbol's details beneath.
  */
+/** A quote's update time as "22:22 GMT+1" in the viewer's zone; null when unparseable. */
+function lastUpdateLabel(utc: string): string | null {
+  const ms = Date.parse(utc);
+  if (!Number.isFinite(ms)) return null;
+  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' })
+    .format(ms);
+}
+
 @Component({
   selector: 'app-watchlist-panel',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -366,7 +374,7 @@ export class WatchlistPanelComponent {
     const legs = this.legs(sym);
     return {
       symbol: sym,
-      name: pair ? `${pair.baseCurrency} / ${pair.quoteCurrency}` : sym,
+      name: pair ? (pairName(pair.baseCurrency, pair.quoteCurrency) ?? `${pair.baseCurrency} / ${pair.quoteCurrency}`) : sym,
       // From the engine's asset class (SP-11): it said "Forex" for gold and indices alike.
       kind: instrumentKind(pair?.assetClass, sym, legs),
       quote: pair?.quoteCurrency ?? '',
@@ -377,6 +385,8 @@ export class WatchlistPanelComponent {
       prevClose: q?.prevClose ?? null,
       marketOpen: q?.marketOpen ?? false,
       tradingDay: q?.tradingDay ?? null,
+      /** "22:22 GMT+1": when the quote was last updated, in the viewer's zone (TradingView's "Last update at"). */
+      asOf: q?.asOfUtc ? lastUpdateLabel(q.asOfUtc) : null,
     };
   });
 

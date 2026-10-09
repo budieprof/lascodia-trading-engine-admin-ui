@@ -472,7 +472,8 @@
 <div class="wl-resizer" (pointerdown)="startResize($event)" title="Drag to resize"></div>
 
 @let d = detail();
-@let dp = split(d.row.last, d.row.digits);
+@let dt = tick()[d.symbol];
+@let dp = tickParts(d.row.last, d.row.digits, dt?.prev ?? null);
 <section class="wl-details" aria-label="Symbol details">
   <div class="wl-d-head">
     @if (pairFlags(d.symbol)) {
@@ -482,30 +483,32 @@
     }
     <strong>{{ d.symbol }}</strong>
   </div>
-  <div class="muted wl-d-name" data-testid="watchlist-detail-kind">{{ d.name }} · {{ d.kind }}</div>
+  <div class="wl-d-name" data-testid="watchlist-detail-kind">{{ d.name }}<span class="muted"> · {{ d.kind }}</span></div>
   <div class="wl-d-price">
-    <span class="wl-d-last"
-      >{{ dp[0] }}<sup>{{ dp[1] }}</sup></span
+    <span class="wl-d-last" [class.up]="dt?.dir === 'up'" [class.down]="dt?.dir === 'down'"
+      >{{ dp.head }}<span class="wl-chg">{{ dp.changed }}</span><sup [class.wl-chg]="dp.pipChanged">{{ dp.pip }}</sup></span
     >
     <span class="muted wl-d-ccy">{{ d.quote }}</span>
-  </div>
-  <div
-    class="wl-d-change"
-    [class.up]="(d.row.change ?? 0) > 0"
-    [class.down]="(d.row.change ?? 0) < 0"
-  >
-    @if (d.row.change !== null) {
-      {{
-        (d.row.change > 0 ? '+' : '') +
-          (d.row.change | number: '1.' + d.row.digits + '-' + d.row.digits)
-      }}
-      {{ (d.row.changePct! > 0 ? '+' : '') + (d.row.changePct | number: '1.2-2') }}%
-    }
+    <span class="wl-d-change" [class.up]="(d.row.change ?? 0) > 0" [class.down]="(d.row.change ?? 0) < 0">
+      @if (d.row.change !== null) {
+        {{
+          (d.row.change > 0 ? '+' : '') +
+            (d.row.change | number: '1.' + d.row.digits + '-' + d.row.digits)
+        }}
+        {{ (d.row.changePct! > 0 ? '+' : '') + (d.row.changePct | number: '1.2-2') }}%
+      }
+    </span>
   </div>
   <div class="wl-d-status" [class.open]="d.marketOpen">
     <span class="wl-dot" [class.open]="d.marketOpen"></span>
     {{ d.marketOpen ? 'Market open' : 'Market closed' }}
-    @if (d.tradingDay) {
+    @if (d.asOf) {
+      <span
+        class="muted"
+        [title]="d.tradingDay ? 'Day figures are for the trading day ' + d.tradingDay + ' (17:00 New York for FX)' : ''"
+        >· Last update at {{ d.asOf }}</span
+      >
+    } @else if (d.tradingDay) {
       <span class="muted" title="The trading day the day figures describe (17:00 New York for FX)"
         >· day {{ d.tradingDay }}</span
       >
