@@ -240,11 +240,8 @@ export class PineChartRenderer {
         close: b.close[i],
       };
       const color = b.colors?.[i];
-      if (color) {
-        d.color = color;
-        d.borderColor = color;
-        d.wickColor = color;
-      }
+      // barcolor() paints the body only; border and wick keep the series' up/down colours (TradingView).
+      if (color) d.color = color;
       data[i] = d;
     }
     const precision = model.pricePrecision;
