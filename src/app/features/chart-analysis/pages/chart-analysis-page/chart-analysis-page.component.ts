@@ -14,7 +14,7 @@ import {
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
@@ -435,7 +435,6 @@ function loadWatchlistOpen(): boolean {
   imports: [
     FormsModule,
     DecimalPipe,
-    DatePipe,
     ChartHostComponent,
     DataWindowComponent,
     IndicatorsDialogComponent,
