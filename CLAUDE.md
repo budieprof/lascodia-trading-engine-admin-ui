@@ -133,7 +133,9 @@ localhost rather than a blank page.
 - SignalR: one shared connection to `/api/hubs/trading`
   ([src/app/core/realtime/realtime.service.ts](src/app/core/realtime/realtime.service.ts)).
   Events are dispatched by method name — a server event not in `REALTIME_EVENTS` never reaches the
-  UI, which is the usual reason "the page doesn't update live".
+  UI, which is the usual reason "the page doesn't update live". Warm chart sessions' `scriptFrame` comes on
+  a SECOND hub, `/api/hubs/scripting` (`core/realtime/scripting-realtime.service.ts`, connected only while a
+  session is subscribed): the engine may serve `scripting/*` from another process (SS-I4).
 - When an engine change crosses the wire, re-run the engine repo's
   `integration-tests/contract-test`.
 
@@ -213,6 +215,16 @@ so a new built-in needs no console change.
   virtualised List of trades the chart's fill arrows select in, deep backtest for engine strategies) and Pine
   Logs / trace / profiler — the last session-only. Named input templates are a synced chart pref
   (`lascodia.chart.scriptInputTemplates.v1`).
+- **Live scripts are warm, and say what is not final** (PC-I1, PC-I9). An indicator on the live standard
+  chart is run with `keepWarm`; the engine then executes only new candles and quotes and pushes `scriptFrame`
+  (≤1/s), which `warm-sessions.ts` folds into the run on the chart (`mergeOutputs`, the replay merge) — no run
+  per tick while the scripting hub is connected; a gap resyncs (`GET scripting/sessions/{id}/frame`), a
+  reset runs it again. `realtime-truth.ts` fades whatever sits on the forming bar, marks drawings made there
+  provisional (tooltip), and flags a plot that changed on an already-closed bar ("Repaints" on the chip).
+- **Alerts on chart scripts** (SS-I1): the chip's bell opens `app-chart-script-alert-form` (a saved "My
+  scripts" script only — the engine snapshots it); the alert manager's "Script alerts" tab lists, re-arms,
+  pauses and logs them; their `alertFired` (`source: 'chart-script'`) pops up only after
+  `GET scripting/alerts/{id}` confirms the owner.
 
 ## Gotchas that have cost real time
 

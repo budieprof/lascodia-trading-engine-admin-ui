@@ -102,14 +102,20 @@ export function releaseStatus(
   return e.actual ? `released ${agoText}` : ago < 60 ? 'due now — no actual yet' : `no actual recorded (${agoText})`;
 }
 
-/** Refresh every 30 s instead of 5 min while a release is imminent or just due without its actual (no push exists). */
+/**
+ * Refresh every 30 s instead of 5 min while a release is imminent or just due without its actual — only while the
+ * `economicEventActualRecorded` push is not reaching the pane (EV-1: it brings the actual the moment it is stored).
+ */
 export const FAST_REFRESH_MS = 30_000;
 export const SLOW_REFRESH_MS = 300_000;
 
 export function refreshInterval(
   events: readonly Pick<UpcomingEconomicEvent, 'scheduledAt' | 'actual'>[],
   nowMs: number,
+  /** The push is connected: it delivers the actuals, the slow re-read is only the backstop. */
+  pushLive = false,
 ): number {
+  if (pushLive) return SLOW_REFRESH_MS;
   const hot = events.some((e) => {
     if (e.actual) return false;
     const at = Date.parse(e.scheduledAt);
@@ -148,4 +154,26 @@ export const POST_EVENT_GRACE_MS = 2 * 60_000;
 /** Whether the event has happened (by the clock, as the engine decides it). Pure. */
 export function isEventPast(e: Pick<UpcomingEconomicEvent, 'scheduledAt'>, nowMs: number): boolean {
   return nowMs >= Date.parse(e.scheduledAt) + POST_EVENT_GRACE_MS;
+}
+
+/**
+ * The pane's list with a pushed release (EV-1 `economicEventActualRecorded`) folded in: the row of the same id is
+ * replaced; an event the pane does not list yet is added when it passes the pane's filter (its currencies — empty =
+ * all — and its minimum importance); anything else leaves the list as it is (same array). Pure.
+ */
+export function upsertEvent(
+  events: readonly UpcomingEconomicEvent[],
+  pushed: UpcomingEconomicEvent,
+  filter: { currencies: readonly string[]; minImpact: string },
+): readonly UpcomingEconomicEvent[] {
+  if (!pushed || typeof pushed.id !== 'number') return events;
+  const i = events.findIndex((e) => e.id === pushed.id);
+  if (i >= 0) {
+    const next = [...events];
+    next[i] = { ...events[i], ...pushed };
+    return next;
+  }
+  const ccyOk = !filter.currencies.length || filter.currencies.some((c) => c.toUpperCase() === pushed.currency?.toUpperCase());
+  const impactOk = impactDots(pushed.impact) >= impactDots(filter.minImpact);
+  return ccyOk && impactOk ? [...events, pushed] : events;
 }

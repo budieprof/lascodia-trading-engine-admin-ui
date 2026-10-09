@@ -265,6 +265,16 @@ export interface ScriptRunRequest {
    * otherwise (the engine's default is light).
    */
   theme?: ScriptChartTheme;
+  /**
+   * SS-I2 (scripting API §3c): keep this run warm on the engine — new candles and quotes advance it, its changes are
+   * pushed as `scriptFrame` (`/api/hubs/scripting`), and a later run can ask for a delta. Indicators on a live,
+   * standard chart only (the engine says why in `session.note` otherwise).
+   */
+  keepWarm?: boolean;
+  /** SS-I2: continue this warm session — answered with what changed since {@link sinceBar}. */
+  sessionId?: string;
+  /** SS-I2: the first bar_index the caller needs (with `sessionId`). */
+  sinceBar?: number;
 }
 
 export type ScriptChartTheme = 'light' | 'dark';
@@ -369,6 +379,8 @@ export interface ScriptRunResult {
   profile?: { line: number; executions: number; totalMicros: number }[] | null;
   runtimeError?: ScriptRuntimeError | null;
   elapsedMs?: number;
+  /** SS-I2: the warm session of a run that asked for one (`keepWarm` / `sessionId` / `sinceBar`). */
+  session?: ScriptRunSession | null;
 }
 
 // ── Chart bars on the session grid — POST scripting/chart-bars ────────────
@@ -698,4 +710,52 @@ export interface BacktestRunCompareFields {
   symbolOverride?: string | null;
   timeframeOverride?: string | null;
   equityCurve?: { time: string; equity: number; drawdownPct: number }[] | null;
+}
+
+// ── Warm chart sessions — scripting API §3c (SS-I2, SS-I3) ──────────────────
+
+/** A run's warm session (`session` on the run response). */
+export interface ScriptRunSession {
+  /** Subscribe to `script:{id}` frames on `/api/hubs/scripting`; null when no session is kept. */
+  id: string | null;
+  /** The run is kept warm. */
+  warm: boolean;
+  /** This response is a delta (bars and per-bar outputs from `fromBar`). */
+  delta: boolean;
+  fromBar: number;
+  /** bar_index of the last bar (the forming one when `lastBarForming`). */
+  barIndex: number;
+  lastBarForming: boolean;
+  /** The session's last pushed frame number. */
+  seq: number;
+  /** Why no session is kept, or why the run was full, in plain words. */
+  note?: string | null;
+}
+
+/**
+ * SignalR `scriptFrame` (room `script:{sessionId}`) and `GET scripting/sessions/{id}/frame?sinceSeq=`: what changed in a
+ * warm session, in the replay frame format — keep the bars and per-bar values before `fromBar`, replace everything
+ * from it (drawings, tables, alerts and logs come whole).
+ */
+export interface ScriptSessionFrame {
+  sessionId: string;
+  /** Consecutive per session: a gap means frames were missed (resync with `sinceSeq`). */
+  seq: number;
+  fromBar: number;
+  barIndex: number;
+  lastBarForming: boolean;
+  bars: ScriptRunBar[];
+  outputsDelta?: ScriptOutputs | null;
+  report?: ScriptStrategyReport | null;
+  runtimeError?: ScriptRuntimeError | null;
+  /** The session ended (idle, retired, a runtime error, or the engine reset it): run the script again. */
+  reset: boolean;
+  note?: string | null;
+}
+
+/** `SubscribeScriptSession` on `/api/hubs/scripting`: where the session stands (null for an unknown one). */
+export interface ScriptSessionSubscription {
+  sessionId: string;
+  seq: number;
+  barIndex: number;
 }

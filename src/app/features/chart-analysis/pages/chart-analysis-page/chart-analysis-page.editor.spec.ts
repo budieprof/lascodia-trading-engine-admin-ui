@@ -7,6 +7,7 @@ import type { ChartScriptItem } from '../../scripts/chart-script.service';
 import { ScriptSettings } from '../../scripts/script-settings';
 import { dockStateOf, restoredDock } from '../../workspace/workspace-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
+import { realtimePageState } from './chart-analysis-page.realtime.testing';
 
 // The page's own methods, run against just the state they touch: the component's prototype with
 // the editor's, the runs' and the settings' signals — no template, no chart, no engine. runScript
@@ -38,6 +39,8 @@ function page(runs: ChartScriptRun[]): Page {
   const editorKey = signal<string | null>(null);
   const editorOpen = signal(false);
   Object.assign(p, {
+    // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
+    ...realtimePageState(),
     // The dock's Pine Logs (PC-I6): closed.
     logsKey: signal(null),
     logsFront: signal(false),

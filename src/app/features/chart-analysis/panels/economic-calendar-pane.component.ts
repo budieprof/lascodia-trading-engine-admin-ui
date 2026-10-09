@@ -17,6 +17,8 @@ import {
   type UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ServerClock } from '@core/time/server-clock';
+import { RealtimeService } from '@core/realtime/realtime.service';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   currencyFlag,
   eventCountdown,
@@ -27,6 +29,7 @@ import {
   refreshInterval,
   releaseStatus,
   SLOW_REFRESH_MS,
+  upsertEvent,
 } from './economic-calendar';
 import { ZonedDatePipe, zoneLabel } from './zoned-time';
 
@@ -43,8 +46,9 @@ const HOVER_OPEN_MS = 250;
  * countdown. Hovering (or focusing, or the ⓘ toggle on touch) opens a row's card — the date and time, the release
  * status, the surprise against the forecast; clicking a row opens the event's AI reading (SP-I7).
  *
- * There is no push for new actuals (the engine publishes no event when an actual is recorded), so the list re-reads
- * every 5 minutes, and every 30 seconds while a release is imminent or due without its actual.
+ * A release's actual arrives by push (EV-1: SignalR `economicEventActualRecorded`, the row as this pane lists it) and is
+ * folded into the list in place — its Beat/Miss with it. The list is still re-read every 5 minutes as a backstop, and
+ * every 30 seconds around a release only while the push is not connected.
  */
 @Component({
   selector: 'app-economic-calendar-pane',
@@ -449,6 +453,7 @@ export class EconomicCalendarPaneComponent {
   private readonly calendar = inject(EconomicCalendarService);
   private readonly clock = inject(ServerClock);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly realtime = inject(RealtimeService);
 
   readonly events = signal<UpcomingEconomicEvent[]>([]);
   readonly loading = signal(false);
@@ -476,6 +481,11 @@ export class EconomicCalendarPaneComponent {
       const min = this.minImpact();
       untracked(() => this.load(all ? [] : ccy, min));
     });
+    // EV-1: an actual recorded by the engine lands in its row at once.
+    this.realtime
+      .on<UpcomingEconomicEvent>('economicEventActualRecorded')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((pushed) => this.applyPush(pushed));
     // Countdowns tick each second while the tab is visible.
     const tick = setInterval(() => {
       if (!document.hidden) this.now.set(this.clock.now());
@@ -508,10 +518,23 @@ export class EconomicCalendarPaneComponent {
     this.destroyRef.onDestroy(() => sub.unsubscribe());
   }
 
-  /** The next re-read: soon while a release is imminent or due without its actual, else in 5 minutes. */
+  /** A pushed release: its row updated in place (or added, when it passes this pane's filter). */
+  applyPush(pushed: UpcomingEconomicEvent | null | undefined): void {
+    if (!pushed) return;
+    const all = this.allCurrencies();
+    const next = upsertEvent(this.events(), pushed, {
+      currencies: all ? [] : this.filterCurrencies(),
+      minImpact: this.minImpact(),
+    });
+    if (next !== this.events()) this.events.set([...next]);
+  }
+
+  /** The next re-read: a backstop every 5 minutes; soon around a release only while the push is not connected. */
   private scheduleRefresh(): void {
     if (this.refreshTimer) clearTimeout(this.refreshTimer);
-    const delay = this.error() ? SLOW_REFRESH_MS : refreshInterval(this.events(), this.clock.now());
+    const delay = this.error()
+      ? SLOW_REFRESH_MS
+      : refreshInterval(this.events(), this.clock.now(), this.realtime.isConnected());
     this.refreshTimer = setTimeout(() => {
       this.refreshTimer = null;
       if (document.hidden) {

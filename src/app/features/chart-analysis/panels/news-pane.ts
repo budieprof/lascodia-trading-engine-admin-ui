@@ -79,3 +79,24 @@ export class ArticleFlagsPipe implements PipeTransform {
     return articleFlags(a, currencies ?? []);
   }
 }
+
+/**
+ * SignalR `newsArticleIngested` (EV-1, broadcast): an article is stored WITH its currency labels — the moment a pane
+ * filtered by currency can list it.
+ */
+export interface NewsArticleIngestedPayload {
+  id: number;
+  title: string;
+  source: string;
+  /** The currencies it is labelled for, upper case. */
+  currencies: string[];
+  firstSeenUtc: string;
+  publishedAtUtc: string;
+}
+
+/** Whether a pushed article is one the pane lists: labelled for one of `currencies` (the pair's two). Pure. */
+export function concernsPane(p: Pick<NewsArticleIngestedPayload, 'currencies'> | null | undefined, currencies: readonly string[]): boolean {
+  if (!p || !Array.isArray(p.currencies) || !currencies.length) return false;
+  const wanted = new Set(currencies.map((c) => c.toUpperCase()));
+  return p.currencies.some((c) => wanted.has(String(c).toUpperCase()));
+}

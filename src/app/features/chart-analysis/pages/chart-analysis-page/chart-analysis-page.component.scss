@@ -2053,3 +2053,18 @@ $strip-width: 46px;
     display: flex;
   }
 }
+
+/* "Create alert on <script>" (PC-I14). */
+.script-alert-dialog {
+  padding: 0;
+  border: 1px solid var(--tv-line, #ddd);
+  border-radius: 8px;
+  background: var(--tv-bg, #fff);
+  color: var(--tv-ink, inherit);
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+}
+.script-alert-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.35);
+}

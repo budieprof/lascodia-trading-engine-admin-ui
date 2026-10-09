@@ -36,6 +36,7 @@ import type {
   ScriptPublisherDto,
   ScriptRunRequest,
   ScriptRunResult,
+  ScriptSessionFrame,
   StrategyExportDto,
   StrategyScriptSaveResult,
   TradingViewScriptImportDto,
@@ -517,6 +518,31 @@ export class ScriptingService {
         catchError((err) =>
           throwError(() => toScriptingError(err, 'Importing from TradingView failed.')),
         ),
+      );
+  }
+
+  // ── §3c Warm chart sessions (SS-I2/SS-I3) ───────────────────────────────
+
+  /**
+   * `GET scripting/sessions/{id}/frame?sinceSeq=` — everything a warm chart session changed since frame `sinceSeq` (a
+   * subscriber that missed frames, or reconnected). Rejects with {@link ScriptingApiError}: `-14` when the session ended
+   * (run the script again), `-429` while it is busy.
+   */
+  sessionFrame(sessionId: string, sinceSeq: number): Observable<ScriptSessionFrame> {
+    const path = `/scripting/sessions/${encodeURIComponent(sessionId)}/frame?sinceSeq=${Math.max(0, Math.trunc(sinceSeq))}`;
+    return this.api.get<ResponseData<ScriptSessionFrame>>(path, SILENT).pipe(
+      map((res) => envelopeData(res, 'The chart session could not be read.')),
+      catchError((err) => throwError(() => toScriptingError(err, 'The chart session could not be read.'))),
+    );
+  }
+
+  /** `DELETE scripting/sessions/{id}` — the chart let go of a warm session (best effort: it also expires on its own). */
+  endSession(sessionId: string): Observable<void> {
+    return this.api
+      .delete<ResponseData<boolean>>(`/scripting/sessions/${encodeURIComponent(sessionId)}`, SILENT)
+      .pipe(
+        map(() => undefined),
+        catchError(() => of(undefined)),
       );
   }
 
