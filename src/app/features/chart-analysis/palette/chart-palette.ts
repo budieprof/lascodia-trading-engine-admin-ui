@@ -89,7 +89,7 @@ const VALUE_LABELS: Record<string, Record<string, string>> = {
     calendar: 'Economic calendar',
     datawindow: 'Data window',
   },
-  'chart.setPanel.panel': { watchlist: 'Watchlist', objects: 'Object tree' },
+  'chart.setPanel.panel': { watchlist: 'Watchlist', objects: 'Drawings' },
   'chart.setOverlay.overlay': {
     volumeProfile: 'Volume profile',
     supportResistance: 'Support and resistance',

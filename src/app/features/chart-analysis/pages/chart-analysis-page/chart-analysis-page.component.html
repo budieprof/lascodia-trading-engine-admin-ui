@@ -1171,7 +1171,7 @@
         title="Data window — every value at the crosshair"
         data-testid="datawindow-button"
       >
-        <app-chart-icon name="object-tree" [size]="28" />
+        <app-chart-icon name="data-window" [size]="28" />
       </button>
       <button
         type="button"
@@ -1179,7 +1179,7 @@
         [class.active]="objectTreeOpen()"
         (click)="objectTreeOpen.set(!objectTreeOpen())"
         [disabled]="!drawings.symbolDrawings().length"
-        [title]="'Object tree (' + drawings.symbolDrawings().length + ')'"
+        [title]="'Drawings on this chart (' + drawings.symbolDrawings().length + ')'"
       >
         <app-chart-icon name="object-tree" [size]="28" />
       </button>
