@@ -558,6 +558,17 @@
     <button
       type="button"
       class="tb-btn tb-text"
+      [class.active]="analysisOpen()"
+      (click)="analysisOpen.set(!analysisOpen())"
+      title="AI analysis of this symbol: analyse now or in a chosen direction, its plan on the chart, the watches on this symbol, and Watch this"
+      data-testid="open-analysis"
+    >
+      <app-chart-icon name="structure" [size]="28" /><span class="tb-label">Analyse</span>
+    </button>
+
+    <button
+      type="button"
+      class="tb-btn tb-text"
       [class.active]="ticketOpen()"
       (click)="ticketOpen.set(!ticketOpen())"
       title="Order ticket: a paper or live manual trade on this symbol, checked by the engine before it is sent"
@@ -1282,6 +1293,19 @@
           [accountIds]="accountIdsInScope()"
           (submitted)="onTicketSubmitted()"
           (changed)="onChartTradeChanged()"
+        />
+
+        <!-- SP-I5 (analysis): the analysis panel, the plan / watch lines and the watches' fire markers. -->
+        <app-chart-analysis
+          [host]="host"
+          [symbol]="symbol()"
+          [resolution]="resolution()"
+          [precision]="precision()"
+          [lastPrice]="bars().at(-1)?.close ?? null"
+          [windowFrom]="bars()[0]?.time ?? null"
+          [(open)]="analysisOpen"
+          (markersChange)="analysisMarkers.set($event)"
+          (ticket)="onAnalysisTicket($event)"
         />
 
         <!-- A strategy the operator added replaced the one on the chart: say so, with Undo. -->
