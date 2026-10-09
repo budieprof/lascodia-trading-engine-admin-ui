@@ -34,7 +34,7 @@ export interface ScriptChip {
  * A Pine script's chip: eye, name, its run's state — running, waiting for a busy engine, running
  * to Bar Replay's head, failed (with the line to open the editor at, the library it is in and the
  * call stack on hover), stale (a re-run failed: the chart shows the last run that worked), not
- * available on this chart type — and Settings, source, Strategy Tester and remove.
+ * available on this chart type — and Settings, source, Pine Logs, Strategy Tester and remove.
  */
 @Component({
   selector: 'app-script-chip',
@@ -143,6 +143,18 @@ export interface ScriptChip {
       >
         <app-chart-icon name="pine" [size]="16" />
       </button>
+      @if (c.placed) {
+        <button
+          type="button"
+          class="ic"
+          (click)="logs.emit()"
+          title="Pine Logs"
+          [attr.aria-label]="c.name + ' Pine Logs'"
+          data-testid="script-logs"
+        >
+          <app-chart-icon name="logs" [size]="16" />
+        </button>
+      }
       @if (c.kind === 'strategy' && c.placed) {
         <button type="button" class="ic" (click)="tester.emit()" title="Strategy tester">
           <app-chart-icon name="tester" [size]="16" />
@@ -280,6 +292,8 @@ export class ScriptChipComponent {
   readonly settings = output<void>();
   readonly source = output<void>();
   readonly tester = output<void>();
+  /** Its Pine Logs, trace and profiler in the dock (PC-I6). */
+  readonly logs = output<void>();
   readonly removed = output<void>();
   /** The failure's line: open the editor there (PC-I7). */
   readonly openAt = output<{ line: number; column: number }>();

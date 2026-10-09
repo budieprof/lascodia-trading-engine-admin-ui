@@ -109,6 +109,9 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   const replayActive = signal(false);
   const displayBars = signal<{ time: number }[]>([]);
   Object.assign(p, {
+    // The dock's Pine Logs (PC-I6): closed.
+    logsKey: signal(null),
+    logsFront: signal(false),
     replayActive,
     displayBars,
     replayHead: computed(() => (replayActive() ? (displayBars().at(-1)?.time ?? null) : null)),

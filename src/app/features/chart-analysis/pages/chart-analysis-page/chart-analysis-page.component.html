@@ -1724,6 +1724,7 @@
           (settings)="settings.open(c.key)"
           (source)="openScriptSource(c.key)"
           (tester)="testerOpen.set(!testerOpen())"
+          (logs)="openLogs(c.key)"
           (removed)="removeScriptFromChart(c.key)"
           (openAt)="openScriptAt(c.key, $event)"
         />
@@ -1819,27 +1820,34 @@
   }
   @if (dockTab(); as tab) {
     <section class="bottom-panel">
-      @if (editorOpen() && testerShown()) {
+      @if (dockTabs().length > 1) {
         <nav class="dock-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            [class.active]="tab === 'editor'"
-            (click)="dockPreference.set('editor')"
-          >
-            Pine Editor
-          </button>
-          <button
-            type="button"
-            role="tab"
-            [class.active]="tab === 'tester'"
-            (click)="dockPreference.set('tester')"
-          >
-            Strategy Tester
-          </button>
+          @for (d of dockTabs(); track d.id) {
+            <button
+              type="button"
+              role="tab"
+              [class.active]="tab === d.id"
+              [attr.aria-selected]="tab === d.id"
+              (click)="showDock(d.id)"
+            >
+              {{ d.label }}
+            </button>
+          }
         </nav>
       }
-      @if (tab === 'editor') {
+      @if (tab === 'logs' && logsRun(); as lr) {
+        <!-- Pine Logs, trace and profiler of a script on the chart (PC-I6). -->
+        <app-script-logs-panel
+          [title]="lr.result.title || lr.item.name"
+          [result]="lr.result"
+          [request]="logsRequest()"
+          [source]="lr.item.pineSource ?? null"
+          [timezone]="timezone()"
+          (barJump)="focusBar($event)"
+          (lineJump)="openScriptAt(lr.item.key, { line: $event.line, column: $event.column ?? 1 })"
+          (closed)="closeLogs()"
+        />
+      } @else if (tab === 'editor') {
         <app-script-editor-panel
           [symbol]="symbol()"
           [resolution]="resolution()"

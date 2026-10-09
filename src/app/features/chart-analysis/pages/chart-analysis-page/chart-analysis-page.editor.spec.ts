@@ -38,6 +38,9 @@ function page(runs: ChartScriptRun[]): Page {
   const editorKey = signal<string | null>(null);
   const editorOpen = signal(false);
   Object.assign(p, {
+    // The dock's Pine Logs (PC-I6): closed.
+    logsKey: signal(null),
+    logsFront: signal(false),
     scriptRuns,
     restoringScripts: signal([]),
     runsInFlight: new Map(),

@@ -48,6 +48,9 @@ function page(runs: ChartScriptRun[] = []) {
     (it: ChartScriptItem): Observable<ChartScriptResult> => held.get(it.key) ?? of(resultOf(it)),
   );
   Object.assign(p, {
+    // The dock's Pine Logs (PC-I6): closed.
+    logsKey: signal(null),
+    logsFront: signal(false),
     scriptRuns: signal(runs),
     restoringScripts: signal([]),
     runsInFlight: new Map(),

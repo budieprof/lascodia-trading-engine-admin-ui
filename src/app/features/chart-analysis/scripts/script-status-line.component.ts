@@ -7,7 +7,7 @@ import type { ScriptAction, ScriptStatusRow } from './script-status';
 /**
  * One Pine script's status line (PC-I2), as TradingView draws it at the top of the pane the study
  * is in: its title, its inputs, its values at the bar under the crosshair in their own colours —
- * and, on hover (always on touch), the eye, Settings, source code and remove; a red mark with the
+ * and, on hover (always on touch), the eye, Settings, source code, Pine Logs and remove; a red mark with the
  * failure when its latest run failed ("Line N" opens the editor there).
  */
 @Component({
@@ -78,6 +78,14 @@ import type { ScriptAction, ScriptStatusRow } from './script-status';
           [attr.aria-label]="r.title + ' source code'"
         >
           <app-chart-icon name="pine" [size]="14" />
+        </button>
+        <button
+          type="button"
+          (click)="act({ key: r.key, kind: 'logs' })"
+          title="Pine Logs"
+          [attr.aria-label]="r.title + ' Pine Logs'"
+        >
+          <app-chart-icon name="logs" [size]="14" />
         </button>
         <button
           type="button"

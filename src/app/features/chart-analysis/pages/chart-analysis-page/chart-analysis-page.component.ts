@@ -161,6 +161,10 @@ import {
   StrategyTesterPanelComponent,
   type TradeReveal,
 } from '../../scripts/strategy-tester-panel.component';
+import {
+  ScriptLogsPanelComponent,
+  type LogsRunRequest,
+} from '../../scripts/script-logs-panel.component';
 import { backtestTimeframeOf, type DeepBacktestTarget } from '../../scripts/tester-trades';
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
@@ -499,6 +503,7 @@ function loadWatchlistOpen(): boolean {
     DrawingSettingsDialogComponent,
     WatchlistPanelComponent,
     StrategyTesterPanelComponent,
+    ScriptLogsPanelComponent,
     ScriptEditorPanelComponent,
     ScriptSettingsDialogComponent,
     ChartBottomBarComponent,
@@ -735,7 +740,7 @@ export class ChartAnalysisPageComponent {
       this.testerOpen.set(true);
       // With no strategy on the chart it opens on how to add one, as TradingView's does.
       this.testerPrompt.set(!this.strategyRun());
-      this.dockPreference.set('tester');
+      this.frontDock('tester');
     }
   }
 
@@ -902,6 +907,9 @@ export class ChartAnalysisPageComponent {
         break;
       case 'source':
         this.openScriptSource(a.key);
+        break;
+      case 'logs':
+        this.openLogs(a.key);
         break;
       case 'remove':
         this.removeScriptFromChart(a.key);
@@ -1079,7 +1087,7 @@ export class ChartAnalysisPageComponent {
         });
     }
     this.editorOpen.set(true);
-    this.dockPreference.set('editor');
+    this.frontDock('editor');
   }
   // ── The assistant's view of the Pine Editor (`pine.*` / `strategy.*` page commands) ──
   /** The editor's current text, for the script it shows — kept here so it reads even with the tester in front. */
@@ -1100,7 +1108,7 @@ export class ChartAnalysisPageComponent {
 
   private writeDraft(text: string): void {
     if (!this.editorOpen()) this.openScriptSource(this.editorKey());
-    this.dockPreference.set('editor');
+    this.frontDock('editor');
     this.editorDraft.set({ key: this.editorKey(), text });
     this.assistSource.set({ text, seq: ++this.assistSeq });
   }
@@ -1115,7 +1123,7 @@ export class ChartAnalysisPageComponent {
     writeDraft: (t) => this.writeDraft(t),
     openEditor: () => {
       if (!this.editorOpen()) this.openScriptSource(this.editorKey());
-      this.dockPreference.set('editor');
+      this.frontDock('editor');
     },
     compile: async (source) => {
       const r = await firstValueFrom(
@@ -1147,12 +1155,86 @@ export class ChartAnalysisPageComponent {
 
   /** Which dock tab wins when both the editor and the tester are open. */
   readonly dockPreference = signal<'editor' | 'tester'>('tester');
-  readonly dockTab = computed<'editor' | 'tester' | null>(() => {
+  /**
+   * Pine Logs (PC-I6) is the dock's front tab — opened, or its tab clicked — until the editor or
+   * the tester is brought up ({@link frontDock}). Session only, as is which script's logs it shows:
+   * a layout keeps the editor and the tester, not this.
+   */
+  readonly logsFront = signal(false);
+  /** The script whose Pine Logs, trace and profiler the dock shows; null: closed. */
+  readonly logsKey = signal<string | null>(null);
+  /** That script's run on the chart (the dock closes with it). */
+  readonly logsRun = computed(() => {
+    const key = this.logsKey();
+    return key === null ? null : (this.scriptRuns().find((r) => r.item.key === key) ?? null);
+  });
+  readonly dockTab = computed<'editor' | 'tester' | 'logs' | null>(() => {
     const editor = this.editorOpen();
     const tester = this.testerShown();
+    if (this.logsRun() && (this.logsFront() || (!editor && !tester))) return 'logs';
     if (editor && tester) return this.dockPreference();
     return editor ? 'editor' : tester ? 'tester' : null;
   });
+  /** The dock's tabs: the panels open in it (its strip shows when there are two or more). */
+  readonly dockTabs = computed(() => {
+    const out: { id: 'editor' | 'tester' | 'logs'; label: string }[] = [];
+    if (this.editorOpen()) out.push({ id: 'editor', label: 'Pine Editor' });
+    if (this.testerShown()) out.push({ id: 'tester', label: 'Strategy Tester' });
+    if (this.logsRun()) out.push({ id: 'logs', label: 'Pine Logs' });
+    return out;
+  });
+
+  /** Bring the editor or the tester to the dock's front (Pine Logs goes behind). */
+  frontDock(which: 'editor' | 'tester'): void {
+    this.logsFront.set(false);
+    this.dockPreference.set(which);
+  }
+
+  /** A dock tab clicked. */
+  showDock(id: 'editor' | 'tester' | 'logs'): void {
+    if (id === 'logs') this.logsFront.set(true);
+    else this.frontDock(id);
+  }
+
+  /** A script's Pine Logs, trace and profiler, in the dock's front (its chip or status line). */
+  openLogs(key: string): void {
+    this.logsKey.set(key);
+    this.logsFront.set(true);
+  }
+
+  closeLogs(): void {
+    this.logsKey.set(null);
+    this.logsFront.set(false);
+  }
+
+  /**
+   * How the script whose logs are shown was run, for its trace and profile runs: the same window,
+   * bars and inputs — to the same Bar Replay head when it was run to one.
+   */
+  readonly logsRequest = computed<LogsRunRequest | null>(() => {
+    const r = this.logsRun();
+    if (!r) return null;
+    const until = r.until;
+    const head =
+      until === undefined ? null : (this.bars().find((b) => b.time === until) ?? { time: until });
+    return {
+      item: r.item,
+      symbol: r.symbol,
+      resolution: r.resolution,
+      values: r.values,
+      lastBars: r.requestedBars,
+      opts: {
+        chartType: r.chartType ?? 'standard',
+        toMs: head ? barCloseMs(head, r.resolution) : null,
+      },
+    };
+  });
+
+  /** A bar the Pine Logs point at (UTC ms): panned into view, the zoom kept. */
+  focusBar(timeMs: number): void {
+    const step = resolutionMs(this.resolution()) ?? 3_600_000;
+    this.host()?.panToRange(timeMs - 20 * step, timeMs + 20 * step);
+  }
 
   /** Other symbols' bars for compare studies, keyed by symbol. */
   readonly compareBars = signal<Record<string, Bar[]>>({});
@@ -3575,7 +3657,7 @@ export class ChartAnalysisPageComponent {
       this.settings.loadStoredInputs(item);
       if (!replace && edited === null) {
         this.testerOpen.set(true);
-        this.dockPreference.set('tester');
+        this.frontDock('tester');
         // Added by the operator over another strategy: say so, with the way back.
         const previous = placed.replaced[0];
         if (previous) this.offerUndoReplace(previous, entry);
@@ -3618,6 +3700,8 @@ export class ChartAnalysisPageComponent {
     this.dropFailure(oldKey);
     this.clearWaiting(oldKey);
     if (this.settings.run()?.item.key === oldKey) this.settings.close();
+    // Its Pine Logs follow it onto the edit, as the editor does.
+    if (this.logsKey() === oldKey) this.logsKey.set(newKey);
     if (this.editorKey() === oldKey) {
       this.editorKey.set(newKey);
       const draft = this.editorDraft();
@@ -3743,7 +3827,7 @@ export class ChartAnalysisPageComponent {
   onScriptTradeClick(e: { key: string; trades: readonly number[] }): void {
     if (this.strategyRun()?.item.key !== e.key || !e.trades.length) return;
     this.testerOpen.set(true);
-    this.dockPreference.set('tester');
+    this.frontDock('tester');
     this.testerReveal.set({ numbers: e.trades, seq: (this.testerReveal()?.seq ?? 0) + 1 });
   }
 
@@ -3809,6 +3893,8 @@ export class ChartAnalysisPageComponent {
     this.dropPending(key);
     this.dropFailure(key);
     this.clearWaiting(key);
+    // Its Pine Logs close with it (added back later, it does not reopen them).
+    if (this.logsKey() === key) this.closeLogs();
     this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
   }
 
@@ -4276,7 +4362,7 @@ export class ChartAnalysisPageComponent {
   private applyDock(d: DockView): void {
     this.testerOpen.set(d.testerOpen);
     this.testerPrompt.set(false);
-    this.dockPreference.set(d.preference);
+    this.frontDock(d.preference);
     this.editorOpen.set(false);
     // Removed with its script before the layout was saved: unlinked, the editor still opens blank.
     this.editorCleared.set(d.editorCleared);

@@ -37,7 +37,7 @@ export interface ScriptStatusRow {
 
 /** The actions a status line (or a chip) asks of the page. */
 export type ScriptAction =
-  | { key: string; kind: 'visibility' | 'settings' | 'source' | 'remove' }
+  | { key: string; kind: 'visibility' | 'settings' | 'source' | 'logs' | 'remove' }
   | { key: string; kind: 'openAt'; where: { line: number; column: number } };
 
 /** Kinds whose values a status line prints: what an operator reads a study's set-up by. */
