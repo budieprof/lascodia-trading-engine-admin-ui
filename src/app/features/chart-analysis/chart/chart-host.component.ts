@@ -625,6 +625,8 @@ export class ChartHostComponent implements OnDestroy {
   /** Balance range, value area, stop pools and the events that formed them. */
   readonly showStructure = input<boolean>(false);
   readonly indicators = input<ActiveIndicator[]>([]);
+  /** What a new Long / Short Position tool is filled with (DR-I9): the account's and the symbol's facts. */
+  readonly positionFacts = input<Record<string, unknown> | null>(null);
   readonly precision = input<number>(5);
   /** Armed drawing tool, or null for the cursor. */
   readonly tool = input<DrawingKind | null>(null);
@@ -1832,6 +1834,7 @@ export class ChartHostComponent implements OnDestroy {
           | ISeriesApi<SeriesType>
           | undefined) ?? null,
     };
+    this.controller.positionDefaults = () => this.positionFacts();
     this.controller.onToolComplete = () => this.toolComplete.emit();
     this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
     this.controller.onInlineEdit = (e) => {

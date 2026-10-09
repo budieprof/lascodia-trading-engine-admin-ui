@@ -19,6 +19,7 @@ import { TemplateMenuComponent } from './template-menu.component';
 import { hasFill, hasText, parseColor } from './colors';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import { canAlertOn, fibAlertLevels } from '../drawing-alert';
+import { isPositionTool } from '../position-link';
 
 type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | 'alert' | null;
 
@@ -198,6 +199,18 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
 
       <span class="dt-sep"></span>
 
+      @if (stageable()) {
+        <!-- DR-I9: the position as a manual trade signal — the dialog is filled in; the chart sends nothing. -->
+        <button
+          type="button"
+          class="dt-btn dt-text-btn"
+          title="Stage as a manual signal (it enters the queue as Pending; approval and every risk check apply)"
+          data-testid="dt-stage"
+          (click)="pop.set(null); stageOrder.emit(d.id)"
+        >
+          Stage…
+        </button>
+      }
       @if (alertable()) {
         <!-- DR-I6: an alert on the line / channel / one Fib level, in the alert form pre-filled with its anchors. -->
         <span class="dt-anchor">
@@ -329,6 +342,11 @@ const POS_KEY = 'lascodia.chart.drawing-toolbar.pos.v1';
     .dt-anchor {
       position: relative;
       display: inline-flex;
+    }
+    .dt-text-btn {
+      padding: 0 8px;
+      font-size: 13px;
+      font-weight: 600;
     }
     .dt-btn {
       min-width: 34px;
@@ -466,6 +484,8 @@ export class DrawingToolbarComponent {
   readonly settings = output<string>();
   /** Add an alert on the drawing (DR-I6); `level` for a Fib retracement. */
   readonly addAlert = output<{ id: string; level?: number }>();
+  /** Stage a position tool as a manual trade signal (DR-I9). */
+  readonly stageOrder = output<string>();
 
   readonly pop = signal<Pop>(null);
   readonly pos = signal<{ x: number; y: number } | null>(readPos());
@@ -482,6 +502,8 @@ export class DrawingToolbarComponent {
   /** A line, level, channel or Fib on the price pane: an alert can watch it. */
   readonly alertable = computed(() => canAlertOn(this.drawing()));
   readonly fibLevels = computed(() => fibAlertLevels(this.drawing()));
+  /** A Long / Short Position on the price pane can be staged as a manual signal. */
+  readonly stageable = computed(() => isPositionTool(this.drawing()) && !this.drawing().pane);
 
   /** A Fib asks which level; every other shape has one line (or one channel) to watch. */
   alertClick(): void {

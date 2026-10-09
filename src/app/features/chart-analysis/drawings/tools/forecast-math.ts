@@ -166,6 +166,11 @@ export interface PositionInputs {
   riskUnit: '%' | 'money';
   leverage: number;
   qtyPrecision: number;
+  /**
+   * Account-currency units per unit of the quote currency (DR-I9): 1 when the account is in the quote currency,
+   * 1 / price when it is in the base currency. Absent = 1 (TradingView's: amounts in the quote currency).
+   */
+  quoteRate?: number;
 }
 
 export interface PositionStats {
@@ -194,9 +199,13 @@ export function positionStats(i: PositionInputs): PositionStats {
   const stopDelta = Math.abs(i.entry - i.stop);
   const riskAmount = i.riskUnit === '%' ? (i.accountSize * i.risk) / 100 : i.risk;
   const lot = i.lotSize > 0 ? i.lotSize : 1;
-  const qtyRisk = stopDelta > 0 ? riskAmount / (stopDelta * lot) : 0;
+  // Money moves in the quote currency; the account counts in its own (DR-I9).
+  const rate = i.quoteRate !== undefined && i.quoteRate > 0 ? i.quoteRate : 1;
+  const qtyRisk = stopDelta > 0 ? riskAmount / (stopDelta * lot * rate) : 0;
   const qtyLvg =
-    i.entry > 0 && i.leverage > 0 ? (i.accountSize * i.leverage) / (i.entry * lot) : Infinity;
+    i.entry > 0 && i.leverage > 0
+      ? (i.accountSize * i.leverage) / (i.entry * lot * rate)
+      : Infinity;
   const qty = floorTo(Math.min(qtyRisk, qtyLvg), i.qtyPrecision);
   const base = i.entry !== 0 ? Math.abs(i.entry) : 1;
   return {
@@ -207,20 +216,26 @@ export function positionStats(i: PositionInputs): PositionStats {
     stopDelta,
     targetPct: (targetDelta / base) * 100,
     stopPct: (stopDelta / base) * 100,
-    targetAmount: qty * lot * targetDelta,
-    stopAmount: qty * lot * stopDelta,
+    targetAmount: qty * lot * targetDelta * rate,
+    stopAmount: qty * lot * stopDelta * rate,
   };
 }
 
-/** P&L of the position if closed at `price`. */
+/** P&L of the position if closed at `price` (in the account currency when `quoteRate` is given). */
 export function positionPnl(
   side: 'long' | 'short',
   entry: number,
   price: number,
   qty: number,
   lotSize: number,
+  quoteRate = 1,
 ): number {
-  return (side === 'long' ? price - entry : entry - price) * qty * (lotSize > 0 ? lotSize : 1);
+  return (
+    (side === 'long' ? price - entry : entry - price) *
+    qty *
+    (lotSize > 0 ? lotSize : 1) *
+    (quoteRate > 0 ? quoteRate : 1)
+  );
 }
 
 export type PositionOutcome =

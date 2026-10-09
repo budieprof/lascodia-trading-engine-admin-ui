@@ -215,6 +215,11 @@ import {
   type StudyPick,
 } from '../../indicators/study-settings-dialog.component';
 import { drawingAlertDraft } from '../../drawings/drawing-alert';
+import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
+import {
+  CreateSignalDialogComponent,
+  type SignalPrefill,
+} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
@@ -549,6 +554,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ChartAlertManagerComponent,
     ObjectTreeComponent,
     StudySettingsDialogComponent,
+    CreateSignalDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1609,6 +1615,45 @@ export class ChartAnalysisPageComponent {
   readonly studySettingsStudy = computed(
     () => this.active().find((i) => i.uid === this.studySettingsFor()) ?? null,
   );
+  /**
+   * What a new Long / Short Position is placed with (DR-I9): the account in scope (one account, or the only live
+   * one), its equity and currency, and this symbol's contract size, pip and quote→account rate.
+   */
+  readonly positionFacts = computed(() => {
+    const selected = this.accountScope.selected();
+    const live = this.accountScope.liveAccounts();
+    const account =
+      typeof selected === 'number'
+        ? (this.accountScope.accounts().find((a) => a.id === selected) ?? null)
+        : live.length === 1
+          ? live[0]
+          : null;
+    const facts = positionAccountFacts({
+      account,
+      pair: this.currentPair() ?? null,
+      pipSize: this.pipSize(),
+      price: this.bars().at(-1)?.close ?? 0,
+    });
+    return facts ? { ...facts } : null;
+  });
+  /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
+  readonly stagePrefill = signal<SignalPrefill | null>(null);
+
+  /** "Stage…" on a Long / Short Position: the manual-signal dialog, filled in. The chart sends nothing itself. */
+  stageOrder(id: string): void {
+    const d = this.drawings.allDrawings().find((x) => x.id === id);
+    const prefill = d ? positionOrderPrefill(d) : null;
+    if (prefill) this.stagePrefill.set(prefill);
+  }
+
+  /** The operator created the signal in the dialog: it waits as Pending for approval and the risk checks. */
+  onStagedSignal(id: number): void {
+    this.stagePrefill.set(null);
+    this.notify.success(
+      `Signal #${id} queued as Pending — approval and the risk checks decide whether it trades.`,
+    );
+  }
+
   /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
   readonly studyLabels = computed(() =>
     Object.fromEntries(this.active().map((i) => [i.uid, this.labelFor(i)])),

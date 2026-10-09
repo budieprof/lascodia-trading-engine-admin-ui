@@ -123,6 +123,11 @@ export class DrawingController {
   bars: Bar[] = [];
   /** The study panes (DR-07); without it drawings go on the price pane only. */
   paneHost: DrawingPaneHost | null = null;
+  /**
+   * The account's and the symbol's facts a new Long / Short Position is placed with (DR-I9: equity, account
+   * currency, contract size, pip, quote→account rate); null when the chart knows none.
+   */
+  positionDefaults: (() => Record<string, unknown> | null) | null = null;
   /** Renderers of the study panes that have drawings, by study uid. */
   private readonly panes = new Map<string, PaneBinding>();
 
@@ -903,6 +908,11 @@ export class DrawingController {
     if (hook) {
       if (hook.points) points = hook.points;
       if (hook.options) options = { ...(options ?? {}), ...hook.options };
+    }
+    // A position is sized from the account it would trade on, not a typed account size (DR-I9).
+    if (kind === 'long-position' || kind === 'short-position') {
+      const facts = this.positionDefaults?.();
+      if (facts) options = { ...(options ?? {}), ...facts };
     }
     const created = this.store.add(kind, points, styleFor(kind, template?.style), this.scope(), {
       options,
