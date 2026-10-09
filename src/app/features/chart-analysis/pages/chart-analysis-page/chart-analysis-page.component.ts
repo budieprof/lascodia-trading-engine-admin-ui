@@ -157,7 +157,11 @@ import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import { parseSavedInputs, pruneInputValues } from '@features/scripting/pine/pine-inputs';
 import { ScriptSettings } from '../../scripts/script-settings';
-import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
+import {
+  StrategyTesterPanelComponent,
+  type TradeReveal,
+} from '../../scripts/strategy-tester-panel.component';
+import { backtestTimeframeOf, type DeepBacktestTarget } from '../../scripts/tester-trades';
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
 import {
@@ -3728,6 +3732,37 @@ export class ChartAnalysisPageComponent {
     };
     setTimeout(() => reveal(10), 0);
   }
+
+  /** The trades the Strategy Tester is asked to show (a fill arrow clicked on the chart). */
+  readonly testerReveal = signal<TradeReveal | null>(null);
+
+  /**
+   * A strategy's fill arrow clicked on the chart (PC-I5): its trades, selected on the Strategy
+   * Tester's List of trades — opened if it was not.
+   */
+  onScriptTradeClick(e: { key: string; trades: readonly number[] }): void {
+    if (this.strategyRun()?.item.key !== e.key || !e.trades.length) return;
+    this.testerOpen.set(true);
+    this.dockPreference.set('tester');
+    this.testerReveal.set({ numbers: e.trades, seq: (this.testerReveal()?.seq ?? 0) + 1 });
+  }
+
+  /**
+   * The engine strategy on the chart, as "Deep backtest…" queues it: its own market and timeframe,
+   * the chart's as overrides. Null for a script that is not an engine strategy.
+   */
+  readonly deepBacktestTarget = computed<DeepBacktestTarget | null>(() => {
+    const item = this.strategyRun()?.item;
+    if (!item || item.strategyId === undefined || item.strategyId === null) return null;
+    const chartTimeframe = backtestTimeframeOf(this.resolution());
+    return {
+      strategyId: item.strategyId,
+      strategySymbol: item.symbol || this.symbol(),
+      strategyTimeframe: item.timeframe || chartTimeframe || 'H1',
+      chartSymbol: this.symbol(),
+      chartTimeframe,
+    };
+  });
 
   /** Frame a strategy trade on the chart (List of trades click), TradingView-style. */
   focusTrade(t: ChartTrade): void {

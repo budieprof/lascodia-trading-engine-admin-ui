@@ -174,7 +174,7 @@ let nextReportUid = 0;
         }
 
         <div class="tabs" role="tablist" aria-label="Report sections">
-          @for (t of tabs; track t.id; let i = $index) {
+          @for (t of shownTabs(); track t.id; let i = $index) {
             <button
               type="button"
               role="tab"
@@ -475,9 +475,18 @@ export class StrategyReportComponent {
   readonly run = input<ReportRunSource | null>(null);
   /** A test count the host keeps when there is no run (the editor counts its previews). */
   readonly testCount = input<ReportTestCount | null>(null);
+  /**
+   * Sections a host shows itself instead (the chart's Strategy Tester has its own List of trades,
+   * which the chart's trade arrows select in): left out of the tabs.
+   */
+  readonly hideTabs = input<readonly ReportTabId[]>([]);
 
   readonly uid = `rpt-${nextReportUid++}`;
   readonly tabs = REPORT_TABS;
+  readonly shownTabs = computed(() => {
+    const hidden = this.hideTabs();
+    return hidden.length ? REPORT_TABS.filter((t) => !hidden.includes(t.id)) : REPORT_TABS;
+  });
   readonly activeTab = signal<ReportTabId>('overview');
 
   readonly performanceGroups = PERFORMANCE_GROUPS;
@@ -566,7 +575,8 @@ export class StrategyReportComponent {
 
   /** Arrow keys / Home / End move between tabs (WAI-ARIA tabs pattern, automatic activation). */
   onTabKeydown(event: KeyboardEvent, index: number): void {
-    const n = this.tabs.length;
+    const tabs = this.shownTabs();
+    const n = tabs.length;
     let next: number;
     switch (event.key) {
       case 'ArrowRight':
@@ -585,7 +595,7 @@ export class StrategyReportComponent {
         return;
     }
     event.preventDefault();
-    const target = this.tabs[next].id;
+    const target = tabs[next].id;
     this.activeTab.set(target);
     queueMicrotask(() =>
       this.host.nativeElement.querySelector<HTMLElement>(`#${this.tabId(target)}`)?.focus(),
