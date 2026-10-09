@@ -961,6 +961,17 @@
             >
               <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
               <span>{{ t.label }}</span>
+              <!-- DR-I12: star a tool for the Favourites bar. -->
+              <span
+                class="fav-star"
+                role="button"
+                tabindex="-1"
+                [class.on]="favoriteTools.has(t.kind)"
+                [attr.aria-label]="(favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'"
+                [title]="favoriteTools.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'"
+                (click)="toggleFavoriteTool(t.kind, $event)"
+                >{{ favoriteTools.has(t.kind) ? '★' : '☆' }}</span
+              >
             </button>
           }
         }
@@ -1201,6 +1212,9 @@
           (action)="undoReplace()"
           (dismissed)="replacedNotice.set(null)"
         />
+
+        <!-- DR-I12: the starred drawing tools, one click to arm. -->
+        <app-drawing-favorites-bar [tool]="tool()" (pick)="selectTool($event)" />
 
         <!-- TradingView's floating drawing toolbar for the selected drawing. -->
         @if (drawings.selected(); as sel) {

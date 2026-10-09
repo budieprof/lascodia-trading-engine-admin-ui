@@ -6,6 +6,7 @@ import type { DashStyle, Drawing } from './model';
 import { HANDLE_RADIUS, type Pt } from './geometry';
 import type { PaintCtx } from './paint-ctx';
 import type { Bar } from '../datafeed/candle-feed.service';
+import { IMAGE_LOADED_EVENT } from './tools/media';
 
 /**
  * Canvas renderer for every drawing on the chart, as one Lightweight Charts
@@ -65,11 +66,18 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
 
   attached(param: { requestUpdate: () => void }): void {
     this.requestUpdate = param.requestUpdate;
+    // An Image drawing's picture decodes after its first paint: paint again when it has (DR-I12).
+    if (typeof window !== 'undefined')
+      window.addEventListener(IMAGE_LOADED_EVENT, this.onImageLoaded);
   }
 
   detached(): void {
     this.requestUpdate = undefined;
+    if (typeof window !== 'undefined')
+      window.removeEventListener(IMAGE_LOADED_EVENT, this.onImageLoaded);
   }
+
+  private readonly onImageLoaded = (): void => this.requestUpdate?.();
 
   setDrawings(
     drawings: Drawing[],

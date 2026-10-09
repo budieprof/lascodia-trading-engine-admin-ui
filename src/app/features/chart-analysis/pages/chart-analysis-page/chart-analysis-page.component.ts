@@ -215,6 +215,8 @@ import {
   type StudyPick,
 } from '../../indicators/study-settings-dialog.component';
 import { drawingAlertDraft } from '../../drawings/drawing-alert';
+import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
+import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
 import {
   CreateSignalDialogComponent,
@@ -555,6 +557,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ObjectTreeComponent,
     StudySettingsDialogComponent,
     CreateSignalDialogComponent,
+    FavoritesBarComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1820,6 +1823,15 @@ export class ChartAnalysisPageComponent {
     this.railFlyout.set(name);
   }
 
+  /** The favourite drawing tools (DR-I12): starred in the flyouts, on the Favourites bar. */
+  readonly favoriteTools = inject(DrawingFavorites);
+
+  /** Star / unstar a tool in a rail flyout (the click does not arm it). */
+  toggleFavoriteTool(kind: DrawingKind, ev: Event): void {
+    ev.stopPropagation();
+    this.favoriteTools.toggle(kind);
+  }
+
   pickRailTool(group: string, kind: DrawingKind): void {
     this.railPick.update((m) => ({ ...m, [group]: kind }));
     this.railFlyout.set(null);
@@ -1899,6 +1911,7 @@ export class ChartAnalysisPageComponent {
     drawingTemplates.useStorage(this.prefs.storage);
     prefsRef = this.prefs;
     this.layoutStore.reload();
+    this.favoriteTools.reload();
     this.magnetStrength.set(readPref('magnetStrength', 'weak'));
     this.stayInDrawing.set(readPref('stayInDrawing', false));
     const deepLink = !!this.route.snapshot.paramMap.get('symbol');

@@ -229,4 +229,27 @@ describe('drawing on the studies panes (DR-07 / DR-I10)', () => {
     const bare = fromDto({ ...row, optionsJson: JSON.stringify({ $pane: 'rsi-1' }) })!;
     expect(bare.options).toBeUndefined();
   });
+
+  it('places Anchored Text at its share of the pane and moves it by the pointer\u2019s share (DR-I12)', () => {
+    const { store, controller, click, container } = setup();
+    controller.setTool('anchored-text');
+    click(200, 150);
+    const d = store.symbolDrawings()[0];
+    // The price pane's plot area: 740 px wide (the time scale), 300 px tall.
+    expect(d.options?.['ax']).toBeCloseTo(200 / 740, 9);
+    expect(d.options?.['ay']).toBeCloseTo(150 / 300, 9);
+    controller.sync(store.symbolDrawings(), null);
+    const at = (type: string, x: number, y: number, buttons = 0) =>
+      container.dispatchEvent(
+        new MouseEvent(type, { clientX: x, clientY: y, button: 0, buttons, bubbles: true }),
+      );
+    at('pointerdown', 204, 156, 1);
+    at('pointermove', 278, 186, 1);
+    at('pointerup', 278, 186);
+    const moved = store.symbolDrawings()[0];
+    expect(moved.options?.['ax']).toBeCloseTo(200 / 740 + 74 / 740, 9);
+    expect(moved.options?.['ay']).toBeCloseTo(0.5 + 30 / 300, 9);
+    // Its bar and price did not move: it is fixed to the pane, not to the chart.
+    expect(moved.points).toEqual(d.points);
+  });
 });

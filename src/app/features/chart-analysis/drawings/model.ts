@@ -128,7 +128,14 @@ export type DrawingKind =
   | 'arrow-mark-up'
   | 'arrow-mark-down'
   | 'arrow-mark-left'
-  | 'arrow-mark-right';
+  | 'arrow-mark-right'
+  // DR-I12: the rest of TradingView's text, arrow and content tools
+  | 'anchored-text'
+  | 'note'
+  | 'price-note'
+  | 'image'
+  | 'arrow-marker'
+  | 'icon';
 
 export interface DrawingPoint {
   /** Bar time in ms. */
@@ -539,6 +546,14 @@ export const TOOLS: readonly ToolSpec[] = [
   { kind: 'arrow-mark-down', label: 'Arrow Down', group: 'annotation', points: 1, icon: '⬇' },
   { kind: 'arrow-mark-left', label: 'Arrow Left', group: 'annotation', points: 1, icon: '⬅' },
   { kind: 'arrow-mark-right', label: 'Arrow Right', group: 'annotation', points: 1, icon: '➡' },
+
+  // ── DR-I12: the rest of TradingView's text / arrows / content tools ─────
+  { kind: 'anchored-text', label: 'Anchored Text', group: 'annotation', points: 1, icon: 'T' },
+  { kind: 'note', label: 'Note', group: 'annotation', points: 1, icon: '📍' },
+  { kind: 'price-note', label: 'Price Note', group: 'annotation', points: 2, icon: '🏷' },
+  { kind: 'image', label: 'Image', group: 'annotation', points: 2, icon: '🖼' },
+  { kind: 'arrow-marker', label: 'Arrow Marker', group: 'annotation', points: 2, icon: '➔' },
+  { kind: 'icon', label: 'Icon', group: 'annotation', points: 1, icon: '★' },
 ];
 
 /**
@@ -683,7 +698,14 @@ export const RAIL_LAYOUT: readonly RailGroup[] = [
       { title: 'Brushes', kinds: ['brush', 'highlighter'] },
       {
         title: 'Arrows',
-        kinds: ['arrow', 'arrow-mark-up', 'arrow-mark-down', 'arrow-mark-left', 'arrow-mark-right'],
+        kinds: [
+          'arrow-marker',
+          'arrow',
+          'arrow-mark-up',
+          'arrow-mark-down',
+          'arrow-mark-left',
+          'arrow-mark-right',
+        ],
       },
       {
         title: 'Shapes',
@@ -711,6 +733,9 @@ export const RAIL_LAYOUT: readonly RailGroup[] = [
         title: 'Text and notes',
         kinds: [
           'text',
+          'anchored-text',
+          'note',
+          'price-note',
           'anchored-note',
           'comment',
           'table',
@@ -719,10 +744,9 @@ export const RAIL_LAYOUT: readonly RailGroup[] = [
           'signpost',
           'flag',
           'balloon',
-          'sticker',
         ],
       },
-      { title: 'Content', kinds: ['idea'] },
+      { title: 'Content', kinds: ['image', 'idea', 'sticker', 'icon'] },
     ],
   },
 ];

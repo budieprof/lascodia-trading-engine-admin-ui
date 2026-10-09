@@ -341,6 +341,25 @@ $pane-gap: 4px;
   display: flex;
   align-items: center;
   gap: 10px;
+
+  // DR-I12: the favourite star, at the row's end; shown on hover, always when starred.
+  .fav-star {
+    margin-left: auto;
+    padding: 0 2px;
+    color: var(--text-muted, #787b86);
+    opacity: 0;
+    cursor: pointer;
+  }
+
+  &:hover .fav-star,
+  .fav-star.on {
+    opacity: 1;
+  }
+
+  .fav-star.on {
+    color: #f7a600;
+  }
+
   width: 100%;
   padding: 6px 8px;
   border: 0;

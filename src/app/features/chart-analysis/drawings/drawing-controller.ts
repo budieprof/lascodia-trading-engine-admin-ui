@@ -106,6 +106,8 @@ export class DrawingController {
     moved: boolean;
     /** A press on one of a multi-selection: every unlocked selected drawing moves with it (DR-I10). */
     group: { id: string; points: DrawingPoint[] }[] | null;
+    /** A drawing fixed to the pane (DR-I12): moved by its pane fractions, from these. */
+    screen: { ax: number; ay: number } | null;
   } | null = null;
 
   private chart: IChartApi | null = null;
@@ -631,10 +633,12 @@ export class DrawingController {
     if (hit && !hit.drawing.locked) {
       // The undo snapshot is taken on the first MOVE, not here: a click that only selects must not
       // cost the operator their Redo (DR-04).
+      const screen = screenAnchorOf(hit.drawing);
       this.dragging = {
         id: hit.id,
         pane,
-        handleIndex: hit.handleIndex,
+        screen,
+        handleIndex: screen ? -1 : hit.handleIndex,
         start: p,
         originalPoints: hit.drawing.points.map((pt) => ({ ...pt })),
         cloneOnMove: hit.handleIndex < 0 && (ev.ctrlKey || ev.metaKey) && this.store.selectedIds().size < 2,
@@ -747,6 +751,24 @@ export class DrawingController {
         const dx = Math.abs(p.x - drag.start.x);
         const dy = Math.abs(p.y - drag.start.y);
         to = dx >= dy ? { x: p.x, y: drag.start.y } : { x: drag.start.x, y: p.y };
+      }
+      // Fixed to the pane: it moves by the pointer's share of the pane, not by bars and prices (DR-I12).
+      if (drag.screen && !drag.group) {
+        const box = this.paneBox(drag.pane);
+        if (!box || box.width <= 0 || box.height <= 0) return;
+        const clamp = (v: number) => Math.min(1, Math.max(0, v));
+        this.store.update(
+          drawing.id,
+          {
+            options: {
+              ...(drawing.options ?? {}),
+              ax: clamp(drag.screen.ax + (to.x - drag.start.x) / box.width),
+              ay: clamp(drag.screen.ay + (to.y - drag.start.y) / box.height),
+            },
+          },
+          false,
+        );
+        return;
       }
       const model = this.toModel(to, 'off', drag.pane);
       const startModel = this.toModel(drag.start, 'off', drag.pane);
@@ -909,6 +931,14 @@ export class DrawingController {
       if (hook.points) points = hook.points;
       if (hook.options) options = { ...(options ?? {}), ...hook.options };
     }
+    // Fixed to the pane (Anchored Text / Note, DR-I12): where it was placed, as fractions of the pane.
+    if (behavior?.screenAnchored && points.length) {
+      const px = this.rendererFor(this.pendingPane).project(points[0]);
+      const box = this.paneBox(this.pendingPane);
+      if (px && box && box.width > 0 && box.height > 0) {
+        options = { ...(options ?? {}), ax: px.x / box.width, ay: px.y / box.height };
+      }
+    }
     // A position is sized from the account it would trade on, not a typed account size (DR-I9).
     if (kind === 'long-position' || kind === 'short-position') {
       const facts = this.positionDefaults?.();
@@ -1043,4 +1073,14 @@ function paneSeriesPrecision(series: ISeriesApi<SeriesType> | null): number {
   } catch {
     return 2;
   }
+}
+
+/** A pane-anchored drawing's fractions (DR-I12); null for one on a bar and a price. */
+function screenAnchorOf(d: Drawing): { ax: number; ay: number } | null {
+  if (!behaviorFor(d.kind)?.screenAnchored) return null;
+  const ax = d.options?.['ax'];
+  const ay = d.options?.['ay'];
+  return typeof ax === 'number' && typeof ay === 'number' && Number.isFinite(ax) && Number.isFinite(ay)
+    ? { ax, ay }
+    : null;
 }

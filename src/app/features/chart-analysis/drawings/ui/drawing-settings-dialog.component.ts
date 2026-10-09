@@ -23,6 +23,7 @@ import { optionsOf, type ToolOption } from '../tools/types';
 import { ColorPopoverComponent } from './color-popover.component';
 import { TemplateMenuComponent } from './template-menu.component';
 import { hasFill, hasText, parseColor } from './colors';
+import { fitImageFile } from './image-fit';
 
 type Tab = 'style' | 'text' | 'coords' | 'visibility';
 type Level = { value: number; color: string; visible: boolean };
@@ -168,6 +169,20 @@ type Level = { value: number; color: string; visible: boolean };
                           }
                           @case ('text') {
                             <input type="text" class="sd-text" [value]="opts()[o.key] ?? ''" (input)="option(o.key, $any($event.target).value)" />
+                          }
+                          @case ('image') {
+                            <!-- DR-I12: the Image drawing's picture, fitted to what a drawing can store. -->
+                            <label class="sd-btn sd-file">
+                              <input
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif"
+                                (change)="pickImage(o.key, $event)"
+                              />
+                              {{ opts()[o.key] ? 'Change picture…' : 'Choose picture…' }}
+                            </label>
+                            @if (imageNote(); as note) {
+                              <span class="sd-hint">{{ note }}</span>
+                            }
                           }
                         }
                       </span>
@@ -350,6 +365,8 @@ type Level = { value: number; color: string; visible: boolean };
     .sd-vis.disabled { color: var(--tv-muted, #787b86); }
     .sd-range { width: 110px; accent-color: var(--tv-blue, #2962ff); }
     .sd-hint { color: var(--tv-muted, #787b86); font-size: 12px; margin: 8px 0 0; }
+    .sd-file { display: inline-flex; align-items: center; }
+    .sd-file input[type='file'] { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
     .sd-foot { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--tv-line, #e0e3eb); }
     .sd-spacer { flex: 1; }
     .sd-btn {
@@ -408,6 +425,8 @@ export class DrawingSettingsDialogComponent implements OnInit {
     return d ? optionsOf(behaviorFor(d.kind), d) : {};
   });
   readonly vis = signal<IntervalVisibility>(visibilityFromList(undefined, []));
+  /** Why the chosen picture was not taken (DR-I12). */
+  readonly imageNote = signal<string | null>(null);
 
   private closedOnce = false;
 
@@ -433,6 +452,21 @@ export class DrawingSettingsDialogComponent implements OnInit {
 
   option(key: string, value: unknown): void {
     this.store.updateOptions(this.drawingId(), { [key]: value }, false);
+  }
+
+  /** A picture chosen for the Image drawing: shrunk until it fits what a drawing can store. */
+  async pickImage(key: string, ev: Event): Promise<void> {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) return;
+    const url = await fitImageFile(file);
+    if (!url) {
+      this.imageNote.set('That picture could not be made small enough to keep with the drawing (about 13 KB).');
+      return;
+    }
+    this.imageNote.set(null);
+    this.option(key, url);
   }
 
   levelsOf(key: string): Level[] {
