@@ -72,6 +72,7 @@ import {
 } from './live.model';
 import { liveClosedTradesCsv } from '../report/report-csv';
 import { fileStamp, saveBlob } from '../shared/download';
+import { ScriptParityPanelComponent } from './script-parity-panel.component';
 
 /** Fallback cadence; a live session advances on bar closes, so 15 s is plenty. */
 const POLL_MS = 15_000;
@@ -82,8 +83,10 @@ const STALE_MINUTES = 240;
 /**
  * Live status of a script strategy's session (`GET strategy/{id}/script/live`): session state,
  * the emulator's position, open trades and pending orders, equity, account positions a previous
- * script version left open, the divergences between the emulator and the bound accounts, and the
- * live emulator's Strategy report. Emulator quantities read in units, account positions in lots.
+ * script version left open, the divergences between the emulator and the bound accounts, the
+ * parity panel (live fills vs the emulator, a session reconciled with a backtest — BT-I3 / PE-I2),
+ * and the live emulator's Strategy report. Emulator quantities read in units, account positions in
+ * lots.
  *
  * Every trade — a row of the report's List of trades or of the Open trades table — opens on the
  * position chart a backtest trade opens, with its origin (warm-up replay, paper, live) in the
@@ -93,7 +96,7 @@ const STALE_MINUTES = 240;
 @Component({
   selector: 'app-script-live-panel',
   standalone: true,
-  imports: [StrategyReportComponent, EATradeChartModalComponent],
+  imports: [StrategyReportComponent, EATradeChartModalComponent, ScriptParityPanelComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
@@ -130,6 +133,8 @@ const STALE_MINUTES = 240;
             A script strategy runs live once it is Active; it trades on bound accounts only.
           </p>
         </div>
+        <!-- BT-I3 / PE-I2: a stopped strategy's recorded sessions can still be compared. -->
+        <app-script-parity-panel [strategyId]="strategyId()" [accountNames]="accountNames()" />
       } @else if (errorText() && !live()) {
         <div class="error" role="alert">
           <span>{{ errorText() }}</span>
@@ -491,6 +496,9 @@ const STALE_MINUTES = 240;
             </div>
           }
         </section>
+
+        <!-- BT-I3 / PE-I2: live fills vs the emulator, and a session reconciled with a backtest. -->
+        <app-script-parity-panel [strategyId]="strategyId()" [accountNames]="accountNames()" />
 
         @if (hasReport()) {
           <app-strategy-report
@@ -856,8 +864,8 @@ export class ScriptLivePanelComponent {
   readonly chartSelection = signal<TradeChartSelection | null>(null);
   readonly chartOpen = signal(false);
 
-  /** Account names for the divergence table, from the strategy's bindings. */
-  private readonly accountNames = signal<ReadonlyMap<string, string>>(new Map());
+  /** Account names for the divergence table and the parity panel, from the strategy's bindings. */
+  protected readonly accountNames = signal<ReadonlyMap<string, string>>(new Map());
   private readonly now = signal(Date.now());
 
   /**

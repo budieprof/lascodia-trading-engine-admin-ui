@@ -33,6 +33,7 @@ declareSignalIo(StrategyReportComponent, {
     'tradeOrigin',
     'run',
     'testCount',
+    'hideTabs',
   ],
   outputs: ['tradeClick'],
 });
@@ -171,6 +172,25 @@ describe('StrategyReportComponent', () => {
     fixture.detectChanges();
     expect(el.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toContain(
       'Trades analysis',
+    );
+  });
+
+  it('leaves out the sections a host shows itself (the chart’s Strategy Tester: its List of trades)', () => {
+    fixture = TestBed.createComponent(StrategyReportComponent);
+    fixture.componentRef.setInput('report', strategyReportFixture());
+    fixture.componentRef.setInput('hideTabs', ['trades']);
+    fixture.detectChanges();
+    el = fixture.nativeElement as HTMLElement;
+    const tabs = text('[role="tab"]');
+    expect(tabs.some((t) => t.startsWith('List of trades'))).toBe(false);
+    expect(tabs).toHaveLength(8);
+    // The keyboard walks the tabs shown: End is the last of them.
+    el.querySelector('[role="tab"]')!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'End', bubbles: true }),
+    );
+    fixture.detectChanges();
+    expect(el.querySelector('[role="tab"][aria-selected="true"]')!.textContent).toContain(
+      'Properties',
     );
   });
 

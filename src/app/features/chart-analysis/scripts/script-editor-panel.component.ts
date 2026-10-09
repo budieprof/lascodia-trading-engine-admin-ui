@@ -585,6 +585,11 @@ export class ScriptEditorPanelComponent {
     this.error.set(null);
   }
 
+  /** Bring a source position into view and put the cursor there (a chip's failure "Line N"). */
+  revealLine(line: number, column = 1): void {
+    this.editorRef()?.revealPosition(line, column);
+  }
+
   compile(): void {
     this.compiling.set(true);
     this.error.set(null);

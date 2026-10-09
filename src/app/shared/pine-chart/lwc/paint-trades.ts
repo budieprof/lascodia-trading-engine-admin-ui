@@ -22,6 +22,8 @@ export interface TradeMarker {
   color: string;
   text: string;
   tooltip: string;
+  /** The trades the arrow stands for (several when fills merged into one order). */
+  trades: number[];
 }
 
 /** The size without its sign: "100,000 units". */
@@ -49,6 +51,7 @@ export function tradeMarkers(t: TradeDrawing, currency = ''): (TradeMarker & { q
       tooltip: `Trade #${t.number} · ${long ? 'Long' : 'Short'} entry "${t.entrySignal}" · ${qtyText(t.qty)} @ ${t.entryPrice}${
         t.isOpen ? ` · open P/L ${profit}` : ''
       }`,
+      trades: [t.number],
     },
   ];
   if (t.exitX !== null && t.exitPrice !== null) {
@@ -62,6 +65,7 @@ export function tradeMarkers(t: TradeDrawing, currency = ''): (TradeMarker & { q
       color: TRADE_COLORS.exit,
       text: `${signal}\n${long ? '-' : '+'}${qtyText(t.qty)}`,
       tooltip: `Trade #${t.number} · ${long ? 'Long' : 'Short'} exit "${signal}" · ${qtyText(t.qty)} @ ${t.exitPrice} · P/L ${profit}`,
+      trades: [t.number],
     });
   }
   return out;
@@ -93,6 +97,7 @@ export function mergeFills(markers: readonly (TradeMarker & { qty: number })[]):
       ...lead,
       text: `${signal}\n${lead.side === 'buy' ? '+' : '-'}${qtyText(qty)}`,
       tooltip: g.map((m) => m.tooltip).join('\n'),
+      trades: g.flatMap((m) => m.trades),
     });
   }
   return out;
@@ -192,7 +197,7 @@ export function paintTrades(
           h: footprint,
         };
       }
-      hits.push({ ...region, tooltip: m.tooltip });
+      hits.push({ ...region, tooltip: m.tooltip, trades: m.trades });
     }
   }
   ctx.restore();

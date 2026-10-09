@@ -6,6 +6,7 @@ import type {
   PolylineDrawing,
 } from '../render/render-model';
 import {
+  Lru,
   applyStroke,
   cssFont,
   curvePath,
@@ -34,6 +35,8 @@ export interface HitRegion {
   w: number;
   h: number;
   tooltip: string;
+  /** A strategy fill's region: the numbers of the trades the arrow stands for. */
+  trades?: readonly number[];
 }
 
 export interface Point {
@@ -164,11 +167,23 @@ export function paintLinefill(
 
 // ── polylines ────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The projected points of the polyline being painted (PC-I13): one pair of buffers, grown when a
+ * longer polyline comes, instead of two new arrays per polyline per frame.
+ */
+let scratchXs = new Float64Array(64);
+let scratchYs = new Float64Array(64);
+
 export function paintPolyline(ctx: Ctx, p: Projection, pl: PolylineDrawing): void {
   if (!pl.lineColor && !pl.fillColor) return;
   const n = pl.xs.length;
-  const xs = new Float64Array(n);
-  const ys = new Float64Array(n);
+  if (scratchXs.length < n) {
+    const size = Math.max(n, scratchXs.length * 2);
+    scratchXs = new Float64Array(size);
+    scratchYs = new Float64Array(size);
+  }
+  const xs = scratchXs;
+  const ys = scratchYs;
   let minX = Infinity;
   let maxX = -Infinity;
   for (let i = 0; i < n; i++) {
@@ -181,7 +196,7 @@ export function paintPolyline(ctx: Ctx, p: Projection, pl: PolylineDrawing): voi
   if (maxX < -50 || minX > p.width + 50) return;
   const path = () => {
     ctx.beginPath();
-    if (pl.curved) curvePath(ctx, xs, ys, pl.closed);
+    if (pl.curved) curvePath(ctx, xs, ys, pl.closed, n);
     else {
       ctx.moveTo(xs[0], ys[0]);
       for (let i = 1; i < n; i++) ctx.lineTo(xs[i], ys[i]);
@@ -210,6 +225,21 @@ export function paintPolyline(ctx: Ctx, p: Projection, pl: PolylineDrawing): voi
 // ── boxes ────────────────────────────────────────────────────────────────────────────────────────
 
 const BOX_PAD = 3;
+
+/** size.auto's fitted size by text, font and box (quarter-px), the most recently used kept. */
+const fittedSizes = new Lru<string, number>(1000);
+
+function autoSizeKey(b: BoxDrawing, innerW: number, innerH: number): string {
+  return [
+    b.text,
+    b.fontFamily,
+    b.bold ? 1 : 0,
+    b.italic ? 1 : 0,
+    b.wrap ? 1 : 0,
+    Math.round(innerW * 4),
+    Math.round(innerH * 4),
+  ].join('\u0000');
+}
 
 export function paintBox(ctx: Ctx, p: Projection, b: BoxDrawing): void {
   let xL = p.x(b.left);
@@ -242,17 +272,28 @@ function paintBoxText(ctx: Ctx, b: BoxDrawing, x: number, y: number, w: number, 
   const innerH = Math.max(0, h - 2 * BOX_PAD);
   let size = b.fontSize;
   let block: TextBlock;
+  const measure = (px: number): TextBlock => {
+    ctx.font = cssFont(px, b.fontFamily, b.bold, b.italic);
+    return measureBlock(ctx, b.wrap ? wrapText(ctx, b.text, innerW) : splitLines(b.text), px);
+  };
   if (size > 0) {
-    ctx.font = cssFont(size, b.fontFamily, b.bold, b.italic);
-    block = measureBlock(ctx, b.wrap ? wrapText(ctx, b.text, innerW) : splitLines(b.text), size);
+    block = measure(size);
   } else {
-    // size.auto: the largest text that fits the box.
-    size = 40;
-    for (;;) {
-      ctx.font = cssFont(size, b.fontFamily, b.bold, b.italic);
-      block = measureBlock(ctx, b.wrap ? wrapText(ctx, b.text, innerW) : splitLines(b.text), size);
-      if ((block.width <= innerW && block.height <= innerH) || size <= 6) break;
-      size = Math.max(6, Math.floor(size * 0.85));
+    // size.auto: the largest text that fits the box — searched once per text and box size, then
+    // remembered (PC-I13: the search ran every frame, a dozen measurements a box).
+    const key = autoSizeKey(b, innerW, innerH);
+    const fitted = fittedSizes.get(key);
+    if (fitted !== undefined) {
+      size = fitted;
+      block = measure(size);
+    } else {
+      size = 40;
+      for (;;) {
+        block = measure(size);
+        if ((block.width <= innerW && block.height <= innerH) || size <= 6) break;
+        size = Math.max(6, Math.floor(size * 0.85));
+      }
+      fittedSizes.set(key, size);
     }
   }
   const clip = b.wrap;

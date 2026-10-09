@@ -83,6 +83,8 @@ export const UI_ICONS: Record<string, string> = {
   play: '<path d="M9.5 7l12 7-12 7z"/>',
   pause: '<path d="M10.5 7.5v13M17.5 7.5v13"/>',
   tester: '<path d="M5.5 22.5h17"/><path d="M8.5 22.5v-6M12.5 22.5V10M16.5 22.5v-9M20.5 22.5V7"/>',
+  // Pine Logs (the script's console).
+  logs: '<rect x="5.5" y="6.5" width="17" height="15" rx="1.5"/><path d="M9 11l2.5 2.5L9 16M13.5 16.5h5"/>',
   settings:
     '<circle cx="14" cy="14" r="3"/><path d="M14 4.5v3M14 20.5v3M4.5 14h3M20.5 14h3M7.3 7.3l2.1 2.1M18.6 18.6l2.1 2.1M7.3 20.7l2.1-2.1M18.6 9.4l2.1-2.1"/>',
   live: DOT(14, 14, 3),

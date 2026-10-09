@@ -6,6 +6,7 @@ import type {
   SavedChartScript,
 } from '../scripts/chart-script.service';
 import type { ScriptInputValues } from '@core/api/scripting.types';
+import type { ScriptDisplaySettings } from '../scripts/script-display';
 import type { LegacyChartLayout } from './layout-store.service';
 
 /** A Pine script on the chart, as a layout restores it. */
@@ -19,12 +20,15 @@ export interface WorkspaceScript {
   strategyId?: number;
   /** Its input overrides (Settings): only the inputs that differ from their defaults. */
   values: ScriptInputValues;
+  /** How it is shown (eye, Style, Visibility): only what differs from the defaults (PC-01/PC-13). */
+  display?: Partial<ScriptDisplaySettings>;
 }
 
 /** A script on the chart as its layout saves it: how to find it again, and its input overrides. */
 export function workspaceScriptOf(run: {
   item: ChartScriptItem;
   values: ScriptInputValues;
+  display?: Partial<ScriptDisplaySettings>;
 }): WorkspaceScript {
   const { item } = run;
   return {
@@ -35,6 +39,7 @@ export function workspaceScriptOf(run: {
     ...(item.pineSource !== undefined ? { pineSource: item.pineSource } : {}),
     ...(item.strategyId !== undefined ? { strategyId: item.strategyId } : {}),
     values: run.values,
+    ...(run.display && Object.keys(run.display).length ? { display: run.display } : {}),
   };
 }
 

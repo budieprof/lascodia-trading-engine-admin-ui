@@ -21,6 +21,9 @@ function page(runs: unknown[] = []): Page {
   const editorOpen = signal(false);
   const dockPreference = signal<'editor' | 'tester'>('tester');
   const testerShown = computed(() => testerOpen() && (!!strategyRun() || testerPrompt()));
+  const logsFront = signal(false);
+  const logsKey = signal<string | null>(null);
+  const logsRun = computed(() => scriptRuns().find((r) => r.item.key === logsKey()) ?? null);
   Object.assign(p, {
     scriptRuns,
     strategyRun,
@@ -29,9 +32,13 @@ function page(runs: unknown[] = []): Page {
     testerShown,
     editorOpen,
     dockPreference,
+    logsFront,
+    logsKey,
+    logsRun,
     dockTab: computed(() => {
       const editor = editorOpen();
       const tester = testerShown();
+      if (logsRun() && (logsFront() || (!editor && !tester))) return 'logs';
       if (editor && tester) return dockPreference();
       return editor ? 'editor' : tester ? 'tester' : null;
     }),
@@ -117,6 +124,42 @@ describe('chart page — the Strategy Tester tab with a strategy on the chart (u
     p.testerOpen.set(true); // e.g. a later strategy auto-opens the tester
     p.scriptRuns.set([]);
     expect(p.dockTab()).toBeNull();
+  });
+});
+
+describe('chart page — Pine Logs in the dock (PC-I6)', () => {
+  const indicator = { item: { key: 'mine:9' }, result: { kind: 'indicator', title: 'RSI' } };
+
+  it('opens in front of the tester, and either comes forward again from its tab', () => {
+    const p = page([strategy, indicator]);
+    expect(p.dockTab()).toBe('tester');
+    p.openLogs('mine:9');
+    expect(p.dockTab()).toBe('logs');
+    // The tester brought up — its button or its tab.
+    p.showDock('tester');
+    expect(p.dockTab()).toBe('tester');
+    p.showDock('logs');
+    expect(p.dockTab()).toBe('logs');
+    p.toggleTester(); // the bottom bar's Strategy Tester: the tester is not in front, so it comes
+    expect(p.dockTab()).toBe('tester');
+  });
+
+  it('is the dock on its own when nothing else is open, and closes with its script', () => {
+    const p = page([indicator]);
+    p.openLogs('mine:9');
+    expect(p.dockTab()).toBe('logs');
+    p.logsFront.set(false);
+    expect(p.dockTab()).toBe('logs');
+    p.scriptRuns.set([]);
+    expect(p.dockTab()).toBeNull();
+  });
+
+  it('its close button closes it; the tester behind it shows again', () => {
+    const p = page([strategy, indicator]);
+    p.openLogs('mine:9');
+    p.closeLogs();
+    expect(p.logsKey()).toBeNull();
+    expect(p.dockTab()).toBe('tester');
   });
 });
 

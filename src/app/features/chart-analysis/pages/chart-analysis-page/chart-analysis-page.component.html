@@ -1129,6 +1129,10 @@
               </div>
             }
           }
+          <!-- Overlay Pine scripts' status lines (PC-I2); pane scripts' sit over their panes. -->
+          @for (row of legendScriptRows(); track row.key) {
+            <app-script-status-line [row]="row" (action)="onScriptAction($event)" />
+          }
         </div>
 
         @if (error()) {
@@ -1179,6 +1183,8 @@
           [markers]="markers()"
           [compareBars]="compareBars()"
           [scriptResults]="scriptResults()"
+          (scriptAction)="onScriptAction($event)"
+          (scriptTradeClick)="onScriptTradeClick($event)"
           [externalPanes]="externalPanes()"
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
@@ -1705,54 +1711,20 @@
   }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
-  @if (active().length || scriptRuns().length || scriptRunning() || scriptError()) {
+  @if (active().length || scriptChips().length || scriptError()) {
     <aside class="studies">
-      @for (run of scriptRuns(); track run.item.key) {
-        <div class="study script-study">
-          <span class="study-label" (dblclick)="settings.open(run.item.key)">
-            <span class="pine-tag">{{ run.result.kind === 'strategy' ? 'Strategy' : 'Pine' }}</span>
-            {{ run.result.title || run.item.name }}
-          </span>
-          <button
-            type="button"
-            class="study-toggle"
-            (click)="settings.open(run.item.key)"
-            title="Settings"
-            [attr.aria-label]="(run.result.title || run.item.name) + ' settings'"
-            data-testid="script-settings"
-          >
-            <app-chart-icon name="settings" [size]="16" />
-          </button>
-          <button
-            type="button"
-            class="study-toggle"
-            (click)="openScriptSource(run.item.key)"
-            title="Source code"
-          >
-            <app-chart-icon name="pine" [size]="16" />
-          </button>
-          @if (run.result.kind === 'strategy') {
-            <button
-              type="button"
-              class="study-toggle"
-              (click)="testerOpen.set(!testerOpen())"
-              title="Strategy tester"
-            >
-              <app-chart-icon name="tester" [size]="16" />
-            </button>
-          }
-          <button
-            type="button"
-            class="study-remove"
-            (click)="removeScriptFromChart(run.item.key)"
-            title="Remove"
-          >
-            <app-chart-icon name="close" [size]="14" />
-          </button>
-        </div>
-      }
-      @if (scriptRunning()) {
-        <div class="study muted">Running script…</div>
+      <!-- Pine scripts: each with its own run state (PC-05/PC-13/PC-I7). -->
+      @for (c of scriptChips(); track c.key) {
+        <app-script-chip
+          [chip]="c"
+          (visibility)="toggleScriptVisible(c.key)"
+          (settings)="settings.open(c.key)"
+          (source)="openScriptSource(c.key)"
+          (tester)="testerOpen.set(!testerOpen())"
+          (logs)="openLogs(c.key)"
+          (removed)="removeScriptFromChart(c.key)"
+          (openAt)="openScriptAt(c.key, $event)"
+        />
       }
       @if (scriptError()) {
         <div class="study script-error" role="alert">
@@ -1824,34 +1796,55 @@
       [values]="run.values"
       [canSaveDefault]="settings.canSaveDefault(run.item)"
       [savingDefault]="settings.saving()"
+      [display]="settingsDisplay()"
+      [styleOutputs]="settingsOutputs()"
+      [scriptKind]="run.result.kind"
+      [overlay]="run.result.overlay"
+      [hasTables]="settingsHasTables()"
+      [symbols]="scriptSymbols()"
+      [pickEnabled]="canPickOnChart()"
+      [confirm]="settings.confirming()"
+      [templates]="settings.templates()"
       (changed)="settings.apply(run.item.key, $event)"
+      (displayChange)="setScriptDisplay(run.item.key, $event)"
       (saveDefault)="settings.saveDefault(run.item.key, $event)"
+      (pickOnChart)="onScriptPick($event)"
+      (confirmCancelled)="removeScriptFromChart(run.item.key)"
+      (saveTemplate)="settings.saveTemplate(run.item.key, $event.name, $event.values)"
+      (deleteTemplate)="settings.deleteTemplate(run.item.key, $event)"
       (closed)="settings.close()"
     />
   }
   @if (dockTab(); as tab) {
     <section class="bottom-panel">
-      @if (editorOpen() && testerShown()) {
+      @if (dockTabs().length > 1) {
         <nav class="dock-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            [class.active]="tab === 'editor'"
-            (click)="dockPreference.set('editor')"
-          >
-            Pine Editor
-          </button>
-          <button
-            type="button"
-            role="tab"
-            [class.active]="tab === 'tester'"
-            (click)="dockPreference.set('tester')"
-          >
-            Strategy Tester
-          </button>
+          @for (d of dockTabs(); track d.id) {
+            <button
+              type="button"
+              role="tab"
+              [class.active]="tab === d.id"
+              [attr.aria-selected]="tab === d.id"
+              (click)="showDock(d.id)"
+            >
+              {{ d.label }}
+            </button>
+          }
         </nav>
       }
-      @if (tab === 'editor') {
+      @if (tab === 'logs' && logsRun(); as lr) {
+        <!-- Pine Logs, trace and profiler of a script on the chart (PC-I6). -->
+        <app-script-logs-panel
+          [title]="lr.result.title || lr.item.name"
+          [result]="lr.result"
+          [request]="logsRequest()"
+          [source]="lr.item.pineSource ?? null"
+          [timezone]="timezone()"
+          (barJump)="focusBar($event)"
+          (lineJump)="openScriptAt(lr.item.key, { line: $event.line, column: $event.column ?? 1 })"
+          (closed)="closeLogs()"
+        />
+      } @else if (tab === 'editor') {
         <app-script-editor-panel
           [symbol]="symbol()"
           [resolution]="resolution()"
@@ -1874,6 +1867,10 @@
           [values]="run.values"
           [resolution]="run.resolution"
           [running]="scriptRunning()"
+          [suspended]="testerSuspended()"
+          [precision]="precision()"
+          [deep]="deepBacktestTarget()"
+          [reveal]="testerReveal()"
           (rerun)="rerunStrategy($event)"
           (tradeFocus)="focusTrade($event)"
           (closed)="closeTester()"

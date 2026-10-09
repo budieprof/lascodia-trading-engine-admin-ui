@@ -165,19 +165,37 @@ export function dataWindowAt(
     sections.push({ title: barTitle, rows });
   }
 
-  const rows: Array<{ id: number; rows: DataWindowRow[] }> = [];
+  const flat = outputRowsAt(model, logical);
+  if (flat.length) sections.push({ title: model.title, rows: flat });
+  return sections;
+}
+
+/** A data-window row of an output, with the number behind its text (null: na or not a number). */
+export interface OutputRow extends DataWindowRow {
+  raw: number | null;
+}
+
+/**
+ * Every output shown in the data window at a bar, in declaration order: plots, plotcandles (open,
+ * high, low, close) and shapes (∅ on a bar without one) — the script's section of a data window.
+ */
+export function outputRowsAt(model: PineRenderModel, logical: number): OutputRow[] {
+  const num = (v: number) => (Number.isFinite(v) ? v : null);
+  const rows: Array<{ id: number; rows: OutputRow[] }> = [];
   for (const pane of [model.panes.main, model.panes.script]) {
     if (!pane) continue;
     for (const s of pane.series) {
       if (!s.display.dataWindow) continue;
       if (s.type === 'plot') {
+        const v = plotValueAt(s, logical);
         rows.push({
           id: s.id,
           rows: [
             {
               label: s.title,
-              value: formatValue(plotValueAt(s, logical), s.format),
+              value: formatValue(v, s.format),
               color: plotColorAt(s, logical),
+              raw: num(v),
             },
           ],
         });
@@ -185,14 +203,15 @@ export function dataWindowAt(
         const slot = logical - s.start;
         const has = slot >= 0 && slot < s.open.length && s.close[slot] === s.close[slot];
         const v = (arr: Float64Array) => (has ? formatValue(arr[slot], s.format) : NA_TEXT);
+        const raw = (arr: Float64Array) => (has ? num(arr[slot]) : null);
         const color = has ? trackColor(s.colors, slot) : null;
         rows.push({
           id: s.id,
           rows: [
-            { label: `${s.title} (open)`, value: v(s.open), color },
-            { label: `${s.title} (high)`, value: v(s.high), color },
-            { label: `${s.title} (low)`, value: v(s.low), color },
-            { label: `${s.title} (close)`, value: v(s.close), color },
+            { label: `${s.title} (open)`, value: v(s.open), color, raw: raw(s.open) },
+            { label: `${s.title} (high)`, value: v(s.high), color, raw: raw(s.high) },
+            { label: `${s.title} (low)`, value: v(s.low), color, raw: raw(s.low) },
+            { label: `${s.title} (close)`, value: v(s.close), color, raw: raw(s.close) },
           ],
         });
       }
@@ -207,15 +226,14 @@ export function dataWindowAt(
             label: m.title,
             value: i >= 0 ? formatValue(m.values[i], m.format) : NA_TEXT,
             color: i >= 0 ? m.colors[i] : null,
+            raw: i >= 0 ? num(m.values[i]) : null,
           },
         ],
       });
     }
   }
   rows.sort((a, b) => a.id - b.id);
-  const flat = rows.flatMap((r) => r.rows);
-  if (flat.length) sections.push({ title: model.title, rows: flat });
-  return sections;
+  return rows.flatMap((r) => r.rows);
 }
 
 /** Status-line groups per pane (main first). */

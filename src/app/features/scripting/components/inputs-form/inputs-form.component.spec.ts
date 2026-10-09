@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { ChangeDetectorRef, signal, type WritableSignal } from '@angular/core';
+import { By } from '@angular/platform-browser';
+import { ChangeDetectorRef, computed, signal, type WritableSignal } from '@angular/core';
 
 import type { ScriptInputDto, ScriptInputValues } from '@core/api/scripting.types';
+import { PineColorPickerComponent } from '@shared/pine-chart/components/pine-color-picker.component';
 import { InputsFormComponent } from './inputs-form.component';
 
 // Signal inputs cannot be set under the JIT harness before the first render, so the specs swap
@@ -128,7 +130,8 @@ describe('InputsFormComponent', () => {
     expect(control<HTMLInputElement>('mult', 'input').getAttribute('step')).toBe('0.1');
     expect(control<HTMLInputElement>('show', 'input').type).toBe('checkbox');
     expect(control<HTMLSelectElement>('mode', 'select')).toBeTruthy();
-    expect(control<HTMLInputElement>('col', 'input[type=color]')).toBeTruthy();
+    // The palette's swatch (PC-I12), and the opacity beside it.
+    expect(control<HTMLButtonElement>('col', '[data-testid="color-swatch"]')).toBeTruthy();
     expect(control<HTMLInputElement>('col', 'input[type=range]')).toBeTruthy();
     expect(control<HTMLTextAreaElement>('note', 'textarea')).toBeTruthy();
     expect(control<HTMLInputElement>('label', 'input').type).toBe('text');
@@ -162,8 +165,17 @@ describe('InputsFormComponent', () => {
     show.dispatchEvent(new Event('change'));
     fixture.detectChanges();
     change(control('mode', 'select'), 'B');
-    change(control('col', 'input[type=color]'), '#ff0000', 'input');
-    change(control('col', 'input[type=range]'), '50', 'input');
+    // The palette (PC-I12) opens on its swatch; its custom colour keeps the opacity the colour
+    // has. JIT binds no signal input or output of a child: wired here as the template does.
+    const picker = fixture.debugElement.query(By.directive(PineColorPickerComponent))
+      .componentInstance as PineColorPickerComponent;
+    const col = INPUTS.find((i) => i.id === 'col')!;
+    (picker as any).value = computed(() => cmp.text(col));
+    picker.valueChange.subscribe((v) => cmp.set(col, v));
+    control<HTMLButtonElement>('col', '[data-testid="color-swatch"]').click();
+    fixture.detectChanges();
+    change(control('col', '.cp-pop input[type=color]'), '#ff0000', 'input');
+    change(control('col', 'input.opacity'), '50', 'input');
     change(control('note', 'textarea'), 'line1\nline2');
     change(control('label', 'input'), 'hello');
     change(control('sym', 'input'), ' gbpusd ');

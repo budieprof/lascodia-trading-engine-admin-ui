@@ -366,7 +366,7 @@ export class ChartBottomBarComponent {
    */
   readonly autoScaleOn = input(true);
   /** The dock's tab in front, if it is open. */
-  readonly dockTab = input<'editor' | 'tester' | null>(null);
+  readonly dockTab = input<'editor' | 'tester' | 'logs' | null>(null);
   /** A strategy is on the chart (the Strategy Tester's tooltip). */
   readonly hasStrategy = input(false);
   /** The page's open menu, whichever bar it belongs to. */

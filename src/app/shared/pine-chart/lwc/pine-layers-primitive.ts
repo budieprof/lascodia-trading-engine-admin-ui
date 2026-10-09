@@ -28,12 +28,19 @@ import {
 } from './paint-series';
 import { paintTrades } from './paint-trades';
 import { createProjection, type Projection } from './projection';
+import type { Ctx } from './canvas-kit';
 
 export interface LayersPrimitiveHooks {
   /** Logical index to highlight (selected log line / trace bar / replay start), or null. */
   highlight(): number | null;
   highlightColor(): string;
   showTrades(): boolean;
+  /**
+   * Pine's `behind_chart` for this pane: its plots, fills, hlines, shapes and drawings are painted
+   * behind the series it shares the pane with (the candles), as TradingView paints them by default;
+   * strategy trades stay in front. Absent or false: everything in front.
+   */
+  behindChart?(): boolean;
 }
 
 /**
@@ -41,7 +48,10 @@ export interface LayersPrimitiveHooks {
  * main pane, an invisible line in the script's pane) so it shares that series' price scale.
  *
  * - bottom layer: bgcolor() bands and the highlight band (under the grid and the candles);
- * - normal layer: fills, hlines, plots and plotcandles in declaration order, markers, drawings, trades;
+ * - normal layer: fills, hlines, plots and plotcandles in declaration order (or the script's code
+ *   order under `explicit_plot_zorder`), markers, drawings, trades. Behind the chart
+ *   (`behind_chart`), all but the trades are painted in the layer's background pass, which the
+ *   library runs for every source before any series draws — so above the grid, under the candles;
  * - price axis: last-value labels of plots shown on the price scale;
  * - autoscale: the pane's plots, plotcandles, hlines and absolute markers over the visible range.
  */
@@ -54,16 +64,29 @@ export class PineLayersPrimitive implements ISeriesPrimitive<Time> {
   private axisViews: ISeriesPrimitiveAxisView[] = [];
   /** Tooltip regions painted in the last frame (pane-relative CSS px). */
   hits: HitRegion[] = [];
+  /**
+   * The marker stacks of the frame being painted: shapes painted behind the chart and the trades
+   * painted in front of it stack on the same bars.
+   */
+  private frameStacks: MarkerStacks | null = null;
 
   private readonly views: readonly IPrimitivePaneView[];
 
   constructor(private readonly hooks: LayersPrimitiveHooks) {
     const bottom: IPrimitivePaneRenderer = { draw: (t) => this.drawBottom(t) };
-    const normal: IPrimitivePaneRenderer = { draw: (t) => this.drawNormal(t) };
+    const normal: IPrimitivePaneRenderer = {
+      drawBackground: (t) => this.drawBehind(t),
+      draw: (t) => this.drawNormal(t),
+    };
     this.views = [
       { zOrder: (): PrimitivePaneViewZOrder => 'bottom', renderer: () => bottom },
       { zOrder: (): PrimitivePaneViewZOrder => 'normal', renderer: () => normal },
     ];
+  }
+
+  /** Whether this frame paints the outputs behind the chart (`behind_chart`). */
+  private behind(): boolean {
+    return this.hooks.behindChart?.() === true;
   }
 
   attached(param: SeriesAttachedParameter<Time, SeriesType>): void {
@@ -167,25 +190,36 @@ export class PineLayersPrimitive implements ISeriesPrimitive<Time> {
     });
   }
 
+  /** The normal layer's background pass: the outputs, when they go behind the chart. */
+  private drawBehind(target: CanvasRenderingTarget2D): void {
+    if (!this.behind()) return;
+    const pane = this.pane;
+    const hits: HitRegion[] = [];
+    this.hits = hits;
+    const stacks = new MarkerStacks();
+    this.frameStacks = stacks;
+    if (!pane || !this.model) return;
+    target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
+      const p = this.projection(mediaSize.width, mediaSize.height);
+      if (p) this.paintOutputs(ctx, p, pane, stacks, hits);
+    });
+  }
+
   private drawNormal(target: CanvasRenderingTarget2D): void {
     const pane = this.pane;
     const model = this.model;
-    const hits: HitRegion[] = [];
+    const behind = this.behind();
+    // Behind the chart, the background pass started this frame's hits and stacks.
+    const hits: HitRegion[] = behind ? this.hits : [];
+    const stacks = (behind ? this.frameStacks : null) ?? new MarkerStacks();
     this.hits = hits;
+    this.frameStacks = null;
     if (!pane || !model) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const p = this.projection(mediaSize.width, mediaSize.height);
       if (!p) return;
       const bars = this.barLookup();
-      for (const f of pane.fills) paintFill(ctx, p, f);
-      for (const h of pane.hlines) paintHline(ctx, p, h);
-      for (const s of pane.series) {
-        if (s.type === 'plot') paintPlot(ctx, p, s);
-        else paintCandles(ctx, p, s);
-      }
-      const stacks = new MarkerStacks();
-      for (const m of pane.markers) paintMarkers(ctx, p, m, bars, stacks);
-      paintDrawings(ctx, p, pane.drawings, bars, hits);
+      if (!behind) this.paintOutputs(ctx, p, pane, stacks, hits);
       if (pane.trades.length && bars && this.hooks.showTrades()) {
         const close = model.bars.close;
         paintTrades(
@@ -199,6 +233,51 @@ export class PineLayersPrimitive implements ISeriesPrimitive<Time> {
         );
       }
     });
+  }
+
+  /**
+   * Fills, hlines, plots and plotcandles — in the script's code order under
+   * `explicit_plot_zorder`, else fills, then hlines, then series by declaration — then the
+   * shapes, then the drawings.
+   */
+  private paintOutputs(
+    ctx: Ctx,
+    p: Projection,
+    pane: PaneModel,
+    stacks: MarkerStacks,
+    hits: HitRegion[],
+  ): void {
+    const bars = this.barLookup();
+    if (pane.drawOrder) {
+      for (const item of pane.drawOrder) {
+        switch (item.kind) {
+          case 'fill':
+            paintFill(ctx, p, pane.fills[item.index]);
+            break;
+          case 'hline':
+            paintHline(ctx, p, pane.hlines[item.index]);
+            break;
+          case 'series': {
+            const s = pane.series[item.index];
+            if (s.type === 'plot') paintPlot(ctx, p, s);
+            else paintCandles(ctx, p, s);
+            break;
+          }
+          case 'marker':
+            paintMarkers(ctx, p, pane.markers[item.index], bars, stacks);
+            break;
+        }
+      }
+    } else {
+      for (const f of pane.fills) paintFill(ctx, p, f);
+      for (const h of pane.hlines) paintHline(ctx, p, h);
+      for (const s of pane.series) {
+        if (s.type === 'plot') paintPlot(ctx, p, s);
+        else paintCandles(ctx, p, s);
+      }
+      for (const m of pane.markers) paintMarkers(ctx, p, m, bars, stacks);
+    }
+    paintDrawings(ctx, p, pane.drawings, bars, hits);
   }
 
   /** Last-value labels of plots (and plotcandles) whose display includes the price scale. */
