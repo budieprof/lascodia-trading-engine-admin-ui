@@ -23,6 +23,7 @@ import type {
   ScriptSemantic,
 } from '@core/api/scripting.types';
 import { ThemeService } from '@core/theme/theme.service';
+import type { PineProfileLine } from '@shared/pine-chart/model/pine-outputs.types';
 import { PineCatalogService } from '../../services/pine-catalog.service';
 import type { PineEditorHandle } from '../../editor/pine-editor-setup';
 
@@ -140,6 +141,12 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
    */
   readonly semantic = input<ScriptSemantic | null>(null);
   readonly semanticSource = input<string | null>(null);
+  /**
+   * A profiled run's per-line times and the source it ran (PE-I5): heat bars in the gutter beside
+   * the script's own lines, shown while the editor holds that source and kept through later edits.
+   */
+  readonly profile = input<readonly PineProfileLine[]>([]);
+  readonly profileSource = input<string | null>(null);
 
   /** 1-based cursor position. */
   readonly cursorChange = output<{ line: number; column: number }>();
@@ -188,6 +195,11 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
       const model = this.semantic();
       const source = this.semanticSource();
       untracked(() => this.handle?.setSemantic(model, source));
+    });
+    effect(() => {
+      const profile = this.profile();
+      const source = this.profileSource();
+      untracked(() => this.handle?.setProfile(profile, source));
     });
     effect(() => {
       const c = this.language.catalog();
@@ -240,6 +252,7 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
           });
           this.handle.setDiagnostics(this.diagnostics());
           this.handle.setSemantic(this.semantic(), this.semanticSource());
+          this.handle.setProfile(this.profile(), this.profileSource());
           this.zone.run(() => {
             this.state.set('ready');
             this.ready.emit();

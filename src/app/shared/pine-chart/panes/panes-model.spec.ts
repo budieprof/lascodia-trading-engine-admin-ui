@@ -191,6 +191,12 @@ describe('profiler', () => {
     ).toEqual([5, 6, 8]);
   });
 
+  it('leaves out lines of imported libraries (their numbers are the library’s, not the script’s)', () => {
+    const rows = profilerRows([...profile, { line: 5, executions: 600, totalMicros: 9000, unit: 'me/lib/1' }], source);
+    expect(rows.find((r) => r.line === 5)).toMatchObject({ executions: 600, totalMicros: 1000 });
+    expect(rows.find((r) => r.line === 8)?.heat).toBe(1);
+  });
+
   it('shows no flames with fewer than four lines', () => {
     expect(profilerRows(profile.slice(0, 2)).every((r) => r.flame === 0)).toBe(true);
   });

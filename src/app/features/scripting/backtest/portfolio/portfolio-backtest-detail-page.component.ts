@@ -14,7 +14,9 @@ import {
   formatMoney,
   formatNumber,
   formatPercent,
+  formatPrice,
   formatRatio,
+  inferPriceDecimals,
 } from '../../report/report-format';
 import { ANALYST_PERMISSION } from '../../research/research-permissions';
 import { describeFailure, isOk } from '../../shared/api-error';
@@ -24,18 +26,24 @@ import {
   accountCurveOptions,
   comparisonOptions,
   correlationFill,
+  exitReasonLabel,
   exposureOptions,
   isActive,
   marginOptions,
+  memberTradeRows,
+  memberTradeSummary,
   refusalCounts,
   refusalKindLabel,
   statusChip,
+  type MemberTradeSummary,
 } from './portfolio-backtest.model';
 import type { PortfolioRefusalKind, PortfolioRun } from './portfolio-backtest.types';
 import { PORTFOLIO_POLL_MS } from './portfolio-backtests-page.component';
 
 /** The refusals table shows the first ones; the counts above it cover all of them. */
 const REFUSALS_SHOWN = 200;
+/** A member's trade table shows its first trades in closing order; the summary above it covers all of them. */
+export const MEMBER_TRADES_SHOWN = 500;
 
 /**
  * One portfolio backtest: what was queued and, once it completed, the account's findings — its curve, drawdown and margin,
@@ -197,6 +205,76 @@ const REFUSALS_SHOWN = 200;
               results made up; shares above 100 % mean other members gained over the same stretch.
             </p>
           </section>
+
+          @if (res.members.length > 0) {
+            <section class="card" aria-labelledby="pf-trades-title">
+              <header class="head">
+                <h2 id="pf-trades-title" class="title">Each member’s trades</h2>
+                <span class="spacer"></span>
+                <label class="small">
+                  Member
+                  <select data-testid="pf-trades-member" [value]="tradesMember()" (change)="pickTradesMember($event)">
+                    @for (m of res.members; track m.index) {
+                      <option [value]="m.index">{{ m.index + 1 }}. {{ m.name }} — {{ m.symbol }} {{ m.timeframe }}</option>
+                    }
+                  </select>
+                </label>
+              </header>
+              @if (tradesOf(); as t) {
+                @if (t.rows.length === 0) {
+                  <p class="muted" data-testid="pf-trades-empty">{{ t.member.name }} held no trade on the account.</p>
+                } @else {
+                  <p class="small" data-testid="pf-trades-summary">{{ tradesSummaryText(t.summary, res.accountCurrency) }}</p>
+                  <div class="table-wrap">
+                    <table data-testid="pf-trades">
+                      <thead>
+                        <tr>
+                          <th scope="col" class="num">#</th>
+                          <th scope="col">Side</th>
+                          <th scope="col">Entry (UTC)</th>
+                          <th scope="col" class="num">Entry price</th>
+                          <th scope="col">Exit (UTC)</th>
+                          <th scope="col" class="num">Exit price</th>
+                          <th scope="col">Exit</th>
+                          <th scope="col" class="num">Lots</th>
+                          <th scope="col" class="num">Costs</th>
+                          <th scope="col" class="num">P&amp;L</th>
+                          <th scope="col" class="num">R</th>
+                          <th scope="col" class="num">Member P&amp;L so far</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (row of t.shown; track row.number) {
+                          <tr>
+                            <td class="num">{{ row.number }}</td>
+                            <td>{{ row.trade.direction === 'Buy' ? 'Long' : 'Short' }}</td>
+                            <td class="small">{{ when(row.trade.entryTime) }}</td>
+                            <td class="num">{{ price(row.trade.entryPrice, t.decimals) }}</td>
+                            <td class="small">{{ when(row.trade.exitTime) }}</td>
+                            <td class="num">{{ price(row.trade.exitPrice, t.decimals) }}</td>
+                            <td class="small">{{ exitLabel(row.trade.exitReason) }}</td>
+                            <td class="num">{{ num(row.trade.lotSize, 2) }}</td>
+                            <td class="num">{{ money(row.trade.commission + row.trade.swap + row.trade.slippage, '') }}</td>
+                            <td class="num">{{ money(row.trade.pnL, '', true) }}</td>
+                            <td class="num">{{ rText(row.trade.rMultiple) }}</td>
+                            <td class="num">{{ money(row.cumulativePnL, '', true) }}</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                  @if (t.rows.length > t.shown.length) {
+                    <p class="muted small">The first {{ t.shown.length }} of {{ t.rows.length }} trades are listed.</p>
+                  }
+                }
+                <p class="muted small">
+                  The trades this member held on the shared account, in the order they closed. Entries the account did
+                  not take are listed under “Entries the account did not take”. Amounts are in {{ res.accountCurrency }};
+                  costs are commission, swap and slippage.
+                </p>
+              }
+            </section>
+          }
 
           @if (res.correlation.members.length > 1) {
             <section class="card" aria-labelledby="pf-corr-title">
@@ -455,6 +533,23 @@ export class PortfolioBacktestDetailPageComponent implements OnInit {
     return res ? marginOptions(res.margin, this.palette()) : null;
   });
   readonly refusals = computed(() => refusalCounts(this.run()?.result?.refusals ?? []));
+
+  /** The member whose trades are listed (its index); the first member until another is picked. */
+  readonly tradesMember = signal(0);
+  readonly tradesOf = computed(() => {
+    const members = this.run()?.result?.members ?? [];
+    const member = members.find((m) => m.index === this.tradesMember()) ?? members[0];
+    if (!member) return null;
+    const trades = member.tradeList ?? [];
+    const rows = memberTradeRows(trades);
+    return {
+      member,
+      rows,
+      shown: rows.slice(0, MEMBER_TRADES_SHOWN),
+      summary: memberTradeSummary(trades),
+      decimals: inferPriceDecimals(trades.flatMap((t) => [t.entryPrice, t.exitPrice])),
+    };
+  });
   readonly shownRefusals = computed(() => (this.run()?.result?.refusals ?? []).slice(0, REFUSALS_SHOWN));
 
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -476,6 +571,25 @@ export class PortfolioBacktestDetailPageComponent implements OnInit {
   }
   num(v: number | null | undefined, decimals = 2, signed = false): string {
     return formatNumber(v ?? null, decimals, signed);
+  }
+  price(v: number | null | undefined, decimals: number): string {
+    return formatPrice(v ?? null, decimals);
+  }
+  rText(v: number | null | undefined): string {
+    return v === null || v === undefined ? '—' : formatNumber(v, 2, true);
+  }
+  exitLabel(reason: string): string {
+    return exitReasonLabel(reason);
+  }
+  tradesSummaryText(s: MemberTradeSummary, currency: string): string {
+    const r = s.averageR === null ? '' : `, average ${this.r1(s.averageR)} over ${s.rTrades} trade(s) with a stop`;
+    return (
+      `${s.trades} trade(s) held: ${s.longs} long, ${s.shorts} short; ${s.winners} won, ${s.losers} lost; ` +
+      `net ${this.money(s.netPnL, currency, true)}${r}.`
+    );
+  }
+  pickTradesMember(event: Event): void {
+    this.tradesMember.set(Number((event.target as HTMLSelectElement).value));
   }
   ratio(v: number | null | undefined): string {
     return formatRatio(v ?? null);

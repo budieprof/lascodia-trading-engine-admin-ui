@@ -36,6 +36,7 @@ class PinePreviewStubComponent {
   @Input() symbol: unknown;
   @Input() timeframe: unknown;
   @Output() jumpToLine = new EventEmitter<{ line: number; column?: number | null }>();
+  @Output() resultChange = new EventEmitter<unknown>();
 }
 
 @Component({
@@ -171,6 +172,17 @@ describe('ScriptPreviewComponent', () => {
       { line: 7, column: 1 },
       { line: 9, column: 4 },
     ]);
+  });
+
+  it('hands a profiled re-run’s line times and source to the editor (PE-I5), nothing for other re-runs', async () => {
+    render();
+    await preview();
+    const profiled: unknown[] = [];
+    fixture.componentInstance.profiled.subscribe((p) => profiled.push(p));
+    const lines = [{ line: 3, executions: 10, totalMicros: 40, unit: null }];
+    chart()!.resultChange.emit({ profile: [] });
+    chart()!.resultChange.emit({ profile: lines });
+    expect(profiled).toEqual([{ lines, source: SOURCE }]);
   });
 
   it('offers the Strategy report of the same run next to the chart', async () => {

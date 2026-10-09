@@ -34,8 +34,10 @@ export function profilerRows(
 ): ProfilerRow[] {
   const lines = source ? source.split(/\r?\n/) : null;
   // One row per line even if the engine reports a line twice (e.g. a block header and its body).
+  // A line of an imported library is not a line of this script (its number is the library's): left out.
   const byLine = new Map<number, { executions: number; totalMicros: number }>();
   for (const p of profile) {
+    if (p.unit) continue;
     if (!Number.isFinite(p.line) || p.line <= 0) continue;
     const cur = byLine.get(p.line) ?? { executions: 0, totalMicros: 0 };
     cur.executions += Math.max(0, p.executions || 0);
