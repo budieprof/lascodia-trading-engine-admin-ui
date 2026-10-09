@@ -200,6 +200,19 @@ so a new built-in needs no console change.
   transport. Delete is refused for a script strategy that still holds positions (engine D131).
 - `/pine-chart-lab` is a development page: always on under `ng serve`, and in a release only where the
   `pine-chart-lab` flag admits (Admin only, off in `config.json`).
+- **Scripts on the chart-analysis chart** (`features/chart-analysis/scripts`). Each script keeps one
+  renderer by its key (`ScriptLayers`): its pane keeps its height and place, a new result or display setting
+  never rebuilds it, and ticks reach it only as an anchor `update()` — never a re-render. Every run goes
+  through `LiveRerunScheduler` (one in flight per script, spaced by its round trip, held while the tab is
+  hidden); a `-429` busy refusal backs off quietly and is never shown as a script error (contract C5). Runs
+  are computed on the bars the chart draws (`chartType: 'heikinashi'` under Heikin-Ashi; price-based styles
+  say "not available"), and in Bar Replay every run ends at the head (`toUtc` = the head bar's close) — a
+  run that reaches past the head is not drawn, nor read by a status line, table or the Strategy Tester (no
+  look-ahead). Style/Visibility apply on the client (`styleRenderModel`, saved in the layout's
+  `WorkspaceScript.display`). The dock holds the Pine Editor, the Strategy Tester (the shared report, a
+  virtualised List of trades the chart's fill arrows select in, deep backtest for engine strategies) and Pine
+  Logs / trace / profiler — the last session-only. Named input templates are a synced chart pref
+  (`lascodia.chart.scriptInputTemplates.v1`).
 
 ## Gotchas that have cost real time
 
