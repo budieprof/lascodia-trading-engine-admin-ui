@@ -26,34 +26,51 @@ import type { DataWindowSection } from './value-providers';
     }
   `,
   styles: `
+    /* The host pane has no side padding (it is shared with edge-to-edge lists), so the data window carries its own
+       12px gutter — labels and values never touch the pane's border. */
     :host {
       display: block;
       font-size: 12px;
     }
     .dw-head {
-      padding: 4px 0 8px;
+      padding: 4px 12px 8px;
       font-weight: 600;
     }
     .dw-section {
-      padding: 6px 0;
+      padding: 8px 12px;
       border-top: 1px solid var(--border, #e6e9ef);
     }
     .dw-title {
-      margin-bottom: 2px;
+      margin-bottom: 4px;
+      font-size: 11px;
+      font-weight: 600;
       color: var(--text-muted, #787b86);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .dw-row {
       display: flex;
+      align-items: baseline;
       justify-content: space-between;
       gap: 12px;
       line-height: 20px;
     }
+    .dw-row span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text, inherit);
+    }
     .dw-row b {
+      flex-shrink: 0;
       font-weight: 500;
       font-variant-numeric: tabular-nums;
       text-align: right;
     }
     .dw-empty {
+      padding: 4px 12px 8px;
       color: var(--text-muted, #787b86);
     }
   `,

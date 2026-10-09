@@ -25,6 +25,7 @@ import { ManualTradingService } from './manual-trading.service';
 import type {
   ManualTradePreview,
   ManualTradeResult,
+  OrderEntryMovePreview,
   PositionChangePreview,
 } from './manual-trading.types';
 import { OrderTicketComponent } from './order-ticket.component';
@@ -32,6 +33,7 @@ import {
   actionableLines,
   dragSideProblem,
   livePending,
+  movedOrderLevels,
   newCorrelationId,
   pendingLines,
   type PendingChange,
@@ -70,6 +72,14 @@ type ChartAction =
       from: number;
       to: number;
     }
+  | {
+      type: 'orderEntry';
+      order: OrderDto;
+      from: number;
+      to: number;
+      /** Move the stop and target by the same distance (the default: the trade keeps its shape). */
+      withBrackets: boolean;
+    }
   | { type: 'close'; positionId: number; lots: number; preview: PositionChangePreview | null }
   | { type: 'cancel'; order: OrderDto };
 
@@ -78,7 +88,8 @@ type ChartAction =
  * <ul>
  *   <li>the order ticket and its brackets as draggable lines (SP-I4);</li>
  *   <li>an open position's stop and target dragged, its entry line clicked to close or partly close it, a working
- *   order's stop and target dragged and its price clicked to cancel it (SP-I3) — each through a confirm dialog that
+ *   order's stop and target dragged, its price dragged to move the order (with its stop and target by default; EA
+ *   ModifyOrderPrice) and clicked to cancel it (SP-I3) — each through a confirm dialog that
  *   shows the account, the new risk in money and R and the distance in pips and ATR from the engine's own
  *   preview, refused when the engine would refuse it (the ATR stop guard, no EA to carry it);</li>
  *   <li>a sent change stays a faded "waiting for the EA" line until the EA acknowledges it; a refusal says why and
@@ -138,6 +149,29 @@ type ChartAction =
               <p class="muted">
                 The engine checks the stop against the noise guard before it is sent.
               </p>
+            }
+            @case ('orderEntry') {
+              <h3>Move the working order's entry</h3>
+              <p>
+                {{ a.order.executionType }} {{ a.order.orderType }} {{ a.order.quantity }}
+                {{ a.order.symbol }}: {{ a.from | number: digits() }} →
+                <strong>{{ a.to | number: digits() }}</strong>
+              </p>
+              <label class="row">
+                <input
+                  type="checkbox"
+                  [checked]="a.withBrackets"
+                  (change)="setWithBrackets($any($event.target).checked)"
+                  data-testid="entry-with-brackets"
+                />
+                Move the stop and target with it
+              </label>
+              @if (entryLevels(); as lv) {
+                <p class="muted">
+                  Stop {{ lv.stopLoss === null ? 'none' : (lv.stopLoss | number: digits()) }} ·
+                  target {{ lv.takeProfit === null ? 'none' : (lv.takeProfit | number: digits()) }}
+                </p>
+              }
             }
             @case ('close') {
               <h3>Close the position</h3>
@@ -205,6 +239,52 @@ type ChartAction =
             </dl>
             <ul class="gates">
               @for (g of p.gates; track g.key) {
+                <li [class.fail]="!g.passed && g.blocking" [class.info]="!g.passed && !g.blocking">
+                  {{ g.passed ? '✓' : g.blocking ? '✕' : '!' }} {{ g.detail }}
+                </li>
+              }
+            </ul>
+          } @else if (entryPreview(); as e) {
+            <p class="account">
+              Account {{ e.accountName || e.accountId }} · {{ e.accountId }} · {{ e.accountType }}
+              @if (e.accountType === 'Real') {
+                <strong class="real">real money</strong>
+              }
+            </p>
+            <dl class="facts" data-testid="entry-move-facts">
+              @if (e.distanceFromMarketPips !== null) {
+                <dt>From the market</dt>
+                <dd>
+                  {{ e.distanceFromMarketPips | number: '1.1-1' }} pips from the
+                  {{ e.isBuy ? 'ask' : 'bid' }}
+                </dd>
+              }
+              @if (e.stopDistancePips !== null) {
+                <dt>Stop</dt>
+                <dd>
+                  {{ e.stopDistancePips | number: '1.1-1' }} pips
+                  @if (e.stopDistanceAtr !== null) {
+                    · {{ e.stopDistanceAtr | number: '1.2-2' }} ATR
+                  }
+                  from the new entry
+                </dd>
+              }
+              @if (e.riskAtStop !== null) {
+                <dt>If stopped</dt>
+                <dd>−{{ e.riskAtStop | number: '1.2-2' }} {{ e.currency }}</dd>
+              }
+              @if (e.rewardAtTarget !== null) {
+                <dt>At the target</dt>
+                <dd>
+                  +{{ e.rewardAtTarget | number: '1.2-2' }} {{ e.currency }}
+                  @if (e.targetR !== null) {
+                    ({{ e.targetR | number: '1.2-2' }}R)
+                  }
+                </dd>
+              }
+            </dl>
+            <ul class="gates">
+              @for (g of e.gates; track g.key) {
                 <li [class.fail]="!g.passed && g.blocking" [class.info]="!g.passed && !g.blocking">
                   {{ g.passed ? '✓' : g.blocking ? '✕' : '!' }} {{ g.detail }}
                 </li>
@@ -349,6 +429,8 @@ export class ChartTradingComponent {
 
   readonly action = signal<ChartAction | null>(null);
   readonly changePreview = signal<PositionChangePreview | null>(null);
+  /** The engine's check of a working order's entry move (move-preview). */
+  readonly entryPreview = signal<OrderEntryMovePreview | null>(null);
   readonly previewLoading = signal(false);
   readonly actionError = signal<string | null>(null);
   readonly sending = signal(false);
@@ -398,7 +480,16 @@ export class ChartTradingComponent {
     const a = this.action();
     if (!a || this.sending()) return false;
     if (a.type === 'move' || a.type === 'close') return !!this.changePreview()?.canApply;
+    if (a.type === 'orderEntry') return !!this.entryPreview()?.canApply;
     return true;
+  });
+
+  /** The levels an entry move sends (stop and target shifted with it, or kept). */
+  readonly entryLevels = computed(() => {
+    const a = this.action();
+    return a?.type === 'orderEntry'
+      ? movedOrderLevels(a.order, a.to, a.withBrackets, this.precision())
+      : null;
   });
 
   readonly applyLabel = computed(() => {
@@ -408,6 +499,8 @@ export class ChartTradingComponent {
       case 'move':
       case 'orderMove':
         return 'Send the change';
+      case 'orderEntry':
+        return 'Move the order';
       case 'close':
         return a.lots < (this.changePreview()?.openLots ?? Infinity)
           ? 'Close these lots'
@@ -491,6 +584,19 @@ export class ChartTradingComponent {
       this.loadChangePreview(p.id, kind === 'stop' ? { stopLoss: price } : { takeProfit: price });
       return;
     }
+    if (line.kind === 'orderPrice' && line.refId != null) {
+      const o = this.orders().find((x) => x.id === line.refId);
+      if (!o) return;
+      this.openAction({
+        type: 'orderEntry',
+        order: o,
+        from: line.price,
+        to: price,
+        withBrackets: true,
+      });
+      this.loadEntryPreview();
+      return;
+    }
     if ((line.kind === 'orderStop' || line.kind === 'orderTarget') && line.refId != null) {
       const o = this.orders().find((x) => x.id === line.refId);
       if (!o) return;
@@ -528,6 +634,7 @@ export class ChartTradingComponent {
   private openAction(a: ChartAction): void {
     this.action.set(a);
     this.changePreview.set(null);
+    this.entryPreview.set(null);
     this.actionError.set(null);
     const el = this.actionDialog()?.nativeElement;
     if (el && !el.open) el.showModal();
@@ -536,6 +643,7 @@ export class ChartTradingComponent {
   closeAction(): void {
     this.action.set(null);
     this.changePreview.set(null);
+    this.entryPreview.set(null);
     const el = this.actionDialog()?.nativeElement;
     if (el?.open) el.close();
   }
@@ -563,6 +671,40 @@ export class ChartTradingComponent {
           this.actionError.set('The engine did not answer the check.');
         },
       });
+  }
+
+  /** Asks the engine about the entry move in the dialog (its levels as they stand now). */
+  private loadEntryPreview(): void {
+    const a = this.action();
+    const levels = this.entryLevels();
+    if (a?.type !== 'orderEntry' || !levels) return;
+    const seq = ++this.previewSeq;
+    this.entryPreview.set(null);
+    this.actionError.set(null);
+    this.previewLoading.set(true);
+    this.trading
+      .orderEntryMovePreview(a.order.id, levels)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (seq !== this.previewSeq) return;
+          this.previewLoading.set(false);
+          if (res?.status && res.data) this.entryPreview.set(res.data);
+          else this.actionError.set(res?.message || 'The engine could not check the move.');
+        },
+        error: () => {
+          if (seq !== this.previewSeq) return;
+          this.previewLoading.set(false);
+          this.actionError.set('The engine did not answer the check.');
+        },
+      });
+  }
+
+  setWithBrackets(withBrackets: boolean): void {
+    const a = this.action();
+    if (a?.type !== 'orderEntry' || a.withBrackets === withBrackets) return;
+    this.action.set({ ...a, withBrackets });
+    this.loadEntryPreview();
   }
 
   setCloseLots(raw: string): void {
@@ -618,6 +760,17 @@ export class ChartTradingComponent {
           },
         );
         return;
+      case 'orderEntry': {
+        const levels = movedOrderLevels(a.order, a.to, a.withBrackets, this.precision());
+        this.send(this.trading.moveOrderEntry(a.order.id, levels, cid), {
+          correlationId: cid,
+          kind: 'orderEntry',
+          refId: a.order.id,
+          price: levels.price,
+          label: 'Entry',
+        });
+        return;
+      }
       case 'close': {
         const p = this.changePreview();
         if (!p || p.triggerPrice === null) return;

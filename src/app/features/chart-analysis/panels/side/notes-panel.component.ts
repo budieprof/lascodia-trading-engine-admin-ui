@@ -180,8 +180,29 @@ import { confirmDelete } from '../../dialog/chart-dialogs';
       }
       .np-tools {
         justify-content: space-between;
-        padding: 0 10px 8px;
+        padding: 0 12px 8px;
         color: var(--tv-muted, #787b86);
+      }
+      .np-tools label,
+      .np-row label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+      .np-tools input[type='checkbox'],
+      .np-row input[type='checkbox'] {
+        margin: 0;
+      }
+      /* The page's .pane-empty style does not reach inside this component (style encapsulation), so the empty, loading
+         and error states are styled here — otherwise they sat flush against the pane's left border. */
+      .pane-empty {
+        padding: 10px 12px;
+        line-height: 1.45;
+        color: var(--tv-muted, #787b86);
+      }
+      .np-error {
+        color: #f23645;
       }
       .np-form {
         display: flex;

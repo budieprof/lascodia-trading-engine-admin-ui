@@ -230,6 +230,13 @@ const HOVER_OPEN_MS = 250;
       :host {
         display: block;
       }
+      /* The page's .pane-empty style does not reach inside this component (style encapsulation): the empty, loading and
+         error states carry the same 10px/12px gutter here, or they sit flush against the pane's border. */
+      .pane-empty {
+        padding: 10px 12px;
+        line-height: 1.45;
+        color: var(--text-muted, #787b86);
+      }
       .tree-title {
         padding: 2px 10px 6px;
         font-weight: 600;
