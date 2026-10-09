@@ -134,9 +134,11 @@
       @for (c of addCandidates(); track c.symbol) {
         <li>
           <button type="button" [disabled]="c.added" (click)="add(c.symbol)">
-            <span class="wl-badge" [attr.data-ccy]="c.symbol.slice(0, 3)">{{
-              c.symbol.slice(0, 1)
-            }}</span>
+            @if (pairFlags(c.symbol)) {
+              <app-pair-icon [symbol]="c.symbol" />
+            } @else {
+              <span class="wl-badge" [attr.data-ccy]="c.symbol.slice(0, 3)">{{ c.symbol.slice(0, 1) }}</span>
+            }
             <span class="wl-add-symbol">{{ c.symbol }}</span>
             <span class="muted">{{ c.name }}</span>
             <span class="wl-add-state">{{ c.added ? 'Added' : '' }}</span>
@@ -273,9 +275,11 @@
               <app-chart-icon name="flag" [size]="14" />
             </button>
             <span class="col-symbol">
-              <span class="wl-badge" [attr.data-ccy]="r.symbol.slice(0, 3)">{{
-                r.symbol.slice(0, 1)
-              }}</span>
+              @if (pairFlags(r.symbol)) {
+                <app-pair-icon [symbol]="r.symbol" />
+              } @else {
+                <span class="wl-badge" [attr.data-ccy]="r.symbol.slice(0, 3)">{{ r.symbol.slice(0, 1) }}</span>
+              }
               <span class="wl-symbol">{{ r.symbol }}</span>
               <span
                 class="wl-dot"
@@ -471,9 +475,11 @@
 @let dp = split(d.row.last, d.row.digits);
 <section class="wl-details" aria-label="Symbol details">
   <div class="wl-d-head">
-    <span class="wl-badge big" [attr.data-ccy]="d.symbol.slice(0, 3)">{{
-      d.symbol.slice(0, 1)
-    }}</span>
+    @if (pairFlags(d.symbol)) {
+      <app-pair-icon [symbol]="d.symbol" [big]="true" />
+    } @else {
+      <span class="wl-badge big" [attr.data-ccy]="d.symbol.slice(0, 3)">{{ d.symbol.slice(0, 1) }}</span>
+    }
     <strong>{{ d.symbol }}</strong>
   </div>
   <div class="muted wl-d-name" data-testid="watchlist-detail-kind">{{ d.name }} · {{ d.kind }}</div>

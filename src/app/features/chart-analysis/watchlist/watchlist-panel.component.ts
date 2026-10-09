@@ -1,3 +1,4 @@
+import { PairIconComponent, pairFlags } from './pair-icon.component';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -126,6 +127,7 @@ type PairMeta = CurrencyPairDto & { assetClass?: string | null };
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DecimalPipe,
+    PairIconComponent,
     ChartIconComponent,
     PerformanceTilesComponent,
     SeasonalsComponent,
@@ -176,6 +178,7 @@ export class WatchlistPanelComponent {
   readonly flags = FLAGS;
   readonly split = splitPrice;
   readonly tickParts = tickParts;
+  readonly pairFlags = pairFlags;
   readonly allColumns = WATCH_COLUMNS;
   readonly hotlists = HOTLISTS;
   readonly countdown = formatCountdown;
