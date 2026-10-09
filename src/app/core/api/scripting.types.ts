@@ -759,3 +759,24 @@ export interface ScriptSessionSubscription {
   seq: number;
   barIndex: number;
 }
+
+// ── runtime2: diagnostic hints and quick fixes (engine PR-I4, `ScriptDiagnosticDto.hint/fixes`) ──
+
+/** A quick fix: replace the located text (1-based, end column exclusive) with `replacement`. */
+export interface ScriptDiagnosticFix {
+  /** What the fix does, as the editor offers it ("Change to 'ta.sma'"). */
+  title: string;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  replacement: string;
+}
+
+/** The engine's suggestion and quick fixes on a diagnostic (merged into `ScriptDiagnostic`). */
+export interface ScriptDiagnostic {
+  /** A short suggestion shown with the message ("Did you mean 'ta.sma'?"); absent when there is none. */
+  hint?: string | null;
+  /** Text edits that apply the hint; absent when there are none. */
+  fixes?: readonly ScriptDiagnosticFix[] | null;
+}

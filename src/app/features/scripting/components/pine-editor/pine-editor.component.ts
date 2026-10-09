@@ -16,7 +16,7 @@ import {
   untracked,
 } from '@angular/core';
 
-import type { ScriptDiagnostic } from '@core/api/scripting.types';
+import type { ScriptDiagnostic, ScriptDiagnosticFix } from '@core/api/scripting.types';
 import { ThemeService } from '@core/theme/theme.service';
 import { PineCatalogService } from '../../services/pine-catalog.service';
 import type { PineEditorHandle } from '../../editor/pine-editor-setup';
@@ -241,6 +241,16 @@ export class PineEditorComponent implements AfterViewInit, OnDestroy {
   replaceSource(doc: string): void {
     if (this.handle) this.handle.setValue(doc, true);
     else this.value.set(doc);
+  }
+
+  /**
+   * Applies one of the engine's quick fixes as an edit the operator can undo (Ctrl/Cmd-Z). Nothing
+   * happens on a read-only editor or before the editor has loaded (the lint markers offer the same
+   * fixes once it has).
+   */
+  applyFix(fix: ScriptDiagnosticFix): void {
+    if (this.readOnly()) return;
+    this.handle?.applyFix(fix);
   }
 
   /** The live source (the editor's own document, even mid-keystroke). */

@@ -12,7 +12,7 @@ import {
   indentOnInput,
   indentUnit,
 } from '@codemirror/language';
-import { lintGutter, lintKeymap, setDiagnostics } from '@codemirror/lint';
+import { lintGutter, lintKeymap, setDiagnostics, type Diagnostic } from '@codemirror/lint';
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { Compartment, EditorState, Transaction, type Extension } from '@codemirror/state';
 import {
@@ -29,9 +29,19 @@ import {
   rectangularSelection,
 } from '@codemirror/view';
 
-import type { PineCatalog, ScriptDiagnostic, ScriptLibraryDto } from '@core/api/scripting.types';
+import type {
+  PineCatalog,
+  ScriptDiagnostic,
+  ScriptDiagnosticFix,
+  ScriptLibraryDto,
+} from '@core/api/scripting.types';
 import type { PineCatalogIndex } from '../pine/pine-catalog-index';
-import { toEditorDiagnostics } from '../pine/pine-diagnostics';
+import {
+  fixRange,
+  shiftedFix,
+  toEditorDiagnostics,
+  type EditorDiagnostic,
+} from '../pine/pine-diagnostics';
 import { pineColorSwatches } from './pine-colors';
 import { pineCompletionSource } from './pine-complete';
 import { indexForCatalog, pineContextField, setPineContext } from './pine-context';
@@ -69,8 +79,10 @@ export interface PineEditorHandle {
   setDark(dark: boolean): void;
   setCatalog(catalog: PineCatalog | null): void;
   setLibraries(libraries: readonly ScriptLibraryDto[]): void;
-  /** Shows the engine's diagnostics as lint markers (1-based line/column). */
+  /** Shows the engine's diagnostics as lint markers (1-based line/column), quick fixes as their actions. */
   setDiagnostics(diagnostics: readonly ScriptDiagnostic[]): void;
+  /** Applies a quick fix (1-based line/column range) as one edit the operator can undo. */
+  applyFix(fix: ScriptDiagnosticFix): void;
   /** Moves the cursor to a 1-based line/column, scrolls it into view and focuses. */
   revealPosition(line: number, column: number): void;
   focus(): void;
@@ -88,6 +100,48 @@ function tokenizerNames(index: PineCatalogIndex): PineTokenizerNames {
 
 function readOnlyExtension(readOnly: boolean): Extension {
   return [EditorState.readOnly.of(readOnly), EditorView.editable.of(!readOnly)];
+}
+
+/**
+ * A mapped diagnostic as a CodeMirror lint marker: each engine quick fix becomes one of its actions,
+ * applied as a single undoable edit (and never on a read-only editor). `doc` is the document the
+ * diagnostics were mapped onto.
+ */
+export function lintDiagnostic(d: EditorDiagnostic, doc?: unknown): Diagnostic {
+  return {
+    from: d.from,
+    to: d.to,
+    severity: d.severity,
+    message: d.message,
+    source: d.source,
+    ...(d.fixes.length > 0
+      ? {
+          actions: d.fixes.map((fix) => ({
+            name: fix.title,
+            apply: (view: EditorView, from: number, to: number) => {
+              if (view.state.readOnly) return;
+              const range = shiftedFix(
+                d,
+                fix,
+                from,
+                to,
+                doc === undefined || view.state.doc === doc,
+              );
+              if (!range) return;
+              const end = view.state.doc.length;
+              view.dispatch({
+                changes: {
+                  from: Math.min(range.from, end),
+                  to: Math.min(range.to, end),
+                  insert: fix.insert,
+                },
+                userEvent: 'input.quickfix',
+              });
+            },
+          })),
+        }
+      : {}),
+  };
 }
 
 export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): PineEditorHandle {
@@ -187,7 +241,21 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
       view.dispatch({ effects: setPineContext.of({ libraries }) });
     },
     setDiagnostics(diagnostics) {
-      view.dispatch(setDiagnostics(view.state, toEditorDiagnostics(view.state.doc, diagnostics)));
+      const doc = view.state.doc;
+      const markers = toEditorDiagnostics(doc, diagnostics).map((d) => lintDiagnostic(d, doc));
+      view.dispatch(setDiagnostics(view.state, markers));
+    },
+    applyFix(fix) {
+      if (view.state.readOnly) return;
+      const range = fixRange(view.state.doc, fix);
+      if (!range) return;
+      view.dispatch({
+        changes: { ...range, insert: fix.replacement },
+        selection: { anchor: range.from + fix.replacement.length },
+        userEvent: 'input.quickfix',
+        effects: EditorView.scrollIntoView(range.from, { y: 'center' }),
+      });
+      view.focus();
     },
     revealPosition(line, column) {
       const doc = view.state.doc;
