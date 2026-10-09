@@ -328,9 +328,6 @@ type ChartAction =
         align-items: flex-start;
         pointer-events: none;
       }
-      .ticket-dock > * {
-        pointer-events: auto;
-      }
       .trade-action {
         max-width: 420px;
         border: 1px solid var(--border-1, #363a45);
