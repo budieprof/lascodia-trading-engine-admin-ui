@@ -3,6 +3,7 @@ import type { Bar } from '../datafeed/candle-feed.service';
 import {
   averageTrueRange,
   boxBase,
+  boxUnit,
   toKagi,
   toLineBreak,
   toPointAndFigure,
@@ -123,8 +124,13 @@ describe('toRenko', () => {
 
 describe('boxBase — the ATR box size is fixed at load (CC-16)', () => {
   it('leaves the forming bar out, so a tick on it never moves the box', () => {
-    const closed = series([100, 101, 102, 101, 103, 102, 104, 103, 105, 104, 106, 105, 107, 106, 108]);
-    const forming = { ...closed[closed.length - 1], time: closed[closed.length - 1].time + 3_600_000 };
+    const closed = series([
+      100, 101, 102, 101, 103, 102, 104, 103, 105, 104, 106, 105, 107, 106, 108,
+    ]);
+    const forming = {
+      ...closed[closed.length - 1],
+      time: closed[closed.length - 1].time + 3_600_000,
+    };
     const quiet = boxBase([...closed, { ...forming, high: 108.1, low: 107.9, close: 108 }], true);
     const spike = boxBase([...closed, { ...forming, high: 140, low: 80, close: 120 }], true);
     expect(spike).toBe(quiet);
@@ -227,5 +233,26 @@ describe('toRangeBars', () => {
     const out = toRangeBars([ohlc(0, 100, 102, 94, 95)], 2);
     expect(out[0].close).toBeGreaterThan(out[0].open);
     expect(out[0].high).toBe(102);
+  });
+});
+
+describe('boxUnit (CC-I10)', () => {
+  const bars = series([1.1, 1.102, 1.101, 1.104, 1.103, 1.106, 1.105, 1.108]);
+
+  it('by ATR: the multiple of the closed bars’ ATR', () => {
+    const base = boxBase(bars, true);
+    expect(boxUnit({ method: 'atr', bars, atrMultiple: 2, pips: 10, pipSize: 0.0001 })).toBeCloseTo(
+      2 * base,
+      12,
+    );
+  });
+
+  it('by pips: pips × pip size, whatever the bars', () => {
+    expect(
+      boxUnit({ method: 'pips', bars, atrMultiple: 2, pips: 15, pipSize: 0.0001 }),
+    ).toBeCloseTo(0.0015, 12);
+    expect(
+      boxUnit({ method: 'pips', bars: [], atrMultiple: 1, pips: 15, pipSize: 0.01 }),
+    ).toBeCloseTo(0.15, 12);
   });
 });

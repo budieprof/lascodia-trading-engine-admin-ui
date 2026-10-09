@@ -62,7 +62,7 @@ import {
 import type { DayOf, Maybe, Ohlc } from '../indicators/math';
 import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
 import {
-  boxBase,
+  boxUnit,
   toKagi,
   toRangeBars,
   toLineBreak,
@@ -96,6 +96,7 @@ import {
 } from './plotted-bars';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { resolutionMs } from '../datafeed/resolution';
+import { pipSizeFor } from '../datafeed/symbol-info';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { MagnetMode } from '../drawings/drawing-ops';
@@ -450,8 +451,20 @@ export class ChartHostComponent implements OnDestroy {
   /** Economic events on the time axis. Times are UTC; shifted like the bars. */
   readonly events = input<EventMark[]>([]);
   readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
-  /** Multiplier on the ATR-derived Renko / P&F / Kagi box size. */
+  /** Multiplier on the ATR-derived Renko / P&F / Kagi / Range box size. */
   readonly boxSizeAtr = input<number>(1);
+  /**
+   * How the price-based box is sized (TradingView's "box size assignment method"): `atr` — a multiple
+   * of ATR(14), measured once at load; `pips` — a fixed number of pips (`boxPips`), "Traditional".
+   */
+  readonly boxMethod = input<'atr' | 'pips'>('atr');
+  readonly boxPips = input<number>(10);
+  /** One pip in price (the page knows the symbol's asset class); null: from {@link precision}. */
+  readonly pipSize = input<number | null>(null);
+  /** Renko "Show wicks": the furthest price traded against each brick before it formed. */
+  readonly renkoWicks = input<boolean>(false);
+  /** Line break: how many lines a reversal must break (TradingView's default 3). */
+  readonly lineBreakLines = input<number>(3);
   /** Which chart this panel is, so it renders only its own drawings. */
   readonly symbol = input<string>('');
   /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
@@ -847,6 +860,11 @@ export class ChartHostComponent implements OnDestroy {
       this.style();
       this.timezone();
       this.boxSizeAtr();
+      this.boxMethod();
+      this.boxPips();
+      this.pipSize();
+      this.renkoWicks();
+      this.lineBreakLines();
       this.theme.theme();
       untracked(() => this.syncData());
     });
@@ -1590,7 +1608,14 @@ export class ChartHostComponent implements OnDestroy {
     const dark = this.theme.theme() === 'dark';
     const series = this.dataKey() || `${this.symbol()}|${this.resolution()}`;
     const unit = PRICE_BASED.has(style) ? this.boxUnitFor(raw, series, style) : null;
-    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}`;
+    // What else a price-based style is built with: Renko's wicks, Line break's lines.
+    const shape =
+      style === 'renko'
+        ? `wicks:${this.renkoWicks()}`
+        : style === 'line-break'
+          ? `lines:${this.lineBreakLines()}`
+          : '';
+    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}`;
     // Another of the effect's inputs re-ran it with nothing changed.
     if (raw === this.plotter.raw && key === this.plotKey) return;
 
@@ -1651,14 +1676,24 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
-   * The price-based styles' box in price: `boxSizeAtr` × ATR(14) of the bars that had CLOSED when the
-   * series loaded (`boxBase`), kept until the series, the style or the multiplier changes (CC-16).
-   * Re-measured per tick it moved with the forming bar and redrew every brick.
+   * The price-based styles' box in price (CC-I10). By ATR: `boxSizeAtr` × ATR(14) of the bars that
+   * had CLOSED when the series loaded (`boxBase`), kept until the series, the style or the multiplier
+   * changes (CC-16) — re-measured per tick it moved with the forming bar and redrew every brick. By
+   * pips ("Traditional"): `boxPips` pips, the same on every timeframe.
    */
   private boxUnitFor(raw: readonly Bar[], series: string, style: ChartStyle): number {
+    const method = this.boxMethod();
+    const opts = {
+      method,
+      bars: raw,
+      atrMultiple: this.boxSizeAtr(),
+      pips: this.boxPips(),
+      pipSize: this.pipSize() ?? pipSizeFor(this.precision()),
+    };
+    if (method === 'pips') return boxUnit(opts);
     const key = `${series}|${style}|${this.boxSizeAtr()}`;
     if (this.box?.key === key) return this.box.unit;
-    const unit = boxBase(raw, true) * Math.max(0.1, this.boxSizeAtr());
+    const unit = boxUnit(opts);
     // Not remembered before the bars arrive: the first real ones measure it.
     if (raw.length > 0) this.box = { key, unit };
     return unit;
@@ -1667,21 +1702,22 @@ export class ChartHostComponent implements OnDestroy {
   /**
    * Rebuild the bar array for styles that are not time-based, with a box of `unit` (price).
    *
-   * Brick and box sizes are a multiple of ATR rather than a fixed price: a 10-pip brick is reasonable
-   * on EURUSD H1 and absurd on the same pair's D1, so a constant would make these chart types useless
-   * on most timeframes.
+   * By ATR, brick and box sizes follow the timeframe: a 10-pip brick is reasonable on EURUSD H1 and
+   * absurd on the same pair's D1. Line break takes no box: a reversal breaks `lineBreakLines` lines.
    */
   private priceBasedBars(bars: Bar[], style: ChartStyle, unit: number): Bar[] {
-    if (bars.length === 0 || !(unit > 0)) return [];
+    if (bars.length === 0) return [];
+    if (style === 'line-break')
+      return toLineBreak(bars, Math.max(1, Math.round(this.lineBreakLines())));
+    if (!(unit > 0)) return [];
     switch (style) {
       case 'renko':
-        return toRenko(bars, unit);
-      case 'line-break':
-        return toLineBreak(bars, 3);
+        return toRenko(bars, unit, { wicks: this.renkoWicks() });
       case 'pnf':
         return toPointAndFigure(bars, unit, 3);
       case 'kagi':
-        return toKagi(bars, unit * 2);
+        // The reversal amount is the box: ATR(14) at the default multiplier, TradingView's default.
+        return toKagi(bars, unit);
       case 'range':
         return toRangeBars(bars, unit);
       default:

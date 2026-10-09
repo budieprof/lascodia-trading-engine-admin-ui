@@ -58,6 +58,20 @@ export function priceScaleFor(decimalPlaces: number): number {
   return 10 ** digits;
 }
 
+/**
+ * One pip, in price, from the quote's decimals — the engine's rule (`InstrumentMath.ResolvePipSize`):
+ * for FX a pip is ten points on today's fractional quotes (5 decimals → 0.0001, JPY's 3 → 0.01) and
+ * one point on the old 4- and 2-decimal ones; for anything else (`assetClass` an index, a commodity,
+ * crypto) a pip is the point. An unknown asset class counts as FX, as the engine counts it.
+ */
+export function pipSizeFor(decimalPlaces: number, assetClass?: string | null): number {
+  const digits =
+    Number.isFinite(decimalPlaces) && decimalPlaces >= 0 ? Math.trunc(decimalPlaces) : 5;
+  const point = 10 ** -digits;
+  const fx = !assetClass || /^fx/i.test(assetClass) || assetClass === 'Unknown';
+  return fx && digits >= 3 && digits % 2 === 1 ? point * 10 : point;
+}
+
 export function toSymbolInfo(pair: CurrencyPairDto): LascodiaSymbolInfo {
   const symbol = pair.symbol ?? '';
   const description =

@@ -9,7 +9,7 @@ import {
   sourceBarsNeeded,
   type EngineTimeframe,
 } from './resolution';
-import { priceScaleFor, toSymbolInfo } from './symbol-info';
+import { pipSizeFor, priceScaleFor, toSymbolInfo } from './symbol-info';
 
 /** The only timeframes the engine's `Timeframe` enum stores. */
 const STORED: EngineTimeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
@@ -105,5 +105,21 @@ describe('symbol info', () => {
     expect(info.pricescale).toBe(100_000);
     expect(info.description).toBe('EUR/USD');
     expect(info.has_intraday).toBe(true);
+  });
+});
+
+describe("pipSizeFor — the engine's pip (InstrumentMath.ResolvePipSize)", () => {
+  it('is ten points on fractional FX quotes and one point on the old ones', () => {
+    expect(pipSizeFor(5)).toBeCloseTo(0.0001, 12);
+    expect(pipSizeFor(3)).toBeCloseTo(0.01, 12);
+    expect(pipSizeFor(4)).toBeCloseTo(0.0001, 12);
+    expect(pipSizeFor(2)).toBeCloseTo(0.01, 12);
+    expect(pipSizeFor(5, 'FxMajor')).toBeCloseTo(0.0001, 12);
+  });
+
+  it('is the point for anything that is not FX', () => {
+    expect(pipSizeFor(2, 'Commodity')).toBeCloseTo(0.01, 12);
+    expect(pipSizeFor(1, 'Index')).toBeCloseTo(0.1, 12);
+    expect(pipSizeFor(3, 'Crypto')).toBeCloseTo(0.001, 12);
   });
 });

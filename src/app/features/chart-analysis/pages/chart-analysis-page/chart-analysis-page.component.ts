@@ -58,7 +58,7 @@ import {
 import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
-import { priceScaleFor } from '../../datafeed/symbol-info';
+import { pipSizeFor, priceScaleFor } from '../../datafeed/symbol-info';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
@@ -187,6 +187,7 @@ import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import {
   dockStateOf,
   restoredDock,
+  restoredPriceBased,
   restoredScriptItem,
   workspaceScriptOf,
   type ChartWorkspaceState,
@@ -1078,6 +1079,24 @@ export class ChartAnalysisPageComponent {
    * ATR-derived default rather than replacing it.
    */
   readonly boxSizeAtr = signal(1);
+  /**
+   * The price-based styles' box (CC-I10): by ATR (`boxSizeAtr` × ATR(14), measured at load) or in pips
+   * (`boxPips`, TradingView's "Traditional"). Saved with the layout.
+   */
+  readonly boxMethod = signal<'atr' | 'pips'>('atr');
+  readonly boxPips = signal(10);
+  /** Renko's "Show wicks". */
+  readonly renkoWicks = signal(false);
+  /** Line break: lines a reversal must break. */
+  readonly lineBreakLines = signal(3);
+  /** One pip of this symbol, in price (the engine's rule: ten points on fractional FX quotes). */
+  readonly pipSize = computed(() =>
+    pipSizeFor(
+      this.precision(),
+      (this.currentPair() as (CurrencyPairDto & { assetClass?: string | null }) | undefined)
+        ?.assetClass,
+    ),
+  );
 
   /**
    * FX market status, from the bar data rather than a clock.
@@ -1891,9 +1910,25 @@ export class ChartAnalysisPageComponent {
     if (Number.isFinite(value) && value > 0) this.boxSizeAtr.set(value);
   }
 
-  /** True while a price-based style is showing, so the box control appears. */
-  readonly priceBasedStyle = computed(() =>
-    ['renko', 'kagi', 'pnf', 'line-break'].includes(this.style()),
+  setBoxPips(raw: string): void {
+    const value = Number(raw);
+    if (Number.isFinite(value) && value > 0) this.boxPips.set(value);
+  }
+
+  setLineBreakLines(raw: string): void {
+    const value = Math.round(Number(raw));
+    if (Number.isFinite(value) && value >= 1 && value <= 10) this.lineBreakLines.set(value);
+  }
+
+  /**
+   * The price-based styles that take a box — Renko's brick, Point & Figure's box, Kagi's reversal,
+   * Range's range — so the box control appears. Line break takes none; it has its lines (CC-17: the
+   * box was shown for Line break, which ignores it, and hidden for Range, which uses it).
+   */
+  readonly boxStyle = computed(() => ['renko', 'kagi', 'pnf', 'range'].includes(this.style()));
+  /** What the box is called on the current style. */
+  readonly boxLabel = computed(() =>
+    this.style() === 'kagi' ? 'Reversal' : this.style() === 'range' ? 'Range' : 'Box size',
   );
 
   setReplaySpeed(raw: string): void {
@@ -3050,6 +3085,13 @@ export class ChartAnalysisPageComponent {
       scaleMode: this.scaleMode(),
       countdown: this.showCountdown(),
       timezone: this.timezone(),
+      priceBased: {
+        boxMethod: this.boxMethod(),
+        boxSizeAtr: this.boxSizeAtr(),
+        boxPips: this.boxPips(),
+        renkoWicks: this.renkoWicks(),
+        lineBreakLines: this.lineBreakLines(),
+      },
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.savedScriptsState(),
       view: this.viewSnapshot() ?? this.pendingView ?? null,
@@ -3143,6 +3185,12 @@ export class ChartAnalysisPageComponent {
       this.scaleMode.set(s.scaleMode ?? 'normal');
       this.showCountdown.set(s.countdown ?? true);
       this.timezone.set(s.timezone ?? 'UTC');
+      const pb = restoredPriceBased(s.priceBased);
+      this.boxMethod.set(pb.boxMethod);
+      this.boxSizeAtr.set(pb.boxSizeAtr);
+      this.boxPips.set(pb.boxPips);
+      this.renkoWicks.set(pb.renkoWicks);
+      this.lineBreakLines.set(pb.lineBreakLines);
       this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
       const o = s.overlays ?? {};
       // Layouts saved before the split had one "Trades & signals" switch: it drove all three.

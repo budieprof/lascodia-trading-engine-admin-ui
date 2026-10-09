@@ -75,6 +75,14 @@ export interface ChartWorkspaceState {
   /** Countdown to bar close on the price scale (default on). */
   countdown?: boolean;
   timezone?: string;
+  /** How the price-based styles are built (CC-I10); absent: ATR × 1, no wicks, 3 lines. */
+  priceBased?: {
+    boxMethod?: 'atr' | 'pips';
+    boxSizeAtr?: number;
+    boxPips?: number;
+    renkoWicks?: boolean;
+    lineBreakLines?: number;
+  };
   indicators?: ActiveIndicator[];
   scripts?: WorkspaceScript[];
   view?: ChartViewState | null;
@@ -112,6 +120,32 @@ export interface ChartWorkspaceState {
      * only when set; a layout without it is not cleared.
      */
     editorCleared?: boolean;
+  };
+}
+
+/** How the price-based styles are built, as the page holds it (CC-I10). */
+export interface PriceBasedSettings {
+  boxMethod: 'atr' | 'pips';
+  boxSizeAtr: number;
+  boxPips: number;
+  renkoWicks: boolean;
+  lineBreakLines: number;
+}
+
+/**
+ * A layout's price-based settings with the chart's defaults for anything missing or out of range: a
+ * layout saved before they existed opens Renko as it always did (1 × ATR, no wicks, 3 lines).
+ */
+export function restoredPriceBased(pb: ChartWorkspaceState['priceBased']): PriceBasedSettings {
+  const positive = (v: number | undefined, fallback: number) =>
+    typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
+  const lines = pb?.lineBreakLines;
+  return {
+    boxMethod: pb?.boxMethod === 'pips' ? 'pips' : 'atr',
+    boxSizeAtr: positive(pb?.boxSizeAtr, 1),
+    boxPips: positive(pb?.boxPips, 10),
+    renkoWicks: pb?.renkoWicks === true,
+    lineBreakLines: typeof lines === 'number' && lines >= 1 && lines <= 10 ? Math.round(lines) : 3,
   };
 }
 

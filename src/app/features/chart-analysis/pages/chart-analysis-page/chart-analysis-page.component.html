@@ -104,19 +104,84 @@
               </button>
             }
           }
-          @if (priceBasedStyle()) {
+          @if (boxStyle()) {
             <div class="tb-menu-sep"></div>
-            <label class="tb-menu-field" title="Box / range size as a multiple of ATR(14)">
-              Box size
+            <div class="tb-menu-heading">{{ boxLabel() }}</div>
+            <div class="tb-menu-chips" role="radiogroup" aria-label="Box size method">
+              <button
+                type="button"
+                role="radio"
+                class="tb-chip"
+                [class.on]="boxMethod() === 'atr'"
+                [attr.aria-checked]="boxMethod() === 'atr'"
+                (click)="boxMethod.set('atr')"
+                title="A multiple of ATR(14), measured once from the bars that had closed when the chart loaded"
+              >
+                ATR
+              </button>
+              <button
+                type="button"
+                role="radio"
+                class="tb-chip"
+                [class.on]="boxMethod() === 'pips'"
+                [attr.aria-checked]="boxMethod() === 'pips'"
+                (click)="boxMethod.set('pips')"
+                title="A fixed number of pips, the same on every timeframe"
+              >
+                Pips
+              </button>
+            </div>
+            @if (boxMethod() === 'atr') {
+              <label class="tb-menu-field" title="Box size as a multiple of ATR(14)">
+                Size
+                <input
+                  type="number"
+                  min="0.1"
+                  max="20"
+                  step="0.1"
+                  [value]="boxSizeAtr()"
+                  (change)="setBoxSize($any($event.target).value)"
+                />
+                × ATR
+              </label>
+            } @else {
+              <label class="tb-menu-field" title="Box size in pips">
+                Size
+                <input
+                  type="number"
+                  min="0.1"
+                  max="10000"
+                  step="0.1"
+                  [value]="boxPips()"
+                  (change)="setBoxPips($any($event.target).value)"
+                />
+                pips
+              </label>
+            }
+            @if (style() === 'renko') {
+              <button
+                type="button"
+                class="tb-menu-item tb-check"
+                [class.on]="renkoWicks()"
+                (click)="renkoWicks.set(!renkoWicks())"
+                title="Each brick's wick reaches the furthest price traded against it before it formed"
+              >
+                Show wicks
+              </button>
+            }
+          }
+          @if (style() === 'line-break') {
+            <div class="tb-menu-sep"></div>
+            <label class="tb-menu-field" title="How many lines a reversal must break">
+              Lines
               <input
                 type="number"
-                min="0.1"
-                max="20"
-                step="0.1"
-                [value]="boxSizeAtr()"
-                (change)="setBoxSize($any($event.target).value)"
+                min="1"
+                max="10"
+                step="1"
+                [value]="lineBreakLines()"
+                (change)="setLineBreakLines($any($event.target).value)"
               />
-              × ATR
             </label>
           }
         </div>
@@ -971,6 +1036,11 @@
           [events]="events()"
           [minEventImpact]="minEventImpact()"
           [boxSizeAtr]="boxSizeAtr()"
+          [boxMethod]="boxMethod()"
+          [boxPips]="boxPips()"
+          [pipSize]="pipSize()"
+          [renkoWicks]="renkoWicks()"
+          [lineBreakLines]="lineBreakLines()"
           [showVolumeProfile]="showVolumeProfile()"
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"

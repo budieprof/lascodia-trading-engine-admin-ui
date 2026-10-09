@@ -55,6 +55,22 @@ export function boxBase(bars: readonly Bar[], excludeLast: boolean): number {
   return atr > 0 ? atr : Math.abs(closed[closed.length - 1].close) * 0.001;
 }
 
+/**
+ * A price-based style's box in price (CC-I10): `atr` — `atrMultiple` × {@link boxBase} of the bars
+ * (measured on the closed ones, so the caller can keep it for the series' life); `pips` — `pips` ×
+ * `pipSize`, TradingView's "Traditional" box, the same on every timeframe. 0 when there is none.
+ */
+export function boxUnit(opts: {
+  method: 'atr' | 'pips';
+  bars: readonly Bar[];
+  atrMultiple: number;
+  pips: number;
+  pipSize: number;
+}): number {
+  if (opts.method === 'pips') return Math.max(0, opts.pips) * Math.max(0, opts.pipSize);
+  return boxBase(opts.bars, true) * Math.max(0.1, opts.atrMultiple);
+}
+
 /** How a Renko brick is drawn. */
 export interface RenkoOptions {
   /**
