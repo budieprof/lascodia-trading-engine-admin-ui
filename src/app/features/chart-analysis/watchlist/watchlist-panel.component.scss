@@ -674,6 +674,7 @@ button {
 
 .wl-d-price {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   gap: 4px;
 }
@@ -694,10 +695,19 @@ button {
 }
 
 .wl-d-change {
+  margin-left: 6px;
   font-size: 14px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  min-height: 18px;
+}
+
+// The digits the last tick changed, as in the list's Last cell.
+.wl-d-last.up .wl-chg {
+  color: var(--wl-up);
+}
+
+.wl-d-last.down .wl-chg {
+  color: var(--wl-down);
 }
 
 .wl-d-status {

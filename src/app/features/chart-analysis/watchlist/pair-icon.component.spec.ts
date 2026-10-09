@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURRENCY_FLAG_SVG, pairFlags } from './pair-icon.component';
+import { CURRENCY_FLAG_SVG, pairFlags, pairName } from './pair-icon.component';
 
 describe('pairFlags (TradingView-style overlapping circle flags)', () => {
   it('splits an FX or metal symbol into base and quote when both have artwork', () => {
@@ -19,5 +19,14 @@ describe('pairFlags (TradingView-style overlapping circle flags)', () => {
     for (const ccy of ['AUD', 'CAD', 'CHF', 'CNH', 'EUR', 'GBP', 'JPY', 'NGN', 'NZD', 'USD', 'XAU']) {
       expect(CURRENCY_FLAG_SVG[ccy], ccy).toMatch(/^<rect width="32" height="32"/);
     }
+  });
+});
+
+describe('pairName (TradingView titles a pair by its currency names)', () => {
+  it('names a pair whose currencies are both known, else null', () => {
+    expect(pairName('EUR', 'USD')).toBe('Euro / U.S. Dollar');
+    expect(pairName('xau', 'usd')).toBe('Gold / U.S. Dollar');
+    expect(pairName('BTC', 'USD')).toBeNull();
+    expect(pairName(null, 'USD')).toBeNull();
   });
 });

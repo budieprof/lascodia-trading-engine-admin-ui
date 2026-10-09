@@ -75,6 +75,28 @@ export const CURRENCY_FLAG_SVG: Readonly<Record<string, string>> = {
     '<path d="M11 19.5l3-8h4l3 8" fill="none" stroke="#8B6508" stroke-width="1.6" stroke-linejoin="round"/>',
 };
 
+/** Currency names as TradingView titles a pair ("Euro / U.S. Dollar"). */
+export const CURRENCY_NAME: Readonly<Record<string, string>> = {
+  USD: 'U.S. Dollar',
+  EUR: 'Euro',
+  GBP: 'British Pound',
+  JPY: 'Japanese Yen',
+  CHF: 'Swiss Franc',
+  CAD: 'Canadian Dollar',
+  AUD: 'Australian Dollar',
+  NZD: 'New Zealand Dollar',
+  CNH: 'Chinese Yuan (offshore)',
+  NGN: 'Nigerian Naira',
+  XAU: 'Gold',
+};
+
+/** "Euro / U.S. Dollar" for a pair whose two currencies are named, else null (the caller keeps its own label). */
+export function pairName(base: string | null, quote: string | null): string | null {
+  const b = base ? CURRENCY_NAME[base.toUpperCase()] : undefined;
+  const q = quote ? CURRENCY_NAME[quote.toUpperCase()] : undefined;
+  return b && q ? `${b} / ${q}` : null;
+}
+
 /** The two currencies of an FX / metal symbol both with flag artwork, else null (the caller shows its letter badge). */
 export function pairFlags(symbol: string): [string, string] | null {
   const s = symbol.toUpperCase().replace(/[^A-Z]/g, '');
