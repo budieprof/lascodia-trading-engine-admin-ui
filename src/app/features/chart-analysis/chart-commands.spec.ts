@@ -3,6 +3,7 @@ import { chartCommands, type ChartCommandHost } from './chart-commands';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import type { ActiveIndicator, ChartStyle } from './chart/chart-host.component';
 import { SUPPORTED_RESOLUTIONS } from './datafeed/resolution';
+import type { DrawingKind } from './drawings/model';
 
 /** A signal-shaped stub: callable, with `.set`. */
 function sig<T>(initial: T) {
@@ -33,7 +34,7 @@ let activeCount: () => number;
 
 let placed: Array<{
   id: string;
-  kind: string;
+  kind: DrawingKind;
   points: { time: number; price: number }[];
   color?: string;
   text?: string;

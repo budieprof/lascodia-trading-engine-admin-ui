@@ -1537,8 +1537,8 @@
             @if (pl.close !== null) {
               <div
                 class="legend-ohlc panel-legend"
-                [class.up]="(pl.close ?? 0) >= (pl.open ?? 0)"
-                [class.down]="(pl.close ?? 0) < (pl.open ?? 0)"
+                [class.up]="pl.close >= (pl.open ?? pl.close)"
+                [class.down]="pl.close < (pl.open ?? pl.close)"
               >
                 <span
                   >O<b>{{

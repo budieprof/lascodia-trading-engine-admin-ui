@@ -41,10 +41,12 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     panelHosts: () => [],
     calendars: new Map(),
   });
-  p['splitState'] = computed(() => ({
-    layout: p.splitLayout(),
-    panels: comparePanels().map((x) => ({ symbol: x.symbol, resolution: x.resolution })),
-  }));
+  Object.defineProperty(p, 'splitState', {
+    value: computed(() => ({
+      layout: p.splitLayout(),
+      panels: comparePanels().map((x) => ({ symbol: x.symbol, resolution: x.resolution })),
+    })),
+  });
   return { p, getBars };
 }
 

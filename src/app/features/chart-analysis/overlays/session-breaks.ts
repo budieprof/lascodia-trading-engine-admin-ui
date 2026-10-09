@@ -1,5 +1,6 @@
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
-import type { IChartApi, ISeriesPrimitive, Logical, Time } from 'lightweight-charts';
+import type { IChartApi, ISeriesPrimitive, Time } from 'lightweight-charts';
+import { xAtLogical } from '../chart/time-x';
 
 /**
  * TradingView's "Session breaks" (CC-I9): a line where each trading day begins on an intraday chart —
@@ -82,7 +83,8 @@ export class SessionBreaksRenderer implements ISeriesPrimitive<Time> {
       ctx.beginPath();
       for (const i of this.indexes) {
         if (i < range.from - 1 || i > range.to + 1) continue;
-        const x = scale.logicalToCoordinate((i - 0.5) as Logical);
+        // Half a bar before the day's first bar (the library answers whole indexes only: xAtLogical).
+        const x = xAtLogical(scale, i - 0.5);
         if (x === null) continue;
         const px = Math.round(x) + 0.5;
         ctx.moveTo(px, 0);

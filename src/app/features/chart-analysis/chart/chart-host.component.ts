@@ -97,6 +97,7 @@ import {
   type PlotUpdate,
 } from './plotted-bars';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
+import { xAtLogical } from './time-x';
 import { resolutionMs } from '../datafeed/resolution';
 import { pipSizeFor } from '../datafeed/symbol-info';
 import { DrawingStore } from '../drawings/drawing-store.service';
@@ -1483,9 +1484,8 @@ export class ChartHostComponent implements OnDestroy {
   /** UTC ms → x on the price pane: an economic event's place, between bars or past the last one. */
   private eventX(utcMs: number): number | null {
     const logical = this.logicalAtMs(utcMs);
-    if (logical === null) return null;
-    const x = this.chart?.timeScale().logicalToCoordinate(logical as Logical);
-    return x === null || x === undefined ? null : Number(x);
+    const scale = this.chart?.timeScale();
+    return logical === null || !scale ? null : xAtLogical(scale, logical);
   }
 
   /**

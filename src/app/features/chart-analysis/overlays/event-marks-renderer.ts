@@ -97,16 +97,18 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
    * is reading the candle.
    */
   hit(x: number, y: number): EventMark | null {
+    if (this.paneHeight > 0 && y >= this.paneHeight - FLAG_STRIP) {
+      let best: PlacedMark | null = null;
+      for (const p of this.placedMarks) {
+        const d = Math.abs(p.x - x);
+        if (d <= 6 && (!best || d < Math.abs(best.x - x))) best = p;
+      }
+      if (best) return best.mark;
+    }
     const chip = this.nextChip;
     if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h)
       return chip.mark;
-    if (this.paneHeight <= 0 || y < this.paneHeight - FLAG_STRIP) return null;
-    let best: PlacedMark | null = null;
-    for (const p of this.placedMarks) {
-      const d = Math.abs(p.x - x);
-      if (d <= 6 && (!best || d < Math.abs(best.x - x))) best = p;
-    }
-    return best?.mark ?? null;
+    return null;
   }
 
   updateAllViews(): void {
@@ -208,7 +210,8 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
     const text = `${mark.currency} ${title} · ${eventCountdown(now, mark.time) ?? ''} ▸`;
     ctx.font = '10px -apple-system, system-ui, sans-serif';
     const tw = ctx.measureText(text).width + 12;
-    const chip = { mark, x: Math.max(0, w - tw - 4), y: h - FLAG_STRIP + 4, w: tw, h: 16 };
+    // Just above the flag strip: the flags of events near the right edge stay visible and hittable.
+    const chip = { mark, x: Math.max(0, w - tw - 4), y: h - FLAG_STRIP - 18, w: tw, h: 16 };
     ctx.globalAlpha = 0.9;
     ctx.fillStyle = IMPACT_COLOR[mark.impact];
     ctx.fillRect(chip.x, chip.y, chip.w, chip.h);
