@@ -304,6 +304,14 @@ import {
   type CompareSeriesSpec,
 } from '../../compare/compare-series';
 import { CompareDialogComponent } from '../../compare/compare-dialog.component';
+import {
+  panelLayers,
+  panelStudyChoices,
+  sharedRun,
+  withStudy,
+  withoutStudy,
+  type PanelScript,
+} from '../../workspace/chart-panels';
 import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
@@ -415,6 +423,8 @@ export interface ComparePanel {
   indicators: ActiveIndicator[];
   /** Its link group, 1 … 3; 0: not linked (CC-I5). */
   link: number;
+  /** Its own Pine indicators (CC-I5). */
+  scripts: PanelScript[];
 }
 
 const RESOLUTION_GROUPS: Array<{
@@ -2218,6 +2228,21 @@ export class ChartAnalysisPageComponent {
       const items = this.active().filter((a) => a.visible && studyKind(a.defId) === 'fundamental');
       const symbol = this.symbol();
       untracked(() => this.loadFundamentals(items, symbol));
+    });
+
+    // The other charts' scripts (CC-I5) run when their chart has bars and again at each new bar — not per tick —
+    // unless the main chart's identical run covers them.
+    effect(() => {
+      const panels = this.comparePanels();
+      const main = this.scriptRuns();
+      untracked(() => {
+        for (const p of panels) {
+          const last = p.bars.at(-1)?.time;
+          if (last === undefined) continue;
+          for (const s of p.scripts)
+            if (s.ranTo !== last && !sharedRun(main, s, p.symbol, p.resolution)) this.runPanelScript(p.id, s.item.key);
+        }
+      });
     });
 
     // Compare studies need the other symbol's bars on the same resolution.
@@ -5010,6 +5035,7 @@ export class ChartAnalysisPageComponent {
         bars: [],
         indicators: [],
         link: 0,
+        scripts: [],
       });
     }
     this.comparePanels.set([...current, ...added]);
@@ -5075,7 +5101,9 @@ export class ChartAnalysisPageComponent {
 
   setPanelSymbol(id: string, symbol: string): void {
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [] } : p)),
+      list.map((p) =>
+        p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) } : p,
+      ),
     );
     void this.loadPanel(id);
   }
@@ -5083,7 +5111,9 @@ export class ChartAnalysisPageComponent {
   setPanelResolution(id: string, resolution: string): void {
     this.comparePanels.update((list) =>
       list.map((p) =>
-        p.id === id ? { ...p, resolution: resolution as TvResolution, bars: [] } : p,
+        p.id === id
+          ? { ...p, resolution: resolution as TvResolution, bars: [], scripts: freshRuns(p.scripts) }
+          : p,
       ),
     );
     void this.loadPanel(id);
@@ -5095,13 +5125,110 @@ export class ChartAnalysisPageComponent {
     if (!panel) return;
     const previous = { symbol: this.symbol(), resolution: this.resolution() };
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [] } : p)),
+      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [], scripts: freshRuns(p.scripts) } : p)),
     );
     this.symbol.set(panel.symbol);
     this.resolution.set(panel.resolution);
     void this.reload();
     void this.loadPanel(id);
   }
+
+  // ── The other charts' studies and scripts (CC-I5) ─────────────────────────
+
+  /** The studies another chart offers (those reading its own bars only). */
+  readonly panelStudyDefs = panelStudyChoices(INDICATORS);
+  /** The Pine indicators another chart offers: My scripts and the examples. */
+  readonly panelScriptChoices = computed(() => {
+    const c = this.scriptCatalog();
+    return c ? [...c.mine, ...c.examples].filter((i) => i.kind === 'indicator') : [];
+  });
+
+  /** "+ Study" on another chart: a built-in (`study:<id>`) or a Pine indicator (`script:<key>`). */
+  panelAdd(id: string, choice: string): void {
+    if (choice.startsWith('study:')) {
+      const def = indicatorById(choice.slice(6));
+      if (!def) return;
+      const uid = `${def.id}-${Date.now().toString(36)}`;
+      this.comparePanels.update((list) =>
+        list.map((p) => (p.id === id ? { ...p, indicators: withStudy(p.indicators, def, uid) } : p)),
+      );
+    } else if (choice.startsWith('script:')) {
+      const item = this.panelScriptChoices().find((i) => i.key === choice.slice(7));
+      if (!item) return;
+      this.comparePanels.update((list) =>
+        list.map((p) =>
+          p.id === id && !p.scripts.some((s) => s.item.key === item.key)
+            ? { ...p, scripts: [...p.scripts, { item, values: {}, result: null, error: null, ranTo: null }] }
+            : p,
+        ),
+      );
+    }
+  }
+
+  removePanelStudy(id: string, uid: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, indicators: withoutStudy(p.indicators, uid) } : p)),
+    );
+  }
+
+  removePanelScript(id: string, key: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, scripts: p.scripts.filter((s) => s.item.key !== key) } : p)),
+    );
+  }
+
+  /** Runs of the other charts' scripts in flight, by `panel|key`. */
+  private readonly panelRuns = new Set<string>();
+
+  /**
+   * Run one of another chart's scripts on its series, to now. A run the main chart already has (same script, inputs
+   * and series) is drawn from there instead — a second chart never doubles the engine's work for it.
+   */
+  private runPanelScript(id: string, key: string): void {
+    const panel = this.comparePanels().find((p) => p.id === id);
+    const script = panel?.scripts.find((s) => s.item.key === key);
+    const last = panel?.bars.at(-1);
+    if (!panel || !script || !last) return;
+    const flight = `${id}|${key}`;
+    if (this.panelRuns.has(flight)) return;
+    this.panelRuns.add(flight);
+    const { symbol, resolution } = panel;
+    const land = (patch: Partial<PanelScript>): void => {
+      this.panelRuns.delete(flight);
+      this.comparePanels.update((list) =>
+        list.map((p) =>
+          p.id === id && p.symbol === symbol && p.resolution === resolution
+            ? { ...p, scripts: p.scripts.map((s) => (s.item.key === key ? { ...s, ...patch, ranTo: last.time } : s)) }
+            : p,
+        ),
+      );
+    };
+    const bars = Math.min(Math.max(panel.bars.length, PAGE_BARS), MAX_SCRIPT_BARS);
+    this.chartScripts
+      .runOnChart(script.item, symbol, resolution, script.values, bars, { chartType: 'standard' })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => land(result.error ? { error: result.error } : { result, error: null }),
+        error: (e: unknown) =>
+          land({ error: isBusy(e) ? 'The engine is busy: it runs again at the next bar.' : e instanceof Error ? e.message : 'The run failed.' }),
+      });
+  }
+
+  /** Each other chart's script layers, the same array while nothing it draws changed (no redraw per tick). */
+  private readonly panelLayerCache = new Map<string, ChartScriptLayer[]>();
+  readonly panelLayerMap = computed(() => {
+    const main = this.scriptRuns();
+    const out = new Map<string, ChartScriptLayer[]>();
+    for (const p of this.comparePanels()) {
+      const next = panelLayers(p.scripts, main, p.symbol, p.resolution);
+      const prev = this.panelLayerCache.get(p.id);
+      const layers = prev && sameLayers(prev, next) ? prev : next;
+      this.panelLayerCache.set(p.id, layers);
+      out.set(p.id, layers);
+    }
+    return out;
+  });
+  readonly noLayers: ChartScriptLayer[] = [];
 
   panelPrecision(symbol: string): number {
     const pair = this.symbols().find(
@@ -5127,6 +5254,9 @@ export class ChartAnalysisPageComponent {
         symbol: p.symbol,
         resolution: p.resolution,
         ...(p.indicators.length ? { indicators: p.indicators.map((i) => ({ ...i, params: { ...i.params } })) } : {}),
+        ...(p.scripts.length
+          ? { scripts: p.scripts.map((s) => workspaceScriptOf({ item: s.item, values: s.values })) }
+          : {}),
         ...(p.link ? { link: p.link } : {}),
       })),
     { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
@@ -5150,6 +5280,13 @@ export class ChartAnalysisPageComponent {
       bars: [],
       indicators: (p.indicators ?? []).map((ind) => ({ ...ind, params: { ...ind.params } })),
       link: linkGroupOf(p.link),
+      scripts: (p.scripts ?? []).map((w) => ({
+        item: restoredScriptItem(w, this.chartScripts.savedScripts()),
+        values: { ...w.values },
+        result: null,
+        error: null,
+        ranTo: null,
+      })),
     }));
     this.comparePanels.set(saved);
     // The arrangement; a layout saved with fewer panels than it shows gets the rest as new ones.
@@ -6345,4 +6482,9 @@ export function normaliseView(v: ChartViewState): ChartViewState {
     rightOffset: Math.round(v.rightOffset),
     paneHeights: v.paneHeights.map((h) => Math.round(h)),
   };
+}
+
+/** A chart's scripts on a new series: their runs were the old series'. */
+function freshRuns(scripts: readonly PanelScript[]): PanelScript[] {
+  return scripts.map((s) => ({ ...s, result: null, error: null, ranTo: null }));
 }

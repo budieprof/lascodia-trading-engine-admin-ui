@@ -1744,6 +1744,50 @@
                 <option [value]="r">{{ resolutionLabel(r) }}</option>
               }
             </select>
+            <!-- Its own studies and Pine indicators (CC-I5). -->
+            <select
+              class="panel-select"
+              (change)="panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''"
+              aria-label="Add a study or a script to this chart"
+            >
+              <option value="">+ Study</option>
+              <optgroup label="Indicators">
+                @for (d of panelStudyDefs; track d.id) {
+                  <option [value]="'study:' + d.id">{{ d.name }}</option>
+                }
+              </optgroup>
+              @if (panelScriptChoices().length) {
+                <optgroup label="Pine scripts">
+                  @for (it of panelScriptChoices(); track it.key) {
+                    <option [value]="'script:' + it.key">{{ it.name }}</option>
+                  }
+                </optgroup>
+              }
+            </select>
+            @for (ind of panel.indicators; track ind.uid) {
+              <button
+                type="button"
+                class="panel-select"
+                (click)="removePanelStudy(panel.id, ind.uid)"
+                [title]="'Remove ' + labelFor(ind)"
+              >
+                {{ labelFor(ind) }} ×
+              </button>
+            }
+            @for (s of panel.scripts; track s.item.key) {
+              <button
+                type="button"
+                class="panel-select"
+                (click)="removePanelScript(panel.id, s.item.key)"
+                [title]="
+                  s.error
+                    ? s.item.name + ': ' + s.error + ' — click to remove'
+                    : 'Remove ' + s.item.name + ' (it runs again at each new bar)'
+                "
+              >
+                {{ s.item.name }}{{ s.error ? ' ⚠' : '' }} ×
+              </button>
+            }
             <button
               type="button"
               class="panel-focus"
@@ -1791,6 +1835,18 @@
               </div>
             }
           }
+          @if (panelLegends()[panel.id]; as pl) {
+            @for (ind of pl.indicators; track ind.uid) {
+              <div class="legend-indicator panel-legend">
+                <span class="muted">{{ ind.label }}</span>
+                @for (v of ind.values; track v.title) {
+                  <span class="legend-value" [style.color]="v.color">
+                    {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+                  </span>
+                }
+              </div>
+            }
+          }
           <app-chart-host
             #panelHost
             [bars]="panel.bars"
@@ -1798,7 +1854,8 @@
             [historyComplete]="!!panel.historyComplete"
             [style]="style()"
             [showVolume]="false"
-            [indicators]="[]"
+            [indicators]="panel.indicators"
+            [scriptResults]="panelLayerMap().get(panel.id) ?? noLayers"
             [precision]="panelPrecision(panel.symbol)"
             [scaleMode]="scaleMode()"
             [timezone]="timezone()"

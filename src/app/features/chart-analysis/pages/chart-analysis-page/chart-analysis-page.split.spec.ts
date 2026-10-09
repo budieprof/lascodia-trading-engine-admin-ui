@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { computed, signal } from '@angular/core';
+import { of } from 'rxjs';
 
 import type { Bar } from '../../datafeed/candle-feed.service';
 import { ChartAnalysisPageComponent, type ComparePanel } from './chart-analysis-page.component';
@@ -40,6 +41,18 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     serverClock: { now: () => NOW },
     panelHosts: () => [],
     calendars: new Map(),
+    chartScripts: { savedScripts: () => [], runOnChart: vi.fn(() => of({ title: 'run', error: null })) },
+    destroyRef: { destroyed: false, onDestroy: () => () => undefined },
+    panelRuns: new Set(),
+    scriptCatalog: signal({
+      mine: [{ key: 'mine:7', source: 'mine', name: 'Trend', description: '', kind: 'indicator', pineSource: 'x' }],
+      examples: [],
+      strategies: [],
+      strategiesError: null,
+    }),
+  });
+  Object.defineProperty(p, 'panelScriptChoices', {
+    value: computed(() => [...p.scriptCatalog().mine, ...p.scriptCatalog().examples]),
   });
   // As the page derives the layout's other charts (v2 `charts`, CC-I5).
   Object.defineProperty(p, 'panelStates', {
@@ -80,8 +93,8 @@ describe('chart page — split panels (CC-12)', () => {
   it('a live price moves the panels that show its symbol', () => {
     const { p } = setup();
     p.comparePanels.set([
-      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(2, 3), indicators: [], link: 0 },
-      { id: 'b', symbol: 'USDJPY', resolution: '60', bars: hours(2, 3), indicators: [], link: 0 },
+      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(2, 3), indicators: [], link: 0, scripts: [] },
+      { id: 'b', symbol: 'USDJPY', resolution: '60', bars: hours(2, 3), indicators: [], link: 0, scripts: [] },
     ]);
     p['applyPanelTick']({ symbol: 'gbpusd', bid: 1.3 });
     const [a, b] = p.comparePanels();
@@ -93,7 +106,7 @@ describe('chart page — split panels (CC-12)', () => {
     const older = vi.fn(() => Promise.resolve({ bars: hours(10, 5), noData: false }));
     const { p } = setup(older);
     p.comparePanels.set([
-      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(4, 5), indicators: [], link: 0 },
+      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(4, 5), indicators: [], link: 0, scripts: [] },
     ]);
     await p.loadPanelOlder('a');
     expect(p.comparePanels()[0].bars).toHaveLength(10);
@@ -101,5 +114,50 @@ describe('chart page — split panels (CC-12)', () => {
     older.mockImplementation(() => Promise.resolve({ bars: [], noData: true }));
     await p.loadPanelOlder('a');
     expect(p.comparePanels()[0].historyComplete).toBe(true);
+  });
+});
+
+describe('chart page — the other charts’ studies and scripts (CC-I5)', () => {
+  const panel = (over = {}) => ({
+    id: 'a',
+    symbol: 'GBPUSD',
+    resolution: '60',
+    bars: hours(2, 3),
+    indicators: [],
+    link: 0,
+    scripts: [],
+    ...over,
+  });
+
+  it('adds a study and a script to one chart, and removes them', () => {
+    const { p } = setup();
+    p.comparePanels.set([panel()]);
+    p.panelAdd('a', 'study:rsi');
+    p.panelAdd('a', 'script:mine:7');
+    p.panelAdd('a', 'script:mine:7'); // once
+    const [a] = p.comparePanels();
+    expect(a.indicators.map((i: { defId: string }) => i.defId)).toEqual(['rsi']);
+    expect(a.scripts.map((s: { item: { key: string } }) => s.item.key)).toEqual(['mine:7']);
+    p.removePanelStudy('a', a.indicators[0].uid);
+    p.removePanelScript('a', 'mine:7');
+    expect(p.comparePanels()[0]).toMatchObject({ indicators: [], scripts: [] });
+  });
+
+  it('runs a chart’s script on its own series to its last bar, and keeps the run', () => {
+    const { p } = setup();
+    p.comparePanels.set([panel()]);
+    p.panelAdd('a', 'script:mine:7');
+    p['runPanelScript']('a', 'mine:7');
+    expect(p.chartScripts.runOnChart).toHaveBeenCalledWith(
+      expect.objectContaining({ key: 'mine:7' }),
+      'GBPUSD',
+      '60',
+      {},
+      1500,
+      { chartType: 'standard' },
+    );
+    const s = p.comparePanels()[0].scripts[0];
+    expect(s.result).toMatchObject({ title: 'run' });
+    expect(s.ranTo).toBe(p.comparePanels()[0].bars.at(-1).time);
   });
 });
