@@ -71,7 +71,13 @@ export interface ChartWorkspaceState {
   resolution?: TvResolution;
   style?: ChartStyle;
   showVolume?: boolean;
-  scaleMode?: 'normal' | 'log' | 'percent';
+  scaleMode?: 'normal' | 'log' | 'percent' | 'indexed';
+  /** The price scale upside down (default off). */
+  invertScale?: boolean;
+  /** The side the price scale sits on (default right). */
+  scaleSide?: 'right' | 'left';
+  /** Session-break lines on intraday charts (default off). */
+  sessionBreaks?: boolean;
   /** Countdown to bar close on the price scale (default on). */
   countdown?: boolean;
   timezone?: string;

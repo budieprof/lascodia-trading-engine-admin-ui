@@ -364,6 +364,15 @@
               </button>
             }
           </div>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="sessionBreaks()"
+            (click)="sessionBreaks.set(!sessionBreaks())"
+            title="A line where each trading day begins (17:00 New York for FX) on intraday charts"
+          >
+            <app-chart-icon name="calendar" [size]="28" /> Session breaks
+          </button>
           <div class="tb-menu-sep"></div>
           <div class="tb-menu-heading">Analysis</div>
           <button
@@ -1079,6 +1088,10 @@
           [magnet]="magnetMode()"
           [stayInDrawingMode]="stayInDrawing()"
           [scaleMode]="scaleMode()"
+          [invertScale]="invertScale()"
+          [scaleSide]="scaleSide()"
+          [sessionBreaks]="sessionBreaks()"
+          (autoScaleChange)="autoScaleOn.set($event)"
           [timezone]="timezone()"
           [events]="chartEvents()"
           [minEventImpact]="minEventImpact()"
@@ -1191,6 +1204,32 @@
         @if (contextMenu(); as cm) {
           <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
             <button type="button" (click)="resetScales()">Reset scales</button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              [attr.aria-checked]="invertScale()"
+              (click)="invertScale.set(!invertScale()); closeContextMenu()"
+            >
+              {{ invertScale() ? '✓ ' : '' }}Invert scale
+            </button>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              [attr.aria-checked]="scaleMode() === 'indexed'"
+              (click)="
+                scaleMode.set(scaleMode() === 'indexed' ? 'normal' : 'indexed'); closeContextMenu()
+              "
+            >
+              {{ scaleMode() === 'indexed' ? '✓ ' : '' }}Indexed to 100
+            </button>
+            <button
+              type="button"
+              (click)="
+                scaleSide.set(scaleSide() === 'right' ? 'left' : 'right'); closeContextMenu()
+              "
+            >
+              Move scale to the {{ scaleSide() === 'right' ? 'left' : 'right' }}
+            </button>
             <button
               type="button"
               role="menuitemcheckbox"
@@ -1541,6 +1580,7 @@
     [timezone]="timezone()"
     [timezones]="timezones"
     [scaleMode]="scaleMode()"
+    [autoScaleOn]="autoScaleOn()"
     [dockTab]="dockTab()"
     [hasStrategy]="!!strategyRun()"
     [menu]="openMenu()"

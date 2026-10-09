@@ -29,6 +29,7 @@ import {
   LineStyle,
   LineType,
   MismatchDirection,
+  PriceScaleMode,
   createChartEx,
   createSeriesMarkers,
   type CandlestickData,
@@ -115,6 +116,7 @@ import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
 import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
@@ -170,6 +172,9 @@ export type ChartStyle =
   | 'pnf'
   | 'line-break'
   | 'range';
+
+/** The price scale's modes (TradingView's Regular, Logarithmic, Percent, Indexed to 100). */
+export type ScaleMode = 'normal' | 'log' | 'percent' | 'indexed';
 
 /** Styles whose bars are built from price movement, not time. */
 /** Styles whose last-value label is the line colour rather than the bar's up/down colour. */
@@ -511,8 +516,14 @@ export class ChartHostComponent implements OnDestroy {
   readonly magnet = input<MagnetMode>('off');
   /** TV "Stay in drawing mode": keep the tool armed after a drawing completes. */
   readonly stayInDrawingMode = input<boolean>(false);
-  /** Price scale mode — normal, logarithmic or percentage. */
-  readonly scaleMode = input<'normal' | 'log' | 'percent'>('normal');
+  /** Price scale mode — normal, logarithmic, percentage or indexed to 100 (CC-I9). */
+  readonly scaleMode = input<ScaleMode>('normal');
+  /** Turn the price scale upside down (TradingView's "Invert scale"). */
+  readonly invertScale = input<boolean>(false);
+  /** Which side the price scale sits on; the studies on the price pane move with it. */
+  readonly scaleSide = input<'right' | 'left'>('right');
+  /** Lines where each trading day begins on an intraday chart (17:00 New York for FX). */
+  readonly sessionBreaks = input<boolean>(false);
   /** Engine-derived price levels: position entry/SL/TP and pending orders. */
   readonly overlays = input<PriceOverlay[]>([]);
   /** Whether those lines widen the price scale's fit (CC-10); off keeps the candles' own range. */
@@ -632,6 +643,12 @@ export class ChartHostComponent implements OnDestroy {
   readonly viewChanged = output<void>();
   /** An economic event's flag (or the next-event chip) was clicked: open its reading. */
   readonly eventOpen = output<UpcomingEconomicEvent>();
+  /**
+   * Whether the price scale fits the visible bars on its own (TradingView's "auto"), as the chart
+   * really is — dragging the scale turns it off, a double-click or "auto" back on (CC-19: the button
+   * lit whenever the mode was "normal").
+   */
+  readonly autoScaleChange = output<boolean>();
 
   private chart: IChartApi | null = null;
   private price: PriceSeries | null = null;
@@ -908,6 +925,10 @@ export class ChartHostComponent implements OnDestroy {
     },
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
+  private readonly sessionBreaksRenderer = new SessionBreaksRenderer(
+    () => this.chart,
+    () => this.theme.theme() === 'dark',
+  );
   private readonly eventRenderer = new EventMarksRenderer(
     (ms) => this.eventX(ms),
     () => this.serverClock.now(),
@@ -1029,7 +1050,15 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const mode = this.scaleMode();
-      untracked(() => this.applyScaleMode(mode));
+      const invert = this.invertScale();
+      const side = this.scaleSide();
+      untracked(() => this.applyScale(mode, invert, side));
+    });
+
+    effect(() => {
+      this.sessionBreaks();
+      this.calendar();
+      untracked(() => this.syncSessionBreaks());
     });
 
     // Pine runs: re-rendered when their results change, and on a rebuild (syncData) — never on a
@@ -1107,13 +1136,61 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
-   * Price scale mode. Percentage and indexed-to-100 are relative to the first
-   * visible bar, which is why switching mode rescales rather than re-fetching.
+   * The price scale: its side, mode and direction (CC-I9). Percentage and indexed-to-100 are
+   * relative to the first visible bar, which is why switching mode rescales rather than re-fetching.
+   * The price series and the studies drawn on its scale move to the chosen side together; the
+   * volume overlay keeps its own scale.
    */
-  private applyScaleMode(mode: 'normal' | 'log' | 'percent'): void {
-    this.chart?.priceScale('right').applyOptions({
-      mode: mode === 'log' ? 1 : mode === 'percent' ? 2 : 0,
+  private applyScale(mode: ScaleMode, invert: boolean, side: 'right' | 'left'): void {
+    const chart = this.chart;
+    if (!chart) return;
+    chart.applyOptions({
+      leftPriceScale: { visible: side === 'left' },
+      rightPriceScale: { visible: side === 'right' },
     });
+    this.price?.applyOptions({ priceScaleId: side });
+    for (const s of this.indicatorSeries)
+      if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceScaleId: side });
+    chart.priceScale(side).applyOptions({
+      mode:
+        mode === 'log'
+          ? PriceScaleMode.Logarithmic
+          : mode === 'percent'
+            ? PriceScaleMode.Percentage
+            : mode === 'indexed'
+              ? PriceScaleMode.IndexedTo100
+              : PriceScaleMode.Normal,
+      invertScale: invert,
+    });
+    this.checkAutoScale();
+  }
+
+  /** The autoscale state as last reported ({@link autoScaleChange}). */
+  private autoScaleOn: boolean | null = null;
+
+  /** Report the price scale's real autoscale state when it changed. */
+  private checkAutoScale(): void {
+    const on = this.chart?.priceScale(this.scaleSide()).options().autoScale;
+    if (on === undefined || on === this.autoScaleOn) return;
+    this.autoScaleOn = on;
+    this.autoScaleChange.emit(on);
+  }
+
+  /** Session breaks on the plotted bars: intraday only, on the symbol's trading days. */
+  private syncSessionBreaks(): void {
+    const resolution = this.resolution();
+    const intraday = !['1D', '1W', '1M'].includes(resolution) && !PRICE_BASED.has(this.style());
+    if (!this.sessionBreaks() || !intraday || this.plottedUtc.length < 2) {
+      this.sessionBreaksRenderer.setBreaks([]);
+      return;
+    }
+    const dayOf = this.calendar()?.dayOf ?? utcDay;
+    this.sessionBreaksRenderer.setBreaks(
+      sessionBreakIndexes(
+        this.plottedUtc.map((b) => b.time),
+        dayOf,
+      ),
+    );
   }
 
   /**
@@ -1156,6 +1233,14 @@ export class ChartHostComponent implements OnDestroy {
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
+  }
+
+  /**
+   * The bars on screen — the window the analysis overlays describe. The assistant's levels read the
+   * same window (CC-21: they were computed on every loaded bar while the chart drew the visible ones).
+   */
+  visibleWindow(): Bar[] {
+    return this.visibleBars(this.bars());
   }
 
   /** The slice of `bars` currently on screen. */
@@ -1478,6 +1563,7 @@ export class ChartHostComponent implements OnDestroy {
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
       rightPriceScale: { borderColor: p.border },
+      leftPriceScale: { borderColor: p.border },
       timeScale: { borderColor: p.border },
       crosshair: {
         vertLine: { color: p.crosshair, labelBackgroundColor: p.crosshairLabel },
@@ -1529,6 +1615,7 @@ export class ChartHostComponent implements OnDestroy {
       },
       grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
       rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
+      leftPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: {
         borderColor: p.border,
         timeVisible: true,
@@ -1635,6 +1722,12 @@ export class ChartHostComponent implements OnDestroy {
     });
     // Pane separators are dragged with the pointer; heights have no change event of their own.
     el.addEventListener('pointerup', () => this.scheduleViewChanged());
+    // The price scale's autoscale has no change event either: dragging or wheeling the scale turns
+    // it off, a double-click on it back on. Read it after each, once the chart has handled it.
+    for (const type of ['pointerup', 'wheel', 'dblclick'] as const)
+      el.addEventListener(type, () => requestAnimationFrame(() => this.checkAutoScale()), {
+        passive: true,
+      });
 
     this.syncVolumeSeries(this.showVolume());
     this.syncData();
@@ -1723,15 +1816,19 @@ export class ChartHostComponent implements OnDestroy {
     };
   }
 
-  /** Reset both scales to fit the data, as double-clicking the axis does. */
-  /** Fit the price axis to the visible data, leaving the time window alone (TradingView's "auto"). */
+  /**
+   * Fit the price axis to the visible data, leaving the time window — and the scale's mode: log,
+   * percent, indexed — alone (TradingView's "auto"; CC-19: it used to switch the mode to normal).
+   */
   autoScalePrice(): void {
-    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+    this.chart?.priceScale(this.scaleSide()).applyOptions({ autoScale: true });
+    this.checkAutoScale();
   }
 
+  /** Reset both scales to fit the data, as double-clicking the axis does. */
   resetScales(): void {
     this.chart?.timeScale().fitContent();
-    this.chart?.priceScale('right').applyOptions({ autoScale: true });
+    this.autoScalePrice();
   }
 
   private sizeToContainer(el: HTMLElement): void {
@@ -1833,10 +1930,17 @@ export class ChartHostComponent implements OnDestroy {
       if (this.markersFor !== this.markerRangeKey()) this.applyMarkers(this.markers());
       this.scheduleTailStudies();
     }
+    if (full || this.breaksFor !== this.plottedUtc.length) {
+      this.breaksFor = this.plottedUtc.length;
+      this.syncSessionBreaks();
+    }
     this.tickCountdown();
     this.syncLastValueLabel();
     this.emitLegend();
   }
+
+  /** The bar count the session breaks were last found for: a tick changes no day. */
+  private breaksFor = -1;
 
   /** How the bars of `style` are plotted; `unit` is a price-based style's box. */
   private plotTransform(style: ChartStyle, unit: number): PlotTransform {
@@ -1929,6 +2033,7 @@ export class ChartHostComponent implements OnDestroy {
     if (!chart || (this.price && this.seriesStyle === style)) return false;
     const old = this.price;
     const next = this.createPriceSeries(chart, style);
+    next.applyOptions({ priceScaleId: this.scaleSide() });
     this.price = next;
     this.seriesStyle = style;
     this.priceSync.attach(next as unknown as SyncTarget<PriceRow>);
@@ -2096,6 +2201,7 @@ export class ChartHostComponent implements OnDestroy {
     this.price.attachPrimitive(this.eventRenderer);
     this.price.attachPrimitive(this.patternRenderer);
     this.price.attachPrimitive(this.countdown);
+    this.price.attachPrimitive(this.sessionBreaksRenderer);
     for (const primitive of this.extraPricePrimitives) this.price.attachPrimitive(primitive);
     for (const r of this.profileRenderers.values()) this.price.attachPrimitive(r);
     this.lastValueColor = ''; // a new series starts on the library's own colouring
@@ -2759,6 +2865,8 @@ export class ChartHostComponent implements OnDestroy {
                 // legend and the autoscale) with no line of its own (DR-17).
                 ...(markers ? { lineVisible: false, crosshairMarkerVisible: false } : {}),
                 ...overlayFormat,
+                // On the price's own scale, whichever side it sits on.
+                ...(overlay ? { priceScaleId: this.scaleSide() } : {}),
               },
               paneIndex,
             );

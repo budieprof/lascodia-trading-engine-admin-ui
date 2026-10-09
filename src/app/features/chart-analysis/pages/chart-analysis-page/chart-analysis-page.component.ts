@@ -145,6 +145,7 @@ import {
   type ActiveIndicator,
   type ChartStyle,
   type LegendSnapshot,
+  type ScaleMode,
 } from '../../chart/chart-host.component';
 import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
@@ -622,8 +623,8 @@ export class ChartAnalysisPageComponent {
     this.testerPrompt.set(false);
   }
 
+  /** "auto": fit the price scale to the visible bars, keeping its mode — log stays log (CC-19). */
   autoScale(): void {
-    this.scaleMode.set('normal');
     this.host()?.autoScalePrice();
   }
 
@@ -1208,7 +1209,15 @@ export class ChartAnalysisPageComponent {
   readonly settingsFor = signal<string | null>(null);
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
-  readonly scaleMode = signal<'normal' | 'log' | 'percent'>('normal');
+  readonly scaleMode = signal<ScaleMode>('normal');
+  /** TradingView's "Invert scale" (CC-I9). */
+  readonly invertScale = signal(false);
+  /** The side the price scale sits on (CC-I9). */
+  readonly scaleSide = signal<'right' | 'left'>('right');
+  /** Whether the price scale fits the visible bars on its own, as the chart reports it (CC-19). */
+  readonly autoScaleOn = signal(true);
+  /** Lines where each trading day begins on intraday charts (CC-I9), saved with the layout. */
+  readonly sessionBreaks = signal(false);
   /** TradingView's countdown to bar close under the last-price label (saved with the layout). */
   readonly showCountdown = signal(true);
   /** When this chart's symbol last had a live price (client ms): a silent feed hides the countdown. */
@@ -1224,7 +1233,17 @@ export class ChartAnalysisPageComponent {
   readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
   private readonly alerts = inject(AlertsService);
   private readonly notify = inject(NotificationService);
+  /**
+   * Whether the page is fullscreen, as the browser says (CC-20): leaving with Esc fires only
+   * `fullscreenchange`, so the button stayed lit and the assistant read the wrong state.
+   */
   readonly isFullscreen = signal(false);
+  private readonly followFullscreen = (() => {
+    if (typeof document === 'undefined') return;
+    const sync = () => this.isFullscreen.set(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', sync);
+    inject(DestroyRef).onDestroy(() => document.removeEventListener('fullscreenchange', sync));
+  })();
 
   /**
    * Box size for the price-based styles, as a multiple of ATR.
@@ -1386,6 +1405,11 @@ export class ChartAnalysisPageComponent {
   });
 
   readonly priceScale = computed(() => priceScaleFor(this.precision()));
+
+  /** The bars on screen (the chart's visible window), or every loaded bar before it is up. */
+  private visibleBars(): Bar[] {
+    return this.host()?.visibleWindow() ?? this.bars();
+  }
 
   readonly filteredSymbols = computed(() => {
     const q = this.symbolQuery().trim().toUpperCase();
@@ -1750,12 +1774,14 @@ export class ChartAnalysisPageComponent {
         showVolumeProfile: this.showVolumeProfile,
         showSupportResistance: this.showSupportResistance,
         showStructure: this.showStructure,
-        structureSummary: () => marketStructure(this.bars()).summary,
+        // The window on screen — what the chart's own overlays describe (CC-21: these read every
+        // loaded bar while the chart drew the visible ones, so the assistant quoted other levels).
+        structureSummary: () => marketStructure(this.visibleBars()).summary,
         // Computed on demand rather than held in a signal: the assistant asks rarely, and a
         // second copy of this would be a second thing that can disagree with the chart.
-        srLevels: () => supportResistance(this.bars()),
+        srLevels: () => supportResistance(this.visibleBars()),
         volumeProfile: () => {
-          const p = profileWithValueArea(this.bars());
+          const p = profileWithValueArea(this.visibleBars());
           return p
             ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
             : null;
@@ -3492,6 +3518,9 @@ export class ChartAnalysisPageComponent {
       style: this.style(),
       showVolume: this.showVolume(),
       scaleMode: this.scaleMode(),
+      invertScale: this.invertScale(),
+      scaleSide: this.scaleSide(),
+      sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
       timezone: this.timezone(),
       priceBased: {
@@ -3596,6 +3625,9 @@ export class ChartAnalysisPageComponent {
       this.style.set(s.style ?? 'candles');
       this.showVolume.set(s.showVolume ?? true);
       this.scaleMode.set(s.scaleMode ?? 'normal');
+      this.invertScale.set(s.invertScale === true);
+      this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
+      this.sessionBreaks.set(s.sessionBreaks === true);
       this.showCountdown.set(s.countdown ?? true);
       this.timezone.set(s.timezone ?? 'UTC');
       const pb = restoredPriceBased(s.priceBased);

@@ -3,7 +3,7 @@ import { ChartIconComponent } from '../../icons/chart-icon.component';
 
 /** The bottom bar's menus. Their open state is the page's, so one menu is open at a time. */
 export type BottomBarMenu = 'range' | 'tz';
-type ScaleMode = 'normal' | 'log' | 'percent';
+type ScaleMode = 'normal' | 'log' | 'percent' | 'indexed';
 
 /**
  * The chart's bottom bar, as TradingView lays it out: date-range presets, go to date, the dock's
@@ -126,7 +126,8 @@ type ScaleMode = 'normal' | 'log' | 'percent';
       <button
         type="button"
         class="bb-btn"
-        [class.on]="scaleMode() === 'normal'"
+        [class.on]="autoScaleOn()"
+        [attr.aria-pressed]="autoScaleOn()"
         (click)="autoScale.emit()"
         title="Auto (fits data to screen)"
       >
@@ -359,6 +360,11 @@ export class ChartBottomBarComponent {
   readonly timezone = input('UTC');
   readonly timezones = input<ReadonlyArray<{ id: string; label: string }>>([]);
   readonly scaleMode = input<ScaleMode>('normal');
+  /**
+   * Whether the price scale fits the data on its own, as the chart reports it: "auto" is lit by
+   * that, not by the mode (CC-19 — it lit for every "normal" scale, and pressing it turned log off).
+   */
+  readonly autoScaleOn = input(true);
   /** The dock's tab in front, if it is open. */
   readonly dockTab = input<'editor' | 'tester' | null>(null);
   /** A strategy is on the chart (the Strategy Tester's tooltip). */

@@ -24,7 +24,7 @@ export interface ChartCommandHost {
   showSignals?: { (): boolean; set(v: boolean): void };
   showEvents: { (): boolean; set(v: boolean): void };
   magnet: { (): boolean; set(v: boolean): void };
-  scaleMode: { (): string; set(v: 'normal' | 'log' | 'percent'): void };
+  scaleMode: { (): string; set(v: 'normal' | 'log' | 'percent' | 'indexed'): void };
   timezone: { (): string; set(v: string): void };
   splitLayout: { (): string };
   active: { (): readonly ActiveIndicator[] };
@@ -562,18 +562,19 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     },
     {
       id: 'chart.setScaleMode',
-      description: 'Switch the price scale between normal, logarithmic and percentage.',
+      description:
+        'Switch the price scale between normal, logarithmic, percentage and indexed to 100.',
       params: [
         {
           name: 'mode',
           type: 'enum',
           required: true,
-          values: ['normal', 'log', 'percent'],
+          values: ['normal', 'log', 'percent', 'indexed'],
           description: 'Price scale mode.',
         },
       ],
       run: (a) => {
-        host.scaleMode.set(str(a, 'mode') as 'normal' | 'log' | 'percent');
+        host.scaleMode.set(str(a, 'mode') as 'normal' | 'log' | 'percent' | 'indexed');
         return ok(`Price scale: ${str(a, 'mode')}.`);
       },
     },
