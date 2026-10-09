@@ -1580,6 +1580,10 @@ export class ChartAnalysisPageComponent {
   readonly studySettingsStudy = computed(
     () => this.active().find((i) => i.uid === this.studySettingsFor()) ?? null,
   );
+  /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
+  readonly studyLabels = computed(() =>
+    Object.fromEntries(this.active().map((i) => [i.uid, this.labelFor(i)])),
+  );
   private readonly studyDialog = viewChild(StudySettingsDialogComponent);
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);

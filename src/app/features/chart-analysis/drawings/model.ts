@@ -171,6 +171,11 @@ export interface Drawing {
   visibleOn?: string[];
   /** Visual order within the chart: higher paints on top (TV "Visual order"). */
   z?: number;
+  /**
+   * The built-in study (its uid) whose pane the drawing is in, its prices in that study's units (DR-07 / DR-I10);
+   * absent = the price pane. A drawing whose study is gone or hidden is not painted (it stays in the object tree).
+   */
+  pane?: string;
 }
 
 export interface ToolSpec {

@@ -219,6 +219,8 @@ export class ObjectTreeComponent {
 
   /** The chart's timeframe: drawings its Visibility keeps off it are dimmed. */
   readonly resolution = input.required<string>();
+  /** The built-in studies' names by uid: a drawing in a study's pane says which (DR-I10). */
+  readonly paneLabels = input<Readonly<Record<string, string>>>({});
   readonly closed = output<void>();
 
   /** The symbol's drawings, top of the visual order first (TradingView's tree order). */
@@ -232,7 +234,11 @@ export class ObjectTreeComponent {
   label(d: Drawing): string {
     const tool = toolFor(d.kind)?.label ?? d.kind;
     const text = d.style.text?.trim();
-    return text ? `${tool} · ${text.length > 24 ? text.slice(0, 24) + '…' : text}` : tool;
+    const name = text ? `${tool} · ${text.length > 24 ? text.slice(0, 24) + '…' : text}` : tool;
+    if (!d.pane) return name;
+    // In a study's pane; the study gone, it is not drawn anywhere — said, so it can be found and removed.
+    const study = this.paneLabels()[d.pane];
+    return `${name} · ${study ? `in ${study}` : 'pane removed'}`;
   }
 
   shownHere(d: Drawing): boolean {

@@ -20,6 +20,42 @@ import {
 import { drawingTemplates } from './drawing-templates';
 
 /**
+ * The panes drawings can be in besides the price pane (DR-07 / DR-I10): the chart says which built-in study a pane
+ * belongs to and which series carries its scale.
+ */
+export interface DrawingPaneHost {
+  /** The study (its uid) whose pane is at `paneIndex` (> 0); null for a pane drawings cannot go in. */
+  keyAt(paneIndex: number): string | null;
+  /** The series whose scale a study's pane drawings use; null while the study is not drawn. */
+  seriesFor(key: string): ISeriesApi<SeriesType> | null;
+}
+
+/** A pane's renderer and the series it is bound to ('' = the price pane). */
+interface PaneBinding {
+  renderer: DrawingRenderer;
+  series: ISeriesApi<SeriesType> | null;
+}
+
+/** A pane on screen: its plot area's top-left in container coordinates and its size. */
+interface PaneBox {
+  origin: Pt;
+  width: number;
+  height: number;
+}
+
+/** Tools that read the market's prices or bars (or trade on them): on the price pane only. */
+export const PRICE_PANE_ONLY: ReadonlySet<DrawingKind> = new Set<DrawingKind>([
+  'long-position',
+  'short-position',
+  'fixed-range-volume-profile',
+  'anchored-volume-profile',
+  'anchored-vwap',
+  'bars-pattern',
+  'ghost-feed',
+  'forecast',
+]);
+
+/**
  * Pointer interaction for drawings: placing, selecting, moving and resizing —
  * TradingView's rules throughout.
  *
@@ -55,8 +91,13 @@ export class DrawingController {
   /** The press that may turn into a press-drag-release creation. */
   private press: { at: Pt; dragged: boolean } | null = null;
 
+  /** The pane the drawing being placed is in ('' = price). */
+  private pendingPane = '';
+
   private dragging: {
     id: string;
+    /** The pane the dragged drawing is in. */
+    pane: string;
     handleIndex: number;
     start: Pt;
     originalPoints: DrawingPoint[];
@@ -80,6 +121,10 @@ export class DrawingController {
   /** TV "Stay in drawing mode": the tool stays armed after a drawing completes. */
   stayInDrawingMode = false;
   bars: Bar[] = [];
+  /** The study panes (DR-07); without it drawings go on the price pane only. */
+  paneHost: DrawingPaneHost | null = null;
+  /** Renderers of the study panes that have drawings, by study uid. */
+  private readonly panes = new Map<string, PaneBinding>();
 
   /** Raised when a tool completes, so the toolbar can drop back to the cursor. */
   onToolComplete?: () => void;
@@ -125,6 +170,63 @@ export class DrawingController {
     return this.renderer;
   }
 
+  /** The renderer of a pane ('' = price); a study pane's is made on first use. */
+  private rendererFor(key: string): DrawingRenderer {
+    if (!key) return this.renderer;
+    return this.bindingFor(key).renderer;
+  }
+
+  /** The series whose scale a pane's drawings use. */
+  private seriesFor(key: string): ISeriesApi<SeriesType> | null {
+    if (!key) return this.series;
+    return this.bindingFor(key).series;
+  }
+
+  private bindingFor(key: string): PaneBinding {
+    let b = this.panes.get(key);
+    if (!b) {
+      const binding: PaneBinding = { renderer: null as unknown as DrawingRenderer, series: null };
+      binding.renderer = new DrawingRenderer(
+        () => this.chart,
+        () => binding.series,
+        () => paneSeriesPrecision(binding.series),
+        (t) => this.shift(t),
+        () => this.bars,
+        (t) => this.unshift(t),
+      );
+      b = binding;
+      this.panes.set(key, b);
+      this.bind(key, b);
+    }
+    return b;
+  }
+
+  /** Bind a study pane's renderer to the series its study is drawn with now (none while it is not drawn). */
+  private bind(key: string, b: PaneBinding): void {
+    const next = this.paneHost?.seriesFor(key) ?? null;
+    if (next === b.series) return;
+    try {
+      b.series?.detachPrimitive(b.renderer);
+    } catch {
+      // Went with its series.
+    }
+    b.series = next;
+    next?.attachPrimitive(b.renderer);
+  }
+
+  /**
+   * The studies' series were made again (inputs, style, a pane moved): bind each study pane's drawings to the
+   * series drawn now. Cheap when nothing changed.
+   */
+  rebindPanes(): void {
+    for (const [key, b] of this.panes) this.bind(key, b);
+  }
+
+  /** Every renderer, the price pane's first. */
+  private renderers(): DrawingRenderer[] {
+    return [this.renderer, ...[...this.panes.values()].map((b) => b.renderer)];
+  }
+
   attach(chart: IChartApi, container: HTMLElement): void {
     this.detach();
     this.chart = chart;
@@ -158,6 +260,15 @@ export class DrawingController {
   }
 
   detach(): void {
+    for (const b of this.panes.values()) {
+      try {
+        b.series?.detachPrimitive(b.renderer);
+      } catch {
+        // Went with its series.
+      }
+      b.series = null;
+    }
+    this.panes.clear();
     const c = this.container;
     if (c) {
       c.removeEventListener('pointerdown', this.onPointerDown, true);
@@ -189,7 +300,17 @@ export class DrawingController {
   sync(drawings: Drawing[], selectedId: string | null, selectedIds: ReadonlySet<string> = new Set()): void {
     const { resolution } = this.scope();
     this.shown = byZ(drawings.filter((d) => isVisibleOn(d, resolution)));
-    this.renderer.setDrawings(this.shown, selectedId, selectedIds);
+    // Each pane's renderer paints its own drawings, on its own scale (DR-07).
+    const byPane = new Map<string, Drawing[]>([['', []]]);
+    for (const d of this.shown) {
+      const key = d.pane ?? '';
+      if (key && !this.paneHost) continue;
+      const list = byPane.get(key) ?? [];
+      list.push(d);
+      byPane.set(key, list);
+    }
+    for (const key of this.panes.keys()) if (!byPane.has(key)) byPane.set(key, []);
+    for (const [key, list] of byPane) this.rendererFor(key).setDrawings(list, selectedId, selectedIds);
   }
 
   /** Whether a drawing is being placed right now. */
@@ -202,7 +323,7 @@ export class DrawingController {
     this.pending = [];
     this.pendingKind = null;
     this.press = null;
-    this.renderer.setPreview(null);
+    for (const r of this.renderers()) r.setPreview(null);
   }
 
   /**
@@ -213,12 +334,14 @@ export class DrawingController {
   nudgeSelected(bars: number, pixels: number): boolean {
     const id = this.store.selectedId();
     const d = id ? this.shown.find((x) => x.id === id) : undefined;
-    if (!d || d.locked || !this.series) return false;
-    const y0 = this.series.priceToCoordinate(d.points[0]?.price ?? 0);
+    // In its pane's units (DR-07).
+    const series = d ? this.seriesFor(d.pane ?? '') : null;
+    if (!d || d.locked || !series) return false;
+    const y0 = series.priceToCoordinate(d.points[0]?.price ?? 0);
     let dp = 0;
     if (pixels !== 0 && y0 !== null) {
-      const p1 = this.series.coordinateToPrice(y0 + pixels);
-      const p0 = this.series.coordinateToPrice(y0);
+      const p1 = series.coordinateToPrice(y0 + pixels);
+      const p0 = series.coordinateToPrice(y0);
       if (p1 !== null && p0 !== null) dp = (p1 as number) - (p0 as number);
     }
     const dt = bars * barStepMs(this.bars);
@@ -239,29 +362,95 @@ export class DrawingController {
   /** Paste the clipboard drawing here, a few bars/pixels away from its source. */
   paste(): Drawing | null {
     const step = barStepMs(this.bars);
-    const pasted = this.store.paste(this.scope(), { dt: step * 3, dp: this.pricePerPixels(-20) });
+    const pasted = this.store.paste(this.scope(), {
+      dt: step * 3,
+      dp: this.pricePerPixels(-20, this.store.clipboardPane),
+    });
     if (pasted) this.select(pasted.id);
     return pasted;
   }
 
-  private pricePerPixels(px: number): number {
-    const s = this.series;
+  private pricePerPixels(px: number, pane = ''): number {
+    const s = this.seriesFor(pane);
     if (!s) return 0;
     const a = s.coordinateToPrice(100);
     const b = s.coordinateToPrice(100 + px);
     return a !== null && b !== null ? (b as number) - (a as number) : 0;
   }
 
-  private localPoint(ev: PointerEvent | MouseEvent): Pt | null {
-    const rect = this.container?.getBoundingClientRect();
-    if (!rect) return null;
-    return { x: ev.clientX - rect.left, y: ev.clientY - rect.top };
+  /**
+   * A pane's plot area on screen ('' = the price pane): where it starts in the container — below the panes above it,
+   * right of a left price scale — and its size. Drawings project into, and pointers are read in, these coordinates.
+   */
+  private paneBox(key: string): PaneBox | null {
+    const chart = this.chart;
+    const c = this.container;
+    if (!chart || !c) return null;
+    let index = 0;
+    if (key) {
+      try {
+        const s = this.seriesFor(key);
+        if (!s) return null;
+        index = s.getPane().paneIndex();
+      } catch {
+        return null;
+      }
+    }
+    const el = chart.panes()[index]?.getHTMLElement();
+    if (!el) {
+      // No pane element (a chart without the panes API): the container is the price pane.
+      return index === 0 ? { origin: { x: 0, y: 0 }, width: c.clientWidth, height: c.clientHeight } : null;
+    }
+    const cr = c.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const left = chart.priceScale('left').width();
+    return {
+      origin: { x: r.left - cr.left + left, y: r.top - cr.top },
+      width: chart.timeScale().width() || r.width,
+      height: r.height,
+    };
   }
 
-  /** Screen → model, applying the magnet in force for this event. */
-  private toModel(p: Pt, magnet: MagnetMode = 'off'): DrawingPoint | null {
+  /** The point of a pointer event in a pane's own coordinates. */
+  private inPane(ev: MouseEvent, key: string): Pt | null {
+    const box = this.paneBox(key);
+    const rect = this.container?.getBoundingClientRect();
+    if (!box || !rect) return null;
+    return { x: ev.clientX - rect.left - box.origin.x, y: ev.clientY - rect.top - box.origin.y };
+  }
+
+  /**
+   * The pane under a pointer event and the point in it (DR-07: the pointer was read through the price series
+   * wherever it was, so a click on an RSI pane made a drawing at a price far off the price pane). Null over a pane
+   * drawings cannot go in (a script's, a fundamentals pane) or off every pane.
+   */
+  private paneAt(ev: MouseEvent): { key: string; p: Pt } | null {
     const chart = this.chart;
-    const series = this.series;
+    const c = this.container;
+    if (!chart || !c) return null;
+    const panes = chart.panes();
+    for (let i = 0; i < panes.length; i++) {
+      const el = panes[i].getHTMLElement();
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (ev.clientY < r.top || ev.clientY >= r.bottom) continue;
+      const key = i === 0 ? '' : (this.paneHost?.keyAt(i) ?? null);
+      if (key === null) return null;
+      const p = this.inPane(ev, key);
+      return p ? { key, p } : null;
+    }
+    // No pane elements (a chart without the panes API): the container is the price pane.
+    if (!panes.some((pane) => pane.getHTMLElement())) {
+      const p = this.inPane(ev, '');
+      return p ? { key: '', p } : null;
+    }
+    return null;
+  }
+
+  /** Screen (pane coordinates) → model, applying the magnet in force for this event — on the price pane only. */
+  private toModel(p: Pt, magnet: MagnetMode = 'off', pane = ''): DrawingPoint | null {
+    const chart = this.chart;
+    const series = this.seriesFor(pane);
     if (!chart || !series) return null;
     const time = chart.timeScale().coordinateToTime(p.x);
     const price = series.coordinateToPrice(p.y);
@@ -274,7 +463,8 @@ export class DrawingController {
     const ms = time !== null ? this.unshift((time as number) * 1000) : this.renderer.timeAtX(p.x);
     if (ms === null) return null;
 
-    if (magnet === 'off') return { time: ms, price };
+    // The magnet snaps to the bars' prices: meaningless on a study's scale.
+    if (magnet === 'off' || pane) return { time: ms, price };
 
     const bar = nearestBar(this.bars, ms);
     if (magnet === 'strong') {
@@ -285,7 +475,7 @@ export class DrawingController {
     // to feel helpful, near enough not to yank the point somewhere the
     // operator did not click.
     const top = series.coordinateToPrice(0);
-    const bottom = series.coordinateToPrice(this.container?.clientHeight ?? 0);
+    const bottom = series.coordinateToPrice(this.paneBox('')?.height ?? this.container?.clientHeight ?? 0);
     const span = top !== null && bottom !== null ? Math.abs(top - bottom) : 0;
     const snapped = magnetPrice(price, bar, span * 0.1);
     return { time: bar ? bar.time : ms, price: snapped };
@@ -297,12 +487,12 @@ export class DrawingController {
    * which would otherwise pull it off the constrained line); otherwise the
    * magnet in force applies, Ctrl/Cmd inverting it.
    */
-  private anchorFor(p: Pt, ev: MouseEvent, origin: DrawingPoint | null): DrawingPoint | null {
+  private anchorFor(p: Pt, ev: MouseEvent, origin: DrawingPoint | null, pane = ''): DrawingPoint | null {
     if (ev.shiftKey && origin) {
-      const o = this.renderer.project(origin);
-      if (o) return this.toModel(snapAngle(o, p));
+      const o = this.rendererFor(pane).project(origin);
+      if (o) return this.toModel(snapAngle(o, p), 'off', pane);
     }
-    return this.toModel(p, effectiveMagnet(this.magnetMode, ev.ctrlKey || ev.metaKey));
+    return this.toModel(p, effectiveMagnet(this.magnetMode, ev.ctrlKey || ev.metaKey), pane);
   }
 
   private setChartInteractive(enabled: boolean): void {
@@ -356,8 +546,20 @@ export class DrawingController {
 
   private onPointerDown = (ev: PointerEvent): void => {
     if (ev.button !== 0) return;
-    const p = this.localPoint(ev);
-    if (!p) return;
+    // The pane under the pointer, and the point in it (DR-07). A drawing being placed stays in the pane it began in.
+    const under = this.paneAt(ev);
+    const pane = this.pending.length > 0 ? this.pendingPane : (under?.key ?? null);
+    const p = pane === null ? null : this.pending.length > 0 ? this.inPane(ev, pane) : under!.p;
+    if (this.activeTool && (pane === null || (pane && PRICE_PANE_ONLY.has(this.activeTool)))) {
+      // Over a pane drawings cannot go in, or a price-only tool off the price pane: nothing is placed.
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    if (!p || pane === null) {
+      if (!this.activeTool) this.select(null);
+      return;
+    }
     // TV: a ruler measurement goes away on the next click on the chart.
     if (this.transientId && !this.pendingKind) this.clearTransient();
 
@@ -370,14 +572,15 @@ export class DrawingController {
     if (this.activeTool) {
       const kind = this.activeTool;
       const needed = this.neededPoints(kind);
-      const model = this.anchorFor(p, ev, this.pending.at(-1) ?? null);
+      const model = this.anchorFor(p, ev, this.pending.at(-1) ?? null, pane);
       ev.preventDefault();
       ev.stopPropagation();
       if (!model) return;
+      if (this.pending.length === 0) this.pendingPane = pane;
 
       // Unlimited-click tools: a click on the first anchor closes and finishes.
       if (needed === Number.POSITIVE_INFINITY && this.pending.length >= 2) {
-        const first = this.renderer.project(this.pending[0]);
+        const first = this.rendererFor(pane).project(this.pending[0]);
         if (first && Math.hypot(first.x - p.x, first.y - p.y) <= HANDLE_RADIUS + 2) {
           this.commitPending({ closed: true });
           return;
@@ -398,13 +601,13 @@ export class DrawingController {
         this.press = { at: p, dragged: false };
         this.container?.setPointerCapture(ev.pointerId);
       }
-      this.renderer.setPreview({ drawing: this.previewDrawing(kind, this.pending), cursor: null });
+      this.rendererFor(pane).setPreview({ drawing: this.previewDrawing(kind, this.pending), cursor: null });
       return;
     }
 
     // Selecting / starting a drag. Ctrl/Cmd or Shift adds to (or takes out of) the selection (DR-I10);
     // Ctrl/Cmd-DRAG on a body still clones, decided once the pointer moves.
-    const hit = this.pick(p);
+    const hit = this.pick(p, pane);
     const additive = ev.shiftKey || ev.ctrlKey || ev.metaKey;
     if (hit && additive && this.store.selectedIds().size > 0 && !this.store.selectedIds().has(hit.id)) {
       this.store.toggleSelected(hit.id);
@@ -425,6 +628,7 @@ export class DrawingController {
       // cost the operator their Redo (DR-04).
       this.dragging = {
         id: hit.id,
+        pane,
         handleIndex: hit.handleIndex,
         start: p,
         originalPoints: hit.drawing.points.map((pt) => ({ ...pt })),
@@ -446,28 +650,29 @@ export class DrawingController {
   };
 
   private onPointerMove = (ev: PointerEvent): void => {
-    const p = this.localPoint(ev);
-    if (!p) return;
-
-    // Preview the in-progress drawing following the cursor.
+    // Preview the in-progress drawing following the cursor, in the pane it began in.
     if (this.activeTool) {
       this.setCursor('crosshair');
       if (!this.pendingKind || this.pending.length === 0) return;
+      const pane = this.pendingPane;
+      const p = this.inPane(ev, pane);
+      if (!p) return;
+      const renderer = this.rendererFor(pane);
       const needed = this.neededPoints(this.pendingKind);
       if (needed === 'freehand') {
         if ((ev.buttons & 1) === 1) {
-          const model = this.toModel(p);
+          const model = this.toModel(p, 'off', pane);
           if (model) this.pending.push(model);
         }
-        this.renderer.setPreview({ drawing: this.previewDrawing(this.pendingKind, this.pending), cursor: null });
+        renderer.setPreview({ drawing: this.previewDrawing(this.pendingKind, this.pending), cursor: null });
         return;
       }
       if (this.press && (ev.buttons & 1) === 1 && isDrag(this.press.at, p)) this.press.dragged = true;
       // Preview through the same snapping the next click will apply, so what
       // is shown is exactly what will be placed.
-      const next = this.anchorFor(p, ev, this.pending.at(-1) ?? null);
-      const cursor = next ? this.renderer.project(next) : p;
-      this.renderer.setPreview({
+      const next = this.anchorFor(p, ev, this.pending.at(-1) ?? null, pane);
+      const cursor = next ? renderer.project(next) : p;
+      renderer.setPreview({
         drawing: this.previewDrawing(this.pendingKind, this.pending),
         cursor: cursor ?? p,
       });
@@ -477,13 +682,16 @@ export class DrawingController {
     if (!this.dragging) {
       // Hover: handles fade in and the cursor says what a press would do.
       if ((ev.buttons & 1) === 1) return;
-      const hit = this.pick(p);
-      this.renderer.setHover(hit?.id ?? null);
+      const under = this.paneAt(ev);
+      const hit = under ? this.pick(under.p, under.key) : null;
+      for (const r of this.renderers()) r.setHover(hit?.id ?? null);
       this.setCursor(hit ? (hit.handleIndex >= 0 && !hit.drawing.locked ? 'crosshair' : 'pointer') : null);
       return;
     }
 
     const drag = this.dragging;
+    const p = this.inPane(ev, drag.pane);
+    if (!p) return;
     if (!drag.moved && !isDrag(drag.start, p, 2)) return;
     if (!drag.moved) {
       drag.moved = true;
@@ -510,17 +718,18 @@ export class DrawingController {
         drag.originalPoints.length === 2 && drag.handleIndex < 2
           ? drag.originalPoints[1 - drag.handleIndex]
           : null;
-      const model = this.anchorFor(p, ev, other);
+      const model = this.anchorFor(p, ev, other, drag.pane);
       if (!model) return;
       // The tool decides what a handle drag means (perimeter handles on an
       // ellipse, edge handles on a rectangle…); by default it moves the
       // grabbed anchor only.
       const behavior = behaviorFor(drawing.kind);
       const handleIndex = drag.handleIndex;
+      const renderer = this.rendererFor(drag.pane);
       const points = behavior?.moveHandle
         ? behavior.moveHandle({ ...drawing, points: drag.originalPoints }, handleIndex, model, {
-            project: (pt) => this.renderer.project(pt),
-            unproject: (pt) => this.toModel(pt),
+            project: (pt) => renderer.project(pt),
+            unproject: (pt) => this.toModel(pt, 'off', drag.pane),
           })
         : drag.originalPoints.map((pt, i) => (i === handleIndex ? model : pt));
       this.store.update(drawing.id, { points }, false);
@@ -534,8 +743,8 @@ export class DrawingController {
         const dy = Math.abs(p.y - drag.start.y);
         to = dx >= dy ? { x: p.x, y: drag.start.y } : { x: drag.start.x, y: p.y };
       }
-      const model = this.toModel(to);
-      const startModel = this.toModel(drag.start);
+      const model = this.toModel(to, 'off', drag.pane);
+      const startModel = this.toModel(drag.start, 'off', drag.pane);
       if (!model || !startModel) return;
       const l0 = this.renderer.logicalAt(startModel.time);
       const l1 = this.renderer.logicalAt(model.time);
@@ -594,8 +803,8 @@ export class DrawingController {
     const press = this.press;
     this.press = null;
     if (press?.dragged && this.pending.length === 1) {
-      const p = this.localPoint(ev);
-      const model = p ? this.anchorFor(p, ev, this.pending[0]) : null;
+      const p = this.inPane(ev, this.pendingPane);
+      const model = p ? this.anchorFor(p, ev, this.pending[0], this.pendingPane) : null;
       if (model) {
         this.pending.push(model);
         if (this.pending.length >= needed) this.commitPending();
@@ -604,7 +813,7 @@ export class DrawingController {
   };
 
   private onPointerLeave = (): void => {
-    if (!this.dragging) this.renderer.setHover(null);
+    if (!this.dragging) for (const r of this.renderers()) r.setHover(null);
   };
 
   /** Double-click finishes a multi-point drawing, or opens a drawing's settings. */
@@ -617,38 +826,45 @@ export class DrawingController {
       return;
     }
     if (this.activeTool) return;
-    const p = this.localPoint(ev);
-    const hit = p ? this.pick(p) : null;
-    if (!hit) return;
+    const under = this.paneAt(ev);
+    const hit = under ? this.pick(under.p, under.key) : null;
+    if (!hit || !under) return;
     ev.preventDefault();
     ev.stopPropagation();
     this.select(hit.id);
-    const edit = hit.drawing.locked ? null : this.inlineEditAt(hit.drawing, p!);
+    const edit = hit.drawing.locked ? null : this.inlineEditAt(hit.drawing, under.p, under.key);
     if (edit && this.onInlineEdit) this.onInlineEdit({ id: hit.id, ...edit });
     else this.onEditRequest?.(hit.id);
   };
 
-  /** Inline edit offered by the tool at `p`: a cell (`editAt`) or its text box (`textRect`). */
-  private inlineEditAt(d: Drawing, p: Pt): InlineEdit | null {
+  /**
+   * Inline edit offered by the tool at `p` (pane coordinates): a cell (`editAt`) or its text box (`textRect`), the
+   * box in container coordinates — where the editor is laid over the chart.
+   */
+  private inlineEditAt(d: Drawing, p: Pt, pane = ''): InlineEdit | null {
     const behavior = behaviorFor(d.kind);
     if (!behavior?.editAt && !behavior?.textRect) return null;
-    const pts = this.renderer.projectAll(d);
+    const renderer = this.rendererFor(pane);
+    const pts = renderer.projectAll(d);
     if (pts.length === 0) return null;
+    const box = this.paneBox(pane);
     const ctx = {
-      ...this.renderer.paintCtx(
+      ...renderer.paintCtx(
         null as unknown as CanvasRenderingContext2D,
         d,
         pts,
-        this.container?.clientWidth ?? 0,
-        this.container?.clientHeight ?? 0,
+        box?.width ?? this.container?.clientWidth ?? 0,
+        box?.height ?? this.container?.clientHeight ?? 0,
       ),
       options: optionsOf(behavior, d),
     };
+    const toContainer = <T extends { rect: TextRect }>(e: T): T =>
+      box ? { ...e, rect: { ...e.rect, x: e.rect.x + box.origin.x, y: e.rect.y + box.origin.y } } : e;
     const cell = behavior.editAt?.(ctx, p);
-    if (cell) return cell;
+    if (cell) return toContainer(cell);
     const rect = behavior.textRect?.(ctx);
     if (!rect) return null;
-    return { rect, value: d.style.text ?? '', commit: (text) => ({ style: { ...d.style, text } }) };
+    return toContainer({ rect, value: d.style.text ?? '', commit: (text) => ({ style: { ...d.style, text } }) });
   }
 
   /** Apply an inline edit's result as one undo step. */
@@ -664,8 +880,8 @@ export class DrawingController {
       this.cancelPending();
       return;
     }
-    const p = this.localPoint(ev);
-    const hit = p ? this.pick(p) : null;
+    const under = this.paneAt(ev);
+    const hit = under ? this.pick(under.p, under.key) : null;
     if (!hit) return; // empty chart: the page's chart menu handles it
     ev.preventDefault();
     ev.stopPropagation();
@@ -688,7 +904,10 @@ export class DrawingController {
       if (hook.points) points = hook.points;
       if (hook.options) options = { ...(options ?? {}), ...hook.options };
     }
-    const created = this.store.add(kind, points, styleFor(kind, template?.style), this.scope(), { options });
+    const created = this.store.add(kind, points, styleFor(kind, template?.style), this.scope(), {
+      options,
+      ...(this.pendingPane ? { pane: this.pendingPane } : {}),
+    });
     if (behavior?.transient) {
       this.clearTransient();
       this.transientId = created.id;
@@ -714,6 +933,7 @@ export class DrawingController {
       options: template?.options,
       locked: false,
       createdAt: 0,
+      ...(this.pendingPane ? { pane: this.pendingPane } : {}),
     };
   }
 
@@ -725,20 +945,24 @@ export class DrawingController {
    * move. Hidden / interval-excluded drawings are not in `shown` and so can
    * never be grabbed.
    */
-  private pick(p: Pt): { id: string; drawing: Drawing; handleIndex: number } | null {
-    const list = this.shown;
+  private pick(p: Pt, pane = ''): { id: string; drawing: Drawing; handleIndex: number } | null {
+    // Only the drawings of the pane under the pointer, projected on its scale (DR-07).
+    const list = this.shown.filter((d) => (d.pane ?? '') === pane);
+    if (!list.length) return null;
+    const renderer = this.rendererFor(pane);
+    const box = this.paneBox(pane);
     const bounds = {
-      width: this.container?.clientWidth ?? 0,
-      height: this.container?.clientHeight ?? 0,
+      width: box?.width ?? this.container?.clientWidth ?? 0,
+      height: box?.height ?? this.container?.clientHeight ?? 0,
     };
     for (let i = list.length - 1; i >= 0; i--) {
       const d = list[i];
-      const pts = this.renderer.projectAll(d);
+      const pts = renderer.projectAll(d);
       if (pts.length === 0) continue;
       const behavior = behaviorFor(d.kind);
       const ctxBase = behavior
         ? {
-            ...this.renderer.paintCtx(null as unknown as CanvasRenderingContext2D, d, pts, bounds.width, bounds.height),
+            ...renderer.paintCtx(null as unknown as CanvasRenderingContext2D, d, pts, bounds.width, bounds.height),
             options: optionsOf(behavior, d),
           }
         : null;
@@ -764,7 +988,7 @@ export class DrawingController {
     this.setChartInteractive(kind === null);
     this.setCursor(kind ? 'crosshair' : null);
     if (kind) {
-      this.renderer.setHover(null);
+      for (const r of this.renderers()) r.setHover(null);
       this.select(null);
     }
   }
@@ -799,4 +1023,14 @@ function nearestBar(bars: Bar[], timeMs: number): Bar | null {
   return Math.abs(candidate.time - timeMs) <= Math.abs(previous.time - timeMs)
     ? candidate
     : previous;
+}
+
+/** The price precision a study pane's drawings label their prices with: its series' (2 when it sets none). */
+function paneSeriesPrecision(series: ISeriesApi<SeriesType> | null): number {
+  try {
+    const f = series?.options().priceFormat as { precision?: number } | undefined;
+    return typeof f?.precision === 'number' ? f.precision : 2;
+  } catch {
+    return 2;
+  }
 }

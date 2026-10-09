@@ -288,7 +288,7 @@ export class DrawingStore {
     points: Drawing['points'],
     style: DrawingStyle,
     scope?: { symbol: string; resolution: string },
-    extra?: Pick<Drawing, 'options'>,
+    extra?: Pick<Drawing, 'options' | 'pane'>,
   ): Drawing {
     const { symbol, resolution } = scope ?? this.scope();
     const drawing: Drawing = {
@@ -303,6 +303,7 @@ export class DrawingStore {
       createdAt: Date.now(),
       z: topZ(this.forSymbol(symbol)),
       ...(extra?.options ? { options: extra.options } : {}),
+      ...(extra?.pane ? { pane: extra.pane } : {}),
     };
     this.mutate(symbol, (list) => [...list, drawing]);
     return drawing;
@@ -367,6 +368,11 @@ export class DrawingStore {
 
   get hasClipboard(): boolean {
     return this.clipboard !== null;
+  }
+
+  /** The pane of the copied drawing ('' = the price pane), so a paste is offset in that pane's units. */
+  get clipboardPane(): string {
+    return this.clipboard?.pane ?? '';
   }
 
   /**
@@ -853,7 +859,7 @@ function toOp(e: OutboxEntry, base: string | null): ChartDrawingOp {
       pointsJson: JSON.stringify(d.points),
       styleJson: JSON.stringify(d.style),
       locked: d.locked,
-      optionsJson: JSON.stringify(d.options ?? {}),
+      optionsJson: JSON.stringify(withPane(d.options, d.pane)),
       hidden: !!d.hidden,
       visibleOn: (d.visibleOn ?? []).join(','),
       zIndex: d.z ?? 0,
@@ -884,14 +890,35 @@ export function fromDto(row: ChartDrawingDto): Drawing | null {
   }
 }
 
-/** Options / visibility / z from an engine row; absent on engines without them. */
+/**
+ * The key under which a drawing's pane (DR-07 / DR-I10) travels inside `optionsJson`: no engine column, and a client
+ * that predates panes keeps it when it writes the options back.
+ */
+export const PANE_OPTION_KEY = '$pane';
+
+/** The options as written: the tool's settings, plus the pane when the drawing is in a study's pane. */
+function withPane(
+  options: Record<string, unknown> | undefined,
+  pane: string | undefined,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...(options ?? {}) };
+  delete out[PANE_OPTION_KEY];
+  if (pane) out[PANE_OPTION_KEY] = pane;
+  return out;
+}
+
+/** Options / visibility / z / pane from an engine row; absent on engines without them. */
 function extrasFromDto(row: ChartDrawingDto): Partial<Drawing> {
   const out: Partial<Drawing> = {};
   if (row.optionsJson) {
     try {
       const o: unknown = JSON.parse(row.optionsJson);
-      if (o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).length) {
-        out.options = o as Record<string, unknown>;
+      if (o && typeof o === 'object' && !Array.isArray(o)) {
+        const options = { ...(o as Record<string, unknown>) };
+        const pane = options[PANE_OPTION_KEY];
+        delete options[PANE_OPTION_KEY];
+        if (typeof pane === 'string' && pane) out.pane = pane;
+        if (Object.keys(options).length) out.options = options;
       }
     } catch {
       /* bad options: fall back to the tool's defaults */

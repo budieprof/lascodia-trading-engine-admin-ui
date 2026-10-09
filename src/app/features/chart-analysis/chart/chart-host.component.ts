@@ -1824,6 +1824,14 @@ export class ChartHostComponent implements OnDestroy {
     this.bindHold(el);
 
     this.controller.attach(this.chart, el);
+    // Drawings on the built-in studies' panes (DR-07 / DR-I10): which study a pane is, and its scale.
+    this.controller.paneHost = {
+      keyAt: (paneIndex) => this.studyAtPane(paneIndex),
+      seriesFor: (uid) =>
+        (this.indicatorSeries.find((s) => s.uid === uid)?.series[0]?.api as
+          | ISeriesApi<SeriesType>
+          | undefined) ?? null,
+    };
     this.controller.onToolComplete = () => this.toolComplete.emit();
     this.controller.onEditRequest = (id) => this.drawingSettings.emit(id);
     this.controller.onInlineEdit = (e) => {
@@ -2696,7 +2704,25 @@ export class ChartHostComponent implements OnDestroy {
       if (target.fill) this.writeFills(target.fill, def, computed);
     }
 
+    // Drawings in a study's pane follow its series when they are made again.
+    this.controller.rebindPanes();
     this.emitLegend();
+  }
+
+  /**
+   * The built-in study a pane (index > 0) belongs to — the one drawn there on its own, not one drawn in it on another
+   * study's plot — for the drawings made in it (DR-07). Null for a pane with none (a script's, a fundamentals pane).
+   */
+  private studyAtPane(paneIndex: number): string | null {
+    let fallback: string | null = null;
+    for (const held of this.indicatorSeries) {
+      if (this.paneIndexOf(held) !== paneIndex) continue;
+      const item = this.indicators().find((a) => a.uid === held.uid);
+      const def = item ? indicatorById(item.defId) : undefined;
+      if (item && def && !this.studyPlace(item, def).host) return held.uid;
+      fallback ??= held.uid;
+    }
+    return fallback;
   }
 
   /** Studies whose source reference was dropped (gone, or a loop): computed on `close`. */

@@ -1515,7 +1515,11 @@
 
         <!-- Object tree (DR-03 / DR-I10): every drawing of the symbol, hidden ones included. -->
         @if (objectTreeOpen() && drawings.symbolDrawings().length) {
-          <app-drawing-object-tree [resolution]="resolution()" (closed)="objectTreeOpen.set(false)" />
+          <app-drawing-object-tree
+            [resolution]="resolution()"
+            [paneLabels]="studyLabels()"
+            (closed)="objectTreeOpen.set(false)"
+          />
         }
 
         <!-- Alert manager (alerts v2, SP-I2). -->
