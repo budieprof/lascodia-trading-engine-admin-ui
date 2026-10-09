@@ -30,6 +30,12 @@ describe('mergeFills (one arrow per order, as TradingView)', () => {
     expect(at20[0].text).toBe('Long\n+20,000 units');
     expect(at20[0].side).toBe('buy');
     expect(at20[0].tooltip.split('\n')).toHaveLength(2);
+    // The one arrow stands for both trades: a click on it can select either row.
+    expect([...at20[0].trades].sort()).toEqual([1, 2]);
+  });
+
+  it('names the trade each fill belongs to', () => {
+    expect(tradeMarkers(trade({ number: 7 })).map((m) => m.trades)).toEqual([[7], [7]]);
   });
 
   it('keeps separate orders on different bars, sides or prices', () => {

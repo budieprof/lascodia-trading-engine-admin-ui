@@ -285,6 +285,9 @@ export interface PlacedRun {
  * <ul>
  *   <li>a re-run takes its own place (one that moved to the end flipped two scripts' order on every
  *       live re-run);</li>
+ *   <li>an edit landing ("Update on chart", `replacesKey`: the script it was edited from) takes the
+ *       place of that script, which comes back as `swapped` — not as `replaced`: nobody is offered
+ *       the old version back (PC-06);</li>
  *   <li>a new script goes last;</li>
  *   <li>and one strategy at a time, as TradingView: a strategy takes the place of any other strategy,
  *       which comes back as `replaced` — the page drops its runs and offers the way back.</li>
@@ -293,15 +296,32 @@ export interface PlacedRun {
 export function placeRun<R extends PlacedRun>(
   runs: readonly R[],
   run: R,
-): { runs: R[]; replaced: R[] } {
-  const replaced = runs.filter(
+  replacesKey: string | null = null,
+): { runs: R[]; replaced: R[]; swapped: R | null } {
+  let list: R[] = [...runs];
+  let swapped: R | null = null;
+  if (replacesKey !== null && replacesKey !== run.item.key) {
+    const at = list.findIndex((r) => r.item.key === replacesKey);
+    if (at >= 0) {
+      swapped = list[at];
+      // In the edited script's slot; any older run under the new key goes.
+      list = list.filter((r) => r.item.key !== run.item.key);
+      list[list.findIndex((r) => r === swapped)] = run;
+    }
+  }
+  const replaced = list.filter(
     (r) =>
-      r.item.key !== run.item.key && run.result.kind === 'strategy' && r.result.kind === 'strategy',
+      r !== run &&
+      r.item.key !== run.item.key &&
+      run.result.kind === 'strategy' &&
+      r.result.kind === 'strategy',
   );
-  const kept = runs.filter((r) => !replaced.includes(r));
+  const kept = list.filter((r) => !replaced.includes(r));
+  if (swapped) return { runs: kept, replaced, swapped };
   const at = kept.findIndex((r) => r.item.key === run.item.key);
   return {
     runs: at < 0 ? [...kept, run] : kept.map((r, i) => (i === at ? run : r)),
     replaced,
+    swapped: null,
   };
 }

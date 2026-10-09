@@ -1,6 +1,11 @@
 import type { ChartScriptResult, ChartTrade } from './chart-script.model';
 import type { ScriptInputValues } from '@core/api/scripting.types';
+import { isDisplayedAnywhere } from '@shared/pine-chart/core/display';
+import { formatValue } from '@shared/pine-chart/core/format';
+import { plotColorAt, plotValueAt } from '@shared/pine-chart/render/legend';
+import type { PineRenderModel } from '@shared/pine-chart/render/render-model';
 import { tradingDateLabel } from '../chart/trading-date';
+import { scriptRenderModel } from './script-model-cache';
 
 /**
  * Everything the Strategy Tester knows about one trade, assembled for the trade-detail popup:
@@ -20,6 +25,9 @@ export interface SeriesAtBars {
   color: string;
   entry: number | null;
   exit: number | null;
+  /** The values as the script formats them (its own format and precision, else the symbol's). */
+  entryText: string;
+  exitText: string;
 }
 
 export interface TradeDetail {
@@ -80,22 +88,63 @@ function duration(fromSec: number, toSec: number): string {
   return [d ? `${d}d` : '', h ? `${h}h` : '', !d && mm ? `${mm}m` : ''].filter(Boolean).join(' ') || '0m';
 }
 
-/** Value of a plot at a chart time (seconds), or null when the plot is na there. */
-function valueAt(data: readonly { time: number; value?: number }[], sec: number | null): number | null {
-  if (sec === null) return null;
-  let lo = 0;
-  let hi = data.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const t = data[mid].time;
-    if (t === sec) {
-      const v = data[mid].value;
-      return v === undefined || !Number.isFinite(v) ? null : v;
-    }
-    if (t < sec) lo = mid + 1;
-    else hi = mid - 1;
+/**
+ * The run bar a fill happened on, as a logical index of the run's render model: by the report's bar
+ * index when it has one, else by the fill's time (chart seconds) — exactly a bar's open, or none.
+ */
+function fillLogical(
+  model: PineRenderModel,
+  barIndex: number | null | undefined,
+  sec: number | null,
+): number | null {
+  if (typeof barIndex === 'number' && Number.isFinite(barIndex)) {
+    const l = model.timeline.logicalOfBarIndex(barIndex);
+    return l >= 0 && l < model.timeline.length ? l : null;
   }
-  return null;
+  if (sec === null) return null;
+  const i = model.timeline.indexOfTime(sec * 1000);
+  return i < 0 ? null : i;
+}
+
+/**
+ * Every plot the run shows anywhere (pane, status line, data window or price scale), read at the
+ * entry and exit bars from the run's render model — the one the chart draws (`script-model-cache`),
+ * never a second copy of the outputs — formatted as the script formats them. Plots that are na at
+ * both bars are left out.
+ */
+export function seriesAtFills(
+  result: ChartScriptResult,
+  entry: { barIndex?: number | null; sec: number | null },
+  exit: { barIndex?: number | null; sec: number | null },
+  precision?: number | null,
+): SeriesAtBars[] {
+  const model = scriptRenderModel(result, precision);
+  if (!model) return [];
+  const el = fillLogical(model, entry.barIndex, entry.sec);
+  const xl = fillLogical(model, exit.barIndex, exit.sec);
+  const out: SeriesAtBars[] = [];
+  for (const pane of [model.panes.main, model.panes.script]) {
+    for (const s of pane?.series ?? []) {
+      if (s.type !== 'plot' || !isDisplayedAnywhere(s.display)) continue;
+      const read = (l: number | null) => {
+        const v = l === null ? NaN : plotValueAt(s, l);
+        return Number.isFinite(v) ? v : null;
+      };
+      const e = read(el);
+      const x = read(xl);
+      if (e === null && x === null) continue;
+      out.push({
+        title: s.title,
+        // The plot's colour on the bar it has a value at (a per-bar colour can be na elsewhere).
+        color: plotColorAt(s, (e !== null ? el : xl) as number) ?? '#787B86',
+        entry: e,
+        exit: x,
+        entryText: e === null ? '—' : formatValue(e, s.format),
+        exitText: x === null ? '—' : formatValue(x, s.format),
+      });
+    }
+  }
+  return out;
 }
 
 export function tradeDetail(
@@ -149,14 +198,12 @@ export function tradeDetail(
   const costs = [raw?.commission, raw?.swap, raw?.executionCost].filter((v): v is number => typeof v === 'number');
   if (costs.length) outcome.push({ label: 'Costs (commission, swap, execution)', value: costs.map((c) => fmt(c, 2)).join(' / ') + (ccy ? ` ${ccy}` : '') });
 
-  const series: SeriesAtBars[] = result.plots
-    .map((p) => ({
-      title: p.title || `Plot ${p.id}`,
-      color: p.color,
-      entry: valueAt(p.data as { time: number; value?: number }[], t.entryTime),
-      exit: valueAt(p.data as { time: number; value?: number }[], t.exitTime),
-    }))
-    .filter((s) => s.entry !== null || s.exit !== null);
+  const series = seriesAtFills(
+    result,
+    { barIndex: raw?.entryBarIndex, sec: t.entryTime },
+    { barIndex: t.isOpen ? null : raw?.exitBarIndex, sec: t.exitTime },
+    precision,
+  );
 
   const runBars = result.run?.bars ?? [];
   const barAt = (sec: number | null) => (sec === null ? null : (runBars.find((b) => b.t === sec * 1000) ?? null));

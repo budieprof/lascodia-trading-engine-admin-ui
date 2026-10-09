@@ -176,6 +176,40 @@ describe('ScriptingService — run (the one scripting/run path)', () => {
       code: '-14',
     });
   });
+
+  it('C5: a busy engine (-429) is a busy refusal with the wait it asks for — never a script error', async () => {
+    const post = vi.fn().mockReturnValue(
+      of({
+        status: false,
+        data: { retryAfterMs: 1500 },
+        message: 'Script runs are busy',
+        responseCode: '-429',
+      }),
+    );
+    const err = await firstValueFrom(make({ post } as any).run({} as any)).catch((e) => e);
+    expect(err).toBeInstanceOf(ScriptingApiError);
+    expect(err).toMatchObject({ code: '-429', retryAfterMs: 1500, compile: null });
+    expect(err.isBusy).toBe(true);
+  });
+
+  it('C5: an HTTP 429 reads the wait from the body, else from the Retry-After header', () => {
+    const withBody = toScriptingError(
+      new HttpErrorResponse({
+        status: 429,
+        error: { status: false, data: { retryAfterMs: 2500 }, message: 'busy', responseCode: '-429' },
+      }),
+      'x',
+    );
+    expect([withBody.isBusy, withBody.retryAfterMs]).toEqual([true, 2500]);
+    const headerOnly = toScriptingError(
+      new HttpErrorResponse({ status: 429, headers: new HttpHeaders({ 'Retry-After': '3' }) }),
+      'x',
+    );
+    expect([headerOnly.isBusy, headerOnly.retryAfterMs]).toEqual([true, 3000]);
+    // A validation refusal stays one, with no wait.
+    expect(new ScriptingApiError('bad', '-11').isBusy).toBe(false);
+    expect(new ScriptingApiError('bad', '-11').retryAfterMs).toBeNull();
+  });
 });
 
 describe('ScriptingService — chart bars (scripting/chart-bars)', () => {

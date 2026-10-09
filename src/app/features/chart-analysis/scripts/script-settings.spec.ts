@@ -191,3 +191,49 @@ describe('ScriptSettings — a Pine chip’s Settings on the chart', () => {
     expect(settings.inputsOf(null)).toBeNull();
   });
 });
+
+describe('ScriptSettings — confirm inputs and named templates (PC-I12)', () => {
+  /** A Storage-like map, as the chart prefs give it. */
+  const memory = () => {
+    const m = new Map<string, string>();
+    return {
+      getItem: (k: string) => m.get(k) ?? null,
+      setItem: (k: string, v: string) => void m.set(k, v),
+      raw: m,
+    };
+  };
+
+  it('opened as the script is added, it asks to confirm; any other opening does not', () => {
+    const it = item('mine:7');
+    const { settings } = make([runOf(it)]);
+    settings.open('mine:7', true);
+    expect(settings.confirming()).toBe(true);
+    settings.close();
+    expect(settings.confirming()).toBe(false);
+    settings.open('mine:7');
+    expect(settings.confirming()).toBe(false);
+  });
+
+  it('saves templates by script, in the synced prefs, and lists them newest first', () => {
+    const prefs = memory();
+    const { settings, host } = make([runOf(item('mine:7')), runOf(item('mine:8'))], { prefs });
+    settings.open('mine:7');
+    settings.saveTemplate('mine:7', 'Scalp', { 'Signals::Sensitivity': 0.8 });
+    settings.saveTemplate('mine:7', 'Swing', { 'Signals::Sensitivity': 2 });
+    expect(settings.templates().map((t) => t.name)).toEqual(['Swing', 'Scalp']);
+    expect(host.notify).toHaveBeenCalledWith('success', 'Saved the inputs as “Swing”.');
+    // Another script keeps its own.
+    settings.open('mine:8');
+    expect(settings.templates()).toEqual([]);
+    // Another page (another browser, through the engine) reads them back.
+    const again = make([runOf(item('mine:7'))], { prefs }).settings;
+    again.open('mine:7');
+    expect(again.templates().map((t) => [t.name, t.values])).toEqual([
+      ['Swing', { 'Signals::Sensitivity': 2 }],
+      ['Scalp', { 'Signals::Sensitivity': 0.8 }],
+    ]);
+    again.deleteTemplate('mine:7', 'Swing');
+    expect(again.templates().map((t) => t.name)).toEqual(['Scalp']);
+    expect(JSON.parse(prefs.raw.get('lascodia.chart.scriptInputTemplates.v1')!)['mine:7']).toHaveLength(1);
+  });
+});

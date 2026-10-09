@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LiveRerunScheduler, formingLiveBar, runMatchesChart, sameSeries } from './live-bar';
+import {
+  LiveRerunScheduler,
+  barCloseMs,
+  formingLiveBar,
+  runMatchesChart,
+  sameSeries,
+} from './live-bar';
 
 const H = 3_600_000;
 const bar = (time: number, close = 1.1) => ({
@@ -405,5 +411,62 @@ describe('LiveRerunScheduler — slow runs and hidden tabs', () => {
     setHidden(false);
     s.resume();
     expect(runs.length).toBe(1);
+  });
+});
+
+describe('LiveRerunScheduler — a busy engine (contract C5)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function make() {
+    let t = 0;
+    const runs: { key: string; ticket: number }[] = [];
+    const s = new LiveRerunScheduler((key, ticket) => runs.push({ key, ticket }), 2_000, () => t);
+    const advance = (ms: number) => {
+      t += ms;
+      vi.advanceTimersByTime(ms);
+    };
+    return { s, runs, advance };
+  }
+
+  it('a quiet run refused as busy backs off for the wait asked, then runs once', () => {
+    const { s, runs, advance } = make();
+    s.request('a');
+    expect(runs).toHaveLength(1);
+    // The engine answered -429 with retryAfterMs 7000: back off, then settle the refused run.
+    s.backoff('a', 7_000);
+    s.settle('a', runs[0].ticket);
+    // Ticks keep asking meanwhile: they collapse into the one run after the wait.
+    s.request('a');
+    advance(6_900);
+    expect(runs).toHaveLength(1);
+    advance(100);
+    expect(runs).toHaveLength(2);
+  });
+
+  it('the back-off holds even when the usual gap is shorter, and is per key', () => {
+    const { s, runs, advance } = make();
+    s.request('a');
+    s.request('b');
+    s.backoff('a', 10_000);
+    s.settle('a', runs[0].ticket);
+    s.settle('b', runs[1].ticket);
+    s.request('b');
+    advance(2_000);
+    // b ran on its usual 2 s gap; a still waits.
+    expect(runs.map((r) => r.key)).toEqual(['a', 'b', 'b']);
+    advance(8_000);
+    expect(runs.map((r) => r.key)).toEqual(['a', 'b', 'b', 'a']);
+  });
+});
+
+describe('barCloseMs (Bar Replay runs to the head, PC-08)', () => {
+  const t = 1_759_708_800_000;
+
+  it('is the engine’s close on the session grid, the fixed width on the stored grid', () => {
+    expect(barCloseMs({ time: t }, '60')).toBe(t + H);
+    expect(barCloseMs({ time: t }, '15')).toBe(t + H / 4);
+    // A 1D bar of the FX session: 17:00 New York to 17:00 New York, as the engine said.
+    expect(barCloseMs({ time: t - 7 * H, closeTime: t + 17 * H }, '1D')).toBe(t + 17 * H);
   });
 });

@@ -4,11 +4,20 @@ import type { Observable } from 'rxjs';
 import type { ScriptInputDto, ScriptInputValues } from '@core/api/scripting.types';
 import { sameInputValues, withSavedDefaults } from '@features/scripting/pine/pine-inputs';
 import { savedScriptId, type ChartScriptItem, type SavedChartScript } from './chart-script.service';
+import {
+  readTemplates,
+  templateScope,
+  withTemplate,
+  withoutTemplate,
+  writeTemplates,
+  type ScriptInputTemplate,
+  type ScriptInputTemplates,
+} from './script-input-templates';
 
 /** A Pine run on the chart, as far as its Settings dialog reads it. */
 export interface SettingsRun {
   item: ChartScriptItem;
-  result: { inputs: readonly ScriptInputDto[] };
+  result: { inputs: readonly ScriptInputDto[]; title?: string };
   /** The input overrides the script runs with. */
   values: ScriptInputValues;
 }
@@ -22,6 +31,11 @@ export interface ScriptSettingsHost {
   /** "Save as default" for a script in "My scripts". */
   saveDefault(id: string, values: ScriptInputValues): Observable<SavedChartScript>;
   notify(kind: 'success' | 'error', message: string): void;
+  /**
+   * Where named input templates are kept (the engine-synced chart prefs, PC-I12). Absent: they last
+   * as long as the page.
+   */
+  prefs?: Pick<Storage, 'getItem' | 'setItem'>;
 }
 
 /**
@@ -62,18 +76,60 @@ export class ScriptSettings<R extends SettingsRun> {
   });
   /** A "Save as default" is on its way. */
   readonly saving = signal(false);
+  /** The script whose dialog asks for its `confirm = true` inputs, as it was just added (PC-I12). */
+  private readonly confirmFor = signal<ChartScriptItem | null>(null);
+  /** The open dialog asks for the script's `confirm = true` inputs: Cancel takes it off the chart. */
+  readonly confirming = computed(() => {
+    const item = this.item();
+    return item !== null && this.confirmFor() === item;
+  });
+  /** Every script's named input templates ({@link templates}), read when a dialog opens. */
+  private readonly templateStore = signal<ScriptInputTemplates>({});
+  /** The open dialog's script's named input templates, newest first. */
+  readonly templates = computed<readonly ScriptInputTemplate[]>(() => {
+    const run = this.run();
+    return run ? (this.templateStore()[this.scopeOf(run)] ?? []) : [];
+  });
 
   constructor(
     private readonly runs: WritableSignal<R[]>,
     private readonly host: ScriptSettingsHost,
   ) {}
 
-  /** The gear on a Pine chip (or a double-click on its name). */
-  open(key: string): void {
+  /**
+   * The gear on a Pine chip (or a double-click on its name). `confirm`: the script was just added
+   * and declares `confirm = true` inputs — the dialog asks for those (TradingView's prompt on add).
+   */
+  open(key: string, confirm = false): void {
     const run = this.runs().find((r) => r.item.key === key);
     if (!run) return;
     this.item.set(run.item);
+    this.confirmFor.set(confirm ? run.item : null);
+    if (this.host.prefs) this.templateStore.set(readTemplates(this.host.prefs));
     this.loadStoredInputs(run.item);
+  }
+
+  /** "Save as…": the dialog's inputs under a name, for this script on any chart. */
+  saveTemplate(key: string, name: string, values: ScriptInputValues): void {
+    const run = this.runs().find((r) => r.item.key === key);
+    if (!run) return;
+    const next = withTemplate(this.templateStore(), this.scopeOf(run), name, values);
+    if (!next) return;
+    this.templateStore.set(next);
+    writeTemplates(this.host.prefs, next);
+    this.host.notify('success', `Saved the inputs as “${name.trim()}”.`);
+  }
+
+  deleteTemplate(key: string, name: string): void {
+    const run = this.runs().find((r) => r.item.key === key);
+    if (!run) return;
+    const next = withoutTemplate(this.templateStore(), this.scopeOf(run), name);
+    this.templateStore.set(next);
+    writeTemplates(this.host.prefs, next);
+  }
+
+  private scopeOf(run: SettingsRun): string {
+    return templateScope(run.item, run.result.title);
   }
 
   /**
@@ -111,6 +167,7 @@ export class ScriptSettings<R extends SettingsRun> {
 
   close(): void {
     this.item.set(null);
+    this.confirmFor.set(null);
   }
 
   /** Only a script saved in the engine ("My scripts") can keep default inputs. */

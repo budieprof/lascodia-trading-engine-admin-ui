@@ -15,7 +15,7 @@ drawing tools, UI chrome — already at parity).
 | Select + symbol study inputs in the studies bar | page | ✅ |
 | 38 more built-ins (111 total): MA ribbon/cross, KAMA, VIDYA, T3, ZLEMA, LSMA, ADR, Chop Zone, BB Trend, Ulcer, Chandelier, Klinger, Chaikin Vol, PO, DMI, RCI, Woodies CCI, SMI, Volume, VWAP bands, anchored VWAP, up/down volume, CVD (est.), auto Fib retr./ext., auto pitchfork, auto trendlines, pivots H/L, pivots standard (6 types × D/W/M), LinReg channel, sessions | `indicators/` | ✅ |
 | Multi-symbol: correlation, relative strength, spread, ratio, compare % (compare bars fetched per symbol) | `indicators/`, page | ✅ |
-| Strategies on chart (engine strategies by id, 6 built-in examples, My scripts), entry/exit markers, Strategy Tester (overview + equity, performance summary, trade list, inputs + re-run) | `scripts/` | ✅ |
+| Strategies on chart (engine strategies by id, 6 built-in examples, My scripts), entry/exit markers, Strategy Tester (the shared strategy report with its warnings, a virtualised List of trades the chart's fill arrows select in, inputs + re-run, deep backtest for engine strategies; Pine Logs / trace / profiler beside it) | `scripts/` | ✅ |
 | Pine indicators on chart (overlay or own pane; plots, shapes, labels, lines, boxes via `shared/pine-chart`) | `scripts/` | ✅ |
 | Pine editor dock (compile + diagnostics, save to My scripts, add to chart) | `scripts/` | ✅ — My scripts are browser-local (engine has no store for stand-alone indicator scripts) |
 | 39 candlestick patterns + "All", SMA50 trend filter | `patterns/` | ✅ |

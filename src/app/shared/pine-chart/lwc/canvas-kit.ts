@@ -33,7 +33,41 @@ export function cssFont(sizePx: number, family: string, bold = false, italic = f
   return `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${Math.max(1, Math.round(sizePx))}px ${family}`;
 }
 
-const widthCache = new Map<string, number>();
+/**
+ * A map kept to `max` entries, the least recently used dropped first (PC-I13): a cache that is used
+ * every frame keeps what the frames use, rather than being emptied whole when it fills up.
+ */
+export class Lru<K, V> {
+  private readonly map = new Map<K, V>();
+
+  constructor(readonly max: number) {}
+
+  get size(): number {
+    return this.map.size;
+  }
+
+  get(key: K): V | undefined {
+    const v = this.map.get(key);
+    if (v === undefined) return undefined;
+    // Most recently used last: the Map's insertion order is the eviction order.
+    this.map.delete(key);
+    this.map.set(key, v);
+    return v;
+  }
+
+  set(key: K, value: V): void {
+    if (this.map.has(key)) this.map.delete(key);
+    else if (this.map.size >= this.max) {
+      const oldest = this.map.keys().next();
+      if (!oldest.done) this.map.delete(oldest.value);
+    }
+    this.map.set(key, value);
+  }
+}
+
+/** Text widths measured, by font + text — at most this many kept. */
+export const TEXT_WIDTH_CACHE = 5000;
+const widthCache = new Lru<string, number>(TEXT_WIDTH_CACHE);
 
 /** measureText().width with a cache keyed by font + text (labels repaint every frame). */
 export function textWidth(ctx: Ctx, text: string): number {
@@ -41,7 +75,6 @@ export function textWidth(ctx: Ctx, text: string): number {
   const hit = widthCache.get(key);
   if (hit !== undefined) return hit;
   const w = ctx.measureText(text).width;
-  if (widthCache.size > 5000) widthCache.clear();
   widthCache.set(key, w);
   return w;
 }
@@ -321,16 +354,17 @@ export function drawArrowHead(
 }
 
 /**
- * Catmull-Rom spline through the points as cubic Bézier segments (what `polyline.new(curved = true)`
- * draws). `closed` wraps the control points around.
+ * Catmull-Rom spline through the first `n` points as cubic Bézier segments (what
+ * `polyline.new(curved = true)` draws). `closed` wraps the control points around.
  */
 export function curvePath(
   ctx: Ctx,
   xs: ArrayLike<number>,
   ys: ArrayLike<number>,
   closed: boolean,
+  /** The points to use: the first `n` (scratch buffers are longer). */
+  n = xs.length,
 ): void {
-  const n = xs.length;
   if (n < 2) return;
   const px = (i: number) => (closed ? xs[(i + n) % n] : xs[Math.max(0, Math.min(n - 1, i))]);
   const py = (i: number) => (closed ? ys[(i + n) % n] : ys[Math.max(0, Math.min(n - 1, i))]);

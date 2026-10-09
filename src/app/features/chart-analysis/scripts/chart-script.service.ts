@@ -38,7 +38,12 @@ import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
 import { pruneInputValues, sameInputValues } from '@features/scripting/pine/pine-inputs';
 import type { TvResolution } from '../datafeed/resolution';
 import { EXAMPLE_STRATEGIES } from './example-strategies';
-import { runTimeframeFor, toChartScriptResult, type ChartScriptResult } from './chart-script.model';
+import {
+  runTimeframeFor,
+  toChartScriptResult,
+  type ChartScriptResult,
+  type ScriptBasis,
+} from './chart-script.model';
 
 export { detectScriptKind } from './chart-script.model';
 
@@ -58,6 +63,27 @@ export interface ChartScriptItem {
   /** A saved strategy's own symbol / timeframe (informational; the chart's are used to run). */
   symbol?: string | null;
   timeframe?: string | null;
+}
+
+/** How a run for the chart is made, beyond the script, series, inputs and window (`runOnChart`). */
+export interface ChartRunOptions {
+  /**
+   * The chart's forming bar, run as the realtime bar so an indicator's last value sits on the bar
+   * the chart is forming: indicators on the standard bars, in a run that ends now. Ignored otherwise.
+   */
+  liveBar?: ScriptRunBar | null;
+  /** The bars to compute on (PC-09): the chart's Heikin-Ashi candles, else the standard bars. */
+  chartType?: ScriptBasis;
+  /**
+   * Run on the bars that open before this instant (Unix ms) instead of up to now — Bar Replay sends
+   * its head bar's close (PC-08, PC-I8), so the head is the run's last bar and nothing after it is
+   * computed. Null or absent: up to now.
+   */
+  toMs?: number | null;
+  /** Record every variable of these bars (`bar_index`, inclusive): the Pine Logs dock (PC-I6). */
+  trace?: { fromBar: number; toBar: number };
+  /** Time each source line: the Pine Logs dock's profiler (PC-I6). */
+  profile?: boolean;
 }
 
 export interface ChartScriptCatalog {
@@ -321,8 +347,10 @@ export class ChartScriptService {
     resolution: TvResolution,
     inputs?: ScriptInputValues,
     lastBars = DEFAULT_LAST_BARS,
-    liveBar?: ScriptRunBar | null,
+    opts: ChartRunOptions = {},
   ): Observable<ChartScriptResult> {
+    const chartType = opts.chartType ?? 'standard';
+    const toMs = opts.toMs ?? null;
     const run = (overrides: ScriptInputValues | undefined): Observable<ChartScriptResult> => {
       const req: ScriptRunRequest = {
         symbol,
@@ -331,12 +359,19 @@ export class ChartScriptService {
         mode: item.kind === 'strategy' ? 'backtest' : 'preview',
         theme: this.theme.theme(),
       };
+      // The engine loads the `lastBars` confirmed bars opening before toUtc.
+      if (toMs !== null) req.toUtc = new Date(toMs).toISOString();
+      if (chartType !== 'standard') req.chartType = chartType;
       if (item.strategyId !== undefined) req.strategyId = item.strategyId;
       else req.source = item.pineSource ?? '';
       if (overrides && Object.keys(overrides).length) req.inputs = overrides;
       // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed
-      // bars.
-      if (liveBar && req.mode === 'preview') req.liveBar = liveBar;
+      // bars. The engine takes it on the standard chart only, for a run that ends now.
+      const liveBar = opts.liveBar ?? null;
+      if (liveBar && req.mode === 'preview' && chartType === 'standard' && toMs === null)
+        req.liveBar = liveBar;
+      if (opts.trace) req.trace = opts.trace;
+      if (opts.profile) req.profile = true;
       return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };
     if (!inputs || !Object.keys(inputs).length) return run(undefined);
@@ -368,14 +403,19 @@ export class ChartScriptService {
     });
   }
 
-  /** An ad-hoc item for source typed in the editor. */
+  /**
+   * An ad-hoc item for source typed in the editor, under `key` — its own (PC-07: every editor
+   * script shared `editor:current`, so a second one replaced the first), or the key of the saved
+   * script whose source it is (`mine:<id>`, which keeps its Settings' "Save as default").
+   */
   itemForSource(
     source: string,
     kind: 'indicator' | 'strategy',
     name = 'Untitled script',
+    key = newEditorKey(),
   ): ChartScriptItem {
     return {
-      key: 'editor:current',
+      key,
       source: 'mine',
       name,
       description: '',
@@ -571,6 +611,32 @@ export class ChartScriptService {
     }
     return this.scripting.deleteChartScript(Number(id)).pipe(tap(drop));
   }
+}
+
+let editorSeq = 0;
+
+/** A fresh key for a script run from the editor's text: each one its own (PC-07). */
+export function newEditorKey(): string {
+  return `editor:${Date.now().toString(36)}${(++editorSeq).toString(36)}`;
+}
+
+/**
+ * The key "Update on chart" runs the editor's source under (PC-07): an editor script keeps its
+ * own; a saved script ("My scripts") stays itself while the source is exactly what is saved — its
+ * Settings keep "Save as default" and a layout reopens it as saved; anything else edited (an engine
+ * strategy, an example, a saved script with unsaved edits) becomes an editor script of its own.
+ * Null target (a new script): a new key.
+ */
+export function editorRunKey(
+  target: { key: string } | null,
+  source: string,
+  saved: readonly SavedChartScript[],
+): string {
+  if (!target) return newEditorKey();
+  if (target.key.startsWith('editor:')) return target.key;
+  const m = /^mine:(.+)$/.exec(target.key);
+  if (m && saved.some((s) => s.id === m[1] && s.source === source)) return target.key;
+  return newEditorKey();
 }
 
 /**

@@ -17,6 +17,8 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.pref.magnetStrength',
   'lascodia.chart.pref.stayInDrawing',
   'lascodia.chart.pref.favouriteIntervals',
+  // Pine scripts' named input templates (PC-I12, `scripts/script-input-templates.ts`).
+  'lascodia.chart.scriptInputTemplates.v1',
 ] as const;
 export type SyncedPrefKey = (typeof SYNCED_PREF_KEYS)[number];
 

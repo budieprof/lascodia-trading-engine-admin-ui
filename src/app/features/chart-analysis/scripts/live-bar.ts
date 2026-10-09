@@ -1,6 +1,6 @@
 import type { Bar } from '../datafeed/candle-feed.service';
 import { bucketStartFor } from '../datafeed/aggregate';
-import { isSessionResolution, type TvResolution } from '../datafeed/resolution';
+import { isSessionResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { isCurrentPeriod } from '../datafeed/session-bars';
 import type { ScriptRunBar } from '@core/api/scripting.types';
 
@@ -57,6 +57,16 @@ export function formingLiveBar(
 }
 
 /**
+ * The instant a bar's period closes (Unix ms, exclusive): the engine's close on the session grid
+ * (2h … 1M), the fixed width on the stored grid. A run with this as `toUtc` ends on the bar: the
+ * engine loads the bars opening before it, so the bar's whole period is in — a bar built from
+ * smaller ones (2h from 1h) included — and the next bar is not.
+ */
+export function barCloseMs(bar: Pick<Bar, 'time' | 'closeTime'>, resolution: TvResolution): number {
+  return bar.closeTime ?? bar.time + (resolutionMs(resolution) ?? 1);
+}
+
+/**
  * Sequences the runs of the chart's scripts. Every run of a key holds a ticket, and only the newest
  * ticket's result may be drawn ({@link isCurrent}) — a slow run of an old source landing after the
  * operator's update must not put the old source back.
@@ -87,6 +97,8 @@ export class LiveRerunScheduler {
       lastStart: number;
       /** How long the last finished run took, ms. */
       lastRtt: number;
+      /** No quiet re-run before this instant: the engine said it was busy ({@link backoff}). */
+      notBefore: number;
       timer?: ReturnType<typeof setTimeout>;
     }
   >();
@@ -108,7 +120,7 @@ export class LiveRerunScheduler {
       s.pending = true;
       return;
     }
-    const wait = s.lastStart + this.gapMs(s.lastRtt) - this.now();
+    const wait = Math.max(s.lastStart + this.gapMs(s.lastRtt), s.notBefore) - this.now();
     if (wait > 0) {
       s.pending = true;
       s.timer = setTimeout(() => {
@@ -151,6 +163,17 @@ export class LiveRerunScheduler {
     }
   }
 
+  /**
+   * The engine refused a run of `key` as busy (contract C5: `-429`, `retryAfterMs`): no quiet re-run
+   * of it before `ms` from now, and one then — the refused run's bar still needs drawing. Call it
+   * before that run's {@link settle}, which then waits instead of starting the trailing run.
+   */
+  backoff(key: string, ms: number): void {
+    const s = this.stateOf(key);
+    s.notBefore = Math.max(s.notBefore, this.now() + Math.max(0, ms));
+    s.pending = true;
+  }
+
   /** Visible again: one run (spaced as usual) for every key that asked while paused. */
   resume(): void {
     if (this.paused()) return;
@@ -182,7 +205,7 @@ export class LiveRerunScheduler {
   private stateOf(key: string) {
     let s = this.state.get(key);
     if (!s) {
-      s = { current: null, pending: false, lastStart: -Infinity, lastRtt: 0 };
+      s = { current: null, pending: false, lastStart: -Infinity, lastRtt: 0, notBefore: -Infinity };
       this.state.set(key, s);
     }
     return s;

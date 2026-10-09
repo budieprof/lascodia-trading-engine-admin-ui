@@ -14,11 +14,23 @@ export type PathCmd =
 
 export type DrawOp =
   | { op: 'stroke'; style: string; width: number; dash: number[]; path: PathCmd[] }
-  | { op: 'fill'; style: string | object; path: PathCmd[] }
+  | { op: 'fill'; style: string | object; path: PathCmd[]; transform: Transform2D }
   | { op: 'fillRect'; style: string | object; x: number; y: number; w: number; h: number }
   | { op: 'strokeRect'; style: string; x: number; y: number; w: number; h: number }
   | { op: 'fillText'; style: string | object; text: string; x: number; y: number; font: string }
   | { op: 'strokeText'; style: string; text: string; x: number; y: number };
+
+/** A 2-D affine transform as canvas keeps it: x' = a·x + c·y + e, y' = b·x + d·y + f. */
+export interface Transform2D {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
+const IDENTITY: Transform2D = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 
 export class RecordingContext {
   ops: DrawOp[] = [];
@@ -35,9 +47,27 @@ export class RecordingContext {
   private path: PathCmd[] = [];
   private dash: number[] = [];
   private stack: Array<Record<string, unknown>> = [];
+  private transform: Transform2D = { ...IDENTITY };
+
+  getTransform(): Transform2D {
+    return { ...this.transform };
+  }
+
+  setTransform(
+    a: number | Transform2D,
+    b?: number,
+    c?: number,
+    d?: number,
+    e?: number,
+    f?: number,
+  ): void {
+    this.transform =
+      typeof a === 'number' ? { a, b: b!, c: c!, d: d!, e: e!, f: f! } : { ...a };
+  }
 
   save(): void {
     this.stack.push({
+      transform: { ...this.transform },
       strokeStyle: this.strokeStyle,
       fillStyle: this.fillStyle,
       lineWidth: this.lineWidth,
@@ -62,6 +92,7 @@ export class RecordingContext {
     this.textAlign = s['textAlign'] as string;
     this.textBaseline = s['textBaseline'] as string;
     this.dash = s['dash'] as number[];
+    this.transform = s['transform'] as Transform2D;
   }
 
   setLineDash(d: number[]): void {
@@ -119,7 +150,12 @@ export class RecordingContext {
   }
 
   fill(): void {
-    this.ops.push({ op: 'fill', style: this.fillStyle, path: [...this.path] });
+    this.ops.push({
+      op: 'fill',
+      style: this.fillStyle,
+      path: [...this.path],
+      transform: { ...this.transform },
+    });
   }
 
   fillRect(x: number, y: number, w: number, h: number): void {
