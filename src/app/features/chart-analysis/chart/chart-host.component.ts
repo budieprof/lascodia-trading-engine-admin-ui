@@ -40,6 +40,7 @@ import {
   type Logical,
   type ISeriesMarkersPluginApi,
   type ISeriesPrimitive,
+  type MouseEventParams,
   type SeriesMarker,
   type TickMarkType,
   type Time,
@@ -132,6 +133,12 @@ import {
 import { detectChartPatterns } from '../patterns/chart-patterns';
 import { ScriptLayers, type ChartScriptLayer } from '../scripts/script-layers';
 import { scriptRenderModel } from '../scripts/script-model-cache';
+import {
+  placeTooltip,
+  topHit,
+  type ScriptHit,
+  type ScriptTooltip,
+} from '../scripts/script-hover';
 import {
   DEFAULT_RIGHT_OFFSET,
   marginCap,
@@ -337,6 +344,19 @@ interface ExternalLineSeries {
         <app-pine-table-overlay [tables]="o.tables" [paneWidth]="o.width" [paneHeight]="o.height" />
       </div>
     }
+    @if (scriptTip(); as t) {
+      <div
+        class="script-tip"
+        role="tooltip"
+        data-testid="script-tooltip"
+        [class.flip-x]="t.flipX"
+        [class.flip-y]="t.flipY"
+        [style.left.px]="t.left"
+        [style.top.px]="t.top"
+      >
+        {{ t.text }}
+      </div>
+    }
     @if (inlineEdit(); as ie) {
       <textarea
         class="inline-edit"
@@ -422,6 +442,28 @@ interface ExternalLineSeries {
         position: absolute;
         z-index: 5;
         pointer-events: none;
+      }
+      .script-tip {
+        position: absolute;
+        z-index: 31;
+        max-width: 320px;
+        padding: 6px 8px;
+        border-radius: 6px;
+        background: rgba(19, 23, 34, 0.92);
+        color: #fff;
+        font-size: 12px;
+        line-height: 1.4;
+        white-space: pre-wrap;
+        pointer-events: none;
+      }
+      .script-tip.flip-x {
+        transform: translateX(-100%);
+      }
+      .script-tip.flip-y {
+        transform: translateY(-100%);
+      }
+      .script-tip.flip-x.flip-y {
+        transform: translate(-100%, -100%);
       }
       .hold-tip {
         position: absolute;
@@ -652,6 +694,11 @@ export class ChartHostComponent implements OnDestroy {
    * lit whenever the mode was "normal").
    */
   readonly autoScaleChange = output<boolean>();
+  /**
+   * A strategy's fill arrow was clicked on the chart: the run's key and the trades the arrow stands
+   * for (one, or several merged into one order) — the Strategy Tester selects that row (PC-I5).
+   */
+  readonly scriptTradeClick = output<{ key: string; trades: readonly number[] }>();
 
   private chart: IChartApi | null = null;
   private price: PriceSeries | null = null;
@@ -2750,12 +2797,63 @@ export class ChartHostComponent implements OnDestroy {
    */
   applyScripts(layers: readonly ChartScriptLayer[] = this.scriptResults()): void {
     if (!this.chart || !this.price) return;
+    this.watchScriptEvents();
     // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
     this.scriptLayers.sync(layers);
     this.syncScriptAxes();
     this.refreshBarColors();
     this.syncScriptMargin();
     this.layoutScriptTables();
+  }
+
+  /** The tooltip of the script drawing under the pointer (PC-10): a label's `tooltip`, a fill's. */
+  readonly scriptTip = signal<ScriptTooltip | null>(null);
+  /** The chart whose pointer events the scripts follow (a rebuilt chart is followed again). */
+  private scriptEventsChart: IChartApi | null = null;
+
+  private watchScriptEvents(): void {
+    const chart = this.chart;
+    if (!chart || chart === this.scriptEventsChart) return;
+    this.scriptEventsChart = chart;
+    chart.subscribeCrosshairMove((param) => this.onScriptPointer(param));
+    chart.subscribeClick((param) => this.onScriptClick(param));
+  }
+
+  /**
+   * The drawing under the pointer, by the regions the scripts' primitives recorded as they painted
+   * (pane-relative px). They were collected for this but never read: tooltips never showed (PC-10).
+   */
+  private scriptHitAt(param: MouseEventParams<Time>): ScriptHit | null {
+    if (!param.point || param.paneIndex === undefined || this.scriptLayers.size === 0) return null;
+    return topHit(this.scriptLayers.list(), param.paneIndex, param.point.x, param.point.y);
+  }
+
+  private onScriptPointer(param: MouseEventParams<Time>): void {
+    const found = this.scriptHitAt(param);
+    let tip: ScriptTooltip | null = null;
+    if (found && param.point && param.paneIndex !== undefined) {
+      const el = this.container().nativeElement;
+      const row = this.chart?.panes()[param.paneIndex]?.getHTMLElement();
+      const paneTop = row ? row.getBoundingClientRect().top - el.getBoundingClientRect().top : 0;
+      tip = placeTooltip(
+        found.hit.tooltip,
+        param.point.x,
+        paneTop + param.point.y,
+        el.clientWidth,
+        el.clientHeight,
+      );
+    }
+    const cur = this.scriptTip();
+    if (cur?.text !== tip?.text || cur?.left !== tip?.left || cur?.top !== tip?.top)
+      this.scriptTip.set(tip);
+  }
+
+  private onScriptClick(param: MouseEventParams<Time>): void {
+    // An armed drawing tool owns clicks.
+    if (this.tool() !== null) return;
+    const found = this.scriptHitAt(param);
+    if (found?.hit.trades?.length)
+      this.scriptTradeClick.emit({ key: found.key, trades: found.hit.trades });
   }
 
   /** The price axes the scripts' own scales are on (`scale.left` / `scale.right`, PC-I10). */

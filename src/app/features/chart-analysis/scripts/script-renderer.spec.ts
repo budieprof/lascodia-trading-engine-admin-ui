@@ -539,6 +539,18 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.futureBars(times, 12)).toBeCloseTo(16 + px / 12);
   });
 
+  it('answers the tooltip regions its primitives recorded, per pane, and none while hidden (PC-10)', () => {
+    const { times } = decorated();
+    const { s, result } = drawn(times);
+    const fill = { x: 10, y: 10, w: 20, h: 20, tooltip: 'Trade #1', trades: [1] };
+    (s as any).mainLayers.hits = [fill];
+    expect(s.hitAt(0, 15, 15)).toBe(fill);
+    expect(s.hitAt(0, 50, 15)).toBeNull();
+    expect(s.hitAt(1, 15, 15)).toBeNull();
+    s.update(result, scriptRenderModel(result, 5), { ...DEFAULT_DISPLAY, visible: false });
+    expect(s.hitAt(0, 15, 15)).toBeNull();
+  });
+
   it('reads its status-line values at a host bar, and at its last bar when at rest', () => {
     const { times } = decorated();
     const { s, rig: r } = drawn(times);
