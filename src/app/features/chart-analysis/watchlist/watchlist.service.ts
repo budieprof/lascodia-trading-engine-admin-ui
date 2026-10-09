@@ -1,7 +1,46 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
-import type { ChartWatchlist, WatchQuote } from './watchlist.model';
+import type { ChartWatchlist, WatchQuote, WatchlistSettings } from './watchlist.model';
+
+/** The quote read's extras (contract C7). */
+export interface QuoteOptions {
+  /** The last 24 hourly closes per symbol. */
+  sparkline?: boolean;
+  /** ADR / ATR over the last 14 completed trading days. */
+  ranges?: boolean;
+}
+
+/** A server-side hotlist kind (`market-data/watchlist-hotlist`). */
+export type HotlistKind = 'gainers' | 'losers' | 'movers' | 'atr' | 'range' | 'spread';
+
+export const HOTLISTS: ReadonlyArray<{ kind: HotlistKind; label: string }> = [
+  { kind: 'gainers', label: 'Top gainers' },
+  { kind: 'losers', label: 'Top losers' },
+  { kind: 'movers', label: 'Biggest moves' },
+  { kind: 'atr', label: 'Most volatile (ATR %)' },
+  { kind: 'range', label: 'Most stretched (range % of ADR)' },
+  { kind: 'spread', label: 'Widest spread' },
+];
+
+export interface HotlistItem {
+  symbol: string;
+  /** The ranked value, in the list's unit. */
+  value: number;
+  quote: WatchQuote;
+}
+
+export interface Hotlist {
+  kind: HotlistKind;
+  title: string;
+  unit: '%' | 'pips';
+  considered: number;
+  asOfUtc: string;
+  items: HotlistItem[];
+}
+
+/** The engine's cap on symbols per quote read (a watchlist holds at most this many). */
+export const MAX_QUOTE_SYMBOLS = 400;
 
 const SILENT = { silent: true };
 const SAVE_DEBOUNCE_MS = 600;
@@ -46,14 +85,31 @@ export class WatchlistService {
     }
   }
 
-  quotes(symbols: string[]): Promise<WatchQuote[]> {
+  /**
+   * The day snapshot for up to {@link MAX_QUOTE_SYMBOLS} symbols in one request (the engine batches internally).
+   * Rejects with the engine's message on failure — the panel shows it rather than an empty list (SP-10).
+   */
+  quotes(symbols: string[], opts: QuoteOptions = {}): Promise<WatchQuote[]> {
     if (!symbols.length) return Promise.resolve([]);
+    const qs = new URLSearchParams({ symbols: symbols.slice(0, MAX_QUOTE_SYMBOLS).join(',') });
+    if (opts.sparkline) qs.set('sparkline', 'true');
+    if (opts.ranges) qs.set('ranges', 'true');
     return firstValueFrom(
-      this.api.getEnvelope<WatchQuote[]>(
-        `/market-data/watchlist-quotes?symbols=${encodeURIComponent(symbols.join(','))}`,
-        SILENT,
-      ),
+      this.api.getEnvelope<WatchQuote[]>(`/market-data/watchlist-quotes?${qs}`, SILENT),
     ).then((q) => q ?? []);
+  }
+
+  /** A server-side hotlist over the engine's active pairs. */
+  hotlist(kind: HotlistKind, take = 20): Promise<Hotlist> {
+    return firstValueFrom(
+      this.api.getEnvelope<Hotlist>(`/market-data/watchlist-hotlist?kind=${kind}&take=${take}`, SILENT),
+    );
+  }
+
+  /** Save a list's columns / sort (SP-I6). */
+  setSettings(id: number, settings: WatchlistSettings): void {
+    const list = this.lists().find((l) => l.id === id);
+    if (list) this.update({ ...list, settings });
   }
 
   /** Replace a list locally and schedule its write. */
@@ -70,14 +126,16 @@ export class WatchlistService {
     );
   }
 
-  async create(name: string, from?: ChartWatchlist): Promise<void> {
-    const body = { name, sections: from?.sections ?? [] };
+  /** Create a list (optionally from another's sections and settings); it becomes the chart's active list unless told not to. */
+  async create(name: string, from?: ChartWatchlist, opts: { activate?: boolean } = {}): Promise<ChartWatchlist | null> {
+    const body = { name, sections: from?.sections ?? [], settings: from?.settings ?? null };
     const created = await this.write(() =>
       this.api.postEnvelope<ChartWatchlist>('/chart-watchlist', body, SILENT),
     );
-    if (!created) return;
+    if (!created) return null;
     this.lists.update((all) => [...all, created]);
-    await this.activate(created.id);
+    if (opts.activate !== false) await this.activate(created.id);
+    return created;
   }
 
   async rename(id: number, name: string): Promise<void> {
@@ -115,7 +173,7 @@ export class WatchlistService {
         this.creating = firstValueFrom(
           this.api.postEnvelope<ChartWatchlist>(
             '/chart-watchlist',
-            { name: draft.name, sections: draft.sections },
+            { name: draft.name, sections: draft.sections, settings: draft.settings ?? null },
             SILENT,
           ),
         );
@@ -146,6 +204,8 @@ export class WatchlistService {
           sections: list.sections,
           isActive: list.isActive,
           sortOrder: list.sortOrder,
+          // Null leaves the stored settings alone (a list never customised).
+          settings: list.settings ?? null,
         },
         SILENT,
       ),

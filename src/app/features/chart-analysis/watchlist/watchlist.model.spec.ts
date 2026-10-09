@@ -3,14 +3,19 @@ import {
   addSection,
   addSymbol,
   cycleFlag,
+  flagCounts,
+  flaggedItems,
   listSymbols,
+  locate,
   moveSymbol,
   neighbour,
   nextSort,
   removeSection,
   removeSymbol,
+  restoreSymbol,
   rowFor,
   setFlag,
+  sortFromSettings,
   sortRows,
   splitPrice,
   type ChartWatchlist,
@@ -133,5 +138,95 @@ describe('watchlist model', () => {
     expect(neighbour(['A', 'B', 'C'], 'B', 1)).toBe('C');
     expect(neighbour(['A', 'B', 'C'], 'A', -1)).toBeNull();
     expect(neighbour(['A', 'B'], 'Z', 1)).toBe('A');
+  });
+
+  it('fills the optional columns from the quote, the live tick and the context (SP-I6)', () => {
+    const now = Date.parse('2026-10-07T13:00:00Z');
+    const r = rowFor(
+      { symbol: 'EURUSD', flag: null },
+      'a',
+      quote({
+        bid: 1.1,
+        ask: 1.10012,
+        dayHigh: 1.105,
+        dayLow: 1.098,
+        pipSize: 0.0001,
+        adr: 0.007,
+        atr: 0.0088,
+        sparkline: [1.09, 1.1],
+      }),
+      1.1,
+      undefined,
+      5,
+      {
+        liveAsk: 1.10012,
+        nowMs: now,
+        legs: { base: 'EUR', quote: 'USD' },
+        events: [{ title: 'NFP', currency: 'USD', scheduledAt: '2026-10-07T14:30:00Z' }],
+        newsScores: new Map([
+          ['EUR', 0.2],
+          ['USD', -0.3],
+        ]),
+        pnl: new Map([['EURUSD', 12.5]]),
+      },
+    );
+    expect(r.spread).toBe(1.2);
+    expect(r.dayRange).toBe(70);
+    expect(r.adr).toBe(70);
+    expect(r.adrUsed).toBe(100);
+    expect(r.atrPct).toBe(0.8);
+    expect(r.sparkline).toEqual([1.09, 1.1]);
+    expect(r.nextEvent?.title).toBe('NFP');
+    expect(r.nextEventInMs).toBe(90 * 60_000);
+    expect(r.news).toBe(0.5);
+    expect(r.pnl).toBe(12.5);
+    expect(r.session).toBe('LDN · NY');
+    expect(r.homeSession).toBe(true);
+
+    // A live tick beyond the day's high widens the range.
+    expect(rowFor({ symbol: 'EURUSD', flag: null }, 'a', quote({ dayHigh: 1.105, dayLow: 1.098, pipSize: 0.0001 }), 1.107, undefined, 5).dayRange).toBe(90);
+  });
+
+  it('sorts by any column; the soonest event first, rows without one last', () => {
+    const rows = [
+      { symbol: 'A', nextEventInMs: null, spread: 3 },
+      { symbol: 'B', nextEventInMs: 60_000, spread: 1 },
+      { symbol: 'C', nextEventInMs: 30_000, spread: 2 },
+    ] as WatchRow[];
+    expect(nextSort({ key: 'none', dir: 1 }, 'nextEvent')).toEqual({ key: 'nextEvent', dir: 1 });
+    expect(sortRows(rows, { key: 'nextEvent', dir: 1 }).map((r) => r.symbol)).toEqual(['C', 'B', 'A']);
+    expect(sortRows(rows, { key: 'spread', dir: -1 }).map((r) => r.symbol)).toEqual(['A', 'C', 'B']);
+  });
+
+  it('a saved sort is validated', () => {
+    expect(sortFromSettings({ columns: [], sort: { key: 'spread', dir: -1 } })).toEqual({ key: 'spread', dir: -1 });
+    expect(sortFromSettings({ columns: [], sort: { key: 'sparkline', dir: 1 } })).toEqual({ key: 'none', dir: 1 });
+    expect(sortFromSettings({ columns: [], sort: { key: 'bogus', dir: 1 } })).toEqual({ key: 'none', dir: 1 });
+    expect(sortFromSettings(null)).toEqual({ key: 'none', dir: 1 });
+  });
+
+  it('flagged lists gather a flag across every list, once per symbol', () => {
+    const a = setFlag(setFlag(list(), 'EURUSD', 'red'), 'EURGBP', 'red');
+    const b: ChartWatchlist = {
+      ...list(),
+      id: 2,
+      sections: [{ id: 'x', name: 'X', collapsed: false, items: [{ symbol: 'USDJPY', flag: 'red' }, { symbol: 'EURUSD', flag: 'red' }] }],
+    };
+    expect(flaggedItems([a, b], 'red').map((i) => i.symbol)).toEqual(['EURUSD', 'EURGBP', 'USDJPY']);
+    expect(flagCounts([a, b]).red).toBe(3);
+    expect(flagCounts([a, b]).blue).toBe(0);
+  });
+
+  it('an undone removal goes back exactly where it was (SP-11)', () => {
+    const before = list();
+    const where = locate(before, 'EURUSD')!;
+    expect(where).toEqual({ item: { symbol: 'EURUSD', flag: null }, sectionId: 'a', index: 0 });
+    const removed = removeSymbol(before, 'EURUSD');
+    const back = restoreSymbol(removed, where);
+    expect(back.sections[0].items.map((i) => i.symbol)).toEqual(['EURUSD', 'GBPUSD']);
+    // Restoring twice is a no-op; a deleted section restores into the last one.
+    expect(restoreSymbol(back, where)).toBe(back);
+    const noSection = restoreSymbol(removeSection(removed, 'a'), where);
+    expect(listSymbols(noSection)).toContain('EURUSD');
   });
 });

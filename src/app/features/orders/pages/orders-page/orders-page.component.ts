@@ -9,7 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { FormsModule } from '@angular/forms';
 import { map } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
@@ -21,7 +21,7 @@ import { AccountScopeService } from '@core/scope/account-scope.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, merge, of, throttleTime } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import type { OrderDto, PagedData, PagerRequest, CreateOrderRequest } from '@core/api/api.types';
+import type { OrderDto, PagedData, PagerRequest } from '@core/api/api.types';
 
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -30,6 +30,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { SavedViewsService, SavedView } from '@core/views/saved-views.service';
+import { CreateSignalDialogComponent } from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 
 interface OrdersViewState {
   status: string;
@@ -42,7 +43,6 @@ interface OrdersViewState {
   standalone: true,
   imports: [
     FormsModule,
-    ReactiveFormsModule,
     DatePipe,
     DecimalPipe,
     RouterLink,
@@ -52,243 +52,33 @@ interface OrdersViewState {
     ChartCardComponent,
     TabsComponent,
     ConfirmDialogComponent,
+    CreateSignalDialogComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header title="Orders" subtitle="Manage and monitor trading orders">
-        <!-- While the form is open the primary action is its own Create
-             button; a primary-blue "Close Form" outranked it. -->
         <button
           type="button"
-          class="btn"
-          [class.btn-primary]="!showCreateForm()"
-          [class.btn-secondary]="showCreateForm()"
-          (click)="toggleCreateForm()"
-          [attr.aria-expanded]="showCreateForm()"
+          class="btn btn-primary"
+          (click)="manualSignalOpen.set(true)"
+          data-testid="new-manual-signal"
+          title="Trade by hand: a manual signal goes through the same risk checks, and the EA places it"
         >
-          @if (showCreateForm()) {
-            Close form
-          } @else {
-            + Create Order
-          }
+          + New manual signal
         </button>
       </app-page-header>
 
-      <!-- Create Order Slide-Down Panel -->
-      @if (showCreateForm()) {
-        <div class="create-panel">
-          <div class="create-card">
-            <div class="create-card-header">
-              <h3 class="create-card-title">Create New Order</h3>
-              <button
-                type="button"
-                class="close-btn"
-                aria-label="Close create-order form"
-                (click)="showCreateForm.set(false)"
-              >
-                &times;
-              </button>
-            </div>
-            <form [formGroup]="createForm" (ngSubmit)="onCreateSubmit()" class="create-card-body">
-              <div class="form-grid-3">
-                <div class="form-field">
-                  <label for="order-symbol" class="form-label"
-                    >Symbol <abbr title="required" aria-label="required">*</abbr></label
-                  >
-                  <input
-                    id="order-symbol"
-                    class="form-input"
-                    formControlName="symbol"
-                    placeholder="e.g. EURUSD"
-                    required
-                    autocomplete="off"
-                    aria-describedby="order-symbol-error"
-                    [attr.aria-invalid]="hasError('symbol')"
-                  />
-                  @if (
-                    createForm.get('symbol')?.touched &&
-                    createForm.get('symbol')?.errors?.['required']
-                  ) {
-                    <span id="order-symbol-error" class="form-error" role="alert"
-                      >Symbol is required</span
-                    >
-                  }
-                </div>
-                <div class="form-field">
-                  <label for="order-strategy" class="form-label"
-                    >Strategy ID <abbr title="required" aria-label="required">*</abbr></label
-                  >
-                  <input
-                    id="order-strategy"
-                    class="form-input"
-                    type="number"
-                    formControlName="strategyId"
-                    placeholder="Strategy ID"
-                    required
-                    aria-describedby="order-strategy-error"
-                    [attr.aria-invalid]="hasError('strategyId')"
-                  />
-                  @if (
-                    createForm.get('strategyId')?.touched &&
-                    createForm.get('strategyId')?.errors?.['required']
-                  ) {
-                    <span id="order-strategy-error" class="form-error" role="alert"
-                      >Strategy ID is required</span
-                    >
-                  }
-                </div>
-                <div class="form-field">
-                  <label for="order-account" class="form-label"
-                    >Trading Account ID <abbr title="required" aria-label="required">*</abbr></label
-                  >
-                  <input
-                    id="order-account"
-                    class="form-input"
-                    type="number"
-                    formControlName="tradingAccountId"
-                    placeholder="Account ID"
-                    required
-                    aria-describedby="order-account-error"
-                    [attr.aria-invalid]="hasError('tradingAccountId')"
-                  />
-                  @if (
-                    createForm.get('tradingAccountId')?.touched &&
-                    createForm.get('tradingAccountId')?.errors?.['required']
-                  ) {
-                    <span id="order-account-error" class="form-error" role="alert"
-                      >Trading Account ID is required</span
-                    >
-                  }
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Order Type *</label>
-                  <select class="form-select" formControlName="orderType">
-                    <option value="" disabled>Select side</option>
-                    <option value="Buy">Buy</option>
-                    <option value="Sell">Sell</option>
-                  </select>
-                  @if (
-                    createForm.get('orderType')?.touched &&
-                    createForm.get('orderType')?.errors?.['required']
-                  ) {
-                    <span class="form-error">Order type is required</span>
-                  }
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Execution Type *</label>
-                  <select class="form-select" formControlName="executionType">
-                    <option value="" disabled>Select execution</option>
-                    <option value="Market">Market</option>
-                    <option value="Limit">Limit</option>
-                    <option value="Stop">Stop</option>
-                    <option value="StopLimit">Stop Limit</option>
-                  </select>
-                  @if (
-                    createForm.get('executionType')?.touched &&
-                    createForm.get('executionType')?.errors?.['required']
-                  ) {
-                    <span class="form-error">Execution type is required</span>
-                  }
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Quantity *</label>
-                  <input
-                    class="form-input"
-                    type="number"
-                    formControlName="quantity"
-                    placeholder="0.00"
-                    step="0.01"
-                  />
-                  @if (
-                    createForm.get('quantity')?.touched &&
-                    createForm.get('quantity')?.errors?.['required']
-                  ) {
-                    <span class="form-error">Quantity is required</span>
-                  }
-                  @if (createForm.get('quantity')?.errors?.['min']) {
-                    <span class="form-error">Must be greater than 0</span>
-                  }
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Price *</label>
-                  <input
-                    class="form-input"
-                    type="number"
-                    formControlName="price"
-                    placeholder="0.00000"
-                    step="0.00001"
-                  />
-                  @if (
-                    createForm.get('price')?.touched &&
-                    createForm.get('price')?.errors?.['required']
-                  ) {
-                    <span class="form-error">Price is required</span>
-                  }
-                  @if (createForm.get('price')?.errors?.['min']) {
-                    <span class="form-error">Must be greater than 0</span>
-                  }
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Stop Loss</label>
-                  <input
-                    class="form-input"
-                    type="number"
-                    formControlName="stopLoss"
-                    placeholder="Optional"
-                    step="0.00001"
-                  />
-                </div>
-                <div class="form-field">
-                  <label class="form-label">Take Profit</label>
-                  <input
-                    class="form-input"
-                    type="number"
-                    formControlName="takeProfit"
-                    placeholder="Optional"
-                    step="0.00001"
-                  />
-                </div>
-                <div class="form-field form-field-full">
-                  <label class="form-checkbox-label">
-                    <input type="checkbox" formControlName="isPaper" />
-                    <span>Paper Trading</span>
-                  </label>
-                </div>
-                <div class="form-field form-field-full">
-                  <label class="form-label">Notes</label>
-                  <textarea
-                    class="form-textarea"
-                    formControlName="notes"
-                    rows="2"
-                    placeholder="Optional notes..."
-                  ></textarea>
-                </div>
-              </div>
-              <div class="create-actions">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="showCreateForm.set(false)"
-                  [disabled]="creating()"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  [disabled]="createForm.invalid || creating()"
-                >
-                  @if (creating()) {
-                    <span class="spinner"></span>
-                  } @else {
-                    Create Order
-                  }
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      <!-- SP-12: orders are created by the EA from approved trade signals; an order typed in here was never placed. -->
+      <p class="manual-note">
+        Orders reach the broker only through trade signals: the EA places an approved signal and creates its order.
+        To trade by hand, create a manual signal — it passes the same risk checks.
+      </p>
+      @if (manualSignalOpen()) {
+        <app-create-signal-dialog
+          (closed)="manualSignalOpen.set(false)"
+          (created)="onManualSignalCreated($event)"
+        />
       }
 
       <!-- Tabs -->
@@ -1181,139 +971,10 @@ interface OrdersViewState {
         color: var(--text-primary);
       }
 
-      /* Create Panel */
-      .create-panel {
-        margin-bottom: var(--space-5);
-        animation: slideDown 0.25s ease-out;
-      }
-
-      .create-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-        box-shadow: var(--shadow-sm);
-      }
-
-      .create-card-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-
-      .create-card-title {
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        margin: 0;
-      }
-
-      .close-btn {
-        width: 32px;
-        height: 32px;
-        border: none;
-        border-radius: var(--radius-full);
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: 20px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background 0.15s ease;
-      }
-      .close-btn:hover {
-        background: var(--bg-tertiary);
-      }
-
-      .create-card-body {
-        padding: var(--space-5);
-      }
-
-      .form-grid-3 {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-4);
-      }
-
-      .form-field {
-        display: flex;
-        flex-direction: column;
-      }
-      .form-field-full {
-        grid-column: 1 / -1;
-      }
-
-      .form-label {
-        display: block;
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-1);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-
-      .form-input,
-      .form-select,
-      .form-textarea {
-        width: 100%;
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
+      .manual-note {
+        margin: 0 0 var(--space-4);
         font-size: var(--text-sm);
-        font-family: inherit;
-        outline: none;
-        transition: border-color 0.15s ease;
-        box-sizing: border-box;
-      }
-
-      .form-textarea {
-        height: auto;
-        padding: var(--space-2) var(--space-3);
-        resize: vertical;
-      }
-
-      .form-input:focus,
-      .form-select:focus,
-      .form-textarea:focus {
-        border-color: var(--accent);
-      }
-
-      .form-error {
-        display: block;
-        font-size: var(--text-xs);
-        color: var(--loss);
-        margin-top: 2px;
-      }
-
-      .form-checkbox-label {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        cursor: pointer;
-      }
-      .form-checkbox-label input[type='checkbox'] {
-        width: 16px;
-        height: 16px;
-        accent-color: var(--accent);
-        cursor: pointer;
-      }
-
-      .create-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
-        padding-top: var(--space-4);
-        border-top: 1px solid var(--border);
-        margin-top: var(--space-4);
+        color: var(--text-secondary);
       }
 
       /* Charts Grid */
@@ -1419,31 +1080,6 @@ interface OrdersViewState {
         font-size: var(--text-sm);
       }
 
-      /* Spinner */
-      .spinner {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: white;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-      @keyframes slideDown {
-        from {
-          opacity: 0;
-          transform: translateY(-12px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
     `,
   ],
 })
@@ -1451,7 +1087,6 @@ export class OrdersPageComponent {
   private readonly ordersService = inject(OrdersService);
   private readonly router = inject(Router);
   private readonly notifications = inject(NotificationService);
-  private readonly fb = inject(FormBuilder);
   private readonly realtime = inject(RealtimeService);
   private readonly savedViewsService = inject(SavedViewsService);
   protected readonly accountScope = inject(AccountScopeService);
@@ -1511,9 +1146,8 @@ export class OrdersPageComponent {
   ];
   activeTab = signal('all');
 
-  // Create form state
-  showCreateForm = signal(false);
-  creating = signal(false);
+  /** "+ New manual signal" — the create-signal dialog (SP-12 replaced the order form nothing ever placed). */
+  readonly manualSignalOpen = signal(false);
 
   // Filter state
   filterStatus = signal('');
@@ -1523,13 +1157,6 @@ export class OrdersPageComponent {
   hasActiveFilters = computed(
     () => this.filterStatus() !== '' || this.filterSide() !== '' || this.filterPaper() !== null,
   );
-
-  /** True when a given form control is invalid AND has been touched or dirtied.
-   *  Used to toggle `aria-invalid` on inputs. */
-  hasError(fieldName: string): boolean {
-    const c = this.createForm.get(fieldName);
-    return !!c && c.invalid && (c.touched || c.dirty);
-  }
 
   // ── Recent orders snapshot ──────────────────────────────────────────
   // The data-table only loads the current page (≤25 rows by default), so
@@ -1637,21 +1264,6 @@ export class OrdersPageComponent {
         this.recentOrders.set(rows);
       });
   }
-
-  // Create form
-  createForm = this.fb.nonNullable.group({
-    symbol: ['', Validators.required],
-    strategyId: [null as number | null, Validators.required],
-    tradingAccountId: [null as number | null, Validators.required],
-    orderType: ['', Validators.required],
-    executionType: ['', Validators.required],
-    quantity: [null as number | null, [Validators.required, Validators.min(0.001)]],
-    price: [null as number | null, [Validators.required, Validators.min(0)]],
-    stopLoss: [null as number | null],
-    takeProfit: [null as number | null],
-    isPaper: [false],
-    notes: [''],
-  });
 
   // AG Grid columns
   columns: ColDef<OrderDto>[] = [
@@ -2566,61 +2178,12 @@ export class OrdersPageComponent {
 
   // ----- Actions -----
 
-  toggleCreateForm(): void {
-    this.showCreateForm.update((v) => !v);
-    if (this.showCreateForm()) {
-      this.createForm.reset({
-        symbol: '',
-        strategyId: null,
-        tradingAccountId: null,
-        orderType: '',
-        executionType: '',
-        quantity: null,
-        price: null,
-        stopLoss: null,
-        takeProfit: null,
-        isPaper: false,
-        notes: '',
-      });
-    }
-  }
-
-  onCreateSubmit(): void {
-    if (this.createForm.invalid) {
-      this.createForm.markAllAsTouched();
-      return;
-    }
-    this.creating.set(true);
-    const v = this.createForm.getRawValue();
-    const request: CreateOrderRequest = {
-      symbol: v.symbol,
-      orderType: v.orderType,
-      executionType: v.executionType,
-      quantity: v.quantity!,
-      price: v.price!,
-      stopLoss: v.stopLoss || null,
-      takeProfit: v.takeProfit || null,
-      strategyId: v.strategyId!,
-      tradingAccountId: v.tradingAccountId!,
-      notes: v.notes || null,
-      isPaper: v.isPaper,
-    };
-    this.ordersService.create(request).subscribe({
-      next: (response) => {
-        this.creating.set(false);
-        if (response.status) {
-          this.showCreateForm.set(false);
-          this.notifications.success('Order created successfully');
-          this.dataTable()?.loadData();
-        } else {
-          this.notifications.error(response.message ?? 'Failed to create order');
-        }
-      },
-      error: () => {
-        this.creating.set(false);
-        this.notifications.error('Failed to create order');
-      },
-    });
+  /**
+   * A manual signal was created (the dialog says so). It passes the risk checks like any signal; its order appears in
+   * this list when the EA places it.
+   */
+  onManualSignalCreated(_id: number): void {
+    this.manualSignalOpen.set(false);
   }
 
   onFilterStatusChange(value: string): void {

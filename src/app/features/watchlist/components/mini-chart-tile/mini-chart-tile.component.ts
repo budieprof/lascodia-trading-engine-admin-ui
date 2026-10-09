@@ -9,6 +9,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   OnDestroy,
   OnInit,
 } from '@angular/core';
@@ -16,7 +17,7 @@ import { Router } from '@angular/router';
 import type { HttpErrorResponse } from '@angular/common/http';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
-import { Subject, takeUntil, timer, switchMap, catchError, of } from 'rxjs';
+import { Subject, takeUntil, timer, catchError, of } from 'rxjs';
 
 /** Emitted when a tile's candle fetch fails; the page aggregates these. */
 export interface TileLoadError {
@@ -47,15 +48,14 @@ import type { CandleDto, LivePriceDto, PositionDto, OrderDto } from '@core/api/a
 import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 
 /**
- * One symbol tile on the watchlist grid. Self-contained: owns its own
- * candle + live-price polling loops, builds its own ECharts options, and
- * persists nothing — the parent passes (symbol, timeframe) as inputs and
- * listens for `remove` / `open` outputs.
+ * One symbol tile on the watchlist grid. Owns its own candle refresh, builds its own ECharts options, and
+ * persists nothing — the parent passes (symbol, timeframe, quote) as inputs and listens for `remove` / `open`
+ * outputs.
  *
- * Lighter than the full chart (no toolbar, no insights, no indicators) so
- * the page can render 10–20 tiles without burning the browser. Each tile
- * polls live prices every 5s and candles every 30s — closed bars churn
- * slow enough that 30s gives a snappy enough feel without flooding the API.
+ * Lighter than the full chart (no toolbar, no insights, no indicators) so the page can render a wall of tiles
+ * without burning the browser. The live quote is PUSHED by the page (SignalR `priceUpdated`, one subscription
+ * per symbol, ~1 Hz) — until 2026-10-09 every tile polled `live-price` every 3 seconds, 400 requests a minute for
+ * a 20-tile wall (SP-I6). Candles re-read every 60s keep the forming bar honest.
  *
  * Click anywhere on the tile body opens the full chart at this pair via
  * the deep-link hand-off ({@link DEEP_LINK_KEY}); the X button stops
@@ -183,7 +183,7 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
                chart with no quote means the price poll is what is missing. -->
           <span
             class="px-row muted"
-            title="The live-price endpoint returned nothing for this symbol"
+            title="No price has arrived from the stream yet: the market may be closed, or no EA is streaming this symbol"
           >
             No live quote
           </span>
@@ -564,6 +564,8 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   readonly orders = input<OrderDto[]>([]);
   readonly showPositions = input<boolean>(false);
   readonly showOrders = input<boolean>(false);
+  /** The live quote, pushed by the page from the price stream; null until one arrives. */
+  readonly quote = input<LivePriceDto | null>(null);
 
   @Output() readonly remove = new EventEmitter<void>();
   /** Operator clicked the tile's ⚡ — parent opens the LLM analysis modal. */
@@ -634,6 +636,22 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   protected readonly lastTickMs = signal<number>(0);
 
   constructor() {
+    // Each pushed quote: remember the previous one for the tick arrows, then paint it onto the forming candle
+    // (the same trick the main chart uses to keep the last bar breathing between candle reads).
+    effect(() => {
+      const q = this.quote();
+      if (!q || !Number.isFinite(q.bid)) return;
+      const prev = untracked(() => this.livePrice());
+      if (prev && prev.bid === q.bid && prev.ask === q.ask) return;
+      if (prev) {
+        this.previousBid.set(prev.bid);
+        this.previousAsk.set(prev.ask);
+      }
+      this.livePrice.set(q);
+      this.lastTickMs.set(Date.now());
+      untracked(() => this.patchLastCandleWithTick(q.bid));
+    });
+
     // Re-fetch candles whenever the operator changes the bar-count
     // selector on the parent toolbar. Without this, the new count would
     // only land on the NEXT 30 s candle tick — clicking "500 bars" and
@@ -648,46 +666,9 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    // Cadences mirror the main Market Data chart's startLivePricePolling
-    // pattern (trading-chart.component.ts) so a tile feels exactly as
-    // alive as the full chart:
-    //   - live price (3 s) — drives the bid/ask + spread chips AND
-    //     paints the live tick onto the in-progress (rightmost) candle
-    //     via `patchLastCandleWithTick`. The last bar breathes between
-    //     server-side candle refreshes.
-    //   - candles (60 s)   — periodic re-fetch keeps the patched last
-    //     candle honest with the server's bar transitions; without
-    //     this the patched bar would drift forever and never roll
-    //     into a new one. 60 s is the main chart's value too — low
-    //     enough that intra-bar painting stays close to truth, high
-    //     enough that we don't flood the API just to redraw history.
-    // Initial candle fetch already happens in the constructor's
-    // `effect`; the timer below kicks subsequent refreshes.
-    timer(0, 3_000)
-      .pipe(
-        switchMap(() =>
-          this.marketData.getLivePrice(this.symbol()).pipe(catchError(() => of(null))),
-        ),
-        takeUntil(this.destroy$),
-      )
-      .subscribe((res) => {
-        if (res?.status && res.data) {
-          // Capture the prior bid/ask BEFORE swapping in the new price
-          // so the trend computeds (up / down / flat) reflect this
-          // tick's movement, not the next one's.
-          const prev = this.livePrice();
-          if (prev) {
-            this.previousBid.set(prev.bid);
-            this.previousAsk.set(prev.ask);
-          }
-          this.livePrice.set(res.data);
-          this.lastTickMs.set(Date.now());
-          // Paint the live tick onto the rightmost candle — the same
-          // trick the main trading chart uses to keep the chart
-          // breathing between candle re-fetches.
-          this.patchLastCandleWithTick(res.data.bid);
-        }
-      });
+    // Candles re-read every 60 s keep the patched forming candle honest with the server's bar transitions;
+    // without it the patched bar would drift forever and never roll into a new one. The initial read happens in
+    // the constructor's effect. Live quotes arrive through the `quote` input (pushed, not polled).
     timer(60_000, 60_000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => this.fetchCandles(this.barCount()));
@@ -802,8 +783,8 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   });
 
   protected readonly chartOptions = computed<EChartsOption>(() => {
-    // `candles()` is mutated in place by patchLastCandleWithTick on every
-    // 3 s live-price tick — the rightmost bar's OHLC updates with the
+    // `candles()` is updated by patchLastCandleWithTick on every pushed
+    // live-price tick — the rightmost bar's OHLC updates with the
     // market so the chart breathes between server-side fetches. No
     // separate liveCandles computed needed; ECharts diffs the candle
     // series and only redraws the last data point.
@@ -813,7 +794,7 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     const labels = xs.map((c) => c.timestamp);
 
     // Read the live price inside the computed so the chart redraws on
-    // every 5 s tick.
+    // every pushed tick.
     const lp = this.livePrice();
     const dp = this.symbol().includes('JPY') ? 3 : 5;
     const haveLive = !!lp && Number.isFinite(lp.bid) && Number.isFinite(lp.ask);

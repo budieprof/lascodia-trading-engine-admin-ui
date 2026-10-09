@@ -989,6 +989,10 @@
       >
         <app-chart-icon name="calendar" [size]="28" />
       </button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'notes'" (click)="openPanel('notes')" title="Notes and ideas" data-testid="notes-button"><app-chart-icon name="pencil" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'depth'" (click)="openPanel('depth')" title="Broker depth (DOM)" data-testid="depth-button"><app-chart-icon name="layers" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'sentiment'" (click)="openPanel('sentiment')" title="Sentiment: news pressure and COT positioning" data-testid="sentiment-button"><app-chart-icon name="delta" [size]="28" /></button>
+      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'account'" (click)="openPanel('account')" title="Account: positions, orders, signals, paper trades" data-testid="account-button"><app-chart-icon name="trades" [size]="28" /></button>
       <button
         type="button"
         class="strip-btn"
@@ -1379,7 +1383,7 @@
 
         @if (sidePane() === 'news') {
           <aside class="side-pane">
-            <div class="tree-title">News · {{ details().base }}</div>
+            <div class="tree-title">News · {{ details().base }} / {{ details().quote }}</div>
 
             <!--
               The module's read on the PAIR, above the raw headlines.
@@ -1446,7 +1450,15 @@
                   >
                     <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
                     <div class="muted news-meta">
-                      {{ a.sourceName }} · {{ a.publishedAtUtc | date: 'MMM d HH:mm' }}
+                      {{ a.sourceName }} · {{ a.publishedAtUtc | zonedDate: timezone() : 'dateTime' }}
+                      @for (f of a | articleFlags: calendarCurrencies(); track f.currency) {
+                        <span
+                          style="margin-left: 4px; white-space: nowrap"
+                          [style.color]="f.direction === 'Bullish' ? '#089981' : f.direction === 'Bearish' ? '#f23645' : null"
+                          [title]="f.title"
+                          >{{ f.flag || f.currency }} {{ f.arrow }}</span
+                        >
+                      }
                     </div>
                   </li>
                 }
@@ -1459,11 +1471,19 @@
           <aside class="side-pane">
             <app-economic-calendar-pane
               [currencies]="calendarCurrencies()"
+              [timeZone]="timezone()"
               [(allCurrencies)]="calendarAll"
               [(minImpact)]="calendarMinImpact"
               (opened)="calendarEvent.set($event)"
             />
           </aside>
+        }
+        @if (chartPanels.open(); as panel) {
+          @if (sidePane() === 'none') {
+            <aside class="side-pane">
+              <app-chart-panels-dock [panel]="panel" [symbol]="symbol()" [timeframe]="resolutionLabel(resolution())" [digits]="precision()" [timeZone]="timezone()" (symbolSelected)="selectSymbol($event)" />
+            </aside>
+          }
         }
 
         @if (sidePane() === 'datawindow') {

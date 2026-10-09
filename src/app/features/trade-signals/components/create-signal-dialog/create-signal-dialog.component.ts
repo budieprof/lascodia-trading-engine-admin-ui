@@ -8,8 +8,10 @@ import {
   computed,
   effect,
   inject,
+  input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -27,13 +29,40 @@ import type {
   LivePriceDto,
   StrategyDto,
 } from '@core/api/api.types';
+import {
+  ATR_CANDLES,
+  ATR_PERIOD,
+  ATR_STOP_MULTIPLE,
+  REWARD_MULTIPLE,
+  atrFromCandles,
+  atrLevels,
+  atrTimeframe,
+  orderStrategies,
+  pipSizeFor,
+  roundTo,
+} from './signal-defaults';
+
+/** Values to open the dialog with (e.g. from a hand-entered order the operator is replacing with a signal). */
+export interface SignalPrefill {
+  symbol?: string | null;
+  direction?: 'Buy' | 'Sell' | null;
+  entryPrice?: number | null;
+  stopLoss?: number | null;
+  takeProfit?: number | null;
+  lotSize?: number | null;
+  strategyId?: number | null;
+}
 
 /**
  * Operator-facing form to hand-author a trade signal. Mirrors the subset of
  * `CreateTradeSignalCommand` an operator would actually fill in (the engine
  * leaves the ML scoring fields null for manual signals; the resulting signal
  * still flows through Pending → Approved/Rejected/Expired exactly like an
- * auto-generated one).
+ * auto-generated one — the same risk checks, and the EA places it).
+ *
+ * SP-13 (2026-10-09): the operator picks the strategy the signal is credited to — there is no "auto-pick" that fell
+ * back to the first active strategy and credited manual trades to an unrelated one — and the default stop is
+ * 1.5 × ATR(14) of real closed candles (the strategy's timeframe, else H1) with the target at 2R, not a fixed 30 pips.
  */
 @Component({
   selector: 'app-create-signal-dialog',
@@ -69,58 +98,32 @@ import type {
         <div class="dialog-body">
           <!-- Section 1: which strategy + which instrument ─────────────── -->
           <section class="form-section">
-            <div class="section-head">
-              <h4 class="section-title">Source</h4>
-              <label class="auto-toggle">
-                <input
-                  type="checkbox"
-                  [checked]="useAutoStrategy()"
-                  (change)="onToggleAutoStrategy($event)"
-                />
-                <span>Auto-pick strategy</span>
-              </label>
-            </div>
+            <h4 class="section-title">Source</h4>
             <div class="row">
-              @if (useAutoStrategy()) {
-                <div class="field span-2 auto-pick">
-                  <span class="label">Strategy</span>
-                  @if (autoPickedStrategy(); as s) {
-                    <div
-                      class="auto-pick-result"
-                      title="Read-only — chosen by auto-pick. Uncheck 'Auto-pick strategy' to select one yourself."
-                    >
-                      <span class="auto-badge">auto</span>
-                      <strong>#{{ s.id }}</strong> · {{ s.symbol }} {{ s.timeframe }} ·
-                      {{ s.name }}
-                      <span class="hint">{{ autoPickHint() }}</span>
-                    </div>
-                  } @else {
-                    <div class="auto-pick-result empty">
-                      <em
-                        >No active strategy matches the symbol — uncheck "Auto-pick" to choose
-                        manually.</em
-                      >
-                    </div>
+              <label class="field span-2">
+                <span class="label">Strategy <span class="hint">credited with this trade</span></span>
+                <select
+                  [ngModel]="strategyId()"
+                  (ngModelChange)="strategyId.set($event)"
+                  name="strategyId"
+                  required
+                  data-testid="signal-strategy"
+                >
+                  <option [ngValue]="null" disabled>— choose the strategy this trade belongs to —</option>
+                  @for (s of orderedStrategies(); track s.id) {
+                    <option [ngValue]="s.id">
+                      #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
+                    </option>
                   }
-                </div>
-              } @else {
-                <label class="field span-2">
-                  <span class="label">Strategy</span>
-                  <select [(ngModel)]="strategyId" name="strategyId" required>
-                    <option [ngValue]="null" disabled>— pick a strategy —</option>
-                    @for (s of activeStrategies(); track s.id) {
-                      <option [ngValue]="s.id">
-                        #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
-                      </option>
-                    }
-                  </select>
-                  @if (strategiesLoading()) {
-                    <small class="muted">loading strategies…</small>
-                  } @else if (activeStrategies().length === 0) {
-                    <small class="muted">No strategies available — create one first.</small>
-                  }
-                </label>
-              }
+                </select>
+                @if (strategiesLoading()) {
+                  <small class="muted">loading strategies…</small>
+                } @else if (activeStrategies().length === 0) {
+                  <small class="muted">No strategies available — create one first.</small>
+                } @else if (strategyMismatch(); as m) {
+                  <small class="warn-text">{{ m }}</small>
+                }
+              </label>
 
               <label class="field">
                 <span class="label">Symbol</span>
@@ -240,8 +243,8 @@ import type {
               <label class="field">
                 <span class="label">
                   Stop loss
-                  @if (!slDirty() && stopLoss() !== null) {
-                    <span class="hint">auto · {{ pipsHint() }}p</span>
+                  @if (!slDirty() && stopLoss() !== null && atrHint(); as h) {
+                    <span class="hint" [title]="h.title">auto · {{ h.text }}</span>
                   } @else {
                     <span class="hint">opt.</span>
                   }
@@ -258,8 +261,8 @@ import type {
               <label class="field">
                 <span class="label">
                   Take profit
-                  @if (!tpDirty() && takeProfit() !== null) {
-                    <span class="hint">auto · {{ pipsHint() * 2 }}p</span>
+                  @if (!tpDirty() && takeProfit() !== null && atrHint()) {
+                    <span class="hint">auto · {{ rewardMultiple }}R</span>
                   } @else {
                     <span class="hint">opt.</span>
                   }
@@ -275,6 +278,17 @@ import type {
               </label>
             </div>
             <div class="auto-actions">
+              @switch (atrState().status) {
+                @case ('loading') {
+                  <small class="muted">reading {{ atrState().timeframe }} candles for the ATR…</small>
+                }
+                @case ('none') {
+                  <small class="muted"
+                    >No closed {{ atrState().timeframe }} candles for {{ symbol().toUpperCase() }} to size the stop
+                    — enter it.</small
+                  >
+                }
+              }
               <button type="button" class="btn-link" (click)="resetAutoCalc()">
                 ↻ Reset to auto
               </button>
@@ -406,47 +420,8 @@ import type {
         align-items: center;
         gap: var(--space-3);
       }
-      .auto-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--text-xs, 0.78rem);
-        color: var(--text-secondary);
-        cursor: pointer;
-        user-select: none;
-      }
-      /* Solid read-only chip, not a dashed panel: dashed borders read as
-         a disabled control, and this field is an informational result. */
-      .auto-pick-result {
-        padding: 8px 10px;
-        background: rgba(0, 113, 227, 0.08);
-        border: 1px solid rgba(0, 113, 227, 0.3);
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        display: flex;
-        flex-wrap: wrap;
-        align-items: baseline;
-        gap: 6px;
-      }
-      .auto-pick-result.empty {
-        color: var(--text-secondary);
-        background: var(--bg-tertiary);
-        border-color: var(--border);
-      }
-      .auto-badge {
-        font-size: 10px;
-        font-weight: var(--font-semibold, 600);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        padding: 1px 7px;
-        border-radius: var(--radius-full);
-        background: var(--accent);
-        color: #fff;
-        align-self: center;
-      }
-      .auto-pick-result strong {
-        font-weight: var(--font-semibold, 600);
+      .warn-text {
+        color: #92400e;
       }
       .live-price-tag {
         font-family: var(--font-mono, ui-monospace, Menlo, monospace);
@@ -621,6 +596,10 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   // Outputs — parent decides whether to keep the dialog open or refresh the list.
   readonly closed = output<void>();
   readonly created = output<number>();
+  /** Optional starting values (symbol, side, levels, lots, strategy). */
+  readonly prefill = input<SignalPrefill | null>(null);
+
+  readonly rewardMultiple = REWARD_MULTIPLE;
 
   // ── Form state ────────────────────────────────────────────────────────
   readonly strategyId = signal<number | null>(null);
@@ -640,8 +619,10 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly slDirty = signal(false);
   readonly tpDirty = signal(false);
 
-  // ── Auto-pick strategy mode ──────────────────────────────────────────
-  readonly useAutoStrategy = signal(true);
+  /** The ATR the default stop is sized from: reading, found, or no candles to size it. */
+  readonly atrState = signal<{ status: 'idle' | 'loading' | 'ok' | 'none'; atr?: number; timeframe?: string }>({
+    status: 'idle',
+  });
 
   // ── Live-price state ─────────────────────────────────────────────────
   readonly livePrice = signal<LivePriceDto | null>(null);
@@ -684,53 +665,39 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
 
   readonly activeStrategies = computed(() => this.strategies_());
 
-  /**
-   * Auto-picked strategy when `useAutoStrategy` is true. Picks the first
-   * active strategy whose Symbol matches the entered symbol; falls back to
-   * the first active strategy overall when the symbol matches nothing.
-   * Returns null only when there are zero strategies in the system.
-   */
-  readonly autoPickedStrategy = computed<StrategyDto | null>(() => {
-    const list = this.activeStrategies();
-    if (list.length === 0) return null;
-    const sym = this.symbol().trim().toUpperCase();
-    if (sym) {
-      const symMatch = list.find((s) => (s.symbol ?? '').toUpperCase() === sym);
-      if (symMatch) return symMatch;
-    }
-    return list[0];
-  });
-
-  /** Strategy that actually gets sent on submit — auto-pick or operator-pick. */
-  readonly effectiveStrategyId = computed<number | null>(() => {
-    return this.useAutoStrategy() ? (this.autoPickedStrategy()?.id ?? null) : this.strategyId();
-  });
-
-  /** Honest hint copy — distinguishes a real symbol match from the list[0] fallback. */
-  readonly autoPickHint = computed(() => {
-    const s = this.autoPickedStrategy();
-    if (!s) return '';
-    const sym = this.symbol().trim().toUpperCase();
-    const matchesSymbol = sym && (s.symbol ?? '').toUpperCase() === sym;
-    return matchesSymbol
-      ? 'auto-picked from active strategies on this symbol'
-      : 'no symbol match yet — showing the first active strategy';
-  });
+  /** The symbol's strategies first, then the rest — the operator chooses; nothing is picked for them. */
+  readonly orderedStrategies = computed(() => orderStrategies(this.activeStrategies(), this.symbol()));
 
   readonly resolvedStrategy = computed(() => {
-    const id = this.useAutoStrategy() ? (this.autoPickedStrategy()?.id ?? null) : this.strategyId();
-    if (id === null) return null;
-    return this.activeStrategies().find((s) => s.id === id) ?? null;
+    const id = this.strategyId();
+    return id === null ? null : (this.activeStrategies().find((s) => s.id === id) ?? null);
   });
 
-  // ── SL/TP auto-calc helpers ──────────────────────────────────────────
-  /** Pip size for the current symbol — JPY pairs are 0.01, others 0.0001. */
-  private pipSize(): number {
-    return this.symbol().toUpperCase().includes('JPY') ? 0.01 : 0.0001;
-  }
+  /** A strategy that trades another symbol can be credited, but the operator is told. */
+  readonly strategyMismatch = computed<string | null>(() => {
+    const s = this.resolvedStrategy();
+    const sym = this.symbol().trim().toUpperCase();
+    if (!s?.symbol || !sym || s.symbol.toUpperCase() === sym) return null;
+    return `Strategy #${s.id} trades ${s.symbol.toUpperCase()}; this ${sym} signal will be credited to it.`;
+  });
 
-  /** SL distance in pips for the auto-default. 1:2 R:R with TP. */
-  readonly pipsHint = computed(() => 30);
+  /** The pair's decimal places (prices are rounded to them), 5 until the pair is known. */
+  readonly digits = computed(() => {
+    const sym = this.symbol().trim().toUpperCase();
+    const pair = this.currencyPairs().find((p) => (p.symbol ?? '').toUpperCase() === sym);
+    return pair && pair.decimalPlaces > 0 ? pair.decimalPlaces : 5;
+  });
+
+  /** The stop's auto label: `1.5 × ATR(14, H1) = 23.4 pips`. */
+  readonly atrHint = computed<{ text: string; title: string } | null>(() => {
+    const st = this.atrState();
+    if (st.status !== 'ok' || st.atr === undefined) return null;
+    const pips = Math.round(((st.atr * ATR_STOP_MULTIPLE) / pipSizeFor(this.digits())) * 10) / 10;
+    return {
+      text: `${ATR_STOP_MULTIPLE} × ATR(${ATR_PERIOD}, ${st.timeframe}) = ${pips} pips`,
+      title: `ATR(${ATR_PERIOD}) of the last closed ${st.timeframe} candles: ${roundTo(st.atr, this.digits() + 1)}`,
+    };
+  });
 
   readonly defaultExpiryHint = computed(() => {
     const local = this.expiresAtLocal();
@@ -741,7 +708,7 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
 
   readonly canSubmit = computed(() => {
     return (
-      this.effectiveStrategyId() !== null &&
+      this.strategyId() !== null &&
       !!this.symbol().trim() &&
       this.entryPrice() !== null &&
       (this.entryPrice() ?? 0) > 0 &&
@@ -773,6 +740,30 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   });
 
   constructor() {
+    // Starting values, applied once when given; entered levels are kept as the operator's own.
+    effect(() => {
+      const p = this.prefill();
+      if (!p) return;
+      untracked(() => {
+        if (p.symbol) this.symbol.set(p.symbol.toUpperCase());
+        if (p.direction) this.direction.set(p.direction);
+        if (p.lotSize && p.lotSize > 0) this.lotSize.set(p.lotSize);
+        if (p.strategyId) this.strategyId.set(p.strategyId);
+        if (p.entryPrice && p.entryPrice > 0) {
+          this.entryPrice.set(p.entryPrice);
+          this.entryDirty.set(true);
+        }
+        if (p.stopLoss && p.stopLoss > 0) {
+          this.stopLoss.set(p.stopLoss);
+          this.slDirty.set(true);
+        }
+        if (p.takeProfit && p.takeProfit > 0) {
+          this.takeProfit.set(p.takeProfit);
+          this.tpDirty.set(true);
+        }
+      });
+    });
+
     // Load active strategies once on mount; the picker needs them.
     this.strategies
       .list({ currentPage: 1, itemCountPerPage: 500, filter: { status: 'Active' } })
@@ -858,37 +849,51 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
     effect(() => {
       if (this.entryDirty()) return;
       const lp = this.livePrice();
+      const digits = this.digits();
       if (lp) {
-        const mid = (lp.bid + lp.ask) / 2;
-        this.entryPrice.set(Math.round(mid * 1e5) / 1e5);
+        this.entryPrice.set(roundTo((lp.bid + lp.ask) / 2, digits));
         return;
       }
       const fb = this.fallbackCandleClose();
       if (fb != null) {
-        this.entryPrice.set(Math.round(fb * 1e5) / 1e5);
+        this.entryPrice.set(roundTo(fb, digits));
       }
     });
 
-    // ── Auto-calc SL/TP relative to entry + direction ────────────────────
-    // 30 pips SL, 60 pips TP (1:2 R:R). Re-runs when entry, direction, or
-    // symbol (pip size) changes; skipped per-field once the operator types.
+    // ── ATR of real closed candles: the strategy's timeframe, else H1 ────
+    effect((onCleanup) => {
+      const sym = this.symbol().trim().toUpperCase();
+      const tf = atrTimeframe(this.resolvedStrategy());
+      if (sym.length < 6) {
+        this.atrState.set({ status: 'idle' });
+        return;
+      }
+      untracked(() => this.atrState.set({ status: 'loading', timeframe: tf }));
+      const sub = this.marketData
+        .listCandles(
+          { currentPage: 1, itemCountPerPage: ATR_CANDLES, filter: { symbol: sym, timeframe: tf } },
+          { silent: true },
+        )
+        .pipe(catchError(() => of(null)))
+        .subscribe((res) => {
+          const value = atrFromCandles(res?.data?.data ?? []);
+          this.atrState.set(value === null ? { status: 'none', timeframe: tf } : { status: 'ok', atr: value, timeframe: tf });
+        });
+      onCleanup(() => sub.unsubscribe());
+    });
+
+    // ── Auto SL/TP: 1.5 × ATR beyond the entry, target 2R ────────────────
+    // Re-runs when the entry, the side or the ATR changes; skipped per field
+    // once the operator types. No ATR → no default (never a made-up distance).
     effect(() => {
       const e = this.entryPrice();
       const dir = this.direction();
-      // Re-read symbol so pip size recomputes when it flips JPY/non-JPY.
-      const _sym = this.symbol();
-      void _sym;
-      if (e === null || e <= 0) return;
-      const pip = this.pipSize();
-      const slPips = 30;
-      const tpPips = 60;
-      const round = (n: number) => Math.round(n * 1e5) / 1e5;
-      if (!this.slDirty()) {
-        this.stopLoss.set(round(dir === 'Buy' ? e - slPips * pip : e + slPips * pip));
-      }
-      if (!this.tpDirty()) {
-        this.takeProfit.set(round(dir === 'Buy' ? e + tpPips * pip : e - tpPips * pip));
-      }
+      const st = this.atrState();
+      const digits = this.digits();
+      if (e === null || e <= 0 || st.status !== 'ok' || st.atr === undefined) return;
+      const levels = atrLevels(e, dir, st.atr, digits);
+      if (!untracked(() => this.slDirty())) this.stopLoss.set(levels.stopLoss);
+      if (!untracked(() => this.tpDirty())) this.takeProfit.set(levels.takeProfit);
     });
   }
 
@@ -932,10 +937,6 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
     else this.closed.emit();
   }
 
-  onToggleAutoStrategy(ev: Event): void {
-    this.useAutoStrategy.set((ev.target as HTMLInputElement).checked);
-  }
-
   /**
    * Wipe the entry/SL/TP fields and clear the dirty flags so the auto-calc
    * effects re-run from the latest live price.
@@ -954,7 +955,7 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
 
     const expiresAtUtc = new Date(this.expiresAtLocal()).toISOString();
     const body: CreateTradeSignalRequest = {
-      strategyId: this.effectiveStrategyId()!,
+      strategyId: this.strategyId()!,
       symbol: this.symbol().trim().toUpperCase(),
       direction: this.direction(),
       entryPrice: this.entryPrice()!,

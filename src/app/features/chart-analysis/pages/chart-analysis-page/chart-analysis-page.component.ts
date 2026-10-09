@@ -209,6 +209,11 @@ import {
 import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
 import { EconomicCalendarPaneComponent } from '../../panels/economic-calendar-pane.component';
 import { EconomicEventModalComponent } from '../../panels/economic-event-modal.component';
+import { ZonedDatePipe } from '../../panels/zoned-time';
+import { ArticleFlagsPipe, headlineAge, mergeArticles } from '../../panels/news-pane';
+import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
+import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
+import type { SidePanel } from '../../panels/side/chart-panels.types';
 import type {
   EconomicImpact,
   UpcomingEconomicEvent,
@@ -450,6 +455,9 @@ function loadWatchlistOpen(): boolean {
     NewsAnalysisModalComponent,
     EconomicCalendarPaneComponent,
     EconomicEventModalComponent,
+    ZonedDatePipe,
+    ArticleFlagsPipe,
+    ChartPanelsDockComponent,
     LongPressDirective,
     UndoNoticeComponent,
     ChartAlertFormComponent,
@@ -1142,18 +1150,21 @@ export class ChartAnalysisPageComponent {
     for (const [sym, q] of Object.entries(this.prices())) out[sym] = q.bid;
     return out;
   });
+  /** Ticks every 30 s while the tab is visible, so the headline's age keeps moving (SP-11: it was computed once). */
+  private readonly headlineClock = signal(Date.now());
+  private readonly headlineTick = effect((onCleanup) => {
+    const t = setInterval(() => {
+      if (!document.hidden) this.headlineClock.set(Date.now());
+    }, 30_000);
+    onCleanup(() => clearInterval(t));
+  });
   readonly watchHeadline = computed<WatchHeadline | null>(() => {
     const a = this.articles()[0];
     if (!a) return null;
-    const mins = Math.max(0, Math.round((Date.now() - Date.parse(a.publishedAtUtc)) / 60_000));
-    const at =
-      mins < 60
-        ? `${mins} min ago`
-        : mins < 1440
-          ? `${Math.round(mins / 60)} h ago`
-          : `${Math.round(mins / 1440)} d ago`;
-    return { title: a.title, source: a.sourceName, at };
+    return { title: a.title, source: a.sourceName, at: headlineAge(a.publishedAtUtc, this.headlineClock()) };
   });
+  /** The SP-I9 side panels (notes, broker depth, sentiment, account), one at a time beside the page's own panes. */
+  readonly chartPanels = inject(ChartPanelsState);
 
   // ── Technicals view ("More technicals") ──────────────────────────────────
   // Laid over the chart area rather than replacing it, so the chart stays
@@ -2311,36 +2322,49 @@ export class ChartAnalysisPageComponent {
 
   openSidePane(pane: 'details' | 'news' | 'calendar' | 'datawindow'): void {
     this.sidePane.set(this.sidePane() === pane ? 'none' : pane);
+    // One side pane at a time: the page's own close the SP-I9 panels.
+    if (this.sidePane() !== 'none') this.chartPanels.close();
     if (this.sidePane() === 'news') this.loadNews();
   }
 
+  /** A right-rail SP-I9 panel (notes, broker depth, sentiment, account) — it replaces any open side pane. */
+  openPanel(panel: SidePanel): void {
+    this.sidePane.set('none');
+    this.chartPanels.toggle(panel);
+  }
+
+  private newsSeq = 0;
+
   /**
-   * Headlines for the charted pair's currencies.
+   * Headlines for the charted pair's currencies — the base AND the quote (SP-07: it read the base only).
    *
    * Filtered to the two currencies the pair is made of, for the same reason the
    * economic events are: an operator charting EURUSD does not want JPY
-   * headlines competing for the same space.
+   * headlines competing for the same space. Each currency is read separately so
+   * each gets its own budget (a busy USD tape cannot crowd EUR out), then merged
+   * once per article, newest first.
    */
   private loadNews(): void {
     const pair = this.symbols().find(
       (p) => (p.symbol ?? '').toUpperCase() === this.symbol().toUpperCase(),
     );
-    const currency = pair?.baseCurrency?.toUpperCase();
+    const currencies = [...new Set([pair?.baseCurrency, pair?.quoteCurrency])]
+      .map((c) => c?.toUpperCase())
+      .filter((c): c is string => !!c);
+    const n = ++this.newsSeq;
     this.newsLoading.set(true);
-    this.newsIntel
-      .getArticles({ currency, hours: 48, take: 40 })
+    // The news module can be disabled entirely; an empty pane says that
+    // better than an error toast the operator cannot act on.
+    const reads = (currencies.length ? currencies : [undefined]).map((currency) =>
+      this.newsIntel.getArticles({ currency, hours: 48, take: 40 }).pipe(catchError(() => of([]))),
+    );
+    forkJoin(reads)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (rows) => {
-          this.articles.set(Array.isArray(rows) ? rows : []);
-          this.newsLoading.set(false);
-        },
-        // The news module can be disabled entirely; an empty pane says that
-        // better than an error toast the operator cannot act on.
-        error: () => {
-          this.articles.set([]);
-          this.newsLoading.set(false);
-        },
+      .subscribe((lists) => {
+        // A slower reply for the previous symbol must not replace this one's headlines.
+        if (n !== this.newsSeq) return;
+        this.articles.set(mergeArticles(...lists.map((rows) => (Array.isArray(rows) ? rows : []))).slice(0, 60));
+        this.newsLoading.set(false);
       });
 
     // The headlines above are the RECORD layer. This is the module's actual
