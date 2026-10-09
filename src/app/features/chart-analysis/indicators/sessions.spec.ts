@@ -73,6 +73,9 @@ describe('sessions on their own clocks (DR-18)', () => {
     }));
     const out = def.compute(winter, { londonSession: '0800-1700', londonZone: 'Europe/London' });
     expect(out['londonHigh'].findIndex((v) => v !== null)).toBe(8);
-    expect(out['londonHigh'].findLastIndex((v) => v !== null)).toBe(16);
+    const high = out['londonHigh'];
+    let last = -1;
+    for (let i = 0; i < high.length; i++) if (high[i] !== null) last = i;
+    expect(last).toBe(16);
   });
 });

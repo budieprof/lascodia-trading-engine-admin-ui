@@ -83,6 +83,23 @@ function makeStore(engine = new FakeEngine(), keepStorage = false) {
 
 const P = (time: number, price: number) => ({ time, price });
 
+/** An engine row's content, as a write carries it. */
+function upsertOf(row: ChartDrawingDto): NonNullable<ChartDrawingOp['drawing']> {
+  return {
+    symbol: row.symbol,
+    resolution: row.resolution,
+    kind: row.kind,
+    pointsJson: row.pointsJson,
+    styleJson: row.styleJson,
+    locked: row.locked,
+    optionsJson: row.optionsJson ?? '{}',
+    hidden: !!row.hidden,
+    visibleOn: row.visibleOn ?? '',
+    zIndex: row.zIndex ?? 0,
+    createdAt: row.createdAt,
+  };
+}
+
 describe('snapAngle (Shift constrain)', () => {
   it('snaps near-horizontal to horizontal, keeping x', () => {
     expect(snapAngle({ x: 0, y: 0 }, { x: 100, y: 7 })).toEqual({ x: 100, y: 0 });
@@ -453,7 +470,7 @@ describe('engine sync (DR-02 / DR-I3)', () => {
     vi.advanceTimersByTime(2000);
     // Another machine moves it.
     const row = engine.rows.get(a.id)!;
-    engine.rows.set(a.id, { ...engine.dto(a.id, { ...row, pointsJson: JSON.stringify([P(7, 7), P(6, 6)]) }) });
+    engine.rows.set(a.id, { ...row, ...engine.dto(a.id, { ...upsertOf(row), pointsJson: JSON.stringify([P(7, 7), P(6, 6)]) }) });
     store.update(a.id, { points: [P(3, 3), P(4, 4)] });
     vi.advanceTimersByTime(2000);
     expect(store.symbolDrawings()[0].points).toEqual([P(7, 7), P(6, 6)]);

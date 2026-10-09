@@ -110,7 +110,8 @@ describe('pattern scorecard (DR-I8)', () => {
   it('scores only the candlestick patterns that point a way', () => {
     const bars = flat(40);
     bars[30] = bar(30, 1.0005, 1.001, 1.0, 1.0005); // a doji-like bar (neutral)
-    expect(candleSignals(bars).every((s) => s.direction !== 'neutral')).toBe(true);
+    const ways = new Set<string>(candleSignals(bars).map((s) => s.direction));
+    expect(ways.has('neutral')).toBe(false);
   });
 });
 
