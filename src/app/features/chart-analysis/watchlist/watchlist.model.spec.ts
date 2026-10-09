@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addSection,
+  tickParts,
   addSymbol,
   cycleFlag,
   flagCounts,
@@ -228,5 +229,27 @@ describe('watchlist model', () => {
     expect(restoreSymbol(back, where)).toBe(back);
     const noSection = restoreSymbol(removeSection(removed, 'a'), where);
     expect(listSymbols(noSection)).toContain('EURUSD');
+  });
+});
+
+describe('tickParts (TradingView colours the digits a tick changed)', () => {
+  it('colours from the first changed digit to the end, the small pip included', () => {
+    expect(tickParts(1.11973, 5, 1.11881)).toEqual({ head: '1.11', changed: '97', pip: '3', pipChanged: true });
+    expect(tickParts(1.11973, 5, 1.11981)).toEqual({ head: '1.119', changed: '7', pip: '3', pipChanged: true });
+    expect(tickParts(158.27, 3, 158.262)).toEqual({ head: '158.2', changed: '7', pip: '0', pipChanged: true });
+  });
+
+  it('colours only the small pip when only it changed', () => {
+    expect(tickParts(1.12344, 5, 1.12341)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: true });
+  });
+
+  it('colours nothing before the first tick or when the price is unchanged', () => {
+    expect(tickParts(1.12344, 5, null)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
+    expect(tickParts(1.12344, 5, 1.12344)).toEqual({ head: '1.1234', changed: '', pip: '4', pipChanged: false });
+  });
+
+  it('handles quotes without a fractional pip and a missing price', () => {
+    expect(tickParts(1.2345, 4, 1.2355)).toEqual({ head: '1.23', changed: '45', pip: '', pipChanged: false });
+    expect(tickParts(null, 5, 1.1)).toEqual({ head: '—', changed: '', pip: '', pipChanged: false });
   });
 });
