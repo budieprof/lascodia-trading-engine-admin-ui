@@ -293,6 +293,11 @@ import {
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ReplayController } from '../../replay/replay-controller';
+import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
+import {
+  ChartSettingsDialogComponent,
+  type ChartSettings,
+} from '../../chart/chart-settings-dialog.component';
 import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 import { askName, confirmDelete } from '../../dialog/chart-dialogs';
 import {
@@ -597,6 +602,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     PatternScorecardDialogComponent,
     ChartScriptAlertFormComponent,
     ReplayPanelComponent,
+    ChartSettingsDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -5086,6 +5092,7 @@ export class ChartAnalysisPageComponent {
       scaleSide: this.scaleSide(),
       sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
+      ...(this.appearance() ? { appearance: { ...this.appearance()! } } : {}),
       timezone: this.timezone(),
       priceBased: {
         boxMethod: this.boxMethod(),
@@ -5159,6 +5166,54 @@ export class ChartAnalysisPageComponent {
     const runs = this.scriptRuns().map(workspaceScriptOf);
     const waiting = this.restoringScripts().filter((w) => !runs.some((r) => r.key === w.key));
     return [...waiting, ...runs].sort((a, b) => a.key.localeCompare(b.key));
+  }
+
+  // ── Chart settings dialog (CC-I11) ───────────────────────────────────────
+
+  /** Candle colours, grid lines and background over the theme's; null: the theme's look. */
+  readonly appearance = signal<ChartAppearance | null>(null);
+  readonly chartSettingsOpen = signal(false);
+
+  /** The chart's settings as the dialog edits them. */
+  chartSettings(): ChartSettings {
+    return {
+      appearance: this.appearance(),
+      showVolume: this.showVolume(),
+      countdown: this.showCountdown(),
+      scaleMode: this.scaleMode(),
+      invertScale: this.invertScale(),
+      scaleSide: this.scaleSide(),
+      timezone: this.timezone(),
+      sessionBreaks: this.sessionBreaks(),
+      showEvents: this.showEvents(),
+      minEventImpact: this.minEventImpact(),
+      showBlackout: this.showBlackout(),
+      showPositions: this.showPositions(),
+      showOrders: this.showOrders(),
+      showOverlays: this.showOverlays(),
+      showClosedTrades: this.showClosedTrades(),
+      fitTradeLines: this.fitTradeLines(),
+    };
+  }
+
+  /** The dialog's edit (or its Cancel putting the opening settings back), applied at once. */
+  applySettingsFromDialog(s: ChartSettings): void {
+    this.appearance.set(restoredAppearance(s.appearance));
+    this.showVolume.set(s.showVolume);
+    this.showCountdown.set(s.countdown);
+    this.scaleMode.set(s.scaleMode);
+    this.invertScale.set(s.invertScale);
+    this.scaleSide.set(s.scaleSide);
+    this.timezone.set(s.timezone);
+    this.sessionBreaks.set(s.sessionBreaks);
+    this.showEvents.set(s.showEvents);
+    this.minEventImpact.set(s.minEventImpact);
+    this.showBlackout.set(s.showBlackout);
+    this.showPositions.set(s.showPositions);
+    this.showOrders.set(s.showOrders);
+    this.showOverlays.set(s.showOverlays);
+    this.showClosedTrades.set(s.showClosedTrades);
+    this.fitTradeLines.set(s.fitTradeLines);
   }
 
   // ── One undo history (CC-I11) ────────────────────────────────────────────
@@ -5368,6 +5423,7 @@ export class ChartAnalysisPageComponent {
     this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
     this.sessionBreaks.set(s.sessionBreaks === true);
     this.showCountdown.set(s.countdown ?? true);
+    this.appearance.set(restoredAppearance(s.appearance));
     this.timezone.set(s.timezone ?? 'UTC');
     const pb = restoredPriceBased(s.priceBased);
     this.boxMethod.set(pb.boxMethod);

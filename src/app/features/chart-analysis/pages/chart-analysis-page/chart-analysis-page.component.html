@@ -782,6 +782,15 @@
     >
       <app-chart-icon name="camera" [size]="28" />
     </button>
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="chartSettingsOpen.set(true)"
+      title="Chart settings"
+      data-testid="chart-settings"
+    >
+      <app-chart-icon name="settings" [size]="28" />
+    </button>
     <!-- A narrow toolbar's ⋯ menu: the tb-wide buttons, as TradingView's narrow layout has them. -->
     <div class="tb-menu-anchor tb-more-anchor">
       <button
@@ -847,6 +856,14 @@
             (click)="takeSnapshot(); openMenu.set(null)"
           >
             <app-chart-icon name="camera" [size]="28" /> Take a snapshot
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="chartSettingsOpen.set(true); openMenu.set(null)"
+          >
+            <app-chart-icon name="settings" [size]="28" /> Chart settings
           </button>
         </div>
       }
@@ -1215,6 +1232,7 @@
           #host
           (viewChanged)="onViewChanged()"
           [showCountdown]="showCountdown()"
+          [appearance]="appearance()"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"
@@ -1407,6 +1425,9 @@
               (click)="showCountdown.set(!showCountdown()); closeContextMenu()"
             >
               {{ showCountdown() ? '✓ ' : '' }}Countdown to bar close
+            </button>
+            <button type="button" (click)="chartSettingsOpen.set(true); closeContextMenu()">
+              Settings…
             </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
             <button type="button" (click)="copySnapshot()">Copy image</button>
@@ -1964,6 +1985,16 @@
       (exportPine)="openPineDraft($event)"
     />
   }
+  <!-- The chart's Settings (CC-I11): applied as they are edited; Cancel puts them back. -->
+  @if (chartSettingsOpen()) {
+    <app-chart-settings-dialog
+      [settings]="chartSettings()"
+      [timezones]="timezones"
+      (changed)="applySettingsFromDialog($event)"
+      (closed)="chartSettingsOpen.set(false)"
+    />
+  }
+
   <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->
   @if (studySettingsStudy(); as st) {
     <app-study-settings-dialog

@@ -8,6 +8,7 @@ import type {
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import type { ScriptDisplaySettings } from '../scripts/script-display';
 import type { LegacyChartLayout } from './layout-store.service';
+import type { ChartAppearance } from '../chart/appearance';
 
 /** A Pine script on the chart, as a layout restores it. */
 export interface WorkspaceScript {
@@ -85,6 +86,8 @@ export interface ChartWorkspaceState {
   sessionBreaks?: boolean;
   /** Countdown to bar close on the price scale (default on). */
   countdown?: boolean;
+  /** Candle colours, grid lines, background over the theme's (CC-I11 chart settings); absent: the theme's. */
+  appearance?: ChartAppearance;
   timezone?: string;
   /** How the price-based styles are built (CC-I10); absent: ATR × 1, no wicks, 3 lines. */
   priceBased?: {

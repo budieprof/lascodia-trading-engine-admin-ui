@@ -13,6 +13,7 @@ import {
   viewChild,
   OnDestroy,
 } from '@angular/core';
+import { appearanceKey, applyAppearance, gridVisibility, type ChartAppearance } from './appearance';
 import { ServerClock } from '@core/time/server-clock';
 import { BarCountdownPrimitive, axisLabelHeight } from './bar-countdown-primitive';
 import { countdownText } from './bar-countdown';
@@ -708,6 +709,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly dataWindowOpen = input(false);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
+  /** Candle colours, grid lines and background over the theme's palette (CC-I11 chart settings); null: the theme's. */
+  readonly appearance = input<ChartAppearance | null>(null);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
   readonly liveAt = input<number | null>(null);
 
@@ -799,6 +802,8 @@ export class ChartHostComponent implements OnDestroy {
   private readonly volumeSync = new SeriesSync<VolumeRow>(null, sameValueRow);
   /** The style the price series was CREATED for (a style change replaces it). */
   private seriesStyle: ChartStyle | null = null;
+  /** The appearance the price series was made with ({@link appearanceKey}): a new one replaces the series. */
+  private seriesLook = '';
   /** The script colours the price rows were built with ({@link adoptRepaintedRows}). */
   private rowsColors: (string | null)[] | null = null;
   /** The bars as plotted, kept in step from the first bar that changed. */
@@ -1106,6 +1111,7 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const el = this.container().nativeElement;
       const dark = this.theme.theme() === 'dark';
+      this.appearance();
       untracked(() => (this.chart ? this.retheme(dark) : this.rebuildChart(el, dark)));
     });
 
@@ -1124,6 +1130,7 @@ export class ChartHostComponent implements OnDestroy {
       this.renkoWicks();
       this.lineBreakLines();
       this.theme.theme();
+      this.appearance();
       untracked(() => this.syncData());
     });
 
@@ -1705,6 +1712,11 @@ export class ChartHostComponent implements OnDestroy {
     return true;
   }
 
+  /** The palette the chart draws with: the theme's, with the chart's appearance settings over it (CC-I11). */
+  private palette(dark: boolean) {
+    return applyAppearance(this.themePalette(dark), this.appearance());
+  }
+
   /**
    * TradingView's 2026 chart palette.
    *
@@ -1717,7 +1729,7 @@ export class ChartHostComponent implements OnDestroy {
    * line whose axis labels sit on a dark #131722 chip in light mode and a
    * #363A45 chip in dark mode, as TradingView draws them.
    */
-  private palette(dark: boolean) {
+  private themePalette(dark: boolean) {
     return {
       background: dark ? '#0F0F0F' : '#FFFFFF',
       text: dark ? '#DBDBDB' : '#131722',
@@ -1743,13 +1755,14 @@ export class ChartHostComponent implements OnDestroy {
   private retheme(dark: boolean): void {
     if (!this.chart) return;
     const p = this.palette(dark);
+    const g = gridVisibility(this.appearance());
     this.chart.applyOptions({
       layout: {
         background: { type: ColorType.Solid, color: p.background },
         textColor: p.text,
         panes: { separatorColor: p.border, separatorHoverColor: p.border },
       },
-      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      grid: { vertLines: { color: p.grid, visible: g.vert }, horzLines: { color: p.grid, visible: g.horz } },
       rightPriceScale: { borderColor: p.border },
       leftPriceScale: { borderColor: p.border },
       timeScale: { borderColor: p.border },
@@ -1775,6 +1788,7 @@ export class ChartHostComponent implements OnDestroy {
     this.indicatorSeries = [];
     this.externalSeries.clear();
     this.seriesStyle = null;
+    this.seriesLook = '';
     this.priceSync.attach(null);
     this.volumeSync.attach(null);
     this.plotter.reset();
@@ -1801,7 +1815,10 @@ export class ChartHostComponent implements OnDestroy {
         attributionLogo: false,
         panes: { separatorColor: p.border, separatorHoverColor: p.border, enableResize: true },
       },
-      grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
+      grid: {
+        vertLines: { color: p.grid, visible: gridVisibility(this.appearance()).vert },
+        horzLines: { color: p.grid, visible: gridVisibility(this.appearance()).horz },
+      },
       rightPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       leftPriceScale: { borderColor: p.border, scaleMargins: { top: 0.1, bottom: 0.08 } },
       timeScale: {
@@ -2175,7 +2192,8 @@ export class ChartHostComponent implements OnDestroy {
         : style === 'line-break'
           ? `lines:${this.lineBreakLines()}`
           : '';
-    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}`;
+    const look = appearanceKey(this.appearance());
+    const key = `${series}|${style}|${zone}|${dark ? 'dark' : 'light'}|${unit ?? ''}|${shape}|${look}`;
     // Another of the effect's inputs re-ran it with nothing changed.
     if (raw === this.plotter.raw && key === this.plotKey) return;
 
@@ -2323,12 +2341,14 @@ export class ChartHostComponent implements OnDestroy {
    */
   private ensurePriceSeries(style: ChartStyle): boolean {
     const chart = this.chart;
-    if (!chart || (this.price && this.seriesStyle === style)) return false;
+    const look = appearanceKey(this.appearance());
+    if (!chart || (this.price && this.seriesStyle === style && this.seriesLook === look)) return false;
     const old = this.price;
     const next = this.createPriceSeries(chart, style);
     next.applyOptions({ priceScaleId: this.scaleSide() });
     this.price = next;
     this.seriesStyle = style;
+    this.seriesLook = look;
     this.priceSync.attach(next as unknown as SyncTarget<PriceRow>);
     // Added before the old one goes, so pane 0 is never empty in between (CC-03); just above the
     // volume overlay, so studies draw over the candles as TradingView draws them.
