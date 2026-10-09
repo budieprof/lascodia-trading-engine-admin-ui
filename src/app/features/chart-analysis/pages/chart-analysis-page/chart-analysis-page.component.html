@@ -945,6 +945,16 @@
       <button
         type="button"
         class="strip-btn"
+        [class.active]="sidePane() === 'datawindow'"
+        (click)="openSidePane('datawindow')"
+        title="Data window — every value at the crosshair"
+        data-testid="datawindow-button"
+      >
+        <app-chart-icon name="object-tree" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
         [class.active]="objectTreeOpen()"
         (click)="objectTreeOpen.set(!objectTreeOpen())"
         [disabled]="!drawings.visible().length"
@@ -1025,8 +1035,13 @@
               <span
                 >C<b>{{ l.close | number: '1.' + precision() + '-' + precision() }}</b></span
               >
-              @if (l.changePct !== null) {
-                <span class="change">{{ l.changePct | number: '1.2-2' }}%</span>
+              @if (legendChange(); as change) {
+                <span class="change" data-testid="legend-change">{{ change }}</span>
+              }
+              @if (legendVolume(); as vol) {
+                <span
+                  >Vol<b>{{ vol }}</b></span
+                >
               }
             </div>
             <div class="legend-time muted">{{ l.dateLabel ?? formatTime(l.time) }}</div>
@@ -1055,6 +1070,7 @@
           [bars]="displayBars()"
           [dataKey]="dataKey()"
           [historyComplete]="historyComplete()"
+          [dataWindowOpen]="sidePane() === 'datawindow'"
           [style]="style()"
           [showVolume]="showVolume()"
           [indicators]="active()"
@@ -1364,6 +1380,12 @@
           </aside>
         }
 
+        @if (sidePane() === 'datawindow') {
+          <aside class="side-pane">
+            <app-data-window [sections]="dataWindowSections()" />
+          </aside>
+        }
+
         <!-- Object tree. -->
         @if (objectTreeOpen() && drawings.visible().length) {
           <div class="object-tree">
@@ -1430,7 +1452,11 @@
           </div>
           @if (panelLegends()[panel.id]; as pl) {
             @if (pl.close !== null) {
-              <div class="panel-legend" [class.up]="(pl.close ?? 0) >= (pl.open ?? 0)">
+              <div
+                class="legend-ohlc panel-legend"
+                [class.up]="(pl.close ?? 0) >= (pl.open ?? 0)"
+                [class.down]="(pl.close ?? 0) < (pl.open ?? 0)"
+              >
                 <span
                   >O<b>{{
                     pl.open

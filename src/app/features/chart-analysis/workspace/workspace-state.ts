@@ -114,7 +114,7 @@ export interface ChartWorkspaceState {
   panel?: {
     watchlistOpen?: boolean;
     width?: number;
-    sidePane?: 'none' | 'details' | 'news' | 'calendar';
+    sidePane?: 'none' | 'details' | 'news' | 'calendar' | 'datawindow';
     calendarAll?: boolean;
     calendarMinImpact?: 'Low' | 'Medium' | 'High';
   };

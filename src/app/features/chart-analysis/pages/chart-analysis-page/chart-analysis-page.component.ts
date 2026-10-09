@@ -61,6 +61,8 @@ import { liveTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { pipSizeFor, priceScaleFor } from '../../datafeed/symbol-info';
+import { changeText, formatVolume } from '../../chart/legend-format';
+import { DataWindowComponent } from '../../chart/data-window.component';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
@@ -425,6 +427,7 @@ function loadWatchlistOpen(): boolean {
     DecimalPipe,
     DatePipe,
     ChartHostComponent,
+    DataWindowComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
     DrawingToolbarComponent,
@@ -1113,7 +1116,7 @@ export class ChartAnalysisPageComponent {
 
   // ── Side panes: Details and News ─────────────────────────────────────────
   private readonly newsIntel = inject(NewsIntelService);
-  readonly sidePane = signal<'none' | 'details' | 'news' | 'calendar'>('none');
+  readonly sidePane = signal<'none' | 'details' | 'news' | 'calendar' | 'datawindow'>('none');
   /** Economic calendar pane: every currency rather than the pair's two; minimum importance. */
   readonly calendarAll = signal(false);
   readonly calendarMinImpact = signal<EconomicImpact>('Low');
@@ -2222,7 +2225,7 @@ export class ChartAnalysisPageComponent {
     this.loadEvents();
   }
 
-  openSidePane(pane: 'details' | 'news' | 'calendar'): void {
+  openSidePane(pane: 'details' | 'news' | 'calendar' | 'datawindow'): void {
     this.sidePane.set(this.sidePane() === pane ? 'none' : pane);
     if (this.sidePane() === 'news') this.loadNews();
   }
@@ -3308,6 +3311,19 @@ export class ChartAnalysisPageComponent {
   onLegend(snapshot: LegendSnapshot): void {
     this.legend.set(snapshot);
   }
+
+  /** The legend's change from the previous close: "−0.00002 / −0.2 pip (−0.00%)" (CC-18). */
+  readonly legendChange = computed(() => {
+    const l = this.legend();
+    return l ? changeText(l.change ?? null, l.changePct, this.pipSize(), this.precision()) : null;
+  });
+  readonly legendVolume = computed(() => {
+    const v = this.legend()?.volume;
+    return v === null || v === undefined ? null : formatVolume(v);
+  });
+
+  /** The data window's sections at the crosshair (CC-I6), from the chart's value providers. */
+  readonly dataWindowSections = computed(() => this.host()?.dataWindow() ?? []);
 
   // ── Split view ───────────────────────────────────────────────────────────
 

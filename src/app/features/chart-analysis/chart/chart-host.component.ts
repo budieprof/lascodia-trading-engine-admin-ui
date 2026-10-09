@@ -115,6 +115,8 @@ import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import { changeText, formatStudyValue, formatVolume } from './legend-format';
+import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
@@ -249,6 +251,8 @@ export interface LegendSnapshot {
   low: number | null;
   close: number | null;
   volume: number | null;
+  /** Close minus the previous bar's close (null on the first bar). */
+  change?: number | null;
   changePct: number | null;
   indicators: Array<{
     uid: string;
@@ -256,6 +260,13 @@ export interface LegendSnapshot {
     values: Array<{ title: string; value: number | null; color: string }>;
   }>;
 }
+
+export type {
+  DataWindowContext,
+  DataWindowRow,
+  DataWindowSection,
+  ValueProvider,
+} from './value-providers';
 
 /** One plot of a study on the chart, and what was last written to it. */
 interface IndicatorPlotSeries {
@@ -554,6 +565,8 @@ export class ChartHostComponent implements OnDestroy {
    * asking for more (CC-14 — every pan to the edge used to fetch again, for nothing).
    */
   readonly historyComplete = input<boolean>(false);
+  /** The data window is open: it is filled on every crosshair move (CC-I6), and only then. */
+  readonly dataWindowOpen = input(false);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
@@ -920,6 +933,14 @@ export class ChartHostComponent implements OnDestroy {
   constructor() {
     this.zone.runOutsideAngular(() => {
       this.countdownTimer = setInterval(() => this.tickCountdown(), 1000);
+    });
+    // The data window's own sections go through the registry like any other provider's.
+    this.registerValueProvider('bar', this.barValues);
+    this.registerValueProvider('studies', this.studyValues);
+
+    // Opening the data window fills it at once, for the bar the legend shows.
+    effect(() => {
+      if (this.dataWindowOpen()) untracked(() => this.emitLegend());
     });
     // Create once the view exists, then keep it in step with inputs. Each
     // effect reads exactly one input and does its work untracked, so changing
@@ -2851,10 +2872,95 @@ export class ChartHostComponent implements OnDestroy {
       low: bar.low,
       close: bar.close,
       volume: bar.volume,
+      change: prev ? bar.close - prev.close : null,
       changePct: prev && prev.close !== 0 ? ((bar.close - prev.close) / prev.close) * 100 : null,
       indicators,
     });
+    if (this.dataWindowOpen()) this.fillDataWindow(index);
   }
+
+  // ── Data window (CC-I6) ──────────────────────────────────────────────────
+
+  /** Every value at the crosshair, section by section, in the order the providers registered. */
+  readonly dataWindow = signal<DataWindowSection[]>([]);
+  private readonly valueProviders = new ValueProviders();
+
+  /**
+   * List `provider`'s sections in the data window under `id`, after the chart's own (the bar, the
+   * studies); registering an id again replaces it. Returns the function that takes it out again.
+   * This is how the scripts' plots reach the data window.
+   */
+  registerValueProvider(id: string, provider: ValueProvider): () => void {
+    return this.valueProviders.register(id, provider);
+  }
+
+  private fillDataWindow(index: number): void {
+    const bar = this.plotted[index];
+    this.dataWindow.set(
+      bar
+        ? this.valueProviders.collect({
+            index,
+            bar,
+            utcTime: this.plottedUtc[index]?.time ?? bar.time,
+            precision: this.precision(),
+          })
+        : [],
+    );
+  }
+
+  /** The bar itself: its date, prices, change and volume. */
+  private readonly barValues: ValueProvider = ({ index, bar, utcTime, precision }) => {
+    const prev = index > 0 ? this.plotted[index - 1] : null;
+    const change = prev ? bar.close - prev.close : null;
+    const pct = prev && prev.close !== 0 ? ((bar.close - prev.close) / prev.close) * 100 : null;
+    const tradingDate = this.tradingDateAt(Math.floor(bar.time / 1000));
+    const when =
+      tradingDate === null
+        ? formatEventTime(utcTime, Math.round(this.timezoneShiftMs(utcTime) / 60_000))
+        : formatTradingDate(tradingDate, this.resolution());
+    const price = (v: number) => v.toFixed(precision);
+    return [
+      {
+        id: 'bar',
+        title: this.symbol() || 'Bar',
+        rows: [
+          { label: tradingDate === null ? 'Time' : 'Date', value: when },
+          { label: 'Open', value: price(bar.open) },
+          { label: 'High', value: price(bar.high) },
+          { label: 'Low', value: price(bar.low) },
+          { label: 'Close', value: price(bar.close) },
+          {
+            label: 'Change',
+            value:
+              changeText(change, pct, this.pipSize() ?? pipSizeFor(precision), precision) ?? '—',
+          },
+          { label: 'Volume', value: formatVolume(bar.volume) },
+        ],
+      },
+    ];
+  };
+
+  /** Each visible study's plots at the bar. */
+  private readonly studyValues: ValueProvider = ({ index, precision }) => {
+    const ohlc = this.studyBars();
+    const out: DataWindowSection[] = [];
+    for (const item of this.indicators()) {
+      if (!item.visible) continue;
+      const def = indicatorById(item.defId);
+      if (!def) continue;
+      const computed = this.computeFor(item, def, ohlc);
+      out.push({
+        id: `study:${item.uid}`,
+        title: indicatorLabel(def, item.params),
+        rows: def.plots.map((plot) => ({
+          label: plot.title,
+          value: formatStudyValue(computed[plot.key]?.[index], def.target === 'overlay', precision),
+          color: plot.color,
+        })),
+      });
+    }
+    return out;
+  };
 
   private emitSnapshot(snap: LegendSnapshot): void {
     this.lastSnapshot = snap;

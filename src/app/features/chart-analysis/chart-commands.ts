@@ -87,7 +87,7 @@ export interface ChartCommandHost {
   eventImpact(): string;
   setEventImpact(v: 'High' | 'Medium' | 'Low'): void;
   sidePane(): string;
-  setSidePane(v: 'none' | 'details' | 'news' | 'calendar'): void;
+  setSidePane(v: 'none' | 'details' | 'news' | 'calendar' | 'datawindow'): void;
   watchlistOpen: { (): boolean; set(v: boolean): void };
   objectTreeOpen: { (): boolean; set(v: boolean): void };
   toggleFullscreen(): Promise<void>;
@@ -1048,18 +1048,18 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     {
       id: 'chart.setSidePane',
       description:
-        'Open the Details pane (symbol facts), the News pane (headlines and pair bias) or the economic Calendar pane (upcoming releases), or close whichever is open.',
+        'Open the Details pane (symbol facts), the News pane (headlines and pair bias), the economic Calendar pane (upcoming releases) or the Data window (every value — bar, studies, scripts — at the crosshair), or close whichever is open.',
       params: [
         {
           name: 'pane',
           type: 'enum',
           required: true,
-          values: ['none', 'details', 'news', 'calendar'],
+          values: ['none', 'details', 'news', 'calendar', 'datawindow'],
           description: 'Which pane.',
         },
       ],
       run: (a) => {
-        const v = str(a, 'pane') as 'none' | 'details' | 'news' | 'calendar';
+        const v = str(a, 'pane') as 'none' | 'details' | 'news' | 'calendar' | 'datawindow';
         host.setSidePane(v);
         return ok(v === 'none' ? 'Side pane closed.' : `${v} pane open.`);
       },
