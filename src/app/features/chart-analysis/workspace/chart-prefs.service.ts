@@ -22,6 +22,8 @@ export const SYNCED_PREF_KEYS = [
   // Favourite drawing tools and their toolbar's place (DR-I12, `drawings/drawing-favorites.service.ts`).
   'lascodia.chart.favoriteDrawingTools.v1',
   'lascodia.chart.favoritesBar.pos.v1',
+  // Auto analysis layers (DR-I11).
+  'lascodia.chart.pref.autoAnalysis',
 ] as const;
 export type SyncedPrefKey = (typeof SYNCED_PREF_KEYS)[number];
 

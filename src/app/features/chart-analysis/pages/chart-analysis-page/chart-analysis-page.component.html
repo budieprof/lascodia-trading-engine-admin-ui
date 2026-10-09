@@ -459,6 +459,32 @@
           >
             <app-chart-icon name="structure" [size]="28" /> Market structure
           </button>
+          <!-- DR-I11: auto analysis — fitted trendlines, higher-timeframe levels, the zig-zag Fib. -->
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="autoAnalysisOn()"
+            (click)="toggleAutoAnalysis()"
+            title="Trendlines fitted and scored, the next higher timeframe's levels, Fib of the last zig-zag leg"
+          >
+            <app-chart-icon name="sr-levels" [size]="28" /> Auto analysis
+          </button>
+          @if (autoAnalysisOn()) {
+            <div class="tb-menu-chips">
+              @for (l of autoAnalysisLayers; track l.id) {
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="tb-chip"
+                  [class.on]="autoAnalysis()[l.id]"
+                  (click)="toggleAutoLayer(l.id)"
+                  [title]="l.hint"
+                >
+                  {{ l.label }}
+                </button>
+              }
+            </div>
+          }
           <!-- DR-I8: how the patterns and structure events have behaved on these bars. -->
           <button
             type="button"
@@ -1173,6 +1199,7 @@
           [showVolume]="showVolume()"
           [indicators]="active()"
           [positionFacts]="positionFacts()"
+          [autoAnalysis]="autoAnalysisOn() ? autoAnalysis() : null"
           [precision]="precision()"
           [tool]="tool()"
           [magnet]="magnetMode()"

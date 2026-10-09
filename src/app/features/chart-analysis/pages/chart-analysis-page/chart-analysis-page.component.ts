@@ -219,6 +219,7 @@ import { DrawingFavorites } from '../../drawings/drawing-favorites.service';
 import { FavoritesBarComponent } from '../../drawings/ui/favorites-bar.component';
 import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog.component';
 import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
+import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
 import {
   CreateSignalDialogComponent,
@@ -1824,6 +1825,39 @@ export class ChartAnalysisPageComponent {
       this.railFlyoutTop.set(btn.getBoundingClientRect().top - rail.getBoundingClientRect().top);
     }
     this.railFlyout.set(name);
+  }
+
+  // ── Auto analysis (DR-I11) ────────────────────────────────────────────────────
+  /** Which auto-analysis layers are on (a synced chart preference). */
+  readonly autoAnalysis = signal<AutoAnalysisSettings>({
+    trendlines: false,
+    htfLevels: false,
+    autoFib: false,
+    ...readPref<Partial<AutoAnalysisSettings>>('autoAnalysis', {}),
+  });
+  readonly autoAnalysisOn = computed(() => {
+    const a = this.autoAnalysis();
+    return a.trendlines || a.htfLevels || a.autoFib;
+  });
+  readonly autoAnalysisLayers: { id: keyof AutoAnalysisSettings; label: string; hint: string }[] = [
+    { id: 'trendlines', label: 'Trendlines', hint: 'Fitted trendlines, scored by touches, age and recency' },
+    { id: 'htfLevels', label: 'HTF levels', hint: "The next higher timeframe's support and resistance" },
+    { id: 'autoFib', label: 'Auto Fib', hint: 'Fibonacci retracement of the last zig-zag leg' },
+  ];
+
+  /** The menu's main switch: all layers on, or all off. */
+  toggleAutoAnalysis(): void {
+    const on = !this.autoAnalysisOn();
+    this.setAutoAnalysis({ trendlines: on, htfLevels: on, autoFib: on });
+  }
+
+  toggleAutoLayer(id: keyof AutoAnalysisSettings): void {
+    this.setAutoAnalysis({ ...this.autoAnalysis(), [id]: !this.autoAnalysis()[id] });
+  }
+
+  private setAutoAnalysis(next: AutoAnalysisSettings): void {
+    this.autoAnalysis.set(next);
+    writePref('autoAnalysis', next);
   }
 
   // ── Pattern & structure scorecard (DR-I8) ─────────────────────────────────────

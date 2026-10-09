@@ -79,6 +79,13 @@ import {
   type StudySettings,
 } from '../indicators/study-settings';
 import { isShownOn } from '../drawings/drawing-ops';
+import {
+  autoFib,
+  higherTimeframe,
+  htfLevels,
+  scoredTrendlines,
+  type AutoAnalysisSettings,
+} from '../overlays/auto-analysis';
 import { HiLoSeries, HlcAreaSeries, VolCandleSeries } from './custom-series';
 import {
   boxUnit,
@@ -115,7 +122,7 @@ import {
 } from './plotted-bars';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
-import { resolutionMs, type TvResolution } from '../datafeed/resolution';
+import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { pipSizeFor } from '../datafeed/symbol-info';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
@@ -625,6 +632,8 @@ export class ChartHostComponent implements OnDestroy {
   /** Balance range, value area, stop pools and the events that formed them. */
   readonly showStructure = input<boolean>(false);
   readonly indicators = input<ActiveIndicator[]>([]);
+  /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib; null = off. */
+  readonly autoAnalysis = input<AutoAnalysisSettings | null>(null);
   /** What a new Long / Short Position tool is filled with (DR-I9): the account's and the symbol's facts. */
   readonly positionFacts = input<Record<string, unknown> | null>(null);
   readonly precision = input<number>(5);
@@ -1174,6 +1183,8 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => {
         this.applyProfiles(this.indicators());
         this.applyIndicators(this.indicators(), this.plotted.length);
+        // The higher timeframe's bars for the auto-analysis levels (DR-I11).
+        if (this.autoAnalysis()?.htfLevels) this.recomputeAnalysis();
       });
     });
 
@@ -1240,6 +1251,7 @@ export class ChartHostComponent implements OnDestroy {
       this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
+      this.autoAnalysis();
       this.calendar();
       untracked(() => this.recomputeAnalysis());
     });
@@ -1354,11 +1366,14 @@ export class ChartHostComponent implements OnDestroy {
     const wantProfile = this.showVolumeProfile();
     const wantLevels = this.showSupportResistance();
     const wantStructure = this.showStructure();
-    if (!wantProfile && !wantLevels && !wantStructure) {
+    const auto = this.autoAnalysis();
+    const wantAuto = !!auto && (auto.trendlines || auto.htfLevels || auto.autoFib);
+    if (!wantProfile && !wantLevels && !wantStructure && !wantAuto) {
       this.analysisRenderer.setProfile(null);
       this.analysisRenderer.setPeriodProfiles([]);
       this.analysisRenderer.setLevels([]);
       this.analysisRenderer.setStructure(null);
+      this.analysisRenderer.setAuto(null);
       return;
     }
 
@@ -1377,6 +1392,30 @@ export class ChartHostComponent implements OnDestroy {
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
+    this.analysisRenderer.setAuto(wantAuto && auto ? this.autoAnalysisOf(auto, window) : null);
+  }
+
+  /**
+   * Auto analysis (DR-I11) for the bars on screen: their trendlines and zig-zag Fib, and the next higher timeframe's
+   * S/R levels over the same span (its bars loaded through StudyBarsService; none until they land).
+   */
+  private autoAnalysisOf(auto: AutoAnalysisSettings, window: readonly Bar[]) {
+    let htf: ReturnType<typeof htfLevels> = [];
+    const tf = auto.htfLevels ? higherTimeframe(this.resolution()) : null;
+    if (tf && window.length) {
+      const tfMs = resolutionMs(tf) ?? 0;
+      // The higher timeframe's last 150 bars up to the window's end: its levels as of now.
+      const to = window[window.length - 1].time;
+      const from = to - tfMs * 150;
+      this.profileBars.ensure(this.symbol(), tf, from, to);
+      const htfBars = this.profileBars.bars(this.symbol(), tf, from, to);
+      htf = htfBars.length >= 30 ? htfLevels(htfBars, formatResolution(tf)) : [];
+    }
+    return {
+      trendlines: auto.trendlines ? scoredTrendlines(window) : [],
+      htf,
+      fib: auto.autoFib ? autoFib(window) : null,
+    };
   }
 
   /**
@@ -1410,7 +1449,13 @@ export class ChartHostComponent implements OnDestroy {
    */
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
   private scheduleAnalysis(): void {
-    if (!this.showVolumeProfile() && !this.showSupportResistance() && !this.showStructure()) return;
+    if (
+      !this.showVolumeProfile() &&
+      !this.showSupportResistance() &&
+      !this.showStructure() &&
+      !this.autoAnalysis()
+    )
+      return;
     if (this.analysisTimer !== null) clearTimeout(this.analysisTimer);
     this.analysisTimer = setTimeout(() => {
       this.analysisTimer = null;
@@ -2576,7 +2621,8 @@ export class ChartHostComponent implements OnDestroy {
       this.indicators().some((a) => a.visible && studyKind(a.defId) !== 'indicator') ||
       this.showVolumeProfile() ||
       this.showSupportResistance() ||
-      this.showStructure();
+      this.showStructure() ||
+      !!this.autoAnalysis();
     if (!scanning) return;
     this.tailStudiesTimer = setTimeout(() => {
       this.tailStudiesTimer = null;
