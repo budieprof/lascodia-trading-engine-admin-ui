@@ -61,7 +61,8 @@ let nextExemptionUid = 0;
           data-testid="exemption-switch"
           [attr.aria-checked]="shown()"
           [attr.aria-describedby]="uid + '-state'"
-          [disabled]="saving()"
+          [disabled]="saving() || readOnly()"
+          [title]="readOnly() ? 'Changing the exemption needs operator access' : ''"
           (click)="toggle()"
         >
           <span class="track" aria-hidden="true"><span class="thumb"></span></span>
@@ -377,6 +378,8 @@ export class NewsBlackoutExemptionCardComponent {
   readonly strategyName = input<string | null>(null);
   /** Whether the engine reports the strategy exempt. */
   readonly exempt = input(false);
+  /** Without operator access the exemption is shown, not changed (PE-I13). */
+  readonly readOnly = input(false);
 
   /** The engine accepted a change — the new exemption state. */
   readonly changed = output<boolean>();

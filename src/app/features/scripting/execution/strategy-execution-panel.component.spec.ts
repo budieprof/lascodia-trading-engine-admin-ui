@@ -1,6 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { ChangeDetectionStrategy, Component, EventEmitter, Input, Output } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  EventEmitter,
+  Input,
+  Output,
+  ViewChild,
+  signal,
+} from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+
+import { AuthService } from '@core/auth/auth.service';
 
 import { StrategyExecutionPanelComponent } from './strategy-execution-panel.component';
 import { AccountBindingsEditorComponent } from './account-bindings-editor.component';
@@ -9,19 +19,34 @@ import { NewsBlackoutExemptionCardComponent } from './news-blackout-exemption-ca
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 declareSignalIo(StrategyExecutionPanelComponent, { inputs: ['strategy'], outputs: ['changed'] });
+// The panel's viewChild() queries, declared the way the CLI's JIT transform would (see
+// declareSignalIo) — without it the JIT compiler never sees them.
+for (const [prop, type] of [
+  ['bindingsEditor', AccountBindingsEditorComponent],
+  ['exemptionCard', NewsBlackoutExemptionCardComponent],
+] as const) {
+  (ViewChild as unknown as (t: unknown, o: object) => PropertyDecorator)(type, { isSignal: true })(
+    StrategyExecutionPanelComponent.prototype,
+    prop,
+  );
+}
 
+// Each stub also answers to the real component's token, so the panel's view queries find it.
 @Component({
   selector: 'app-account-bindings-editor',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.Eager,
   template: '',
+  providers: [{ provide: AccountBindingsEditorComponent, useExisting: BindingsStubComponent }],
 })
 class BindingsStubComponent {
   @Input() strategyId = 0;
   @Input() isScript = false;
   @Input() symbol: string | null = null;
   @Input() strategyName: string | null = null;
+  @Input() readOnly = false;
   @Output() saved = new EventEmitter<void>();
+  readonly dirty = signal(false);
 }
 
 @Component({
@@ -34,6 +59,7 @@ class PolicyStubComponent {
   @Input() strategyId = 0;
   @Input() policy: string | null = null;
   @Input() isScript = false;
+  @Input() readOnly = false;
   @Output() policyChanged = new EventEmitter<string>();
 }
 
@@ -42,12 +68,15 @@ class PolicyStubComponent {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: '',
+  providers: [{ provide: NewsBlackoutExemptionCardComponent, useExisting: ExemptionStubComponent }],
 })
 class ExemptionStubComponent {
   @Input() strategyId = 0;
   @Input() strategyName: string | null = null;
   @Input() exempt = false;
+  @Input() readOnly = false;
   @Output() changed = new EventEmitter<boolean>();
+  readonly draft = signal<boolean | null>(null);
 }
 
 describe('StrategyExecutionPanelComponent', () => {
@@ -61,8 +90,14 @@ describe('StrategyExecutionPanelComponent', () => {
     el = fixture.nativeElement as HTMLElement;
   }
 
+  let canOperate = true;
+
   beforeEach(() => {
-    TestBed.configureTestingModule({ imports: [StrategyExecutionPanelComponent] });
+    canOperate = true;
+    TestBed.configureTestingModule({
+      imports: [StrategyExecutionPanelComponent],
+      providers: [{ provide: AuthService, useValue: { hasPermission: () => canOperate } }],
+    });
     TestBed.overrideComponent(StrategyExecutionPanelComponent, {
       remove: {
         imports: [
@@ -142,5 +177,37 @@ describe('StrategyExecutionPanelComponent', () => {
       .componentInstance as PolicyStubComponent;
     policy.policyChanged.emit('Standard');
     expect(count).toBe(2);
+  });
+  it('PE-I13: hands every card read-only without operator access', () => {
+    canOperate = false;
+    render({ authoringMode: 'Script' });
+    const editor = fixture.debugElement.query((d) => d.name === 'app-account-bindings-editor')
+      .componentInstance as BindingsStubComponent;
+    const policy = fixture.debugElement.query((d) => d.name === 'app-execution-policy-card')
+      .componentInstance as PolicyStubComponent;
+    expect(editor.readOnly).toBe(true);
+    expect(policy.readOnly).toBe(true);
+    expect(exemptionCard()!.readOnly).toBe(true);
+  });
+
+  it('PE-I13: lets an operator change them', () => {
+    render({ authoringMode: 'Script' });
+    const editor = fixture.debugElement.query((d) => d.name === 'app-account-bindings-editor')
+      .componentInstance as BindingsStubComponent;
+    expect(editor.readOnly).toBe(false);
+    expect(exemptionCard()!.readOnly).toBe(false);
+  });
+
+  it('PE-14: reports unsaved binding or exemption edits to the page', () => {
+    render({ authoringMode: 'Script' });
+    const panel = fixture.componentInstance;
+    const editor = fixture.debugElement.query((d) => d.name === 'app-account-bindings-editor')
+      .componentInstance as BindingsStubComponent;
+    expect(panel.hasUnsavedChanges()).toBe(false);
+    editor.dirty.set(true);
+    expect(panel.hasUnsavedChanges()).toBe(true);
+    editor.dirty.set(false);
+    exemptionCard()!.draft.set(true);
+    expect(panel.hasUnsavedChanges()).toBe(true);
   });
 });

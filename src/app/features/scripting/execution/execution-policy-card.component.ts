@@ -56,7 +56,7 @@ let nextPolicyUid = 0;
               <span class="option-title">{{ describe(p).title }}</span>
               @if (current() === p) {
                 <span class="badge">Current</span>
-              } @else {
+              } @else if (!readOnly()) {
                 <button type="button" class="btn" [disabled]="saving()" (click)="requestChange(p)">
                   {{ current() === null ? 'Set' : 'Switch to' }} {{ describe(p).title }}…
                 </button>
@@ -226,6 +226,8 @@ export class ExecutionPolicyCardComponent {
   /** The policy the engine reported; null when it did not. */
   readonly policy = input<ExecutionPolicy | null>(null);
   readonly isScript = input(false);
+  /** Without operator access the policy is shown, not changed (PE-I13). */
+  readonly readOnly = input(false);
 
   readonly policyChanged = output<ExecutionPolicy>();
 

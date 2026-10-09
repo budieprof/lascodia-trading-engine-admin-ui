@@ -73,5 +73,11 @@ export const STRATEGIES_ROUTES: Routes = [
         (m) => m.StrategyEditPageComponent,
       ),
   },
-  { path: ':id', component: StrategyDetailPageComponent, data: { breadcrumb: 'Detail' } },
+  {
+    path: ':id',
+    component: StrategyDetailPageComponent,
+    data: { breadcrumb: 'Detail' },
+    // PE-14: an unsaved edit (the edit dialog, the Execution or Alerts tab) asks before leaving.
+    canDeactivate: [unsavedChangesGuard],
+  },
 ];
