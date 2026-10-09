@@ -89,6 +89,13 @@ const POLL_MS = 1_500;
         display: block;
         font-size: 12px;
       }
+      /* The page's .pane-empty style does not reach inside this component (style encapsulation): the empty, loading and
+         error states carry the same 10px/12px gutter here, or they sit flush against the pane's border. */
+      .pane-empty {
+        padding: 10px 12px;
+        line-height: 1.45;
+        color: var(--text-muted, #787b86);
+      }
       .dp-note {
         margin: 0 10px 8px;
         color: var(--tv-muted, #787b86);
