@@ -25,9 +25,7 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
-  OptimizationRunDto,
   BacktestRunDto,
-  WalkForwardRunDto,
   PagerRequest,
   UpdateStrategyRequest,
   StrategyLineageDto,
@@ -68,6 +66,8 @@ import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
 import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
+import { OptimizationWorkbenchComponent } from '@features/scripting/research/optimization-workbench.component';
+import { WalkForwardWorkbenchComponent } from '@features/scripting/research/walk-forward-workbench.component';
 import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
 import { OPERATOR_PERMISSION } from '@features/scripting/shared/permissions';
@@ -111,6 +111,8 @@ import {
     StrategyScriptCardComponent,
     FirstStrategyChecklistComponent,
     RunComparisonComponent,
+    OptimizationWorkbenchComponent,
+    WalkForwardWorkbenchComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -558,27 +560,9 @@ import {
             <app-data-table [columnDefs]="orderColumns" [fetchData]="fetchOrders" />
           }
 
-          <!-- Optimization Tab -->
+          <!-- Optimization Tab — PE-I4 workbench: search space, runs, results, heatmap, trial ledger. -->
           @if (activeTab() === 'optimization') {
-            <div class="optimization-header">
-              <button
-                class="btn btn-primary"
-                (click)="onTriggerOptimization()"
-                [disabled]="optimizationLoading()"
-              >
-                @if (optimizationLoading()) {
-                  <span class="spinner"></span>
-                } @else {
-                  Trigger Optimization
-                }
-              </button>
-            </div>
-
-            <app-data-table
-              #optimizationTable
-              [columnDefs]="optimizationColumns"
-              [fetchData]="fetchOptimizations"
-            />
+            <app-optimization-workbench [strategy]="strategy()!" />
           }
 
           <!-- Backtests Tab — runs filtered to this strategy. Click-through
@@ -603,13 +587,9 @@ import {
             <app-run-comparison [strategyId]="strategyId" />
           }
 
-          <!-- Walk-Forward Tab — runs filtered to this strategy. -->
+          <!-- Walk-Forward Tab — BT-I5 workbench: launcher, runs, stitched OOS analysis, Monte Carlo. -->
           @if (activeTab() === 'walkforward') {
-            <app-data-table
-              [columnDefs]="walkForwardColumns"
-              [fetchData]="fetchWalkForward"
-              (rowClick)="onWalkForwardRowClick($event)"
-            />
+            <app-walk-forward-workbench [strategy]="strategy()!" />
           }
 
           <!-- Variants Tab — A/B shadow tests attached to this base strategy. -->
@@ -1216,12 +1196,6 @@ import {
         font-family: 'SF Mono', 'Fira Code', monospace;
       }
 
-      .optimization-header {
-        display: flex;
-        justify-content: flex-end;
-        margin-bottom: var(--space-4);
-      }
-
       .error-state {
         text-align: center;
         padding: var(--space-16);
@@ -1410,7 +1384,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     { value: 100, color: '#34C759' },
   ];
 
-  @ViewChild('optimizationTable') optimizationTable?: DataTableComponent<OptimizationRunDto>;
   /** Refreshed when the script launcher queues a run, so the new row shows at once. */
   @ViewChild('backtestTable') backtestTable?: DataTableComponent<BacktestRunDto>;
 
@@ -1454,7 +1427,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   /** Why the last activation was refused, shown under the header until dismissed. */
   readonly activationHint = signal<string | null>(null);
   showRejectionDrawer = signal(false);
-  optimizationLoading = signal(false);
 
   // Config-tab roll-up signals: lifetime counters and last-N feeds.
   // null while loading; numeric value once the count comes back.
@@ -1937,73 +1909,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     },
   ];
 
-  readonly optimizationColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    {
-      field: 'triggerType',
-      headerName: 'Trigger',
-      flex: 1,
-      valueFormatter: (p: any) => this.enumLabel.transform(p.value),
-    },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 120,
-      cellRenderer: (p: any) => {
-        const v = this.getOptStatusVariant(p.value);
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${v.bg};color:${v.color}">${p.value}</span>`;
-      },
-    },
-    { field: 'iterations', headerName: 'Iterations', width: 100 },
-    {
-      field: 'bestHealthScore',
-      headerName: 'Best Score',
-      width: 110,
-      valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-',
-    },
-    {
-      field: 'baselineHealthScore',
-      headerName: 'Baseline',
-      width: 110,
-      valueFormatter: (p: any) => p.value?.toFixed(4) ?? '-',
-    },
-    {
-      field: 'startedAt',
-      headerName: 'Started',
-      flex: 1,
-      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
-    },
-    {
-      field: 'completedAt',
-      headerName: 'Completed',
-      flex: 1,
-      valueFormatter: (p: any) => (p.value ? this.relativeTime.transform(p.value) : '-'),
-    },
-    {
-      headerName: 'Actions',
-      width: 180,
-      sortable: false,
-      cellRenderer: (p: any) => {
-        const run = p.data as OptimizationRunDto;
-        if (run.status === 'Completed') {
-          return `<div style="display:flex;gap:6px;padding-top:4px">
-            <button class="opt-action-btn approve" data-action="approve" data-id="${run.id}" style="height:24px;padding:0 10px;border:none;border-radius:9999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(52,199,89,0.15);color:#248A3D">Approve</button>
-            <button class="opt-action-btn reject" data-action="reject" data-id="${run.id}" style="height:24px;padding:0 10px;border:none;border-radius:9999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(255,59,48,0.15);color:#D70015">Reject</button>
-          </div>`;
-        }
-        return '';
-      },
-      onCellClicked: (params: any) => {
-        const target = params.event?.target as HTMLElement;
-        if (target?.dataset?.['action'] === 'approve') {
-          this.onApproveOptimization(+target.dataset['id']!);
-        } else if (target?.dataset?.['action'] === 'reject') {
-          this.onRejectOptimization(+target.dataset['id']!);
-        }
-      },
-    },
-  ];
-
   // Engine `PagerRequestWithFilterType<TFilter,...>` setters reject any
   // bare-string `filter` value with HTTP 400 (System.Text.Json can't bind a
   // string to TFilter). Pass an object that matches the per-controller
@@ -2019,21 +1924,8 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
       .pipe(map((res) => res.data!));
 
-  readonly fetchOptimizations = (params: PagerRequest) =>
-    this.feedbackService
-      .listOptimizationRuns({
-        ...params,
-        filter: { ...(params.filter ?? {}), strategyId: this.strategyId },
-      })
-      .pipe(map((res) => res.data!));
-
   readonly fetchBacktests = (params: PagerRequest) =>
     this.backtestsService
-      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
-      .pipe(map((res) => res.data!));
-
-  readonly fetchWalkForward = (params: PagerRequest) =>
-    this.walkForwardService
       .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
       .pipe(map((res) => res.data!));
 
@@ -2111,102 +2003,8 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     },
   ];
 
-  readonly walkForwardColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 80 },
-    { field: 'symbol', headerName: 'Symbol', width: 110 },
-    {
-      field: 'timeframe',
-      headerName: 'TF',
-      width: 80,
-      valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
-    },
-    {
-      field: 'fromDate',
-      headerName: 'From',
-      width: 120,
-      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
-    },
-    {
-      field: 'toDate',
-      headerName: 'To',
-      width: 120,
-      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
-    },
-    { field: 'inSampleDays', headerName: 'IS days', width: 90 },
-    { field: 'outOfSampleDays', headerName: 'OOS days', width: 100 },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 120,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Walk-forward status' },
-    },
-    {
-      field: 'averageOutOfSampleScore',
-      headerName: 'Avg OOS',
-      width: 110,
-      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
-    },
-    {
-      field: 'scoreConsistency',
-      headerName: 'Consistency',
-      width: 130,
-      minWidth: 130,
-      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
-    },
-    {
-      colId: 'oosWinRate',
-      headerName: 'Win %',
-      headerTooltip:
-        'Out-of-sample win rate: winning OOS trades / all OOS trades, pooled over every window',
-      width: 100,
-      valueGetter: (p: any) => this.oosWinRate(p.data),
-      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
-    },
-    {
-      field: 'startedAt',
-      headerName: 'Started',
-      flex: 1,
-      minWidth: 130,
-      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
-    },
-  ];
-
-  /** Pooled OOS win rate from windowResultsJson (each window's OosWinRate weighted by its OosTotalTrades); null when unknown. */
-  private readonly oosWinRateCache = new Map<number, number | null>();
-  private oosWinRate(run: WalkForwardRunDto | undefined): number | null {
-    if (!run?.windowResultsJson) return null;
-    if (this.oosWinRateCache.has(run.id)) return this.oosWinRateCache.get(run.id)!;
-    let rate: number | null = null;
-    try {
-      const windows = JSON.parse(run.windowResultsJson) as Array<{
-        OosTotalTrades?: number;
-        OosWinRate?: number;
-      }>;
-      let trades = 0;
-      let wins = 0;
-      for (const w of Array.isArray(windows) ? windows : []) {
-        const n = Number(w?.OosTotalTrades ?? 0);
-        const wr = Number(w?.OosWinRate);
-        if (n > 0 && Number.isFinite(wr)) {
-          trades += n;
-          wins += wr * n;
-        }
-      }
-      rate = trades > 0 ? wins / trades : null;
-    } catch {
-      rate = null;
-    }
-    this.oosWinRateCache.set(run.id, rate);
-    return rate;
-  }
-
   onBacktestRowClick(run: BacktestRunDto): void {
     this.router.navigate(['/backtests', run.id]);
-  }
-
-  onWalkForwardRowClick(run: WalkForwardRunDto): void {
-    this.router.navigate(['/walk-forward', run.id]);
   }
 
   ngOnInit(): void {
@@ -2529,41 +2327,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       });
   }
 
-  onTriggerOptimization(): void {
-    this.optimizationLoading.set(true);
-    this.feedbackService.triggerOptimization({ strategyId: this.strategyId }).subscribe({
-      next: () => {
-        this.notifications.success('Optimization triggered');
-        this.optimizationLoading.set(false);
-        this.optimizationTable?.loadData();
-      },
-      error: () => {
-        this.notifications.error('Failed to trigger optimization');
-        this.optimizationLoading.set(false);
-      },
-    });
-  }
-
-  onApproveOptimization(id: number): void {
-    this.feedbackService.approveOptimization(id).subscribe({
-      next: () => {
-        this.notifications.success('Optimization approved');
-        this.optimizationTable?.loadData();
-      },
-      error: () => this.notifications.error('Failed to approve optimization'),
-    });
-  }
-
-  onRejectOptimization(id: number): void {
-    this.feedbackService.rejectOptimization(id).subscribe({
-      next: () => {
-        this.notifications.success('Optimization rejected');
-        this.optimizationTable?.loadData();
-      },
-      error: () => this.notifications.error('Failed to reject optimization'),
-    });
-  }
-
   protected loadStrategy(): void {
     this.strategiesService.getById(this.strategyId).subscribe({
       next: (res) => {
@@ -2659,18 +2422,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       Cancelled: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
       Rejected: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015' },
       Expired: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
-    };
-    return m[status] ?? { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' };
-  }
-
-  private getOptStatusVariant(status: string): { bg: string; color: string } {
-    const m: Record<string, { bg: string; color: string }> = {
-      Queued: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
-      Running: { bg: 'rgba(0, 113, 227, 0.12)', color: '#0040DD' },
-      Completed: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
-      Failed: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015' },
-      Approved: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
-      Rejected: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015' },
     };
     return m[status] ?? { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' };
   }
