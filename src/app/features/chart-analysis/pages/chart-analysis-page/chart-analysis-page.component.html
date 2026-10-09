@@ -1587,9 +1587,25 @@
             [precision]="precision()"
             [lastClose]="bars().at(-1)?.close ?? 0"
             [focusId]="alertFocusId()"
+            [scriptAlertFocusId]="scriptAlertFocusId()"
             (closed)="closeAlertManager()"
           />
         }
+        <!-- "Create alert on <script>" (PC-I14, SS-I1): a native dialog, so it sits above the chart and traps focus. -->
+        <dialog
+          #scriptAlertDialog
+          class="script-alert-dialog"
+          aria-label="Create an alert on a script"
+          (close)="scriptAlertTarget.set(null)"
+        >
+          @if (scriptAlertTarget(); as t) {
+            <app-chart-script-alert-form
+              [target]="t"
+              (saved)="closeScriptAlert($event)"
+              (cancelled)="closeScriptAlert()"
+            />
+          }
+        </dialog>
       </div>
 
       @for (panel of comparePanels(); track panel.id) {
@@ -1783,6 +1799,7 @@
           (source)="openScriptSource(c.key)"
           (tester)="testerOpen.set(!testerOpen())"
           (logs)="openLogs(c.key)"
+          (alert)="openScriptAlert(c.key)"
           (removed)="removeScriptFromChart(c.key)"
           (openAt)="openScriptAt(c.key, $event)"
         />

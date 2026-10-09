@@ -8,6 +8,7 @@ import type {
   ScriptCompileResult,
   ScriptDiagnostic,
   ScriptInputDto,
+  ScriptRunSession,
 } from '@core/api/scripting.types';
 import { resolutionSource, type TvResolution } from '../datafeed/resolution';
 
@@ -111,6 +112,11 @@ export interface ChartScriptResult {
    * read — through the render model (`script-model-cache.ts`), never a second copy of the outputs.
    */
   run: PineRunResult | null;
+  /**
+   * PC-I1: the run's warm session on the engine (a run that asked `keepWarm`): its frames keep `run` current. Absent
+   * or null when none is kept (`note` says why).
+   */
+  session?: ScriptRunSession | null;
 }
 
 // ── Time & timeframe ─────────────────────────────────────────────────────────
@@ -253,6 +259,7 @@ export function toChartScriptResult(raw: unknown): ChartScriptResult {
     errorStack: firstError ? [] : (rt?.callStack ?? []),
     strategy: kind === 'strategy' && rawReport ? strategyToChart(rawReport) : null,
     run,
+    session: ((raw as { session?: ScriptRunSession | null } | null)?.session ?? null) as ScriptRunSession | null,
   };
 }
 

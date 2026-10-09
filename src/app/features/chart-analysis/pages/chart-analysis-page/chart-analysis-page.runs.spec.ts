@@ -9,6 +9,7 @@ import type { ChartScriptResult } from '../../scripts/chart-script.model';
 import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { MAX_BUSY_RETRIES } from '../../scripts/script-run-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
+import { realtimePageState } from './chart-analysis-page.realtime.testing';
 
 // The page's runScript and the editor's "Add / Update on chart", run against just the state they
 // touch (as the strategy and editor specs do): the component's prototype, its signals, a real
@@ -113,6 +114,8 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   const replayActive = signal(false);
   const displayBars = signal<{ time: number }[]>([]);
   Object.assign(p, {
+    // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
+    ...realtimePageState(),
     // The dock's Pine Logs (PC-I6): closed.
     logsKey: signal(null),
     logsFront: signal(false),
