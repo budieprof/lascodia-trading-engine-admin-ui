@@ -182,8 +182,8 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
 
       const now = this.now();
       let next: EventMark | null = null;
-      let prevX = -Infinity;
-      let stack = 0;
+      // The rightmost badge x on each stack level: a badge takes the lowest level with room at its x.
+      const levelX: number[] = [];
       const badges: { mark: EventMark; x: number; y: number }[] = [];
       for (const mark of this.marks) {
         if (!passesImpact(mark.impact, this.minImpact)) continue;
@@ -205,9 +205,10 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
         ctx.lineTo(x, h - 2 * BADGE_R - 4);
         ctx.stroke();
 
-        stack = x - prevX < BADGE_GAP ? Math.min(stack + 1, MAX_STACK - 1) : 0;
-        prevX = x;
-        const y = h - BADGE_R - 4 - stack * BADGE_GAP;
+        let level = levelX.findIndex((lx) => x - lx >= BADGE_GAP);
+        if (level < 0) level = levelX.length < MAX_STACK ? levelX.length : MAX_STACK - 1;
+        levelX[level] = x;
+        const y = h - BADGE_R - 4 - level * BADGE_GAP;
         badges.push({ mark, x, y });
       }
 
