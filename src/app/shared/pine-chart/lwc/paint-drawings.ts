@@ -34,6 +34,8 @@ export interface HitRegion {
   w: number;
   h: number;
   tooltip: string;
+  /** A strategy fill's region: the numbers of the trades the arrow stands for. */
+  trades?: readonly number[];
 }
 
 export interface Point {

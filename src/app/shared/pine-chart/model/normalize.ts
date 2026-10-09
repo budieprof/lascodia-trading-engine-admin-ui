@@ -1,6 +1,7 @@
 import type {
   PineBar,
   PineBoxOutput,
+  PineCallSite,
   PineCandleOutput,
   PineColorSeriesOutput,
   PineCompileResult,
@@ -143,13 +144,29 @@ export function normalizeCompile(raw: unknown): PineCompileResult | null {
         column: num(d['column'], 0),
         endLine: numOrNull(d['endLine']) ?? undefined,
         endColumn: numOrNull(d['endColumn']) ?? undefined,
+        unit: strOrNull(d['unit']),
       })),
     declaration: normalizeDeclaration(raw['declaration']),
+    plots: normalizeCallSites(raw['plots']),
   };
+}
+
+/** The compile response's plot-type calls, in source order (absent: none). */
+export function normalizeCallSites(raw: unknown): PineCallSite[] {
+  return arr<Obj>(raw)
+    .filter(isObj)
+    .map((p) => ({
+      function: str(p['function'], ''),
+      title: strOrNull(p['title']),
+      count: num(p['count'], 0),
+      line: num(p['line'], 0),
+      column: num(p['column'], 0),
+    }));
 }
 
 export function normalizeDeclaration(raw: unknown): PineDeclaration | null {
   if (!isObj(raw)) return null;
+  const scale = strOrNull(raw['scale'])?.toLowerCase();
   return {
     ...raw,
     kind: str(raw['kind'], 'indicator'),
@@ -158,6 +175,10 @@ export function normalizeDeclaration(raw: unknown): PineDeclaration | null {
     overlay: bool(raw['overlay'], false),
     format: strOrNull(raw['format']),
     precision: numOrNull(raw['precision']),
+    scale: scale === 'right' || scale === 'left' || scale === 'none' ? scale : null,
+    // Pine's defaults: behind the chart, plots in the default (not code) order.
+    behindChart: bool(raw['behindChart'], true),
+    explicitPlotZorder: bool(raw['explicitPlotZorder'], false),
   };
 }
 
@@ -169,6 +190,15 @@ export function normalizeRuntimeError(raw: unknown): PineRuntimeError | null {
     line: numOrNull(raw['line']),
     column: numOrNull(raw['column']),
     barIndex: numOrNull(raw['barIndex']),
+    unit: strOrNull(raw['unit']),
+    callStack: arr<Obj>(raw['callStack'])
+      .filter(isObj)
+      .map((f) => ({
+        function: str(f['function'], ''),
+        line: numOrNull(f['line']),
+        column: numOrNull(f['column']),
+        unit: strOrNull(f['unit']),
+      })),
   };
 }
 

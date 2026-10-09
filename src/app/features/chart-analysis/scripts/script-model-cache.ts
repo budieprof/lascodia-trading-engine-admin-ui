@@ -35,6 +35,8 @@ export function scriptRenderModel(
       outputs: run.outputs,
       report: run.report,
       declaration: run.compile?.declaration ?? null,
+      // Where each output's call is in the code: explicit_plot_zorder draws in that order.
+      callSites: run.compile?.plots ?? null,
     },
     { pricePrecision: key < 0 ? null : key, trades: true },
   );

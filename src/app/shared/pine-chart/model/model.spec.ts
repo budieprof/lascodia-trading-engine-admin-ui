@@ -70,6 +70,64 @@ describe('normalize', () => {
     expect(normalizeBars('nope')).toEqual([]);
   });
 
+  it('reads the declaration’s scale, behind_chart and explicit_plot_zorder with Pine’s defaults', () => {
+    const run = (declaration: object) =>
+      normalizeRunResult({ compile: { success: true, diagnostics: [], declaration }, bars: [] })!
+        .compile!.declaration!;
+    expect(run({ title: 'X', overlay: true })).toMatchObject({
+      scale: null,
+      behindChart: true,
+      explicitPlotZorder: false,
+    });
+    expect(
+      run({ title: 'X', scale: 'None', behindChart: false, explicitPlotZorder: true }),
+    ).toMatchObject({ scale: 'none', behindChart: false, explicitPlotZorder: true });
+    expect(run({ title: 'X', scale: 'sideways' }).scale).toBeNull();
+  });
+
+  it('keeps the compile response’s call sites in source order', () => {
+    const r = normalizeRunResult({
+      compile: {
+        success: true,
+        diagnostics: [],
+        declaration: null,
+        plots: [
+          { function: 'plot', title: 'Basis', count: 1, line: 9, column: 1 },
+          { function: 'fill', title: null, count: 0, line: 12, column: 1 },
+        ],
+      },
+      bars: [],
+    })!;
+    expect(r.compile!.plots).toEqual([
+      { function: 'plot', title: 'Basis', count: 1, line: 9, column: 1 },
+      { function: 'fill', title: null, count: 0, line: 12, column: 1 },
+    ]);
+  });
+
+  it('reads where a failure is: a library unit and the call stack', () => {
+    const r = normalizeRunResult({
+      compile: {
+        success: false,
+        diagnostics: [{ code: 'PS2001', severity: 'error', message: 'x', line: 4, column: 2, unit: 'me/lib/1' }],
+        declaration: null,
+      },
+      bars: [],
+      runtimeError: {
+        code: 'PS5011',
+        message: 'boom',
+        line: 31,
+        column: 9,
+        unit: 'me/lib/1',
+        callStack: [{ function: 'pick', line: 12, column: 5 }],
+      },
+    })!;
+    expect(r.compile!.diagnostics[0].unit).toBe('me/lib/1');
+    expect(r.runtimeError).toMatchObject({
+      unit: 'me/lib/1',
+      callStack: [{ function: 'pick', line: 12, column: 5, unit: null }],
+    });
+  });
+
   it('reads replay starts with numeric or string session ids', () => {
     expect(
       normalizeReplayStart({ sessionId: 42, frame: { barIndex: 10, bars: [] } })?.sessionId,

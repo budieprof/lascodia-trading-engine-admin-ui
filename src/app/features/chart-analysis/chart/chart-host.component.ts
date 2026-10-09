@@ -130,7 +130,8 @@ import {
   type CandleTrendFilter,
 } from '../patterns/candlestick-patterns';
 import { detectChartPatterns } from '../patterns/chart-patterns';
-import { renderScriptResult, type ScriptRenderHandle } from '../scripts/script-renderer';
+import { ScriptLayers, type ChartScriptLayer } from '../scripts/script-layers';
+import { scriptRenderModel } from '../scripts/script-model-cache';
 import {
   DEFAULT_RIGHT_OFFSET,
   marginCap,
@@ -143,7 +144,6 @@ import {
 } from '../scripts/run-on-host';
 import { PineTableOverlayComponent } from '@shared/pine-chart/components/pine-table-overlay.component';
 import type { TableLayout } from '@shared/pine-chart/render/render-model';
-import type { ChartScriptResult } from '../scripts/chart-script.model';
 import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
 
@@ -560,12 +560,13 @@ export class ChartHostComponent implements OnDestroy {
   readonly symbol = input<string>('');
   /** Bars of other symbols, keyed by symbol, for compare studies (correlation, spread…). */
   readonly compareBars = input<Record<string, Bar[]>>({});
-  /** Pine indicator / strategy runs to paint on this chart. */
-  readonly scriptResults = input<ChartScriptResult[]>([]);
+  /**
+   * Pine indicator / strategy runs to paint on this chart, by key, in the order they were added
+   * (a later script's barcolor() wins), each with its display settings (eye, trades on chart, …).
+   */
+  readonly scriptResults = input<ChartScriptLayer[]>([]);
   /** Externally sourced series (FX fundamentals), each in its own pane. */
   readonly externalPanes = input<ExternalPane[]>([]);
-  /** Whether strategy entry/exit arrows are drawn. */
-  readonly showScriptTrades = input<boolean>(true);
   readonly resolution = input<string>('');
   /**
    * The symbol's session as the engine reports it (`scripting/chart-bars`): the trading days the
@@ -1063,14 +1064,15 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.syncSessionBreaks());
     });
 
-    // Pine runs: re-rendered when their results change, and on a rebuild (syncData) — never on a
-    // tick (the contract with pine-chart). Ticks write the forming bar's row, which carries its
-    // barcolor (priceRowsFrom), and the price series is replaced only by a style change.
+    // Pine runs: synced when their results or settings change (and the symbol's precision, which
+    // their values print with), and on a rebuild (syncData) — never on a tick (the contract with
+    // pine-chart). Ticks write the forming bar's row, which carries its barcolor (priceRowsFrom),
+    // and reach the scripts' panes as an anchor update (ScriptLayers).
     effect(() => {
-      const results = this.scriptResults();
-      const trades = this.showScriptTrades();
+      const layers = this.scriptResults();
+      this.precision();
       untracked(() => {
-        this.applyScripts(results, trades);
+        this.applyScripts(layers);
         this.adoptRepaintedRows();
       });
     });
@@ -1127,8 +1129,7 @@ export class ChartHostComponent implements OnDestroy {
     clearTimeout(this.marginTimer);
     if (this.tailStudiesTimer !== null) clearTimeout(this.tailStudiesTimer);
     this.cancelGlide();
-    for (const h of this.scriptHandles) h.dispose();
-    this.scriptHandles = [];
+    this.scriptLayers.dispose();
     cancelAnimationFrame(this.tablesFrame);
     this.paneObserver?.disconnect();
     this.resizeObserver?.disconnect();
@@ -1164,6 +1165,7 @@ export class ChartHostComponent implements OnDestroy {
               : PriceScaleMode.Normal,
       invertScale: invert,
     });
+    this.syncScriptScales();
     this.checkAutoScale();
   }
 
@@ -2018,7 +2020,7 @@ export class ChartHostComponent implements OnDestroy {
       this.recomputeAnalysis();
       this.applyMarkers(this.markers());
       this.writeExternalPanes(0);
-      this.applyScripts(this.scriptResults(), this.showScriptTrades());
+      this.applyScripts();
       this.adoptRepaintedRows();
     } else {
       this.applyIndicators(this.indicators(), update.from);
@@ -2662,7 +2664,23 @@ export class ChartHostComponent implements OnDestroy {
     l.sync.apply(valueRowsFrom(this.plotted, values, 'join', from, l.sync.rows()));
   }
 
-  private scriptHandles: ScriptRenderHandle[] = [];
+  /**
+   * The Pine scripts drawn on this chart, by key (PC-04/PC-I3): persistent renderers whose panes
+   * and anchors live as long as their script, synced by {@link applyScripts}.
+   */
+  private readonly scriptLayers = new ScriptLayers(
+    {
+      chart: () => this.chart,
+      price: () => this.price,
+      shiftMs: (ms) => this.timezoneShiftMs(ms),
+      hostTimes: () => {
+        const plotted = this.plotted;
+        return { length: plotted.length, at: (i) => Math.floor(plotted[i].time / 1000) };
+      },
+      priceSide: () => this.scaleSide(),
+    },
+    (result) => scriptRenderModel(result, this.precision()),
+  );
   /** Pine tables of the runs on the chart, one entry per pane, placed over that pane's plot area. */
   readonly scriptTables = signal<
     {
@@ -2683,7 +2701,7 @@ export class ChartHostComponent implements OnDestroy {
     this.tablesFrame = requestAnimationFrame(() => {
       const chart = this.chart;
       const byPane = new Map<number, TableLayout[]>();
-      for (const h of this.scriptHandles)
+      for (const h of this.scriptLayers.list())
         for (const p of h.tables())
           byPane.set(p.paneIndex, [...(byPane.get(p.paneIndex) ?? []), ...p.tables]);
       if (!chart || byPane.size === 0) {
@@ -2724,29 +2742,54 @@ export class ChartHostComponent implements OnDestroy {
     });
   }
 
-  private applyScripts(results: ChartScriptResult[], showTrades: boolean): void {
-    for (const h of this.scriptHandles) {
-      try {
-        h.dispose();
-      } catch {
-        // Pane already gone with a rebuilt chart.
-      }
-    }
-    this.scriptHandles = [];
+  /**
+   * Bring the Pine scripts on the chart in line with `layers` (default: the input) by the least
+   * change (ScriptLayers): cheap and idempotent, so the chart may call it on every rebuild — a new
+   * series, style, zone, theme or history — and on every change of the results. Scripts that stay
+   * keep their panes, heights and anchors; only their drawings take the new result.
+   */
+  applyScripts(layers: readonly ChartScriptLayer[] = this.scriptResults()): void {
     if (!this.chart || !this.price) return;
     // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
-    for (const r of results) {
-      this.scriptHandles.push(
-        renderScriptResult(this.chart, this.price, r, {
-          shiftMs: (ms) => this.timezoneShiftMs(ms),
-          showTrades,
-          pricePrecision: this.precision(),
-        }),
-      );
-    }
+    this.scriptLayers.sync(layers);
+    this.syncScriptAxes();
     this.refreshBarColors();
     this.syncScriptMargin();
     this.layoutScriptTables();
+  }
+
+  /** The price axes the scripts' own scales are on (`scale.left` / `scale.right`, PC-I10). */
+  private scriptAxes = new Set<'left' | 'right'>();
+
+  /**
+   * Show the price axis on a side a script's own scale is on (`scale.left` while the price is on
+   * the right, and the reverse) — and hide it again when no script needs it; the price's own side
+   * is the chart's (applyScale). Scripts that follow the chart's side move with it.
+   */
+  private syncScriptAxes(force = false): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const need = this.scriptLayers.axisSides();
+    const side = this.scaleSide();
+    const same = need.size === this.scriptAxes.size && [...need].every((s) => this.scriptAxes.has(s));
+    if (same && !force) return;
+    // Nothing needed now or before: the chart's own scale settings stand as they are.
+    if (need.size === 0 && this.scriptAxes.size === 0) return;
+    this.scriptAxes = need;
+    chart.applyOptions({
+      leftPriceScale: { visible: side === 'left' || need.has('left') },
+      rightPriceScale: { visible: side === 'right' || need.has('right') },
+    });
+  }
+
+  /**
+   * The price moved sides, or its axes were set again (applyScale): the scripts that follow the
+   * chart's side move with it, and the axes their own scales are on stay shown.
+   */
+  private syncScriptScales(): void {
+    if (this.scriptLayers.size === 0 && this.scriptAxes.size === 0) return;
+    this.scriptLayers.syncScales();
+    this.syncScriptAxes(true);
   }
 
   /** barcolor() per plotted bar as the price series draws it; null = the style's own colours. */
@@ -2759,9 +2802,9 @@ export class ChartHostComponent implements OnDestroy {
    * bar or the style has no time bars of its own to colour ({@link BAR_COLOR_STYLES}).
    */
   private scriptBarColors(style: ChartStyle, plotted: readonly Bar[]): (string | null)[] | null {
-    if (!BAR_COLOR_STYLES.has(style) || this.scriptHandles.length === 0) return null;
+    if (!BAR_COLOR_STYLES.has(style) || this.scriptLayers.size === 0) return null;
     const times = plottedSeconds(plotted);
-    return mergeBarColors(this.scriptHandles.map((h) => h.barColors(times)));
+    return mergeBarColors(this.scriptLayers.list().map((h) => h.barColors(times)));
   }
 
   /**
@@ -2802,9 +2845,10 @@ export class ChartHostComponent implements OnDestroy {
     // Labels' text is px wide, so how many bars it takes depends on the zoom: a zoom re-syncs.
     this.marginSpacing = barSpacing;
     let reach = 0;
-    if (this.scriptHandles.length) {
+    if (this.scriptLayers.size) {
       const times = plottedSeconds(this.plotted);
-      for (const h of this.scriptHandles) reach = Math.max(reach, h.futureBars(times, barSpacing));
+      for (const h of this.scriptLayers.list())
+        reach = Math.max(reach, h.futureBars(times, barSpacing));
     }
     const next = scriptRightOffset(current, reach, marginCap(scale.width(), barSpacing));
     if (next === current) return;
@@ -2824,8 +2868,7 @@ export class ChartHostComponent implements OnDestroy {
    */
   private scheduleMarginSync(): void {
     const spacing = this.chart?.timeScale().options().barSpacing;
-    if (!this.scriptHandles.length || spacing === undefined || spacing === this.marginSpacing)
-      return;
+    if (!this.scriptLayers.size || spacing === undefined || spacing === this.marginSpacing) return;
     clearTimeout(this.marginTimer);
     this.marginTimer = setTimeout(() => this.syncScriptMargin(), 150);
   }

@@ -289,6 +289,12 @@ export interface TradeDrawing {
   lineColor: string;
 }
 
+/** One layer of a pane's normal pass, by index into the pane's own list of its kind. */
+export interface DrawItem {
+  kind: 'fill' | 'hline' | 'series' | 'marker';
+  index: number;
+}
+
 export interface PaneModel {
   key: PaneKey;
   backgrounds: BackgroundLayer[];
@@ -301,6 +307,12 @@ export interface PaneModel {
   tables: TableLayout[];
   /** Strategy trades (main pane only). */
   trades: TradeDrawing[];
+  /**
+   * `explicit_plot_zorder = true`: the pane's fills, hlines, plots, plotcandles and shapes in the
+   * order their calls appear in the script, each drawn over the ones before it. Null: Pine's
+   * default order (fills, hlines, plots by declaration, shapes).
+   */
+  drawOrder: DrawItem[] | null;
 }
 
 export interface PineRenderModel {

@@ -135,6 +135,7 @@ import { ScriptSettings } from '../../scripts/script-settings';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
+import type { ChartScriptLayer } from '../../scripts/script-layers';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -806,15 +807,18 @@ export class ChartAnalysisPageComponent {
    * that series. Through a switch the previous runs' plots, drawings and tables go at once, and the
    * new runs wait for the new bars — "Running script…" shows meanwhile.
    */
-  readonly scriptResults = computed(
+  readonly scriptResults = computed<ChartScriptLayer[]>(
     () => {
       const chart = { symbol: this.symbol(), resolution: this.resolution() };
       const bars = this.barsFor();
       return this.scriptRuns()
         .filter((r) => runMatchesChart(r, chart, bars))
-        .map((r) => r.result);
+        .map((r) => ({ key: r.item.key, result: r.result }));
     },
-    { equal: (a, b) => a.length === b.length && a.every((r, i) => r === b[i]) },
+    {
+      equal: (a, b) =>
+        a.length === b.length && a.every((l, i) => l.key === b[i].key && l.result === b[i].result),
+    },
   );
   readonly strategyRun = computed(
     () => this.scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,

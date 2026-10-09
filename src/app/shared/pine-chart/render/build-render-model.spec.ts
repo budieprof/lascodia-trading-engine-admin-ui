@@ -409,6 +409,63 @@ describe('buildRenderModel — hlines and fills', () => {
   });
 });
 
+describe('buildRenderModel — explicit_plot_zorder (PC-I10)', () => {
+  const b = bars(5);
+  /**
+   * The script, in code order: plot A, hline 0, plotshape S, fill(A, B), plot B, alertcondition
+   * (no output id). Output ids follow it, one counter per id space: plot-family A=0, S=1, B=2;
+   * hline 0; fill 0.
+   */
+  function outputs() {
+    const out = emptyOutputs(b.map((q) => q.t));
+    out.plots.push(
+      plot({ id: 0, title: 'A', values: [1, 2, 3, 4, 5] }),
+      plot({ id: 2, title: 'B', values: [2, 3, 4, 5, 6] }),
+    );
+    out.markers.push(marker({ id: 1, title: 'S', points: [{ barIndex: 1, time: b[1].t }] }));
+    out.hlines.push({
+      id: 0,
+      price: 3,
+      title: 'mid',
+      color: PINE.red,
+      lineStyle: 'dashed',
+      lineWidth: 1,
+      display: ['all'],
+    });
+    out.fills.push({ id: 0, kind: 'plots', from: 0, to: 2, fillGaps: false, display: ['all'], color: PINE.red });
+    return out;
+  }
+  const callSites = ['plot', 'hline', 'plotshape', 'fill', 'plot', 'alertcondition'].map(
+    (fn, i) => ({ function: fn, title: null, count: 1, line: i + 3, column: 1 }),
+  );
+
+  it('orders fills, hlines, plots and shapes by where their calls are in the code', () => {
+    const inp = { ...input(outputs(), b), callSites };
+    inp.declaration = { ...inp.declaration!, explicitPlotZorder: true };
+    const pane = buildRenderModel(inp).panes.main;
+    const names = pane.drawOrder!.map((d) => {
+      switch (d.kind) {
+        case 'fill':
+          return 'fill';
+        case 'hline':
+          return pane.hlines[d.index].title;
+        case 'series':
+          return pane.series[d.index].title;
+        default:
+          return pane.markers[d.index].title;
+      }
+    });
+    expect(names).toEqual(['A', 'mid', 'S', 'fill', 'B']);
+  });
+
+  it('keeps the default order without the flag, or without the call sites', () => {
+    expect(buildRenderModel({ ...input(outputs(), b), callSites }).panes.main.drawOrder).toBeNull();
+    const flagged = input(outputs(), b);
+    flagged.declaration = { ...flagged.declaration!, explicitPlotZorder: true };
+    expect(buildRenderModel(flagged).panes.main.drawOrder).toBeNull();
+  });
+});
+
 describe('buildRenderModel — drawings', () => {
   const b = bars(30);
   const times = b.map((q) => q.t);

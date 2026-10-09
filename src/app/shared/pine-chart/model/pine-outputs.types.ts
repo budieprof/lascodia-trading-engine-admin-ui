@@ -492,6 +492,8 @@ export interface PineDiagnostic {
   column: number;
   endLine?: number;
   endColumn?: number;
+  /** The imported library the position is in (`publisher/name/version`); null in the script's own code. */
+  unit?: string | null;
 }
 
 export interface PineDeclaration {
@@ -501,13 +503,30 @@ export interface PineDeclaration {
   overlay: boolean;
   format?: string | null;
   precision?: number | null;
+  /** `scale.right` / `scale.left` / `scale.none`; null when the script does not set it. */
+  scale?: 'right' | 'left' | 'none' | null;
+  /** `behind_chart` (Pine default true): main-pane visuals under the chart's bars. */
+  behindChart?: boolean;
+  /** `explicit_plot_zorder` (default false): plots, fills and hlines in code order. */
+  explicitPlotZorder?: boolean;
   [key: string]: unknown;
+}
+
+/** A plot-type call of the script (compile `plots`: plot, plotshape, hline, fill, bgcolor, …), in source order. */
+export interface PineCallSite {
+  function: string;
+  title: string | null;
+  count: number;
+  line: number;
+  column: number;
 }
 
 export interface PineCompileResult {
   success: boolean;
   diagnostics: PineDiagnostic[];
   declaration: PineDeclaration | null;
+  /** The script's plot-type calls in source order (`explicit_plot_zorder`); absent from older engines. */
+  plots?: PineCallSite[];
   [key: string]: unknown;
 }
 
@@ -535,12 +554,26 @@ export interface PineProfileLine {
   totalMicros: number;
 }
 
+/** A user-function call a runtime error happened inside (innermost first). */
+export interface PineCallFrame {
+  function: string;
+  /** Where the function was called. */
+  line: number | null;
+  column: number | null;
+  /** The library the call is in; null in the script's own code. */
+  unit: string | null;
+}
+
 export interface PineRuntimeError {
   code: string;
   message: string;
   line?: number | null;
   column?: number | null;
   barIndex?: number | null;
+  /** The imported library the error is in; null in the script's own code. */
+  unit?: string | null;
+  /** The user-function calls the error happened inside, innermost first (empty at global scope). */
+  callStack?: PineCallFrame[];
 }
 
 /** The §3 response `data`. */
