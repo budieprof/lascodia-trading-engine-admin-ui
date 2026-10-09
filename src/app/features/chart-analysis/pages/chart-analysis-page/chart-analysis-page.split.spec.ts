@@ -41,34 +41,37 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
     panelHosts: () => [],
     calendars: new Map(),
   });
-  Object.defineProperty(p, 'splitState', {
-    value: computed(() => ({
-      layout: p.splitLayout(),
-      panels: comparePanels().map((x) => ({ symbol: x.symbol, resolution: x.resolution })),
-    })),
+  // As the page derives the layout's other charts (v2 `charts`, CC-I5).
+  Object.defineProperty(p, 'panelStates', {
+    value: computed(() =>
+      comparePanels().map((x) => ({
+        symbol: x.symbol,
+        resolution: x.resolution,
+        ...(x.indicators.length ? { indicators: x.indicators } : {}),
+        ...(x.link ? { link: x.link } : {}),
+      })),
+    ),
   });
   return { p, getBars };
 }
 
 describe('chart page — split panels (CC-12)', () => {
-  it('restores the layout’s arrangement and each panel’s series, and loads them', async () => {
+  it('restores the layout’s arrangement and each chart’s series, studies and link, and loads them', async () => {
     const { p, getBars } = setup();
-    p['restoreSplit']({ layout: '2h', panels: [{ symbol: 'usdjpy', resolution: '240' }] });
+    const rsi = { uid: 'r', defId: 'rsi', params: { length: 14 }, visible: true };
+    p['restoreSplit']({ layout: '2h' }, [{ symbol: 'usdjpy', resolution: '240', indicators: [rsi], link: 2 }]);
     expect(p.splitLayout()).toBe('2h');
     expect(p.comparePanels().map((x: ComparePanel) => [x.symbol, x.resolution])).toEqual([
       ['USDJPY', '240'],
     ]);
     await Promise.resolve();
     expect(getBars).toHaveBeenCalledWith('USDJPY', '240', 0, expect.any(Number), 1500);
-    expect(p['splitState']()).toEqual({
-      layout: '2h',
-      panels: [{ symbol: 'USDJPY', resolution: '240' }],
-    });
+    expect(p['panelStates']()).toEqual([{ symbol: 'USDJPY', resolution: '240', indicators: [rsi], link: 2 }]);
   });
 
   it('fills an arrangement the layout saved short with new panels on other symbols', () => {
     const { p } = setup();
-    p['restoreSplit']({ layout: '4', panels: [{ symbol: 'GBPUSD', resolution: '60' }] });
+    p['restoreSplit']({ layout: '4' }, [{ symbol: 'GBPUSD', resolution: '60' }]);
     const symbols = p.comparePanels().map((x: ComparePanel) => x.symbol);
     expect(symbols).toHaveLength(3);
     expect(symbols[0]).toBe('GBPUSD');
@@ -77,8 +80,8 @@ describe('chart page — split panels (CC-12)', () => {
   it('a live price moves the panels that show its symbol', () => {
     const { p } = setup();
     p.comparePanels.set([
-      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(2, 3) },
-      { id: 'b', symbol: 'USDJPY', resolution: '60', bars: hours(2, 3) },
+      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(2, 3), indicators: [], link: 0 },
+      { id: 'b', symbol: 'USDJPY', resolution: '60', bars: hours(2, 3), indicators: [], link: 0 },
     ]);
     p['applyPanelTick']({ symbol: 'gbpusd', bid: 1.3 });
     const [a, b] = p.comparePanels();
@@ -89,7 +92,9 @@ describe('chart page — split panels (CC-12)', () => {
   it('scroll-back prepends the panel’s older page; an empty page ends its history', async () => {
     const older = vi.fn(() => Promise.resolve({ bars: hours(10, 5), noData: false }));
     const { p } = setup(older);
-    p.comparePanels.set([{ id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(4, 5) }]);
+    p.comparePanels.set([
+      { id: 'a', symbol: 'GBPUSD', resolution: '60', bars: hours(4, 5), indicators: [], link: 0 },
+    ]);
     await p.loadPanelOlder('a');
     expect(p.comparePanels()[0].bars).toHaveLength(10);
 

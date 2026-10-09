@@ -4,7 +4,10 @@ import type { ChartScriptItem, SavedChartScript } from '../scripts/chart-script.
 import {
   dockStateOf,
   isWorkspaceState,
+  linkGroupOf,
+  migrateWorkspaceState,
   restoredDock,
+  restoredSync,
   restoredPriceBased,
   restoredScriptItem,
   workspaceScriptOf,
@@ -211,5 +214,64 @@ describe('restoredPriceBased (CC-I10)', () => {
   it('falls back on values out of range', () => {
     const pb = restoredPriceBased({ boxSizeAtr: -1, boxPips: 0, lineBreakLines: 40, pnfReversal: 0 });
     expect(pb).toMatchObject({ boxSizeAtr: 1, boxPips: 10, lineBreakLines: 3, pnfReversal: 3 });
+  });
+});
+
+describe('workspace state v2 (CC-I5, multi-chart)', () => {
+  /** A full v1 layout as the engine stores it today: every field a v1 console writes. */
+  const v1: ChartWorkspaceState = {
+    v: 1,
+    symbol: 'EURUSD',
+    resolution: '60',
+    style: 'heikin-ashi',
+    showVolume: false,
+    scaleMode: 'log',
+    invertScale: true,
+    scaleSide: 'left',
+    sessionBreaks: true,
+    countdown: false,
+    timezone: 'America/New_York',
+    priceBased: { boxMethod: 'pips', boxSizeAtr: 2, boxPips: 15, renkoWicks: true, lineBreakLines: 2 },
+    indicators: [{ uid: 'a', defId: 'rsi', params: { length: 14 }, visible: true }],
+    scripts: [{ key: 'mine:20', source: 'mine', name: 'x', kind: 'indicator', values: { a: 1 } }],
+    view: { barSpacing: 8, rightOffset: -3, paneHeights: [400, 120] },
+    overlays: { showPositions: true, showEvents: false, minEventImpact: 'High' },
+    split: { layout: '4', panels: [{ symbol: 'GBPUSD', resolution: '15' }, { symbol: 'USDJPY', resolution: '240' }] },
+    panel: { watchlistOpen: false, width: 320, sidePane: 'news' },
+    dock: { editorOpen: true, testerOpen: false, preference: 'editor', editorKey: 'mine:20', editorText: 'x' },
+  };
+
+  it('migrates a v1 layout losslessly: every field kept, the split panels become charts', () => {
+    const v2 = migrateWorkspaceState(throughTheEngine(v1));
+    expect(v2.v).toBe(2);
+    expect(v2.charts).toEqual([
+      { symbol: 'GBPUSD', resolution: '15' },
+      { symbol: 'USDJPY', resolution: '240' },
+    ]);
+    expect(v2.split).toEqual({ layout: '4' });
+    // Everything else is exactly the v1 layout's.
+    const { v: _a, split: _b, charts: _c, ...kept } = v2;
+    const { v: _d, split: _e, ...original } = v1;
+    expect(kept).toEqual(original);
+  });
+
+  it('a v1 layout without a split stays without one; a v2 layout passes through untouched', () => {
+    const plain = migrateWorkspaceState({ v: 1, symbol: 'EURUSD' });
+    expect(plain).toEqual({ v: 2, symbol: 'EURUSD' });
+    const v2: ChartWorkspaceState = { v: 2, symbol: 'EURUSD', charts: [{ symbol: 'GBPUSD', resolution: '60', link: 1 }] };
+    expect(migrateWorkspaceState(v2)).toBe(v2);
+  });
+
+  it('reads both versions as workspace states, and nothing else', () => {
+    expect(isWorkspaceState({ v: 1 })).toBe(true);
+    expect(isWorkspaceState({ v: 2 })).toBe(true);
+    expect(isWorkspaceState({ v: 3 })).toBe(false);
+    expect(isWorkspaceState(null)).toBe(false);
+  });
+
+  it('link groups and sync defaults', () => {
+    expect([linkGroupOf(1), linkGroupOf(3), linkGroupOf(4), linkGroupOf('2'), linkGroupOf(undefined)]).toEqual([1, 3, 0, 0, 0]);
+    expect(restoredSync(undefined)).toEqual({ symbol: false, interval: false, crosshair: true, time: true });
+    expect(restoredSync({ symbol: true, crosshair: false })).toMatchObject({ symbol: true, crosshair: false });
   });
 });

@@ -342,11 +342,17 @@ import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/
 import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import type { TicketPrefill } from '../../trading/ticket-model';
 import {
+  WORKSPACE_VERSION,
   dockStateOf,
+  linkGroupOf,
+  migrateWorkspaceState,
   restoredDock,
   restoredPriceBased,
   restoredScriptItem,
+  restoredSync,
   workspaceScriptOf,
+  type ChartPanelState,
+  type ChartSync,
   type ChartWorkspaceState,
   type DockView,
   type WorkspaceScript,
@@ -397,7 +403,7 @@ interface ScriptUpdate {
   replaces: string | null;
 }
 
-/** One comparison chart in a split layout. */
+/** One of a multi-chart layout's other charts (CC-12, CC-I5). */
 export interface ComparePanel {
   id: string;
   symbol: string;
@@ -405,6 +411,10 @@ export interface ComparePanel {
   bars: Bar[];
   /** Its oldest bar is the start of the engine's history: scroll-back stops asking (CC-14). */
   historyComplete?: boolean;
+  /** Its own built-in studies (CC-I5). */
+  indicators: ActiveIndicator[];
+  /** Its link group, 1 … 3; 0: not linked (CC-I5). */
+  link: number;
 }
 
 const RESOLUTION_GROUPS: Array<{
@@ -4998,6 +5008,8 @@ export class ChartAnalysisPageComponent {
         symbol,
         resolution: this.resolution(),
         bars: [],
+        indicators: [],
+        link: 0,
       });
     }
     this.comparePanels.set([...current, ...added]);
@@ -5104,25 +5116,40 @@ export class ChartAnalysisPageComponent {
    * The split layout as a layout saves it (CC-12: it was not saved): the arrangement and each
    * panel's symbol and timeframe — not their bars, which move with every tick.
    */
-  private readonly splitState = computed(
-    () => ({
-      layout: this.splitLayout(),
-      panels: this.comparePanels().map((p) => ({ symbol: p.symbol, resolution: p.resolution })),
-    }),
+  private readonly splitState = computed(() => ({ layout: this.splitLayout() }), {
+    equal: (a, b) => a.layout === b.layout,
+  });
+
+  /** The other charts as the layout saves them (v2 `charts`): series, studies, link — not their bars. */
+  private readonly panelStates = computed<ChartPanelState[]>(
+    () =>
+      this.comparePanels().map((p) => ({
+        symbol: p.symbol,
+        resolution: p.resolution,
+        ...(p.indicators.length ? { indicators: p.indicators.map((i) => ({ ...i, params: { ...i.params } })) } : {}),
+        ...(p.link ? { link: p.link } : {}),
+      })),
     { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );
 
-  /** A layout's split view, restored: the arrangement, then each panel's series, loaded. */
-  private restoreSplit(split: ChartWorkspaceState['split']): void {
+  /** The main chart's link group (CC-I5): 1 … 3, 0 not linked. */
+  readonly mainLink = signal(0);
+  /** What linked charts follow of each other (CC-I5). */
+  readonly chartSync = signal<Required<ChartSync>>(restoredSync(undefined));
+
+  /** A layout's split view, restored: the arrangement, then each other chart's series and studies, loaded. */
+  private restoreSplit(split: ChartWorkspaceState['split'], charts: ChartPanelState[] | undefined): void {
     const layout = this.splitLayouts.find((l) => l.id === split?.layout)?.id ?? '1';
     const wanted = this.splitLayouts.find((l) => l.id === layout)?.panels ?? 0;
-    const saved: ComparePanel[] = (split?.panels ?? []).slice(0, wanted).map((p, i) => ({
+    const saved: ComparePanel[] = (charts ?? []).slice(0, wanted).map((p, i) => ({
       id: `p${Date.now().toString(36)}${i}`,
       symbol: p.symbol.toUpperCase(),
       resolution: isSupportedResolution(p.resolution)
         ? (p.resolution as TvResolution)
         : this.resolution(),
       bars: [],
+      indicators: (p.indicators ?? []).map((ind) => ({ ...ind, params: { ...ind.params } })),
+      link: linkGroupOf(p.link),
     }));
     this.comparePanels.set(saved);
     // The arrangement; a layout saved with fewer panels than it shows gets the rest as new ones.
@@ -5133,7 +5160,7 @@ export class ChartAnalysisPageComponent {
   /** The whole chart set-up, as the engine saves it (`ChartLayout.state`). */
   captureState(): ChartWorkspaceState {
     return {
-      v: 1,
+      v: WORKSPACE_VERSION,
       symbol: this.symbol(),
       resolution: this.resolution(),
       style: this.style(),
@@ -5175,6 +5202,9 @@ export class ChartAnalysisPageComponent {
         fitTradeLines: this.fitTradeLines(),
       },
       split: this.splitState(),
+      ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
+      ...(this.mainLink() ? { link: this.mainLink() } : {}),
+      sync: this.chartSync(),
       panel: {
         watchlistOpen: this.watchlistOpen(),
         width: this.dockWidth(),
@@ -5512,7 +5542,8 @@ export class ChartAnalysisPageComponent {
    * (`{ v: 1 }`) opens a clean chart. `keepSymbol` lets a deep link's symbol/timeframe win.
    */
   applyState(st: ChartWorkspaceState | null, keepSymbol = false): void {
-    const s = st ?? { v: 1 as const };
+    // v1 layouts (one chart and split panels) read as v2 (CC-I5): nothing is lost.
+    const s = migrateWorkspaceState(st ?? { v: WORKSPACE_VERSION });
     this.applyingState = true;
     try {
       const symbolBefore = this.symbol();
@@ -5535,7 +5566,9 @@ export class ChartAnalysisPageComponent {
       this.pendingView = s.view ?? null;
       this.pendingViewFor = null;
       this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
-      this.restoreSplit(s.split);
+      this.mainLink.set(linkGroupOf(s.link));
+      this.chartSync.set(restoredSync(s.sync));
+      this.restoreSplit(s.split, s.charts);
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy. Runs of the
       // layout being replaced that are still in flight must not land on this one, nor an Undo for

@@ -14,7 +14,17 @@ import type { ChartWorkspaceState, WorkspaceScript } from './workspace-state';
 export interface UndoableChart {
   settings: Omit<
     ChartWorkspaceState,
-    'v' | 'symbol' | 'resolution' | 'view' | 'panel' | 'dock' | 'split' | 'indicators' | 'scripts' | 'symbolMemory'
+    | 'v'
+    | 'symbol'
+    | 'resolution'
+    | 'view'
+    | 'panel'
+    | 'dock'
+    | 'split'
+    | 'indicators'
+    | 'scripts'
+    | 'symbolMemory'
+    | 'charts'
   >;
   indicators: ActiveIndicator[];
   scripts: WorkspaceScript[];
@@ -38,6 +48,7 @@ export function undoableOf(s: ChartWorkspaceState): UndoableChart {
     dock: _dock,
     split: _split,
     symbolMemory: _symbolMemory,
+    charts: _charts,
     indicators,
     scripts,
     ...settings
