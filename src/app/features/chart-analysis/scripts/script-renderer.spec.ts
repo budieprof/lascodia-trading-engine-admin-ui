@@ -477,6 +477,24 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.tables()).toEqual([]);
   });
 
+  it('shows no table while its run is not on the host axis — in replay they would show the future (PC-08)', () => {
+    const { times } = decorated();
+    const { s, rig: r } = drawn(times);
+    expect(s.tables()).toHaveLength(1);
+    // Replay stepped back: the host's bars end before the run's last bar.
+    r.chart.times = times.slice(0, 40);
+    expect(s.aligned()).toBe(false);
+    expect(s.tables()).toEqual([]);
+  });
+
+  it('asks its pane’s scale for the room the top tables need (PC-I11)', () => {
+    const { times } = decorated();
+    const { s, rig: r } = drawn(times);
+    expect((s as any).mainLayers.autoscaleInfo(40, 59)?.margins).toBeUndefined();
+    (r.host as { tableMarginPx?: (i: number) => number }).tableMarginPx = (i) => (i === 0 ? 32 : 0);
+    expect((s as any).mainLayers.autoscaleInfo(40, 59).margins).toEqual({ above: 32, below: 0 });
+  });
+
   it("maps the run's bar colours onto the host's bars by time", () => {
     const { times } = decorated();
     const { s } = drawn(times);

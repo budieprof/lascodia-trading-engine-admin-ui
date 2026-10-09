@@ -46,6 +46,11 @@ export interface ScriptHost {
   hostTimes(): HostTimes;
   /** The side the price scale is on (TradingView's "Scale position"). */
   priceSide(): 'left' | 'right';
+  /**
+   * Px a pane's price scale keeps clear at its top for the tables anchored there (PC-I11): the
+   * scripts' autoscale asks for it. Optional: none.
+   */
+  tableMarginPx?(paneIndex: number): number;
 }
 
 /** A script's values at one bar, per pane (PC-I2 status lines). */
@@ -133,7 +138,9 @@ export class ScriptRenderer {
     readonly key: string,
   ) {
     const offset = () => this.offset();
-    this.mainLayers = new OffsetLayersPrimitive(this.hooks(true), offset);
+    this.mainLayers = new OffsetLayersPrimitive(this.hooks(true), offset, () =>
+      this.drawn() ? (this.host.tableMarginPx?.(0) ?? 0) : 0,
+    );
   }
 
   /** The run it shows. */
@@ -236,7 +243,9 @@ export class ScriptRenderer {
    */
   tables(): { paneIndex: number; tables: readonly TableLayout[] }[] {
     const m = this.model;
-    if (!m || !this.drawn()) return [];
+    // Not on the host axis (replay before its last bar, another window): its tables would show
+    // values of bars the chart does not show — in replay, the future (PC-08).
+    if (!m || !this.drawn() || !this.aligned()) return [];
     const out: { paneIndex: number; tables: readonly TableLayout[] }[] = [];
     if (m.panes.main.tables.length) out.push({ paneIndex: 0, tables: m.panes.main.tables });
     const paneIndex = this.scriptPaneIndex();
@@ -425,6 +434,8 @@ export class ScriptRenderer {
       const scaleId = this.paneScaleIdFor(m);
       if (!this.pane) {
         const layers = new OffsetLayersPrimitive(this.hooks(false), () => this.offset());
+        layers.marginAbove = () =>
+          this.drawn() ? (this.host.tableMarginPx?.(this.scriptPaneIndex()) ?? 0) : 0;
         const anchor = this.makeAnchor(chart, scaleId, chart.panes().length, layers);
         anchor.series.attachPrimitive(layers);
         this.pane = { anchor, layers };
@@ -491,7 +502,10 @@ export class ScriptRenderer {
     return anchor;
   }
 
-  /** `layers`' value range over the visible bars (padded when flat), for an anchor's autoscale. */
+  /**
+   * `layers`' value range over the visible bars (padded when flat), for an anchor's autoscale —
+   * with the room its pane's top tables need (PC-I11).
+   */
   private rangeOf(layers: OffsetLayersPrimitive): AutoscaleInfo | null {
     const r = this.host.chart()?.timeScale().getVisibleLogicalRange();
     const o = this.offset();
@@ -499,7 +513,11 @@ export class ScriptRenderer {
     const range = layers.valueRange(Math.floor(r.from) - o, Math.ceil(r.to) - o);
     if (!range) return null;
     const pad = range.min === range.max ? Math.abs(range.min) * 0.01 || 1 : 0;
-    return { priceRange: { minValue: range.min - pad, maxValue: range.max + pad } };
+    const above = layers.marginAbove();
+    return {
+      priceRange: { minValue: range.min - pad, maxValue: range.max + pad },
+      ...(above > 0 ? { margins: { above, below: 0 } } : {}),
+    };
   }
 
   private removeOverlayAnchor(): void {
@@ -578,6 +596,8 @@ export class OffsetLayersPrimitive extends PineLayersPrimitive {
   constructor(
     hooks: ConstructorParameters<typeof PineLayersPrimitive>[0],
     private readonly offset: () => number | null,
+    /** Px of top margin to ask of the scale (tables anchored at the pane's top, PC-I11). */
+    public marginAbove: () => number = () => 0,
   ) {
     super(hooks);
   }
@@ -588,7 +608,10 @@ export class OffsetLayersPrimitive extends PineLayersPrimitive {
 
   override autoscaleInfo(start: number, end: number): AutoscaleInfo | null {
     const o = this.offset();
-    return o === null ? null : super.autoscaleInfo(start - o, end - o);
+    const base = o === null ? null : super.autoscaleInfo(start - o, end - o);
+    const above = this.marginAbove();
+    if (!(above > 0)) return base;
+    return { priceRange: base?.priceRange ?? null, margins: { above, below: 0 } };
   }
 }
 

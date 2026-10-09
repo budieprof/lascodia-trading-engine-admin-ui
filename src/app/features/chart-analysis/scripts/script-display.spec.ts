@@ -114,6 +114,56 @@ describe('styleRenderModel (PC-01, PC-I4)', () => {
     expect(hidden.panes.main.tables).toEqual([]);
   });
 
+  it('keeps tables readable over the chart’s background, unless the operator turns it off', () => {
+    const withTable = run((raw) => {
+      raw.outputs.tables = [
+        {
+          id: 1,
+          position: 'top_right',
+          columns: 1,
+          rows: 1,
+          bgColor: null,
+          frameColor: null,
+          frameWidth: 0,
+          borderColor: null,
+          borderWidth: 0,
+          forceOverlay: false,
+          cells: [
+            {
+              column: 0,
+              row: 0,
+              columnSpan: 1,
+              rowSpan: 1,
+              text: 'MSqueeze',
+              width: 0,
+              height: 0,
+              textColor: '#FFFFFFFF',
+              textHAlign: 'center',
+              textVAlign: 'center',
+              textSize: 'small',
+              textSizePoints: 10,
+              bgColor: '#787B864D',
+              tooltip: null,
+              fontFamily: 'default',
+              bold: false,
+              italic: false,
+            },
+          ],
+        },
+      ];
+    });
+    const m0 = scriptRenderModel(withTable, 5)!;
+    const guarded = styleRenderModel(m0, DEFAULT_DISPLAY, withTable.run?.outputs, '#FFFFFF');
+    expect(guarded.panes.main.tables[0].cells[0].textColor).toBe('rgb(19, 23, 34)');
+    const verbatim = styleRenderModel(
+      m0,
+      display({ tableContrast: false }),
+      withTable.run?.outputs,
+      '#FFFFFF',
+    );
+    expect(verbatim.panes.main.tables[0].cells[0].textColor).toBe('rgb(255, 255, 255)');
+  });
+
   it('gives a pane of its own an automatic precision when the script declares none', () => {
     const osc = oscillator();
     const m0 = scriptRenderModel(osc, 5)!;

@@ -153,8 +153,10 @@ import {
   savedRightOffset,
   scriptRightOffset,
 } from '../scripts/run-on-host';
-import { PineTableOverlayComponent } from '@shared/pine-chart/components/pine-table-overlay.component';
-import type { TableLayout } from '@shared/pine-chart/render/render-model';
+import {
+  PineTableOverlayComponent,
+  type KeyedTable,
+} from '@shared/pine-chart/components/pine-table-overlay.component';
 import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
 
@@ -340,12 +342,19 @@ interface ExternalLineSeries {
     @for (o of scriptTables(); track o.key) {
       <div
         class="script-tables"
+        [attr.data-pane]="o.paneIndex"
         [style.top.px]="o.top"
         [style.left.px]="o.left"
         [style.width.px]="o.width"
         [style.height.px]="o.height"
       >
-        <app-pine-table-overlay [tables]="o.tables" [paneWidth]="o.width" [paneHeight]="o.height" />
+        <app-pine-table-overlay
+          [tables]="o.tables"
+          [paneWidth]="o.width"
+          [paneHeight]="o.height"
+          [pointer]="tablePointer()?.paneIndex === o.paneIndex ? tablePointer() : null"
+          [topLeftOffset]="o.topLeftOffset"
+        />
       </div>
     }
     @for (row of scriptPaneRows(); track row.key) {
@@ -2744,24 +2753,35 @@ export class ChartHostComponent implements OnDestroy {
         return { length: plotted.length, at: (i) => Math.floor(plotted[i].time / 1000) };
       },
       priceSide: () => this.scaleSide(),
+      tableMarginPx: (paneIndex) => this.tableMarginPx.get(paneIndex) ?? 0,
     },
-    // The run's render model, with its Style settings applied on the client (PC-01, PC-I4).
+    // The run's render model, with its Style settings applied on the client (PC-01, PC-I4), its
+    // tables read over this chart's background (PC-I11).
     (result, display) => {
       const model = scriptRenderModel(result, this.precision());
-      return model ? styleRenderModel(model, display, result.run?.outputs ?? null) : null;
+      const background = this.palette(this.theme.theme() === 'dark').background;
+      return model
+        ? styleRenderModel(model, display, result.run?.outputs ?? null, background)
+        : null;
     },
   );
   /** Pine tables of the runs on the chart, one entry per pane, placed over that pane's plot area. */
   readonly scriptTables = signal<
     {
       key: string;
+      paneIndex: number;
       top: number;
       left: number;
       width: number;
       height: number;
-      tables: readonly TableLayout[];
+      /** Each keyed by its script, as two scripts' tables share a pane. */
+      tables: readonly KeyedTable[];
+      /** Px kept free above the top-left corner's tables: the legend or a status line is there. */
+      topLeftOffset: number;
     }[]
   >([]);
+  /** The pointer over a pane (pane px): the table under it fades (PC-I11). */
+  readonly tablePointer = signal<{ paneIndex: number; x: number; y: number } | null>(null);
   private paneObserver: ResizeObserver | null = null;
   private tablesFrame = 0;
 
@@ -2773,17 +2793,21 @@ export class ChartHostComponent implements OnDestroy {
     cancelAnimationFrame(this.tablesFrame);
     this.tablesFrame = requestAnimationFrame(() => {
       const chart = this.chart;
-      const byPane = new Map<number, TableLayout[]>();
+      const byPane = new Map<number, KeyedTable[]>();
       const scriptPanes = new Set<number>();
       for (const h of this.scriptLayers.list()) {
         for (const p of h.tables())
-          byPane.set(p.paneIndex, [...(byPane.get(p.paneIndex) ?? []), ...p.tables]);
+          byPane.set(p.paneIndex, [
+            ...(byPane.get(p.paneIndex) ?? []),
+            ...p.tables.map((t) => ({ ...t, key: `${h.key}:${t.id}` })),
+          ]);
         const own = h.scriptPaneIndex();
         if (own > 0) scriptPanes.add(own);
       }
       if (!chart || (byPane.size === 0 && scriptPanes.size === 0)) {
         if (this.scriptTables().length) this.scriptTables.set([]);
         if (this.scriptPaneTops().size) this.scriptPaneTops.set(new Map());
+        this.reserveTableMargins();
         return;
       }
       const host = this.container().nativeElement.getBoundingClientRect();
@@ -2798,20 +2822,30 @@ export class ChartHostComponent implements OnDestroy {
         const r = panes[index]?.getHTMLElement()?.getBoundingClientRect();
         return r ? r.top - host.top : 0;
       };
+      // The top-left corner's tables go below what sits there: the page's legend over the price
+      // pane (its OHLC line, studies and overlay scripts' status lines), a pane script's status line.
+      const legend = this.hostEl.nativeElement.parentElement?.querySelector(':scope > .legend');
+      const legendBottom = legend
+        ? Math.max(0, legend.getBoundingClientRect().bottom - host.top - topOf(0))
+        : 0;
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
         if (!panes[index]) continue;
         const size = chart.paneSize(index);
         out.push({
           key: `pane-${index}`,
+          paneIndex: index,
           top: topOf(index),
           left,
           width: size.width,
           height: size.height,
           tables,
+          topLeftOffset: index === 0 ? legendBottom : scriptPanes.has(index) ? 22 : 0,
         });
       }
       this.scriptTables.set(out);
+      // Once the tables are on screen: room for them under the top of their panes.
+      requestAnimationFrame(() => this.reserveTableMargins());
       // Each script pane's status line sits at its top-left (PC-I2).
       const tops = new Map<number, number>();
       for (const index of scriptPanes) if (panes[index]) tops.set(index, topOf(index));
@@ -2819,14 +2853,49 @@ export class ChartHostComponent implements OnDestroy {
       if (tops.size !== before.size || [...tops].some(([i, t]) => before.get(i) !== t))
         this.scriptPaneTops.set(tops);
       if (this.scriptRowLeft() !== left + 8) this.scriptRowLeft.set(left + 8);
-      // Pane separators can be dragged with no chart event; watch the pane rows themselves.
+      // Pane separators can be dragged with no chart event; watch the pane rows themselves — and the
+      // legend, whose height moves the top-left tables.
       this.paneObserver?.disconnect();
       this.paneObserver ??= new ResizeObserver(() => this.layoutScriptTables());
       for (const p of panes) {
         const row = p.getHTMLElement();
         if (row) this.paneObserver.observe(row);
       }
+      if (legend) this.paneObserver.observe(legend);
     });
+  }
+
+  private readonly hostEl = inject(ElementRef<HTMLElement>);
+  /** Px the price scale keeps clear under each pane's top tables, by pane index. */
+  private tableMarginPx = new Map<number, number>();
+
+  /**
+   * Room under the tables anchored at the top of a pane (PC-I11): the scripts' own autoscale asks
+   * the pane's price scale for that much more top margin (in px, beyond its own 10 %), so the bars
+   * and plots do not run under a dashboard — at most 40 % of the pane, in 4 px steps so a table
+   * whose text changes a little on a re-run does not make the scale twitch. The scale's options
+   * are not touched: a pane made later starts with the chart's margins.
+   */
+  private reserveTableMargins(): void {
+    const next = new Map<number, number>();
+    const root = this.hostEl.nativeElement as HTMLElement;
+    for (const o of this.scriptTables()) {
+      const wrap = root.querySelector(`.script-tables[data-pane="${o.paneIndex}"]`);
+      if (!wrap || o.height <= 0) continue;
+      const top = wrap.getBoundingClientRect().top;
+      let bottom = 0;
+      for (const g of wrap.querySelectorAll('.pine-tables[data-position^="top"]'))
+        bottom = Math.max(bottom, g.getBoundingClientRect().bottom - top);
+      const px = Math.min(o.height * 0.4, bottom + 6 - o.height * 0.1);
+      if (bottom > 0 && px > 0) next.set(o.paneIndex, Math.ceil(px / 4) * 4);
+    }
+    const same =
+      next.size === this.tableMarginPx.size &&
+      [...next].every(([i, px]) => this.tableMarginPx.get(i) === px);
+    if (same) return;
+    this.tableMarginPx = next;
+    // The scale takes the new margin at its next autoscale: a full update.
+    for (const r of this.scriptLayers.list()) r.redraw();
   }
 
   /**
@@ -2839,8 +2908,9 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.chart || !this.price) return;
     this.watchScriptEvents();
     // In the order the scripts were added: a later script's barcolor() wins (mergeBarColors).
-    // Their models print at the symbol's precision: a change of it restyles them all.
-    this.scriptLayers.sync(layers, String(this.precision()));
+    // Their models print at the symbol's precision and read their tables over the theme's
+    // background: a change of either restyles them all.
+    this.scriptLayers.sync(layers, `${this.precision()}|${this.theme.theme()}`);
     this.scriptsVersion.update((v) => v + 1);
     this.syncScriptAxes();
     this.refreshBarColors();
@@ -2968,6 +3038,16 @@ export class ChartHostComponent implements OnDestroy {
         ? Math.round(param.logical as number)
         : null;
     if (logical !== this.scriptCrosshair()) this.scriptCrosshair.set(logical);
+    // A table under the pointer fades so the bars under it can be read (PC-I11).
+    if (this.scriptTables().length) {
+      const p =
+        param.point && param.paneIndex !== undefined
+          ? { paneIndex: param.paneIndex, x: param.point.x, y: param.point.y }
+          : null;
+      const cur = this.tablePointer();
+      if (p?.paneIndex !== cur?.paneIndex || p?.x !== cur?.x || p?.y !== cur?.y)
+        this.tablePointer.set(p);
+    } else if (this.tablePointer()) this.tablePointer.set(null);
     const found = this.scriptHitAt(param);
     let tip: ScriptTooltip | null = null;
     if (found && param.point && param.paneIndex !== undefined) {

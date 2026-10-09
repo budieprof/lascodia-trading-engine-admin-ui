@@ -12,6 +12,7 @@ import type {
   PineRenderModel,
   PlotLayer,
 } from '@shared/pine-chart/render/render-model';
+import { readableTable } from '@shared/pine-chart/render/table-contrast';
 
 /**
  * How one Pine script on the chart is shown — everything its chip's eye and its Settings dialog's
@@ -400,6 +401,7 @@ function stylePane(
   s: ScriptDisplaySettings,
   precision: number | null,
   plotsByKey: Map<string, PlotLayer>,
+  chartBackground: string | null,
 ): PaneModel {
   const o = s.outputs;
   const series = pane.series.map((x) => {
@@ -422,17 +424,24 @@ function stylePane(
     markers: pane.markers.map((m) => styleMarker(m, o[m.key], s, precision)),
     hlines: pane.hlines.map((h) => styleHline(h, o[h.key], s)),
     backgrounds: pane.backgrounds.map((b) => styleBackground(b, o[b.key], s)),
-    tables: s.showTables ? pane.tables : [],
+    // Readable tables (PC-I11): text under 3:1 on its cell, over the chart, turns black or white.
+    tables: !s.showTables
+      ? []
+      : s.tableContrast && chartBackground
+        ? pane.tables.map((t) => readableTable(t, chartBackground))
+        : pane.tables,
   };
 }
 
 /** Whether `s` changes anything the render model draws (fast path: the run's own model). */
-function styles(s: ScriptDisplaySettings): boolean {
+function styles(s: ScriptDisplaySettings, model: PineRenderModel, guardTables: boolean): boolean {
+  const tables = model.panes.main.tables.length + (model.panes.script?.tables.length ?? 0);
   return (
     s.precision !== null ||
     !s.labelsOnScale ||
     !s.valuesInStatusLine ||
     !s.showTables ||
+    (guardTables && s.tableContrast && tables > 0) ||
     Object.keys(s.outputs).length > 0
   );
 }
@@ -443,27 +452,28 @@ const styled = new WeakMap<PineRenderModel, Map<string, PineRenderModel>>();
  * The render model with a script's display settings applied (PC-01, PC-I4) — cached per model and
  * settings, so a crosshair move or a re-sync never restyles. `outputs` is the run's raw outputs:
  * whether the script declares its own number format, else a pane of its own prints at an
- * automatic precision.
+ * automatic precision. `chartBackground` (CSS): the chart its tables are read over (PC-I11).
  */
 export function styleRenderModel(
   model: PineRenderModel,
   s: ScriptDisplaySettings,
   outputs: unknown,
+  chartBackground: string | null = null,
 ): PineRenderModel {
   // The script pane's automatic precision, when the script declares none and the operator set none.
   const auto =
     s.precision === null && model.panes.script && !declaresFormat(model, outputs)
       ? autoPrecision(paneValues(model.panes.script))
       : null;
-  if (!styles(s) && auto === null) return model;
-  const key = `${JSON.stringify(s)}|${auto ?? ''}`;
+  if (!styles(s, model, chartBackground !== null) && auto === null) return model;
+  const key = `${JSON.stringify(s)}|${auto ?? ''}|${chartBackground ?? ''}`;
   let byKey = styled.get(model);
   const hit = byKey?.get(key);
   if (hit) return hit;
   const plots = new Map<string, PlotLayer>();
-  const main = stylePane(model.panes.main, s, s.precision, plots);
+  const main = stylePane(model.panes.main, s, s.precision, plots, chartBackground);
   const script = model.panes.script
-    ? stylePane(model.panes.script, s, s.precision ?? auto, plots)
+    ? stylePane(model.panes.script, s, s.precision ?? auto, plots, chartBackground)
     : null;
   const paneFormat = s.precision ?? auto;
   const out: PineRenderModel = {
