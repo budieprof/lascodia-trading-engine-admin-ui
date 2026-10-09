@@ -1,7 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 
 import { formatBarTime } from '../core/format';
-import type { PineDebugRequest, PineDebugResult } from '../model/pine-outputs.types';
+import type {
+  PineDebugRequest,
+  PineDebugResult,
+  PineDebugVariable,
+} from '../model/pine-outputs.types';
 import {
   MAX_WATCHES,
   debugProblems,
@@ -9,6 +13,8 @@ import {
   emptyDraft,
   groupByScope,
   kindBadge,
+  watchExpressionFor,
+  withWatch,
   type DebugDraft,
 } from './debugger-model';
 
@@ -98,6 +104,10 @@ import {
       @if (problems().length && touched()) {
         <p class="problem" role="status">{{ problems()[0] }}</p>
       }
+      <p class="muted hint">
+        A function's own variables: write <span class="mono">f(): expression</span> — read after
+        each call, one value per call in the script (the last call on the bar).
+      </p>
       @if (!canRun()) {
         <p class="muted">
           Run the script first: the debugger runs the same script, symbol and timeframe.
@@ -177,6 +187,16 @@ import {
                   }
                   <span class="type">{{ v.type }}</span>
                   <span class="mono value" [title]="v.value">{{ v.value }}</span>
+                  <button
+                    type="button"
+                    class="link watch-var"
+                    (click)="watchVariable(v)"
+                    [attr.aria-label]="'Watch ' + watchExpression(v)"
+                    [title]="'Watch ' + watchExpression(v)"
+                    data-testid="dbg-watch-var"
+                  >
+                    Watch
+                  </button>
                 </div>
               }
             } @empty {
@@ -350,7 +370,7 @@ import {
       }
       .var {
         display: grid;
-        grid-template-columns: minmax(70px, auto) auto minmax(50px, auto) minmax(0, 1fr);
+        grid-template-columns: minmax(70px, auto) auto minmax(50px, auto) minmax(0, 1fr) auto;
         gap: 6px;
         align-items: center;
         padding: 2px 10px;
@@ -423,6 +443,13 @@ export class PineDebuggerPaneComponent {
     this.draft.update((d) =>
       d.watches.length < MAX_WATCHES ? { ...d, watches: [...d.watches, ''] } : d,
     );
+  }
+
+  protected readonly watchExpression = watchExpressionFor;
+
+  /** Adds the watch that reads a listed variable (a function's own: `f(): name`). */
+  watchVariable(v: PineDebugVariable): void {
+    this.draft.update((d) => withWatch(d, watchExpressionFor(v)));
   }
 
   removeWatch(i: number): void {

@@ -6,7 +6,9 @@ import type { ChartPosition } from '../overlays/trade-layer';
 import {
   actionableLines,
   dragSideProblem,
+  canMoveOrderEntry,
   livePending,
+  movedOrderLevels,
   newCorrelationId,
   PENDING_TIMEOUT_MS,
   pendingLines,
@@ -39,6 +41,8 @@ const order = (over: Partial<OrderDto> = {}): OrderDto =>
     stopLoss: 1.092,
     takeProfit: 1.101,
     status: 'Submitted',
+    brokerOrderId: '77001',
+    isPaper: false,
     ...over,
   }) as OrderDto;
 
@@ -54,13 +58,54 @@ describe('actionable position and order lines (SP-I3)', () => {
     ]);
   });
 
-  it('makes a working order’s stop and target draggable and its price clickable (cancel), never its price draggable', () => {
+  it('makes a working order’s stop and target draggable, and its price both draggable (move) and clickable (cancel)', () => {
     const lines = actionableLines([], [order()], 'EURUSD', inScope, []);
     expect(lines.map((l) => [l.kind, l.draggable, !!l.clickable])).toEqual([
-      ['orderPrice', false, true],
+      ['orderPrice', true, true],
       ['orderStop', true, false],
       ['orderTarget', true, false],
     ]);
+  });
+
+  it('only lets an order working at the broker have its entry dragged', () => {
+    expect(canMoveOrderEntry(order())).toBe(true);
+    expect(canMoveOrderEntry(order({ status: 'Pending' as OrderDto['status'] }))).toBe(false);
+    expect(canMoveOrderEntry(order({ status: 'PartialFill' as OrderDto['status'] }))).toBe(false);
+    expect(canMoveOrderEntry(order({ brokerOrderId: null }))).toBe(false);
+    expect(canMoveOrderEntry(order({ isPaper: true }))).toBe(false);
+    expect(canMoveOrderEntry(order({ executionType: 'Market' as OrderDto['executionType'] }))).toBe(
+      false,
+    );
+    // Not movable: the price line stays clickable (cancel) only.
+    const [price] = actionableLines([], [order({ brokerOrderId: null })], 'EURUSD', inScope, []);
+    expect([price.kind, price.draggable, price.clickable]).toEqual(['orderPrice', false, true]);
+  });
+
+  it('holds an order still while its entry move waits for the EA (its stop and target move with it)', () => {
+    const pending: PendingChange = {
+      correlationId: 'chart-1',
+      kind: 'orderEntry',
+      refId: 601,
+      price: 1.096,
+      label: 'Entry',
+      startedAt: 0,
+    };
+    const lines = actionableLines([], [order()], 'EURUSD', inScope, [pending]);
+    expect(lines.map((l) => [l.kind, l.draggable])).toEqual([['orderPrice', false]]);
+  });
+
+  it('moves the stop and target with the entry by default, or keeps them', () => {
+    expect(movedOrderLevels(order(), 1.09612, true, 5)).toEqual({
+      price: 1.09612,
+      stopLoss: 1.09312,
+      takeProfit: 1.10212,
+    });
+    expect(movedOrderLevels(order(), 1.096, false, 5)).toEqual({
+      price: 1.096,
+      stopLoss: 1.092,
+      takeProfit: 1.101,
+    });
+    expect(movedOrderLevels(order({ takeProfit: null }), 1.096, true, 5).takeProfit).toBeNull();
   });
 
   it('skips other symbols, other accounts and orders that can no longer fill', () => {

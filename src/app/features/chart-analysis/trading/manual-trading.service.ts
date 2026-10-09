@@ -9,6 +9,7 @@ import type {
   ManualTradePreview,
   ManualTradeRequest,
   ManualTradeResult,
+  OrderEntryMovePreview,
   PositionChangePreview,
 } from './manual-trading.types';
 
@@ -79,6 +80,26 @@ export class ManualTradingService {
     correlationId: string,
   ): Observable<ResponseData<string>> {
     return this.api.put(`/order/${orderId}/modify`, { stopLoss, takeProfit, correlationId });
+  }
+
+  /** `POST order/{id}/move-preview` — what moving a working order's entry would mean. Writes nothing. */
+  orderEntryMovePreview(
+    orderId: number,
+    move: { price: number; stopLoss: number | null; takeProfit: number | null },
+  ): Observable<ResponseData<OrderEntryMovePreview>> {
+    return this.api.post(`/order/${orderId}/move-preview`, move);
+  }
+
+  /**
+   * `POST order/{id}/move-entry` — moves a working order's entry (with the stop and target sent) at the broker through
+   * the account's EA; the engine runs every check of the preview again and refuses (-11) unless all pass.
+   */
+  moveOrderEntry(
+    orderId: number,
+    move: { price: number; stopLoss: number | null; takeProfit: number | null },
+    correlationId: string,
+  ): Observable<ResponseData<string>> {
+    return this.api.post(`/order/${orderId}/move-entry`, { ...move, correlationId });
   }
 
   /** `POST order/{id}/cancel?correlationId=`. */

@@ -65,6 +65,23 @@ function bar(text: string): number | null | undefined {
   return Number(t);
 }
 
+/**
+ * The watch that reads a variable of the list: a global by its name; a function's own variable as `f(): name`, which the
+ * engine evaluates inside f after each call (one value per call site: the one after its last call on the bar).
+ */
+export function watchExpressionFor(v: Pick<PineDebugVariable, 'scope' | 'name'>): string {
+  const m = /^([A-Za-z_][A-Za-z0-9_]*)\(\)/.exec(v.scope);
+  return v.scope === 'global' || !m ? v.name : `${m[1]}(): ${v.name}`;
+}
+
+/** The draft with `expression` watched: in the first empty watch box, else a new one (unchanged when already watched or full). */
+export function withWatch(d: DebugDraft, expression: string): DebugDraft {
+  if (d.watches.some((w) => w.trim() === expression)) return d;
+  const empty = d.watches.findIndex((w) => w.trim() === '');
+  if (empty >= 0) return { ...d, watches: d.watches.map((w, k) => (k === empty ? expression : w)) };
+  return d.watches.length < MAX_WATCHES ? { ...d, watches: [...d.watches, expression] } : d;
+}
+
 export interface ScopeGroup {
   scope: string;
   variables: PineDebugVariable[];

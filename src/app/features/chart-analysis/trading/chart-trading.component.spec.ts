@@ -10,7 +10,7 @@ import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 import type { ChartPosition } from '../overlays/trade-layer';
 import { ChartTradingComponent } from './chart-trading.component';
-import type { PositionChangePreview } from './manual-trading.types';
+import type { OrderEntryMovePreview, PositionChangePreview } from './manual-trading.types';
 import type { TradeLine } from './trade-lines';
 
 declareSignalIo(ChartTradingComponent, {
@@ -102,6 +102,51 @@ function preview(over: Partial<PositionChangePreview> = {}): PositionChangePrevi
     ],
     canApply: true,
     refusedReason: null,
+    ...over,
+  };
+}
+
+function entryPreview(over: Partial<OrderEntryMovePreview> = {}): OrderEntryMovePreview {
+  return {
+    orderId: 601,
+    tradingAccountId: 17,
+    accountId: '107699364',
+    accountName: 'Demo 17',
+    accountType: 'Demo',
+    currency: 'USD',
+    symbol: 'EURUSD',
+    isBuy: true,
+    orderKind: 'Limit',
+    lots: 0.2,
+    currentPrice: 1.095,
+    currentStop: 1.092,
+    currentTarget: 1.101,
+    newPrice: 1.096,
+    newStop: 1.093,
+    newTarget: 1.102,
+    bid: 1.1,
+    ask: 1.1001,
+    pipSize: 0.0001,
+    pipValuePerLot: 10,
+    atr: null,
+    distanceFromMarketPips: 41,
+    stopDistancePips: 30,
+    stopDistanceAtr: 1.5,
+    riskAtStop: 60,
+    rewardAtTarget: 120,
+    targetR: 2,
+    gates: [
+      {
+        key: 'side',
+        name: 'Entry side',
+        passed: true,
+        blocking: true,
+        detail: 'The entry stays on its side',
+      },
+    ],
+    canApply: true,
+    refusedReason: null,
+    refusedGate: null,
     ...over,
   };
 }
@@ -318,5 +363,75 @@ describe('ChartTradingComponent (SP-I3)', () => {
     fixture.detectChanges();
     expect(fixture.componentInstance.pending()).toHaveLength(0);
     expect(byId('trade-action-error').textContent).toContain('No active EA');
+  });
+  it('moves a working order’s entry with its stop and target, after the engine’s check, pending until the EA answers', () => {
+    drag({ kind: 'orderPrice', refId: 601, price: 1.095, clickable: true, draggable: true }, 1.096);
+    fixture.detectChanges();
+
+    const pv = http.expectOne(`${BASE}/order/601/move-preview`);
+    expect(pv.request.body).toEqual({ price: 1.096, stopLoss: 1.093, takeProfit: 1.102 });
+    pv.flush(ok(entryPreview()));
+    fixture.detectChanges();
+    const text = byId('trade-action-dialog').textContent ?? '';
+    expect(text).toContain('Move the working order');
+    expect(text).toContain('41.0 pips from the ask');
+    expect(text).toContain('60.00 USD');
+    expect(text).toContain('2.00R');
+
+    // Keep the stop and target where they are: the engine is asked again with them.
+    const box = byId<HTMLInputElement>('entry-with-brackets');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    const again = http.expectOne(`${BASE}/order/601/move-preview`);
+    expect(again.request.body).toEqual({ price: 1.096, stopLoss: 1.092, takeProfit: 1.101 });
+    again.flush(ok(entryPreview({ newStop: 1.092, newTarget: 1.101 })));
+    fixture.detectChanges();
+
+    byId<HTMLButtonElement>('trade-action-apply').click();
+    const move = http.expectOne(`${BASE}/order/601/move-entry`);
+    expect(move.request.body).toMatchObject({ price: 1.096, stopLoss: 1.092, takeProfit: 1.101 });
+    const cid = (move.request.body as { correlationId: string }).correlationId;
+    expect(cid).toMatch(/^chart-[0-9a-f]{20}$/);
+    move.flush(ok(null));
+    expect(fixture.componentInstance.pending()).toEqual([
+      expect.objectContaining({ kind: 'orderEntry', refId: 601, price: 1.096 }),
+    ]);
+
+    vi.advanceTimersByTime(1600);
+    http
+      .expectOne(`${BASE}/position/command-status?correlationId=${cid}`)
+      .flush(ok({ acknowledged: true, succeeded: true, result: 'order modify: broker confirmed' }));
+    expect(fixture.componentInstance.pending()).toHaveLength(0);
+    expect(notify.success).toHaveBeenCalledWith(expect.stringContaining('Entry at 1.096'));
+  });
+
+  it('keeps Apply off for an entry move the engine would refuse, with its reason', () => {
+    drag(
+      { kind: 'orderPrice', refId: 601, price: 1.095, clickable: true, draggable: true },
+      1.0965,
+    );
+    fixture.detectChanges();
+    http.expectOne(`${BASE}/order/601/move-preview`).flush(
+      ok(
+        entryPreview({
+          canApply: false,
+          refusedGate: 'eaVersion',
+          refusedReason: 'The EA runs v8.47.249; moving an order’s entry needs v8.47.250 or later.',
+          gates: [
+            {
+              key: 'eaVersion',
+              name: 'EA build',
+              passed: false,
+              blocking: true,
+              detail: 'The EA runs v8.47.249; moving an order’s entry needs v8.47.250 or later.',
+            },
+          ],
+        }),
+      ),
+    );
+    fixture.detectChanges();
+    expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(true);
+    expect(byId('trade-action-dialog').textContent).toContain('needs v8.47.250');
   });
 });

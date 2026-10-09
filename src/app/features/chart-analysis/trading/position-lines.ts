@@ -17,7 +17,14 @@ const isLong = (direction: unknown) =>
   String(direction).toLowerCase().includes('buy') || String(direction).toLowerCase() === 'long';
 
 /** What a sent change is waiting for. */
-export type PendingKind = 'stop' | 'target' | 'close' | 'orderStop' | 'orderTarget' | 'cancel';
+export type PendingKind =
+  | 'stop'
+  | 'target'
+  | 'close'
+  | 'orderStop'
+  | 'orderTarget'
+  | 'orderEntry'
+  | 'cancel';
 
 /** A change sent to the EA and not yet acknowledged. */
 export interface PendingChange {
@@ -34,8 +41,10 @@ export interface PendingChange {
 /**
  * The grabbable / clickable lines of `symbol`'s positions and orders in the account scope:
  * a position's stop and target drag (a missing one is not drawn and cannot be dragged into being here);
- * its entry is clicked for close / partial close; a working order's stop and target drag, its price is clicked for
- * cancel (the EA has no command to move a working order's price). Lines with a change pending are not grabbable.
+ * its entry is clicked for close / partial close; a working order's stop and target drag, its price is dragged to
+ * move the order (EA ModifyOrderPrice — only an order working at the broker, not one partly filled) and clicked to
+ * cancel it. Lines with a change pending are not grabbable; while an order's entry move is pending, its stop and
+ * target are not either (they move with it).
  */
 export function actionableLines(
   positions: readonly ChartPosition[],
@@ -94,17 +103,19 @@ export function actionableLines(
       busy('cancel', o.id)
     )
       continue;
+    const entryPending = busy('orderEntry', o.id);
     lines.push({
       key: `ord:${o.id}:price`,
       kind: 'orderPrice',
       price: o.price,
       label: 'order',
       color: String(o.orderType) === 'Buy' ? GREEN : RED,
-      draggable: false,
+      draggable: canMoveOrderEntry(o) && !entryPending,
       clickable: true,
       drawn: false,
       refId: o.id,
     });
+    if (entryPending) continue;
     if (o.stopLoss && !busy('orderStop', o.id))
       lines.push({
         key: `ord:${o.id}:stop`,
@@ -129,6 +140,36 @@ export function actionableLines(
       });
   }
   return lines;
+}
+
+/**
+ * A working order's entry can be moved: it is working at the broker (Submitted, with a broker ticket), not partly
+ * filled, and has an entry price (not a market order). The engine checks the rest (EA build, safety, stop guard).
+ */
+export function canMoveOrderEntry(o: OrderDto): boolean {
+  return (
+    String(o.status) === 'Submitted' &&
+    !!o.brokerOrderId &&
+    String(o.executionType) !== 'Market' &&
+    !o.isPaper
+  );
+}
+
+/**
+ * The levels a working order takes when its entry is dragged to `price`: with `withBrackets` its stop and target move by
+ * the same distance (the trade keeps its shape and risk), otherwise they stay. Rounded to the symbol's digits.
+ */
+export function movedOrderLevels(
+  o: Pick<OrderDto, 'price' | 'stopLoss' | 'takeProfit'>,
+  price: number,
+  withBrackets: boolean,
+  precision: number,
+): { price: number; stopLoss: number | null; takeProfit: number | null } {
+  const shift = price - o.price;
+  const round = (v: number) => Number(v.toFixed(precision));
+  const level = (v: number | null | undefined) =>
+    v == null || v === 0 ? null : withBrackets ? round(v + shift) : v;
+  return { price: round(price), stopLoss: level(o.stopLoss), takeProfit: level(o.takeProfit) };
 }
 
 /** A pending change as a faded line with its chip ("SL → 1.09750 · waiting for the EA"). */
