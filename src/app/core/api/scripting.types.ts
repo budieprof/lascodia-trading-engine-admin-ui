@@ -89,6 +89,8 @@ export interface ScriptDiagnostic {
   column: number;
   endLine: number;
   endColumn: number;
+  /** The imported library the position is in (`publisher/name/version`); absent: the script's own. */
+  unit?: string | null;
 }
 
 export type ScriptKind = 'indicator' | 'strategy' | 'library';
@@ -282,6 +284,15 @@ export interface ScriptRuntimeError {
   line?: number | null;
   column?: number | null;
   barIndex?: number | null;
+  /** The imported library the error is in; absent: the script's own code. */
+  unit?: string | null;
+  /** The user-function calls it happened inside, innermost first (call line/column, unit). */
+  callStack?: {
+    function: string;
+    line?: number | null;
+    column?: number | null;
+    unit?: string | null;
+  }[];
 }
 
 /** One side (all / long / short) of the Strategy Tester's performance summary. */

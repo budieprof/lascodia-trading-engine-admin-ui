@@ -58,6 +58,11 @@ export class ScriptingApiError extends Error {
     readonly compile: ScriptCompileResult | null = null,
     /** HTTP status; 0 when the engine could not be reached. */
     readonly httpStatus = 200,
+    /**
+     * A busy refusal's wait before a retry (contract C5: `data.retryAfterMs`, else the
+     * `Retry-After` header); null when the engine gave none.
+     */
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = 'ScriptingApiError';
@@ -70,6 +75,28 @@ export class ScriptingApiError extends Error {
   get isNotFound(): boolean {
     return this.code === '-14' || this.httpStatus === 404;
   }
+
+  /**
+   * The engine is busy and asks to retry later (contract C5: `-429` with `retryAfterMs`) — a slot,
+   * the queue, a data load or the memory budget; never a fault of the script.
+   */
+  get isBusy(): boolean {
+    return this.code === '-429' || this.httpStatus === 429;
+  }
+}
+
+/** A busy refusal's `retryAfterMs` from an envelope's `data` (C5), or null. */
+function retryAfterOf(data: unknown): number | null {
+  const v =
+    data && typeof data === 'object' ? (data as Record<string, unknown>)['retryAfterMs'] : null;
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : null;
+}
+
+/** The `Retry-After` header (whole seconds) in ms, or null. */
+function retryAfterHeader(err: HttpErrorResponse): number | null {
+  const raw = err.headers?.get?.('Retry-After');
+  const s = raw === null || raw === undefined ? NaN : Number(raw);
+  return Number.isFinite(s) && s >= 0 ? s * 1000 : null;
 }
 
 /** The compile response inside an envelope's `data`, if that is what it holds. */
@@ -101,6 +128,8 @@ function envelopeData<T>(res: ResponseData<T> | null | undefined, fallback: stri
     res?.message || fallback,
     res?.responseCode ?? null,
     compileResultOf(res?.data),
+    200,
+    retryAfterOf(res?.data),
   );
 }
 
@@ -115,6 +144,7 @@ export function toScriptingError(err: unknown, fallback: string): ScriptingApiEr
         body.responseCode ?? null,
         compileResultOf(body.data),
         err.status,
+        retryAfterOf(body.data) ?? retryAfterHeader(err),
       );
     }
     if (err.status === 0) {
@@ -125,6 +155,7 @@ export function toScriptingError(err: unknown, fallback: string): ScriptingApiEr
       null,
       null,
       err.status,
+      err.status === 429 ? retryAfterHeader(err) : null,
     );
   }
   if (err instanceof Error && err.message) return new ScriptingApiError(err.message);

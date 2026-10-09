@@ -7,7 +7,7 @@ import type {
   HlineLayer,
   PlotLayer,
 } from '../render/render-model';
-import { applyStroke, type Ctx } from './canvas-kit';
+import { Lru, applyStroke, type Ctx } from './canvas-kit';
 import type { Projection } from './projection';
 
 /**
@@ -661,11 +661,44 @@ function paintPlotFill(ctx: Ctx, p: Projection, layer: FillLayer): void {
   flush();
 }
 
-/** Gradient fill: each bar segment gets a vertical gradient from top_value/top_color to bottom_value/bottom_color. */
+/** Gradients a context paints with, by colour pair — the most recently used kept. */
+const unitGradients = new WeakMap<object, Lru<string, CanvasGradient>>();
+
+/**
+ * The vertical gradient from `top` (at y = 0) to `bottom` (at y = 1) — one per colour pair and
+ * context, made once (PC-I13): a gradient fill used to make a gradient, and parse its two colours,
+ * for every bar segment of every frame. It is stretched onto each segment by the transform it is
+ * filled under.
+ */
+function unitGradient(ctx: Ctx, top: string, bottom: string): CanvasGradient {
+  let cache = unitGradients.get(ctx);
+  if (!cache) {
+    cache = new Lru(256);
+    unitGradients.set(ctx, cache);
+  }
+  const key = `${top}\u0000${bottom}`;
+  let g = cache.get(key);
+  if (!g) {
+    g = ctx.createLinearGradient(0, 0, 0, 1);
+    g.addColorStop(0, top);
+    g.addColorStop(1, bottom);
+    cache.set(key, g);
+  }
+  return g;
+}
+
+/**
+ * Gradient fill: each bar segment gets a vertical gradient from top_value/top_color to
+ * bottom_value/bottom_color. The segment's path is laid down as it is; the gradient is the cached
+ * unit one, filled under a transform that stretches its 0…1 onto the segment's top…bottom — a
+ * transform set after the path changes only what the path is painted with, never where it is.
+ */
 function paintGradientFill(ctx: Ctx, p: Projection, layer: FillLayer): void {
   const g = layer.gradient;
   if (!g) return;
   const value = layer.fillGaps ? bridgedValue : edgeValue;
+  // The transform the chart paints under (its pixel ratio): each stretched fill composes onto it.
+  const base = ctx.getTransform();
   let prevOk = false;
   let px = 0;
   let pa = 0;
@@ -686,21 +719,23 @@ function paintGradientFill(ctx: Ctx, p: Projection, layer: FillLayer): void {
       if (tv === tv && bv === bv && (tc || bc)) {
         const ty = p.y(tv);
         const by = p.y(bv);
-        let fill: string | CanvasGradient = tc ?? bc!;
-        if (Math.abs(by - ty) >= 0.5) {
-          const grad = ctx.createLinearGradient(0, ty, 0, by);
-          grad.addColorStop(0, tc ?? 'rgba(0,0,0,0)');
-          grad.addColorStop(1, bc ?? 'rgba(0,0,0,0)');
-          fill = grad;
-        }
-        ctx.fillStyle = fill;
         ctx.beginPath();
         ctx.moveTo(px, pa);
         ctx.lineTo(x, ya);
         ctx.lineTo(x, yb);
         ctx.lineTo(px, pb);
         ctx.closePath();
-        ctx.fill();
+        if (Math.abs(by - ty) >= 0.5) {
+          ctx.fillStyle = unitGradient(ctx, tc ?? 'rgba(0,0,0,0)', bc ?? 'rgba(0,0,0,0)');
+          // base · translate(0, ty) · scale(1, by − ty): unit y 0 → ty, 1 → by.
+          const s = by - ty;
+          ctx.setTransform(base.a, base.b, base.c * s, base.d * s, base.c * ty + base.e, base.d * ty + base.f);
+          ctx.fill();
+          ctx.setTransform(base);
+        } else {
+          ctx.fillStyle = tc ?? bc!;
+          ctx.fill();
+        }
       }
     }
     prevOk = ok;

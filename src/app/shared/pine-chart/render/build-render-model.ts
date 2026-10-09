@@ -6,6 +6,7 @@ import { BarTimeline, timeframeMs, typicalStepMs } from '../core/timeline';
 import type {
   PineBar,
   PineBoxOutput,
+  PineCallSite,
   PineCandleOutput,
   PineColorSeriesOutput,
   PineDeclaration,
@@ -36,6 +37,7 @@ import type {
   BackgroundLayer,
   BoxDrawing,
   CandleLayer,
+  DrawItem,
   FillEdge,
   FillLayer,
   HlineLayer,
@@ -59,6 +61,11 @@ export interface PineChartInput {
   outputs: PineScriptOutputs | null;
   report: PineStrategyReport | null;
   declaration: PineDeclaration | null;
+  /**
+   * The script's plot-type calls in source order (compile `plots`) — what `explicit_plot_zorder`
+   * orders the pane by. Absent: the default order.
+   */
+  callSites?: readonly PineCallSite[] | null;
 }
 
 export interface BuildOptions {
@@ -294,6 +301,10 @@ export function buildRenderModel(input: PineChartInput, opts: BuildOptions = {})
     pane.drawings.polylines.sort((a, b) => a.id - b.id);
     pane.drawings.linefills.sort((a, b) => a.id - b.id);
   }
+  if (declaration?.explicitPlotZorder === true && input.callSites?.length) {
+    const position = codePositions(input.callSites);
+    for (const pane of [main, script]) pane.drawOrder = codeOrder(pane, position);
+  }
 
   const futureSlots = Math.max(
     0,
@@ -324,7 +335,57 @@ export function emptyPane(key: PaneKey): PaneModel {
     drawings: { labels: [], lines: [], boxes: [], polylines: [], linefills: [] },
     tables: [],
     trades: [],
+    drawOrder: null,
   };
+}
+
+/** Plot-type calls that share one output id space (`plot:N`, `marker:N`, `candle:N`, `bgcolor:N`, barcolor). */
+const PLOT_FAMILY = new Set([
+  'plot',
+  'plotshape',
+  'plotchar',
+  'plotarrow',
+  'plotbar',
+  'plotcandle',
+  'bgcolor',
+  'barcolor',
+]);
+
+/**
+ * Where each plot-type output's call is in the source, by output: `plot:<id>` (the plot family's
+ * shared id space), `hline:<id>`, `fill:<id>`. Every plot-type call is global-scope only in Pine, so
+ * each runs on the first bar, in source order — which is the order the engine numbers outputs in, one
+ * counter per space. Other calls in the list (alertcondition) take no output id.
+ */
+export function codePositions(callSites: readonly PineCallSite[]): Map<string, number> {
+  const out = new Map<string, number>();
+  let plots = 0;
+  let hlines = 0;
+  let fills = 0;
+  callSites.forEach((c, position) => {
+    const fn = c.function.toLowerCase();
+    if (PLOT_FAMILY.has(fn)) out.set(`plot:${plots++}`, position);
+    else if (fn === 'hline') out.set(`hline:${hlines++}`, position);
+    else if (fn === 'fill') out.set(`fill:${fills++}`, position);
+  });
+  return out;
+}
+
+/**
+ * A pane's fills, hlines, series and shapes in code order (`explicit_plot_zorder`). An output whose
+ * call is not in the list (an engine that sent none for it) keeps the default order after the others.
+ */
+export function codeOrder(pane: PaneModel, position: ReadonlyMap<string, number>): DrawItem[] {
+  const items: { item: DrawItem; at: number; rank: number }[] = [];
+  const add = (kind: DrawItem['kind'], index: number, key: string, rank: number) =>
+    items.push({ item: { kind, index }, at: position.get(key) ?? Infinity, rank });
+  pane.fills.forEach((f, i) => add('fill', i, `fill:${f.id}`, 0));
+  pane.hlines.forEach((h, i) => add('hline', i, `hline:${h.id}`, 1));
+  pane.series.forEach((s, i) => add('series', i, `plot:${s.id}`, 2));
+  pane.markers.forEach((m, i) => add('marker', i, `plot:${m.id}`, 3));
+  return items
+    .sort((a, b) => a.at - b.at || a.rank - b.rank || a.item.index - b.item.index)
+    .map((x) => x.item);
 }
 
 function isPaneEmpty(p: PaneModel): boolean {

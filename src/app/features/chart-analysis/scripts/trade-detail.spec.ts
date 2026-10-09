@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { plotValueAt } from '@shared/pine-chart/render/legend';
+import type { PlotLayer } from '@shared/pine-chart/render/render-model';
 import { toChartScriptResult } from './chart-script.model';
 import { BOLLINGER_RUN } from './__fixtures__/bollinger-run';
+import { scriptRenderModel } from './script-model-cache';
 import { tradeDetail, tradeTimeLabel, tradeWindow } from './trade-detail';
 
 describe('trade detail', () => {
@@ -23,6 +26,32 @@ describe('trade detail', () => {
     expect(d.series.length).toBeGreaterThan(0);
     expect(d.series.every((s) => s.entry !== null || s.exit !== null)).toBe(true);
     expect(d.bars.find((b) => b.label === 'Close')!.entry).not.toBeNull();
+  });
+
+  it('reads the series from the render model the chart draws, at the fills’ bar indexes', () => {
+    const d = tradeDetail(result, t, {}, 5);
+    const model = scriptRenderModel(result, 5)!;
+    const plots = model.panes.main.series as PlotLayer[];
+    // The fixture's trade enters on bar_index 32 and exits on 53 (the report's bar indexes).
+    expect(d.series.map((s) => s.title)).toEqual(['Basis', 'Upper', 'Lower']);
+    d.series.forEach((s, i) => {
+      expect(s.entry).toBe(plotValueAt(plots[i], 32));
+      expect(s.exit).toBe(plotValueAt(plots[i], 53));
+    });
+  });
+
+  it('formats the series at the symbol’s precision when the script declares none (PC-12)', () => {
+    const at5 = tradeDetail(result, t, {}, 5).series[0];
+    const at3 = tradeDetail(result, t, {}, 3).series[0];
+    expect(at5.entryText).toBe(at5.entry!.toFixed(5));
+    expect(at3.entryText).toBe(at3.entry!.toFixed(3));
+  });
+
+  it('an open trade has no exit values', () => {
+    const open = { ...t, isOpen: true, exitTime: null, exitPrice: null };
+    const d = tradeDetail(result, open, {}, 5);
+    expect(d.series.length).toBe(3);
+    expect(d.series.every((s) => s.exit === null && s.exitText === '—')).toBe(true);
   });
 
   it('frames the trade with a margin of at least 10 bars', () => {
