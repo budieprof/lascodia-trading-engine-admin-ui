@@ -1159,7 +1159,7 @@
         (contextmenu)="openContextMenu($event)"
         (pointerdown)="drawingMenu.set(null)"
       >
-        <div class="legend">
+        <div class="legend" appMeasuredBottom (bottomChange)="legendBottom.set($event)">
           <div class="legend-title">
             <strong>{{ symbol() }}</strong>
             <span class="muted">{{ resolutionLabel(resolution()) }}</span>
@@ -1233,6 +1233,7 @@
           (viewChanged)="onViewChanged()"
           [showCountdown]="showCountdown()"
           [appearance]="appearance()"
+          [legendBottom]="legendBottom()"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"

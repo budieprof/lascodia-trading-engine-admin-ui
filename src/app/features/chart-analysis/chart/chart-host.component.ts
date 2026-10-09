@@ -144,7 +144,7 @@ import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-rend
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
-import { paintLegend, paintTable, placeTable, type LegendRun } from './snapshot';
+import { paintLegend, paintTable, placeTable, stackTables, type LegendRun } from './snapshot';
 import { ValueProviders, type DataWindowSection, type ValueProvider } from './value-providers';
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
@@ -711,6 +711,11 @@ export class ChartHostComponent implements OnDestroy {
   readonly showCountdown = input(true);
   /** Candle colours, grid lines and background over the theme's palette (CC-I11 chart settings); null: the theme's. */
   readonly appearance = input<ChartAppearance | null>(null);
+  /**
+   * Where the page's floating legend ends, in px from the top of the container the chart sits in (the page measures
+   * it, `appMeasuredBottom`): the price pane's top-left script tables go below it. Null: no legend.
+   */
+  readonly legendBottom = input<number | null>(null);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
   readonly liveAt = input<number | null>(null);
 
@@ -1100,6 +1105,14 @@ export class ChartHostComponent implements OnDestroy {
     this.registerValueProvider('studies', this.studyValues);
     // The Pine scripts' values at the bar (PC-I2): in the data window and the CSV export.
     this.registerValueProvider('scripts', this.scriptValues);
+
+    // The legend grew or shrank: the top-left script tables move with it.
+    effect(() => {
+      this.legendBottom();
+      untracked(() => {
+        if (this.scriptTables().length) this.layoutScriptTables();
+      });
+    });
 
     // Opening the data window fills it at once, for the bar the legend shows.
     effect(() => {
@@ -2018,14 +2031,17 @@ export class ChartHostComponent implements OnDestroy {
       ctx.font = cellFont;
       return ctx.measureText(text).width;
     };
+    // Laid out as the chart shows them: tables at one anchor stack one under the other, the top-left
+    // ones below the legend.
     for (const pane of this.scriptTables())
-      for (const table of pane.tables)
-        paintTable(
-          ctx,
-          placeTable(table, pane.width, pane.height, measure),
-          pane.left,
-          BAND + pane.top,
-        );
+      for (const placed of stackTables(
+        pane.tables.filter((t) => t.cells.length > 0).map((t) => placeTable(t, pane.width, pane.height, measure)),
+        pane.tables.filter((t) => t.cells.length > 0).map((t) => String(t.position)),
+        pane.width,
+        pane.height,
+        pane.topLeftOffset,
+      ))
+        paintTable(ctx, placed, pane.left, BAND + pane.top);
 
     paintLegend(ctx, this.legendRuns(p.text), 12, BAND + 8, `12px ${font}`, 18);
     return out;
@@ -3268,11 +3284,13 @@ export class ChartHostComponent implements OnDestroy {
         return r ? r.top - host.top : 0;
       };
       // The top-left corner's tables go below what sits there: the page's legend over the price
-      // pane (its OHLC line, studies and overlay scripts' status lines), a pane script's status line.
-      const legend = this.hostEl.nativeElement.parentElement?.querySelector(':scope > .legend');
-      const legendBottom = legend
-        ? Math.max(0, legend.getBoundingClientRect().bottom - host.top - topOf(0))
-        : 0;
+      // pane (its OHLC line, studies and overlay scripts' status lines) — as far down as the page
+      // says it reaches (`legendBottom`) — and a pane script's status line.
+      const legendEnd = this.legendBottom();
+      const legendBottom =
+        legendEnd === null
+          ? 0
+          : Math.max(0, legendEnd - (this.hostEl.nativeElement as HTMLElement).offsetTop - topOf(0));
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
         if (!panes[index]) continue;
@@ -3298,15 +3316,14 @@ export class ChartHostComponent implements OnDestroy {
       if (tops.size !== before.size || [...tops].some(([i, t]) => before.get(i) !== t))
         this.scriptPaneTops.set(tops);
       if (this.scriptRowLeft() !== left + 8) this.scriptRowLeft.set(left + 8);
-      // Pane separators can be dragged with no chart event; watch the pane rows themselves — and the
-      // legend, whose height moves the top-left tables.
+      // Pane separators can be dragged with no chart event; watch the pane rows themselves. (The
+      // legend's height arrives as `legendBottom`.)
       this.paneObserver?.disconnect();
       this.paneObserver ??= new ResizeObserver(() => this.layoutScriptTables());
       for (const p of panes) {
         const row = p.getHTMLElement();
         if (row) this.paneObserver.observe(row);
       }
-      if (legend) this.paneObserver.observe(legend);
     });
   }
 

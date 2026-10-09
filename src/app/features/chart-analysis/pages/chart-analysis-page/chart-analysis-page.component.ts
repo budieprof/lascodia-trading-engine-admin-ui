@@ -296,6 +296,7 @@ import { ReplayController } from '../../replay/replay-controller';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import { buildPaletteActions, type PaletteAction } from '../../palette/chart-palette';
 import { ChartPaletteComponent } from '../../palette/chart-palette.component';
+import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
   recalled,
@@ -622,6 +623,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ReplayPanelComponent,
     ChartSettingsDialogComponent,
     ChartPaletteComponent,
+    MeasuredBottomDirective,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -5206,6 +5208,8 @@ export class ChartAnalysisPageComponent {
 
   /** Candle colours, grid lines and background over the theme's; null: the theme's look. */
   readonly appearance = signal<ChartAppearance | null>(null);
+  /** How far down the floating legend reaches (px in the chart area): the chart keeps its top-left tables below it. */
+  readonly legendBottom = signal<number | null>(null);
   readonly chartSettingsOpen = signal(false);
   /** Layout memory per symbol (CC-I11): on, and what each symbol was left on. */
   readonly rememberPerSymbol = signal(false);
