@@ -24,7 +24,7 @@ export interface ChartCommandHost {
   showSignals?: { (): boolean; set(v: boolean): void };
   showEvents: { (): boolean; set(v: boolean): void };
   magnet: { (): boolean; set(v: boolean): void };
-  scaleMode: { (): string; set(v: 'normal' | 'log' | 'percent'): void };
+  scaleMode: { (): string; set(v: 'normal' | 'log' | 'percent' | 'indexed'): void };
   timezone: { (): string; set(v: string): void };
   splitLayout: { (): string };
   active: { (): readonly ActiveIndicator[] };
@@ -40,7 +40,8 @@ export interface ChartCommandHost {
   setSplitLayout(id: '1' | '2h' | '2v' | '4' | '6' | '8'): void;
   selectTool(kind: DrawingKind | null): void;
   clearDrawings(): void;
-  takeSnapshot(): void;
+  /** Save a PNG of the chart; whether it could, and what happened. */
+  takeSnapshot(): { ok: boolean; message: string } | void;
   knownSymbols(): readonly string[];
   timezones(): readonly { id: string; label: string }[];
 
@@ -87,7 +88,7 @@ export interface ChartCommandHost {
   eventImpact(): string;
   setEventImpact(v: 'High' | 'Medium' | 'Low'): void;
   sidePane(): string;
-  setSidePane(v: 'none' | 'details' | 'news' | 'calendar'): void;
+  setSidePane(v: 'none' | 'details' | 'news' | 'calendar' | 'datawindow'): void;
   watchlistOpen: { (): boolean; set(v: boolean): void };
   objectTreeOpen: { (): boolean; set(v: boolean): void };
   toggleFullscreen(): Promise<void>;
@@ -562,18 +563,19 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     },
     {
       id: 'chart.setScaleMode',
-      description: 'Switch the price scale between normal, logarithmic and percentage.',
+      description:
+        'Switch the price scale between normal, logarithmic, percentage and indexed to 100.',
       params: [
         {
           name: 'mode',
           type: 'enum',
           required: true,
-          values: ['normal', 'log', 'percent'],
+          values: ['normal', 'log', 'percent', 'indexed'],
           description: 'Price scale mode.',
         },
       ],
       run: (a) => {
-        host.scaleMode.set(str(a, 'mode') as 'normal' | 'log' | 'percent');
+        host.scaleMode.set(str(a, 'mode') as 'normal' | 'log' | 'percent' | 'indexed');
         return ok(`Price scale: ${str(a, 'mode')}.`);
       },
     },
@@ -1048,18 +1050,18 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
     {
       id: 'chart.setSidePane',
       description:
-        'Open the Details pane (symbol facts), the News pane (headlines and pair bias) or the economic Calendar pane (upcoming releases), or close whichever is open.',
+        'Open the Details pane (symbol facts), the News pane (headlines and pair bias), the economic Calendar pane (upcoming releases) or the Data window (every value — bar, studies, scripts — at the crosshair), or close whichever is open.',
       params: [
         {
           name: 'pane',
           type: 'enum',
           required: true,
-          values: ['none', 'details', 'news', 'calendar'],
+          values: ['none', 'details', 'news', 'calendar', 'datawindow'],
           description: 'Which pane.',
         },
       ],
       run: (a) => {
-        const v = str(a, 'pane') as 'none' | 'details' | 'news' | 'calendar';
+        const v = str(a, 'pane') as 'none' | 'details' | 'news' | 'calendar' | 'datawindow';
         host.setSidePane(v);
         return ok(v === 'none' ? 'Side pane closed.' : `${v} pane open.`);
       },
@@ -1144,8 +1146,10 @@ export function chartCommands(host: ChartCommandHost): UiCommand[] {
       id: 'chart.snapshot',
       description: 'Save a PNG of the chart as it currently looks.',
       run: () => {
-        host.takeSnapshot();
-        return ok('Snapshot saved.');
+        // Honest about a failure (CC-22): it used to report success with no image.
+        const r = host.takeSnapshot();
+        if (r && !r.ok) return fail(r.message);
+        return ok(r?.message ?? 'Snapshot saved.');
       },
     },
   ];

@@ -16,6 +16,7 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.watchlist.split',
   'lascodia.chart.pref.magnetStrength',
   'lascodia.chart.pref.stayInDrawing',
+  'lascodia.chart.pref.favouriteIntervals',
 ] as const;
 export type SyncedPrefKey = (typeof SYNCED_PREF_KEYS)[number];
 

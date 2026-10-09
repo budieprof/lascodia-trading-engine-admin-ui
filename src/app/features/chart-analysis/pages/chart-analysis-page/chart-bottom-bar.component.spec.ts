@@ -56,6 +56,7 @@ describe('ChartBottomBarComponent', () => {
       timezone: signal('UTC'),
       timezones: signal(ZONES),
       scaleMode: signal('normal'),
+      autoScaleOn: signal(true),
       dockTab: signal(null),
       hasStrategy: signal(false),
       menu: signal(null),
@@ -151,6 +152,17 @@ describe('ChartBottomBarComponent', () => {
     byText('auto').click();
     expect(mode).toHaveBeenLastCalledWith('normal');
     expect(auto).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto is lit by the chart’s real autoscale, whatever the mode (CC-19)', () => {
+    set('scaleMode', 'log');
+    expect(byText('auto').classList.contains('on')).toBe(true);
+    // The operator dragged the price scale: the chart reports autoscale off.
+    set('autoScaleOn', false);
+    expect(byText('auto').classList.contains('on')).toBe(false);
+    expect(byText('log').classList.contains('on')).toBe(true);
+    set('scaleMode', 'normal');
+    expect(byText('auto').classList.contains('on')).toBe(false);
   });
 
   it('go to date hands the page the day picked', () => {

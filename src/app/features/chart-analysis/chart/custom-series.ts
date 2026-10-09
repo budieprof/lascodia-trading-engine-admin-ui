@@ -158,6 +158,70 @@ class VolCandleRenderer extends BaseRenderer {
   }
 }
 
+/** The HLC area's own colours, on top of the base style. */
+export interface HlcAreaStyle extends CustomSeriesStyle {
+  /** The close line, drawn over both fills. */
+  closeColor: string;
+  /** Fill between the high and the close. */
+  upFill: string;
+  /** Fill between the close and the low. */
+  downFill: string;
+}
+
+/**
+ * TradingView's HLC area: a high line, a low line and a close line, the band between high and close
+ * filled in the up colour and the band between close and low in the down colour — how far each bar
+ * closed from either end of its range, at a glance. Until 2026-10 the style was the Area series
+ * under another name, byte for byte (CC-23).
+ */
+class HlcAreaRenderer extends BaseRenderer {
+  protected paint(
+    ctx: CanvasRenderingContext2D,
+    data: PaneRendererCustomData<Time, OhlcvData>,
+    toY: PriceToCoordinateConverter,
+  ): void {
+    const range = data.visibleRange!;
+    const style = this.style as HlcAreaStyle;
+    const pts: { x: number; h: number; l: number; c: number }[] = [];
+    // One bar past each edge, so the bands run off the pane rather than stopping short of it.
+    const from = Math.max(0, range.from - 1);
+    const to = Math.min(data.bars.length, range.to + 1);
+    for (let i = from; i < to; i++) {
+      const bar = data.bars[i];
+      const item = bar.originalData;
+      if (!item || item.close === undefined) continue;
+      const h = toY(item.high);
+      const l = toY(item.low);
+      const c = toY(item.close);
+      if (h === null || l === null || c === null) continue;
+      pts.push({ x: bar.x, h, l, c });
+    }
+    if (pts.length === 0) return;
+    const band = (top: (p: (typeof pts)[number]) => number, bottom: typeof top, fill: string) => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, top(pts[0]));
+      for (const p of pts) ctx.lineTo(p.x, top(p));
+      for (let i = pts.length - 1; i >= 0; i--) ctx.lineTo(pts[i].x, bottom(pts[i]));
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+    };
+    band((p) => p.h, (p) => p.c, style.upFill ?? 'rgba(8,153,129,0.2)');
+    band((p) => p.c, (p) => p.l, style.downFill ?? 'rgba(242,54,69,0.2)');
+    const line = (y: (p: (typeof pts)[number]) => number, color: string, width: number) => {
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, y(pts[0]));
+      for (const p of pts) ctx.lineTo(p.x, y(p));
+      ctx.strokeStyle = color;
+      ctx.lineWidth = width;
+      ctx.stroke();
+    };
+    line((p) => p.h, style.upColor, 1);
+    line((p) => p.l, style.downColor, 1);
+    line((p) => p.c, style.closeColor ?? '#2962FF', 2);
+  }
+}
+
 abstract class BaseSeriesView implements ICustomSeriesPaneView<Time, OhlcvData, CustomSeriesStyle> {
   protected abstract createRenderer(): BaseRenderer;
   private instance: BaseRenderer | null = null;
@@ -196,5 +260,20 @@ export class HiLoSeries extends BaseSeriesView {
 export class VolCandleSeries extends BaseSeriesView {
   protected createRenderer(): BaseRenderer {
     return new VolCandleRenderer();
+  }
+}
+
+export class HlcAreaSeries extends BaseSeriesView {
+  protected createRenderer(): BaseRenderer {
+    return new HlcAreaRenderer();
+  }
+
+  override defaultOptions(): HlcAreaStyle {
+    return {
+      ...DEFAULT_STYLE,
+      closeColor: '#2962FF',
+      upFill: 'rgba(8,153,129,0.2)',
+      downFill: 'rgba(242,54,69,0.2)',
+    };
   }
 }

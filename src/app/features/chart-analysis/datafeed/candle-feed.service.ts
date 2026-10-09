@@ -44,6 +44,12 @@ export interface BarsResult {
 /** Hard ceiling on rows per request, so a wide window can't ask for millions. */
 const MAX_PAGE = 5000;
 /**
+ * Series the bar cache keeps (CC-24): the least recently used goes first. A session of switching
+ * symbols and timeframes — the watchlist, the technicals, compare studies — used to keep every
+ * series it ever loaded for the page's life.
+ */
+export const MAX_CACHED_SERIES = 24;
+/**
  * A window ending this close to now is a live one: on the session grid it is asked for with no `to`,
  * so the engine adds the period still forming.
  */
@@ -202,9 +208,8 @@ export class CandleFeedService {
    * asks for a bar count ending at `to` and a short answer leaves a visibly
    * truncated chart. `fromMs` is used only to trim the result.
    *
-   * A session-grid resolution rejects when the engine refuses or cannot be reached — "no bars" would
-   * read as "the engine has no data"; the stored path answers that with an empty result, as it
-   * always has.
+   * Rejects when the engine refuses or cannot be reached, on both grids — "no bars" would read as
+   * "the engine has no data" (CC-14).
    */
   async getBars(
     symbol: string,
@@ -219,7 +224,7 @@ export class CandleFeedService {
     const src = resolutionSource(resolution);
     if (!src || src.kind !== 'stored') return { bars: [], noData: true };
 
-    const cached = this.cache.get(this.key(symbol, resolution)) ?? [];
+    const cached = this.cached(symbol, resolution);
     const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
     if (servedFromCache) return { bars: servedFromCache, noData: false };
 
@@ -227,6 +232,8 @@ export class CandleFeedService {
     // ones, and asking for 10 would render a chart half as long.
     const rows = Math.min(MAX_PAGE, Math.max(1, sourceBarsNeeded(resolution, countBack)));
 
+    // A refusal or an unreachable engine REJECTS, as the session grid does (CC-14): read as "no
+    // data", a network failure on 1m … 1h told the operator "No 1h candles stored for EURUSD".
     const res = await firstValueFrom(
       this.marketData.listCandles({
         currentPage: 1,
@@ -237,9 +244,12 @@ export class CandleFeedService {
           to: new Date(toMs).toISOString(),
         },
       }),
-    ).catch(() => null);
+    ).catch((e: unknown) => {
+      throw e instanceof Error && e.message ? e : new Error('the engine could not be reached');
+    });
 
-    if (!res?.status || !res.data) return { bars: [], noData: true };
+    if (!res?.status || !res.data)
+      throw new Error(res?.message || 'the engine refused the candle request');
 
     const bars = normaliseRows(res.data.data ?? [], resolution);
     if (bars.length === 0) return { bars: [], noData: true };
@@ -267,7 +277,7 @@ export class CandleFeedService {
   ): Promise<BarsResult> {
     const live = toMs >= Date.now() - LIVE_EDGE_MS;
     if (!live) {
-      const cached = this.cache.get(this.key(symbol, resolution)) ?? [];
+      const cached = this.cached(symbol, resolution);
       const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
       if (servedFromCache) return { bars: servedFromCache, noData: false };
     }
@@ -349,11 +359,37 @@ export class CandleFeedService {
     return windowed.length >= Math.min(countBack, 1) && windowed.length > 0 ? windowed : null;
   }
 
+  /** A series' cached bars, marked as just used (CC-24). */
+  private cached(symbol: string, resolution: TvResolution): Bar[] {
+    const k = this.key(symbol, resolution);
+    const bars = this.cache.get(k);
+    if (!bars) return [];
+    this.cache.delete(k);
+    this.cache.set(k, bars);
+    return bars;
+  }
+
+  /** Keep `bars` for a series as its most recently used, dropping the least recently used past the cap. */
+  private store(k: string, bars: Bar[]): void {
+    this.cache.delete(k);
+    this.cache.set(k, bars);
+    while (this.cache.size > MAX_CACHED_SERIES) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest === undefined) break;
+      this.cache.delete(oldest);
+    }
+  }
+
+  /** How many series the cache holds (tests). */
+  cachedSeries(): number {
+    return this.cache.size;
+  }
+
   private mergeIntoCache(symbol: string, resolution: TvResolution, incoming: Bar[]): void {
     const k = this.key(symbol, resolution);
     const existing = this.cache.get(k);
     if (!existing || existing.length === 0) {
-      this.cache.set(k, incoming);
+      this.store(k, incoming);
       return;
     }
     const byTime = new Map<number, Bar>();
@@ -361,7 +397,7 @@ export class CandleFeedService {
     // Incoming wins: a re-fetched bar is fresher than a cached one, which
     // matters for the most recent bar while it is still forming.
     for (const b of incoming) byTime.set(b.time, b);
-    this.cache.set(
+    this.store(
       k,
       [...byTime.values()].sort((a, b) => a.time - b.time),
     );

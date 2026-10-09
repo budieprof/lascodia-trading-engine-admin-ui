@@ -115,12 +115,20 @@ describe('chart page — one load per symbol switch', () => {
   });
 
   it('an unknown timeframe in the URL keeps the chart’s', () => {
-    const { p, feed, follow } = setup({ tf: '7' });
+    // Seconds have no source (no tick history); 7 minutes is a typed interval since CC-I8.
+    const { p, feed, follow } = setup({ tf: '30S' });
     p.resolution.set('240');
 
     follow({ symbol: 'USDJPY' });
 
     expect(p.resolution()).toBe('240');
     expect(feed.getBars).toHaveBeenLastCalledWith('USDJPY', '240', 0, expect.any(Number), 1500);
+  });
+
+  it('a typed interval in the URL opens on it (CC-I8)', () => {
+    const { p, feed, follow } = setup({ tf: '7' });
+    follow({ symbol: 'USDJPY' });
+    expect(p.resolution()).toBe('7');
+    expect(feed.getBars).toHaveBeenLastCalledWith('USDJPY', '7', 0, expect.any(Number), 1500);
   });
 });

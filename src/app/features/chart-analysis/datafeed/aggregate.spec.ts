@@ -78,7 +78,24 @@ describe('aggregateCandles', () => {
   });
 
   it('returns nothing for an unsupported resolution rather than guessing', () => {
-    expect(aggregateCandles([candle('2026-09-13T00:00:00Z', 1, 1, 1, 1)], '3')).toEqual([]);
+    // ('3' is a 3-minute fold since CC-I8; seconds have no source.)
+    expect(aggregateCandles([candle('2026-09-13T00:00:00Z', 1, 1, 1, 1)], '30S')).toEqual([]);
+  });
+
+  it('folds 3 minutes from M1 on the epoch grid (CC-I8)', () => {
+    const bars = aggregateCandles(
+      [
+        candle('2026-09-13T21:00:00Z', 1, 2, 0.5, 1.5),
+        candle('2026-09-13T21:01:00Z', 1.5, 3, 1, 2),
+        candle('2026-09-13T21:02:00Z', 2, 2.5, 1.8, 2.2),
+        candle('2026-09-13T21:03:00Z', 2.2, 2.4, 2.1, 2.3),
+      ].map((c) => ({ ...c, timeframe: 'M1' })),
+      '3',
+    );
+    expect(bars.map((b) => [b.timestamp, b.open, b.high, b.low, b.close])).toEqual([
+      ['2026-09-13T21:00:00.000Z', 1, 3, 0.5, 2.2],
+      ['2026-09-13T21:03:00.000Z', 2.2, 2.4, 2.1, 2.3],
+    ]);
   });
 
   it('builds nothing for the session grid, which the engine serves already built', () => {

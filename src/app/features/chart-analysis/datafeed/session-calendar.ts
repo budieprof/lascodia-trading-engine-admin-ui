@@ -146,6 +146,29 @@ export class TradingCalendar implements TradingDays {
   }
 }
 
+/**
+ * Trading time between two instants (ms): the part of [`fromMs`, `toMs`) that falls in the
+ * calendar's trading days — a Saturday adds nothing. What the chart counts bars by when it places an
+ * upcoming event after its last bar (CC-I2): the bars still to come open only while the market
+ * trades. Bounded to a few hundred trading days.
+ */
+export function tradingMsBetween(
+  calendar: TradingDays & Pick<TradingCalendar, 'isTradingDay'>,
+  fromMs: number,
+  toMs: number,
+): number {
+  let total = 0;
+  let cursor = fromMs;
+  for (let i = 0; i < 400 && cursor < toMs; i++) {
+    const s = calendar.sessionAt(cursor);
+    if (calendar.isTradingDay(s.day))
+      total += Math.max(0, Math.min(toMs, s.end) - Math.max(cursor, s.start));
+    // Sessions follow one another; never stand still on a malformed one.
+    cursor = Math.max(s.end, cursor + 60_000);
+  }
+  return total;
+}
+
 /** `HH:mm` → minutes after midnight. */
 function minutesOf(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
