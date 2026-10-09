@@ -148,7 +148,22 @@ export type ScriptStrategyDto = StrategyDto & ScriptStrategyFields;
  */
 export interface ScriptLiveStatus {
   status: string;
+  /** Why the session is in its status (bound accounts, not bound, errors…); '' when not said. */
+  reason: string;
+  /** `live` | `paper` | `exitsOnly` | `alertsOnly` | `none` — what the session does (PE-08). */
+  mode: ScriptLiveMode;
   lastBarTimeMs: number | null;
+  /** Unix ms the live worker last advanced the session; null before the first. */
+  lastHeartbeatMs: number | null;
+  startedAtMs: number | null;
+  /** Unix ms the emulator state shown was captured. */
+  stateAtMs: number | null;
+  /**
+   * What the running session was compiled with that deserves a look: compiler warnings for the
+   * strategy's chart and saved inputs that were NOT applied (PS9301 — the default runs — and PS9302
+   * unknown ids). Empty on an older engine.
+   */
+  warnings: ScriptLiveWarning[];
   position: Record<string, unknown> | null;
   openTrades: Record<string, unknown>[];
   /** The emulator's closed trades, oldest first (the newest 500); empty on an older engine. */
@@ -160,6 +175,20 @@ export interface ScriptLiveStatus {
   divergences: ScriptDivergence[];
   /** Account positions a previous script version opened, left to the operator (engine D90). */
   orphanedPositions: ScriptOrphanedPosition[];
+}
+
+/** What a live session does (`GET strategy/{id}/script/live` → `mode`). */
+export type ScriptLiveMode = 'live' | 'paper' | 'exitsOnly' | 'alertsOnly' | 'none' | string;
+
+/** One compile finding of the running session (`warnings[]`). */
+export interface ScriptLiveWarning {
+  code: string;
+  /** `warning` | `info`. */
+  severity: string;
+  message: string;
+  /** 1-based; 0 when not about a source position. */
+  line: number;
+  column: number;
 }
 
 /**

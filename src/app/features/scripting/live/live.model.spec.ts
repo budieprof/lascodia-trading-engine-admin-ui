@@ -7,11 +7,20 @@ import {
   formatBrokerLots,
   formatAge,
   formatLiveValue,
+  heartbeatLate,
   humanize,
+  liveModeInfo,
   liveStatusTone,
+  liveWarningHint,
   normalizeLiveStatus,
+  originStats,
   positionHeadline,
+  sortLiveWarnings,
+  timeframeMinutes,
+  tradeR,
 } from './live.model';
+import type { ScriptLiveClosedTrade } from '../api/scripting-api.types';
+import { liveClosedTradesFixture } from '../testing/live-status.fixture';
 import { MINUS } from '../report/report-format';
 
 describe('normalizeLiveStatus', () => {
@@ -222,5 +231,100 @@ describe('presentation helpers', () => {
     expect(formatAge(45)).toBe('45 min ago');
     expect(formatAge(180)).toBe('3 h ago');
     expect(formatAge(60 * 72)).toBe('3 d ago');
+  });
+});
+
+describe('PE-08 — mode, reason, heartbeat and compile findings', () => {
+  it('reads mode, reason, heartbeat and warnings (either casing; UTC times without a zone)', () => {
+    const l = normalizeLiveStatus({
+      Status: 'Running',
+      Mode: 'paper',
+      Reason: 'Paper trading (paper-only stage, before approval)',
+      LastHeartbeatUtc: '2026-10-09T08:00:00',
+      StartedAtUtc: '2026-10-09T07:00:00Z',
+      Warnings: [
+        { Code: 'PS6202', Severity: 'Info', Message: 'lower tf', Line: 9, Column: 1 },
+        {
+          Code: 'PS9301',
+          Severity: 'Warning',
+          Message: 'Input "Length" was not applied',
+          Line: 0,
+          Column: 0,
+        },
+      ],
+    })!;
+    expect(l.mode).toBe('paper');
+    expect(l.reason).toContain('Paper trading');
+    expect(l.lastHeartbeatMs).toBe(Date.UTC(2026, 9, 9, 8));
+    expect(l.startedAtMs).toBe(Date.UTC(2026, 9, 9, 7));
+    expect(sortLiveWarnings(l.warnings).map((w) => [w.code, w.severity])).toEqual([
+      ['PS9301', 'warning'],
+      ['PS6202', 'info'],
+    ]);
+    // An older engine sends none of these.
+    const old = normalizeLiveStatus({ Status: 'Running' })!;
+    expect([old.mode, old.reason, old.lastHeartbeatMs, old.warnings]).toEqual([
+      'none',
+      '',
+      null,
+      [],
+    ]);
+  });
+
+  it('explains each mode, and which of them reach a broker', () => {
+    expect(liveModeInfo('live')).toMatchObject({ label: 'Live', sendsOrders: true });
+    expect(liveModeInfo('paper')).toMatchObject({ label: 'Paper', sendsOrders: false });
+    expect(liveModeInfo('ExitsOnly')).toMatchObject({ label: 'Exits only', sendsOrders: true });
+    expect(liveModeInfo('alertsOnly').sendsOrders).toBe(false);
+    expect(liveModeInfo('weird').label).toBe('weird');
+  });
+
+  it('calls a heartbeat late after two bars of the timeframe (at least 15 minutes)', () => {
+    const now = Date.UTC(2026, 9, 9, 12);
+    expect(heartbeatLate(now - 14 * 60_000, 'M1', now)).toBe(false);
+    expect(heartbeatLate(now - 16 * 60_000, 'M1', now)).toBe(true);
+    expect(heartbeatLate(now - 119 * 60_000, 'H1', now)).toBe(false);
+    expect(heartbeatLate(now - 121 * 60_000, 'H1', now)).toBe(true);
+    expect(heartbeatLate(null, 'H1', now)).toBe(false);
+    expect(timeframeMinutes('D1')).toBe(1440);
+  });
+
+  it('PS9301 says the saved input was not applied — the default runs', () => {
+    expect(liveWarningHint('ps9301')).toContain('runs that input’s default');
+    expect(liveWarningHint('PS1234')).toBeNull();
+  });
+});
+
+describe('PE-I2 (part) — paper and live statistics leave the warm-up out', () => {
+  const trades = liveClosedTradesFixture() as unknown as ScriptLiveClosedTrade[];
+
+  it('measures R against the stop the trade opened with', () => {
+    expect(tradeR(trades[4])).toBeCloseTo(5, 6); // paper long 1.08 → 1.13, stop 1.07
+    expect(tradeR(trades[5])).toBeCloseTo(0.0008 / 0.006, 6); // live short
+    expect(tradeR({ ...trades[4], stopLoss: null })).toBeNull();
+  });
+
+  it('counts each origin on its own, never the warm-up replay', () => {
+    const paper = originStats(trades, 'paper');
+    const live = originStats(trades, 'live');
+    expect([paper.trades, live.trades]).toEqual([1, 1]);
+    expect(paper.expectancyR).toBeCloseTo(5, 6);
+    expect(paper.wins).toBe(1);
+    expect(paper.netProfit).toBeNull(); // the fixture carries no money
+    expect(originStats(trades, 'warmup').trades).toBe(4);
+  });
+
+  it('sums money, profit factor and drawdown when the engine sends profit', () => {
+    const withMoney = trades.map((t, i) => ({
+      ...t,
+      origin: 'paper' as const,
+      profit: [10, -5, 20, -15, 30, -2][i],
+    }));
+    const s = originStats(withMoney, 'paper');
+    expect(s.netProfit).toBe(38);
+    expect(s.profitFactor).toBeCloseTo(60 / 22, 6);
+    expect(s.winRate).toBeCloseTo(0.5, 6);
+    // Cumulative 10, 5, 25, 10, 40, 38 → the deepest fall is 25 → 10.
+    expect(s.maxDrawdown).toBe(15);
   });
 });

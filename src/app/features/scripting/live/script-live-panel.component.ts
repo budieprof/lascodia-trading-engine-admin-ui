@@ -59,11 +59,19 @@ import {
   formatBrokerLots,
   formatAge,
   formatLiveValue,
+  heartbeatLate,
   humanize,
+  liveModeInfo,
   liveStatusTone,
+  liveWarningHint,
   normalizeLiveStatus,
+  originStats,
   positionHeadline,
+  sortLiveWarnings,
+  type OriginStats,
 } from './live.model';
+import { liveClosedTradesCsv } from '../report/report-csv';
+import { fileStamp, saveBlob } from '../shared/download';
 
 /** Fallback cadence; a live session advances on bar closes, so 15 s is plenty. */
 const POLL_MS = 15_000;
@@ -94,6 +102,12 @@ const STALE_MINUTES = 240;
           <h3 class="title">Live session</h3>
           @if (live(); as l) {
             <span class="status" [attr.data-tone]="tone()">{{ l.status || 'Unknown' }}</span>
+            <span
+              class="mode"
+              [attr.data-sends]="modeInfo().sendsOrders"
+              [title]="modeInfo().explanation"
+              >{{ modeInfo().label }}</span
+            >
           }
         </div>
         <div class="head-right">
@@ -127,6 +141,37 @@ const STALE_MINUTES = 240;
             The last refresh failed ({{ errorText() }}); showing the previous state.
           </p>
         }
+        <!-- PE-08: what the session does and why, as the engine reports it. -->
+        <p class="session-line">
+          <strong>{{ modeInfo().label }}.</strong> {{ modeInfo().explanation }}
+          @if (l.reason) {
+            <span class="reason">{{ l.reason }}</span>
+          }
+        </p>
+        @if (sortedWarnings().length > 0) {
+          <section class="block warnings" aria-labelledby="live-warnings">
+            <h4 class="block-title" id="live-warnings">
+              Compile findings of the running session
+              <span class="count">{{ sortedWarnings().length }}</span>
+            </h4>
+            <ul class="warning-list">
+              @for (w of sortedWarnings(); track $index) {
+                <li [attr.data-code]="w.code" [class.applied-input]="w.code === 'PS9301'">
+                  <span class="code">{{ w.code }}</span>
+                  <span class="warning-text">
+                    {{ w.message }}
+                    @if (w.line > 0) {
+                      <span class="muted">(line {{ w.line }})</span>
+                    }
+                    @if (warningHint(w.code); as hint) {
+                      <span class="hint-line">{{ hint }}</span>
+                    }
+                  </span>
+                </li>
+              }
+            </ul>
+          </section>
+        }
         <section class="facts" aria-label="Session">
           <div class="fact">
             <span class="fact-label">Last bar</span>
@@ -135,6 +180,17 @@ const STALE_MINUTES = 240;
               <span class="fact-note warn-text">No new bar for {{ ageText() }}</span>
             } @else if (ageText()) {
               <span class="fact-note">{{ ageText() }}</span>
+            }
+          </div>
+          <div class="fact">
+            <span class="fact-label">Heartbeat</span>
+            <span class="fact-value">{{ heartbeatText() }}</span>
+            @if (heartbeatIsLate()) {
+              <span class="fact-note warn-text"
+                >The live worker has not advanced the session lately</span
+              >
+            } @else if (l.lastHeartbeatMs !== null) {
+              <span class="fact-note">last advanced by the live worker</span>
             }
           </div>
           <div class="fact">
@@ -347,6 +403,95 @@ const STALE_MINUTES = 240;
           }
         </section>
 
+        <!-- PE-I2 (part): what the session did for real, without the warm-up replay. -->
+        <section class="block" aria-labelledby="live-real-trades">
+          <div class="block-head">
+            <h4 class="block-title" id="live-real-trades">Paper and live trades</h4>
+            @if (l.closedTrades.length > 0) {
+              <button type="button" class="btn" (click)="downloadClosedTrades()">
+                Download closed trades (CSV)
+              </button>
+            }
+          </div>
+          <p class="hint">
+            Closed trades the session took after it went live — paper and live separately. The
+            warm-up replay (history run before the session went live) is left out here; the report
+            below counts it.
+          </p>
+          @if (!hasOrigins() && l.closedTrades.length > 0) {
+            <p class="muted">This engine build does not mark where each trade came from.</p>
+          } @else if (realStats().length === 0) {
+            <p class="muted">No paper or live trade has closed yet.</p>
+          } @else {
+            <div class="table-wrap" tabindex="0" role="region" aria-labelledby="live-real-trades">
+              <table class="stats">
+                <thead>
+                  <tr>
+                    <th scope="col"></th>
+                    @for (s of realStats(); track s.origin) {
+                      <th scope="col">{{ originTitle(s.origin) }}</th>
+                    }
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <th scope="row">Closed trades</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td>{{ s.trades }} ({{ s.wins }} won · {{ s.losses }} lost)</td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Net profit</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td
+                        [class.gain]="(s.netProfit ?? 0) > 0"
+                        [class.loss]="(s.netProfit ?? 0) < 0"
+                      >
+                        {{ money(s.netProfit, true) }}
+                      </td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Win rate</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td>{{ pct(s.winRate) }}</td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Profit factor</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td>{{ ratio(s.profitFactor) }}</td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Expectancy</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td>
+                        {{ rText(s.expectancyR) }}
+                        @if (s.rTrades < s.trades) {
+                          <span class="muted">({{ s.rTrades }} with a stop)</span>
+                        }
+                      </td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Max drawdown</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td>{{ money(s.maxDrawdown, false) }}</td>
+                    }
+                  </tr>
+                  <tr>
+                    <th scope="row">Since</th>
+                    @for (s of realStats(); track s.origin) {
+                      <td class="nowrap">{{ dateText(s.firstEntryMs) }}</td>
+                    }
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+
         @if (hasReport()) {
           <app-strategy-report
             [report]="l.report"
@@ -414,6 +559,73 @@ const STALE_MINUTES = 240;
       .status[data-tone='error'] {
         background: rgba(255, 59, 48, 0.12);
         color: var(--loss);
+      }
+      .mode {
+        padding: 2px 10px;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .mode[data-sends='true'] {
+        border-color: rgba(255, 149, 0, 0.6);
+        color: #b25e00;
+      }
+      .session-line {
+        margin: 0;
+        font-size: var(--text-sm);
+        line-height: 1.5;
+        color: var(--text-secondary);
+      }
+      .session-line .reason {
+        display: block;
+        color: var(--text-primary);
+      }
+      .warning-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .warning-list li {
+        display: flex;
+        gap: var(--space-3);
+        align-items: baseline;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        background: rgba(255, 149, 0, 0.07);
+        font-size: var(--text-sm);
+      }
+      .warning-list li.applied-input {
+        border-color: rgba(255, 59, 48, 0.45);
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .warning-list .code {
+        flex-shrink: 0;
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+      }
+      .hint-line {
+        display: block;
+        margin-top: 2px;
+        color: var(--text-secondary);
+      }
+      .block-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+      }
+      table.stats th[scope='row'] {
+        text-align: left;
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
       }
       .facts {
         display: grid;
@@ -767,7 +979,8 @@ export class ScriptLivePanelComponent {
   readonly warmupNote = computed(
     () =>
       'Warm-up trades are a historical replay run before the session went live — not paper ' +
-      'evidence, though the statistics include them. ' +
+      'evidence, though this report’s statistics include them (the "Paper and live trades" table ' +
+      'above leaves them out). ' +
       (this.hasOrigins()
         ? 'The Origin column marks them; select a trade to chart it.'
         : 'This engine build does not mark which trades they are; select a trade to chart it.'),
@@ -809,6 +1022,75 @@ export class ScriptLivePanelComponent {
     const s = Math.max(0, Math.round((this.now() - at) / 1000));
     return s < 5 ? 'Updated just now' : `Updated ${s}s ago`;
   });
+
+  // ── PE-08: mode, reason, heartbeat, compile findings ──────────────────────
+
+  readonly modeInfo = computed(() => liveModeInfo(this.live()?.mode));
+
+  readonly heartbeatText = computed(() => {
+    const t = this.live()?.lastHeartbeatMs ?? null;
+    if (t === null) return NA;
+    return `${formatAge(Math.max(0, Math.round((this.now() - t) / 60_000)))} · ${formatDateTime(t)} UTC`;
+  });
+
+  readonly heartbeatIsLate = computed(() => {
+    const l = this.live();
+    return (
+      !!l &&
+      this.tone() === 'success' &&
+      heartbeatLate(l.lastHeartbeatMs, this.timeframe(), this.now())
+    );
+  });
+
+  readonly sortedWarnings = computed(() => sortLiveWarnings(this.live()?.warnings ?? []));
+
+  warningHint(code: string): string | null {
+    return liveWarningHint(code);
+  }
+
+  // ── PE-I2 (part): paper / live statistics without the warm-up replay ───────
+
+  readonly realStats = computed<OriginStats[]>(() => {
+    const trades = this.live()?.closedTrades ?? [];
+    return (['paper', 'live'] as const)
+      .map((o) => originStats(trades, o))
+      .filter((s) => s.trades > 0);
+  });
+
+  originTitle(origin: TradeOrigin): string {
+    return tradeOriginTitle(origin);
+  }
+
+  money(v: number | null, signed: boolean): string {
+    return formatMoney(v, this.currency(), { signed });
+  }
+
+  pct(v: number | null): string {
+    return v === null ? NA : `${(v * 100).toFixed(1)}%`;
+  }
+
+  ratio(v: number | null): string {
+    return v === null ? NA : v.toFixed(2);
+  }
+
+  rText(v: number | null): string {
+    return v === null ? NA : `${v >= 0 ? '+' : ''}${v.toFixed(2)} R per trade`;
+  }
+
+  dateText(ms: number | null): string {
+    return ms === null ? NA : `${formatDateTime(ms)} UTC`;
+  }
+
+  /** PE-I14: the closed trades (with their origin) as CSV. */
+  downloadClosedTrades(): void {
+    const trades = this.live()?.closedTrades ?? [];
+    if (trades.length === 0) return;
+    const day = new Date().toISOString().slice(0, 10);
+    saveBlob(
+      new Blob([liveClosedTradesCsv(trades)], { type: 'text/csv;charset=utf-8' }),
+      `${fileStamp('live-trades', this.symbol(), this.timeframe(), day)}.csv`,
+    );
+  }
 
   constructor() {
     effect(() => {

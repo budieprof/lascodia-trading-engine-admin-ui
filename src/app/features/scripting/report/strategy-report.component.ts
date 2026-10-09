@@ -14,7 +14,8 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 
 import { ScriptStrategyService, type BacktestExportFormat } from '../api/script-strategy.service';
 import { describeFailure } from '../shared/api-error';
-import { saveBlob } from '../shared/download';
+import { fileStamp, saveBlob } from '../shared/download';
+import { reportTradesCsv } from './report-csv';
 import { normalizeStrategyReport, reportCurrency, type ReportTrade } from './strategy-report.model';
 import { buildProfitDistributionOptions, reportPalette } from './report-charts';
 import { formatDate, formatInteger, formatUnits } from './report-format';
@@ -125,6 +126,16 @@ let nextReportUid = 0;
                   {{ exporting() === 'xlsx' ? 'Exporting…' : 'Export XLSX' }}
                 </button>
               </div>
+            } @else if (r.trades.length > 0) {
+              <!-- PE-I14: a Preview's or the live emulator's List of trades, for a spreadsheet. -->
+              <button
+                type="button"
+                class="btn"
+                (click)="exportTradesCsv()"
+                title="Download the List of trades as CSV (UTC times, quantities in units)"
+              >
+                Export trades (CSV)
+              </button>
             }
           </div>
         </header>
@@ -541,6 +552,18 @@ export class StrategyReportComponent {
     this.activeTab.set(target);
     queueMicrotask(() =>
       this.host.nativeElement.querySelector<HTMLElement>(`#${this.tabId(target)}`)?.focus(),
+    );
+  }
+
+  /** PE-I14: the List of trades as CSV, built here (a Preview or a live report has no run id). */
+  exportTradesCsv(): void {
+    const r = this.data();
+    if (!r) return;
+    const csv = reportTradesCsv(r, this.tradeOrigin());
+    const day = new Date().toISOString().slice(0, 10);
+    saveBlob(
+      new Blob([csv], { type: 'text/csv;charset=utf-8' }),
+      `${fileStamp('trades', r.meta.symbol, r.meta.timeframe, day)}.csv`,
     );
   }
 
