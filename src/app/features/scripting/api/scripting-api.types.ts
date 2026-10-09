@@ -192,6 +192,10 @@ export interface ScriptLiveWarning {
   /** 1-based; 0 when not about a source position. */
   line: number;
   column: number;
+  /** The library the position is in (`publisher/name/version`); absent for the script's own code. */
+  unit?: string | null;
+  /** The compiler's suggestion; absent when there is none. */
+  hint?: string | null;
 }
 
 /**
