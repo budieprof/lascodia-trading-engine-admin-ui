@@ -300,6 +300,8 @@ import type {
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import { ChartTradingComponent } from '../../trading/chart-trading.component';
+import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/trade-timeline';
+import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import type { TicketPrefill } from '../../trading/ticket-model';
 import {
   dockStateOf,
@@ -1396,7 +1398,52 @@ export class ChartAnalysisPageComponent {
     ...this.signalMarkers(),
     ...this.rungMarkers(),
     ...this.closedTradeMarkers(),
+    ...this.timelineMarkers(),
   ]);
+
+  // ── BX-1 (trading): the chart strategy's trade timeline — backtest, live session, paper and broker fills ──
+  private readonly scriptStrategies = inject(ScriptStrategyService);
+  /** The timeline is drawn (overlays menu "Trade timeline"); it needs an engine strategy script on the chart. */
+  readonly showTradeTimeline = signal(false);
+  readonly tradeTimelineStrategyId = computed(() => this.strategyRun()?.item.strategyId ?? null);
+  private readonly timelineMarkers = signal<ChartMarker[]>([]);
+  /** What the drawn timeline holds, or why nothing is drawn (the overlays menu shows it). */
+  readonly tradeTimelineInfo = signal<string | null>(null);
+  private timelineSeq = 0;
+  private readonly loadTradeTimeline = effect((onCleanup) => {
+    const show = this.showTradeTimeline();
+    const strategyId = this.tradeTimelineStrategyId();
+    const symbol = this.symbol();
+    const seq = ++this.timelineSeq;
+    if (!show || strategyId === null) {
+      this.timelineMarkers.set([]);
+      this.tradeTimelineInfo.set(show ? 'Add an engine strategy script to the chart to draw its trades.' : null);
+      return;
+    }
+    const oldest = untracked(() => this.bars()[0]?.time ?? null);
+    const sub = this.scriptStrategies
+      .getParityTimeline(strategyId, timelineWindow(oldest, Date.now()))
+      .subscribe({
+        next: (res) => {
+          if (seq !== this.timelineSeq) return;
+          if (!res?.status || !res.data) {
+            this.timelineMarkers.set([]);
+            this.tradeTimelineInfo.set(res?.message || 'The trade timeline could not be loaded.');
+            return;
+          }
+          this.timelineMarkers.set(timelineMarkers(res.data, symbol));
+          this.tradeTimelineInfo.set(
+            res.data.symbol.toUpperCase() === symbol.toUpperCase()
+              ? [timelineSummary(res.data), ...res.data.notes].join(' — ')
+              : `The strategy trades ${res.data.symbol}, not ${symbol}.`,
+          );
+        },
+        error: () => {
+          if (seq === this.timelineSeq) this.tradeTimelineInfo.set('The engine did not answer.');
+        },
+      });
+    onCleanup(() => sub.unsubscribe());
+  });
   /**
    * Engine state on the chart, each toggled on its own (all off until the operator asks):
    * open positions (entry/SL/TP), pending orders (working limit/stop orders and their O·SL/O·TP),

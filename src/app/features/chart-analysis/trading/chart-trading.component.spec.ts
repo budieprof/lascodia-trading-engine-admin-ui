@@ -309,14 +309,12 @@ describe('ChartTradingComponent (SP-I3)', () => {
     http.expectOne(`${BASE}/position/501/change-preview`).flush(ok(preview({ newTarget: 1.108 })));
     fixture.detectChanges();
     byId<HTMLButtonElement>('trade-action-apply').click();
-    http
-      .expectOne(`${BASE}/position/501/modify-sl-tp`)
-      .flush({
-        data: 'NoBrokerRoute',
-        status: false,
-        message: 'No active EA for account 17 on EURUSD',
-        responseCode: '-11',
-      });
+    http.expectOne(`${BASE}/position/501/modify-sl-tp`).flush({
+      data: 'NoBrokerRoute',
+      status: false,
+      message: 'No active EA for account 17 on EURUSD',
+      responseCode: '-11',
+    });
     fixture.detectChanges();
     expect(fixture.componentInstance.pending()).toHaveLength(0);
     expect(byId('trade-action-error').textContent).toContain('No active EA');

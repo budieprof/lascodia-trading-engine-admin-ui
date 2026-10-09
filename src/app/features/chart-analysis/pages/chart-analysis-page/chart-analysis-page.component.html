@@ -364,6 +364,19 @@
           >
             <app-chart-icon name="trades" [size]="28" /> Closed trades
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showTradeTimeline()"
+            (click)="showTradeTimeline.set(!showTradeTimeline())"
+            [title]="
+              tradeTimelineInfo() ??
+              'The chart strategy\'s trades on one timeline: backtest, live session, paper and account fills, each with its slippage'
+            "
+            data-testid="toggle-trade-timeline"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Trade timeline
+          </button>
           @if (showPositions() || showOrders()) {
             <button
               type="button"
