@@ -2,11 +2,13 @@ import { StateField, type EditorState, type Extension } from '@codemirror/state'
 import { hoverTooltip, showTooltip, type Tooltip } from '@codemirror/view';
 
 import { docViewFor, type PineDocView } from '../pine/pine-docs';
+import { symbolDocView } from '../pine/pine-semantic';
 import { resolvePinePath } from '../pine/pine-resolve';
 import { identifierPathAt } from '../pine/pine-scan';
 import { signatureHelpAt, type SignatureHelpInfo } from '../pine/pine-signature';
 import { docSymbols, inCommentOrString, maskedDoc, pineContext } from './pine-context';
 import { renderDocView, renderSignatureHelp } from './pine-dom';
+import { currentSemantic } from './pine-semantic-ext';
 
 // ── Hover ──────────────────────────────────────────────────────────────────
 
@@ -16,6 +18,10 @@ export function pineHoverInfo(
   pos: number,
 ): { from: number; to: number; view: PineDocView } | null {
   if (inCommentOrString(state, pos)) return null;
+  // The engine's model of this exact text knows what a user name is (PR-I8): its type, where it is declared.
+  const semantic = currentSemantic(state)?.referenceAt(pos);
+  if (semantic)
+    return { from: semantic.from, to: semantic.to, view: symbolDocView(semantic.symbol) };
   const text = state.doc.toString();
   const hit = identifierPathAt(text, pos);
   if (!hit) return null;

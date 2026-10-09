@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   ViewChild,
   computed,
   effect,
@@ -30,6 +31,7 @@ import {
   ScriptStatusBarComponent,
   type CompileState,
 } from '../script-status-bar/script-status-bar.component';
+import { flattenOutline } from '../../pine/pine-semantic';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 
 /** Delay between the last keystroke and the background compile. */
@@ -71,6 +73,16 @@ export const COMPILE_DEBOUNCE_MS = 700;
         <button
           type="button"
           class="btn btn-ghost btn-sm"
+          [class.active]="outlineOpen()"
+          [attr.aria-pressed]="outlineOpen()"
+          (click)="outlineOpen.set(!outlineOpen())"
+          title="The script's functions, types, inputs and variables (F12 goes to a definition, Shift-F12 selects its references, F2 renames)"
+        >
+          Outline
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
           (click)="download()"
           [disabled]="!source().trim()"
           title="Download the source as a .pine file"
@@ -106,7 +118,55 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [placeholder]="placeholder()"
         (cursorChange)="cursor.set($event)"
         (saveRequested)="onSaveShortcut()"
+        [semantic]="result()?.semantic ?? null"
+        [semanticSource]="resultSource()"
+        (renameRequested)="openRename($event)"
+        (libraryDefinition)="notice.set(libraryNotice($event))"
+        (notice)="notice.set($event)"
       />
+      @if (notice(); as n) {
+        <p class="notice" role="status">
+          {{ n }}
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs"
+            (click)="notice.set(null)"
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </p>
+      }
+      @if (outlineOpen()) {
+        <nav class="outline" aria-label="Outline">
+          @if (outline().length === 0) {
+            <p class="muted">
+              {{
+                result()?.semantic
+                  ? 'Nothing declared yet.'
+                  : 'The outline appears after the next compile.'
+              }}
+            </p>
+          } @else {
+            <ul role="list">
+              @for (o of outline(); track $index) {
+                <li [style.padding-left.px]="8 + o.depth * 14">
+                  <button
+                    type="button"
+                    (click)="reveal(o.item.nameRange.line, o.item.nameRange.column)"
+                  >
+                    <span class="outline-kind">{{ o.item.kind }}</span>
+                    <span class="outline-name">{{ o.item.name }}</span>
+                    @if (o.item.detail) {
+                      <span class="outline-detail">{{ o.item.detail }}</span>
+                    }
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        </nav>
+      }
 
       <app-script-status-bar
         [result]="result()"
@@ -115,6 +175,42 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [stale]="stale()"
         [cursor]="cursor()"
       />
+
+      <dialog #renameBox class="rename" aria-label="Rename" (close)="renameTarget.set(null)">
+        @if (renameTarget(); as t) {
+          <form method="dialog" (submit)="$event.preventDefault(); confirmRename()">
+            <label>
+              Rename <code>{{ t.name }}</code> to
+              <input
+                #renameInput
+                type="text"
+                [value]="t.name"
+                (input)="renameTo.set($any($event.target).value)"
+                spellcheck="false"
+              />
+            </label>
+            <p class="muted">
+              Every use in this script changes, its documentation included. The engine checks the
+              new name first.
+            </p>
+            @if (renameError(); as e) {
+              <p class="error" role="alert">{{ e }}</p>
+            }
+            <div class="actions">
+              <button type="button" class="btn btn-ghost btn-sm" (click)="closeRename()">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn btn-sm"
+                [disabled]="renaming() || !renameTo().trim()"
+              >
+                {{ renaming() ? 'Checking…' : 'Rename' }}
+              </button>
+            </div>
+          </form>
+        }
+      </dialog>
 
       @if (showProblems()) {
         <app-problems-panel
@@ -158,6 +254,84 @@ export const COMPILE_DEBOUNCE_MS = 700;
       }
       .file-input {
         display: none;
+      }
+      .notice {
+        margin: 0;
+        font-size: 12px;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .outline {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        max-height: 220px;
+        overflow-y: auto;
+        font-size: 12px;
+      }
+      .outline ul {
+        list-style: none;
+        margin: 0;
+        padding: 4px 0;
+      }
+      .outline li button {
+        width: 100%;
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        border: none;
+        background: transparent;
+        color: var(--text-primary);
+        font: inherit;
+        text-align: left;
+        padding: 2px 8px;
+        cursor: pointer;
+      }
+      .outline li button:hover,
+      .outline li button:focus-visible {
+        background: var(--bg-tertiary);
+        outline: none;
+      }
+      .outline-kind {
+        color: var(--text-tertiary);
+        font-size: 11px;
+        min-width: 64px;
+      }
+      .outline-detail {
+        color: var(--text-tertiary);
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+        font-size: 11px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .muted {
+        color: var(--text-tertiary);
+        margin: 6px 8px;
+      }
+      .rename {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: 16px;
+        min-width: 320px;
+      }
+      .rename input {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+      }
+      .rename .error {
+        color: var(--loss);
+      }
+      .rename .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
       }
     `,
   ],
@@ -208,6 +382,17 @@ export class ScriptWorkbenchComponent {
   );
 
   @ViewChild(PineEditorComponent) private editor?: PineEditorComponent;
+  @ViewChild('renameBox') private renameBox?: ElementRef<HTMLDialogElement>;
+
+  // ── Outline, notices, rename (PR-I8 / PE-I5) ──
+  readonly outlineOpen = signal(false);
+  readonly outline = computed(() => flattenOutline(this.result()?.semantic?.outline ?? []));
+  /** What a semantic command could not do, or where a library definition is. */
+  readonly notice = signal<string | null>(null);
+  readonly renameTarget = signal<{ offset: number; name: string; source: string } | null>(null);
+  readonly renameTo = signal('');
+  readonly renaming = signal(false);
+  readonly renameError = signal<string | null>(null);
 
   private readonly scripting = inject(ScriptingService);
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -262,7 +447,12 @@ export class ScriptWorkbenchComponent {
     this.compileState.set('compiling');
     try {
       const r = await firstValueFrom(
-        this.scripting.compile({ source, symbol: this.symbol(), timeframe: this.timeframe() }),
+        this.scripting.compile({
+          source,
+          symbol: this.symbol(),
+          timeframe: this.timeframe(),
+          semantic: true,
+        }),
       );
       // Apply only the newest compile, and only while it still describes the text on screen.
       if (seq === this.seq && source === this.source()) {
@@ -297,6 +487,56 @@ export class ScriptWorkbenchComponent {
 
   reveal(line: number, column = 1): void {
     this.editor?.revealPosition(line, column);
+  }
+
+  libraryNotice(d: { unit: string; line: number; name: string }): string {
+    return `'${d.name}' is declared in the library ${d.unit}, line ${d.line} — read-only here; open it on the Libraries page to see its source.`;
+  }
+
+  /** F2 in the editor: ask for the new name (a native modal). */
+  openRename(at: { offset: number; name: string }): void {
+    if (this.readOnly()) return;
+    this.renameTarget.set({ ...at, source: this.currentSource() });
+    this.renameTo.set(at.name);
+    this.renameError.set(null);
+    const box = this.renameBox?.nativeElement;
+    if (box && !box.open) {
+      if (typeof box.showModal === 'function') box.showModal();
+      else box.setAttribute('open', '');
+    }
+  }
+
+  closeRename(): void {
+    const box = this.renameBox?.nativeElement;
+    if (box?.open) {
+      if (typeof box.close === 'function') box.close();
+      else box.removeAttribute('open');
+    }
+    this.renameTarget.set(null);
+  }
+
+  /** The engine plans the rename (proven by compiling it); applied as one undoable edit. */
+  async confirmRename(): Promise<void> {
+    const t = this.renameTarget();
+    const to = this.renameTo().trim();
+    if (!t || !to || this.renaming()) return;
+    this.renaming.set(true);
+    this.renameError.set(null);
+    try {
+      const plan = await firstValueFrom(this.scripting.renameSymbol(t.source, t.offset, to));
+      if (!this.editor?.applyRename(t.source, plan.edits)) {
+        this.renameError.set('The text changed while the engine checked the name — try again.');
+        return;
+      }
+      this.closeRename();
+      this.notice.set(
+        `Renamed '${plan.oldName}' to '${plan.newName}' in ${plan.edits.length} place${plan.edits.length === 1 ? '' : 's'} (Ctrl/Cmd-Z undoes it).`,
+      );
+    } catch (err) {
+      this.renameError.set(toScriptingError(err, 'The engine could not rename it.').message);
+    } finally {
+      this.renaming.set(false);
+    }
   }
 
   /**

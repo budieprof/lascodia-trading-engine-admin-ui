@@ -34,6 +34,7 @@ import type {
   StrategyTrialLedgerDto,
   ScriptLibraryVisibility,
   ScriptPublisherDto,
+  ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
   ScriptSessionFrame,
@@ -232,6 +233,24 @@ export class ScriptingService {
         return e.compile ? of(normaliseCompile(e.compile)) : throwError(() => e);
       }),
     );
+  }
+
+  /**
+   * `POST scripting/rename` (§2b) — the edits renaming the name at `offset` everywhere it is used,
+   * proven by the engine compiling the result. A refusal (the new name collides or captures)
+   * rejects with the engine's reason as the error message.
+   */
+  renameSymbol(source: string, offset: number, newName: string): Observable<ScriptRenamePlan> {
+    return this.api
+      .post<
+        ResponseData<ScriptRenamePlan>
+      >('/scripting/rename', { source, offset, newName }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not rename it.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not rename it.')),
+        ),
+      );
   }
 
   // ── §3 Run / preview ────────────────────────────────────────────────────
@@ -532,7 +551,9 @@ export class ScriptingService {
     const path = `/scripting/sessions/${encodeURIComponent(sessionId)}/frame?sinceSeq=${Math.max(0, Math.trunc(sinceSeq))}`;
     return this.api.get<ResponseData<ScriptSessionFrame>>(path, SILENT).pipe(
       map((res) => envelopeData(res, 'The chart session could not be read.')),
-      catchError((err) => throwError(() => toScriptingError(err, 'The chart session could not be read.'))),
+      catchError((err) =>
+        throwError(() => toScriptingError(err, 'The chart session could not be read.')),
+      ),
     );
   }
 

@@ -815,3 +815,84 @@ export interface ScriptStrategyPropertyOverrides {
 export interface ScriptRunRequest {
   strategyProperties?: ScriptStrategyPropertyOverrides;
 }
+
+// ── runtime2: semantic model and rename (PR-I8 / PE-I5, scripting API §2a/§2b) ──
+
+/** A location: 1-based line/column (end exclusive), 0-based offset/length; `unit` = the library it is in. */
+export interface ScriptLocation {
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+  offset: number;
+  length: number;
+  unit?: string | null;
+}
+
+export type ScriptSymbolKind =
+  | 'variable'
+  | 'parameter'
+  | 'loopVariable'
+  | 'function'
+  | 'method'
+  | 'type'
+  | 'field'
+  | 'enum'
+  | 'enumMember'
+  | 'import';
+
+export interface ScriptSymbol {
+  id: number;
+  name: string;
+  kind: ScriptSymbolKind;
+  declaration: ScriptLocation;
+  /** "series float"; "a | b" for a template called with several types. */
+  type?: string | null;
+  detail?: string | null;
+  doc?: string | null;
+  container?: string | null;
+  exported: boolean;
+}
+
+export interface ScriptOutlineItem {
+  name: string;
+  kind: string;
+  range: ScriptLocation;
+  nameRange: ScriptLocation;
+  detail?: string | null;
+  children: ScriptOutlineItem[];
+}
+
+/** §2a: `references` are `[symbol, offset, length, kind]` (0 declaration, 1 read, 2 write, 3 call, 4 named argument, 5 type, 6 member). */
+export interface ScriptSemantic {
+  symbols: ScriptSymbol[];
+  references: [number, number, number, number][];
+  outline: ScriptOutlineItem[];
+}
+
+export interface ScriptCompileRequest {
+  /** Also return the semantic model (§2a). */
+  semantic?: boolean;
+}
+
+export interface ScriptCompileResult {
+  /** The semantic model when the compile asked for it. */
+  semantic?: ScriptSemantic | null;
+}
+
+/** §2b: one edit of a rename (0-based offset/length in the source it was planned on). */
+export interface ScriptRenameEdit {
+  offset: number;
+  length: number;
+  text: string;
+  line: number;
+  column: number;
+  endLine: number;
+  endColumn: number;
+}
+
+export interface ScriptRenamePlan {
+  oldName: string;
+  newName: string;
+  edits: ScriptRenameEdit[];
+}
