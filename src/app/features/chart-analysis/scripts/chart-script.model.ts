@@ -1,5 +1,5 @@
 import { normalizeRunResult } from '@shared/pine-chart/model/normalize';
-import type { PineRunResult } from '@shared/pine-chart/model/pine-outputs.types';
+import type { PineCallFrame, PineRunResult } from '@shared/pine-chart/model/pine-outputs.types';
 import {
   normalizeStrategyReport,
   type StrategyReport,
@@ -97,6 +97,13 @@ export interface ChartScriptResult {
    * opens the editor there.
    */
   errorAt: { line: number; column: number } | null;
+  /**
+   * The imported library `errorAt` is in (`publisher/name/version`) — not this script's source, so
+   * the editor cannot open it there; null in the script's own code.
+   */
+  errorUnit: string | null;
+  /** A runtime error's user-function calls, innermost first; empty otherwise. */
+  errorStack: readonly PineCallFrame[];
   strategy: ChartStrategyResult | null;
   /**
    * The run as the shared Pine renderer reads it (`@shared/pine-chart` normaliser): what
@@ -220,7 +227,41 @@ export function toChartScriptResult(raw: unknown): ChartScriptResult {
     diagnostics,
     error,
     errorAt,
+    errorUnit: firstError ? (firstError.unit ?? null) : (rt?.unit ?? null),
+    errorStack: firstError ? [] : (rt?.callStack ?? []),
     strategy: kind === 'strategy' && rawReport ? strategyToChart(rawReport) : null,
     run,
+  };
+}
+
+/**
+ * What the Pine Editor shows for a run of its text that failed on the chart ("Update on chart",
+ * PC-06): the compile diagnostics, and a runtime error as one more error at its line — the editor
+ * marks and lists them. Null when the run did not fail or carries no compile response.
+ */
+export function editorReport(result: ChartScriptResult): ScriptCompileResult | null {
+  const compile = result.compile;
+  if (!result.error || !compile) return null;
+  const rt = result.run?.runtimeError;
+  if (!rt || result.diagnostics.some((d) => d.severity === 'error')) return compile;
+  const line = rt.line && rt.line > 0 ? rt.line : 1;
+  const column = rt.column && rt.column > 0 ? rt.column : 1;
+  const where = rt.unit ? ` (in library ${rt.unit})` : '';
+  const bar = typeof rt.barIndex === 'number' ? ` on bar ${rt.barIndex}` : '';
+  return {
+    ...compile,
+    diagnostics: [
+      ...compile.diagnostics,
+      {
+        code: rt.code,
+        severity: 'error',
+        message: `Runtime error${bar}${where}: ${rt.message}`,
+        line,
+        column,
+        endLine: line,
+        endColumn: column + 1,
+        unit: rt.unit ?? null,
+      },
+    ],
   };
 }

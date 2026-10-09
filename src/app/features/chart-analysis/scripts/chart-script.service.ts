@@ -368,14 +368,19 @@ export class ChartScriptService {
     });
   }
 
-  /** An ad-hoc item for source typed in the editor. */
+  /**
+   * An ad-hoc item for source typed in the editor, under `key` — its own (PC-07: every editor
+   * script shared `editor:current`, so a second one replaced the first), or the key of the saved
+   * script whose source it is (`mine:<id>`, which keeps its Settings' "Save as default").
+   */
   itemForSource(
     source: string,
     kind: 'indicator' | 'strategy',
     name = 'Untitled script',
+    key = newEditorKey(),
   ): ChartScriptItem {
     return {
-      key: 'editor:current',
+      key,
       source: 'mine',
       name,
       description: '',
@@ -571,6 +576,32 @@ export class ChartScriptService {
     }
     return this.scripting.deleteChartScript(Number(id)).pipe(tap(drop));
   }
+}
+
+let editorSeq = 0;
+
+/** A fresh key for a script run from the editor's text: each one its own (PC-07). */
+export function newEditorKey(): string {
+  return `editor:${Date.now().toString(36)}${(++editorSeq).toString(36)}`;
+}
+
+/**
+ * The key "Update on chart" runs the editor's source under (PC-07): an editor script keeps its
+ * own; a saved script ("My scripts") stays itself while the source is exactly what is saved — its
+ * Settings keep "Save as default" and a layout reopens it as saved; anything else edited (an engine
+ * strategy, an example, a saved script with unsaved edits) becomes an editor script of its own.
+ * Null target (a new script): a new key.
+ */
+export function editorRunKey(
+  target: { key: string } | null,
+  source: string,
+  saved: readonly SavedChartScript[],
+): string {
+  if (!target) return newEditorKey();
+  if (target.key.startsWith('editor:')) return target.key;
+  const m = /^mine:(.+)$/.exec(target.key);
+  if (m && saved.some((s) => s.id === m[1] && s.source === source)) return target.key;
+  return newEditorKey();
 }
 
 /**

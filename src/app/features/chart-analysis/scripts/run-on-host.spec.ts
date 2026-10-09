@@ -11,6 +11,7 @@ import {
   marginCap,
   marginMovesView,
   mergeBarColors,
+  placeRun,
   restoredRightOffset,
   runOffsetOnHost,
   sameBarColors,
@@ -294,5 +295,50 @@ describe('saved / restored right offset', () => {
     expect(restoredRightOffset(DEFAULT_RIGHT_OFFSET, 18)).toBe(18);
     expect(restoredRightOffset(DEFAULT_RIGHT_OFFSET, DEFAULT_RIGHT_OFFSET)).toBe(5);
     expect(restoredRightOffset(-120, 18)).toBe(-120);
+  });
+});
+
+describe('placeRun', () => {
+  const run = (key: string, kind: 'indicator' | 'strategy' = 'indicator', tag = '') => ({
+    item: { key },
+    result: { kind },
+    tag,
+  });
+
+  it('a re-run keeps its place; a new script goes last', () => {
+    const a = run('a');
+    const b = run('b');
+    expect(placeRun([a, b], run('a', 'indicator', 'v2')).runs.map((r) => r.item.key + r.tag)).toEqual([
+      'av2',
+      'b',
+    ]);
+    expect(placeRun([a, b], run('c')).runs.map((r) => r.item.key)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('one strategy at a time: another strategy comes back as replaced', () => {
+    const s1 = run('s1', 'strategy');
+    const placed = placeRun([s1, run('a')], run('s2', 'strategy'));
+    expect(placed.runs.map((r) => r.item.key)).toEqual(['a', 's2']);
+    expect(placed.replaced).toEqual([s1]);
+    expect(placed.swapped).toBeNull();
+  });
+
+  it('PC-06: an edit takes the place of the script it was edited from, offering nothing back', () => {
+    const s1 = run('strategy:9', 'strategy');
+    const placed = placeRun([run('a'), s1, run('b')], run('editor:x', 'strategy'), 'strategy:9');
+    expect(placed.runs.map((r) => r.item.key)).toEqual(['a', 'editor:x', 'b']);
+    expect(placed.swapped).toBe(s1);
+    expect(placed.replaced).toEqual([]);
+  });
+
+  it('an edit under its own key is a re-run in place; a missing target places it as new', () => {
+    const e = run('editor:x');
+    expect(placeRun([e, run('b')], run('editor:x', 'indicator', 'v2'), 'editor:x')).toMatchObject({
+      swapped: null,
+    });
+    expect(placeRun([run('b')], run('editor:y'), 'gone').runs.map((r) => r.item.key)).toEqual([
+      'b',
+      'editor:y',
+    ]);
   });
 });

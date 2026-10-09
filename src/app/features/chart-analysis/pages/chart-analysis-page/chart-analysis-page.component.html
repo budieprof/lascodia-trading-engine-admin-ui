@@ -1708,54 +1708,19 @@
   }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
-  @if (active().length || scriptRuns().length || scriptRunning() || scriptError()) {
+  @if (active().length || scriptChips().length || scriptError()) {
     <aside class="studies">
-      @for (run of scriptRuns(); track run.item.key) {
-        <div class="study script-study">
-          <span class="study-label" (dblclick)="settings.open(run.item.key)">
-            <span class="pine-tag">{{ run.result.kind === 'strategy' ? 'Strategy' : 'Pine' }}</span>
-            {{ run.result.title || run.item.name }}
-          </span>
-          <button
-            type="button"
-            class="study-toggle"
-            (click)="settings.open(run.item.key)"
-            title="Settings"
-            [attr.aria-label]="(run.result.title || run.item.name) + ' settings'"
-            data-testid="script-settings"
-          >
-            <app-chart-icon name="settings" [size]="16" />
-          </button>
-          <button
-            type="button"
-            class="study-toggle"
-            (click)="openScriptSource(run.item.key)"
-            title="Source code"
-          >
-            <app-chart-icon name="pine" [size]="16" />
-          </button>
-          @if (run.result.kind === 'strategy') {
-            <button
-              type="button"
-              class="study-toggle"
-              (click)="testerOpen.set(!testerOpen())"
-              title="Strategy tester"
-            >
-              <app-chart-icon name="tester" [size]="16" />
-            </button>
-          }
-          <button
-            type="button"
-            class="study-remove"
-            (click)="removeScriptFromChart(run.item.key)"
-            title="Remove"
-          >
-            <app-chart-icon name="close" [size]="14" />
-          </button>
-        </div>
-      }
-      @if (scriptRunning()) {
-        <div class="study muted">Running script…</div>
+      <!-- Pine scripts: each with its own run state (PC-05/PC-13/PC-I7). -->
+      @for (c of scriptChips(); track c.key) {
+        <app-script-chip
+          [chip]="c"
+          (visibility)="toggleScriptVisible(c.key)"
+          (settings)="settings.open(c.key)"
+          (source)="openScriptSource(c.key)"
+          (tester)="testerOpen.set(!testerOpen())"
+          (removed)="removeScriptFromChart(c.key)"
+          (openAt)="openScriptAt(c.key, $event)"
+        />
       }
       @if (scriptError()) {
         <div class="study script-error" role="alert">

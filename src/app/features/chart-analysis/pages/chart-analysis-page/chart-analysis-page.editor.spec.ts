@@ -54,15 +54,25 @@ function page(runs: ChartScriptRun[]): Page {
     strategySources: signal({}),
     editorCleared: signal(false),
     runScript: vi.fn(),
+    pendingScripts: signal(new Map()),
+    scriptFailures: signal(new Map()),
+    waitingScripts: signal(new Map()),
+    scriptUpdates: signal(new Map()),
     chartScripts: {
-      itemForSource: (source: string, kind: 'indicator' | 'strategy', name: string) => ({
-        key: 'editor:current',
+      itemForSource: (
+        source: string,
+        kind: 'indicator' | 'strategy',
+        name: string,
+        key: string,
+      ) => ({
+        key,
         source: 'mine',
         name,
         description: '',
         kind,
         pineSource: source,
       }),
+      savedScripts: () => [],
     },
     // As the page derives them.
     editorTarget: computed(() => {
@@ -161,7 +171,7 @@ describe('chart page — removing a Pine script from the chart clears the editor
     expect(p['settings'].run()).toBeNull();
   });
 
-  it('"Update on chart" still keeps the editor open, on the edited copy, with the inputs', () => {
+  it('"Update on chart" runs the edit first, keeping the script on the chart until it lands (PC-06)', () => {
     const v2 = item('mine:20');
     const p = page([run(v2, { 'Display::Colour candles': false }), run(item('mine:5'))]);
     editing(p, 'mine:20');
@@ -169,15 +179,21 @@ describe('chart page — removing a Pine script from the chart clears the editor
     p.onEditorAdd({ source: '// v2 edited', kind: 'indicator', name: 'v2' });
 
     expect(p.editorOpen()).toBe(true);
-    expect(p.editorKey()).toBe('editor:current');
-    expect(p.scriptRuns().map((r) => r.item.key)).toEqual(['mine:5']);
+    // Nothing is removed before the edit's run lands; the editor stays on the script it shows.
+    expect(p.editorKey()).toBe('mine:20');
+    expect(p.scriptRuns().map((r) => r.item.key)).toEqual(['mine:20', 'mine:5']);
+    // The edit runs under a key of its own (PC-07), with the inputs, replacing mine:20 once it lands.
     expect(p['runScript']).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'editor:current', pineSource: '// v2 edited' }),
+      expect.objectContaining({ key: expect.stringMatching(/^editor:/), pineSource: '// v2 edited' }),
       { 'Display::Colour candles': false },
+      false,
+      undefined,
+      undefined,
+      { replaces: 'mine:20' },
     );
   });
 
-  it('the assistant’s run (runDraft) is unaffected: the editor stays open on the new copy', () => {
+  it('the assistant’s run (runDraft) is an update too: the editor stays open on the script it shows', () => {
     const p = page([run(item('mine:20'), { 'Signals::Sensitivity': 2 })]);
     editing(p, 'mine:20');
     const done = vi.fn();
@@ -185,13 +201,15 @@ describe('chart page — removing a Pine script from the chart clears the editor
     p['runDraftOnChart']('// from the assistant', done);
 
     expect(p.editorOpen()).toBe(true);
-    expect(p.editorKey()).toBe('editor:current');
-    expect(p['editorDraft']()).toEqual({ key: 'editor:current', text: '// from the assistant' });
+    expect(p.editorKey()).toBe('mine:20');
+    expect(p['editorDraft']()).toEqual({ key: 'mine:20', text: '// from the assistant' });
     expect(p['runScript']).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'editor:current' }),
+      expect.objectContaining({ key: expect.stringMatching(/^editor:/) }),
       { 'Signals::Sensitivity': 2 },
       false,
       done,
+      undefined,
+      { replaces: 'mine:20' },
     );
   });
 
@@ -232,7 +250,15 @@ describe('chart page — removing a Pine script from the chart clears the editor
     p.removeScriptFromChart('mine:20');
     p.toggleEditor(); // the starter template
     p.onEditorAdd({ source: '// new', kind: 'indicator', name: 'New' });
-    expect(p.editorKey()).toBe('editor:current');
+    // A new script: nothing to replace; the editor links to it when its run lands.
+    expect(p['runScript']).toHaveBeenCalledWith(
+      expect.objectContaining({ key: expect.stringMatching(/^editor:/), pineSource: '// new' }),
+      {},
+      false,
+      undefined,
+      undefined,
+      { replaces: null },
+    );
     expect(dockStateOf(p['dockView']())).not.toHaveProperty('editorCleared');
   });
 });

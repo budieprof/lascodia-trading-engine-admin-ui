@@ -111,16 +111,31 @@ import {
 } from 'rxjs';
 import {
   ChartScriptService,
+  editorRunKey,
   startingValues,
   type ChartScriptCatalog,
   type ChartScriptItem,
 } from '../../scripts/chart-script.service';
+import {
+  MAX_BUSY_RETRIES,
+  busyWaitMs,
+  failureOfError,
+  failureOfResult,
+  isBusy,
+  type ScriptFailure,
+} from '../../scripts/script-run-state';
+import { ScriptChipComponent, type ScriptChip } from '../../scripts/script-chip.component';
+import {
+  displayOverrides,
+  resolveDisplay,
+  type ScriptDisplaySettings,
+} from '../../scripts/script-display';
 import { ScriptSettingsDialogComponent } from '../../scripts/script-settings-dialog.component';
 import { ChartBottomBarComponent, type BottomBarMenu } from './chart-bottom-bar.component';
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
 import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
-import { detectScriptKind } from '../../scripts/chart-script.model';
+import { detectScriptKind, editorReport } from '../../scripts/chart-script.model';
 import {
   pineAssistCommands,
   pineEditorFacts,
@@ -257,6 +272,16 @@ export interface ChartScriptRun {
   resolution: TvResolution;
   /** Bars this run asked for — history loaded past it triggers a re-run. */
   requestedBars: number;
+  /** How it is shown (eye, Style, Visibility): what differs from the defaults; saved with the layout. */
+  display?: Partial<ScriptDisplaySettings>;
+  /** When this run landed (client ms): how old the chart's run is when a re-run fails. */
+  landedAt?: number;
+}
+
+/** "Update on chart" (PC-06): the run of the editor's text and the chart script it was edited from. */
+interface ScriptUpdate {
+  /** The script on the chart it replaces once it lands; null for a new script. */
+  replaces: string | null;
 }
 
 /** One comparison chart in a split layout. */
@@ -460,6 +485,7 @@ function loadWatchlistOpen(): boolean {
     ChartPanelsDockComponent,
     LongPressDirective,
     UndoNoticeComponent,
+    ScriptChipComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
   ],
@@ -813,11 +839,17 @@ export class ChartAnalysisPageComponent {
       const bars = this.barsFor();
       return this.scriptRuns()
         .filter((r) => runMatchesChart(r, chart, bars))
-        .map((r) => ({ key: r.item.key, result: r.result }));
+        .map((r) => ({ key: r.item.key, result: r.result, display: resolveDisplay(r.display) }));
     },
     {
       equal: (a, b) =>
-        a.length === b.length && a.every((l, i) => l.key === b[i].key && l.result === b[i].result),
+        a.length === b.length &&
+        a.every(
+          (l, i) =>
+            l.key === b[i].key &&
+            l.result === b[i].result &&
+            JSON.stringify(l.display) === JSON.stringify(b[i].display),
+        ),
     },
   );
   readonly strategyRun = computed(
@@ -826,7 +858,65 @@ export class ChartAnalysisPageComponent {
   /** Scripts with an explicit run in flight, by key, with its ticket ({@link runScript}). */
   private readonly runningKeys = signal<ReadonlyMap<string, number>>(new Map());
   readonly scriptRunning = computed(() => this.runningKeys().size > 0);
+  /**
+   * The chart's non-script notices (an FX-fundamentals pane that could not load, a study with no
+   * data). A Pine script's failure is its own, on its chip ({@link scriptFailures}).
+   */
   readonly scriptError = signal<string | null>(null);
+  /** Each script's last failed run, by key (PC-05, PC-13): never one line for all of them. */
+  readonly scriptFailures = signal<ReadonlyMap<string, ScriptFailure>>(new Map());
+  /**
+   * Scripts asked onto the chart whose first run has not landed — on its way, or failed (a dialog
+   * pick, a restored layout): their chips show it, with the way to open or remove them.
+   */
+  private readonly pendingScripts = signal<
+    ReadonlyMap<
+      string,
+      { item: ChartScriptItem; values: ScriptInputValues; symbol: string; resolution: TvResolution }
+    >
+  >(new Map());
+  /** Explicit runs the engine refused as busy (C5), by key: sent again at this time (client ms). */
+  private readonly waitingScripts = signal<ReadonlyMap<string, number>>(new Map());
+  /** "Update on chart" in flight, by the chart script it replaces: its chip shows it updating. */
+  private readonly scriptUpdates = signal<ReadonlyMap<string, string>>(new Map());
+
+  /** The studies row's Pine chips: the scripts on the chart, then those still on their way. */
+  readonly scriptChips = computed<ScriptChip[]>(() => {
+    const running = this.runningKeys();
+    const waiting = this.waitingScripts();
+    const failures = this.scriptFailures();
+    const updates = this.scriptUpdates();
+    const updating = new Set(updates.keys());
+    const viaUpdate = new Set(updates.values());
+    const chip = (
+      key: string,
+      name: string,
+      kind: ScriptChip['kind'],
+      placed: boolean,
+      run: ChartScriptRun | null,
+    ): ScriptChip => ({
+      key,
+      name,
+      kind,
+      placed,
+      visible: resolveDisplay(run?.display).visible,
+      running: running.has(key) || updating.has(key),
+      waitingUntil: waiting.get(key) ?? null,
+      failure: failures.get(key) ?? null,
+      lastGoodMs: run?.landedAt ?? null,
+      unavailable: null,
+    });
+    const runs = this.scriptRuns();
+    const out = runs.map((r) =>
+      chip(r.item.key, r.result.title || r.item.name, r.result.kind, true, r),
+    );
+    for (const [key, p] of this.pendingScripts()) {
+      // An edit on its way shows on the chip of the script it updates.
+      if (viaUpdate.has(key) || runs.some((r) => r.item.key === key)) continue;
+      out.push(chip(key, p.item.name, p.item.kind, false, null));
+    }
+    return out;
+  });
   readonly testerOpen = signal(true);
   /**
    * The operator opened the Strategy Tester with no strategy on the chart: it shows how to add
@@ -848,13 +938,15 @@ export class ChartAnalysisPageComponent {
     const runs = this.scriptRuns();
     const key = this.editorKey();
     const run = runs.find((r) => r.item.key === key) ?? null;
-    if (!run) return null;
-    const item = run.item;
+    // A script whose first run failed is not on the chart yet, but its source can be fixed here.
+    const pending = run || key === null ? null : (this.pendingScripts().get(key) ?? null);
+    const item = run?.item ?? pending?.item;
+    if (!item) return null;
     const id = item.strategyId ?? null;
     const source = item.pineSource ?? (id !== null ? (this.strategySources()[id] ?? null) : null);
     return {
       key: item.key,
-      name: run.result.title || item.name,
+      name: run?.result.title || item.name,
       source,
       strategyId: id,
       loading: id !== null && source === null,
@@ -880,7 +972,9 @@ export class ChartAnalysisPageComponent {
     const target = key ?? fallback;
     if (target !== null) this.editorCleared.set(false);
     this.editorKey.set(target);
-    const item = runs.find((r) => r.item.key === target)?.item;
+    const item =
+      runs.find((r) => r.item.key === target)?.item ??
+      (target !== null ? this.pendingScripts().get(target)?.item : undefined);
     const id = item?.strategyId;
     if (id !== undefined && id !== null && !item?.pineSource && !(id in this.strategySources())) {
       this.strategies
@@ -1589,6 +1683,10 @@ export class ChartAnalysisPageComponent {
         if (runs.some((r) => r.symbol !== symbol || r.resolution !== resolution)) {
           for (const r of runs) this.runScript(r.item, r.values, true);
         }
+        // Scripts whose first run was for the series the chart left start over on this one.
+        for (const p of this.pendingScripts().values())
+          if (p.symbol !== symbol || p.resolution !== resolution)
+            this.runScript(p.item, p.values, true);
       });
     });
 
@@ -1601,11 +1699,17 @@ export class ChartAnalysisPageComponent {
       document.removeEventListener('visibilitychange', resumeReruns);
       this.runScheduler.dispose();
     });
-    /** Quiet re-runs of the scripts on this chart (`filter`: which of them). */
+    /**
+     * Quiet re-runs of the scripts on this chart (`filter`: which of them). A hidden indicator is not
+     * kept current — nothing of it shows — and runs again when shown (toggleScriptVisible); a hidden
+     * strategy is, for its Strategy Tester.
+     */
     const rerunScripts = (filter: (r: ChartScriptRun) => boolean) => {
       const chart = { symbol: this.symbol(), resolution: this.resolution() };
-      for (const r of this.scriptRuns())
-        if (sameSeries(r, chart) && filter(r)) this.runScheduler.request(r.item.key);
+      for (const r of this.scriptRuns()) {
+        const hidden = r.result.kind !== 'strategy' && !resolveDisplay(r.display).visible;
+        if (sameSeries(r, chart) && !hidden && filter(r)) this.runScheduler.request(r.item.key);
+      }
     };
 
     // Scroll-back paging prepends history; a run only covers the bars it asked for, so its plots
@@ -3058,10 +3162,13 @@ export class ChartAnalysisPageComponent {
     () => Date.now(),
     () => document.hidden,
   );
-  /** Each script's run in flight, so that a newer run, or removing the script, aborts its request. */
+  /**
+   * Each script's run in flight, so that a newer run, or removing the script, aborts its request —
+   * or the retry it waits for after a busy refusal.
+   */
   private readonly runsInFlight = new Map<
     string,
-    { ticket: number; sub: Subscription; done?: (r: RunOutcome) => void }
+    { ticket: number; sub: { unsubscribe(): void }; done?: (r: RunOutcome) => void }
   >();
 
   /** A quiet re-run the scheduler started: the script as it is on the chart, on the bar forming now. */
@@ -3079,10 +3186,17 @@ export class ChartAnalysisPageComponent {
    * Run a Pine script/strategy over the loaded window and paint it.
    *
    * <p>An explicit run (no `quiet` ticket: adding a script, "Update on chart", new inputs, a symbol
-   * switch, a restored layout, more history) shows "Running script…" and its errors, and supersedes
-   * the script's run in flight — that request is aborted, and its result would not be drawn. Every
-   * script in the editor shares one key, so without this a slow live re-run of the old source,
-   * landing after "Update on chart", put the old source back.</p>
+   * switch, a restored layout, more history) shows on its chip, and supersedes the script's run in
+   * flight — that request is aborted, and its result would not be drawn: a slow live re-run of an
+   * old source landing after "Update on chart" never puts the old source back.</p>
+   *
+   * <p>A failure is the script's own (PC-05, PC-13): an explicit run's marks its chip with the error
+   * (the line to open the editor at, its library, the call stack); a quiet re-run's marks it stale —
+   * the chart keeps the run before it, and says how old it is. "Update on chart" (`update`, PC-06)
+   * runs the edited text first and puts it in the edited script's place only once it lands: when it
+   * fails, the script on the chart stays as it was and the editor shows why. A busy engine (contract
+   * C5, `-429`) is never a failure: a quiet re-run backs off for the wait it asks; an explicit run
+   * waits on its chip and is sent again, at most {@link MAX_BUSY_RETRIES} times.</p>
    */
   runScript(
     item: ChartScriptItem,
@@ -3091,99 +3205,280 @@ export class ChartAnalysisPageComponent {
     done?: (r: RunOutcome) => void,
     /** The scheduler's ticket for a quiet re-run: no spinner, and a failure keeps the last plots. */
     quiet?: number,
+    /** "Update on chart": the editor's text, and the chart script it replaces once it lands. */
+    update?: ScriptUpdate,
   ): void {
     const key = item.key;
     const explicit = quiet === undefined;
-    if (explicit) {
-      this.abortRun(key, SUPERSEDED);
-      this.scriptError.set(null);
-    }
-    const ticket = quiet ?? this.runScheduler.begin(key);
-    if (explicit) this.runningKeys.update((m) => new Map(m).set(key, ticket));
     const symbol = this.symbol();
     const resolution = this.resolution();
-    // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's. On
-    // the engine's clock: the session grid's periods open and close at the engine's instants.
-    const liveBar = formingLiveBar(
-      this.bars(),
-      this.barsFor(),
-      { symbol, resolution },
-      this.serverClock.now(),
-    );
+    if (explicit) {
+      this.abortRun(key, SUPERSEDED);
+      // A new attempt: what failed before is not what this run will say. An edit's failure goes to
+      // the editor, so the chip it would update keeps its own state meanwhile.
+      if (!update) this.dropFailure(key);
+    }
+    const ticket = quiet ?? this.runScheduler.begin(key);
+    if (explicit) {
+      this.runningKeys.update((m) => new Map(m).set(key, ticket));
+      if (!this.scriptRuns().some((r) => r.item.key === key))
+        this.pendingScripts.update((m) =>
+          new Map(m).set(key, { item, values, symbol, resolution }),
+        );
+      const target = update?.replaces;
+      if (target && target !== key) this.scriptUpdates.update((m) => new Map(m).set(target, key));
+    }
     // Never less than a full page: a run started while the chart is still loading would
     // otherwise cover only a sliver of history and stop short when the operator pans back.
     const requestedBars = Math.min(Math.max(this.bars().length, PAGE_BARS), MAX_SCRIPT_BARS);
     let over = false;
+    let busyRetries = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let request: Subscription | null = null;
     /** The run is over: off the spinner and out of flight. Whether its result may be drawn. */
     const finish = (): boolean => {
       over = true;
+      clearTimeout(retryTimer);
       if (this.runsInFlight.get(key)?.ticket === ticket) this.runsInFlight.delete(key);
       this.clearRunning(key, ticket);
+      this.clearWaiting(key);
+      this.clearUpdatesBy(key);
       return this.runScheduler.isCurrent(key, ticket);
     };
-    const sub = this.chartScripts
-      .runOnChart(item, symbol, resolution, values, requestedBars, liveBar)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (result) => {
-          const current = finish();
-          try {
-            // A newer run of this script, or its removal, superseded this one.
-            if (!current) {
-              done?.({ error: SUPERSEDED });
-              return;
+    const send = (): void => {
+      // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's.
+      // On the engine's clock: the session grid's periods open and close at the engine's instants.
+      // Taken again for a retry after a busy refusal: it runs on the bar forming then.
+      const liveBar = formingLiveBar(
+        this.bars(),
+        this.barsFor(),
+        { symbol, resolution },
+        this.serverClock.now(),
+      );
+      request = this.chartScripts
+        .runOnChart(item, symbol, resolution, values, requestedBars, liveBar)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (result) => {
+            const current = finish();
+            try {
+              // A newer run of this script, or its removal, superseded this one.
+              if (!current) {
+                done?.({ error: SUPERSEDED });
+                return;
+              }
+              // A run for a symbol the operator has since left is stale (the switch ran it again).
+              if (symbol !== this.symbol() || resolution !== this.resolution()) {
+                done?.({ error: 'The chart moved to another symbol or timeframe during the run.' });
+                return;
+              }
+              if (result.error) {
+                this.runFailed(key, explicit, update, failureOfResult(result, 'error', Date.now()));
+                if (update) {
+                  // PC-06: the editor marks the diagnostics (a runtime error at its line too).
+                  const report = editorReport(result);
+                  if (report) this.scriptEditor()?.showCompile(report);
+                }
+                done?.({ error: result.error });
+                return;
+              }
+              this.landRun(item, result, values, symbol, resolution, requestedBars, replace, update);
+              done?.(result);
+            } finally {
+              // After the result is in: a re-run waiting on this one reads the script as it is now.
+              this.runScheduler.settle(key, ticket);
             }
-            // A run for a symbol the operator has since left is stale.
-            if (symbol !== this.symbol() || resolution !== this.resolution()) {
-              done?.({ error: 'The chart moved to another symbol or timeframe during the run.' });
-              return;
-            }
-            if (result.error) {
-              if (explicit) this.scriptError.set(`${item.name}: ${result.error}`);
-              done?.({ error: result.error });
-              return;
-            }
-            // The overrides as they apply to the script that ran: one for an input its source no
-            // longer declares, or declares with another type, range or options, is dropped — that
-            // input runs on its default (the run fell back to that) and leaves the layout.
-            const fitting = result.compile ? pruneInputValues(result.inputs, values) : values;
-            const entry = { item, result, values: fitting, symbol, resolution, requestedBars };
-            // One strategy at a time (its tester owns the bottom panel), in place for a re-run.
-            const placed = placeRun(this.scriptRuns(), entry);
-            this.scriptRuns.set(placed.runs);
-            // A strategy this one replaced is off the chart: its run in flight and its quiet re-runs
-            // go with it — one landing late would put it back in place of this one.
-            for (const r of placed.replaced) {
-              this.abortRun(r.item.key, 'Another strategy took its place on the chart.');
-              this.runScheduler.cancel(r.item.key);
-            }
-            this.restoringScripts.update((l) => l.filter((w) => w.key !== item.key));
-            if (result.kind === 'strategy') {
-              // The defaults its Strategy Tester inputs are measured against (engine strategies).
-              this.settings.loadStoredInputs(item);
-              if (!replace) {
-                this.testerOpen.set(true);
-                this.dockPreference.set('tester');
-                // Added by the operator over another strategy: say so, with the way back.
-                const previous = placed.replaced[0];
-                if (previous) this.offerUndoReplace(previous, entry);
+          },
+          error: (err: unknown) => {
+            if (isBusy(err)) {
+              const wait = busyWaitMs(err, busyRetries);
+              if (!explicit) {
+                // C5: a quiet re-run backs off for the wait the engine asked — never an error.
+                const current = finish();
+                if (current) this.runScheduler.backoff(key, wait);
+                this.runScheduler.settle(key, ticket);
+                done?.({ error: current ? err.message : SUPERSEDED });
+                return;
+              }
+              if (busyRetries < MAX_BUSY_RETRIES && this.runScheduler.isCurrent(key, ticket)) {
+                // An explicit run waits on its chip and goes again: the operator asked for it.
+                busyRetries++;
+                this.waitingScripts.update((m) => new Map(m).set(key, Date.now() + wait));
+                retryTimer = setTimeout(send, wait);
+                return;
               }
             }
-            done?.(result);
-          } finally {
-            // After the result is in: a re-run waiting on this one reads the script as it is now.
+            const current = finish();
             this.runScheduler.settle(key, ticket);
-          }
+            const message = err instanceof Error ? err.message : 'run failed';
+            done?.({ error: current ? message : SUPERSEDED });
+            if (!current) return;
+            this.runFailed(key, explicit, update, failureOfError(err, 'error', Date.now()));
+            if (update) this.notify.error(`${item.name}: ${message}`);
+          },
+        });
+    };
+    send();
+    if (!over)
+      this.runsInFlight.set(key, {
+        ticket,
+        sub: {
+          unsubscribe: () => {
+            clearTimeout(retryTimer);
+            request?.unsubscribe();
+          },
         },
-        error: (err: unknown) => {
-          const current = finish();
-          this.runScheduler.settle(key, ticket);
-          const message = err instanceof Error ? err.message : 'run failed';
-          done?.({ error: current ? message : SUPERSEDED });
-          if (explicit && current) this.scriptError.set(`${item.name}: ${message}`);
-        },
+        done,
       });
-    if (!over) this.runsInFlight.set(key, { ticket, sub, done });
+  }
+
+  /**
+   * A run came back with its result: it goes on the chart — in its own place for a re-run, in the
+   * edited script's for "Update on chart" (which leaves the chart then), last for a new script, and
+   * in the place of the strategy on the chart for another strategy (one at a time).
+   */
+  private landRun(
+    item: ChartScriptItem,
+    result: ChartScriptResult,
+    values: ScriptInputValues,
+    symbol: string,
+    resolution: TvResolution,
+    requestedBars: number,
+    replace: boolean,
+    update: ScriptUpdate | undefined,
+  ): void {
+    const key = item.key;
+    // The overrides as they apply to the script that ran: one for an input its source no longer
+    // declares, or declares with another type, range or options, is dropped — that input runs on
+    // its default (the run fell back to that) and leaves the layout.
+    const fitting = result.compile ? pruneInputValues(result.inputs, values) : values;
+    const runs = this.scriptRuns();
+    // How it was shown: its own run's, the edited script's for an edit, a restored layout's.
+    const display =
+      runs.find((r) => r.item.key === key)?.display ??
+      (update?.replaces ? runs.find((r) => r.item.key === update.replaces)?.display : undefined) ??
+      this.restoringScripts().find((w) => w.key === key)?.display;
+    const entry: ChartScriptRun = {
+      item,
+      result,
+      values: fitting,
+      symbol,
+      resolution,
+      requestedBars,
+      landedAt: Date.now(),
+      ...(display && Object.keys(display).length ? { display } : {}),
+    };
+    // One strategy at a time (its tester owns the bottom panel), in place for a re-run.
+    const placed = placeRun(runs, entry, update?.replaces ?? null);
+    this.scriptRuns.set(placed.runs);
+    // A strategy this one replaced is off the chart: its run in flight and its quiet re-runs go
+    // with it — one landing late would put it back in place of this one.
+    for (const r of placed.replaced) {
+      this.abortRun(r.item.key, 'Another strategy took its place on the chart.');
+      this.runScheduler.cancel(r.item.key);
+      this.dropFailure(r.item.key);
+    }
+    // An edit took the place of the script it was edited from: that one leaves the chart, and the
+    // editor follows its text onto the new one.
+    const edited = update?.replaces ?? null;
+    if (edited !== null && edited !== key) this.retireScript(edited, key);
+    else if (update && edited === null && this.editorKey() === null) this.editorKey.set(key);
+    this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
+    this.dropPending(key);
+    this.dropFailure(key);
+    if (result.kind === 'strategy') {
+      // The defaults its Strategy Tester inputs are measured against (engine strategies).
+      this.settings.loadStoredInputs(item);
+      if (!replace && edited === null) {
+        this.testerOpen.set(true);
+        this.dockPreference.set('tester');
+        // Added by the operator over another strategy: say so, with the way back.
+        const previous = placed.replaced[0];
+        if (previous) this.offerUndoReplace(previous, entry);
+      }
+    }
+  }
+
+  /**
+   * A run failed. An edit's failure is the editor's (it shows the diagnostics; the script on the
+   * chart stays as it was), and a new script from the editor leaves no chip behind; an explicit
+   * run's marks the script's chip; a quiet re-run's marks it stale, unless it already shows an error.
+   */
+  private runFailed(
+    key: string,
+    explicit: boolean,
+    update: ScriptUpdate | undefined,
+    failure: ScriptFailure,
+  ): void {
+    if (update) {
+      if (update.replaces === null || update.replaces !== key) this.dropPending(key);
+      return;
+    }
+    if (explicit) {
+      this.setFailure(key, failure);
+      return;
+    }
+    if (this.scriptFailures().get(key)?.kind === 'error') return;
+    this.setFailure(key, { ...failure, kind: 'stale' });
+  }
+
+  /**
+   * The script an edit replaced leaves the chart (PC-06): its run in flight, its re-runs and its
+   * state go with it, its Settings close, and the editor showing it moves to the edit.
+   */
+  private retireScript(oldKey: string, newKey: string): void {
+    this.abortRun(oldKey, 'An edit of this script took its place on the chart.');
+    this.runScheduler.cancel(oldKey);
+    this.restoringScripts.update((l) => l.filter((w) => w.key !== oldKey));
+    this.dropPending(oldKey);
+    this.dropFailure(oldKey);
+    this.clearWaiting(oldKey);
+    if (this.settings.run()?.item.key === oldKey) this.settings.close();
+    if (this.editorKey() === oldKey) {
+      this.editorKey.set(newKey);
+      const draft = this.editorDraft();
+      if (draft?.key === oldKey) this.editorDraft.set({ key: newKey, text: draft.text });
+    }
+  }
+
+  private setFailure(key: string, failure: ScriptFailure): void {
+    this.scriptFailures.update((m) => new Map(m).set(key, failure));
+  }
+
+  private dropFailure(key: string): void {
+    if (!this.scriptFailures().has(key)) return;
+    this.scriptFailures.update((m) => {
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  private dropPending(key: string): void {
+    if (!this.pendingScripts().has(key)) return;
+    this.pendingScripts.update((m) => {
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  private clearWaiting(key: string): void {
+    if (!this.waitingScripts().has(key)) return;
+    this.waitingScripts.update((m) => {
+      const next = new Map(m);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  /** Forget the "Update on chart" `key` is the run of (it ended), and any update OF `key`. */
+  private clearUpdatesBy(key: string): void {
+    const m = this.scriptUpdates();
+    if (![...m].some(([target, run]) => target === key || run === key)) return;
+    this.scriptUpdates.set(
+      new Map([...m].filter(([target, run]) => target !== key && run !== key)),
+    );
   }
 
   /** Abort the run of `key` in flight, if any; whoever waits on it is told `why`. */
@@ -3193,6 +3488,8 @@ export class ChartAnalysisPageComponent {
     this.runsInFlight.delete(key);
     run.sub.unsubscribe();
     this.clearRunning(key, run.ticket);
+    this.clearWaiting(key);
+    this.clearUpdatesBy(key);
     run.done?.({ error: why });
   }
 
@@ -3201,6 +3498,10 @@ export class ChartAnalysisPageComponent {
     for (const key of [...this.runsInFlight.keys()]) this.abortRun(key, why);
     this.runScheduler.cancelAll();
     this.runningKeys.set(new Map());
+    this.waitingScripts.set(new Map());
+    this.scriptUpdates.set(new Map());
+    this.pendingScripts.set(new Map());
+    this.scriptFailures.set(new Map());
   }
 
   private clearRunning(key: string, ticket: number): void {
@@ -3210,6 +3511,42 @@ export class ChartAnalysisPageComponent {
       next.delete(key);
       return next;
     });
+  }
+
+  /** The eye on a script's chip or status line: hide it or show it again — no re-run to hide. */
+  toggleScriptVisible(key: string): void {
+    const run = this.scriptRuns().find((r) => r.item.key === key);
+    if (!run) return;
+    const visible = !resolveDisplay(run.display).visible;
+    this.setScriptDisplay(key, { visible });
+    // A hidden indicator is not kept current: shown again, it catches up.
+    if (visible) this.runScheduler.request(key);
+  }
+
+  /**
+   * Change how a script on the chart is shown (the eye, its Style and Visibility tabs): applied on
+   * the client to its render model — no re-run — and saved with the layout (PC-01, PC-13).
+   */
+  setScriptDisplay(key: string, patch: Partial<ScriptDisplaySettings>): void {
+    this.scriptRuns.update((runs) =>
+      runs.map((r) =>
+        r.item.key !== key
+          ? r
+          : { ...r, display: displayOverrides(resolveDisplay({ ...r.display, ...patch })) },
+      ),
+    );
+  }
+
+  /** A failure's "Line N": the script in the Pine Editor, at that line (PC-I7). */
+  openScriptAt(key: string, where: { line: number; column: number }): void {
+    this.openScriptSource(key);
+    // The editor shows the script's text first (a fresh panel renders a frame later).
+    const reveal = (tries: number): void => {
+      const editor = this.scriptEditor();
+      if (editor) editor.revealLine(where.line, where.column);
+      else if (tries > 0) setTimeout(() => reveal(tries - 1), 50);
+    };
+    setTimeout(() => reveal(10), 0);
   }
 
   /** Frame a strategy trade on the chart (List of trades click), TradingView-style. */
@@ -3243,10 +3580,20 @@ export class ChartAnalysisPageComponent {
   });
 
   removeScript(key: string): void {
-    // Its run in flight must not bring it back, nor a re-run waiting to start.
+    // Its run in flight must not bring it back, nor a re-run waiting to start — nor an edit of it
+    // still on its way ("Update on chart").
+    const edit = this.scriptUpdates().get(key);
+    if (edit) {
+      this.abortRun(edit, 'The script it updates was removed from the chart.');
+      this.runScheduler.cancel(edit);
+      this.dropPending(edit);
+    }
     this.abortRun(key, 'The script was removed from the chart.');
     this.runScheduler.cancel(key);
     this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
+    this.dropPending(key);
+    this.dropFailure(key);
+    this.clearWaiting(key);
     this.scriptRuns.update((runs) => runs.filter((r) => r.item.key !== key));
   }
 
@@ -3301,40 +3648,50 @@ export class ChartAnalysisPageComponent {
     this.editorCleared.set(true);
   }
 
-  /** A script's input overrides on the chart (none when it is not on it). */
+  /** A script's input overrides on the chart, or on its way there (none when it is neither). */
   private scriptValues(key: string | null | undefined): ScriptInputValues {
-    return this.scriptRuns().find((r) => r.item.key === key)?.values ?? {};
+    return (
+      this.scriptRuns().find((r) => r.item.key === key)?.values ??
+      (key ? this.pendingScripts().get(key)?.values : undefined) ??
+      {}
+    );
   }
 
+  /**
+   * The editor's "Add to chart" / "Update on chart". An edit of a script on the chart runs FIRST
+   * and takes the edited script's place only once it lands (PC-06): when it does not compile or
+   * fails at run time, the script on the chart stays as it was and the editor marks why — it used
+   * to be removed first and lost. Its inputs carry over; those the edit removed or retyped are
+   * dropped by the run. The run's key is the edit's own (PC-07: every editor script used to share
+   * `editor:current`, so adding a second replaced the first), or the saved script's when the text is
+   * exactly what is saved.
+   */
   onEditorAdd(submit: ScriptEditorSubmit): void {
-    // Editing a script that is on the chart updates it in place (the edited copy replaces it). Its
-    // inputs carry over; those the edit removed or retyped are dropped by the run (runScript).
-    const replacing = this.editorTarget();
-    const values = this.scriptValues(replacing?.key);
-    if (replacing) this.removeScript(replacing.key);
-    const item = this.chartScripts.itemForSource(submit.source, submit.kind, submit.name);
-    this.editorKey.set(item.key);
+    const target = this.editorTarget();
+    const values = this.scriptValues(target?.key);
+    const key = editorRunKey(target, submit.source, this.chartScripts.savedScripts());
+    const item = this.chartScripts.itemForSource(submit.source, submit.kind, submit.name, key);
     this.editorCleared.set(false); // it shows a chart script again
-    this.runScript(item, values);
+    this.runScript(item, values, false, undefined, undefined, { replaces: target?.key ?? null });
   }
 
   /**
    * The assistant's `pine.run`, as "Update on chart": the edited copy replaces the script the
-   * editor shows, keeps its inputs, and the editor follows it.
+   * editor shows once it lands, keeps its inputs, and the editor follows it.
    */
   private runDraftOnChart(source: string, done: (r: RunOutcome) => void): void {
     const target = this.editorTarget();
     const values = this.scriptValues(target?.key);
-    if (target) this.removeScript(target.key);
+    const key = editorRunKey(target, source, this.chartScripts.savedScripts());
     const item = this.chartScripts.itemForSource(
       source,
       detectScriptKind(source),
       target?.name ?? 'Untitled script',
+      key,
     );
-    this.editorKey.set(item.key);
     this.editorCleared.set(false);
-    this.editorDraft.set({ key: item.key, text: source });
-    this.runScript(item, values, false, done);
+    this.editorDraft.set({ key: this.editorKey(), text: source });
+    this.runScript(item, values, false, done, undefined, { replaces: target?.key ?? null });
   }
 
   /** A Pine script's Settings dialog (TradingView's study Settings): its inputs, applied live. */
