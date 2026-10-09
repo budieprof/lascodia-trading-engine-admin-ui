@@ -11,6 +11,8 @@ import {
   humanize,
   liveModeInfo,
   liveStatusTone,
+  liveFindingHint,
+  liveFindingWhere,
   liveWarningHint,
   normalizeLiveStatus,
   originStats,
@@ -292,6 +294,16 @@ describe('PE-08 — mode, reason, heartbeat and compile findings', () => {
   it('PS9301 says the saved input was not applied — the default runs', () => {
     expect(liveWarningHint('ps9301')).toContain('runs that input’s default');
     expect(liveWarningHint('PS1234')).toBeNull();
+    // The engine's own hint wins; a finding in a library names it.
+    expect(liveFindingHint({ code: 'PS2001', hint: "Did you mean 'close'?" })).toBe(
+      "Did you mean 'close'?",
+    );
+    expect(liveFindingHint({ code: 'ps9301', hint: null })).toContain('runs that input’s default');
+    expect(liveFindingWhere({ line: 12, unit: 'alice/tools/2' })).toBe(
+      '(line 12 of library alice/tools/2)',
+    );
+    expect(liveFindingWhere({ line: 12 })).toBe('(line 12)');
+    expect(liveFindingWhere({ line: 0 })).toBeNull();
   });
 });
 

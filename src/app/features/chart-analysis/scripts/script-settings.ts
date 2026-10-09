@@ -1,7 +1,11 @@
 import { computed, linkedSignal, signal, type WritableSignal } from '@angular/core';
 import type { Observable } from 'rxjs';
 
-import type { ScriptInputDto, ScriptInputValues } from '@core/api/scripting.types';
+import type {
+  ScriptInputDto,
+  ScriptInputValues,
+  ScriptStrategyPropertyOverrides,
+} from '@core/api/scripting.types';
 import { sameInputValues, withSavedDefaults } from '@features/scripting/pine/pine-inputs';
 import { savedScriptId, type ChartScriptItem, type SavedChartScript } from './chart-script.service';
 import {
@@ -186,6 +190,22 @@ export class ScriptSettings<R extends SettingsRun> {
     if (!sameInputValues(run.values, values))
       this.runs.update((runs) => runs.map((r) => (r === run ? { ...r, values } : r)));
     this.host.run(run.item, values);
+  }
+
+  /**
+   * PC-I5: the Strategy Tester's Properties — re-run the strategy at once with these `strategy()`
+   * overrides (`{}` = the script's own again). They ride on its chart item, so its later runs (live
+   * re-runs, a symbol switch, Bar Replay) keep them for this chart session.
+   */
+  applyProperties(key: string, properties: ScriptStrategyPropertyOverrides): void {
+    const run = this.runs().find((r) => r.item.key === key);
+    if (!run || run.item.kind !== 'strategy') return;
+    const { strategyProperties: _previous, ...rest } = run.item;
+    const item: ChartScriptItem = Object.keys(properties).length
+      ? { ...rest, strategyProperties: { ...properties } }
+      : rest;
+    this.runs.update((runs) => runs.map((r) => (r === run ? { ...r, item } : r)));
+    this.host.run(item, run.values);
   }
 
   /** "Save as default": a copy of this saved script added to a chart starts with these values. */

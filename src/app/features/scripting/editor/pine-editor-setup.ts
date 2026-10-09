@@ -34,6 +34,7 @@ import type {
   ScriptDiagnostic,
   ScriptDiagnosticFix,
   ScriptLibraryDto,
+  ScriptSemantic,
 } from '@core/api/scripting.types';
 import type { PineCatalogIndex } from '../pine/pine-catalog-index';
 import {
@@ -48,6 +49,7 @@ import { indexForCatalog, pineContextField, setPineContext } from './pine-contex
 import { pineLanguageSupport, type PineTokenizerNames } from './pine-language';
 import { pineTheme } from './pine-theme';
 import { pineTooltips } from './pine-tooltips';
+import { pineSemantic, semanticState, setSemantic, type SemanticHost } from './pine-semantic-ext';
 
 /**
  * The CodeMirror 6 Pine editor. This module (and everything it imports) is loaded on demand by
@@ -68,11 +70,17 @@ export interface PineEditorOptions {
   onCursor(line: number, column: number): void;
   /** Mod-S inside the editor. */
   onSave?(): void;
+  /** Shift-Alt-F inside the editor: format the script. */
+  onFormat?(): void;
+  /** Go to definition / references / rename (PR-I8, PE-I5). */
+  semantic?: SemanticHost;
 }
 
 export interface PineEditorHandle {
   readonly view: EditorView;
   getValue(): string;
+  /** The main selection as document offsets [from, to); null when nothing is selected. */
+  getSelection(): { from: number; to: number } | null;
   /** Replaces the document. External loads stay out of the undo history by default. */
   setValue(doc: string, addToHistory?: boolean): void;
   setReadOnly(readOnly: boolean): void;
@@ -83,6 +91,16 @@ export interface PineEditorHandle {
   setDiagnostics(diagnostics: readonly ScriptDiagnostic[]): void;
   /** Applies a quick fix (1-based line/column range) as one edit the operator can undo. */
   applyFix(fix: ScriptDiagnosticFix): void;
+  /** The engine's semantic model of `source` (null: none); used only while the editor shows that text. */
+  setSemantic(model: ScriptSemantic | null, source: string | null): void;
+  /**
+   * Applies a rename's edits (planned on `source`) as one undoable edit; false — and nothing
+   * changes — when the editor's text is no longer `source`.
+   */
+  applyEdits(
+    source: string,
+    edits: readonly { offset: number; length: number; text: string }[],
+  ): boolean;
   /** Moves the cursor to a 1-based line/column, scrolls it into view and focuses. */
   revealPosition(line: number, column: number): void;
   focus(): void;
@@ -178,6 +196,7 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     search({ top: true }),
     keymap.of([
       { key: 'Mod-s', preventDefault: true, run: () => (opts.onSave?.(), true) },
+      { key: 'Shift-Alt-f', preventDefault: true, run: () => (opts.onFormat?.(), true) },
       ...closeBracketsKeymap,
       ...defaultKeymap,
       ...searchKeymap,
@@ -192,6 +211,7 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
     readOnlySlot.of(readOnlyExtension(opts.readOnly)),
     pineContextField.init(() => ({ index, libraries: opts.libraries })),
     pineTooltips(),
+    pineSemantic(opts.semantic ?? {}),
     pineColorSwatches,
     EditorView.contentAttributes.of({ 'aria-label': opts.ariaLabel ?? 'Pine Script editor' }),
     // A little air below the cursor when typing on the last visible lines.
@@ -215,6 +235,10 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
   return {
     view,
     getValue: () => view.state.doc.toString(),
+    getSelection: () => {
+      const r = view.state.selection.main;
+      return r.empty ? null : { from: r.from, to: r.to };
+    },
     setValue(doc, addToHistory = false) {
       if (doc === view.state.doc.toString()) return;
       view.dispatch({
@@ -244,6 +268,20 @@ export function createPineEditor(parent: HTMLElement, opts: PineEditorOptions): 
       const doc = view.state.doc;
       const markers = toEditorDiagnostics(doc, diagnostics).map((d) => lintDiagnostic(d, doc));
       view.dispatch(setDiagnostics(view.state, markers));
+    },
+    setSemantic(model, source) {
+      view.dispatch({ effects: setSemantic.of(semanticState(model, source)) });
+    },
+    applyEdits(source, edits) {
+      if (view.state.readOnly || view.state.doc.toString() !== source) return false;
+      view.dispatch({
+        changes: [...edits]
+          .sort((a, b) => a.offset - b.offset)
+          .map((e) => ({ from: e.offset, to: e.offset + e.length, insert: e.text })),
+        userEvent: 'input.rename',
+      });
+      view.focus();
+      return true;
     },
     applyFix(fix) {
       if (view.state.readOnly) return;

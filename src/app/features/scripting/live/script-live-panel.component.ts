@@ -19,7 +19,7 @@ import {
 
 import { ScriptStrategyService } from '../api/script-strategy.service';
 import { StrategyExecutionService } from '../api/strategy-execution.service';
-import type { ScriptDivergence } from '../api/scripting-api.types';
+import type { ScriptDivergence, ScriptLiveWarning } from '../api/scripting-api.types';
 import { describeFailure, isOk } from '../shared/api-error';
 import { StrategyReportComponent } from '../report/strategy-report.component';
 import {
@@ -63,7 +63,8 @@ import {
   humanize,
   liveModeInfo,
   liveStatusTone,
-  liveWarningHint,
+  liveFindingHint,
+  liveFindingWhere,
   normalizeLiveStatus,
   originStats,
   positionHeadline,
@@ -165,10 +166,10 @@ const STALE_MINUTES = 240;
                   <span class="code">{{ w.code }}</span>
                   <span class="warning-text">
                     {{ w.message }}
-                    @if (w.line > 0) {
-                      <span class="muted">(line {{ w.line }})</span>
+                    @if (findingWhere(w); as where) {
+                      <span class="muted">{{ where }}</span>
                     }
-                    @if (warningHint(w.code); as hint) {
+                    @if (warningHint(w); as hint) {
                       <span class="hint-line">{{ hint }}</span>
                     }
                   </span>
@@ -1052,8 +1053,12 @@ export class ScriptLivePanelComponent {
 
   readonly sortedWarnings = computed(() => sortLiveWarnings(this.live()?.warnings ?? []));
 
-  warningHint(code: string): string | null {
-    return liveWarningHint(code);
+  warningHint(w: ScriptLiveWarning): string | null {
+    return liveFindingHint(w);
+  }
+
+  findingWhere(w: ScriptLiveWarning): string | null {
+    return liveFindingWhere(w);
   }
 
   // ── PE-I2 (part): paper / live statistics without the warm-up replay ───────
