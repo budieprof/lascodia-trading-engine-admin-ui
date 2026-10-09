@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TradingCalendar, nextSessionPeriod } from './session-calendar';
+import { TradingCalendar, nextSessionPeriod, tradingMsBetween } from './session-calendar';
 import { tradingDayMs } from './session-bars';
 
 /**
@@ -165,5 +165,23 @@ describe('nextSessionPeriod — the period a live price opens after the newest b
     expect(
       nextSessionPeriod(FX, '240', { time: last.time }, at('2026-10-06T13:00:00Z')),
     ).toBeNull();
+  });
+});
+
+describe('tradingMsBetween — the bars still to come open only while the market trades (CC-I2)', () => {
+  it('counts nothing for the FX weekend', () => {
+    // Friday 17:00 New York (EDT) to Monday 12:30 UTC: only Sunday 17:00 NY onwards trades.
+    expect(tradingMsBetween(FX, at('2026-10-09T21:00:00Z'), at('2026-10-12T12:30:00Z'))).toBe(
+      15.5 * H,
+    );
+  });
+
+  it('is the plain span inside a trading week, and every hour on a 7-day session', () => {
+    expect(tradingMsBetween(FX, at('2026-10-06T10:00:00Z'), at('2026-10-06T14:00:00Z'))).toBe(
+      4 * H,
+    );
+    expect(tradingMsBetween(UTC, at('2026-10-09T21:00:00Z'), at('2026-10-12T12:30:00Z'))).toBe(
+      63.5 * H,
+    );
   });
 });

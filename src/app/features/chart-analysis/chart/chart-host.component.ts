@@ -36,6 +36,7 @@ import {
   type DeepPartial,
   type IChartApi,
   type ISeriesApi,
+  type Logical,
   type ISeriesMarkersPluginApi,
   type ISeriesPrimitive,
   type SeriesMarker,
@@ -52,7 +53,7 @@ import {
 } from './trading-date';
 import { ThemeService } from '@core/theme/theme.service';
 import type { Bar } from '../datafeed/candle-feed.service';
-import { TradingCalendar, type SessionSpec } from '../datafeed/session-calendar';
+import { TradingCalendar, tradingMsBetween, type SessionSpec } from '../datafeed/session-calendar';
 import {
   indicatorById,
   indicatorLabel,
@@ -113,6 +114,8 @@ import {
 import { marketStructure } from '../overlays/market-structure';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
+import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import { ProfileRenderer } from '../profiles/profile-renderer';
 import { computeProfileStudy } from '../profiles/profile-studies';
 import { PatternRenderer } from '../patterns/pattern-renderer';
@@ -346,6 +349,34 @@ interface ExternalLineSeries {
           </div>
         }
       </div>
+    }
+    @if (eventTip(); as tip) {
+      <div
+        class="hold-tip event-tip"
+        [style.left.px]="tip.x"
+        [style.top.px]="tip.y"
+        role="tooltip"
+        aria-live="polite"
+        data-testid="event-tip"
+      >
+        <div class="event-head">
+          <span class="event-ccy" [class]="'event-' + tip.card.impact.toLowerCase()">{{
+            tip.card.currency
+          }}</span>
+          <b>{{ tip.card.title }}</b>
+        </div>
+        <div class="row date">{{ tip.card.when }} · {{ tip.card.impact }} impact</div>
+        @for (r of tip.card.rows; track r.label) {
+          <div class="row">
+            <span>{{ r.label }}</span
+            ><b>{{ r.value }}</b>
+          </div>
+        }
+        @if (tip.card.surprise) {
+          <div class="event-surprise">{{ tip.card.surprise }}</div>
+        }
+        <div class="row date">Click for the event's reading</div>
+      </div>
     }`,
   styles: [
     `
@@ -399,6 +430,35 @@ interface ExternalLineSeries {
         font-weight: 500;
         font-variant-numeric: tabular-nums;
       }
+      .event-tip {
+        width: 240px;
+      }
+      .event-head {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        margin-bottom: 2px;
+        line-height: 18px;
+      }
+      .event-ccy {
+        flex: none;
+        padding: 0 4px;
+        border-radius: 3px;
+        color: #fff;
+        font-size: 11px;
+        background: #787b86;
+      }
+      .event-ccy.event-high {
+        background: #ef5350;
+      }
+      .event-ccy.event-medium {
+        background: #ffa726;
+      }
+      .event-surprise {
+        margin-top: 2px;
+        line-height: 18px;
+        font-weight: 500;
+      }
     `,
   ],
 })
@@ -448,9 +508,14 @@ export class ChartHostComponent implements OnDestroy {
   readonly markers = input<ChartMarker[]>([]);
   /** IANA zone for the time axis; bar data itself stays UTC. */
   readonly timezone = input<string>('UTC');
-  /** Economic events on the time axis. Times are UTC; shifted like the bars. */
+  /** Economic events on the time axis. Times are UTC; placed on the display clock between bars. */
   readonly events = input<EventMark[]>([]);
   readonly minEventImpact = input<'High' | 'Medium' | 'Low'>('Medium');
+  /**
+   * Spans to shade (UTC ms): the news blackout around Tier-1 events — the window live refuses new
+   * entries in (`GET economic-event/news-blackout`). Empty: no shading.
+   */
+  readonly eventBands = input<{ from: number; to: number }[]>([]);
   /** Multiplier on the ATR-derived Renko / P&F / Kagi / Range box size. */
   readonly boxSizeAtr = input<number>(1);
   /**
@@ -545,6 +610,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly drawingContextMenu = output<{ id: string; clientX: number; clientY: number }>();
   /** Zoom/scroll or a pane resize settled — the page auto-saves {@link viewState}. */
   readonly viewChanged = output<void>();
+  /** An economic event's flag (or the next-event chip) was clicked: open its reading. */
+  readonly eventOpen = output<UpcomingEconomicEvent>();
 
   private chart: IChartApi | null = null;
   private price: PriceSeries | null = null;
@@ -590,6 +657,8 @@ export class ChartHostComponent implements OnDestroy {
     date: string;
     rows: Array<{ label: string; value: string; color: string }>;
   } | null>(null);
+  /** The economic event under the pointer, as a card above its flag (CC-I2). */
+  readonly eventTip = signal<{ x: number; y: number; card: EventCard } | null>(null);
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private holdOrigin: { x: number; y: number } | null = null;
   private holding = false;
@@ -819,7 +888,10 @@ export class ChartHostComponent implements OnDestroy {
     },
   );
   private markerApi: ISeriesMarkersPluginApi<Time> | null = null;
-  private readonly eventRenderer = new EventMarksRenderer(() => this.chart);
+  private readonly eventRenderer = new EventMarksRenderer(
+    (ms) => this.eventX(ms),
+    () => this.serverClock.now(),
+  );
   /** One renderer per active profile study, keyed by the study's uid. */
   private profileRenderers = new Map<string, ProfileRenderer>();
   /** Every active pattern study paints through this one renderer. */
@@ -966,18 +1038,17 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.applyMarkers(markers));
     });
 
+    // Events are placed by their UTC instant between bars (eventX), so a zone change moves them with
+    // the bars and needs nothing here.
     effect(() => {
       const events = this.events();
       const minImpact = this.minEventImpact();
-      // Shifted with the bars so an event sits where it happened on the
-      // displayed clock, not where it happened in UTC.
-      this.timezone();
-      untracked(() =>
-        this.eventRenderer.setMarks(
-          events.map((e) => ({ ...e, time: e.time + this.timezoneShiftMs(e.time) })),
-          minImpact,
-        ),
-      );
+      untracked(() => this.eventRenderer.setMarks(events, minImpact));
+    });
+
+    effect(() => {
+      const bands = this.eventBands();
+      untracked(() => this.eventRenderer.setBands(bands));
     });
   }
 
@@ -1239,15 +1310,32 @@ export class ChartHostComponent implements OnDestroy {
     this.glideCleanup = null;
   }
 
-  /** Fractional bar index of a UTC instant on the plotted (zone-shifted) bars; extrapolates past either end. */
+  /**
+   * Fractional bar index of a UTC instant on the plotted (zone-shifted) bars: between two bars by
+   * time; before the first by the average bar width; past the last one — an upcoming economic event —
+   * inside the forming bar by its own span, and beyond it by the TRADING time to it in bars of this
+   * resolution (the symbol's session, when known), so Monday's release lands on Monday's bar rather
+   * than two days' worth of bars past Friday's.
+   */
   private logicalAtMs(utcMs: number): number | null {
     const bars = this.plotted;
     if (bars.length < 2) return null;
     const t = utcMs + this.timezoneShiftMs(utcMs);
     const last = bars.length - 1;
-    const step = (bars[last].time - bars[0].time) / last || 3_600_000;
-    if (t <= bars[0].time) return (t - bars[0].time) / step;
-    if (t >= bars[last].time) return last + (t - bars[last].time) / step;
+    const avg = (bars[last].time - bars[0].time) / last || 3_600_000;
+    if (t <= bars[0].time) return (t - bars[0].time) / avg;
+    if (t >= bars[last].time) {
+      const lastUtc = this.plottedUtc[last]?.time ?? utcMs;
+      const step = resolutionMs(this.resolution()) ?? avg;
+      const end = this.lastBarEnd();
+      if (!Number.isFinite(end) || end <= lastUtc) return last + (utcMs - lastUtc) / step;
+      if (utcMs < end) return last + (utcMs - lastUtc) / (end - lastUtc);
+      // Weeks and months are counted on the calendar: their bars span the weekends anyway.
+      const calendar =
+        this.resolution() === '1W' || this.resolution() === '1M' ? null : this.calendar();
+      const span = calendar ? tradingMsBetween(calendar, end, utcMs) : utcMs - end;
+      return last + 1 + span / step;
+    }
     let lo = 0;
     let hi = last;
     while (hi - lo > 1) {
@@ -1256,6 +1344,33 @@ export class ChartHostComponent implements OnDestroy {
       else hi = mid;
     }
     return lo + (t - bars[lo].time) / (bars[hi].time - bars[lo].time);
+  }
+
+  /** UTC ms → x on the price pane: an economic event's place, between bars or past the last one. */
+  private eventX(utcMs: number): number | null {
+    const logical = this.logicalAtMs(utcMs);
+    if (logical === null) return null;
+    const x = this.chart?.timeScale().logicalToCoordinate(logical as Logical);
+    return x === null || x === undefined ? null : Number(x);
+  }
+
+  /**
+   * The event card under the pointer (CC-I2), above its flag; none elsewhere. From the crosshair's
+   * point on the price pane.
+   */
+  private updateEventTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
+    const mark = point && (paneIndex ?? 0) === 0 ? this.eventRenderer.hit(point.x, point.y) : null;
+    if (!mark) {
+      if (this.eventTip()) this.eventTip.set(null);
+      return;
+    }
+    const when = formatEventTime(mark.time, Math.round(this.timezoneShiftMs(mark.time) / 60_000));
+    const card = eventCard(mark, when, this.serverClock.now());
+    const el = this.container().nativeElement;
+    const height = 92 + card.rows.length * 20 + (card.surprise ? 18 : 0);
+    const x = Math.max(4, Math.min(point!.x + 10, el.clientWidth - 248));
+    const y = Math.max(4, point!.y - height - 12);
+    this.eventTip.set({ x, y, card });
   }
 
   /** Show the most recent `count` bars. */
@@ -1422,6 +1537,13 @@ export class ChartHostComponent implements OnDestroy {
           ? (param.time as number)
           : null;
       this.emitLegend();
+      this.updateEventTip(param.point, param.paneIndex);
+    });
+    // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
+    this.chart.subscribeClick((param) => {
+      if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
+      const mark = this.eventRenderer.hit(param.point.x, param.point.y);
+      if (mark) this.eventOpen.emit(mark.event);
     });
     this.bindHold(el);
 

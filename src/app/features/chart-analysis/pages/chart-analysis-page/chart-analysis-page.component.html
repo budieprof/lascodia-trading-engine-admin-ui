@@ -332,6 +332,16 @@
               >
                 {{ minEventImpact() }}+
               </button>
+              <button
+                type="button"
+                class="tb-chip"
+                [class.on]="showBlackout()"
+                [attr.aria-pressed]="showBlackout()"
+                (click)="showBlackout.set(!showBlackout())"
+                [title]="blackoutTitle()"
+              >
+                Blackout
+              </button>
             }
           </div>
           <div class="tb-menu-sep"></div>
@@ -1033,8 +1043,10 @@
           [stayInDrawingMode]="stayInDrawing()"
           [scaleMode]="scaleMode()"
           [timezone]="timezone()"
-          [events]="events()"
+          [events]="chartEvents()"
           [minEventImpact]="minEventImpact()"
+          [eventBands]="eventBands()"
+          (eventOpen)="calendarEvent.set($event)"
           [boxSizeAtr]="boxSizeAtr()"
           [boxMethod]="boxMethod()"
           [boxPips]="boxPips()"

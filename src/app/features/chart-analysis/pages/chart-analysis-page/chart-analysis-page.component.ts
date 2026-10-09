@@ -145,7 +145,14 @@ import {
 import { DrawingStore } from '../../drawings/drawing-store.service';
 import { PositionsService } from '@core/services/positions.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
-import { EconomicEventsService } from '@core/services/economic-events.service';
+import { ChartEventsService } from '../../overlays/chart-events.service';
+import {
+  blackoutBands,
+  eventsWindow,
+  mergeMarks,
+  missingOnTheLeft,
+  type BlackoutWindow,
+} from '../../overlays/chart-events';
 import { AlertsService } from '@core/services/alerts.service';
 import { OrdersService } from '@core/services/orders.service';
 import { MartingaleService } from '@core/services/martingale.service';
@@ -912,10 +919,61 @@ export class ChartAnalysisPageComponent {
   private readonly martingale = inject(MartingaleService);
 
   /** Economic events on the time axis. */
-  private readonly economicEvents = inject(EconomicEventsService);
+  private readonly eventsFeed = inject(ChartEventsService);
   readonly events = signal<EventMark[]>([]);
   readonly showEvents = signal(true);
   readonly minEventImpact = signal<'High' | 'Medium' | 'Low'>('Medium');
+  /**
+   * Shade the news blackout around Tier-1 events (CC-I2): the minutes live refuses new entries in,
+   * around each High event of the pair's currencies. Saved with the layout.
+   */
+  readonly showBlackout = signal(true);
+  /** The blackout window live applies (`economic-event/news-blackout`), and when it was read. */
+  readonly blackout = signal<BlackoutWindow | null>(null);
+  private blackoutAt = 0;
+  /**
+   * The pair's two currencies — the events the chart asks for, and the ones the blackout listens to.
+   * From the pair's metadata; otherwise the symbol's first and next three letters, the engine's
+   * `NewsBlackoutRules.CurrenciesOf` (a symbol shorter than six letters has none).
+   */
+  readonly pairCurrencies = computed(
+    () => {
+      const pair = this.currentPair();
+      const fromPair = [pair?.baseCurrency, pair?.quoteCurrency]
+        .filter((c): c is string => !!c)
+        .map((c) => c.toUpperCase());
+      if (fromPair.length) return fromPair;
+      const symbol = this.symbol().toUpperCase();
+      return symbol.length >= 6 ? [symbol.slice(0, 3), symbol.slice(3, 6)] : [];
+    },
+    { equal: (a, b) => a.join() === b.join() },
+  );
+  /**
+   * The events the chart draws: in replay, none after the head — the calendar of the replayed past,
+   * not its future (their actuals would be look-ahead).
+   */
+  readonly chartEvents = computed(() => {
+    const events = this.events();
+    if (!this.replayActive()) return events;
+    const shown = this.displayBars();
+    const head = shown[shown.length - 1];
+    return head ? events.filter((e) => e.time <= head.time) : [];
+  });
+  /** What the blackout chip shades, in the policy's numbers. */
+  readonly blackoutTitle = computed(() => {
+    const w = this.blackout();
+    if (!w) return 'Shade the news blackout around high-impact events';
+    if (!w.active)
+      return `The news blackout is off (${w.explanation ?? 'no window'}): nothing is refused around events`;
+    const ccy = this.pairCurrencies().join('/') || 'this symbol';
+    return `Shade the ${w.minutesBefore} min before and ${w.minutesAfter} min after each high-impact ${ccy} event: live refuses new entries then`;
+  });
+  /** The blackout spans to shade (UTC ms). */
+  readonly eventBands = computed(() =>
+    this.showEvents() && this.showBlackout()
+      ? blackoutBands(this.chartEvents(), this.blackout(), this.pairCurrencies())
+      : [],
+  );
 
   // ── Watchlist ────────────────────────────────────────────────────────────
   //
@@ -1949,64 +2007,63 @@ export class ChartAnalysisPageComponent {
     return bars.length ? this.barTimeLabel(bars[bars.length - 1]) : '';
   }
 
+  /** What the events on the chart were fetched for, and the window they cover (UTC ms). */
+  private eventsHeld: { key: string; from: number; to: number } | null = null;
+  /** Bumped by every full load: a reply for an older one (another symbol, importance) is dropped. */
+  private eventsLoad = 0;
+
   /**
-   * Load the calendar around the visible window.
-   *
-   * Filtered to the currencies this pair is made of: an operator charting
-   * EURUSD cares about EUR and USD prints, and drawing every JPY release on
-   * top of them is noise that makes the ones that matter harder to see.
+   * Load the pair's economic events onto the time axis (CC-07, SP-08, contract C3): the loaded bars'
+   * window through two weeks ahead, the pair's currencies and the chart's minimum importance filtered
+   * on the engine. `extend` (scroll-back loaded older bars): fetch only what the held window does not
+   * cover on the left, and merge it — the events used to stay at the first load's window.
    */
-  private loadEvents(): void {
+  private loadEvents(extend = false): void {
     if (!this.showEvents()) {
+      this.eventsLoad++;
+      this.eventsHeld = null;
       this.events.set([]);
       return;
     }
+    const currencies = this.pairCurrencies();
+    const minImpact = this.minEventImpact();
     const symbol = this.symbol().toUpperCase();
-    const pair = this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === symbol);
-    const currencies = [pair?.baseCurrency, pair?.quoteCurrency]
-      .filter((c): c is string => !!c)
-      .map((c) => c.toUpperCase());
-
-    // Window to the bars actually plotted, not a fixed number of days: 1500
-    // H1 bars is ~62 days but 1500 M5 bars is ~5, and a fixed window is either
-    // short of the left edge or wasteful.
+    const key = `${symbol}|${currencies.join(',')}|${minImpact}`;
     const loaded = this.bars();
-    const fromMs = loaded.length ? loaded[0].time : Date.now() - 45 * 86_400_000;
-    const from = new Date(fromMs).toISOString();
-    const to = new Date(Date.now() + 14 * 86_400_000).toISOString();
-
-    // sortBy/sortDirection are EXPLICIT. The handler's default is ascending, so
-    // a capped page returns the OLDEST events in the window — which is exactly
-    // what happened here: the chart showed 9-18 Sep and the API cheerfully
-    // returned 5-20 Aug, so nothing rendered and the feature looked broken.
-    this.economicEvents
-      .list({
-        currentPage: 1,
-        itemCountPerPage: 500,
-        filter: { from, to },
-        sortBy: 'scheduledAt',
-        sortDirection: 'desc',
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((res) => {
-        if (!res?.status || !res.data) return;
-        const rows = (res.data.data ?? []).filter(
-          (e) => currencies.length === 0 || currencies.includes((e.currency ?? '').toUpperCase()),
-        );
-        const marks: EventMark[] = [];
-        for (const e of rows) {
-          const at = Date.parse(e.scheduledAt ?? '');
-          if (Number.isNaN(at)) continue;
-          const impact = String(e.impact);
-          marks.push({
-            time: at,
-            title: e.title ?? '',
-            currency: (e.currency ?? '').toUpperCase(),
-            impact: impact === 'High' ? 'High' : impact === 'Medium' ? 'Medium' : 'Low',
-          });
+    const wanted = eventsWindow(loaded.length ? loaded[0].time : null, Date.now());
+    const held = this.eventsHeld?.key === key ? this.eventsHeld : null;
+    const span = extend ? (held ? missingOnTheLeft(held, wanted) : null) : wanted;
+    if (!span) return;
+    const load = extend ? this.eventsLoad : ++this.eventsLoad;
+    if (!extend) this.eventsHeld = null;
+    this.refreshBlackout();
+    void this.eventsFeed
+      .load({ currencies, minImpact, from: span.from, to: span.to })
+      .then((marks) => {
+        // A newer load (another symbol, importance or toggle) owns the layer now.
+        if (load !== this.eventsLoad || !marks) return;
+        if (extend) {
+          const now = this.eventsHeld;
+          if (!now || now.key !== key) return;
+          this.events.set(mergeMarks(this.events(), marks));
+          this.eventsHeld = { key, from: Math.min(now.from, span.from), to: now.to };
+        } else {
+          this.events.set(marks);
+          this.eventsHeld = { key, from: span.from, to: span.to };
+          // History loaded on the left while this was in flight.
+          this.loadEvents(true);
         }
-        this.events.set(marks);
       });
+  }
+
+  /** Read the blackout window again when it is older than ten minutes (it is config). */
+  private refreshBlackout(): void {
+    if (Date.now() - this.blackoutAt < 600_000) return;
+    this.blackoutAt = Date.now();
+    void this.eventsFeed.blackout().then((w) => {
+      if (w) this.blackout.set(w);
+      else this.blackoutAt = 0;
+    });
   }
 
   toggleEvents(): void {
@@ -2014,10 +2071,12 @@ export class ChartAnalysisPageComponent {
     this.loadEvents();
   }
 
+  /** The minimum importance is filtered on the engine: a change asks again. */
   cycleEventImpact(): void {
     const order: Array<'High' | 'Medium' | 'Low'> = ['High', 'Medium', 'Low'];
     const next = order[(order.indexOf(this.minEventImpact()) + 1) % order.length];
     this.minEventImpact.set(next);
+    this.loadEvents();
   }
 
   openSidePane(pane: 'details' | 'news' | 'calendar'): void {
@@ -2085,7 +2144,6 @@ export class ChartAnalysisPageComponent {
 
   toggleOverlays(): void {
     this.showOverlays.set(!this.showOverlays());
-    this.loadEvents();
   }
 
   togglePositions(): void {
@@ -2259,6 +2317,8 @@ export class ChartAnalysisPageComponent {
         // The bars as they are now: ticks may have moved the newest one during the load.
         for (const b of this.bars()) merged.set(b.time, b);
         this.bars.set([...merged.values()].sort((a, b) => a.time - b.time));
+        // The events of the history just loaded (the layer covered the first window only).
+        this.loadEvents(true);
       }
     } catch {
       // The engine refused or could not be reached: the history stays as it is, and the next
@@ -3105,6 +3165,7 @@ export class ChartAnalysisPageComponent {
         showStructure: this.showStructure(),
         showEvents: this.showEvents(),
         minEventImpact: this.minEventImpact(),
+        showBlackout: this.showBlackout(),
       },
       panel: {
         watchlistOpen: this.watchlistOpen(),
@@ -3203,6 +3264,7 @@ export class ChartAnalysisPageComponent {
       this.showStructure.set(o.showStructure ?? false);
       this.showEvents.set(o.showEvents ?? true);
       this.minEventImpact.set(o.minEventImpact ?? 'Medium');
+      this.showBlackout.set(o.showBlackout ?? true);
       const p = s.panel ?? {};
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
       if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);

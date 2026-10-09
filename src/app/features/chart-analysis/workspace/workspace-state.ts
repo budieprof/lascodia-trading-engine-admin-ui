@@ -99,6 +99,8 @@ export interface ChartWorkspaceState {
     showStructure?: boolean;
     showEvents?: boolean;
     minEventImpact?: 'High' | 'Medium' | 'Low';
+    /** Shade the news blackout around Tier-1 events (default on). */
+    showBlackout?: boolean;
   };
   panel?: {
     watchlistOpen?: boolean;
