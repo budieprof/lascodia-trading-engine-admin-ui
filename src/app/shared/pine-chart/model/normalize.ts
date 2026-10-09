@@ -5,6 +5,7 @@ import type {
   PineCandleOutput,
   PineColorSeriesOutput,
   PineCompileResult,
+  PineDebugResult,
   PineDeclaration,
   PineFillOutput,
   PineHlineOutput,
@@ -58,6 +59,56 @@ const colorArr = (v: unknown): (string | null)[] | null =>
   Array.isArray(v) ? (v as (string | null)[]) : null;
 const numArr = (v: unknown): (number | null)[] =>
   Array.isArray(v) ? (v as (number | null)[]) : [];
+
+/** §3e: a debug run's `data` (or the envelope): the hits, the variables at a bar, the runtime error that stopped it. */
+export function normalizeDebugResult(raw: unknown): PineDebugResult | null {
+  if (!isObj(raw)) return null;
+  if ('data' in raw && 'status' in raw) return normalizeDebugResult(raw['data']);
+  const d = raw['debug'];
+  const runtimeError = normalizeRuntimeError(raw['runtimeError']);
+  if (!isObj(d)) {
+    return runtimeError
+      ? {
+          watches: [],
+          condition: null,
+          hits: [],
+          hitsTotal: 0,
+          fromBar: 0,
+          toBar: 0,
+          stateBar: null,
+          stateTime: null,
+          state: [],
+          runtimeError,
+        }
+      : null;
+  }
+  return {
+    watches: arr<unknown>(d['watches']).filter((w): w is string => typeof w === 'string'),
+    condition: strOrNull(d['condition']),
+    hits: arr<unknown>(d['hits'])
+      .filter(isObj)
+      .map((h) => ({
+        barIndex: num(h['barIndex'], 0),
+        time: num(h['time'], 0),
+        watches: arr<unknown>(h['watches']).map((w) => (typeof w === 'string' ? w : 'na')),
+      })),
+    hitsTotal: num(d['hitsTotal'], 0),
+    fromBar: num(d['fromBar'], 0),
+    toBar: num(d['toBar'], 0),
+    stateBar: numOrNull(d['stateBar']),
+    stateTime: numOrNull(d['stateTime']),
+    state: arr<unknown>(d['state'])
+      .filter(isObj)
+      .map((v) => ({
+        scope: str(v['scope'], 'global'),
+        name: str(v['name'], ''),
+        type: str(v['type'], ''),
+        kind: str(v['kind'], 'value'),
+        value: str(v['value'], 'na'),
+      })),
+    runtimeError,
+  };
+}
 
 /** Accepts the §3 `data`, the whole `ResponseData` envelope, or `ScriptingService.run()`'s `ScriptRunResult`. */
 export function normalizeRunResult(raw: unknown): PineRunResult | null {
