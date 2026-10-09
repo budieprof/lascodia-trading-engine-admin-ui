@@ -7,9 +7,11 @@ import {
   effect,
   inject,
   signal,
+  untracked,
   viewChildren,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs';
 
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
@@ -17,35 +19,48 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { PositionsService } from '@core/services/positions.service';
 import { OrdersService } from '@core/services/orders.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
+import { RealtimeService } from '@core/realtime/realtime.service';
 import { createPolledResource } from '@core/polling/polled-resource';
-import type { CurrencyPairDto, PositionDto, OrderDto } from '@core/api/api.types';
+import type { CurrencyPairDto, LivePriceDto, PositionDto, OrderDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { WatchlistService } from '@features/chart-analysis/watchlist/watchlist.service';
+import {
+  addSymbol,
+  listSymbols,
+  locate,
+  newSectionId,
+  removeSymbol,
+  restoreSymbol,
+  type ChartWatchlist,
+  type RemovedItem,
+} from '@features/chart-analysis/watchlist/watchlist.model';
 
 import {
   MiniChartTileComponent,
   type TileLoadError,
 } from '../../components/mini-chart-tile/mini-chart-tile.component';
 import { SpotAnalysisModalComponent } from '@shared/components/spot-analysis-modal/spot-analysis-modal.component';
+import {
+  LEGACY_WALL_KEY,
+  applyTick,
+  canonicalSymbol,
+  readLegacyWall,
+  seedFromSnapshot,
+  type PriceTick,
+} from './watchlist-wall';
 
 /**
- * Multi-symbol watchlist — a single page that renders one mini-chart tile
- * per watched (symbol, timeframe) so the operator can scan many pairs at
- * a glance without paging through the single chart for each one. Each
- * tile owns its own candle + live-price polling; clicking a tile drops
- * the operator into the full chart at that pair via a deep-link hand-off.
+ * Multi-symbol watchlist wall — one mini-chart tile per symbol of a watchlist, so the operator can scan many pairs at
+ * a glance; clicking a tile opens the full chart at that pair.
  *
  * <ul>
- *   <li>State is BROWSER-ONLY (localStorage). No engine config writes —
- *       SpotAnalysisWorker:Pairs (the live-analysis watch list) is a
- *       separate concept and stays managed via the chart toolbar's Live
- *       toggle.</li>
- *   <li>Timeframe is GLOBAL across the grid — the same TF applies to every
- *       tile. The single-chart page is the place for cross-TF scans.</li>
- *   <li>Add UX is a single text input with chip-add on Enter (or click).
- *       Validated against the engine's CurrencyPair catalogue so a typo
- *       lands on a "symbol not registered" hint rather than silently
- *       adding a tile that will never receive data.</li>
+ *   <li>The symbols are the ENGINE's watchlists — the same lists as the chart workstation's watchlist panel (pick
+ *       one), or every active pair. Until 2026-10-09 this page kept its own browser-only list; a wall saved that
+ *       way is offered for import once (SP-I6).</li>
+ *   <li>Prices are PUSHED: one SignalR price room per symbol (`priceUpdated`, ~1 Hz), seeded by a single
+ *       watchlist-quotes read. Every tile used to poll `live-price` every 3 seconds.</li>
+ *   <li>Timeframe, tile size, bar count and overlays are per-viewer conveniences kept in the browser.</li>
  * </ul>
  */
 interface WatchlistEntry {
@@ -62,9 +77,14 @@ interface WatchlistEntry {
  */
 type TileSize = 'sm' | 'md' | 'lg' | 'xl';
 
-const STORAGE_KEY = 'tradingChart.watchlist.v1';
+/** Which symbols the wall shows: an engine watchlist by id, or every active pair. */
+type WallSource = number | 'all';
+
+const SOURCE_STORAGE_KEY = 'tradingChart.watchlist.source.v1';
+const LEGACY_DISMISSED_KEY = 'tradingChart.watchlist.v1.importDismissed';
 const SIZE_STORAGE_KEY = 'tradingChart.watchlist.size.v1';
 const BARS_STORAGE_KEY = 'tradingChart.watchlist.bars.v1';
+const TF_STORAGE_KEY = 'tradingChart.watchlist.timeframe.v1';
 const SHOW_POSITIONS_STORAGE_KEY = 'tradingChart.watchlist.showPositions.v1';
 const SHOW_ORDERS_STORAGE_KEY = 'tradingChart.watchlist.showOrders.v1';
 const OVERLAY_ACCOUNT_STORAGE_KEY = 'tradingChart.watchlist.overlayAccount.v1';
@@ -79,6 +99,9 @@ const SIZE_OPTIONS: ReadonlyArray<{ value: TileSize; label: string; minPx: numbe
  *  original default; 500 covers ~6 weeks of M5 / ~10 weeks of H1 /
  *  multi-year D1 — enough to scan structural context without paginating. */
 const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
+/** The day snapshot that seeds the tiles' quotes before (and between) pushes. */
+const SNAPSHOT_REFRESH_MS = 60_000;
+const UNDO_MS = 8_000;
 
 @Component({
   selector: 'app-watchlist-page',
@@ -89,28 +112,38 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
     <div class="page">
       <app-page-header
         title="Watchlist"
-        subtitle="Mini-charts for every symbol you're watching. Click a tile to open the full chart."
+        subtitle="Mini-charts for every symbol of a watchlist — the same lists as the chart's watchlist panel. Click a tile to open the full chart."
       >
-        @if (catalogueSymbols().length > 0) {
-          <button
-            type="button"
-            class="btn-ghost"
-            (click)="resetToAllPairs()"
-            [title]="
-              'Replace the watchlist with every active currency pair (' +
-              catalogueSymbols().length +
-              ')'
-            "
+        <label class="source-pick">
+          <span class="tf-label">Showing</span>
+          <select
+            class="acct-select source-select"
+            (change)="setSource($any($event.target).value)"
+            aria-label="Which watchlist the wall shows"
+            data-testid="wall-source"
           >
-            Reset to all pairs
-          </button>
-        }
-        @if (entries().length > 0) {
-          <button type="button" class="btn-ghost" (click)="clearAll()" title="Remove all tiles">
-            Clear all
-          </button>
-        }
+            @for (l of store.lists(); track l.id) {
+              <option [value]="l.id" [selected]="source() === l.id">
+                {{ l.name }}{{ l.isActive ? ' (chart)' : '' }}
+              </option>
+            }
+            <option value="all" [selected]="source() === 'all'">All active pairs</option>
+          </select>
+        </label>
       </app-page-header>
+
+      @if (legacyWall().length > 0) {
+        <div class="info-banner" role="status">
+          <span>
+            This browser has a wall of <strong>{{ legacyWall().length }}</strong> symbols saved by the old
+            page. The wall now shows your engine watchlists.
+          </span>
+          <button type="button" class="btn-ghost" (click)="importLegacyWall()">
+            Import as a watchlist
+          </button>
+          <button type="button" class="btn-ghost" (click)="dismissLegacyWall()">Dismiss</button>
+        </div>
+      }
 
       <!-- ── Toolbar: timeframe + size + add-symbol ──────────────── -->
       <section class="toolbar" aria-label="Watchlist controls">
@@ -214,12 +247,17 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
             #addInput
             type="text"
             class="add-input"
-            placeholder="Add symbol (e.g. EURUSD or EUR/USD)…"
+            [placeholder]="
+              sourceList()
+                ? 'Add a symbol to ' + sourceList()!.name + ' (e.g. EURUSD)…'
+                : 'Pick a watchlist above to add symbols'
+            "
+            [disabled]="!sourceList()"
             [ngModel]="addDraft()"
             (ngModelChange)="addDraft.set($event)"
             (keydown.enter)="addFromInput()"
             list="watchlist-symbols"
-            aria-label="Add symbol to watchlist"
+            aria-label="Add symbol to the watchlist"
           />
           <datalist id="watchlist-symbols">
             @for (s of catalogueSymbols(); track s) {
@@ -231,7 +269,7 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
             class="add-btn"
             [disabled]="!canAdd()"
             (click)="addFromInput()"
-            title="Add this symbol to the watchlist at the selected timeframe"
+            title="Add this symbol to the watchlist (it shows on the chart's watchlist panel too)"
           >
             Add
           </button>
@@ -240,6 +278,13 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
           {{ entries().length }} tile{{ entries().length === 1 ? '' : 's' }}
         </span>
       </section>
+
+      @if (undo(); as u) {
+        <div class="info-banner" role="status">
+          <span>Removed {{ u.removed.item.symbol }} from {{ u.listName }}.</span>
+          <button type="button" class="btn-ghost" (click)="undoRemove()">Undo</button>
+        </div>
+      }
 
       <!-- One inline notice for every tile whose candle fetch failed; the
            tiles themselves carry the per-symbol error and a Retry. -->
@@ -256,43 +301,31 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
       }
 
       <!-- ── Grid / empty state ──────────────────────────────────── -->
-      @if (seeding()) {
+      @if (!store.loaded()) {
         <section class="empty" role="status">
-          <h3>Loading symbols…</h3>
-          <p class="muted">
-            Seeding the watchlist with every active currency pair from the engine catalogue.
-          </p>
+          <h3>Loading watchlists…</h3>
         </section>
       } @else if (entries().length === 0) {
         <section class="empty" role="status">
-          <h3>No symbols on the watchlist yet</h3>
-          <p class="muted">
-            Add a symbol above to start watching, or
-            @if (catalogueSymbols().length > 0) {
-              <button type="button" class="link-btn" (click)="resetToAllPairs()">
-                load every active pair
-              </button>
-              .
-            } @else {
-              wait for the currency-pair catalogue to load.
+          @if (store.error(); as err) {
+            <h3>Watchlists are unavailable</h3>
+            <p class="muted">{{ err }}</p>
+          } @else {
+            <h3>{{ sourceList()?.name ?? 'This list' }} is empty</h3>
+            <p class="muted">
+              Add a symbol above, or show
+              <button type="button" class="link-btn" (click)="setSource('all')">every active pair</button>.
+            </p>
+            @if (sourceList() && suggestionSymbols().length > 0) {
+              <div class="empty-suggest">
+                <span class="muted small">Quick add:</span>
+                @for (s of suggestionSymbols(); track s) {
+                  <button type="button" class="chip" (click)="addSymbolToList(s)" [title]="'Add ' + s">
+                    + {{ s }}
+                  </button>
+                }
+              </div>
             }
-            Tiles refresh every few seconds — clicking one opens the full chart on the Market Data
-            page.
-          </p>
-          @if (catalogueSymbols().length > 0) {
-            <div class="empty-suggest">
-              <span class="muted small">Quick add:</span>
-              @for (s of suggestionSymbols(); track s) {
-                <button
-                  type="button"
-                  class="chip"
-                  (click)="addEntry(s, globalTimeframe())"
-                  [title]="'Add ' + s + ' at ' + globalTimeframe()"
-                >
-                  + {{ s }}
-                </button>
-              }
-            </div>
           }
         </section>
       } @else {
@@ -303,6 +336,7 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
               [timeframe]="e.timeframe"
               [size]="tileSize()"
               [barCount]="barCount()"
+              [quote]="quotes()[e.symbol] ?? null"
               [positions]="scopedPositions()"
               [orders]="scopedOrders()"
               [showPositions]="showPositions()"
@@ -536,15 +570,41 @@ const BAR_COUNT_OPTIONS: ReadonlyArray<number> = [60, 120, 240, 500];
       .small {
         font-size: 11px;
       }
+
+      .source-pick {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .source-select {
+        max-width: 240px;
+      }
+      .info-banner {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+      }
+      .info-banner span {
+        flex: 1;
+      }
     `,
   ],
 })
 export class WatchlistPageComponent implements OnInit {
+  protected readonly store = inject(WatchlistService);
   private readonly pairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
   private readonly positionsService = inject(PositionsService);
   private readonly ordersService = inject(OrdersService);
   private readonly accountScope = inject(AccountScopeService);
+  private readonly realtime = inject(RealtimeService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly tiles = viewChildren(MiniChartTileComponent);
 
   // ── Candle-load failures ───────────────────────────────────────────
@@ -658,7 +718,6 @@ export class WatchlistPageComponent implements OnInit {
   protected readonly sizeOptions = SIZE_OPTIONS;
   protected readonly barCountOptions = BAR_COUNT_OPTIONS;
 
-  protected readonly entries = signal<WatchlistEntry[]>([]);
   protected readonly globalTimeframe = signal<string>('H1');
   protected readonly addDraft = signal<string>('');
   protected readonly catalogue = signal<readonly CurrencyPairDto[]>([]);
@@ -669,25 +728,45 @@ export class WatchlistPageComponent implements OnInit {
   /** Number of candles each tile pulls. 60 is enough for an at-a-
    *  glance trend read; 240 / 500 lets the operator scan deeper
    *  structural context without leaving the wall. Persisted under its
-   *  own key so changing bars doesn't churn the entries blob. */
+   *  own key so changing bars doesn't churn anything else. */
   protected readonly barCount = signal<number>(60);
-  /** True while we're waiting for the catalogue to arrive so we can seed
-   *  the first-ever-visit watchlist. The empty-state UI substitutes a
-   *  "Loading symbols…" message during this window so the operator
-   *  doesn't briefly see an "empty" CTA before tiles populate. */
-  protected readonly seeding = signal(false);
+
+  /** The source the operator picked (persisted); null until they pick — then the chart's active list. */
+  private readonly pickedSource = signal<WallSource | null>(null);
+  /** What the wall shows: the picked list while it exists, else the active list, else every active pair. */
+  protected readonly source = computed<WallSource>(() => {
+    const picked = this.pickedSource();
+    const lists = this.store.lists();
+    if (picked === 'all') return 'all';
+    if (picked !== null && lists.some((l) => l.id === picked)) return picked;
+    return this.store.active()?.id ?? 'all';
+  });
+  protected readonly sourceList = computed<ChartWatchlist | null>(() => {
+    const s = this.source();
+    return s === 'all' ? null : (this.store.lists().find((l) => l.id === s) ?? null);
+  });
 
   protected readonly catalogueSymbols = computed<readonly string[]>(() =>
     this.catalogue()
-      .map((p) => this.canonicaliseSymbol(p.symbol ?? ''))
+      .map((p) => canonicalSymbol(p.symbol))
       .filter((s) => s.length > 0)
       .sort(),
   );
 
+  protected readonly entries = computed<WatchlistEntry[]>(() => {
+    const tf = this.globalTimeframe();
+    const symbols = this.source() === 'all' ? this.catalogueSymbols() : listSymbols(this.sourceList());
+    return symbols.map((symbol) => ({ symbol, timeframe: tf }));
+  });
+
+  /** The wall's symbols, stable for an equal set (drives the price rooms and the snapshot). */
+  private readonly wallSymbols = computed(() => this.entries().map((e) => e.symbol), {
+    equal: (a, b) => a.length === b.length && a.every((s, i) => s === b[i]),
+  });
+
   /**
-   * The first 6 catalogue symbols that aren't already on the watchlist —
-   * fuel for the empty-state "Quick add" chips. Avoid suggesting things
-   * the operator already has so the chips stay actionable.
+   * The first 6 catalogue symbols that aren't already on the list —
+   * fuel for the empty-state "Quick add" chips.
    */
   protected readonly suggestionSymbols = computed<readonly string[]>(() => {
     const have = new Set(this.entries().map((e) => e.symbol));
@@ -697,75 +776,180 @@ export class WatchlistPageComponent implements OnInit {
   });
 
   protected readonly canAdd = computed(() => {
-    const draft = this.canonicaliseSymbol(this.addDraft());
-    if (draft.length === 0) return false;
-    const have = this.entries().some(
-      (e) => e.symbol === draft && e.timeframe === this.globalTimeframe(),
-    );
-    return !have;
+    const draft = canonicalSymbol(this.addDraft());
+    return !!this.sourceList() && draft.length > 0 && !this.entries().some((e) => e.symbol === draft);
   });
 
+  /** Live quotes per symbol: pushed ticks, seeded by the day snapshot. */
+  protected readonly quotes = signal<Readonly<Record<string, LivePriceDto>>>({});
+  /** Symbols whose price room this page has joined. */
+  private readonly joined = new Set<string>();
+
+  /** The old browser-only wall, offered for import once. */
+  protected readonly legacyWall = signal<string[]>([]);
+  /** The last tile removed from a list, for Undo. */
+  protected readonly undo = signal<{ listId: number; listName: string; removed: RemovedItem } | null>(null);
+  private undoTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.clearLoadFailures());
-    // Persist on every change. effect() runs once on construction with
-    // the default empty entries; gating on `hydrationComplete` keeps it
-    // from blowing away the saved state on init OR blanking the storage
-    // key while we're waiting for the catalogue-seeded first-visit state.
-    effect(() => {
-      const xs = this.entries();
-      if (!this.hydrationComplete()) return;
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(xs));
-      } catch {
-        /* localStorage full / blocked — best-effort */
-      }
+    this.destroyRef.onDestroy(() => {
+      this.clearLoadFailures();
+      if (this.undoTimer) clearTimeout(this.undoTimer);
+      for (const symbol of this.joined) void this.realtime.leave(`price:${symbol}`, 'UnsubscribePrice', symbol);
+      this.joined.clear();
+      this.store.flush();
     });
-    // Tile-size has no async dependencies, so we persist it unconditionally
-    // on change. Stored under a separate key so resizing doesn't churn the
-    // (much larger) entries blob.
+
+    // Price rooms follow the wall: join the new symbols, leave the dropped ones.
     effect(() => {
-      const size = this.tileSize();
-      try {
-        localStorage.setItem(SIZE_STORAGE_KEY, size);
-      } catch {
-        /* best-effort */
-      }
+      const wanted = new Set(this.wallSymbols());
+      untracked(() => this.syncPriceRooms(wanted));
     });
-    // Bar count: same pattern — separate key, unconditional persist.
-    effect(() => {
-      const n = this.barCount();
-      try {
-        localStorage.setItem(BARS_STORAGE_KEY, String(n));
-      } catch {
-        /* best-effort */
-      }
+    this.realtime
+      .on<PriceTick>('priceUpdated')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((tick) => {
+        const symbol = canonicalSymbol(tick?.symbol);
+        if (!this.joined.has(symbol)) return;
+        this.quotes.update((q) => applyTick(q, tick, new Date().toISOString()));
+      });
+
+    // One snapshot read seeds every tile (and covers a symbol whose stream is quiet); refreshed each minute.
+    effect((onCleanup) => {
+      const symbols = this.wallSymbols();
+      if (!symbols.length) return;
+      const seed = () => {
+        if (document.hidden) return;
+        this.store
+          .quotes(symbols)
+          .then((snap) => this.quotes.update((q) => seedFromSnapshot(q, snap)))
+          .catch(() => undefined); // the tiles say "No live quote"; candles still load
+      };
+      untracked(seed);
+      const timer = setInterval(seed, SNAPSHOT_REFRESH_MS);
+      onCleanup(() => clearInterval(timer));
     });
-    // Overlay toggles — persist each under its own key.
-    effect(() => {
-      const on = this.showPositions();
-      try {
-        localStorage.setItem(SHOW_POSITIONS_STORAGE_KEY, on ? '1' : '0');
-      } catch {
-        /* best-effort */
-      }
-    });
-    effect(() => {
-      const on = this.showOrders();
-      try {
-        localStorage.setItem(SHOW_ORDERS_STORAGE_KEY, on ? '1' : '0');
-      } catch {
-        /* best-effort */
-      }
-    });
-    effect(() => {
-      const acct = this.overlayAccount();
-      try {
-        localStorage.setItem(OVERLAY_ACCOUNT_STORAGE_KEY, String(acct));
-      } catch {
-        /* best-effort */
-      }
-    });
+
+    // Per-viewer conveniences, each under its own key.
+    effect(() => this.persist(SIZE_STORAGE_KEY, this.tileSize()));
+    effect(() => this.persist(BARS_STORAGE_KEY, String(this.barCount())));
+    effect(() => this.persist(TF_STORAGE_KEY, this.globalTimeframe()));
+    effect(() => this.persist(SHOW_POSITIONS_STORAGE_KEY, this.showPositions() ? '1' : '0'));
+    effect(() => this.persist(SHOW_ORDERS_STORAGE_KEY, this.showOrders() ? '1' : '0'));
+    effect(() => this.persist(OVERLAY_ACCOUNT_STORAGE_KEY, String(this.overlayAccount())));
   }
+
+  ngOnInit(): void {
+    void this.store.load();
+    this.hydratePrefs();
+    this.loadCatalogue();
+  }
+
+  private persist(key: string, value: string): void {
+    try {
+      localStorage.setItem(key, value);
+    } catch {
+      /* localStorage full / blocked — best-effort */
+    }
+  }
+
+  private read(key: string): string | null {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  }
+
+  private hydratePrefs(): void {
+    const size = this.read(SIZE_STORAGE_KEY);
+    if (size === 'sm' || size === 'md' || size === 'lg' || size === 'xl') this.tileSize.set(size);
+    const bars = Number(this.read(BARS_STORAGE_KEY));
+    // Snap to a preset rather than trusting whatever number was stored.
+    if (BAR_COUNT_OPTIONS.includes(bars)) this.barCount.set(bars);
+    const tf = this.read(TF_STORAGE_KEY);
+    if (tf && TF_OPTIONS.includes(tf)) this.globalTimeframe.set(tf);
+    if (this.read(SHOW_POSITIONS_STORAGE_KEY) === '1') this.showPositions.set(true);
+    if (this.read(SHOW_ORDERS_STORAGE_KEY) === '1') this.showOrders.set(true);
+    const acct = this.read(OVERLAY_ACCOUNT_STORAGE_KEY);
+    if (acct && acct !== 'all' && Number.isFinite(Number(acct))) this.overlayAccount.set(Number(acct));
+    const src = this.read(SOURCE_STORAGE_KEY);
+    if (src === 'all') this.pickedSource.set('all');
+    else if (src && Number.isFinite(Number(src))) this.pickedSource.set(Number(src));
+    // The old page's own wall: offer it once, unless already imported or dismissed.
+    if (this.read(LEGACY_DISMISSED_KEY) !== '1') this.legacyWall.set(readLegacyWall(this.read(LEGACY_WALL_KEY)));
+  }
+
+  private loadCatalogue(): void {
+    this.pairsService
+      .list({ currentPage: 1, itemCountPerPage: 400 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => this.catalogue.set((res?.data?.data ?? []).filter((p) => p.isActive)),
+        // The catalogue only feeds the datalist and "All active pairs"; lists still work without it.
+        error: () => this.catalogue.set([]),
+      });
+  }
+
+  // ── Price rooms ────────────────────────────────────────────────────
+
+  private syncPriceRooms(wanted: Set<string>): void {
+    for (const symbol of [...this.joined]) {
+      if (wanted.has(symbol)) continue;
+      this.joined.delete(symbol);
+      void this.realtime.leave(`price:${symbol}`, 'UnsubscribePrice', symbol);
+    }
+    for (const symbol of wanted) {
+      if (this.joined.has(symbol)) continue;
+      this.joined.add(symbol);
+      // `join`, not `invoke`: recorded and re-applied after a reconnect, and applied once the hub is up.
+      void this.realtime.join(`price:${symbol}`, 'SubscribePrice', symbol);
+    }
+  }
+
+  // ── Source + legacy wall ───────────────────────────────────────────
+
+  protected setSource(value: string): void {
+    const next: WallSource = value === 'all' ? 'all' : Number(value);
+    this.clearLoadFailures();
+    this.pickedSource.set(next);
+    this.persist(SOURCE_STORAGE_KEY, String(next));
+  }
+
+  protected async importLegacyWall(): Promise<void> {
+    const symbols = this.legacyWall();
+    if (!symbols.length) return;
+    const template: ChartWatchlist = {
+      id: 0,
+      name: 'Wall',
+      isActive: false,
+      sortOrder: 0,
+      sections: [
+        {
+          id: newSectionId(),
+          name: 'Symbols',
+          collapsed: false,
+          items: symbols.map((symbol) => ({ symbol, flag: null })),
+        },
+      ],
+    };
+    // Not made the chart's active list: importing the old wall must not change what the chart's watchlist shows.
+    const created = await this.store.create('Wall (imported)', template, { activate: false });
+    if (!created) {
+      this.notifications.error(this.store.error() ?? 'The wall could not be imported.');
+      return;
+    }
+    this.setSource(String(created.id));
+    this.dismissLegacyWall();
+    this.notifications.success(`Imported ${symbols.length} symbols into the watchlist "${created.name}".`);
+  }
+
+  protected dismissLegacyWall(): void {
+    this.legacyWall.set([]);
+    this.persist(LEGACY_DISMISSED_KEY, '1');
+  }
+
+  // ── Toolbar ────────────────────────────────────────────────────────
 
   togglePositions(): void {
     this.showPositions.set(!this.showPositions());
@@ -782,209 +966,80 @@ export class WatchlistPageComponent implements OnInit {
     this.overlayAccount.set(value === 'all' ? 'all' : Number(value));
   }
 
-  /**
-   * True once `entries` is in its final post-load state — either:
-   *   - the localStorage key existed and we restored its contents, OR
-   *   - the catalogue arrived and we seeded the first-visit watchlist
-   *     with every active currency pair.
-   * The persistence effect refuses to write until this is true so a
-   * slow catalogue load doesn't clobber the key with an empty array
-   * mid-hydrate.
-   */
-  private readonly hydrationComplete = signal(false);
-  /** True while we still need to seed from the catalogue (raw === null
-   *  on the first-ever visit, or the saved payload was malformed). */
-  private needsSeeding = false;
-
-  ngOnInit(): void {
-    this.hydrateFromStorage();
-    this.hydrateTileSize();
-    this.hydrateBarCount();
-    this.hydrateOverlayToggles();
-    this.loadCatalogue();
-  }
-
-  private hydrateOverlayToggles(): void {
-    try {
-      if (localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY) === '1') this.showPositions.set(true);
-      if (localStorage.getItem(SHOW_ORDERS_STORAGE_KEY) === '1') this.showOrders.set(true);
-      const acct = localStorage.getItem(OVERLAY_ACCOUNT_STORAGE_KEY);
-      if (acct && acct !== 'all' && Number.isFinite(Number(acct)))
-        this.overlayAccount.set(Number(acct));
-    } catch {
-      /* localStorage blocked — leave defaults (off / all) */
-    }
-  }
-
-  private hydrateTileSize(): void {
-    try {
-      const raw = localStorage.getItem(SIZE_STORAGE_KEY);
-      if (raw === 'sm' || raw === 'md' || raw === 'lg' || raw === 'xl') {
-        this.tileSize.set(raw);
-      }
-    } catch {
-      /* best-effort — leave at default */
-    }
-  }
-
-  private hydrateBarCount(): void {
-    try {
-      const raw = localStorage.getItem(BARS_STORAGE_KEY);
-      const parsed = raw !== null ? Number(raw) : NaN;
-      // Snap to the nearest valid preset rather than trusting whatever
-      // arbitrary number was previously stored — a future preset-list
-      // tweak shouldn't leave operators stuck with an off-menu value.
-      if (Number.isFinite(parsed) && BAR_COUNT_OPTIONS.includes(parsed)) {
-        this.barCount.set(parsed);
-      }
-    } catch {
-      /* best-effort — leave at default */
-    }
-  }
-
   protected setTileSize(size: TileSize): void {
-    if (this.tileSize() === size) return;
-    this.tileSize.set(size);
+    if (this.tileSize() !== size) this.tileSize.set(size);
   }
 
   protected setBarCount(n: number): void {
-    if (this.barCount() === n) return;
-    this.barCount.set(n);
+    if (this.barCount() !== n) this.barCount.set(n);
   }
 
-  /**
-   * Pixel min-width currently in effect, used to derive the grid's
-   * `repeat(auto-fit, minmax(<X>px, 1fr))` template via a CSS custom
-   * property. Keeps the size→layout mapping in one place.
-   */
+  /** Pixel min-width currently in effect, for the grid's `minmax(<X>px, 1fr)` template. */
   protected currentSizeMinPx(): number {
     const cur = this.tileSize();
     return SIZE_OPTIONS.find((o) => o.value === cur)?.minPx ?? 320;
   }
 
-  private hydrateFromStorage(): void {
-    let raw: string | null = null;
-    try {
-      raw = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      /* localStorage blocked — treat as first visit */
-    }
-    if (raw === null) {
-      // First-ever visit on this browser. Defer hydration completion
-      // until the catalogue arrives — we'll seed entries with every
-      // active currency pair so the operator sees a populated grid
-      // out of the box (matches the "show all by default" intent).
-      this.needsSeeding = true;
-      this.seeding.set(true);
-      return;
-    }
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        const valid: WatchlistEntry[] = [];
-        for (const item of parsed) {
-          const sym = this.canonicaliseSymbol((item as { symbol?: unknown }).symbol as string);
-          const tf = String((item as { timeframe?: unknown }).timeframe ?? '');
-          if (sym.length > 0 && tf.length > 0) valid.push({ symbol: sym, timeframe: tf });
-        }
-        this.entries.set(valid);
-      }
-      this.hydrationComplete.set(true);
-    } catch {
-      // Malformed payload — discard and treat as first visit so the
-      // operator gets a sensible default rather than a stuck-empty page.
-      this.needsSeeding = true;
-      this.seeding.set(true);
-    }
+  protected setGlobalTimeframe(tf: string): void {
+    if (this.globalTimeframe() === tf) return;
+    // Failures belong to the timeframe they happened on; the tiles re-key and re-fetch.
+    this.clearLoadFailures();
+    this.globalTimeframe.set(tf);
   }
 
-  private loadCatalogue(): void {
-    this.pairsService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe({
-      next: (res) => {
-        const xs = (res?.data?.data ?? []).filter((p) => p.isActive);
-        this.catalogue.set(xs);
-        if (this.needsSeeding) {
-          this.seedFromCatalogue();
-          this.needsSeeding = false;
-          this.seeding.set(false);
-          this.hydrationComplete.set(true);
-        }
-      },
-      error: () => {
-        // Catalogue failed — let the operator start with an empty
-        // watchlist they can populate manually rather than blocking.
-        if (this.needsSeeding) {
-          this.needsSeeding = false;
-          this.seeding.set(false);
-          this.hydrationComplete.set(true);
-        }
-      },
-    });
-  }
-
-  /**
-   * Populate `entries` with every active currency pair at the current
-   * timeframe. Used for the first-visit seed AND for the
-   * "Reset to all pairs" button — the operator can wipe their curated
-   * list and snap back to the full grid without clearing localStorage
-   * by hand.
-   */
-  private seedFromCatalogue(): void {
-    const tf = this.globalTimeframe();
-    const xs = this.catalogueSymbols().map((s) => ({ symbol: s, timeframe: tf }));
-    this.entries.set(xs);
-  }
-
-  protected resetToAllPairs(): void {
-    if (this.catalogueSymbols().length === 0) {
-      this.notifications.info('Currency-pair catalogue is empty — nothing to reset to.');
-      return;
-    }
-    if (
-      this.entries().length > 0 &&
-      !confirm(
-        `Replace the current watchlist (${this.entries().length} tile(s)) with ` +
-          `every active currency pair (${this.catalogueSymbols().length})?`,
-      )
-    ) {
-      return;
-    }
-    this.seedFromCatalogue();
-  }
-
-  // ── Add / remove ──────────────────────────────────────────────────
+  // ── Add / remove (edits the engine list) ───────────────────────────
 
   protected addFromInput(): void {
-    const sym = this.canonicaliseSymbol(this.addDraft());
+    const sym = canonicalSymbol(this.addDraft());
     if (!sym) return;
-    this.addEntry(sym, this.globalTimeframe());
+    this.addSymbolToList(sym);
     this.addDraft.set('');
   }
 
-  protected addEntry(symbol: string, timeframe: string): void {
-    const sym = this.canonicaliseSymbol(symbol);
-    if (!sym) return;
-    const exists = this.entries().some((e) => e.symbol === sym && e.timeframe === timeframe);
-    if (exists) {
-      this.notifications.info(`${sym} ${timeframe} is already on the watchlist.`);
+  protected addSymbolToList(symbol: string): void {
+    const list = this.sourceList();
+    const sym = canonicalSymbol(symbol);
+    if (!list || !sym) return;
+    if (listSymbols(list).includes(sym)) {
+      this.notifications.info(`${sym} is already on ${list.name}.`);
       return;
     }
     if (this.catalogueSymbols().length > 0 && !this.catalogueSymbols().includes(sym)) {
-      // Hard-warn but allow — operator may be adding a symbol the catalogue
-      // hasn't picked up yet; live price will surface the gap.
-      this.notifications.info(
-        `${sym} isn't in the active currency-pair catalogue — tiles may show "No feed".`,
-      );
+      // Allowed: the catalogue may not have picked the symbol up yet; its tile will say there is no feed.
+      this.notifications.info(`${sym} isn't in the active currency-pair catalogue — its tile may show no prices.`);
     }
-    this.entries.update((xs) => [...xs, { symbol: sym, timeframe }]);
+    this.store.update(addSymbol(list, sym));
   }
 
   protected removeEntry(target: WatchlistEntry): void {
-    this.entries.update((xs) =>
-      xs.filter((e) => !(e.symbol === target.symbol && e.timeframe === target.timeframe)),
-    );
+    const list = this.sourceList();
+    if (!list) {
+      this.notifications.info('"All active pairs" is not a list — pick a watchlist to remove symbols from it.');
+      return;
+    }
+    const removed = locate(list, target.symbol);
+    if (!removed) return;
+    this.store.update(removeSymbol(list, target.symbol));
     this.onTileLoadOk(target);
+    if (this.undoTimer) clearTimeout(this.undoTimer);
+    this.undo.set({ listId: list.id, listName: list.name, removed });
+    this.undoTimer = setTimeout(() => {
+      this.undoTimer = null;
+      this.undo.set(null);
+    }, UNDO_MS);
   }
+
+  protected undoRemove(): void {
+    const u = this.undo();
+    if (!u) return;
+    const list = this.store.lists().find((l) => l.id === u.listId);
+    if (list) this.store.update(restoreSymbol(list, u.removed));
+    if (this.undoTimer) clearTimeout(this.undoTimer);
+    this.undoTimer = null;
+    this.undo.set(null);
+  }
+
+  // ── Analysis modal ─────────────────────────────────────────────────
 
   /** The tile whose LLM analysis modal is open, or null. */
   protected readonly analysisTarget = signal<WatchlistEntry | null>(null);
@@ -994,48 +1049,10 @@ export class WatchlistPageComponent implements OnInit {
   }
 
   protected closeAnalysis(): void {
+    const t = this.analysisTarget();
     this.analysisTarget.set(null);
-  }
-
-  protected clearAll(): void {
-    if (this.entries().length === 0) return;
-    if (!confirm('Remove all symbols from the watchlist?')) return;
-    this.entries.set([]);
-    this.clearLoadFailures();
-  }
-
-  protected setGlobalTimeframe(tf: string): void {
-    if (this.globalTimeframe() === tf) return;
-    // Failures belong to the timeframe they happened on; the tiles re-key
-    // and re-fetch below, so start the new tab clean.
-    this.clearLoadFailures();
-    this.globalTimeframe.set(tf);
-    // Re-key every existing entry to the new TF. Drops any duplicates
-    // that would arise from mixed-TF watchlists collapsing to one TF.
-    this.entries.update((xs) => {
-      const seen = new Set<string>();
-      const out: WatchlistEntry[] = [];
-      for (const e of xs) {
-        const next = { symbol: e.symbol, timeframe: tf };
-        const key = `${next.symbol}|${next.timeframe}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        out.push(next);
-      }
-      return out;
-    });
-  }
-
-  // ── Helpers ───────────────────────────────────────────────────────
-
-  /**
-   * Normalise a symbol into canonical engine form: uppercase, no separators.
-   * "eur/usd" → "EURUSD"; "GBP-JPY" → "GBPJPY". The watchlist stores and
-   * keys on this canonical form so equal-but-differently-typed entries
-   * don't double up; tiles render with a "/" inserted at display time.
-   */
-  private canonicaliseSymbol(s: string | null | undefined): string {
-    if (!s) return '';
-    return s.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    // The modal's chart leaves its symbol's price room when it closes (one connection, no reference counting), which
+    // would silently stop this tile's prices: join it again.
+    if (t && this.joined.has(t.symbol)) void this.realtime.join(`price:${t.symbol}`, 'SubscribePrice', t.symbol);
   }
 }
