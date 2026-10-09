@@ -132,6 +132,28 @@ export function runTimeframeFor(resolution: TvResolution): string {
   return engine ?? 'H1';
 }
 
+/** The bars a run is computed on for the chart (`scripting/run` `chartType`). */
+export type ScriptBasis = 'standard' | 'heikinashi';
+
+/** Styles drawn from bricks built by price movement rather than time. */
+const PRICE_BASED_STYLES = new Set(['renko', 'kagi', 'pnf', 'line-break', 'range']);
+
+/**
+ * The chart type a run must be made on to sit on a chart of `style` (PC-09, PC-I8). Heikin-Ashi
+ * candles are the engine's `heikinashi` bars — the same builder as the chart's (each open the
+ * previous HA bar's midpoint, the same bar times), so the script computes on what is drawn, as
+ * TradingView's does; it used to run on the standard OHLC under Heikin-Ashi candles. Every other
+ * time-based style (candles, bars, line, area, …) draws the standard bars. The price-based styles —
+ * Renko, Kagi, Point & Figure, Line break, Range — build their bricks in the browser by the chart's
+ * own box (an ATR multiple or pips, sequenced a second apart), which the engine's bricks (ATR(14),
+ * tick-rounded) do not reproduce: a run cannot be placed on them — null, "not available on this
+ * chart type" — rather than hidden silently or drawn on the wrong bricks.
+ */
+export function scriptBasisOf(style: string): ScriptBasis | null {
+  if (style === 'heikin-ashi') return 'heikinashi';
+  return PRICE_BASED_STYLES.has(style) ? null : 'standard';
+}
+
 /** `strategy(` anywhere at the start of a line → strategy; otherwise indicator. */
 export function detectScriptKind(source: string): 'indicator' | 'strategy' {
   return /^\s*strategy\s*\(/m.test(source) ? 'strategy' : 'indicator';

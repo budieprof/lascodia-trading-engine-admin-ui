@@ -1,8 +1,9 @@
 import type { IChartApi, ISeriesApi, SeriesType, Time } from 'lightweight-charts';
 
 import type { PineRenderModel } from '@shared/pine-chart/render/render-model';
-import type { ChartScriptResult } from './chart-script.model';
-import { DEFAULT_DISPLAY, type ScriptDisplaySettings } from './script-display';
+import type { ChartScriptResult, ScriptBasis } from './chart-script.model';
+import { runMatchesChart, type SeriesId } from './live-bar';
+import { DEFAULT_DISPLAY, resolveDisplay, type ScriptDisplaySettings } from './script-display';
 import { ScriptRenderer, type ScriptHost } from './script-renderer';
 
 /** One Pine script on the chart, as chart-host draws it (its `scriptResults` input). */
@@ -17,6 +18,41 @@ export interface ChartScriptLayer {
    * still on the way; null or absent: drawn. Its pane stays meanwhile.
    */
   suspended?: string | null;
+}
+
+/** A run on the page, as far as the chart's layers read it. */
+export interface LayerRun extends SeriesId {
+  item: { key: string };
+  result: ChartScriptResult;
+  display?: Partial<ScriptDisplaySettings>;
+  /** The bars it was computed on; absent = standard. */
+  chartType?: ScriptBasis;
+}
+
+/**
+ * The layers the chart draws for the page's runs: those computed for its symbol and resolution,
+ * once its bars are that series (through a switch the previous runs' outputs go at once and the new
+ * runs wait for the new bars), each with its display settings. A run is suspended — its pane stays,
+ * nothing drawn — on a chart type runs cannot sit on (`unavailable`), and while its run for the
+ * chart's bars is on its way (Heikin-Ashi ↔ standard, PC-09).
+ */
+export function chartScriptLayers(
+  runs: readonly LayerRun[],
+  chart: SeriesId,
+  bars: SeriesId | null,
+  basis: ScriptBasis | null,
+  unavailable: string | null,
+): ChartScriptLayer[] {
+  return runs
+    .filter((r) => runMatchesChart(r, chart, bars))
+    .map((r) => ({
+      key: r.item.key,
+      result: r.result,
+      display: resolveDisplay(r.display),
+      suspended:
+        unavailable ??
+        ((r.chartType ?? 'standard') !== basis ? 'Running on the new chart type…' : null),
+    }));
 }
 
 /** The render model a layer draws: its run's, with its display settings applied. */

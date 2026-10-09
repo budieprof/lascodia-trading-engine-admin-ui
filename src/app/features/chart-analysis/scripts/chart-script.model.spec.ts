@@ -3,6 +3,7 @@ import { BOLLINGER_RUN } from './__fixtures__/bollinger-run';
 import {
   detectScriptKind,
   runTimeframeFor,
+  scriptBasisOf,
   toChartScriptResult,
   toChartSeconds,
 } from './chart-script.model';
@@ -244,6 +245,18 @@ describe('toChartScriptResult — failures and indicators', () => {
       ['Plot 3', 'belowbar', [2]],
     ]);
     expect(script.hlines.map((h) => [h.price, h.lineStyle])).toEqual([[50, 'dashed']]);
+  });
+});
+
+describe('scriptBasisOf (PC-09, PC-I8)', () => {
+  it('runs on the Heikin-Ashi bars under Heikin-Ashi candles, the standard bars under any other time style', () => {
+    expect(scriptBasisOf('heikin-ashi')).toBe('heikinashi');
+    for (const s of ['candles', 'hollow', 'bars', 'line', 'area', 'baseline', 'column', 'hlc-area'])
+      expect(scriptBasisOf(s)).toBe('standard');
+  });
+
+  it('cannot place a run on bricks built from price movement', () => {
+    for (const s of ['renko', 'kagi', 'pnf', 'line-break', 'range']) expect(scriptBasisOf(s)).toBeNull();
   });
 });
 

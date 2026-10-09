@@ -11,7 +11,7 @@ import {
   syncAnchorData,
   type ScriptHost,
 } from './script-renderer';
-import { ScriptLayers, type ChartScriptLayer } from './script-layers';
+import { ScriptLayers, chartScriptLayers, type ChartScriptLayer } from './script-layers';
 import { scriptRenderModel } from './script-model-cache';
 import { toChartScriptResult, type ChartScriptResult } from './chart-script.model';
 import { DEFAULT_DISPLAY } from './script-display';
@@ -561,6 +561,51 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(atRest.main.map((v) => v.text)).toEqual(at59.main.map((v) => v.text));
     expect(atRest.main.map((v) => v.title)).toEqual(['Basis', 'Upper', 'Lower']);
     expect(s.statusAt(5)!.main.every((v) => v.text === '∅')).toBe(true);
+  });
+});
+
+describe('chartScriptLayers (PC-09)', () => {
+  const EURUSD = { symbol: 'EURUSD', resolution: '60' as const };
+  const run = (key: string, chartType?: 'standard' | 'heikinashi', symbol = 'EURUSD') => ({
+    item: { key },
+    result: bollinger(),
+    symbol,
+    resolution: '60' as const,
+    ...(chartType ? { chartType } : {}),
+  });
+
+  it('draws the runs made for the chart’s series and bars, each with its display settings', () => {
+    const layers = chartScriptLayers([run('a'), run('b', 'standard')], EURUSD, EURUSD, 'standard', null);
+    expect(layers.map((l) => [l.key, l.suspended])).toEqual([
+      ['a', null],
+      ['b', null],
+    ]);
+    expect(layers[0].display).toEqual(DEFAULT_DISPLAY);
+  });
+
+  it('suspends a run made on the other bars until its re-run lands (Heikin-Ashi ↔ standard)', () => {
+    const layers = chartScriptLayers(
+      [run('std'), run('ha', 'heikinashi')],
+      EURUSD,
+      EURUSD,
+      'heikinashi',
+      null,
+    );
+    expect(layers.map((l) => [l.key, l.suspended])).toEqual([
+      ['std', 'Running on the new chart type…'],
+      ['ha', null],
+    ]);
+  });
+
+  it('suspends every run on a chart type runs cannot sit on, saying so', () => {
+    const layers = chartScriptLayers([run('a')], EURUSD, EURUSD, null, 'Not available on Renko charts');
+    expect(layers[0].suspended).toBe('Not available on Renko charts');
+  });
+
+  it('leaves out another series’ runs, and runs while the bars on screen are another series’', () => {
+    expect(chartScriptLayers([run('a', undefined, 'GBPUSD')], EURUSD, EURUSD, 'standard', null)).toEqual([]);
+    const gbp = { symbol: 'GBPUSD', resolution: '60' as const };
+    expect(chartScriptLayers([run('a')], EURUSD, gbp, 'standard', null)).toEqual([]);
   });
 });
 

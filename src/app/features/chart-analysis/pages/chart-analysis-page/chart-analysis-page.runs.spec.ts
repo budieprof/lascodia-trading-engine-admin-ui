@@ -117,6 +117,7 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
     pendingScripts,
     waitingScripts: signal(new Map()),
     scriptUpdates: signal(new Map()),
+    chartBasis: signal('standard'),
     symbol: signal('EURUSD'),
     resolution: signal('60'),
     bars: signal([]),
@@ -379,5 +380,25 @@ describe('chart page — a busy engine (contract C5)', () => {
     expect(runOnChart).toHaveBeenCalledTimes(1);
     expect(p.waitingScripts().size).toBe(0);
     expect(p.pendingScripts().size).toBe(0);
+  });
+});
+
+describe('chart page — runs on the bars the chart draws (PC-09)', () => {
+  it('under Heikin-Ashi candles a run is made on the Heikin-Ashi bars, and says so', () => {
+    const m = item('mine:9');
+    const { p, runOnChart } = page();
+    p.chartBasis.set('heikinashi');
+    p.runScript(m, {});
+    expect(runOnChart.mock.calls[0][6]).toBe('heikinashi');
+    expect(p.scriptRuns()[0].chartType).toBe('heikinashi');
+  });
+
+  it('on a price-based style a run is made on the standard bars (it is not drawn there)', () => {
+    const m = item('mine:9');
+    const { p, runOnChart } = page();
+    p.chartBasis.set(null);
+    p.runScript(m, {});
+    expect(runOnChart.mock.calls[0][6]).toBe('standard');
+    expect(p.scriptRuns()[0].chartType).toBe('standard');
   });
 });

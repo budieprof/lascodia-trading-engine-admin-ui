@@ -22,7 +22,6 @@ import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service'
 import {
   LiveRerunScheduler,
   formingLiveBar,
-  runMatchesChart,
   sameSeries,
   type SeriesId,
 } from '../../scripts/live-bar';
@@ -135,7 +134,12 @@ import { ChartBottomBarComponent, type BottomBarMenu } from './chart-bottom-bar.
 import type { ChartScriptResult, ChartTrade } from '../../scripts/chart-script.model';
 import { tradeWindow } from '../../scripts/trade-detail';
 import { chartPineAdapter } from '../../scripts/chart-pine-adapter';
-import { detectScriptKind, editorReport } from '../../scripts/chart-script.model';
+import {
+  detectScriptKind,
+  editorReport,
+  scriptBasisOf,
+  type ScriptBasis,
+} from '../../scripts/chart-script.model';
 import {
   pineAssistCommands,
   pineEditorFacts,
@@ -150,7 +154,7 @@ import { ScriptSettings } from '../../scripts/script-settings';
 import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-panel.component';
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
-import type { ChartScriptLayer } from '../../scripts/script-layers';
+import { chartScriptLayers, type ChartScriptLayer } from '../../scripts/script-layers';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -276,6 +280,8 @@ export interface ChartScriptRun {
   display?: Partial<ScriptDisplaySettings>;
   /** When this run landed (client ms): how old the chart's run is when a re-run fails. */
   landedAt?: number;
+  /** The bars it was computed on (PC-09): Heikin-Ashi or standard; absent = standard. */
+  chartType?: ScriptBasis;
 }
 
 /** "Update on chart" (PC-06): the run of the editor's text and the chart script it was edited from. */
@@ -834,13 +840,14 @@ export class ChartAnalysisPageComponent {
    * new runs wait for the new bars — "Running script…" shows meanwhile.
    */
   readonly scriptResults = computed<ChartScriptLayer[]>(
-    () => {
-      const chart = { symbol: this.symbol(), resolution: this.resolution() };
-      const bars = this.barsFor();
-      return this.scriptRuns()
-        .filter((r) => runMatchesChart(r, chart, bars))
-        .map((r) => ({ key: r.item.key, result: r.result, display: resolveDisplay(r.display) }));
-    },
+    () =>
+      chartScriptLayers(
+        this.scriptRuns(),
+        { symbol: this.symbol(), resolution: this.resolution() },
+        this.barsFor(),
+        this.chartBasis(),
+        this.scriptsUnavailable(),
+      ),
     {
       equal: (a, b) =>
         a.length === b.length &&
@@ -848,9 +855,21 @@ export class ChartAnalysisPageComponent {
           (l, i) =>
             l.key === b[i].key &&
             l.result === b[i].result &&
+            l.suspended === b[i].suspended &&
             JSON.stringify(l.display) === JSON.stringify(b[i].display),
         ),
     },
+  );
+  /**
+   * The bars runs are computed on for the chart's style (PC-09, PC-I8): Heikin-Ashi or standard;
+   * null on a price-based style, which runs cannot be placed on.
+   */
+  readonly chartBasis = computed(() => scriptBasisOf(this.style()));
+  /** "Not available on Renko charts" — why no script is drawn on this chart type; null when they are. */
+  readonly scriptsUnavailable = computed(() =>
+    this.chartBasis() === null
+      ? `Not available on ${CHART_STYLES.find((s) => s.id === this.style())?.label ?? this.style()} charts`
+      : null,
   );
   readonly strategyRun = computed(
     () => this.scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,
@@ -888,6 +907,7 @@ export class ChartAnalysisPageComponent {
     const updates = this.scriptUpdates();
     const updating = new Set(updates.keys());
     const viaUpdate = new Set(updates.values());
+    const unavailable = this.scriptsUnavailable();
     const chip = (
       key: string,
       name: string,
@@ -904,7 +924,7 @@ export class ChartAnalysisPageComponent {
       waitingUntil: waiting.get(key) ?? null,
       failure: failures.get(key) ?? null,
       lastGoodMs: run?.landedAt ?? null,
-      unavailable: null,
+      unavailable,
     });
     const runs = this.scriptRuns();
     const out = runs.map((r) =>
@@ -1690,6 +1710,19 @@ export class ChartAnalysisPageComponent {
       });
     });
 
+    // A run is computed on the bars the chart draws (PC-09): a switch between Heikin-Ashi and a
+    // standard style runs every script again on the other bars — meanwhile its panes stay, nothing
+    // drawn (scriptResults: suspended). A price-based style runs nothing (not available there); the
+    // way back from one finds the runs as they were, and re-runs only those on the other basis.
+    effect(() => {
+      const basis = this.chartBasis();
+      untracked(() => {
+        if (basis === null) return;
+        for (const r of this.scriptRuns())
+          if ((r.chartType ?? 'standard') !== basis) this.runScript(r.item, r.values, true);
+      });
+    });
+
     // The quiet re-runs below (the minute timer, the forming bar, a theme switch) go through
     // `runScheduler`: one run per script in flight — an explicit run counts — spaced by its round
     // trip, held while the tab is hidden.
@@ -1705,6 +1738,8 @@ export class ChartAnalysisPageComponent {
      * strategy is, for its Strategy Tester.
      */
     const rerunScripts = (filter: (r: ChartScriptRun) => boolean) => {
+      // Not on a chart type runs cannot sit on (a price-based style): nothing of them shows there.
+      if (this.chartBasis() === null) return;
       const chart = { symbol: this.symbol(), resolution: this.resolution() };
       for (const r of this.scriptRuns()) {
         const hidden = r.result.kind !== 'strategy' && !resolveDisplay(r.display).visible;
@@ -3212,6 +3247,9 @@ export class ChartAnalysisPageComponent {
     const explicit = quiet === undefined;
     const symbol = this.symbol();
     const resolution = this.resolution();
+    // The bars it computes on: the chart's Heikin-Ashi candles, else the standard bars — also on
+    // a price-based style, where it is not drawn but ready for the operator's way back (PC-09).
+    const basis: ScriptBasis = this.chartBasis() ?? 'standard';
     if (explicit) {
       this.abortRun(key, SUPERSEDED);
       // A new attempt: what failed before is not what this run will say. An edit's failure goes to
@@ -3256,7 +3294,7 @@ export class ChartAnalysisPageComponent {
         this.serverClock.now(),
       );
       request = this.chartScripts
-        .runOnChart(item, symbol, resolution, values, requestedBars, liveBar)
+        .runOnChart(item, symbol, resolution, values, requestedBars, liveBar, basis)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
@@ -3282,7 +3320,14 @@ export class ChartAnalysisPageComponent {
                 done?.({ error: result.error });
                 return;
               }
-              this.landRun(item, result, values, symbol, resolution, requestedBars, replace, update);
+              this.landRun(
+                item,
+                result,
+                values,
+                { symbol, resolution, requestedBars, basis },
+                replace,
+                update,
+              );
               done?.(result);
             } finally {
               // After the result is in: a re-run waiting on this one reads the script as it is now.
@@ -3341,12 +3386,12 @@ export class ChartAnalysisPageComponent {
     item: ChartScriptItem,
     result: ChartScriptResult,
     values: ScriptInputValues,
-    symbol: string,
-    resolution: TvResolution,
-    requestedBars: number,
+    /** The series, window and bars it ran on. */
+    on: { symbol: string; resolution: TvResolution; requestedBars: number; basis: ScriptBasis },
     replace: boolean,
     update: ScriptUpdate | undefined,
   ): void {
+    const { symbol, resolution, requestedBars, basis } = on;
     const key = item.key;
     // The overrides as they apply to the script that ran: one for an input its source no longer
     // declares, or declares with another type, range or options, is dropped — that input runs on
@@ -3366,6 +3411,7 @@ export class ChartAnalysisPageComponent {
       resolution,
       requestedBars,
       landedAt: Date.now(),
+      chartType: basis,
       ...(display && Object.keys(display).length ? { display } : {}),
     };
     // One strategy at a time (its tester owns the bottom panel), in place for a re-run.

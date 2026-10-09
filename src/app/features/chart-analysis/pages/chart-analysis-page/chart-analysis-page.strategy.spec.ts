@@ -59,6 +59,7 @@ function page(runs: ChartScriptRun[] = []) {
     waitingScripts: signal(new Map()),
     scriptUpdates: signal(new Map()),
     editorKey: signal(null),
+    chartBasis: signal('standard'),
     symbol: signal('EURUSD'),
     resolution: signal('60'),
     bars: signal([]),
@@ -104,6 +105,7 @@ describe('chart page — one strategy at a time, said out loud', () => {
       { 'Risk::Stop (ATR)': 2 },
       1500,
       null,
+      'standard',
     );
     const back = p.scriptRuns();
     expect(back.map((r: ChartScriptRun) => [r.item.key, r.values])).toEqual([

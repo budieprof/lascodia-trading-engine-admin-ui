@@ -38,7 +38,12 @@ import { parseSavedInputs } from '@features/scripting/pine/pine-saved-inputs';
 import { pruneInputValues, sameInputValues } from '@features/scripting/pine/pine-inputs';
 import type { TvResolution } from '../datafeed/resolution';
 import { EXAMPLE_STRATEGIES } from './example-strategies';
-import { runTimeframeFor, toChartScriptResult, type ChartScriptResult } from './chart-script.model';
+import {
+  runTimeframeFor,
+  toChartScriptResult,
+  type ChartScriptResult,
+  type ScriptBasis,
+} from './chart-script.model';
 
 export { detectScriptKind } from './chart-script.model';
 
@@ -322,6 +327,8 @@ export class ChartScriptService {
     inputs?: ScriptInputValues,
     lastBars = DEFAULT_LAST_BARS,
     liveBar?: ScriptRunBar | null,
+    /** The bars to compute on (PC-09): the chart's Heikin-Ashi candles, else the standard bars. */
+    chartType: ScriptBasis = 'standard',
   ): Observable<ChartScriptResult> {
     const run = (overrides: ScriptInputValues | undefined): Observable<ChartScriptResult> => {
       const req: ScriptRunRequest = {
@@ -331,12 +338,13 @@ export class ChartScriptService {
         mode: item.kind === 'strategy' ? 'backtest' : 'preview',
         theme: this.theme.theme(),
       };
+      if (chartType !== 'standard') req.chartType = chartType;
       if (item.strategyId !== undefined) req.strategyId = item.strategyId;
       else req.source = item.pineSource ?? '';
       if (overrides && Object.keys(overrides).length) req.inputs = overrides;
       // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed
-      // bars.
-      if (liveBar && req.mode === 'preview') req.liveBar = liveBar;
+      // bars. The engine takes it on the standard chart only.
+      if (liveBar && req.mode === 'preview' && chartType === 'standard') req.liveBar = liveBar;
       return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };
     if (!inputs || !Object.keys(inputs).length) return run(undefined);

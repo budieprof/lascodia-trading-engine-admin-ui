@@ -359,6 +359,43 @@ describe('ChartScriptService — engine-backed "My scripts"', () => {
     expect(calls[1][0].liveBar).toBeUndefined();
   });
 
+  it('PC-09: runs on the Heikin-Ashi bars under Heikin-Ashi candles — no forming bar there', () => {
+    const run = vi.fn(() => of({ compile: { success: true, diagnostics: [], inputs: [] } }));
+    const { svc } = make({ run });
+    const live = { t: 1, o: 1, h: 1, l: 1, c: 1, v: 0 };
+    const indicator: ChartScriptItem = {
+      key: 'k',
+      source: 'mine',
+      name: 'i',
+      description: '',
+      kind: 'indicator',
+      pineSource: 's',
+    };
+    svc.runOnChart(indicator, 'EURUSD', '60' as never, {}, 100, live, 'heikinashi').subscribe();
+    svc.runOnChart(indicator, 'EURUSD', '60' as never, {}, 100, live, 'standard').subscribe();
+    const calls = run.mock.calls as unknown as [{ chartType?: string; liveBar?: unknown }][];
+    expect(calls[0][0].chartType).toBe('heikinashi');
+    // The engine takes a forming bar on the standard chart only.
+    expect(calls[0][0].liveBar).toBeUndefined();
+    // The standard bars: the request is as it always was.
+    expect(calls[1][0].chartType).toBeUndefined();
+    expect(calls[1][0].liveBar).toEqual(live);
+  });
+
+  it('itemForSource gives every editor script a key of its own (PC-07)', () => {
+    const { svc } = make({});
+    const a = svc.itemForSource('// a', 'indicator');
+    const b = svc.itemForSource('// b', 'indicator');
+    expect(a.key).toMatch(/^editor:/);
+    expect(b.key).toMatch(/^editor:/);
+    expect(a.key).not.toBe(b.key);
+    expect(svc.itemForSource('// saved', 'indicator', 'S', 'mine:7')).toMatchObject({
+      key: 'mine:7',
+      source: 'mine',
+      pineSource: '// saved',
+    });
+  });
+
   it("sends the console's theme as it is when each run is requested (chart.bg_color)", () => {
     const run = vi.fn(() => of({ compile: { success: true, diagnostics: [], inputs: [] } }));
     const { svc, theme } = make({ run });
