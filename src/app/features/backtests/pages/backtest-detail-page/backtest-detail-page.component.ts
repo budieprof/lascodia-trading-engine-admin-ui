@@ -31,6 +31,7 @@ import {
 import type { ReportTrade } from '@features/scripting/report/strategy-report.model';
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
+import { MonteCarloPanelComponent } from '@features/scripting/research/monte-carlo-panel.component';
 import {
   extractStrategyReport,
   type StrategyReport,
@@ -137,6 +138,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     EATradeChartModalComponent,
     StrategyReportComponent,
     ScriptRunChartComponent,
+    MonteCarloPanelComponent,
     RouterLink,
     DatePipe,
     DecimalPipe,
@@ -441,6 +443,12 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
               </div>
             </div>
           </div>
+        }
+
+        <!-- ── Monte Carlo in R (BT-I6): the engine resamples the completed run's R multiples; it
+             says so in words when the run has too few trades with a stop. ─────────────────── -->
+        @if (monteCarloSource(); as mc) {
+          <app-monte-carlo-panel [source]="mc" />
         }
 
         <!-- ── Trade log ───────────────────────────────────────────────── -->
@@ -1070,6 +1078,17 @@ export class BacktestDetailPageComponent implements OnInit {
   readonly parsed = signal<BacktestResultData | null>(null);
   /** Set when the run is a script strategy's: its resultJson is a Strategy report (ADR-0027). */
   readonly scriptReport = signal<StrategyReport | null>(null);
+  /**
+   * The Monte Carlo panel's source: a completed run only (the engine refuses others). Equal by id, so
+   * a re-read of the same run does not simulate again.
+   */
+  readonly monteCarloSource = computed(
+    () => {
+      const bt = this.backtest();
+      return bt && bt.status === 'Completed' ? { kind: 'backtest' as const, id: bt.id } : null;
+    },
+    { equal: (a, b) => a?.id === b?.id },
+  );
   /** How a script run modelled the news blackout; null on older and non-script runs. */
   readonly newsBlackout = signal<NewsBlackoutSummary | null>(null);
   readonly parseError = signal<string | null>(null);

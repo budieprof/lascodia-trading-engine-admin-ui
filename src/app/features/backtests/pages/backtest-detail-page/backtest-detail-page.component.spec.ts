@@ -98,6 +98,17 @@ describe('BacktestDetailPageComponent (result shape)', () => {
     expect(cmp.parsed()?.Trades).toHaveLength(1);
   });
 
+  it('offers the Monte Carlo in R of a completed run only, once per run', () => {
+    http.expectOne(RUN_URL).flush(run(null));
+    const source = cmp.monteCarloSource();
+    expect(source).toEqual({ kind: 'backtest', id: 812 });
+    // A re-read of the same run keeps the same source (the panel does not simulate again).
+    cmp.backtest.set({ ...cmp.backtest()! });
+    expect(cmp.monteCarloSource()).toBe(source);
+    cmp.backtest.set({ ...cmp.backtest()!, status: 'Running' });
+    expect(cmp.monteCarloSource()).toBeNull();
+  });
+
   it('handles a run that has no result yet', () => {
     http.expectOne(RUN_URL).flush(run(null));
     expect(cmp.scriptReport()).toBeNull();
