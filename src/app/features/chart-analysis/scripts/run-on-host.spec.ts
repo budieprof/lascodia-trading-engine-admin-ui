@@ -91,13 +91,11 @@ describe('sameBarColors', () => {
 describe('withBarColor', () => {
   const row = { time: 1, open: 1, high: 2, low: 0.5, close: 1.5 };
 
-  it('paints a candle body, border and wick', () => {
-    expect(withBarColor(row, '#f00', 'candle')).toEqual({
-      ...row,
-      color: '#f00',
-      borderColor: '#f00',
-      wickColor: '#f00',
-    });
+  it("paints a candle's body only: border and wick keep the style's up/down colours (TradingView barcolor)", () => {
+    const r = withBarColor(row, '#f00', 'candle');
+    expect(r).toEqual({ ...row, color: '#f00' });
+    expect('borderColor' in r).toBe(false);
+    expect('wickColor' in r).toBe(false);
   });
 
   it('keeps a hollow candle hollow: border and wick only', () => {

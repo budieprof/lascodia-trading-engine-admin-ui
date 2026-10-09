@@ -102,9 +102,10 @@ export function sameBarColors(
 }
 
 /**
- * Which parts of a bar a colour paints: a candle's body, border and wick; a hollow candle's border
- * and wick (its body stays hollow — the style's whole point); a bar's single colour (OHLC and HLC
- * bars, and the HiLo / volume-candle custom series).
+ * Which parts of a bar a colour paints: a candle's BODY only — its border and wick keep the chart's
+ * up/down colours, as TradingView draws `barcolor()`, so the bar's direction stays readable under any
+ * script colouring; a hollow candle's border and wick (its body stays hollow — the style's whole
+ * point); a bar's single colour (OHLC and HLC bars, and the HiLo / volume-candle custom series).
  */
 export type BarPaint = 'candle' | 'hollow' | 'bar';
 
@@ -123,7 +124,7 @@ export function withBarColor<T extends object>(
   if (!color) return row as T & BarColorFields;
   if (paint === 'bar') return { ...row, color };
   if (paint === 'hollow') return { ...row, borderColor: color, wickColor: color };
-  return { ...row, color, borderColor: color, wickColor: color };
+  return { ...row, color };
 }
 
 const NARROW = new Set([...' .,:;\'"!|()[]{}`ijlI']);

@@ -79,7 +79,8 @@ describe('priceRowsFrom', () => {
     const rows = priceRowsFrom('candles', bars, colors, PALETTE, 0, []);
     const ticked = [...bars.slice(0, -1), { ...bars[4], close: 9 }];
     const next = priceRowsFrom('candles', ticked, colors, PALETTE, 4, rows);
-    expect(next[4]).toMatchObject({ close: 9, color: '#ff00ff', borderColor: '#ff00ff' });
+    expect(next[4]).toMatchObject({ close: 9, color: '#ff00ff' });
+    expect(next[4]).not.toHaveProperty('borderColor'); // the body only (TradingView barcolor)
   });
 
   it('writes a value row for line styles and an up/down colour for columns', () => {
