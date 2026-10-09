@@ -1024,19 +1024,23 @@ export class ChartHostComponent implements OnDestroy {
     // (add, drag, style change, undo) repaints without the page wiring an
     // explicit refresh for each one.
     effect(() => {
-      // Filtered by THIS panel's symbol and timeframe rather than the store's
-      // single global scope: in a split layout every panel is on screen at
-      // once, and a global set would paint one panel's trendlines onto another.
+      // Filtered by THIS panel's symbol rather than the store's single global scope: in a split
+      // layout every panel is on screen at once, and a global set would paint one panel's
+      // trendlines onto another. Drawings belong to the symbol (DR-01 / DR-I2) — the controller
+      // keeps those whose Visibility shows them on this panel's timeframe.
       const all = this.drawings.hidden() ? [] : this.drawings.allDrawings();
       const symbol = this.symbol();
-      const resolution = this.resolution();
       const selected = this.drawings.selectedId();
-      untracked(() =>
+      const selectedIds = this.drawings.selectedIds();
+      this.resolution();
+      untracked(() => {
+        this.drawings.ensureSymbol(symbol);
         this.controller.sync(
-          all.filter((d) => d.symbol === symbol && d.resolution === resolution),
+          all.filter((d) => d.symbol === symbol),
           selected,
-        ),
-      );
+          selectedIds,
+        );
+      });
     });
 
     effect(() => {
@@ -2292,8 +2296,9 @@ export class ChartHostComponent implements OnDestroy {
     if (!this.price) return;
     this.controller.bindSeries(this.price);
     this.controller.sync(
-      this.drawings.forScope(this.symbol(), this.resolution()),
+      this.drawings.forSymbol(this.symbol()),
       this.drawings.selectedId(),
+      this.drawings.selectedIds(),
     );
     this.price.attachPrimitive(this.overlayRenderer);
     this.price.attachPrimitive(this.analysisRenderer);

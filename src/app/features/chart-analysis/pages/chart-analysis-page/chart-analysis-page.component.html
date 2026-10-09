@@ -554,16 +554,31 @@
       @case ('offline') {
         <span
           class="status sync-warn"
-          title="Drawings are saved in this browser only — the engine is unreachable"
+          [title]="
+            'Drawings are kept in this browser and sent when the engine answers (' +
+            drawings.pending() +
+            ' waiting)'
+          "
         >
           <app-chart-icon name="warning" [size]="16" /> local only
         </span>
       }
       @case ('error') {
-        <span class="status sync-warn" title="The engine rejected the last drawing sync"
+        <span class="status sync-warn" title="The engine refused the last drawing write; it is retried"
           ><app-chart-icon name="warning" [size]="16" /> not saved</span
         >
       }
+    }
+    @if (drawings.notice(); as note) {
+      <!-- A drawing changed elsewhere replaced ours, or the engine refused one (DR-I3). -->
+      <button
+        type="button"
+        class="status sync-warn"
+        [title]="note + ' — click to dismiss'"
+        (click)="drawings.notice.set(null)"
+      >
+        <app-chart-icon name="info" [size]="16" /> {{ note }}
+      </button>
     }
 
     @if (loading()) {
@@ -1008,8 +1023,8 @@
         class="strip-btn"
         [class.active]="objectTreeOpen()"
         (click)="objectTreeOpen.set(!objectTreeOpen())"
-        [disabled]="!drawings.visible().length"
-        [title]="'Object tree (' + drawings.visible().length + ')'"
+        [disabled]="!drawings.symbolDrawings().length"
+        [title]="'Object tree (' + drawings.symbolDrawings().length + ')'"
       >
         <app-chart-icon name="object-tree" [size]="28" />
       </button>
@@ -1492,27 +1507,9 @@
           </aside>
         }
 
-        <!-- Object tree. -->
-        @if (objectTreeOpen() && drawings.visible().length) {
-          <div class="object-tree">
-            <div class="tree-title">Objects</div>
-            <ul>
-              @for (d of drawings.visible(); track d.id) {
-                <li [class.selected]="drawings.selectedId() === d.id">
-                  <button type="button" class="tree-row" (click)="selectDrawing(d.id)">
-                    <span class="swatch" [style.background]="d.style.color"></span>
-                    <span>{{ drawingLabel(d) }}</span>
-                    @if (d.locked) {
-                      <span class="muted"><app-chart-icon name="lock" [size]="14" /></span>
-                    }
-                  </button>
-                  <button type="button" class="tree-remove" (click)="removeDrawing(d.id)">
-                    <app-chart-icon name="close" [size]="14" />
-                  </button>
-                </li>
-              }
-            </ul>
-          </div>
+        <!-- Object tree (DR-03 / DR-I10): every drawing of the symbol, hidden ones included. -->
+        @if (objectTreeOpen() && drawings.symbolDrawings().length) {
+          <app-drawing-object-tree [resolution]="resolution()" (closed)="objectTreeOpen.set(false)" />
         }
 
         <!-- Alert manager (alerts v2, SP-I2). -->

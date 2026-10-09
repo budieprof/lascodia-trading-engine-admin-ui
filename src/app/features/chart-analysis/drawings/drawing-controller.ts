@@ -63,6 +63,8 @@ export class DrawingController {
     /** Ctrl/Cmd held at press on a body: the first movement clones. */
     cloneOnMove: boolean;
     moved: boolean;
+    /** A press on one of a multi-selection: every unlocked selected drawing moves with it (DR-I10). */
+    group: { id: string; points: DrawingPoint[] }[] | null;
   } | null = null;
 
   private chart: IChartApi | null = null;
@@ -172,14 +174,9 @@ export class DrawingController {
     this.cancelPending();
   }
 
-  /** Delete the selected drawing, if any and unlocked. Returns true if it went. */
+  /** Delete the selected drawings that are not locked (DR-06). Returns true if any went. */
   deleteSelected(): boolean {
-    const id = this.store.selectedId();
-    if (!id) return false;
-    const { symbol, resolution } = this.scope();
-    const drawing = this.store.forScope(symbol, resolution).find((d) => d.id === id);
-    if (!drawing || drawing.locked) return false;
-    this.store.remove(id);
+    if (!this.store.removeSelectedUnlocked()) return false;
     this.onSelectionChange?.(null);
     return true;
   }
@@ -189,10 +186,10 @@ export class DrawingController {
    * Visibility tab excludes the current resolution are dropped here, so they
    * are neither painted nor hit-tested; the rest paint in visual order.
    */
-  sync(drawings: Drawing[], selectedId: string | null): void {
+  sync(drawings: Drawing[], selectedId: string | null, selectedIds: ReadonlySet<string> = new Set()): void {
     const { resolution } = this.scope();
     this.shown = byZ(drawings.filter((d) => isVisibleOn(d, resolution)));
-    this.renderer.setDrawings(this.shown, selectedId);
+    this.renderer.setDrawings(this.shown, selectedId, selectedIds);
   }
 
   /** Whether a drawing is being placed right now. */
@@ -405,19 +402,40 @@ export class DrawingController {
       return;
     }
 
-    // Selecting / starting a drag.
+    // Selecting / starting a drag. Ctrl/Cmd or Shift adds to (or takes out of) the selection (DR-I10);
+    // Ctrl/Cmd-DRAG on a body still clones, decided once the pointer moves.
     const hit = this.pick(p);
-    this.select(hit?.id ?? null);
+    const additive = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+    if (hit && additive && this.store.selectedIds().size > 0 && !this.store.selectedIds().has(hit.id)) {
+      this.store.toggleSelected(hit.id);
+      this.onSelectionChange?.(this.store.selectedId());
+      ev.preventDefault();
+      ev.stopPropagation();
+      return;
+    }
+    if (!hit || !this.store.selectedIds().has(hit.id) || this.store.selectedIds().size < 2) {
+      this.select(hit?.id ?? null);
+    } else {
+      // A press on one of a multi-selection keeps the selection (a drag moves them all).
+      this.store.focusInSelection(hit.id);
+    }
 
     if (hit && !hit.drawing.locked) {
-      this.store.beginGesture();
+      // The undo snapshot is taken on the first MOVE, not here: a click that only selects must not
+      // cost the operator their Redo (DR-04).
       this.dragging = {
         id: hit.id,
         handleIndex: hit.handleIndex,
         start: p,
         originalPoints: hit.drawing.points.map((pt) => ({ ...pt })),
-        cloneOnMove: hit.handleIndex < 0 && (ev.ctrlKey || ev.metaKey),
+        cloneOnMove: hit.handleIndex < 0 && (ev.ctrlKey || ev.metaKey) && this.store.selectedIds().size < 2,
         moved: false,
+        group:
+          hit.handleIndex < 0 && this.store.selectedIds().size > 1
+            ? this.shown
+                .filter((d) => this.store.selectedIds().has(d.id) && !d.locked)
+                .map((d) => ({ id: d.id, points: d.points.map((pt) => ({ ...pt })) }))
+            : null,
       };
       this.setChartInteractive(false);
       this.setCursor(hit.handleIndex >= 0 ? 'crosshair' : 'grabbing');
@@ -469,6 +487,7 @@ export class DrawingController {
     if (!drag.moved && !isDrag(drag.start, p, 2)) return;
     if (!drag.moved) {
       drag.moved = true;
+      this.store.beginGesture(drag.id);
       if (drag.cloneOnMove) {
         // Ctrl/Cmd-drag: the ORIGINAL stays put and a clone follows the
         // pointer. The clone joins the gesture snapshot taken at press, so one
@@ -481,8 +500,7 @@ export class DrawingController {
       }
     }
 
-    const { symbol, resolution } = this.scope();
-    const drawing = this.store.forScope(symbol, resolution).find((d) => d.id === drag.id);
+    const drawing = this.store.forSymbol(this.scope().symbol).find((d) => d.id === drag.id);
     if (!drawing) return;
 
     if (drag.handleIndex >= 0) {
@@ -521,23 +539,32 @@ export class DrawingController {
       if (!model || !startModel) return;
       const l0 = this.renderer.logicalAt(startModel.time);
       const l1 = this.renderer.logicalAt(model.time);
-      const points =
+      const shift = (original: DrawingPoint[]): DrawingPoint[] =>
         l0 !== null && l1 !== null
           ? shiftPointsByBars(
-              drag.originalPoints,
+              original,
               l1 - l0,
               model.price - startModel.price,
               (t) => this.renderer.logicalAt(t),
               (l) => this.renderer.timeAtLogical(l),
               model.time - startModel.time,
             )
-          : shiftPoints(drag.originalPoints, model.time - startModel.time, model.price - startModel.price);
-      this.store.update(drawing.id, { points }, false);
+          : shiftPoints(original, model.time - startModel.time, model.price - startModel.price);
+      if (drag.group) {
+        const originals = new Map(drag.group.map((g) => [g.id, g.points]));
+        this.store.moveMany([...originals.keys()], (d) => shift(originals.get(d.id) ?? d.points));
+        return;
+      }
+      this.store.update(drawing.id, { points: shift(drag.originalPoints) }, false);
     }
   };
 
   private onPointerUp = (ev: PointerEvent): void => {
     if (this.dragging) {
+      // A drag that ended where it started leaves no undo step; a plain click on one of a
+      // multi-selection narrows the selection to it, as on TradingView.
+      if (this.dragging.moved) this.store.endGesture();
+      else if (this.dragging.group) this.select(this.dragging.id);
       this.dragging = null;
       this.setChartInteractive(true);
       this.setCursor('pointer');

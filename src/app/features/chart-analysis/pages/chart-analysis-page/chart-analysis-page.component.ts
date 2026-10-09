@@ -166,6 +166,7 @@ import {
 import { ChartAlertsService } from '../../alerts/chart-alerts.service';
 import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
 import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
+import { ObjectTreeComponent } from '../../drawings/ui/object-tree.component';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
 import { inputOf } from '../../alerts/chart-alert-rules';
@@ -429,6 +430,16 @@ function loadWatchlistOpen(): boolean {
   }
 }
 
+/** TradingView's drawing hotkeys (Alt + key), by `KeyboardEvent.code` (DR-I12). */
+const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
+  KeyT: 'trend-line',
+  KeyH: 'horizontal-line',
+  KeyJ: 'horizontal-ray',
+  KeyV: 'vertical-line',
+  KeyC: 'cross-line',
+  KeyF: 'fib-retracement',
+};
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -461,6 +472,7 @@ function loadWatchlistOpen(): boolean {
     UndoNoticeComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
+    ObjectTreeComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -4276,12 +4288,23 @@ export class ChartAnalysisPageComponent {
       return;
     }
     if (ev.key === 'Delete' || ev.key === 'Backspace') {
-      const id = this.drawings.selectedId();
-      if (id) {
+      if (this.drawings.selectedIds().size) {
         ev.preventDefault();
-        this.drawings.remove(id);
+        // Locked drawings stay: the lock is what stops a stray key deleting one (DR-06). Every other
+        // selected drawing goes (a multi-selection, DR-I10).
+        this.drawings.removeSelectedUnlocked();
       }
       return;
+    }
+    // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
+    // (Alt+T types "†") do not get in the way.
+    if (ev.altKey && !mod) {
+      const kind = DRAWING_HOTKEYS[ev.code];
+      if (kind) {
+        ev.preventDefault();
+        this.tool.set(kind);
+        return;
+      }
     }
     if (ev.key.startsWith('Arrow') && this.drawings.selectedId() && !mod) {
       // Nudge: one bar sideways / one pixel vertically; Shift ×10.

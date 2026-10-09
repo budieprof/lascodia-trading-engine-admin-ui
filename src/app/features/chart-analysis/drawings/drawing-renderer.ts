@@ -61,6 +61,8 @@ const AXIS_BAND = 'rgba(41, 98, 255, 0.25)';
 export class DrawingRenderer implements ISeriesPrimitive<Time> {
   private drawings: Drawing[] = [];
   private selectedId: string | null = null;
+  /** The rest of a multi-selection (DR-I10): drawn selected too, with its handles. */
+  private alsoSelected: ReadonlySet<string> = new Set();
   /** Drawing under the pointer: shows its handles faintly, as TradingView does. */
   private hoverId: string | null = null;
   /** In-progress drawing, rendered as a preview while being placed. */
@@ -103,9 +105,10 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate = undefined;
   }
 
-  setDrawings(drawings: Drawing[], selectedId: string | null): void {
+  setDrawings(drawings: Drawing[], selectedId: string | null, alsoSelected: ReadonlySet<string> = new Set()): void {
     this.drawings = drawings;
     this.selectedId = selectedId;
+    this.alsoSelected = alsoSelected;
     this.requestUpdate?.();
   }
 
@@ -380,7 +383,7 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
       for (const drawing of this.drawings) {
         const pts = this.projectAll(drawing);
         if (pts.length === 0) continue;
-        const selected = drawing.id === this.selectedId;
+        const selected = drawing.id === this.selectedId || this.alsoSelected.has(drawing.id);
         this.paint(ctx, drawing, pts, w, h, selected, !selected && drawing.id === this.hoverId);
       }
 

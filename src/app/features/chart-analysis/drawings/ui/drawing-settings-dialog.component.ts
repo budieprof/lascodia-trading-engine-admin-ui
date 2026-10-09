@@ -412,8 +412,8 @@ export class DrawingSettingsDialogComponent implements OnInit {
   private closedOnce = false;
 
   ngOnInit(): void {
-    // One snapshot for the whole dialog: Ok = one undo step, Cancel = restore.
-    this.store.beginGesture();
+    // One snapshot for the whole dialog: Ok = one undo step (none when nothing changed), Cancel = restore.
+    this.store.beginGesture(this.drawingId());
     this.vis.set(visibilityFromList(this.live()?.visibleOn, this.resolutions()));
   }
 
@@ -505,6 +505,8 @@ export class DrawingSettingsDialogComponent implements OnInit {
   ok(): void {
     if (this.closedOnce) return;
     this.closedOnce = true;
+    // Opened and closed without a change: no undo step, and Redo survives (DR-04).
+    this.store.endGesture();
     this.closed.emit();
   }
 

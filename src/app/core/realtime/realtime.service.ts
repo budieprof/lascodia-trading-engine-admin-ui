@@ -84,6 +84,10 @@ export const REALTIME_EVENTS = [
   // ── In-app alert delivery (contract C2, 2026-10-09): a chart or script alert fired on the
   //    InApp channel (IInAppAlertPublisher, broadcast). Drives the alert pop-ups. ──
   'alertFired',
+  // ── Chart drawings (DR-I3, 2026-10-09): an operator's drawings changed on these symbols
+  //    ({ symbols, origin }, broadcast, no drawing and no operator in it). A chart showing one of
+  //    them reloads its own drawings unless `origin` is its own tab. ──
+  'chartDrawingsChanged',
 ] as const;
 export type RealtimeEventName = (typeof REALTIME_EVENTS)[number];
 
