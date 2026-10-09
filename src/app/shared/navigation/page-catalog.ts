@@ -208,7 +208,8 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
     group: 'Analysis',
     label: 'Pine Screener',
     route: '/pine-screener',
-    keywords: 'pine script screener scan symbols indicator plots alerts tradingview',
+    keywords:
+      'pine script screener scan symbols indicator plots alerts tradingview saved screens schedule bar close matches',
   },
   {
     group: 'Analysis',

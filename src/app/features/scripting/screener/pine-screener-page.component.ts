@@ -1,12 +1,15 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   OnInit,
   computed,
   inject,
   signal,
 } from '@angular/core';
-import { catchError, of } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
+import { catchError, firstValueFrom, of } from 'rxjs';
 import { AgGridAngular } from 'ag-grid-angular';
 import {
   AllCommunityModule,
@@ -18,60 +21,117 @@ import {
 } from 'ag-grid-community';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { AuthService } from '@core/auth/auth.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { ScriptingService } from '@core/services/scripting.service';
+import type { ChartIndicatorScriptDetailDto, ScriptDiagnostic } from '@core/api/scripting.types';
 
-import { ScriptStrategyService } from '../api/script-strategy.service';
 import type {
-  ScreenerRequest,
-  ScreenerRow,
   ScriptInputDef,
   ScriptLibrarySummary,
   ScriptStrategyDto,
 } from '../api/scripting-api.types';
+import { PineEditorComponent } from '../components/pine-editor/pine-editor.component';
+import { formatDateTime } from '../report/report-format';
+import { ANALYST_PERMISSION } from '../research/research-permissions';
 import { describeFailure, isOk } from '../shared/api-error';
 import { fileStamp, saveBlob } from '../shared/download';
-import { isScriptStrategy, scriptInputsOf, scriptSourceOf } from '../shared/script-strategy';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
+import { OPERATOR_PERMISSION } from '../shared/permissions';
+import { isScriptStrategy, scriptInputsOf, scriptSourceOf } from '../shared/script-strategy';
+import { SavedScreensPanelComponent } from './saved-screens-panel.component';
+import { ScreenHistoryComponent } from './screen-history.component';
+import { ScreenSettingsComponent } from './screen-settings.component';
 import {
   MAX_SCREENER_BARS,
   MAX_SCREENER_SYMBOLS,
   alertsSummary,
   formatPlotValue,
-  lastBarText,
-  normalizeScreenerRows,
-  plotColumns,
-  screenerCsv,
   summarize,
   validateScreenerForm,
   type ScreenerSourceMode,
 } from './screener.model';
+import { ScreensApiService } from './screens-api.service';
+import {
+  MAX_EXTRA_TIMEFRAMES,
+  MAX_SCREEN_NAME,
+  SCREENER_TIMEFRAMES,
+  buildSaveRequest,
+  changeLabel,
+  cleanExtras,
+  emptySettings,
+  filterColumnOptions,
+  formatMetric,
+  isoText,
+  lastBarLabel,
+  metricLabel,
+  modeOfScreen,
+  normalizeResultRows,
+  normalizeScreenRows,
+  onTimeframe,
+  resultColumns,
+  resultsCsv,
+  rowError,
+  settingsOfScreen,
+  timeframeName,
+  verdictLabel,
+  type ScreenScriptRef,
+  type ScreenSettingsDraft,
+} from './screens.model';
+import type {
+  ScreenRowDto,
+  ScreenRunDto,
+  ScreenerRequestV2,
+  ScreenerResultRow,
+  ScriptScreenDto,
+} from './screens.types';
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
-const TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
-
-interface StrategyOption {
+interface Option {
   id: number;
   label: string;
 }
 
+const SOURCE_PLACEHOLDER = '//@version=6\nindicator("My screener")\nplot(ta.rsi(close, 14), "RSI")';
+
 /**
- * Pine screener (§6 `POST scripting/screener`): run a saved script, a library or a pasted source
- * over up to 200 symbols' last ≤ 500 bars, and compare its screener plots, fired alerts and errors
- * side by side. Results sort and filter per column and export as CSV.
+ * Pine screener (§6 `POST scripting/screener`, §6a saved screens — PE-I11, SS-I6, BX-6): run a script strategy, one of
+ * the operator's chart scripts, a library or a written source over up to 200 symbols' last ≤ 500 bars — on up to three
+ * more timeframes, optionally on the bar still forming — and compare its screener plots, strategy figures, fired alerts
+ * and errors side by side. A run can be saved as a screen: filters decide which symbols match, a schedule runs it at
+ * every bar close, and alerts say when a symbol starts or stops matching. Results sort, filter and export as CSV.
  */
 @Component({
   selector: 'app-pine-screener-page',
   standalone: true,
-  imports: [PageHeaderComponent, InputOverridesEditorComponent, AgGridAngular],
+  imports: [
+    PageHeaderComponent,
+    InputOverridesEditorComponent,
+    AgGridAngular,
+    PineEditorComponent,
+    SavedScreensPanelComponent,
+    ScreenSettingsComponent,
+    ScreenHistoryComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
       <app-page-header
         title="Pine screener"
-        subtitle="Run a Pine script across many symbols and compare its screener plots and alerts"
+        subtitle="Run a Pine script across many symbols, save it as a screen, and get alerts when symbols start or stop matching"
+      />
+
+      <app-saved-screens-panel
+        [activeId]="openScreen()?.id ?? null"
+        [refreshKey]="screensKey()"
+        [canWrite]="canWrite()"
+        [canRun]="canRun()"
+        (opened)="openScreenById($event)"
+        (ran)="onRan($event)"
+        (removed)="onScreenRemoved($event)"
+        (changed)="onScreenChanged($event)"
       />
 
       <section class="card" aria-labelledby="scr-config-title">
@@ -95,7 +155,7 @@ interface StrategyOption {
         @switch (mode()) {
           @case ('saved') {
             <label class="field">
-              <span>Saved script</span>
+              <span>Script strategy</span>
               <select (change)="selectStrategy($any($event.target).value)">
                 <option value="" [selected]="selectedStrategyId() === null">
                   {{ strategiesLoading() ? 'Loading scripts…' : 'Choose a script…' }}
@@ -109,6 +169,27 @@ interface StrategyOption {
             </label>
             @if (strategyNote()) {
               <p class="note">{{ strategyNote() }}</p>
+            }
+          }
+          @case ('chart') {
+            <label class="field">
+              <span>My script</span>
+              <select
+                data-testid="chart-script-select"
+                (change)="selectChartScript($any($event.target).value)"
+              >
+                <option value="" [selected]="selectedChartScriptId() === null">
+                  {{ chartScripts() === null ? 'Loading your scripts…' : 'Choose a script…' }}
+                </option>
+                @for (s of chartScriptOptions(); track s.id) {
+                  <option [value]="s.id" [selected]="selectedChartScriptId() === s.id">
+                    {{ s.label }}
+                  </option>
+                }
+              </select>
+            </label>
+            @if (chartNote()) {
+              <p class="note">{{ chartNote() }}</p>
             }
           }
           @case ('library') {
@@ -127,16 +208,17 @@ interface StrategyOption {
             </label>
           }
           @case ('source') {
-            <label class="field">
+            <div class="field">
               <span>Pine source</span>
-              <textarea
-                rows="8"
-                spellcheck="false"
-                placeholder='//@version=6&#10;indicator("My screener")&#10;plot(ta.rsi(close, 14), "RSI")'
+              <app-pine-editor
                 [value]="pastedSource()"
-                (input)="pastedSource.set($any($event.target).value)"
-              ></textarea>
-            </label>
+                (valueChange)="onSourceEdited($event)"
+                [diagnostics]="diagnostics()"
+                height="260px"
+                ariaLabel="Pine source to screen"
+                [placeholder]="sourcePlaceholder"
+              />
+            </div>
             <div class="row-actions">
               <button
                 type="button"
@@ -144,16 +226,19 @@ interface StrategyOption {
                 [disabled]="!pastedSource().trim() || compiling()"
                 (click)="compileSource(pastedSource())"
               >
-                {{ compiling() ? 'Reading…' : 'Read inputs' }}
+                {{ compiling() ? 'Checking…' : 'Check and read inputs' }}
               </button>
             </div>
           }
+        }
+        @if (copyNote(); as n) {
+          <p class="note" data-testid="copy-note">{{ n }}</p>
         }
 
         <div class="grid">
           <label class="field">
             <span>Timeframe</span>
-            <select (change)="timeframe.set($any($event.target).value)">
+            <select (change)="setTimeframe($any($event.target).value)">
               @for (tf of timeframes; track tf) {
                 <option [value]="tf" [selected]="timeframe() === tf">{{ tf }}</option>
               }
@@ -171,6 +256,35 @@ interface StrategyOption {
             />
           </label>
         </div>
+
+        <fieldset class="options" data-testid="screen-options">
+          <legend>Also run on (up to {{ maxExtras }} more timeframes)</legend>
+          <div class="option-row">
+            @for (tf of extraOptions(); track tf) {
+              <label class="check">
+                <input
+                  type="checkbox"
+                  [attr.data-extra]="tf"
+                  [checked]="extraTimeframes().includes(tf)"
+                  [disabled]="
+                    !extraTimeframes().includes(tf) && extraTimeframes().length >= maxExtras
+                  "
+                  (change)="toggleExtra(tf, $any($event.target).checked)"
+                />
+                {{ tf }}
+              </label>
+            }
+          </div>
+          <label class="check">
+            <input
+              type="checkbox"
+              data-testid="forming-bar"
+              [checked]="formingBar()"
+              (change)="formingBar.set($any($event.target).checked)"
+            />
+            Use the bar still forming as the last bar (its values move until it closes)
+          </label>
+        </fieldset>
 
         <fieldset class="symbols">
           <legend>
@@ -229,6 +343,18 @@ interface StrategyOption {
           <p class="error" role="alert">{{ formError() }}</p>
         }
         <div class="row-actions">
+          @if (openScreen()) {
+            <button
+              type="button"
+              class="btn"
+              data-testid="run-saved"
+              [disabled]="running() || !canRun()"
+              title="Runs the screen as saved (not unsaved changes) and keeps the run in its history"
+              (click)="runSaved()"
+            >
+              Run saved screen
+            </button>
+          }
           <button type="button" class="btn primary" [disabled]="running()" (click)="run()">
             {{ running() ? 'Running…' : 'Run screener' }}
           </button>
@@ -261,6 +387,12 @@ interface StrategyOption {
             </div>
           }
         </div>
+        @if (runLabel(); as label) {
+          <p class="note" data-testid="run-label">{{ label }}</p>
+        }
+        @if (runError(); as e) {
+          <p class="error" role="status">The run failed: {{ e }}</p>
+        }
         @if (results(); as rows) {
           @if (rows.length === 0) {
             <p class="muted">The screener returned no rows.</p>
@@ -287,6 +419,31 @@ interface StrategyOption {
           <p class="muted">Choose a script and symbols, then run the screener.</p>
         }
       </section>
+
+      <app-screen-settings
+        [draft]="settings()"
+        [screen]="openScreen()"
+        [columns]="filterColumns()"
+        [mainTimeframe]="timeframe()"
+        [extraTimeframes]="extraTimeframes()"
+        [canWrite]="canWrite()"
+        [saving]="saving()"
+        [problem]="screenProblem()"
+        [note]="screenNote()"
+        (draftChange)="settings.set($event)"
+        (save)="saveScreen(false)"
+        (saveAsNew)="saveScreen(true)"
+        (closeScreen)="closeScreen()"
+        (refreshSource)="useCurrentScript()"
+      />
+
+      @if (openScreen(); as s) {
+        <app-screen-history
+          [screenId]="s.id"
+          [refreshKey]="historyKey()"
+          (runOpened)="showRun($event)"
+        />
+      }
     </div>
   `,
   styles: [
@@ -342,10 +499,10 @@ interface StrategyOption {
         gap: var(--space-1);
         font-size: var(--text-xs);
         color: var(--text-secondary);
+        min-width: 0;
       }
       .field select,
       .field input,
-      .field textarea,
       .symbol-tools input,
       .results-tools input {
         min-width: 0;
@@ -357,11 +514,8 @@ interface StrategyOption {
         font: inherit;
         font-size: var(--text-sm);
       }
-      .field textarea {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        resize: vertical;
-      }
-      .symbols {
+      .symbols,
+      .options {
         margin: 0;
         padding: var(--space-3);
         border: 1px solid var(--border);
@@ -371,10 +525,22 @@ interface StrategyOption {
         gap: var(--space-2);
         min-width: 0;
       }
-      .symbols legend {
+      .symbols legend,
+      .options legend {
         font-size: var(--text-xs);
         color: var(--text-secondary);
         padding: 0 var(--space-1);
+      }
+      .option-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-4);
+      }
+      .check {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-1);
+        font-size: var(--text-sm);
       }
       .count {
         margin-left: var(--space-1);
@@ -482,6 +648,13 @@ interface StrategyOption {
       :host ::ng-deep .scr-error {
         color: var(--loss);
       }
+      :host ::ng-deep .scr-match {
+        color: var(--profit);
+        font-weight: var(--font-semibold);
+      }
+      :host ::ng-deep .scr-unknown {
+        color: var(--text-tertiary);
+      }
       .sr-only {
         position: absolute;
         width: 1px;
@@ -497,42 +670,64 @@ interface StrategyOption {
   ],
 })
 export class PineScreenerPageComponent implements OnInit {
-  private readonly api = inject(ScriptStrategyService);
   private readonly scripting = inject(ScriptingService);
   private readonly strategiesApi = inject(StrategiesService);
   private readonly pairsApi = inject(CurrencyPairsService);
+  private readonly screensApi = inject(ScreensApiService);
+  private readonly auth = inject(AuthService);
+  private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly modes: readonly { id: ScreenerSourceMode; label: string }[] = [
-    { id: 'saved', label: 'Saved script' },
+    { id: 'saved', label: 'Script strategy' },
+    { id: 'chart', label: 'My scripts' },
     { id: 'library', label: 'Library' },
-    { id: 'source', label: 'Paste source' },
+    { id: 'source', label: 'Write source' },
   ];
-  readonly timeframes = TIMEFRAMES;
+  readonly timeframes = SCREENER_TIMEFRAMES;
   readonly maxBars = MAX_SCREENER_BARS;
   readonly maxSymbols = MAX_SCREENER_SYMBOLS;
+  readonly maxExtras = MAX_EXTRA_TIMEFRAMES;
+  readonly sourcePlaceholder = SOURCE_PLACEHOLDER;
+
+  /** Saving a screen is `access.operator`; running one is `access.analyst`. */
+  readonly canWrite = computed(() => this.auth.hasPermission(OPERATOR_PERMISSION));
+  readonly canRun = computed(() => this.auth.hasPermission(ANALYST_PERMISSION));
 
   readonly mode = signal<ScreenerSourceMode>('saved');
 
   readonly strategiesLoading = signal(false);
-  readonly strategyOptions = signal<StrategyOption[]>([]);
+  readonly strategyOptions = signal<Option[]>([]);
   readonly selectedStrategyId = signal<number | null>(null);
   readonly selectedStrategy = signal<ScriptStrategyDto | null>(null);
   readonly strategyNote = signal<string | null>(null);
+
+  /** The operator's chart scripts (own and shared); null until "My scripts" is first opened. */
+  readonly chartScripts = signal<ChartIndicatorScriptDetailDto[] | null>(null);
+  readonly selectedChartScriptId = signal<number | null>(null);
+  readonly chartNote = signal<string | null>(null);
+  private chartScriptsLoading = false;
 
   readonly libraries = signal<ScriptLibrarySummary[]>([]);
   readonly selectedLibraryId = signal<number | null>(null);
 
   readonly pastedSource = signal('');
+  readonly diagnostics = signal<readonly ScriptDiagnostic[]>([]);
 
   readonly allSymbols = signal<string[]>([]);
   readonly symbolsError = signal<string | null>(null);
   readonly selectedSymbols = signal<ReadonlySet<string>>(new Set());
   readonly symbolFilter = signal('');
   readonly timeframe = signal('H1');
+  readonly extraTimeframes = signal<string[]>([]);
+  readonly formingBar = signal(false);
   readonly lastBars = signal<number | string>(200);
 
   readonly compiling = signal(false);
   readonly compileNote = signal<string | null>(null);
+  /** The script declares strategy(): it has strategy figures to filter on. */
+  readonly isStrategyScript = signal(false);
   /** undefined = no script chosen yet; null = schema unavailable (free-form overrides). */
   readonly inputDefs = signal<ScriptInputDef[] | null | undefined>(undefined);
   readonly inputsBaseline = signal<Record<string, unknown>>({});
@@ -541,25 +736,90 @@ export class PineScreenerPageComponent implements OnInit {
 
   readonly running = signal(false);
   readonly formError = signal<string | null>(null);
-  readonly results = signal<ScreenerRow[] | null>(null);
+  readonly results = signal<ScreenerResultRow[] | null>(null);
+  /** A screen run's verdicts by symbol; null for an ad-hoc run. */
+  readonly verdicts = signal<ReadonlyMap<string, ScreenRowDto> | null>(null);
+  readonly runLabel = signal<string | null>(null);
+  readonly runError = signal<string | null>(null);
   readonly lastRun = signal<{ timeframe: string; ms: number } | null>(null);
   readonly quickFilter = signal('');
-  private gridApi: GridApi<ScreenerRow> | null = null;
+  private gridApi: GridApi<ScreenerResultRow> | null = null;
+
+  // ── The saved screen open on the page ──────────────────────────────────────
+  readonly openScreen = signal<ScriptScreenDto | null>(null);
+  readonly settings = signal<ScreenSettingsDraft>(emptySettings());
+  /** "Use the current script": the next update copies the origin's script again. */
+  readonly refreshRequested = signal(false);
+  readonly saving = signal(false);
+  readonly screenProblem = signal<string | null>(null);
+  readonly screenNote = signal<string | null>(null);
+  readonly screensKey = signal(0);
+  readonly historyKey = signal(0);
+  private openingId: number | null = null;
 
   readonly visibleSymbols = computed(() => {
     const f = this.symbolFilter().trim().toUpperCase();
     return f ? this.allSymbols().filter((s) => s.includes(f)) : this.allSymbols();
   });
 
-  readonly plots = computed(() => plotColumns(this.results() ?? []));
+  readonly extraOptions = computed(() => this.timeframes.filter((tf) => tf !== this.timeframe()));
+
+  readonly chartScriptOptions = computed<Option[]>(() =>
+    (this.chartScripts() ?? [])
+      .map((s) => ({
+        id: s.id,
+        label:
+          `${s.name || `Script #${s.id}`}${s.kind === 'strategy' ? ' (strategy)' : ''}` +
+          (s.ownedByMe === false ? ' — shared' : ''),
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
+  );
+
+  /**
+   * An open strategy or chart-script screen runs its own copy of the script; the page runs that copy too (so a preview
+   * shows what the screen will do) until the operator picks another script or asks for the current one.
+   */
+  readonly useCopy = computed(() => {
+    const s = this.openScreen();
+    if (!s?.pineSource || this.refreshRequested()) return false;
+    if (this.mode() === 'saved') {
+      return s.sourceKind === 'Strategy' && this.selectedStrategyId() === s.sourceId;
+    }
+    if (this.mode() === 'chart') {
+      return s.sourceKind === 'ChartScript' && this.selectedChartScriptId() === s.sourceId;
+    }
+    return false;
+  });
+
+  readonly copyNote = computed(() => {
+    const s = this.openScreen();
+    if (!s || !this.useCopy()) return null;
+    const name = s.sourceName ?? 'the script';
+    const what = s.sourceKind === 'ChartScript' ? 'chart script' : 'strategy';
+    if (s.sourceMissing) return `Runs this screen's copy of ${name}; the ${what} no longer exists.`;
+    return s.sourceChanged
+      ? `Runs this screen's copy of ${name}; the ${what} has changed since it was copied.`
+      : `Runs this screen's copy of ${name}.`;
+  });
+
+  readonly columns = computed(() => resultColumns(this.results() ?? []));
+
+  readonly filterColumns = computed(() =>
+    filterColumnOptions(this.results() ?? [], this.isStrategyScript()),
+  );
 
   readonly summaryText = computed(() => {
     const rows = this.results();
     if (!rows) return '';
     const s = summarize(rows);
     const run = this.lastRun();
+    const verdicts = this.verdicts();
+    const matched = verdicts
+      ? [...verdicts.values()].filter((v) => v.status === 'matched').length
+      : null;
     return [
       `${s.symbols} symbol${s.symbols === 1 ? '' : 's'}`,
+      matched === null ? '' : `${matched} matched`,
       `${s.withAlerts} with alerts`,
       `${s.errors} error${s.errors === 1 ? '' : 's'}`,
       run ? `${run.timeframe}, ${run.ms} ms` : '',
@@ -568,7 +828,7 @@ export class PineScreenerPageComponent implements OnInit {
       .join(' · ');
   });
 
-  readonly defaultColDef: ColDef<ScreenerRow> = {
+  readonly defaultColDef: ColDef<ScreenerResultRow> = {
     sortable: true,
     resizable: true,
     filter: true,
@@ -577,27 +837,57 @@ export class PineScreenerPageComponent implements OnInit {
     minWidth: 96,
   };
 
-  readonly rowClassRules: RowClassRules<ScreenerRow> = {
+  readonly rowClassRules: RowClassRules<ScreenerResultRow> = {
     'scr-error-row': (p) => !!p.data?.error,
   };
 
-  readonly columnDefs = computed<ColDef<ScreenerRow>[]>(() => [
-    {
-      headerName: 'Symbol',
-      field: 'symbol',
-      pinned: 'left',
-      width: 120,
-      filter: 'agTextColumnFilter',
-    },
-    {
+  readonly columnDefs = computed<ColDef<ScreenerResultRow>[]>(() => {
+    const cols = this.columns();
+    const verdicts = this.verdicts();
+    const rows = this.results() ?? [];
+    const verdictOf = (row: ScreenerResultRow | undefined) =>
+      row && verdicts ? (verdicts.get(row.symbol) ?? null) : null;
+    const defs: ColDef<ScreenerResultRow>[] = [
+      {
+        headerName: 'Symbol',
+        field: 'symbol',
+        pinned: 'left',
+        width: 120,
+        filter: 'agTextColumnFilter',
+      },
+    ];
+    if (verdicts) {
+      defs.push(
+        {
+          headerName: 'Status',
+          colId: 'status',
+          width: 120,
+          filter: 'agTextColumnFilter',
+          valueGetter: (p) => verdictLabel(verdictOf(p.data)?.status),
+          tooltipValueGetter: (p) => verdictOf(p.data)?.reason ?? '',
+          cellClassRules: {
+            'scr-match': (p) => p.value === 'Match',
+            'scr-unknown': (p) => p.value === 'Unknown',
+          },
+        },
+        {
+          headerName: 'Change',
+          colId: 'change',
+          width: 110,
+          filter: 'agTextColumnFilter',
+          valueGetter: (p) => changeLabel(verdictOf(p.data)),
+        },
+      );
+    }
+    defs.push({
       headerName: 'Last bar (UTC)',
       field: 'lastBarTimeMs',
-      width: 150,
+      width: 170,
       filter: false,
-      valueFormatter: (p) => lastBarText(p.value ?? null),
-    },
-    ...this.plots().map(
-      (title): ColDef<ScreenerRow> => ({
+      valueFormatter: (p) => lastBarLabel(p.value ?? null, !!p.data?.lastBarForming),
+    });
+    for (const title of cols.plots) {
+      defs.push({
         headerName: title,
         colId: `plot:${title}`,
         type: 'numericColumn',
@@ -605,49 +895,127 @@ export class PineScreenerPageComponent implements OnInit {
         minWidth: 110,
         valueGetter: (p) => p.data?.values[title] ?? null,
         valueFormatter: (p) => formatPlotValue(p.value ?? null),
-      }),
-    ),
-    {
-      headerName: 'Alerts',
-      colId: 'alerts',
-      minWidth: 160,
-      flex: 1,
-      filter: 'agNumberColumnFilter',
-      valueGetter: (p) => p.data?.alerts.length ?? 0,
-      valueFormatter: (p) => (p.data ? alertsSummary(p.data.alerts) : ''),
-      tooltipValueGetter: (p) =>
-        p.data?.alerts.map((a) => `${a.title || 'alert()'}: ${a.message}`).join('\n') ?? '',
-    },
-    {
-      headerName: 'Error',
-      colId: 'error',
-      minWidth: 160,
-      flex: 1,
-      filter: 'agTextColumnFilter',
-      valueGetter: (p) => p.data?.error ?? '',
-      cellClass: 'scr-error',
-      tooltipValueGetter: (p) => p.data?.error ?? '',
-    },
-  ]);
+      });
+    }
+    for (const key of cols.metrics) {
+      defs.push({
+        headerName: metricLabel(key),
+        colId: `metric:${key}`,
+        type: 'numericColumn',
+        filter: 'agNumberColumnFilter',
+        minWidth: 110,
+        valueGetter: (p) => p.data?.metrics?.[key] ?? null,
+        valueFormatter: (p) => formatMetric(key, p.value ?? null),
+      });
+    }
+    for (const t of cols.timeframes) {
+      for (const title of t.plots) {
+        defs.push({
+          headerName: `${title} · ${t.label}`,
+          colId: `tf:${t.key}:plot:${title}`,
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          minWidth: 110,
+          valueGetter: (p) => (p.data ? (onTimeframe(p.data, t.key)?.values[title] ?? null) : null),
+          valueFormatter: (p) => formatPlotValue(p.value ?? null),
+        });
+      }
+      for (const key of t.metrics) {
+        defs.push({
+          headerName: `${metricLabel(key)} · ${t.label}`,
+          colId: `tf:${t.key}:metric:${key}`,
+          type: 'numericColumn',
+          filter: 'agNumberColumnFilter',
+          minWidth: 110,
+          valueGetter: (p) =>
+            p.data ? (onTimeframe(p.data, t.key)?.metrics?.[key] ?? null) : null,
+          valueFormatter: (p) => formatMetric(key, p.value ?? null),
+        });
+      }
+      if (rows.some((r) => (onTimeframe(r, t.key)?.alerts.length ?? 0) > 0)) {
+        defs.push({
+          headerName: `Alerts · ${t.label}`,
+          colId: `tf:${t.key}:alerts`,
+          minWidth: 140,
+          filter: 'agNumberColumnFilter',
+          valueGetter: (p) => (p.data ? (onTimeframe(p.data, t.key)?.alerts.length ?? 0) : 0),
+          valueFormatter: (p) =>
+            p.data ? alertsSummary(onTimeframe(p.data, t.key)?.alerts ?? []) : '',
+        });
+      }
+    }
+    defs.push(
+      {
+        headerName: 'Alerts',
+        colId: 'alerts',
+        minWidth: 160,
+        flex: 1,
+        filter: 'agNumberColumnFilter',
+        valueGetter: (p) => p.data?.alerts.length ?? 0,
+        valueFormatter: (p) => (p.data ? alertsSummary(p.data.alerts) : ''),
+        tooltipValueGetter: (p) =>
+          p.data?.alerts.map((a) => `${a.title || 'alert()'}: ${a.message}`).join('\n') ?? '',
+      },
+      {
+        headerName: 'Error',
+        colId: 'error',
+        minWidth: 160,
+        flex: 1,
+        filter: 'agTextColumnFilter',
+        valueGetter: (p) => (p.data ? (rowError(p.data) ?? '') : ''),
+        cellClass: 'scr-error',
+        tooltipValueGetter: (p) => (p.data ? (rowError(p.data) ?? '') : ''),
+      },
+    );
+    return defs;
+  });
 
   ngOnInit(): void {
     this.loadStrategies();
     this.loadLibraries();
     this.loadSymbols();
+    // ?screen={id}: the notification bell and alert pop-ups open a screen here.
+    const params = this.route.queryParamMap;
+    if (params) {
+      params
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((m) => this.onScreenParam(m.get('screen')));
+    } else {
+      this.onScreenParam(this.route.snapshot?.queryParamMap?.get('screen') ?? null);
+    }
   }
 
   setMode(mode: ScreenerSourceMode): void {
     this.mode.set(mode);
     this.formError.set(null);
     this.compileNote.set(null);
+    const screen = this.openScreen();
     if (mode === 'saved') {
+      if (this.useCopy()) {
+        this.applyCopy(screen!);
+        return;
+      }
       const s = this.selectedStrategy();
       this.inputsBaseline.set(scriptInputsOf(s));
       if (s) this.compileSource(scriptSourceOf(s) ?? '');
       else this.inputDefs.set(undefined);
+    } else if (mode === 'chart') {
+      this.ensureChartScripts();
+      if (this.useCopy()) {
+        this.applyCopy(screen!);
+        return;
+      }
+      const script = this.chartScripts()?.find((c) => c.id === this.selectedChartScriptId());
+      if (script) this.applyChartScript(script);
+      else {
+        this.inputsBaseline.set({});
+        this.inputDefs.set(undefined);
+      }
     } else if (mode === 'source') {
-      this.inputsBaseline.set({});
+      const own = screen?.sourceKind === 'Source';
+      this.inputsBaseline.set(own ? ((screen!.inputs ?? {}) as Record<string, unknown>) : {});
       this.inputDefs.set(undefined);
+      if (own && this.pastedSource().trim()) this.compileSource(this.pastedSource());
     }
   }
 
@@ -675,9 +1043,50 @@ export class PineScreenerPageComponent implements OnInit {
     });
   }
 
+  selectChartScript(value: string): void {
+    const id = Number(value);
+    this.selectedChartScriptId.set(value && Number.isFinite(id) ? id : null);
+    this.chartNote.set(null);
+    this.inputDefs.set(undefined);
+    const chosen = this.selectedChartScriptId();
+    if (!chosen) return;
+    const script = this.chartScripts()?.find((s) => s.id === chosen);
+    if (script) {
+      this.applyChartScript(script);
+      return;
+    }
+    // Not in the list (still loading, or a screen's origin): read it on its own.
+    this.scripting.getChartScript(chosen).subscribe({
+      next: (s) => {
+        if (this.selectedChartScriptId() === chosen) this.applyChartScript(s);
+      },
+      error: (err: unknown) =>
+        this.chartNote.set(describeFailure(err, 'That script could not be loaded.')),
+    });
+  }
+
   selectLibrary(value: string): void {
     const id = Number(value);
     this.selectedLibraryId.set(value && Number.isFinite(id) ? id : null);
+  }
+
+  onSourceEdited(source: string): void {
+    this.pastedSource.set(source);
+    // Markers for an older text would point at the wrong places.
+    if (this.diagnostics().length > 0) this.diagnostics.set([]);
+  }
+
+  setTimeframe(tf: string): void {
+    this.timeframe.set(tf);
+    this.extraTimeframes.update((list) => list.filter((x) => x !== tf));
+  }
+
+  toggleExtra(tf: string, on: boolean): void {
+    this.extraTimeframes.update((list) => {
+      const rest = list.filter((x) => x !== tf);
+      if (!on) return rest;
+      return rest.length >= MAX_EXTRA_TIMEFRAMES ? rest : [...rest, tf];
+    });
   }
 
   compileSource(source: string): void {
@@ -690,6 +1099,8 @@ export class PineScreenerPageComponent implements OnInit {
       next: (result) => {
         this.compiling.set(false);
         this.inputDefs.set(result.inputs ?? []);
+        this.diagnostics.set(result.diagnostics ?? []);
+        this.isStrategyScript.set(result.declaration?.kind === 'strategy');
         const firstError = (result.diagnostics ?? []).find((d) => d.severity === 'error');
         if (firstError) {
           this.compileNote.set(`Line ${firstError.line}: ${firstError.message}`);
@@ -725,37 +1136,50 @@ export class PineScreenerPageComponent implements OnInit {
     this.selectedSymbols.set(new Set());
   }
 
-  /** The request, or the reason it cannot be sent. */
-  buildRequest(): ScreenerRequest | string {
+  /** The ad-hoc request, or the reason it cannot be sent. */
+  buildRequest(): ScreenerRequestV2 | string {
     const mode = this.mode();
+    const copy = this.useCopy() ? (this.openScreen()?.pineSource ?? null) : null;
     const source =
       mode === 'saved'
-        ? scriptSourceOf(this.selectedStrategy())
+        ? (copy ?? scriptSourceOf(this.selectedStrategy()))
         : mode === 'source'
           ? this.pastedSource()
-          : null;
+          : mode === 'chart'
+            ? copy
+            : null;
     const problem = validateScreenerForm({
       mode,
       source,
       libraryId: this.selectedLibraryId(),
+      chartScriptId: this.selectedChartScriptId(),
       symbols: [...this.selectedSymbols()],
       timeframe: this.timeframe(),
       lastBars: this.lastBars(),
     });
     if (problem) return problem;
     if (mode !== 'library' && !this.inputsValid()) return 'Fix the highlighted inputs first.';
-    const req: ScreenerRequest = {
+    const req: ScreenerRequestV2 = {
       symbols: [...this.selectedSymbols()].sort(),
       timeframe: this.timeframe(),
       lastBars: Number(this.lastBars()),
     };
+    const extras = cleanExtras(this.extraTimeframes(), this.timeframe());
+    if (extras.length > 0) req.timeframes = extras;
+    if (this.formingBar()) req.formingBar = true;
     if (mode === 'library') {
       req.libraryId = this.selectedLibraryId()!;
       return req;
     }
+    if (mode === 'chart' && !copy) {
+      // By id: the engine applies the script's saved inputs, then these overrides.
+      req.chartScriptId = this.selectedChartScriptId()!;
+      if (Object.keys(this.overrides()).length > 0) req.inputs = { ...this.overrides() };
+      return req;
+    }
     req.source = source!;
-    // A saved script runs from its source alone, so its saved inputs travel with the overrides.
-    const inputs = { ...(mode === 'saved' ? this.inputsBaseline() : {}), ...this.overrides() };
+    // A source runs alone, so the inputs it was saved with travel with the overrides.
+    const inputs = { ...this.inputsBaseline(), ...this.overrides() };
     if (Object.keys(inputs).length > 0) req.inputs = inputs;
     return req;
   }
@@ -770,14 +1194,17 @@ export class PineScreenerPageComponent implements OnInit {
     this.formError.set(null);
     this.running.set(true);
     const started = Date.now();
-    this.api.runScreener(req).subscribe({
+    this.screensApi.runScreener(req).subscribe({
       next: (res) => {
         this.running.set(false);
         if (!isOk(res)) {
           this.formError.set(describeFailure(res, 'The screener did not run.'));
           return;
         }
-        this.results.set(normalizeScreenerRows(res.data));
+        this.results.set(normalizeResultRows(res.data));
+        this.verdicts.set(null);
+        this.runLabel.set(null);
+        this.runError.set(null);
         this.lastRun.set({ timeframe: req.timeframe, ms: Date.now() - started });
       },
       error: (err: unknown) => {
@@ -787,13 +1214,177 @@ export class PineScreenerPageComponent implements OnInit {
     });
   }
 
-  onGridReady(event: GridReadyEvent<ScreenerRow>): void {
+  /** "Run saved screen": the stored definition, stored as a Manual run (never alerts). */
+  async runSaved(): Promise<void> {
+    const s = this.openScreen();
+    if (!s || this.running()) return;
+    this.running.set(true);
+    this.formError.set(null);
+    try {
+      const res = await firstValueFrom(this.screensApi.run(s.id));
+      if (!res?.status || !res.data) throw res;
+      this.showRun(res.data);
+      this.historyKey.update((k) => k + 1);
+      this.screensKey.update((k) => k + 1);
+    } catch (err) {
+      this.formError.set(describeFailure(err, `${s.name} did not run.`));
+    } finally {
+      this.running.set(false);
+    }
+  }
+
+  /** A stored run's rows and verdicts in the grid. */
+  showRun(run: ScreenRunDto): void {
+    const rows = normalizeScreenRows(run.rows ?? []);
+    this.results.set(rows.map((r) => r.row));
+    this.verdicts.set(new Map(rows.map((r) => [r.row.symbol, r])));
+    const screen = this.openScreen();
+    this.lastRun.set({
+      timeframe: timeframeName(screen?.id === run.screenId ? screen.timeframe : this.timeframe()),
+      ms: run.durationMs,
+    });
+    const bar = run.barTimeMs === null ? '' : ` · bar ${formatDateTime(run.barTimeMs)} UTC`;
+    this.runLabel.set(
+      `${run.trigger === 'Scheduled' ? 'Scheduled run' : 'Run'} #${run.id} of the saved screen, ${isoText(run.startedAt)} UTC${bar}`,
+    );
+    this.runError.set(run.error);
+  }
+
+  /** "Run now" in the list: show the run with its screen. */
+  onRan(run: ScreenRunDto): void {
+    this.historyKey.update((k) => k + 1);
+    if (this.openScreen()?.id === run.screenId) this.showRun(run);
+    else void this.openScreenById(run.screenId, run);
+  }
+
+  onScreenRemoved(id: number): void {
+    if (this.openScreen()?.id === id) this.closeScreen();
+  }
+
+  /** The list changed a screen (its schedule): keep the open one in step. */
+  onScreenChanged(dto: ScriptScreenDto): void {
+    const open = this.openScreen();
+    if (!open || open.id !== dto.id) return;
+    this.openScreen.set({
+      ...dto,
+      pineSource: open.pineSource,
+      sourceChanged: open.sourceChanged,
+      sourceMissing: open.sourceMissing,
+    });
+    this.settings.update((d) => ({ ...d, scheduleEnabled: dto.scheduleEnabled }));
+  }
+
+  async openScreenById(id: number, run?: ScreenRunDto): Promise<void> {
+    this.openingId = id;
+    this.screenProblem.set(null);
+    this.screenNote.set(null);
+    try {
+      const res = await firstValueFrom(this.screensApi.get(id));
+      if (!res?.status || !res.data) throw res;
+      if (this.openingId !== id) return;
+      this.applyScreen(res.data);
+      this.setScreenParam(id);
+      if (run) this.showRun(run);
+      else if (res.data.lastRunId) void this.loadRun(id, res.data.lastRunId);
+      else this.clearScreenResults();
+    } catch (err) {
+      this.screenProblem.set(describeFailure(err, `Screen ${id} could not be opened.`));
+    } finally {
+      if (this.openingId === id) this.openingId = null;
+    }
+  }
+
+  closeScreen(): void {
+    this.openScreen.set(null);
+    this.refreshRequested.set(false);
+    this.settings.set(emptySettings());
+    this.screenProblem.set(null);
+    this.screenNote.set(null);
+    this.clearScreenResults();
+    this.setScreenParam(null);
+  }
+
+  /** The banner's "Use the current script": load the origin's script now; the update copies it. */
+  useCurrentScript(): void {
+    const s = this.openScreen();
+    if (!s?.sourceId) return;
+    this.refreshRequested.set(true);
+    this.screenProblem.set(null);
+    this.screenNote.set(
+      'The current script is loaded. Update the screen to keep it; its next run then starts a new baseline.',
+    );
+    if (s.sourceKind === 'Strategy') {
+      this.mode.set('saved');
+      this.selectStrategy(String(s.sourceId));
+    } else if (s.sourceKind === 'ChartScript') {
+      this.mode.set('chart');
+      this.ensureChartScripts();
+      this.selectChartScript(String(s.sourceId));
+    }
+  }
+
+  async saveScreen(asNew: boolean): Promise<void> {
+    if (this.saving()) return;
+    const open = this.openScreen();
+    const updating = !!open && !asNew;
+    let draft = this.settings();
+    if (asNew && open && draft.name.trim() === open.name) {
+      draft = { ...draft, name: `${open.name} (copy)`.slice(0, MAX_SCREEN_NAME) };
+    }
+    if (this.mode() !== 'library' && !this.inputsValid()) {
+      this.screenProblem.set('Fix the highlighted inputs first.');
+      return;
+    }
+    const req = buildSaveRequest({
+      script: this.scriptRef(),
+      inputs: this.mode() === 'library' ? {} : { ...this.inputsBaseline(), ...this.overrides() },
+      symbols: [...this.selectedSymbols()],
+      timeframe: this.timeframe(),
+      extraTimeframes: this.extraTimeframes(),
+      lastBars: this.lastBars(),
+      formingBar: this.formingBar(),
+      settings: draft,
+      refreshSource: updating && this.refreshRequested(),
+    });
+    if (typeof req === 'string') {
+      this.screenProblem.set(req);
+      return;
+    }
+    this.saving.set(true);
+    this.screenProblem.set(null);
+    this.screenNote.set(null);
+    try {
+      const res = await firstValueFrom(
+        updating ? this.screensApi.update(open.id, req) : this.screensApi.create(req),
+      );
+      if (!res?.status || !res.data) throw res;
+      const saved = res.data;
+      const keepSource = saved.pineSource ?? (updating ? open.pineSource : null);
+      this.openScreen.set({ ...saved, pineSource: keepSource ?? null, sourceChanged: false });
+      this.refreshRequested.set(false);
+      this.settings.set(settingsOfScreen(saved));
+      if (this.mode() !== 'library') {
+        this.inputsBaseline.set((saved.inputs ?? {}) as Record<string, unknown>);
+      }
+      const message = res.message && res.message !== 'Successful' ? res.message : null;
+      this.screenNote.set(message ?? (updating ? 'Screen updated.' : 'Screen saved.'));
+      this.screensKey.update((k) => k + 1);
+      this.historyKey.update((k) => k + 1);
+      this.setScreenParam(saved.id);
+    } catch (err) {
+      this.screenProblem.set(describeFailure(err, 'The screen could not be saved.'));
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  onGridReady(event: GridReadyEvent<ScreenerResultRow>): void {
     this.gridApi = event.api;
   }
 
   /** Exports what the grid shows (its filter and sort); every row when the grid is not up. */
   exportCsv(): void {
-    const rows: ScreenerRow[] = [];
+    const rows: ScreenerResultRow[] = [];
     if (this.gridApi) {
       this.gridApi.forEachNodeAfterFilterAndSort((n) => {
         if (n.data) rows.push(n.data);
@@ -801,9 +1392,132 @@ export class PineScreenerPageComponent implements OnInit {
     } else {
       rows.push(...(this.results() ?? []));
     }
-    const csv = screenerCsv(rows, this.plots());
+    const csv = resultsCsv(rows, this.columns(), this.verdicts());
     const name = `${fileStamp('pine-screener', this.lastRun()?.timeframe ?? this.timeframe(), new Date().toISOString().slice(0, 16).replace(':', ''))}.csv`;
     saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), name);
+  }
+
+  private scriptRef(): ScreenScriptRef | null {
+    switch (this.mode()) {
+      case 'saved': {
+        const id = this.selectedStrategyId();
+        return id ? { kind: 'strategy', strategyId: id } : null;
+      }
+      case 'chart': {
+        const id = this.selectedChartScriptId();
+        return id ? { kind: 'chart', chartScriptId: id } : null;
+      }
+      case 'library': {
+        const id = this.selectedLibraryId();
+        return id ? { kind: 'library', libraryId: id } : null;
+      }
+      default:
+        return { kind: 'source', source: this.pastedSource() };
+    }
+  }
+
+  private onScreenParam(text: string | null): void {
+    const id = Number(text);
+    if (!text || !Number.isInteger(id) || id <= 0) return;
+    if (id === this.openScreen()?.id || id === this.openingId) return;
+    void this.openScreenById(id);
+  }
+
+  private setScreenParam(id: number | null): void {
+    void this.router.navigate([], {
+      queryParams: { screen: id },
+      replaceUrl: true,
+      queryParamsHandling: 'merge',
+    });
+  }
+
+  /** Fills the form from a saved screen. */
+  private applyScreen(s: ScriptScreenDto): void {
+    this.openScreen.set(s);
+    this.refreshRequested.set(false);
+    this.settings.set(settingsOfScreen(s));
+    const main = timeframeName(s.timeframe) || 'H1';
+    this.timeframe.set(main);
+    this.extraTimeframes.set(cleanExtras(s.extraTimeframes ?? [], main));
+    this.lastBars.set(s.lastBars);
+    this.formingBar.set(!!s.formingBar);
+    this.selectedSymbols.set(new Set(s.symbols ?? []));
+    this.formError.set(null);
+    this.compileNote.set(null);
+    this.strategyNote.set(null);
+    this.chartNote.set(null);
+    this.diagnostics.set([]);
+    const mode = modeOfScreen(s);
+    this.mode.set(mode);
+    switch (mode) {
+      case 'saved':
+        this.selectedStrategyId.set(s.sourceId);
+        this.selectedStrategy.set(null);
+        break;
+      case 'chart':
+        this.selectedChartScriptId.set(s.sourceId);
+        this.ensureChartScripts();
+        break;
+      case 'library':
+        this.selectedLibraryId.set(s.sourceId);
+        break;
+      default:
+        this.pastedSource.set(s.pineSource ?? '');
+    }
+    if (mode === 'library') {
+      this.inputsBaseline.set({});
+      this.inputDefs.set(undefined);
+      return;
+    }
+    this.applyCopy(s);
+  }
+
+  /** The screen's copy of its script on the form: its inputs as the baseline, compiled for the input editor. */
+  private applyCopy(s: ScriptScreenDto): void {
+    this.inputsBaseline.set((s.inputs ?? {}) as Record<string, unknown>);
+    if (s.pineSource) this.compileSource(s.pineSource);
+    else this.inputDefs.set(null);
+  }
+
+  private applyChartScript(script: ChartIndicatorScriptDetailDto): void {
+    this.inputsBaseline.set((script.inputs ?? {}) as Record<string, unknown>);
+    this.isStrategyScript.set(script.kind === 'strategy');
+    this.compileSource(script.pineSource);
+  }
+
+  private clearScreenResults(): void {
+    if (!this.verdicts()) return;
+    this.results.set(null);
+    this.verdicts.set(null);
+    this.runLabel.set(null);
+    this.runError.set(null);
+  }
+
+  private async loadRun(screenId: number, runId: number): Promise<void> {
+    try {
+      const res = await firstValueFrom(this.screensApi.runDetail(screenId, runId));
+      if (!res?.status || !res.data || this.openScreen()?.id !== screenId) return;
+      if (res.data.rows?.length) this.showRun(res.data);
+      else this.clearScreenResults();
+    } catch {
+      // The newest run's rows are a convenience; the history still lists the runs.
+    }
+  }
+
+  private ensureChartScripts(): void {
+    if (this.chartScripts() !== null || this.chartScriptsLoading) return;
+    this.chartScriptsLoading = true;
+    this.scripting.listChartScripts().subscribe({
+      next: (list) => {
+        this.chartScriptsLoading = false;
+        this.chartScripts.set(list);
+      },
+      error: (err: unknown) => {
+        this.chartScriptsLoading = false;
+        this.chartScripts.set([]);
+        this.chartNote.set(describeFailure(err, 'Your scripts could not be loaded.'));
+      },
+    });
   }
 
   private loadStrategies(): void {

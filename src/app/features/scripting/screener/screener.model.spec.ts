@@ -32,6 +32,12 @@ describe('validateScreenerForm', () => {
     expect(validateScreenerForm({ ...form, source: ' ' })).toMatch(/Paste a script/);
     expect(validateScreenerForm({ ...form, mode: 'saved', source: null })).toMatch(/saved script/);
     expect(validateScreenerForm({ ...form, mode: 'library', libraryId: null })).toMatch(/library/);
+    expect(
+      validateScreenerForm({ ...form, mode: 'chart', source: null, chartScriptId: null }),
+    ).toMatch(/one of your scripts/);
+    expect(
+      validateScreenerForm({ ...form, mode: 'chart', source: null, chartScriptId: 9 }),
+    ).toBeNull();
     expect(validateScreenerForm({ ...form, symbols: [] })).toMatch(/at least one symbol/);
     expect(
       validateScreenerForm({ ...form, symbols: Array.from({ length: 201 }, (_, i) => `S${i}`) }),
