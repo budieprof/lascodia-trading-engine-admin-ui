@@ -317,7 +317,11 @@ const PREVIEW_REFRESH_MS = 10_000;
   `,
   styles: [
     `
+      /* The dock around the ticket lets clicks fall through to the chart (pointer-events: none) and the ticket
+         takes them back HERE: the dock's ".ticket-dock > *" rule is scoped to chart-trading's view and never
+         matched this component's section, so every control on the ticket was unclickable. */
       .ticket {
+        pointer-events: auto;
         width: 300px;
         max-height: calc(100% - 16px);
         overflow-y: auto;
