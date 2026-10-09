@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { normalizeDebugResult } from '../model/normalize';
-import { debugProblems, debugRequest, emptyDraft, groupByScope, kindBadge } from './debugger-model';
+import {
+  debugProblems,
+  debugRequest,
+  emptyDraft,
+  groupByScope,
+  kindBadge,
+  watchExpressionFor,
+  withWatch,
+} from './debugger-model';
 
 describe('Pine debugger (PR-I11)', () => {
   it('names what the engine would refuse before a run', () => {
@@ -40,6 +48,19 @@ describe('Pine debugger (PR-I11)', () => {
       toBar: 90,
       stateAtBar: 42,
     });
+  });
+
+  it('watches a listed variable: a global by name, a function’s own as f(): name', () => {
+    expect(watchExpressionFor({ scope: 'global', name: 'crosses' })).toBe('crosses');
+    expect(watchExpressionFor({ scope: 'g(), call 2', name: 'n' })).toBe('g(): n');
+    let d = withWatch(emptyDraft(), 'g(): n');
+    expect(d.watches).toEqual(['g(): n']);
+    d = withWatch(d, 'crosses');
+    expect(d.watches).toEqual(['g(): n', 'crosses']);
+    // Already watched: unchanged; full: unchanged.
+    expect(withWatch(d, 'crosses')).toBe(d);
+    const full = { ...emptyDraft(), watches: Array.from({ length: 10 }, (_, i) => `w${i}`) };
+    expect(withWatch(full, 'x')).toBe(full);
   });
 
   it('groups the variables by scope, global first, and filters by name', () => {
