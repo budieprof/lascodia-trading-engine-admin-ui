@@ -8,6 +8,7 @@ import { ChartSettingsDialogComponent, type ChartSettings } from './chart-settin
 
 const base: ChartSettings = {
   appearance: null,
+  rememberPerSymbol: false,
   showVolume: true,
   countdown: true,
   scaleMode: 'normal',

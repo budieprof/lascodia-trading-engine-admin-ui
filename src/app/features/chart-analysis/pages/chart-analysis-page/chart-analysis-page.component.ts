@@ -295,6 +295,12 @@ import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.co
 import { ReplayController } from '../../replay/replay-controller';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
+  recalled,
+  rememberSymbol,
+  restoredSymbolMemory,
+  type SymbolMemory,
+} from '../../workspace/symbol-memory';
+import {
   ChartSettingsDialogComponent,
   type ChartSettings,
 } from '../../chart/chart-settings-dialog.component';
@@ -3500,6 +3506,19 @@ export class ChartAnalysisPageComponent {
     this.symbolMenuOpen.set(false);
     this.symbolQuery.set('');
     if (symbol === this.symbol()) return;
+    // Layout memory per symbol (CC-I11): the symbol left is remembered as it is; the one switched to opens as it was left.
+    this.symbolMemory.update((m) =>
+      rememberSymbol(m, this.symbol(), {
+        resolution: this.resolution(),
+        ...(this.viewSnapshot() ? { view: this.viewSnapshot()! } : {}),
+      }),
+    );
+    const memory = this.rememberPerSymbol() ? recalled(this.symbolMemory(), symbol) : null;
+    if (memory && isSupportedResolution(memory.resolution)) this.resolution.set(memory.resolution);
+    if (memory?.view) {
+      this.pendingView = memory.view;
+      this.pendingViewFor = { symbol, resolution: this.resolution() };
+    }
     this.symbol.set(symbol);
     void this.router.navigate(['/chart-analysis', symbol], {
       queryParams: { tf: this.resolution() },
@@ -5093,6 +5112,9 @@ export class ChartAnalysisPageComponent {
       sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
       ...(this.appearance() ? { appearance: { ...this.appearance()! } } : {}),
+      ...(this.rememberPerSymbol() || Object.keys(this.symbolMemory()).length
+        ? { symbolMemory: { on: this.rememberPerSymbol(), symbols: this.symbolMemory() } }
+        : {}),
       timezone: this.timezone(),
       priceBased: {
         boxMethod: this.boxMethod(),
@@ -5173,11 +5195,15 @@ export class ChartAnalysisPageComponent {
   /** Candle colours, grid lines and background over the theme's; null: the theme's look. */
   readonly appearance = signal<ChartAppearance | null>(null);
   readonly chartSettingsOpen = signal(false);
+  /** Layout memory per symbol (CC-I11): on, and what each symbol was left on. */
+  readonly rememberPerSymbol = signal(false);
+  readonly symbolMemory = signal<SymbolMemory>({});
 
   /** The chart's settings as the dialog edits them. */
   chartSettings(): ChartSettings {
     return {
       appearance: this.appearance(),
+      rememberPerSymbol: this.rememberPerSymbol(),
       showVolume: this.showVolume(),
       countdown: this.showCountdown(),
       scaleMode: this.scaleMode(),
@@ -5199,6 +5225,7 @@ export class ChartAnalysisPageComponent {
   /** The dialog's edit (or its Cancel putting the opening settings back), applied at once. */
   applySettingsFromDialog(s: ChartSettings): void {
     this.appearance.set(restoredAppearance(s.appearance));
+    this.rememberPerSymbol.set(s.rememberPerSymbol);
     this.showVolume.set(s.showVolume);
     this.showCountdown.set(s.countdown);
     this.scaleMode.set(s.scaleMode);
@@ -5344,6 +5371,8 @@ export class ChartAnalysisPageComponent {
 
   /** Zoom/scroll/pane heights waiting for the chart's first data. */
   private pendingView: ChartWorkspaceState['view'] = null;
+  /** The series a pending view is for (a symbol's remembered zoom); null: whatever loads next. */
+  private pendingViewFor: SeriesId | null = null;
   /** True while a saved state is being applied, so applying it does not save it back. */
   private applyingState = false;
   /** Set once the saved state (or the defaults) has been applied; nothing saves before. */
@@ -5367,6 +5396,8 @@ export class ChartAnalysisPageComponent {
         else this.resolution.set('60');
       }
       this.applyChartSettings(s);
+      this.rememberPerSymbol.set(s.symbolMemory?.on === true);
+      this.symbolMemory.set(restoredSymbolMemory(s.symbolMemory?.symbols));
       this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
       const p = s.panel ?? {};
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
@@ -5375,6 +5406,7 @@ export class ChartAnalysisPageComponent {
       this.calendarAll.set(p.calendarAll ?? false);
       this.calendarMinImpact.set(p.calendarMinImpact ?? 'Low');
       this.pendingView = s.view ?? null;
+      this.pendingViewFor = null;
       this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
       this.restoreSplit(s.split);
 
@@ -5451,7 +5483,10 @@ export class ChartAnalysisPageComponent {
     const v = this.pendingView;
     const host = this.host();
     if (!v || !host || !this.bars().length) return;
+    // A remembered zoom waits for its symbol's bars, not the ones still on screen.
+    if (this.pendingViewFor && !sameSeries(this.barsFor(), this.pendingViewFor)) return;
     this.pendingView = null;
+    this.pendingViewFor = null;
     host.applyViewState(v);
     // Indicator panes are created a moment after the data; size them once they exist.
     setTimeout(() => host.applyViewState({ ...v, barSpacing: NaN, rightOffset: NaN }), 1_200);

@@ -14,6 +14,8 @@ import type { ChartAppearance } from './appearance';
 /** Everything the chart settings dialog edits — the chart's own settings, as the page holds them. */
 export interface ChartSettings {
   appearance: ChartAppearance | null;
+  /** Each symbol opens on the timeframe and zoom it was left on (layout memory per symbol). */
+  rememberPerSymbol: boolean;
   showVolume: boolean;
   countdown: boolean;
   scaleMode: 'normal' | 'log' | 'percent' | 'indexed';
@@ -81,6 +83,10 @@ const THEME_DOWN = '#F23645';
               <button type="button" class="cs-link" (click)="resetColours()">Theme colours</button>
               <label class="cs-check"><input type="checkbox" [checked]="s.showVolume" (change)="set('showVolume', $any($event.target).checked)" /> Volume</label>
               <label class="cs-check"><input type="checkbox" [checked]="s.countdown" (change)="set('countdown', $any($event.target).checked)" /> Countdown to bar close</label>
+              <label class="cs-check" title="In this layout: switching to a symbol opens it on the timeframe and zoom you left it on">
+                <input type="checkbox" [checked]="s.rememberPerSymbol" (change)="set('rememberPerSymbol', $any($event.target).checked)" />
+                Remember each symbol’s timeframe and zoom
+              </label>
             }
             @case ('scales') {
               <label class="cs-row">

@@ -88,6 +88,11 @@ export interface ChartWorkspaceState {
   countdown?: boolean;
   /** Candle colours, grid lines, background over the theme's (CC-I11 chart settings); absent: the theme's. */
   appearance?: ChartAppearance;
+  /**
+   * Layout memory per symbol (CC-I11): `on` — a symbol switched to opens on the timeframe and zoom it was left on;
+   * `symbols` — what each was left on (`workspace/symbol-memory.ts`). Absent: off.
+   */
+  symbolMemory?: { on?: boolean; symbols?: Record<string, { resolution: string; view?: ChartViewState }> };
   timezone?: string;
   /** How the price-based styles are built (CC-I10); absent: ATR × 1, no wicks, 3 lines. */
   priceBased?: {

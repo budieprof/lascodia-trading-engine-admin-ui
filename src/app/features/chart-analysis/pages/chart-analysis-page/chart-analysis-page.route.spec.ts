@@ -25,6 +25,12 @@ function setup(url: { tf?: string } = {}) {
     resolution: signal('60'),
     replayActive: signal(false),
     replayHead: signal(null),
+    // Layout memory per symbol (CC-I11): off unless a spec turns it on.
+    rememberPerSymbol: signal(false),
+    symbolMemory: signal({}),
+    viewSnapshot: signal(null),
+    pendingView: null,
+    pendingViewFor: null,
     symbolMenuOpen: signal(false),
     symbolQuery: signal(''),
     loading: signal(false),
@@ -44,6 +50,34 @@ function setup(url: { tf?: string } = {}) {
   const loads = (): string[] => feed.getBars.mock.calls.map((c: unknown[]) => c[0] as string);
   return { p, feed, router, follow, loads };
 }
+
+describe('chart page — layout memory per symbol (CC-I11)', () => {
+  it('with it on, a symbol opens on the timeframe and zoom it was left on', () => {
+    const { p, feed } = setup();
+    const view = { barSpacing: 9, rightOffset: -20, paneHeights: [500] };
+    p.rememberPerSymbol.set(true);
+    p.resolution.set('240');
+    p.viewSnapshot.set(view);
+    p.selectSymbol('USDJPY'); // EURUSD left on 4h with that zoom
+    p.resolution.set('15');
+    p.viewSnapshot.set(null);
+    p.selectSymbol('EURUSD');
+    expect(p.resolution()).toBe('240');
+    expect(feed.getBars).toHaveBeenLastCalledWith('EURUSD', '240', 0, expect.any(Number), 1500);
+    expect(p['pendingView']).toEqual(view);
+    expect(p['pendingViewFor']).toEqual({ symbol: 'EURUSD', resolution: '240' });
+  });
+
+  it('off, the timeframe stays as it is (it is still remembered for when it is turned on)', () => {
+    const { p } = setup();
+    p.resolution.set('240');
+    p.selectSymbol('USDJPY');
+    p.resolution.set('15');
+    p.selectSymbol('EURUSD');
+    expect(p.resolution()).toBe('15');
+    expect(p.symbolMemory().EURUSD).toEqual({ resolution: '240' });
+  });
+});
 
 describe('chart page — one load per symbol switch', () => {
   it('a symbol switch loads its series once: the navigation it makes is not loaded again', () => {
