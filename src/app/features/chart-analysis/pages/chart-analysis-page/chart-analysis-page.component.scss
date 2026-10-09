@@ -1660,8 +1660,34 @@ $pane-gap: 4px;
   }
 }
 
+// Alerts v2: the toolbar popover hosts the full alert form.
 .tb-alert-menu {
   min-width: 240px;
+  width: min(340px, calc(100vw - 32px));
+  padding: 0;
+}
+
+.alert-move-dialog {
+  max-width: 360px;
+  padding: 16px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--tv-bg);
+  color: var(--tv-ink);
+  box-shadow:
+    var(--tv-menu-shadow),
+    0 0 0 1px var(--tv-line);
+  font-size: 13px;
+
+  p {
+    margin: 0 0 12px;
+  }
+}
+
+.alert-move-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 // ── Left rail ──────────────────────────────────────────────────────────────
