@@ -13,6 +13,11 @@ import type {
   ScriptAlertBinding,
   ScriptBacktestRequest,
   ScriptLiveStatus,
+  ScriptParityReconcile,
+  ScriptParityReconcileQueued,
+  ScriptParitySession,
+  ScriptParitySummary,
+  ScriptParityTimeline,
 } from './scripting-api.types';
 import { describeFailure } from '../shared/api-error';
 import { fileNameFromContentDisposition } from '../shared/download';
@@ -46,6 +51,55 @@ export class ScriptStrategyService {
   /** §8 — the live session: status, emulator position/trades/orders, live report, divergences. */
   getLiveStatus(strategyId: number): Observable<ResponseData<ScriptLiveStatus>> {
     return this.api.get(`/strategy/${strategyId}/script/live`, { silent: true });
+  }
+
+  /** §8f — the rolling parity summary (live fills vs the emulator, paper R, drift). */
+  getParitySummary(
+    strategyId: number,
+    days?: number,
+  ): Observable<ResponseData<ScriptParitySummary>> {
+    const query = days ? `?days=${days}` : '';
+    return this.api.get(`/strategy/${strategyId}/parity/summary${query}`, { silent: true });
+  }
+
+  /** §8f — the strategy's emulator lineages, newest first. */
+  getParitySessions(strategyId: number): Observable<ResponseData<ScriptParitySession[]>> {
+    return this.api.get(`/strategy/${strategyId}/parity/sessions`, { silent: true });
+  }
+
+  /** §8f — queues a reconcile backtest of a session (none = the newest); `data.backtestRunId` to poll. */
+  queueParityReconcile(
+    strategyId: number,
+    sessionId: number | null,
+  ): Observable<ResponseData<ScriptParityReconcileQueued>> {
+    return this.api.post(
+      `/strategy/${strategyId}/parity/reconcile`,
+      sessionId ? { sessionId } : {},
+      { silent: true },
+    );
+  }
+
+  /** §8f — a reconcile's status, and once completed its matched / missing / extra trades. */
+  getParityReconcile(
+    strategyId: number,
+    runId: number,
+  ): Observable<ResponseData<ScriptParityReconcile>> {
+    return this.api.get(`/strategy/${strategyId}/parity/reconcile/${runId}`, { silent: true });
+  }
+
+  /** §8f (BX-1) — the trade timeline: backtest, paper, emulator and broker fills over a window. */
+  getParityTimeline(
+    strategyId: number,
+    window: { fromUtc?: string; toUtc?: string; backtestRunId?: number } = {},
+  ): Observable<ResponseData<ScriptParityTimeline>> {
+    const params = new URLSearchParams();
+    if (window.fromUtc) params.set('fromUtc', window.fromUtc);
+    if (window.toUtc) params.set('toUtc', window.toUtc);
+    if (window.backtestRunId) params.set('backtestRunId', String(window.backtestRunId));
+    const query = params.toString();
+    return this.api.get(`/strategy/${strategyId}/parity/timeline${query ? `?${query}` : ''}`, {
+      silent: true,
+    });
   }
 
   /** §10 — the strategy's alert bindings. */
