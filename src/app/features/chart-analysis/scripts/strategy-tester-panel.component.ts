@@ -100,6 +100,10 @@ interface SummaryRow {
       }
 
       <div class="tester__body">
+        @if (suspended() && tab() !== 'inputs') {
+          <!-- Bar Replay (PC-08): the run's trades reach past the head — not shown until the run to the head lands. -->
+          <p class="tester__muted" role="status" data-testid="tester-suspended">{{ suspended() }}</p>
+        } @else {
         @switch (tab()) {
           @case ('overview') {
             @if (metrics(); as m) {
@@ -288,6 +292,7 @@ interface SummaryRow {
               </form>
             }
           }
+        }
         }
       </div>
     </section>
@@ -567,6 +572,11 @@ export class StrategyTesterPanelComponent implements OnDestroy {
   readonly running = input(false);
   /** The resolution the run is on: on 1D/1W/1M a trade's bar is named by its trading date. */
   readonly resolution = input<string>('');
+  /**
+   * Why the run's report is not shown — in Bar Replay its trades reach past the head, bars the
+   * chart has not reached (PC-08); its run to the head is on the way. Null: shown.
+   */
+  readonly suspended = input<string | null>(null);
 
   /** Re-run with these input overrides. */
   readonly rerun = output<ScriptInputValues>();

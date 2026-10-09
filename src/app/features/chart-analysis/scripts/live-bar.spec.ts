@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LiveRerunScheduler, formingLiveBar, runMatchesChart, sameSeries } from './live-bar';
+import {
+  LiveRerunScheduler,
+  barCloseMs,
+  formingLiveBar,
+  runMatchesChart,
+  sameSeries,
+} from './live-bar';
 
 const H = 3_600_000;
 const bar = (time: number, close = 1.1) => ({
@@ -451,5 +457,16 @@ describe('LiveRerunScheduler — a busy engine (contract C5)', () => {
     expect(runs.map((r) => r.key)).toEqual(['a', 'b', 'b']);
     advance(8_000);
     expect(runs.map((r) => r.key)).toEqual(['a', 'b', 'b', 'a']);
+  });
+});
+
+describe('barCloseMs (Bar Replay runs to the head, PC-08)', () => {
+  const t = 1_759_708_800_000;
+
+  it('is the engine’s close on the session grid, the fixed width on the stored grid', () => {
+    expect(barCloseMs({ time: t }, '60')).toBe(t + H);
+    expect(barCloseMs({ time: t }, '15')).toBe(t + H / 4);
+    // A 1D bar of the FX session: 17:00 New York to 17:00 New York, as the engine said.
+    expect(barCloseMs({ time: t - 7 * H, closeTime: t + 17 * H }, '1D')).toBe(t + 17 * H);
   });
 });

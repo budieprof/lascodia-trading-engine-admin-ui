@@ -2950,7 +2950,7 @@ export class ChartHostComponent implements OnDestroy {
         inputs: layer.label?.inputs ?? '',
         visible: layer.display?.visible !== false,
         failure: layer.label?.failure ?? null,
-        note: layer.suspended ?? null,
+        note: layer.suspended ?? layer.note ?? null,
       };
       out.push(
         paneIndex > 0

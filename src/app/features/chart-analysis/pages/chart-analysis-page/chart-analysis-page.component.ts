@@ -21,6 +21,7 @@ import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import {
   LiveRerunScheduler,
+  barCloseMs,
   formingLiveBar,
   sameSeries,
   type SeriesId,
@@ -157,8 +158,10 @@ import { StrategyTesterPanelComponent } from '../../scripts/strategy-tester-pane
 import { UndoNoticeComponent } from '../../scripts/undo-notice.component';
 import { placeRun } from '../../scripts/run-on-host';
 import {
+  REPLAY_AHEAD,
   chartScriptLayers,
   hiddenOnTimeframe,
+  replayLag,
   sameLayers,
   type ChartScriptLayer,
 } from '../../scripts/script-layers';
@@ -291,6 +294,11 @@ export interface ChartScriptRun {
   landedAt?: number;
   /** The bars it was computed on (PC-09): Heikin-Ashi or standard; absent = standard. */
   chartType?: ScriptBasis;
+  /**
+   * The Bar Replay head it was run to — that bar's open, Unix ms (PC-08): its last bar is at or
+   * before it. Absent: run to now.
+   */
+  until?: number;
 }
 
 /** "Update on chart" (PC-06): the run of the editor's text and the chart script it was edited from. */
@@ -854,10 +862,13 @@ export class ChartAnalysisPageComponent {
       const failures = this.scriptFailures();
       return chartScriptLayers(
         this.scriptRuns(),
-        { symbol: this.symbol(), resolution: this.resolution() },
-        this.barsFor(),
-        this.chartBasis(),
-        this.scriptsUnavailable(),
+        {
+          chart: { symbol: this.symbol(), resolution: this.resolution() },
+          bars: this.barsFor(),
+          basis: this.chartBasis(),
+          unavailable: this.scriptsUnavailable(),
+          replayHead: this.replayHead(),
+        },
         // What each status line prints besides its values (PC-I2).
         (run) => ({
           title: run.result.title || run.item.name,
@@ -907,6 +918,14 @@ export class ChartAnalysisPageComponent {
   readonly strategyRun = computed(
     () => this.scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,
   );
+  /**
+   * Why the Strategy Tester holds its report back: in Bar Replay the strategy's run reaches past
+   * the head — its trades would be bars the chart has not reached (PC-08).
+   */
+  readonly testerSuspended = computed(() => {
+    const run = this.strategyRun();
+    return run && replayLag(run, this.replayHead()) === 'ahead' ? REPLAY_AHEAD : null;
+  });
   /** Scripts with an explicit run in flight, by key, with its ticket ({@link runScript}). */
   private readonly runningKeys = signal<ReadonlyMap<string, number>>(new Map());
   readonly scriptRunning = computed(() => this.runningKeys().size > 0);
@@ -941,26 +960,37 @@ export class ChartAnalysisPageComponent {
     const updating = new Set(updates.keys());
     const viaUpdate = new Set(updates.values());
     const unavailable = this.scriptsUnavailable();
+    const head = this.replayHead();
     const chip = (
       key: string,
       name: string,
       kind: ScriptChip['kind'],
       placed: boolean,
       run: ChartScriptRun | null,
-    ): ScriptChip => ({
-      key,
-      name,
-      kind,
-      placed,
-      visible: resolveDisplay(run?.display).visible,
-      running: running.has(key) || updating.has(key),
-      waitingUntil: waiting.get(key) ?? null,
-      failure: failures.get(key) ?? null,
-      lastGoodMs: run?.landedAt ?? null,
-      unavailable:
-        unavailable ??
-        (run ? hiddenOnTimeframe(resolveDisplay(run.display), this.resolution()) : null),
-    });
+    ): ScriptChip => {
+      const visible = resolveDisplay(run?.display).visible;
+      const failure = failures.get(key) ?? null;
+      return {
+        key,
+        name,
+        kind,
+        placed,
+        visible,
+        running: running.has(key) || updating.has(key),
+        waitingUntil: waiting.get(key) ?? null,
+        failure,
+        lastGoodMs: run?.landedAt ?? null,
+        unavailable:
+          unavailable ??
+          (run ? hiddenOnTimeframe(resolveDisplay(run.display), this.resolution()) : null),
+        // Its run to the replay head is due — not for a hidden indicator (it is not run while
+        // hidden), nor after a failed one (its badge says so), nor where scripts cannot sit.
+        replay:
+          run && !failure && !unavailable && (visible || kind === 'strategy')
+            ? replayLag(run, head)
+            : null,
+      };
+    };
     const runs = this.scriptRuns();
     const out = runs.map((r) =>
       chip(r.item.key, r.result.title || r.item.name, r.result.kind, true, r),
@@ -1414,6 +1444,13 @@ export class ChartAnalysisPageComponent {
   });
 
   readonly replayAtEnd = computed(() => this.replayIndex() >= this.bars().length);
+  /**
+   * Bar Replay's head: the open (Unix ms) of the last bar the chart shows; null outside replay. The
+   * scripts run to it (PC-08, PC-I8) — never a bar past it.
+   */
+  readonly replayHead = computed(() =>
+    this.replayActive() ? (this.displayBars().at(-1)?.time ?? null) : null,
+  );
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
@@ -1849,6 +1886,22 @@ export class ChartAnalysisPageComponent {
         if (theme === runTheme) return;
         runTheme = theme;
         rerunScripts(() => true);
+      });
+    });
+
+    // Bar Replay (PC-08, PC-I8): the scripts run to the head — on the bars the chart shows, never
+    // one past them — when replay starts and each time the head moves; leaving replay runs them to
+    // now again. Quiet re-runs through the scheduler: stepping or playing faster than a run comes
+    // back collapses into one run to wherever the head is when it starts. Meanwhile a run past the
+    // head shows nothing (its future would be on the chart) and one short of it shows as far as it
+    // goes (scriptResults).
+    let replayedTo: number | null = null;
+    effect(() => {
+      const head = this.replayHead();
+      untracked(() => {
+        if (head === replayedTo) return;
+        replayedTo = head;
+        rerunScripts((r) => (r.until ?? null) !== head);
       });
     });
 
@@ -3241,11 +3294,14 @@ export class ChartAnalysisPageComponent {
     { ticket: number; sub: { unsubscribe(): void }; done?: (r: RunOutcome) => void }
   >();
 
-  /** A quiet re-run the scheduler started: the script as it is on the chart, on the bar forming now. */
+  /**
+   * A quiet re-run the scheduler started: the script as it is on the chart, on the bar forming now
+   * — or, in Bar Replay, to the head.
+   */
   private rerunQuietly(key: string, ticket: number): void {
     const run = this.scriptRuns().find((r) => r.item.key === key);
     const chart = { symbol: this.symbol(), resolution: this.resolution() };
-    if (!run || this.replayActive() || !sameSeries(run, chart)) {
+    if (!run || !sameSeries(run, chart)) {
       this.runScheduler.settle(key, ticket);
       return;
     }
@@ -3308,6 +3364,8 @@ export class ChartAnalysisPageComponent {
     let busyRetries = 0;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let request: Subscription | null = null;
+    /** The Bar Replay head the request in flight runs to (its open, Unix ms); null: to now. */
+    let until: number | null = null;
     /** The run is over: off the spinner and out of flight. Whether its result may be drawn. */
     const finish = (): boolean => {
       over = true;
@@ -3319,17 +3377,23 @@ export class ChartAnalysisPageComponent {
       return this.runScheduler.isCurrent(key, ticket);
     };
     const send = (): void => {
-      // The chart's forming bar — only once the bars on screen are this symbol's and timeframe's.
-      // On the engine's clock: the session grid's periods open and close at the engine's instants.
-      // Taken again for a retry after a busy refusal: it runs on the bar forming then.
-      const liveBar = formingLiveBar(
-        this.bars(),
-        this.barsFor(),
-        { symbol, resolution },
-        this.serverClock.now(),
-      );
+      // In Bar Replay, up to the head (PC-08, PC-I8): the bars opening before its close, so the
+      // head is the run's last bar and nothing past it is computed. Else up to now, with the
+      // chart's forming bar — only once the bars on screen are this symbol's and timeframe's, on
+      // the engine's clock (the session grid's periods open and close at the engine's instants).
+      // Both taken again for a retry after a busy refusal: it runs to the head, or on the bar
+      // forming, then.
+      const head = this.replayActive() ? (this.displayBars().at(-1) ?? null) : null;
+      until = head?.time ?? null;
+      const liveBar = head
+        ? null
+        : formingLiveBar(this.bars(), this.barsFor(), { symbol, resolution }, this.serverClock.now());
       request = this.chartScripts
-        .runOnChart(item, symbol, resolution, values, requestedBars, liveBar, basis)
+        .runOnChart(item, symbol, resolution, values, requestedBars, {
+          liveBar,
+          chartType: basis,
+          toMs: head ? barCloseMs(head, resolution) : null,
+        })
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
@@ -3359,7 +3423,7 @@ export class ChartAnalysisPageComponent {
                 item,
                 result,
                 values,
-                { symbol, resolution, requestedBars, basis },
+                { symbol, resolution, requestedBars, basis, until },
                 replace,
                 update,
               );
@@ -3421,12 +3485,19 @@ export class ChartAnalysisPageComponent {
     item: ChartScriptItem,
     result: ChartScriptResult,
     values: ScriptInputValues,
-    /** The series, window and bars it ran on. */
-    on: { symbol: string; resolution: TvResolution; requestedBars: number; basis: ScriptBasis },
+    /** The series, window and bars it ran on, and the Bar Replay head it ran to (null: now). */
+    on: {
+      symbol: string;
+      resolution: TvResolution;
+      requestedBars: number;
+      basis: ScriptBasis;
+      until?: number | null;
+    },
     replace: boolean,
     update: ScriptUpdate | undefined,
   ): void {
     const { symbol, resolution, requestedBars, basis } = on;
+    const until = on.until ?? null;
     const key = item.key;
     // The overrides as they apply to the script that ran: one for an input its source no longer
     // declares, or declares with another type, range or options, is dropped — that input runs on
@@ -3447,6 +3518,7 @@ export class ChartAnalysisPageComponent {
       requestedBars,
       landedAt: Date.now(),
       chartType: basis,
+      ...(until !== null ? { until } : {}),
       ...(display && Object.keys(display).length ? { display } : {}),
     };
     // One strategy at a time (its tester owns the bottom panel), in place for a re-run.
@@ -3467,6 +3539,15 @@ export class ChartAnalysisPageComponent {
     this.restoringScripts.update((l) => l.filter((w) => w.key !== key));
     this.dropPending(key);
     this.dropFailure(key);
+    // Bar Replay's head moved, or replay ended, while it ran (PC-08): it runs again to where the
+    // chart is now. The head effect judged the run on the chart, not this one in flight, so it
+    // may not have asked. A hidden indicator waits until it is shown, as every quiet re-run does.
+    if (
+      until !== this.replayHead() &&
+      this.chartBasis() !== null &&
+      (result.kind === 'strategy' || resolveDisplay(entry.display).visible)
+    )
+      this.runScheduler.request(key);
     if (result.kind === 'strategy') {
       // The defaults its Strategy Tester inputs are measured against (engine strategies).
       this.settings.loadStoredInputs(item);

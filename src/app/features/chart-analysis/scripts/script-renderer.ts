@@ -292,14 +292,16 @@ export class ScriptRenderer {
 
   /**
    * The run's logical index for a host logical index (the bar under the crosshair); its last bar
-   * when there is none — TradingView's resting legend. Null when the run is not on the axis.
+   * when there is none — TradingView's resting legend. Null when the run is not on the axis: nothing
+   * of it is drawn then, and its last bar may be one the chart has not reached (Bar Replay, PC-08).
    */
   runLogical(hostLogical: number | null): number | null {
     const m = this.model;
     if (!m) return null;
-    if (hostLogical === null || !Number.isFinite(hostLogical)) return m.timeline.length - 1;
     const o = this.offset();
-    return o === null ? null : Math.round(hostLogical) - o;
+    if (o === null) return null;
+    if (hostLogical === null || !Number.isFinite(hostLogical)) return m.timeline.length - 1;
+    return Math.round(hostLogical) - o;
   }
 
   /** Its status-line values at a host bar (null: at rest — its last bar). */

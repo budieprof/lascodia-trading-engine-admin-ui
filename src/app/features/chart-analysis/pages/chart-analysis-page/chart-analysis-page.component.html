@@ -1853,6 +1853,7 @@
           [values]="run.values"
           [resolution]="run.resolution"
           [running]="scriptRunning()"
+          [suspended]="testerSuspended()"
           (rerun)="rerunStrategy($event)"
           (tradeFocus)="focusTrade($event)"
           (closed)="closeTester()"

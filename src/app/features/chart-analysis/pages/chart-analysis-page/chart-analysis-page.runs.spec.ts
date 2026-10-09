@@ -105,7 +105,13 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   const editorKey = signal<string | null>(null);
   const pendingScripts = signal(new Map());
   const runningKeys = signal<ReadonlyMap<string, number>>(new Map());
+  // Bar Replay, as the page derives its head.
+  const replayActive = signal(false);
+  const displayBars = signal<{ time: number }[]>([]);
   Object.assign(p, {
+    replayActive,
+    displayBars,
+    replayHead: computed(() => (replayActive() ? (displayBars().at(-1)?.time ?? null) : null)),
     scriptRuns,
     restoringScripts: signal([]),
     runsInFlight: new Map(),
@@ -383,13 +389,21 @@ describe('chart page — a busy engine (contract C5)', () => {
   });
 });
 
+/** The options a run was asked with (`runOnChart`'s last argument). */
+const optsOf = (runOnChart: ReturnType<typeof page>['runOnChart'], call = 0) =>
+  (runOnChart.mock.calls[call] as unknown[])[5] as {
+    liveBar: unknown;
+    chartType: string;
+    toMs: number | null;
+  };
+
 describe('chart page — runs on the bars the chart draws (PC-09)', () => {
   it('under Heikin-Ashi candles a run is made on the Heikin-Ashi bars, and says so', () => {
     const m = item('mine:9');
     const { p, runOnChart } = page();
     p.chartBasis.set('heikinashi');
     p.runScript(m, {});
-    expect(runOnChart.mock.calls[0][6]).toBe('heikinashi');
+    expect(optsOf(runOnChart).chartType).toBe('heikinashi');
     expect(p.scriptRuns()[0].chartType).toBe('heikinashi');
   });
 
@@ -398,7 +412,87 @@ describe('chart page — runs on the bars the chart draws (PC-09)', () => {
     const { p, runOnChart } = page();
     p.chartBasis.set(null);
     p.runScript(m, {});
-    expect(runOnChart.mock.calls[0][6]).toBe('standard');
+    expect(optsOf(runOnChart).chartType).toBe('standard');
     expect(p.scriptRuns()[0].chartType).toBe('standard');
+  });
+});
+
+describe('chart page — Bar Replay runs the scripts to the head (PC-08, PC-I8)', () => {
+  const H = 3_600_000;
+  const T0 = Date.UTC(2026, 8, 1);
+  const hours = (n: number) => Array.from({ length: n }, (_, i) => ({ time: T0 + i * H }));
+
+  it('a run in replay ends on the head bar: to its close, no forming bar, and it says which head', () => {
+    const m = item('mine:9');
+    const { p, runOnChart } = page();
+    p.replayActive.set(true);
+    p.displayBars.set(hours(40));
+    p.runScript(m, {});
+    expect(optsOf(runOnChart)).toEqual({ liveBar: null, chartType: 'standard', toMs: T0 + 40 * H });
+    expect(p.scriptRuns()[0].until).toBe(T0 + 39 * H);
+  });
+
+  it('outside replay a run goes to now and carries no head', () => {
+    const m = item('mine:9');
+    const { p, runOnChart } = page();
+    p.runScript(m, {});
+    expect(optsOf(runOnChart).toMs).toBeNull();
+    expect('until' in p.scriptRuns()[0]).toBe(false);
+  });
+
+  it('the quiet re-runs the head asks for run in replay — they used to be dropped there', () => {
+    const m = item('mine:5');
+    const { p, runOnChart } = page([onChart(m)]);
+    p.replayActive.set(true);
+    p.displayBars.set(hours(10));
+    p.rerunQuietly('mine:5', p.runScheduler.begin('mine:5'));
+    expect(optsOf(runOnChart).toMs).toBe(T0 + 10 * H);
+    expect(p.scriptRuns()[0].until).toBe(T0 + 9 * H);
+  });
+
+  it('a run that lands after the head moved on asks for another, to where the head is now', () => {
+    const m = item('mine:5');
+    const { p, answers } = page([onChart(m)]);
+    p.replayActive.set(true);
+    p.displayBars.set(hours(10));
+    const request = vi.spyOn(p.runScheduler, 'request');
+    answers.set('mine:5', [
+      () => {
+        // The operator steps on while the run is in flight.
+        p.displayBars.set(hours(11));
+        return of(ok(m, ' v2'));
+      },
+    ]);
+    p.runScript(m, {}, true, undefined, p.runScheduler.begin('mine:5'));
+    expect(p.scriptRuns()[0].until).toBe(T0 + 9 * H);
+    expect(request).toHaveBeenCalledWith('mine:5');
+  });
+
+  it('one that lands at the head, or outside replay to now, asks for nothing more', () => {
+    const m = item('mine:5');
+    const { p } = page([onChart(m)]);
+    const request = vi.spyOn(p.runScheduler, 'request');
+    p.runScript(m, {}, true);
+    p.replayActive.set(true);
+    p.displayBars.set(hours(10));
+    p.runScript(m, {}, true);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('a run to a head that lands after replay ended runs again to now', () => {
+    const m = item('mine:5');
+    const { p, answers } = page([onChart(m)]);
+    p.replayActive.set(true);
+    p.displayBars.set(hours(10));
+    const request = vi.spyOn(p.runScheduler, 'request');
+    answers.set('mine:5', [
+      () => {
+        p.replayActive.set(false);
+        return of(ok(m, ' v2'));
+      },
+    ]);
+    p.runScript(m, {}, true);
+    expect(p.scriptRuns()[0].until).toBe(T0 + 9 * H);
+    expect(request).toHaveBeenCalledWith('mine:5');
   });
 });

@@ -65,6 +65,27 @@ export interface ChartScriptItem {
   timeframe?: string | null;
 }
 
+/** How a run for the chart is made, beyond the script, series, inputs and window (`runOnChart`). */
+export interface ChartRunOptions {
+  /**
+   * The chart's forming bar, run as the realtime bar so an indicator's last value sits on the bar
+   * the chart is forming: indicators on the standard bars, in a run that ends now. Ignored otherwise.
+   */
+  liveBar?: ScriptRunBar | null;
+  /** The bars to compute on (PC-09): the chart's Heikin-Ashi candles, else the standard bars. */
+  chartType?: ScriptBasis;
+  /**
+   * Run on the bars that open before this instant (Unix ms) instead of up to now — Bar Replay sends
+   * its head bar's close (PC-08, PC-I8), so the head is the run's last bar and nothing after it is
+   * computed. Null or absent: up to now.
+   */
+  toMs?: number | null;
+  /** Record every variable of these bars (`bar_index`, inclusive): the Pine Logs dock (PC-I6). */
+  trace?: { fromBar: number; toBar: number };
+  /** Time each source line: the Pine Logs dock's profiler (PC-I6). */
+  profile?: boolean;
+}
+
 export interface ChartScriptCatalog {
   mine: ChartScriptItem[];
   strategies: ChartScriptItem[];
@@ -326,10 +347,10 @@ export class ChartScriptService {
     resolution: TvResolution,
     inputs?: ScriptInputValues,
     lastBars = DEFAULT_LAST_BARS,
-    liveBar?: ScriptRunBar | null,
-    /** The bars to compute on (PC-09): the chart's Heikin-Ashi candles, else the standard bars. */
-    chartType: ScriptBasis = 'standard',
+    opts: ChartRunOptions = {},
   ): Observable<ChartScriptResult> {
+    const chartType = opts.chartType ?? 'standard';
+    const toMs = opts.toMs ?? null;
     const run = (overrides: ScriptInputValues | undefined): Observable<ChartScriptResult> => {
       const req: ScriptRunRequest = {
         symbol,
@@ -338,13 +359,19 @@ export class ChartScriptService {
         mode: item.kind === 'strategy' ? 'backtest' : 'preview',
         theme: this.theme.theme(),
       };
+      // The engine loads the `lastBars` confirmed bars opening before toUtc.
+      if (toMs !== null) req.toUtc = new Date(toMs).toISOString();
       if (chartType !== 'standard') req.chartType = chartType;
       if (item.strategyId !== undefined) req.strategyId = item.strategyId;
       else req.source = item.pineSource ?? '';
       if (overrides && Object.keys(overrides).length) req.inputs = overrides;
       // Indicators run the chart's forming bar as the realtime bar; strategies backtest closed
-      // bars. The engine takes it on the standard chart only.
-      if (liveBar && req.mode === 'preview' && chartType === 'standard') req.liveBar = liveBar;
+      // bars. The engine takes it on the standard chart only, for a run that ends now.
+      const liveBar = opts.liveBar ?? null;
+      if (liveBar && req.mode === 'preview' && chartType === 'standard' && toMs === null)
+        req.liveBar = liveBar;
+      if (opts.trace) req.trace = opts.trace;
+      if (opts.profile) req.profile = true;
       return this.scripting.run(req).pipe(map((res) => toChartScriptResult(res)));
     };
     if (!inputs || !Object.keys(inputs).length) return run(undefined);

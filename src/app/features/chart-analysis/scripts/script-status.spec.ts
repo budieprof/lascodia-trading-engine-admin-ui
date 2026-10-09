@@ -52,16 +52,30 @@ describe('the status line’s label on the chart layers', () => {
   const EURUSD = { symbol: 'EURUSD', resolution: '60' as const };
   const run = { item: { key: 'a' }, result, symbol: 'EURUSD', resolution: '60' as const };
 
+  const on = { chart: EURUSD, bars: EURUSD, basis: 'standard' as const, unavailable: null };
+
   it('carries the page’s title, inputs and failure, and a change of them is a change', () => {
     const label = { title: 'BB', inputs: '20 2', failure: null };
-    const a = chartScriptLayers([run], EURUSD, EURUSD, 'standard', null, () => label);
+    const a = chartScriptLayers([run], on, () => label);
     expect(a[0].label).toEqual(label);
-    const same = chartScriptLayers([run], EURUSD, EURUSD, 'standard', null, () => ({ ...label }));
+    const same = chartScriptLayers([run], on, () => ({ ...label }));
     expect(sameLayers(a, same)).toBe(true);
-    const failed = chartScriptLayers([run], EURUSD, EURUSD, 'standard', null, () => ({
+    const failed = chartScriptLayers([run], on, () => ({
       ...label,
       failure: { kind: 'stale', message: 'x', where: null, unit: null, callStack: [], atMs: 0 },
     }));
     expect(sameLayers(a, failed)).toBe(false);
+  });
+
+  it('a replay note coming or going is a change (PC-08)', () => {
+    const bars = result.run!.bars;
+    const last = bars[bars.length - 1].t;
+    const atHead = chartScriptLayers([{ ...run, until: last }], { ...on, replayHead: last });
+    const behind = chartScriptLayers([{ ...run, until: last }], {
+      ...on,
+      replayHead: last + 3_600_000,
+    });
+    expect(behind[0].note).not.toBeNull();
+    expect(sameLayers(atHead, behind)).toBe(false);
   });
 });

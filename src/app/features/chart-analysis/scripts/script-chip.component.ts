@@ -22,13 +22,19 @@ export interface ScriptChip {
   lastGoodMs: number | null;
   /** Why it is not drawn on this chart type; null when it is. */
   unavailable: string | null;
+  /**
+   * Bar Replay (PC-08): `ahead` — its run reaches past the head, so it is not drawn until its run
+   * to the head lands; `behind` — it is drawn up to an earlier bar while that run comes. Null
+   * outside replay, at the head, and when no run to the head is due (hidden, failed, unavailable).
+   */
+  replay: 'ahead' | 'behind' | null;
 }
 
 /**
- * A Pine script's chip: eye, name, its run's state — running, waiting for a busy engine, failed
- * (with the line to open the editor at, the library it is in and the call stack on hover), stale
- * (a re-run failed: the chart shows the last run that worked), not available on this chart type —
- * and Settings, source, Strategy Tester and remove.
+ * A Pine script's chip: eye, name, its run's state — running, waiting for a busy engine, running
+ * to Bar Replay's head, failed (with the line to open the editor at, the library it is in and the
+ * call stack on hover), stale (a re-run failed: the chart shows the last run that worked), not
+ * available on this chart type — and Settings, source, Strategy Tester and remove.
  */
 @Component({
   selector: 'app-script-chip',
@@ -71,6 +77,22 @@ export interface ScriptChip {
           role="status"
           title="The engine is busy with other runs: this one is sent again in a moment"
           ><span class="spin" aria-hidden="true"></span>Waiting for the engine…</span
+        >
+      } @else if (c.replay === 'ahead') {
+        <span
+          class="state"
+          role="status"
+          data-testid="script-replay"
+          title="Its run reaches past the replay head: it shows again once its run to the head comes back"
+          ><span class="spin" aria-hidden="true"></span>To the replay head…</span
+        >
+      } @else if (c.replay === 'behind') {
+        <span
+          class="state"
+          role="status"
+          data-testid="script-replay"
+          title="It shows its run up to an earlier bar while its run to the replay head comes"
+          ><span class="spin" aria-hidden="true"></span>Catching up…</span
         >
       }
       @if (c.unavailable; as u) {

@@ -11,7 +11,14 @@ import {
   syncAnchorData,
   type ScriptHost,
 } from './script-renderer';
-import { ScriptLayers, chartScriptLayers, type ChartScriptLayer } from './script-layers';
+import {
+  REPLAY_AHEAD,
+  REPLAY_BEHIND,
+  ScriptLayers,
+  chartScriptLayers,
+  replayLag,
+  type ChartScriptLayer,
+} from './script-layers';
 import { scriptRenderModel } from './script-model-cache';
 import { toChartScriptResult, type ChartScriptResult } from './chart-script.model';
 import { DEFAULT_DISPLAY } from './script-display';
@@ -477,14 +484,19 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
     expect(s.tables()).toEqual([]);
   });
 
-  it('shows no table while its run is not on the host axis — in replay they would show the future (PC-08)', () => {
+  it('shows no table and no value while its run is not on the host axis — in replay they would show the future (PC-08)', () => {
     const { times } = decorated();
     const { s, rig: r } = drawn(times);
     expect(s.tables()).toHaveLength(1);
+    expect(s.statusAt(null)).not.toBeNull();
     // Replay stepped back: the host's bars end before the run's last bar.
     r.chart.times = times.slice(0, 40);
     expect(s.aligned()).toBe(false);
     expect(s.tables()).toEqual([]);
+    // Its resting status line would print its last bar's values — bars the chart has not reached.
+    expect(s.runLogical(null)).toBeNull();
+    expect(s.statusAt(null)).toBeNull();
+    expect(s.statusAt(20)).toBeNull();
   });
 
   it('asks its pane’s scale for the room the top tables need (PC-I11)', () => {
@@ -582,7 +594,7 @@ describe('ScriptRenderer — tables, bar colours and future drawings', () => {
   });
 });
 
-describe('chartScriptLayers (PC-09)', () => {
+describe('chartScriptLayers (PC-09, PC-08)', () => {
   const EURUSD = { symbol: 'EURUSD', resolution: '60' as const };
   const run = (key: string, chartType?: 'standard' | 'heikinashi', symbol = 'EURUSD') => ({
     item: { key },
@@ -591,12 +603,21 @@ describe('chartScriptLayers (PC-09)', () => {
     resolution: '60' as const,
     ...(chartType ? { chartType } : {}),
   });
+  const on = (
+    patch: Partial<Parameters<typeof chartScriptLayers>[1]> = {},
+  ): Parameters<typeof chartScriptLayers>[1] => ({
+    chart: EURUSD,
+    bars: EURUSD,
+    basis: 'standard',
+    unavailable: null,
+    ...patch,
+  });
 
   it('draws the runs made for the chart’s series and bars, each with its display settings', () => {
-    const layers = chartScriptLayers([run('a'), run('b', 'standard')], EURUSD, EURUSD, 'standard', null);
-    expect(layers.map((l) => [l.key, l.suspended])).toEqual([
-      ['a', null],
-      ['b', null],
+    const layers = chartScriptLayers([run('a'), run('b', 'standard')], on());
+    expect(layers.map((l) => [l.key, l.suspended, l.note])).toEqual([
+      ['a', null, null],
+      ['b', null, null],
     ]);
     expect(layers[0].display).toEqual(DEFAULT_DISPLAY);
   });
@@ -604,10 +625,7 @@ describe('chartScriptLayers (PC-09)', () => {
   it('suspends a run made on the other bars until its re-run lands (Heikin-Ashi ↔ standard)', () => {
     const layers = chartScriptLayers(
       [run('std'), run('ha', 'heikinashi')],
-      EURUSD,
-      EURUSD,
-      'heikinashi',
-      null,
+      on({ basis: 'heikinashi' }),
     );
     expect(layers.map((l) => [l.key, l.suspended])).toEqual([
       ['std', 'Running on the new chart type…'],
@@ -616,14 +634,59 @@ describe('chartScriptLayers (PC-09)', () => {
   });
 
   it('suspends every run on a chart type runs cannot sit on, saying so', () => {
-    const layers = chartScriptLayers([run('a')], EURUSD, EURUSD, null, 'Not available on Renko charts');
+    const layers = chartScriptLayers(
+      [run('a')],
+      on({ basis: null, unavailable: 'Not available on Renko charts' }),
+    );
     expect(layers[0].suspended).toBe('Not available on Renko charts');
   });
 
   it('leaves out another series’ runs, and runs while the bars on screen are another series’', () => {
-    expect(chartScriptLayers([run('a', undefined, 'GBPUSD')], EURUSD, EURUSD, 'standard', null)).toEqual([]);
+    expect(chartScriptLayers([run('a', undefined, 'GBPUSD')], on())).toEqual([]);
     const gbp = { symbol: 'GBPUSD', resolution: '60' as const };
-    expect(chartScriptLayers([run('a')], EURUSD, gbp, 'standard', null)).toEqual([]);
+    expect(chartScriptLayers([run('a')], on({ bars: gbp }))).toEqual([]);
+  });
+
+  describe('Bar Replay (PC-08, PC-I8)', () => {
+    const times = (bollinger().run?.bars ?? []).map((b) => b.t);
+    const last = times[times.length - 1];
+
+    it('shows nothing of a run that reaches past the head — its future would be on the chart', () => {
+      // A run to now, the head 20 bars back.
+      const [layer] = chartScriptLayers([run('a')], on({ replayHead: times[39] }));
+      expect(layer.suspended).toBe(REPLAY_AHEAD);
+      expect(layer.note).toBeNull();
+      expect(replayLag(run('a'), times[39])).toBe('ahead');
+      // Outside replay it is drawn.
+      expect(chartScriptLayers([run('a')], on({ replayHead: null }))[0].suspended).toBeNull();
+    });
+
+    it('draws a run that ends at or before the head, saying it catches up until its run to the head lands', () => {
+      // Run to an earlier head (its last bar), the head one bar on.
+      const behind = { ...run('a'), until: last };
+      const head = last + 3_600_000;
+      const [layer] = chartScriptLayers([behind], on({ replayHead: head }));
+      expect(layer.suspended).toBeNull();
+      expect(layer.note).toBe(REPLAY_BEHIND);
+      // Its run to the head landed (it ends on the bar before: the engine had no bar there yet).
+      const landed = { ...run('a'), until: head };
+      expect(replayLag(landed, head)).toBeNull();
+      expect(chartScriptLayers([landed], on({ replayHead: head }))[0].note).toBeNull();
+      // Back to now: a run to a head is drawn as it is while its run to now comes.
+      expect(replayLag(behind, null)).toBeNull();
+    });
+
+    it('never says a hidden indicator catches up — it is not run while hidden; a strategy is', () => {
+      const strategy = { ...run('a'), until: last, display: { visible: false } };
+      expect(strategy.result.kind).toBe('strategy');
+      const indicator = {
+        ...strategy,
+        item: { key: 'b' },
+        result: { ...strategy.result, kind: 'indicator' as const },
+      };
+      const layers = chartScriptLayers([strategy, indicator], on({ replayHead: last + 3_600_000 }));
+      expect(layers.map((l) => l.note)).toEqual([REPLAY_BEHIND, null]);
+    });
   });
 });
 

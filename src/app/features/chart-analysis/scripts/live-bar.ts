@@ -1,6 +1,6 @@
 import type { Bar } from '../datafeed/candle-feed.service';
 import { bucketStartFor } from '../datafeed/aggregate';
-import { isSessionResolution, type TvResolution } from '../datafeed/resolution';
+import { isSessionResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { isCurrentPeriod } from '../datafeed/session-bars';
 import type { ScriptRunBar } from '@core/api/scripting.types';
 
@@ -54,6 +54,16 @@ export function formingLiveBar(
     if (bucket === null || bucket !== last.time) return null;
   }
   return { t: last.time, o: last.open, h: last.high, l: last.low, c: last.close, v: last.volume };
+}
+
+/**
+ * The instant a bar's period closes (Unix ms, exclusive): the engine's close on the session grid
+ * (2h … 1M), the fixed width on the stored grid. A run with this as `toUtc` ends on the bar: the
+ * engine loads the bars opening before it, so the bar's whole period is in — a bar built from
+ * smaller ones (2h from 1h) included — and the next bar is not.
+ */
+export function barCloseMs(bar: Pick<Bar, 'time' | 'closeTime'>, resolution: TvResolution): number {
+  return bar.closeTime ?? bar.time + (resolutionMs(resolution) ?? 1);
 }
 
 /**

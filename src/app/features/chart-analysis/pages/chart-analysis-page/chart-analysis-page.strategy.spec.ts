@@ -64,6 +64,9 @@ function page(runs: ChartScriptRun[] = []) {
     resolution: signal('60'),
     bars: signal([]),
     barsFor: signal(null),
+    replayActive: signal(false),
+    displayBars: signal([]),
+    replayHead: signal(null),
     serverClock: { now: () => Date.now() },
     chartScripts: { runOnChart },
     destroyRef: { destroyed: false, onDestroy: () => () => undefined },
@@ -104,8 +107,7 @@ describe('chart page — one strategy at a time, said out loud', () => {
       '60',
       { 'Risk::Stop (ATR)': 2 },
       1500,
-      null,
-      'standard',
+      { liveBar: null, chartType: 'standard', toMs: null },
     );
     const back = p.scriptRuns();
     expect(back.map((r: ChartScriptRun) => [r.item.key, r.values])).toEqual([

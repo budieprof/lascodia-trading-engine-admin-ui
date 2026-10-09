@@ -158,3 +158,40 @@ describe('StrategyTesterPanelComponent — Inputs against the defaults the strat
   });
 });
 
+
+describe('StrategyTesterPanelComponent — Bar Replay (PC-08)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('holds the report back while its run reaches past the replay head; the inputs stay', () => {
+    TestBed.configureTestingModule({ imports: [StrategyTesterPanelComponent] });
+    TestBed.overrideComponent(StrategyTesterPanelComponent, {
+      set: { imports: [ChartIconStubComponent] },
+    });
+    const fixture = TestBed.createComponent(StrategyTesterPanelComponent);
+    const cmp = fixture.componentInstance as any;
+    const suspended = signal<string | null>('Running to the replay head…');
+    cmp.result = signal({ title: 'MeanRev v5', inputs: SOURCE, strategy: null, error: null });
+    cmp.inputs = signal(EFFECTIVE);
+    cmp.values = signal({});
+    cmp.running = signal(false);
+    cmp.resolution = signal('60');
+    cmp.suspended = suspended;
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    const note = () => host.querySelector('[data-testid="tester-suspended"]');
+
+    expect(note()?.textContent?.trim()).toBe('Running to the replay head…');
+    expect(host.textContent).not.toContain('No strategy report');
+    // The Inputs tab is the operator's, not the run's: it stays usable.
+    cmp.tab.set('inputs');
+    fixture.detectChanges();
+    expect(note()).toBeNull();
+    expect(host.querySelector('form')).not.toBeNull();
+    // The run to the head landed.
+    cmp.tab.set('overview');
+    suspended.set(null);
+    fixture.detectChanges();
+    expect(note()).toBeNull();
+    expect(host.textContent).toContain('No strategy report');
+  });
+});
