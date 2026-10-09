@@ -896,3 +896,17 @@ export interface ScriptRenamePlan {
   newName: string;
   edits: ScriptRenameEdit[];
 }
+
+// ── runtime2: v4/v5 → v6 converter (PR-I10, scripting API §2c) ──
+
+export interface ScriptConversion {
+  source: string;
+  fromVersion: number | null;
+  /** 6, or 5 when a refused construct keeps the script on v5; null when nothing was converted. */
+  toVersion: number | null;
+  changes: { line: number; what: string }[];
+  refusals: { line: number; construct: string; why: string }[];
+  /** Why nothing was converted. */
+  problem?: string | null;
+  compile?: ScriptCompileResult | null;
+}

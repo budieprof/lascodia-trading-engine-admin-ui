@@ -31,7 +31,9 @@ import {
   ScriptStatusBarComponent,
   type CompileState,
 } from '../script-status-bar/script-status-bar.component';
+import { conversionProposal, versionOf, type ScriptProposal } from '../../pine/pine-proposal';
 import { flattenOutline } from '../../pine/pine-semantic';
+import { ScriptDiffComponent } from '../../shared/script-diff.component';
 import { SCRIPTING_UI_STYLES } from '../scripting-ui.styles';
 
 /** Delay between the last keystroke and the background compile. */
@@ -47,7 +49,12 @@ export const COMPILE_DEBOUNCE_MS = 700;
   selector: 'app-script-workbench',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineEditorComponent, ProblemsPanelComponent, ScriptStatusBarComponent],
+  imports: [
+    PineEditorComponent,
+    ProblemsPanelComponent,
+    ScriptStatusBarComponent,
+    ScriptDiffComponent,
+  ],
   template: `
     <div class="workbench">
       <div class="toolbar">
@@ -80,6 +87,17 @@ export const COMPILE_DEBOUNCE_MS = 700;
         >
           Outline
         </button>
+        @if (!readOnly() && convertible()) {
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            (click)="convert()"
+            [disabled]="converting()"
+            title="Rewrite this Pine v4/v5 script for v6 — shown as a comparison you accept or reject"
+          >
+            {{ converting() ? 'Converting…' : 'Convert to v6' }}
+          </button>
+        }
         <button
           type="button"
           class="btn btn-ghost btn-sm"
@@ -175,6 +193,52 @@ export const COMPILE_DEBOUNCE_MS = 700;
         [stale]="stale()"
         [cursor]="cursor()"
       />
+
+      <dialog
+        #proposalBox
+        class="proposal"
+        aria-label="Review the change"
+        (close)="proposal.set(null)"
+      >
+        @if (proposal(); as p) {
+          <h3>{{ p.title }}</h3>
+          @if (p.warnings.length) {
+            <ul class="warnings" role="list">
+              @for (w of p.warnings; track $index) {
+                <li>{{ w }}</li>
+              }
+            </ul>
+          }
+          <app-script-diff
+            [before]="p.before"
+            [after]="p.after"
+            beforeLabel="Now"
+            afterLabel="Proposed"
+            maxHeight="360px"
+          />
+          @if (p.notes.length) {
+            <details>
+              <summary>{{ p.notes.length }} change{{ p.notes.length === 1 ? '' : 's' }}</summary>
+              <ul role="list">
+                @for (n of p.notes; track $index) {
+                  <li>{{ n }}</li>
+                }
+              </ul>
+            </details>
+          }
+          @if (proposalError(); as e) {
+            <p class="error" role="alert">{{ e }}</p>
+          }
+          <div class="actions">
+            <button type="button" class="btn btn-ghost btn-sm" (click)="closeProposal()">
+              Reject
+            </button>
+            <button type="button" class="btn btn-sm" (click)="acceptProposal()">
+              {{ p.acceptLabel }}
+            </button>
+          </div>
+        }
+      </dialog>
 
       <dialog #renameBox class="rename" aria-label="Rename" (close)="renameTarget.set(null)">
         @if (renameTarget(); as t) {
@@ -328,6 +392,36 @@ export const COMPILE_DEBOUNCE_MS = 700;
       .rename .error {
         color: var(--loss);
       }
+      .proposal {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: 16px;
+        width: min(960px, 92vw);
+      }
+      .proposal h3 {
+        margin: 0 0 8px;
+        font-size: 14px;
+      }
+      .proposal .warnings {
+        margin: 0 0 8px;
+        padding-left: 18px;
+        color: var(--warning);
+        font-size: 12px;
+      }
+      .proposal details {
+        font-size: 12px;
+        margin: 8px 0;
+      }
+      .proposal .error {
+        color: var(--loss);
+      }
+      .proposal .actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 6px;
+      }
       .rename .actions {
         display: flex;
         justify-content: flex-end;
@@ -393,6 +487,17 @@ export class ScriptWorkbenchComponent {
   readonly renameTo = signal('');
   readonly renaming = signal(false);
   readonly renameError = signal<string | null>(null);
+
+  // ── Proposed changes: the converter (PR-I10), the AI (PE-I6) — reviewed as a diff, never applied unasked ──
+  @ViewChild('proposalBox') private proposalBox?: ElementRef<HTMLDialogElement>;
+  readonly proposal = signal<ScriptProposal | null>(null);
+  readonly proposalError = signal<string | null>(null);
+  readonly converting = signal(false);
+  /** A Pine v4/v5 script (its //@version line). */
+  readonly convertible = computed(() => {
+    const v = versionOf(this.source());
+    return v === 4 || v === 5;
+  });
 
   private readonly scripting = inject(ScriptingService);
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -487,6 +592,58 @@ export class ScriptWorkbenchComponent {
 
   reveal(line: number, column = 1): void {
     this.editor?.revealPosition(line, column);
+  }
+
+  /** Shows a proposed change for review (Reject / accept). */
+  showProposal(p: ScriptProposal): void {
+    this.proposal.set(p);
+    this.proposalError.set(null);
+    const box = this.proposalBox?.nativeElement;
+    if (box && !box.open) {
+      if (typeof box.showModal === 'function') box.showModal();
+      else box.setAttribute('open', '');
+    }
+  }
+
+  closeProposal(): void {
+    const box = this.proposalBox?.nativeElement;
+    if (box?.open) {
+      if (typeof box.close === 'function') box.close();
+      else box.removeAttribute('open');
+    }
+    this.proposal.set(null);
+  }
+
+  /** Accept: the proposed script replaces the one it was made for, as an undoable edit. */
+  acceptProposal(): void {
+    const p = this.proposal();
+    if (!p || this.readOnly()) return;
+    if (this.currentSource() !== p.before) {
+      this.proposalError.set(
+        'The script changed since this was proposed — close it and ask again.',
+      );
+      return;
+    }
+    this.replaceSource(p.after);
+    this.closeProposal();
+    this.notice.set(`${p.title}: applied (Ctrl/Cmd-Z undoes it).`);
+  }
+
+  /** PR-I10: the engine converts the script; the result is a proposal. */
+  async convert(): Promise<void> {
+    if (this.converting()) return;
+    const before = this.currentSource();
+    this.converting.set(true);
+    try {
+      const c = await firstValueFrom(this.scripting.convert(before));
+      const { proposal, problem } = conversionProposal(before, c);
+      if (proposal) this.showProposal(proposal);
+      else this.notice.set(problem);
+    } catch (err) {
+      this.notice.set(toScriptingError(err, 'The engine could not convert the script.').message);
+    } finally {
+      this.converting.set(false);
+    }
   }
 
   libraryNotice(d: { unit: string; line: number; name: string }): string {

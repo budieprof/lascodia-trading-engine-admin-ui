@@ -34,6 +34,7 @@ import type {
   StrategyTrialLedgerDto,
   ScriptLibraryVisibility,
   ScriptPublisherDto,
+  ScriptConversion,
   ScriptRenamePlan,
   ScriptRunRequest,
   ScriptRunResult,
@@ -233,6 +234,18 @@ export class ScriptingService {
         return e.compile ? of(normaliseCompile(e.compile)) : throwError(() => e);
       }),
     );
+  }
+
+  /** `POST scripting/convert` (§2c) — a Pine v4/v5 script converted to v6 (or kept on v5, with the reasons). */
+  convert(source: string): Observable<ScriptConversion> {
+    return this.api
+      .post<ResponseData<ScriptConversion>>('/scripting/convert', { source }, SILENT)
+      .pipe(
+        map((res) => envelopeData(res, 'The engine could not convert the script.')),
+        catchError((err) =>
+          throwError(() => toScriptingError(err, 'The engine could not convert the script.')),
+        ),
+      );
   }
 
   /**
