@@ -23,6 +23,8 @@ function setup(url: { tf?: string } = {}) {
   Object.assign(p, {
     symbol: signal('EURUSD'),
     resolution: signal('60'),
+    replayActive: signal(false),
+    replayHead: signal(null),
     symbolMenuOpen: signal(false),
     symbolQuery: signal(''),
     loading: signal(false),

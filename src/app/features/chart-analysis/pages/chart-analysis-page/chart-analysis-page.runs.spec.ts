@@ -10,6 +10,9 @@ import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { MAX_BUSY_RETRIES } from '../../scripts/script-run-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
+import { ReplayController } from '../../replay/replay-controller';
+import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
+import { normalizeOutputs } from '@shared/pine-chart/model/normalize';
 
 // The page's runScript and the editor's "Add / Update on chart", run against just the state they
 // touch (as the strategy and editor specs do): the component's prototype, its signals, a real
@@ -459,6 +462,53 @@ describe('chart page — Bar Replay runs the scripts to the head (PC-08, PC-I8)'
     p.rerunQuietly('mine:5', p.runScheduler.begin('mine:5'));
     expect(optsOf(runOnChart).toMs).toBe(T0 + 10 * H);
     expect(p.scriptRuns()[0].until).toBe(T0 + 9 * H);
+  });
+
+  it('an indicator follows the head through its engine replay session — only the new bars run (CC-I4)', async () => {
+    const m = item('mine:5');
+    const pine = (k: number) => ({ t: T0 + k * H, o: 1, h: 1, l: 1, c: 1, v: 1 });
+    const outs = (first: number, n: number) =>
+      normalizeOutputs({
+        bars: { firstIndex: first, times: Array.from({ length: n }, (_, k) => T0 + (first + k) * H) },
+        plots: [{ id: 'p', values: Array.from({ length: n }, (_, k) => first + k) }],
+      });
+    const runBars = Array.from({ length: 10 }, (_, k) => pine(k));
+    const atHead: ChartScriptRun = {
+      ...onChart(m),
+      until: T0 + 9 * H,
+      result: { ...ok(m), run: { bars: runBars, outputs: outs(0, 10) } } as unknown as ChartScriptResult,
+    };
+    const { p, runOnChart } = page([atHead]);
+    const bars = signal(hours(20).map((b) => ({ ...b, open: 1, high: 1, low: 1, close: 1, volume: 1 })));
+    const replay = new ReplayController({
+      bars,
+      resolution: () => '60',
+      digits: () => 5,
+      symbolFacts: () => ({ pipSize: 0.0001, contractSize: 100_000 }),
+      fetchIntrabar: () => Promise.resolve([]),
+    });
+    const api = {
+      startReplay: vi.fn(() => of({ sessionId: 's', frame: { barIndex: 9, bars: runBars, outputsDelta: outs(0, 10) } })),
+      stepReplay: vi.fn(() => of({ barIndex: 11, bars: [pine(10), pine(11)], outputsDelta: outs(10, 2) })),
+      stopReplay: vi.fn(() => of(true)),
+    };
+    Object.assign(p, {
+      bars,
+      replay,
+      replayActive: replay.active,
+      replayClosedHead: replay.closedHead,
+      replayHead: computed(() => replay.closedHead()?.time ?? null),
+      replayScripts: new ReplayScriptSessions(api),
+    });
+    replay.intrabar.set(false);
+    replay.start(12); // the head is bar 11
+    p.rerunQuietly('mine:5', p.runScheduler.begin('mine:5'));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(api.startReplay).toHaveBeenCalledWith(expect.objectContaining({ startBar: 9, lastBars: 20 }));
+    expect(api.stepReplay).toHaveBeenCalledWith('s', { bars: 2 });
+    expect(runOnChart).not.toHaveBeenCalled();
+    expect(p.scriptRuns()[0].until).toBe(T0 + 11 * H);
+    expect(p.scriptRuns()[0].result.run.outputs.plots[0].values).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   });
 
   it('a run that lands after the head moved on asks for another, to where the head is now', () => {

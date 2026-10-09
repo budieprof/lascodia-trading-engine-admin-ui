@@ -167,6 +167,7 @@ describe('chart page — keyboard shortcuts leave the Pine editor’s typing alo
   function keyed(): Page {
     const p = page();
     Object.assign(p, {
+      replayActive: signal(false),
       technicalsOpen: signal(false),
       seasonalsOpen: signal(false),
       tool: signal(null),

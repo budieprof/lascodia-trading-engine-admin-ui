@@ -293,6 +293,9 @@ import {
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ReplayController } from '../../replay/replay-controller';
+import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
+import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
+import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
 import { ReplayPanelComponent } from '../../replay/replay-panel.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
@@ -1686,6 +1689,8 @@ export class ChartAnalysisPageComponent {
    * scripts run to it (PC-08, PC-I8) — never a bar past it, nor the bar forming from intrabar steps.
    */
   readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
+  /** The indicators' engine replay sessions: a head moving forward executes only the new bars (CC-I4). */
+  private readonly replayScripts = new ReplayScriptSessions(inject(ScriptingRunService));
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
@@ -2564,7 +2569,10 @@ export class ChartAnalysisPageComponent {
     });
     // A running replay interval would outlive the page and keep stepping a
     // chart nobody is looking at.
-    this.destroyRef.onDestroy(() => this.replay.pause());
+    this.destroyRef.onDestroy(() => {
+      this.replay.pause();
+      this.replayScripts.stopAll();
+    });
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
     // a position or a signal without the operator re-selecting anything.
@@ -2865,6 +2873,7 @@ export class ChartAnalysisPageComponent {
 
   /** The series changed in replay: history back to the head's instant, and the head on its bar there. */
   private async reanchorReplay(anchor: number): Promise<void> {
+    this.replayScripts.stopAll();
     this.replay.reanchor(anchor);
     if ((this.bars()[0]?.time ?? anchor) > anchor) {
       await this.loadBackTo(anchor);
@@ -2875,6 +2884,7 @@ export class ChartAnalysisPageComponent {
   exitReplay(): void {
     this.host()?.cancelPick();
     this.replay.exit();
+    this.replayScripts.stopAll();
   }
 
   stepReplay(delta: number): void {
@@ -3769,7 +3779,89 @@ export class ChartAnalysisPageComponent {
       this.runScheduler.settle(key, ticket);
       return;
     }
+    if (this.replayActive() && this.stepReplayRun(run, ticket)) return;
     this.runScript(run.item, run.values, true, undefined, ticket);
+  }
+
+  /**
+   * Bar Replay moved forward (CC-I4): an indicator's run on the chart follows through its engine replay session —
+   * only the bars the head moved over are executed — instead of a full run to the new head. False (the caller runs
+   * it in full) for a strategy (its tester result is not in a frame), a basis other than the standard bars, a run
+   * that is not at an earlier head, or a move the step endpoint does not take; a step that fails also ends in a full
+   * run.
+   */
+  private stepReplayRun(run: ChartScriptRun, ticket: number): boolean {
+    const head = this.replayClosedHead();
+    const until = run.until ?? null;
+    const runBars = run.result.run?.bars ?? [];
+    if (
+      run.result.kind === 'strategy' ||
+      (run.chartType ?? 'standard') !== 'standard' ||
+      until === null ||
+      !head ||
+      head.time <= until ||
+      !runBars.length
+    )
+      return false;
+    const bars = this.bars();
+    const untilIdx = bars.findIndex((b) => b.time === until);
+    const headIdx = this.replay.cursor().index - 1;
+    const steps = headIdx - untilIdx;
+    // The session's window reaches the last closed bar loaded, so later steps need no new session.
+    const now = this.serverClock.now();
+    let lastClosed = bars.length - 1;
+    while (lastClosed > headIdx && barCloseMs(bars[lastClosed], run.resolution) > now) lastClosed--;
+    const lastBars = runBars.length + (lastClosed - untilIdx);
+    const signature = JSON.stringify([
+      run.item.strategyId ?? run.item.pineSource ?? '',
+      run.values,
+      run.symbol,
+      run.resolution,
+    ]);
+    if (untilIdx < 0 || lastBars > MAX_SCRIPT_BARS || !this.replayScripts.usable(signature, steps)) return false;
+    const request: PineRunRequest = {
+      symbol: run.symbol,
+      timeframe: runTimeframeFor(run.resolution),
+      lastBars,
+      mode: 'preview',
+      toUtc: new Date(barCloseMs(bars[lastClosed], run.resolution)).toISOString(),
+      ...(run.item.strategyId !== undefined ? { strategyId: run.item.strategyId } : { source: run.item.pineSource ?? '' }),
+      ...(Object.keys(run.values).length ? { inputs: run.values } : {}),
+    };
+    const key = run.item.key;
+    void this.replayScripts
+      .step(
+        {
+          key,
+          signature,
+          request,
+          startBar: runBars.length - 1,
+          firstTime: runBars[0].t,
+          fromTime: until,
+          toTime: head.time,
+          steps,
+        },
+        run.result,
+      )
+      .then((result) => {
+        if (!this.runScheduler.isCurrent(key, ticket)) {
+          this.runScheduler.settle(key, ticket);
+          return;
+        }
+        const held = this.scriptRuns().find((r) => r.item.key === key);
+        if (!result || held !== run) {
+          // The step failed, or the run changed meanwhile: in full, as before.
+          this.runScript(run.item, run.values, true, undefined, ticket);
+          return;
+        }
+        this.scriptRuns.update((list) =>
+          list.map((r) => (r === run ? { ...r, result, until: head.time, landedAt: Date.now() } : r)),
+        );
+        this.runScheduler.settle(key, ticket);
+        // The head moved on (or replay ended) while it stepped: once more, to where it is now.
+        if (head.time !== this.replayHead()) this.runScheduler.request(key);
+      });
+    return true;
   }
 
   /**
@@ -4353,6 +4445,8 @@ export class ChartAnalysisPageComponent {
 
   /** Abort the run of `key` in flight, if any; whoever waits on it is told `why`. */
   private abortRun(key: string, why: string): void {
+    // Its replay session follows the run on the chart; an explicit run replaces that run.
+    this.replayScripts.stop(key);
     const run = this.runsInFlight.get(key);
     if (!run) return;
     this.runsInFlight.delete(key);
