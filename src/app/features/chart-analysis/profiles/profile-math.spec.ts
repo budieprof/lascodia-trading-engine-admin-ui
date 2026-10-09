@@ -14,6 +14,10 @@ import {
 } from './profile-math';
 import { PROFILE_STUDIES, computeProfileStudy } from './profile-studies';
 import { TradingCalendar } from '../datafeed/session-calendar';
+import { vwap, vwapBands } from '../indicators/math';
+import { anchoredVwap, volumeProfileRows } from '../drawings/tools/forecast-math';
+import { profileWithValueArea } from '../overlays/analysis-overlays';
+import { volumeProfile as volumeProfileOf, vwapRun } from './profile-math';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -30,7 +34,7 @@ function rowSum(vp: { rows: { upVol: number; downVol: number }[] }): number {
 // Deterministic pseudo-random walk.
 function walk(n: number, stepMs = HOUR, start = T0): Ohlc[] {
   let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
   let p = 1.1;
   return Array.from({ length: n }, (_, i) => {
     const o = p;
@@ -60,7 +64,9 @@ describe('volumeProfile', () => {
   });
 
   it('splits up/down by bar direction', () => {
-    const vp = volumeProfile([bar(T0, 1, 2, 1, 2, 100), bar(T0 + HOUR, 2, 2, 1, 1, 60)], { rows: 2 })!;
+    const vp = volumeProfile([bar(T0, 1, 2, 1, 2, 100), bar(T0 + HOUR, 2, 2, 1, 1, 60)], {
+      rows: 2,
+    })!;
     expect(vp.rows[0].upVol).toBeCloseTo(50);
     expect(vp.rows[0].downVol).toBeCloseTo(30);
     const flat = volumeProfile([bar(T0, 2, 2, 1, 1, 60)], { rows: 2, upDown: false })!;
@@ -97,7 +103,10 @@ describe('range profiles', () => {
     const vp = visibleRangeProfile(bars, 50.4, 99.6, { rows: 20 })!;
     expect(vp.fromIdx).toBe(50);
     expect(vp.toIdx).toBe(100);
-    expect(rowSum(vp)).toBeCloseTo(bars.slice(50, 101).reduce((a, b) => a + b.volume, 0), 6);
+    expect(rowSum(vp)).toBeCloseTo(
+      bars.slice(50, 101).reduce((a, b) => a + b.volume, 0),
+      6,
+    );
   });
 
   it('fixed range by time', () => {
@@ -127,7 +136,10 @@ describe('session splitting', () => {
     expect(s3.map((s) => s.startIdx)).toEqual([0, 21, 45]);
     expect(s3[1].sessionStart).toBe(T0 + 21 * HOUR);
     const total = s3.reduce((a, s) => a + rowSum(s.profile), 0);
-    expect(total).toBeCloseTo(bars.reduce((a, b) => a + b.volume, 0), 6);
+    expect(total).toBeCloseTo(
+      bars.reduce((a, b) => a + b.volume, 0),
+      6,
+    );
   });
 
   it('asia wraps midnight into one session', () => {
@@ -174,7 +186,9 @@ describe('tpoProfile', () => {
     expect(t.ibHigh).toBe(1.6);
     expect(t.ibLow).toBe(1.0);
     expect(t.bracketCount).toBe(4);
-    expect(t.singlePrints.map((i) => t.rows[i].letters[0])).toEqual(expect.arrayContaining(['A', 'B', 'D']));
+    expect(t.singlePrints.map((i) => t.rows[i].letters[0])).toEqual(
+      expect.arrayContaining(['A', 'B', 'D']),
+    );
   });
 
   it('several 5m bars within one bracket share a letter; days split', () => {
@@ -220,9 +234,9 @@ describe('profiles on FX trading sessions', () => {
     // An explicit clock offset keeps its midnight-to-midnight day.
     const utcPlus3 = sessionProfiles(bars, { session: 'daily', tzOffsetMinutes: 180, days: FX });
     expect(utcPlus3[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21)); // 00:00 at UTC+3
-    expect(sessionProfiles(bars, { session: 'daily', tzOffsetMinutes: 60, days: FX })[1].sessionStart).toBe(
-      Date.UTC(2026, 9, 5, 23),
-    );
+    expect(
+      sessionProfiles(bars, { session: 'daily', tzOffsetMinutes: 60, days: FX })[1].sessionStart,
+    ).toBe(Date.UTC(2026, 9, 5, 23));
   });
 
   it('TPO letters count from the session’s open: A is 21:00–21:30 UTC', () => {
@@ -260,5 +274,58 @@ describe('profiles on FX trading sessions', () => {
   it('computeProfileStudy passes the sessions on', () => {
     const m = computeProfileStudy('tpo', bars, {}, null, FX);
     expect(m.kind === 'tpo' && m.sessions[1].sessionStart).toBe(Date.UTC(2026, 9, 5, 21));
+  });
+});
+
+// ── DR-19: one VWAP and one profile ────────────────────────────────────────────
+describe('one VWAP for every caller (DR-19)', () => {
+  const H = 3_600_000;
+  const bar = (i: number, price: number, volume: number) => ({
+    time: Date.UTC(2026, 8, 1) + i * H,
+    open: price,
+    high: price + 0.001,
+    low: price - 0.001,
+    close: price,
+    volume,
+  });
+  // Two bars without volume, then traded bars, one more without volume in the middle.
+  const bars = [
+    bar(0, 1.1, 0),
+    bar(1, 1.2, 0),
+    bar(2, 1.3, 100),
+    bar(3, 1.5, 300),
+    bar(4, 9.9, 0),
+    bar(5, 1.4, 100),
+  ];
+
+  it('is na until volume trades, and a bar without volume adds nothing', () => {
+    const run = vwapRun(bars);
+    expect(run.vwap.slice(0, 2)).toEqual([null, null]);
+    expect(run.vwap[2]).toBeCloseTo(1.3, 12);
+    expect(run.vwap[3]).toBeCloseTo((1.3 * 100 + 1.5 * 300) / 400, 12);
+    expect(run.vwap[4]).toBeCloseTo(run.vwap[3] as number, 12); // the 9.9 bar had no volume
+    expect(run.dev[2]).toBe(0); // a single bar deviates from nothing
+  });
+
+  it('the session VWAP, the VWAP bands and the anchored-VWAP drawing all give that answer', () => {
+    const run = vwapRun(bars);
+    expect(vwap(bars)).toEqual(run.vwap);
+    expect(vwapBands(bars, 1, 2, 'Day').vwap).toEqual(run.vwap);
+    const drawn = anchoredVwap(bars, bars[0].time);
+    expect(drawn.map((p) => p.time)).toEqual(bars.slice(2).map((b) => b.time)); // no point before volume
+    expect(drawn.map((p) => p.vwap)).toEqual(run.vwap.slice(2));
+  });
+
+  it('the overlay, the drawing tool and the study share one profile', () => {
+    const many = Array.from({ length: 40 }, (_, i) =>
+      bar(i, 1.1 + Math.sin(i / 3) * 0.01, 100 + i * 10),
+    );
+    const study = volumeProfileOf(many, { rows: 24 })!;
+    const tool = volumeProfileRows(many, 24, 70)!;
+    const overlay = profileWithValueArea(many, 24)!;
+    expect(tool.rows.map((r) => r.total)).toEqual(study.rows.map((r) => r.upVol + r.downVol));
+    expect(tool.poc).toBe(study.pocIndex);
+    expect(overlay.poc).toBeCloseTo(study.poc, 12);
+    expect(overlay.bins.map((b) => b.volume)).toEqual(study.rows.map((r) => r.upVol + r.downVol));
   });
 });

@@ -14,6 +14,8 @@
  */
 
 import { pivotLevels as verifiedPivotLevels, type PivotMethod } from '../panels/pivots';
+import { periodKey, utcDay, type AnchorPeriod, type DayOf } from './periods';
+import { volumeProfile as profileVolume, vwapRun } from '../profiles/profile-math';
 
 export type Maybe = number | null;
 
@@ -26,18 +28,8 @@ export interface Ohlc {
   volume: number;
 }
 
-const DAY_MS = 86_400_000;
-
-/**
- * A bar's time → its trading day, as 00:00 UTC ms of the date. What every day-based study (session
- * VWAP, daily pivots, the Day / Week / Month anchors) counts in: the chart passes the symbol's own
- * trading days (`TradingCalendar.dayOf` — for FX, days that roll at 17:00 New York), and without one
- * a day is the UTC day ({@link utcDay}).
- */
-export type DayOf = (time: number) => number;
-
-/** The UTC day of `time`: the trading day of a symbol with no session of its own. */
-export const utcDay: DayOf = (time) => Math.floor(time / DAY_MS) * DAY_MS;
+// The trading periods (day / week / month of a bar) live in `periods.ts`, shared with the profile engine.
+export { periodKey, utcDay, type AnchorPeriod, type DayOf } from './periods';
 
 const nulls = (n: number): Maybe[] => new Array<Maybe>(Math.max(0, n)).fill(null);
 
@@ -370,23 +362,7 @@ function smoothDense(series: Maybe[], period: number): Maybe[] {
  * it drifts toward the all-time mean and stops tracking the day's value area.
  */
 export function vwap(bars: Ohlc[], dayOf: DayOf = utcDay): Maybe[] {
-  const out: Maybe[] = nulls(bars.length);
-  let day = -1;
-  let pv = 0;
-  let vol = 0;
-  for (let i = 0; i < bars.length; i++) {
-    const d = dayOf(bars[i].time);
-    if (d !== day) {
-      day = d;
-      pv = 0;
-      vol = 0;
-    }
-    const typical = (bars[i].high + bars[i].low + bars[i].close) / 3;
-    pv += typical * bars[i].volume;
-    vol += bars[i].volume;
-    out[i] = vol > 0 ? pv / vol : null;
-  }
-  return out;
+  return vwapRun(bars, { source: 'hlc3', periodOf: dayOf }).vwap;
 }
 
 /** Highest high / lowest low channel (Donchian). */
@@ -1410,47 +1386,21 @@ export interface VolumeProfileBin {
 }
 
 /**
- * Volume profile — volume distributed across price bins.
- *
- * Returns bins rather than a per-bar series because it is a HORIZONTAL
- * histogram: it has one value per price level for the whole window, not one
- * per bar, so it cannot be plotted through the normal series path.
+ * Volume profile — volume distributed across price bins, as bins rather than a per-bar series because it is a
+ * HORIZONTAL histogram. The profile engine's one implementation ({@link profileVolume}, DR-19): each bar's volume
+ * spread over the bins its range covers in proportion to the overlap, up or down by the bar's own direction (the
+ * OHLCV convention TradingView uses for its profiles when there is no aggressor tape, which FX never has).
  */
 export function volumeProfile(bars: Ohlc[], bins = 24): VolumeProfileBin[] {
-  if (bars.length === 0 || bins <= 0) return [];
-  let hi = -Infinity;
-  let lo = Infinity;
-  for (const b of bars) {
-    hi = Math.max(hi, b.high);
-    lo = Math.min(lo, b.low);
-  }
-  const span = hi - lo;
-  if (span <= 0) return [];
-  const step = span / bins;
-  const out: VolumeProfileBin[] = Array.from({ length: bins }, (_, i) => ({
-    price: lo + step * (i + 0.5),
-    volume: 0,
-    up: 0,
-    down: 0,
+  if (bins <= 0) return [];
+  const p = profileVolume(bars, { rows: bins });
+  if (!p) return [];
+  return p.rows.map((r) => ({
+    price: (r.priceLow + r.priceHigh) / 2,
+    volume: r.upVol + r.downVol,
+    up: r.upVol,
+    down: r.downVol,
   }));
-  for (const b of bars) {
-    // Spread each bar's volume across the bins its range covers, rather than
-    // dumping it all at the close — otherwise the profile is a histogram of
-    // closing prices, which is a different and much less useful chart.
-    const first = Math.max(0, Math.min(bins - 1, Math.floor((b.low - lo) / step)));
-    const last = Math.max(0, Math.min(bins - 1, Math.floor((b.high - lo) / step)));
-    const touched = last - first + 1;
-    const share = b.volume / touched;
-    // Up/down by the bar's own direction — the OHLCV convention TradingView uses for its
-    // profiles when there is no aggressor tape, which FX never has.
-    const rising = b.close >= b.open;
-    for (let i = first; i <= last; i++) {
-      out[i].volume += share;
-      if (rising) out[i].up += share;
-      else out[i].down += share;
-    }
-  }
-  return out;
 }
 
 // ── Fourth wave ────────────────────────────────────────────────────────────
@@ -2382,10 +2332,9 @@ export interface VwapBands {
 }
 
 /**
- * VWAP with volume-weighted standard-deviation bands, resetting whenever
- * `periodKey` changes (and starting at `startIndex`). A null key means
- * "never reset". Bars with zero volume count with weight 1 so FX tick-volume
- * gaps do not blank the line.
+ * VWAP with volume-weighted standard-deviation bands, resetting whenever `periodKey` changes (and starting at
+ * `startIndex`); a null key means "never reset". The VWAP itself is the profile engine's one implementation
+ * ({@link vwapRun}): a bar without volume adds nothing, and the line is na until volume has traded.
  */
 function vwapCore(
   bars: Ohlc[],
@@ -2394,61 +2343,16 @@ function vwapCore(
   startIndex: number,
   periodKey: ((t: number) => number) | null,
 ): VwapBands {
-  const n = bars.length;
-  const r: VwapBands = {
-    vwap: nulls(n),
-    upper1: nulls(n),
-    lower1: nulls(n),
-    upper2: nulls(n),
-    lower2: nulls(n),
+  const run = vwapRun(bars, { source: 'hlc3', startIndex, periodOf: periodKey ?? undefined });
+  const band = (mult: number, sign: 1 | -1): Maybe[] =>
+    run.vwap.map((v, i) => (v === null ? null : v + sign * mult * (run.dev[i] as number)));
+  return {
+    vwap: run.vwap,
+    upper1: band(mult1, 1),
+    lower1: band(mult1, -1),
+    upper2: band(mult2, 1),
+    lower2: band(mult2, -1),
   };
-  let key = NaN;
-  let sv = 0;
-  let spv = 0;
-  let sp2v = 0;
-  for (let i = Math.max(0, startIndex); i < n; i++) {
-    const k = periodKey ? periodKey(bars[i].time) : 0;
-    if (k !== key) {
-      key = k;
-      sv = 0;
-      spv = 0;
-      sp2v = 0;
-    }
-    const b = bars[i];
-    const p = (b.high + b.low + b.close) / 3;
-    const v = b.volume > 0 ? b.volume : 1;
-    sv += v;
-    spv += p * v;
-    // `ta.vwap`'s operation order: the variance of a single bar is a difference of two equal sums, and only the
-    // same rounding makes it the same (zero, after the clamp) in both runtimes.
-    sp2v += v * p * p;
-    const vw = spv / sv;
-    const sd = Math.sqrt(Math.max(0, sp2v / sv - vw * vw));
-    r.vwap[i] = vw;
-    r.upper1[i] = vw + mult1 * sd;
-    r.lower1[i] = vw - mult1 * sd;
-    r.upper2[i] = vw + mult2 * sd;
-    r.lower2[i] = vw - mult2 * sd;
-  }
-  return r;
-}
-
-export type AnchorPeriod = 'Day' | 'Week' | 'Month';
-
-/**
- * Key of the trading day, week (Monday–Sunday) or month `time` falls in — the period of its trading
- * DATE (`dayOf`), as TradingView anchors them: an FX bar from Sunday 17:00 New York trades Monday, so
- * it opens Monday's week, and the session opening on 30 September at 17:00 New York is 1 October's,
- * so it opens October. With the default {@link utcDay}, calendar periods of the UTC day.
- */
-export function periodKey(time: number, period: AnchorPeriod, dayOf: DayOf = utcDay): number {
-  const day = Math.floor(dayOf(time) / DAY_MS);
-  if (period === 'Week') return Math.floor((day + 3) / 7); // 1970-01-01 was a Thursday
-  if (period === 'Month') {
-    const d = new Date(day * DAY_MS);
-    return d.getUTCFullYear() * 12 + d.getUTCMonth();
-  }
-  return day;
 }
 
 /** Session VWAP with ±mult1/±mult2 standard-deviation bands, reset with each `anchor` period. */

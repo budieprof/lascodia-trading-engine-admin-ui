@@ -836,9 +836,22 @@ describe('volumeProfile', () => {
     expect(profile.filter((b) => b.volume > 0).length).toBeGreaterThan(5);
   });
 
-  it('returns nothing when the series has no range', () => {
-    expect(volumeProfile(flat, 10)).toEqual([]);
+  it('puts all the volume at the one price of a series with no range (one engine, DR-19)', () => {
+    const profile = volumeProfile(flat, 10);
+    const traded = profile.filter((b) => b.volume > 0);
+    expect(traded).toHaveLength(1);
+    expect(traded[0].volume).toBeCloseTo(
+      flat.reduce((a, b) => a + b.volume, 0),
+      9,
+    );
+    expect(traded[0].price).toBeCloseTo(flat[0].close, 4);
     expect(volumeProfile([], 10)).toEqual([]);
+  });
+
+  it('is the profile engine: overlap-weighted, so a bar half inside a bin gives it half its share', () => {
+    // One bar from 0 to 10 over 4 bins of 2.5: each bin holds a quarter, exactly.
+    const p = volumeProfile([{ time: 0, open: 0, high: 10, low: 0, close: 10, volume: 100 }], 4);
+    expect(p.map((b) => b.volume)).toEqual([25, 25, 25, 25]);
   });
 });
 

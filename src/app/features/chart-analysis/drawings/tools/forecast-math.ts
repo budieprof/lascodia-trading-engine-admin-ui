@@ -4,6 +4,12 @@
  * Everything here is canvas-free so the numbers TradingView prints (R:R, P&L,
  * tick counts, bar counts, VWAP, profile rows) can be pinned by unit tests.
  */
+import {
+  priceOf,
+  volumeProfile as profileOf,
+  vwapRun,
+  type VwapSource as ProfileVwapSource,
+} from '../../profiles/profile-math';
 
 export interface OhlcvBar {
   time: number;
@@ -97,7 +103,8 @@ export function resolutionMs(resolution: string | undefined): number | null {
 export function medianInterval(bars: readonly { time: number }[]): number | null {
   if (bars.length < 2) return null;
   const diffs: number[] = [];
-  for (let i = Math.max(1, bars.length - 200); i < bars.length; i++) diffs.push(bars[i].time - bars[i - 1].time);
+  for (let i = Math.max(1, bars.length - 200); i < bars.length; i++)
+    diffs.push(bars[i].time - bars[i - 1].time);
   diffs.sort((a, b) => a - b);
   return diffs[diffs.length >> 1] || null;
 }
@@ -107,7 +114,11 @@ export function medianInterval(bars: readonly { time: number }[]): number | null
  * at or before `time`; past either end it extrapolates at `interval`, which is
  * how a range reaching into the future still counts bars.
  */
-export function barIndexAt(bars: readonly { time: number }[], time: number, interval: number): number {
+export function barIndexAt(
+  bars: readonly { time: number }[],
+  time: number,
+  interval: number,
+): number {
   if (bars.length === 0) return time / interval;
   const first = bars[0].time;
   const last = bars[bars.length - 1].time;
@@ -124,7 +135,12 @@ export function barIndexAt(bars: readonly { time: number }[], time: number, inte
 }
 
 /** Signed bar count from t0 to t1 — what "N bars" means on every TV measurer. */
-export function barsBetween(bars: readonly { time: number }[], t0: number, t1: number, interval: number): number {
+export function barsBetween(
+  bars: readonly { time: number }[],
+  t0: number,
+  t1: number,
+  interval: number,
+): number {
   return Math.round(barIndexAt(bars, t1, interval) - barIndexAt(bars, t0, interval));
 }
 
@@ -179,7 +195,8 @@ export function positionStats(i: PositionInputs): PositionStats {
   const riskAmount = i.riskUnit === '%' ? (i.accountSize * i.risk) / 100 : i.risk;
   const lot = i.lotSize > 0 ? i.lotSize : 1;
   const qtyRisk = stopDelta > 0 ? riskAmount / (stopDelta * lot) : 0;
-  const qtyLvg = i.entry > 0 && i.leverage > 0 ? (i.accountSize * i.leverage) / (i.entry * lot) : Infinity;
+  const qtyLvg =
+    i.entry > 0 && i.leverage > 0 ? (i.accountSize * i.leverage) / (i.entry * lot) : Infinity;
   const qty = floorTo(Math.min(qtyRisk, qtyLvg), i.qtyPrecision);
   const base = i.entry !== 0 ? Math.abs(i.entry) : 1;
   return {
@@ -196,7 +213,13 @@ export function positionStats(i: PositionInputs): PositionStats {
 }
 
 /** P&L of the position if closed at `price`. */
-export function positionPnl(side: 'long' | 'short', entry: number, price: number, qty: number, lotSize: number): number {
+export function positionPnl(
+  side: 'long' | 'short',
+  entry: number,
+  price: number,
+  qty: number,
+  lotSize: number,
+): number {
   return (side === 'long' ? price - entry : entry - price) * qty * (lotSize > 0 ? lotSize : 1);
 }
 
@@ -254,7 +277,11 @@ export function defaultPositionLevels(
 ): { target: number; stop: number; end: number } {
   const stopDist = entry * 0.0015 * Math.sqrt(interval / 3_600_000);
   const dir = side === 'long' ? 1 : -1;
-  return { target: entry + dir * stopDist * 1.5, stop: entry - dir * stopDist, end: entryTime + 20 * interval };
+  return {
+    target: entry + dir * stopDist * 1.5,
+    stop: entry - dir * stopDist,
+    end: entryTime + 20 * interval,
+  };
 }
 
 // ── Anchored VWAP ─────────────────────────────────────────────────────────
@@ -265,43 +292,29 @@ export interface VwapPoint {
   stdev: number;
 }
 
-export type VwapSource = 'hlc3' | 'hl2' | 'ohlc4' | 'close' | 'open' | 'high' | 'low';
+export type VwapSource = ProfileVwapSource;
 
 export function sourceOf(b: OhlcvBar, src: VwapSource): number {
-  switch (src) {
-    case 'hl2':
-      return (b.high + b.low) / 2;
-    case 'ohlc4':
-      return (b.open + b.high + b.low + b.close) / 4;
-    case 'close':
-    case 'open':
-    case 'high':
-    case 'low':
-      return b[src];
-    default:
-      return (b.high + b.low + b.close) / 3;
-  }
+  return priceOf(b, src);
 }
 
-/** Cumulative VWAP from the anchor, with the volume-weighted standard deviation for the bands. */
-export function anchoredVwap(bars: readonly OhlcvBar[], anchor: number, src: VwapSource = 'hlc3'): VwapPoint[] {
+/**
+ * Cumulative VWAP from the anchor, with the volume-weighted standard deviation for the bands — the profile
+ * engine's one VWAP ({@link vwapRun}, DR-19). Bars before any volume has traded have no VWAP and no point (this
+ * drew the bar's own price there, a value no volume backed).
+ */
+export function anchoredVwap(
+  bars: readonly OhlcvBar[],
+  anchor: number,
+  src: VwapSource = 'hlc3',
+): VwapPoint[] {
+  const start = bars.findIndex((b) => b.time >= anchor);
+  if (start < 0) return [];
+  const run = vwapRun(bars, { source: src, startIndex: start });
   const out: VwapPoint[] = [];
-  let pv = 0;
-  let v = 0;
-  let pv2 = 0;
-  for (const b of bars) {
-    if (b.time < anchor) continue;
-    const s = sourceOf(b, src);
-    const vol = b.volume > 0 ? b.volume : 0;
-    pv += s * vol;
-    pv2 += s * s * vol;
-    v += vol;
-    if (v <= 0) {
-      out.push({ time: b.time, vwap: s, stdev: 0 });
-      continue;
-    }
-    const vwap = pv / v;
-    out.push({ time: b.time, vwap, stdev: Math.sqrt(Math.max(0, pv2 / v - vwap * vwap)) });
+  for (let i = start; i < bars.length; i++) {
+    const v = run.vwap[i];
+    if (v !== null) out.push({ time: bars[i].time, vwap: v, stdev: run.dev[i] as number });
   }
   return out;
 }
@@ -325,58 +338,34 @@ export interface Profile {
 }
 
 /**
- * TradingView's fixed-range / anchored profile: `rows` equal price rows
- * spanning the window's high-low, each bar's volume spread over the rows its
- * range covers in proportion to overlap, split up/down by close vs open, and a
- * value area grown from the POC towards the fuller neighbour.
+ * TradingView's fixed-range / anchored profile: `rows` equal price rows spanning the window's high-low, each bar's
+ * volume spread over the rows its range covers in proportion to overlap, split up/down by close vs open, and a
+ * value area grown from the POC towards the fuller neighbour — the profile engine's one profile
+ * ({@link profileOf}, DR-19), in the drawing tools' row shape.
  */
-export function volumeProfileRows(bars: readonly OhlcvBar[], rows = 24, valueAreaPct = 70): Profile | null {
-  const used = bars.filter((b) => b.volume > 0);
-  if (used.length === 0 || rows < 1) return null;
-  let lo = Infinity;
-  let hi = -Infinity;
-  for (const b of used) {
-    lo = Math.min(lo, b.low);
-    hi = Math.max(hi, b.high);
-  }
-  if (hi <= lo) hi = lo + Math.abs(lo) * 1e-6 + 1e-9;
-  const step = (hi - lo) / rows;
-  const out: ProfileRow[] = Array.from({ length: rows }, (_, i) => ({
-    low: lo + i * step,
-    high: lo + (i + 1) * step,
-    up: 0,
-    down: 0,
-    total: 0,
-  }));
-  for (const b of used) {
-    const up = b.close >= b.open;
-    const span = b.high - b.low;
-    const first = Math.min(rows - 1, Math.max(0, Math.floor((b.low - lo) / step)));
-    const last = Math.min(rows - 1, Math.max(0, Math.floor((b.high - lo) / step)));
-    for (let r = first; r <= last; r++) {
-      const share =
-        span > 0 ? (Math.min(b.high, out[r].high) - Math.max(b.low, out[r].low)) / span : 1 / (last - first + 1);
-      if (share <= 0) continue;
-      const vol = b.volume * share;
-      if (up) out[r].up += vol;
-      else out[r].down += vol;
-      out[r].total += vol;
-    }
-  }
-  let poc = 0;
-  for (let i = 1; i < rows; i++) if (out[i].total > out[poc].total) poc = i;
-  const total = out.reduce((s, r) => s + r.total, 0);
-  let a = poc;
-  let z = poc;
-  let inside = out[poc].total;
-  const target = (total * valueAreaPct) / 100;
-  while (inside < target - 1e-9 && (a > 0 || z < rows - 1)) {
-    const below = a > 0 ? out[a - 1].total : -1;
-    const above = z < rows - 1 ? out[z + 1].total : -1;
-    if (above >= below) inside += out[++z].total;
-    else inside += out[--a].total;
-  }
-  return { rows: out, poc, vaLow: a, vaHigh: z, peak: out[poc].total };
+export function volumeProfileRows(
+  bars: readonly OhlcvBar[],
+  rows = 24,
+  valueAreaPct = 70,
+): Profile | null {
+  if (rows < 1) return null;
+  const p = profileOf(bars, { rows, valueAreaPct });
+  if (!p) return null;
+  const vaLow = p.rows.findIndex((r) => r.priceLow === p.val);
+  const vaHigh = p.rows.findIndex((r) => r.priceHigh === p.vah);
+  return {
+    rows: p.rows.map((r) => ({
+      low: r.priceLow,
+      high: r.priceHigh,
+      up: r.upVol,
+      down: r.downVol,
+      total: r.upVol + r.downVol,
+    })),
+    poc: p.pocIndex,
+    vaLow: vaLow < 0 ? p.pocIndex : vaLow,
+    vaHigh: vaHigh < 0 ? p.pocIndex : vaHigh,
+    peak: p.maxRowVolume,
+  };
 }
 
 // ── Forecast ──────────────────────────────────────────────────────────────
