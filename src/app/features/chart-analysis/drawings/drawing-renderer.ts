@@ -2,43 +2,9 @@ import { behaviorFor } from './tools/registry';
 import { optionsOf } from './tools/types';
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { IChartApi, ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
-import { FIB_LEVELS, type DashStyle, type Drawing } from './model';
-import { HANDLE_RADIUS, rectOf, type Pt } from './geometry';
-import {
-  paintArc,
-  paintCurve,
-  paintFibArcs,
-  paintFibChannel,
-  paintFibCircles,
-  paintFibSpeedFan,
-  paintFibTimezone,
-  paintFibWedge,
-  paintFlatChannel,
-  paintGannBox,
-  paintGannFan,
-  paintGannSquare,
-  paintLabelledPolyline,
-  paintMarker,
-  paintPitchfork,
-  paintRegressionChannel,
-  paintBarRegion,
-  paintCyclicLines,
-  paintDoubleCurve,
-  paintFibSpiral,
-  paintGannGrid,
-  paintRotatedRectangle,
-  paintSineLine,
-  paintTimeCycles,
-  paintArrowMark,
-  paintCircle,
-  paintForecast,
-  paintGannSquareFixed,
-  paintInfoLine,
-  paintTrendAngle,
-  paintTrendFibTime,
-  paintVolumeProfile,
-  type PaintCtx,
-} from './advanced-painters';
+import type { DashStyle, Drawing } from './model';
+import { HANDLE_RADIUS, type Pt } from './geometry';
+import type { PaintCtx } from './paint-ctx';
 import type { Bar } from '../datafeed/candle-feed.service';
 
 /**
@@ -105,7 +71,11 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate = undefined;
   }
 
-  setDrawings(drawings: Drawing[], selectedId: string | null, alsoSelected: ReadonlySet<string> = new Set()): void {
+  setDrawings(
+    drawings: Drawing[],
+    selectedId: string | null,
+    alsoSelected: ReadonlySet<string> = new Set(),
+  ): void {
     this.drawings = drawings;
     this.selectedId = selectedId;
     this.alsoSelected = alsoSelected;
@@ -178,11 +148,26 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     }
     const d = new Date(Number(sec) * 1000);
     const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
-    const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+    const mon = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ][d.getUTCMonth()];
     const pad = (n: number) => String(n).padStart(2, '0');
     const date = `${day} ${pad(d.getUTCDate())} ${mon} '${String(d.getUTCFullYear()).slice(2)}`;
     // Daily and slower charts label dates only, as TradingView does.
-    return this.medianStep() >= 86_400_000 ? date : `${date}  ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
+    return this.medianStep() >= 86_400_000
+      ? date
+      : `${date}  ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
   }
 
   priceAxisViews() {
@@ -247,11 +232,25 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
           const lo = Math.min(...vals);
           const hi = Math.max(...vals);
           if (hi - lo < 1) return;
-          target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
-            context.fillStyle = AXIS_BAND;
-            if (axis === 'y') context.fillRect(0, lo * verticalPixelRatio, bitmapSize.width, (hi - lo) * verticalPixelRatio);
-            else context.fillRect(lo * horizontalPixelRatio, 0, (hi - lo) * horizontalPixelRatio, bitmapSize.height);
-          });
+          target.useBitmapCoordinateSpace(
+            ({ context, bitmapSize, horizontalPixelRatio, verticalPixelRatio }) => {
+              context.fillStyle = AXIS_BAND;
+              if (axis === 'y')
+                context.fillRect(
+                  0,
+                  lo * verticalPixelRatio,
+                  bitmapSize.width,
+                  (hi - lo) * verticalPixelRatio,
+                );
+              else
+                context.fillRect(
+                  lo * horizontalPixelRatio,
+                  0,
+                  (hi - lo) * horizontalPixelRatio,
+                  bitmapSize.height,
+                );
+            },
+          );
         },
       }),
     };
@@ -264,7 +263,9 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     if (!chart || !series) return null;
     const y = series.priceToCoordinate(point.price);
     if (y === null) return null;
-    const x = chart.timeScale().timeToCoordinate((this.shift(point.time) / 1000) as Time) ?? this.xAtTime(point.time);
+    const x =
+      chart.timeScale().timeToCoordinate((this.shift(point.time) / 1000) as Time) ??
+      this.xAtTime(point.time);
     if (x === null) return null;
     return { x, y };
   }
@@ -286,7 +287,8 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
       const b = bars[i + 1];
       const xa = chart.timeScale().timeToCoordinate((this.shift(a.time) / 1000) as Time);
       const xb = chart.timeScale().timeToCoordinate((this.shift(b.time) / 1000) as Time);
-      if (xa !== null && xb !== null) return xa + ((timeMs - a.time) / (b.time - a.time)) * (xb - xa);
+      if (xa !== null && xb !== null)
+        return xa + ((timeMs - a.time) / (b.time - a.time)) * (xb - xa);
     }
     const edge = this.edge(timeMs);
     if (!edge) return null;
@@ -324,7 +326,8 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
   private medianStep(): number {
     const bars = this.bars();
     const gaps: number[] = [];
-    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++) gaps.push(bars[i].time - bars[i - 1].time);
+    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++)
+      gaps.push(bars[i].time - bars[i - 1].time);
     gaps.sort((a, b) => a - b);
     return gaps[gaps.length >> 1] || 60_000;
   }
@@ -349,7 +352,8 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     if (x === null) return null;
     const spacing = chart.timeScale().options().barSpacing;
     const gaps: number[] = [];
-    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++) gaps.push(bars[i].time - bars[i - 1].time);
+    for (let i = Math.max(1, bars.length - 50); i < bars.length; i++)
+      gaps.push(bars[i].time - bars[i - 1].time);
     gaps.sort((a, b) => a - b);
     const step = gaps[gaps.length >> 1] || 60_000;
     return { time: ref.time, x, step, spacing };
@@ -420,193 +424,18 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     selected: boolean,
     hovered = false,
   ): void {
-    this.applyStroke(ctx, drawing);
-    const showHandles = selected || hovered;
+    // Every tool paints through its behaviour (tools/registry.ts; a spec holds every kind to one). The old
+    // per-kind switch and its painters were unreachable and are gone (DR-21).
     const behavior = behaviorFor(drawing.kind);
-    if (behavior) {
-      const base = this.paintCtx(ctx, drawing, pts, w, h);
-      const options = optionsOf(behavior, drawing);
-      behavior.paint({ ...base, selected, hovered, options });
-      ctx.setLineDash([]);
-      if (showHandles) this.handles(ctx, behavior.handles?.({ ...base, options }) ?? pts, drawing.locked, !selected);
-      return;
-    }
-    const [a, b, c] = pts;
-    const fill = drawing.style.fill;
-
-    switch (drawing.kind) {
-      case 'trend-line':
-      case 'measure':
-        if (pts.length >= 2) this.line(ctx, a, b);
-        if (drawing.kind === 'measure' && pts.length >= 2) this.measureLabel(ctx, drawing, a, b);
-        break;
-
-      case 'arrow':
-        if (pts.length >= 2) {
-          this.line(ctx, a, b);
-          this.arrowHead(ctx, a, b, drawing.style.color);
-        }
-        break;
-
-      case 'ray':
-        if (pts.length >= 2) this.line(ctx, a, extend(a, b, w, h));
-        break;
-
-      case 'extended-line':
-        if (pts.length >= 2) this.line(ctx, extend(b, a, w, h), extend(a, b, w, h));
-        break;
-
-      case 'horizontal-line':
-        this.line(ctx, { x: 0, y: a.y }, { x: w, y: a.y });
-        this.priceTag(ctx, drawing, a.y, w);
-        break;
-
-      case 'horizontal-ray':
-        if (pts.length >= 2) {
-          this.line(ctx, { x: Math.min(a.x, b.x), y: a.y }, { x: w, y: a.y });
-          this.priceTag(ctx, drawing, a.y, w);
-        } else {
-          this.line(ctx, a, { x: w, y: a.y });
-        }
-        break;
-
-      case 'vertical-line':
-        this.line(ctx, { x: a.x, y: 0 }, { x: a.x, y: h });
-        break;
-
-      case 'cross-line':
-        this.line(ctx, { x: 0, y: a.y }, { x: w, y: a.y });
-        this.line(ctx, { x: a.x, y: 0 }, { x: a.x, y: h });
-        break;
-
-      case 'parallel-channel':
-        if (pts.length >= 2) {
-          this.line(ctx, a, b);
-          if (pts.length >= 3) {
-            const dy = c.y - a.y;
-            const a2 = { x: a.x, y: a.y + dy };
-            const b2 = { x: b.x, y: b.y + dy };
-            this.line(ctx, a2, b2);
-            if (fill) {
-              ctx.fillStyle = fill;
-              ctx.beginPath();
-              ctx.moveTo(a.x, a.y);
-              ctx.lineTo(b.x, b.y);
-              ctx.lineTo(b2.x, b2.y);
-              ctx.lineTo(a2.x, a2.y);
-              ctx.closePath();
-              ctx.fill();
-            }
-          }
-        }
-        break;
-
-      case 'rectangle':
-        if (pts.length >= 2) {
-          const r = rectOf(a, b);
-          if (fill) {
-            ctx.fillStyle = fill;
-            ctx.fillRect(r.x, r.y, r.w, r.h);
-          }
-          ctx.strokeRect(r.x, r.y, r.w, r.h);
-        }
-        break;
-
-      case 'ellipse':
-        if (pts.length >= 2) {
-          const r = rectOf(a, b);
-          ctx.beginPath();
-          ctx.ellipse(r.x + r.w / 2, r.y + r.h / 2, r.w / 2, r.h / 2, 0, 0, Math.PI * 2);
-          if (fill) {
-            ctx.fillStyle = fill;
-            ctx.fill();
-          }
-          ctx.stroke();
-        }
-        break;
-
-      case 'triangle':
-        if (pts.length >= 3) {
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.lineTo(c.x, c.y);
-          ctx.closePath();
-          if (fill) {
-            ctx.fillStyle = fill;
-            ctx.fill();
-          }
-          ctx.stroke();
-        } else if (pts.length >= 2) {
-          this.line(ctx, a, b);
-        }
-        break;
-
-      case 'path':
-      case 'brush':
-        ctx.beginPath();
-        ctx.moveTo(pts[0].x, pts[0].y);
-        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-        ctx.stroke();
-        break;
-
-      case 'fib-retracement':
-        if (pts.length >= 2) this.fib(ctx, drawing, a, b, w, false);
-        break;
-
-      case 'fib-extension':
-        if (pts.length >= 3) this.fib(ctx, drawing, b, c, w, true, a);
-        else if (pts.length >= 2) this.line(ctx, a, b);
-        break;
-
-      case 'text':
-        this.text(ctx, drawing, a);
-        break;
-
-      case 'callout':
-        if (pts.length >= 2) {
-          this.line(ctx, a, b);
-          this.text(ctx, drawing, b, true);
-        } else {
-          this.text(ctx, drawing, a, true);
-        }
-        break;
-
-      case 'price-range':
-        if (pts.length >= 2) this.priceRange(ctx, drawing, a, b);
-        break;
-
-      case 'date-range':
-        if (pts.length >= 2) this.dateRange(ctx, drawing, a, b, h);
-        break;
-
-      case 'long-position':
-      case 'short-position':
-        if (pts.length >= 2) this.position(ctx, drawing, pts);
-        break;
-
-      default:
-        this.paintAdvanced(ctx, drawing, pts, w, h);
-    }
-
+    if (!behavior) return;
+    this.applyStroke(ctx, drawing);
+    const base = this.paintCtx(ctx, drawing, pts, w, h);
+    const options = optionsOf(behavior, drawing);
+    behavior.paint({ ...base, selected, hovered, options });
     ctx.setLineDash([]);
-    if (showHandles) this.handles(ctx, pts, drawing.locked, !selected);
-  }
-
-  /**
-   * The analytical families — pitchforks, Gann, extended Fibonacci, Elliott
-   * and harmonic patterns — live in `advanced-painters.ts`. Dispatching here
-   * rather than inlining keeps this switch about canvas plumbing and that
-   * module about geometry.
-   */
-  private paintAdvanced(
-    ctx: CanvasRenderingContext2D,
-    drawing: Drawing,
-    pts: Pt[],
-    width: number,
-    height: number,
-  ): void {
-    this.paintLegacyAdvanced(this.paintCtx(ctx, drawing, pts, width, height));
+    if (selected || hovered) {
+      this.handles(ctx, behavior.handles?.({ ...base, options }) ?? pts, drawing.locked, !selected);
+    }
   }
 
   /** The painter context every tool receives. */
@@ -637,373 +466,6 @@ export class DrawingRenderer implements ISeriesPrimitive<Time> {
     };
   }
 
-  private paintLegacyAdvanced(p: PaintCtx): void {
-    const { drawing, ctx, pts, width, height } = p;
-    switch (drawing.kind) {
-      case 'pitchfork':
-      case 'schiff-pitchfork':
-      case 'modified-schiff-pitchfork':
-      case 'inside-pitchfork':
-        return paintPitchfork(p, drawing.kind);
-      case 'gann-box':
-        return paintGannBox(p);
-      case 'gann-fan':
-        return paintGannFan(p);
-      case 'gann-square':
-        return paintGannSquare(p);
-      case 'fib-circles':
-        return paintFibCircles(p);
-      case 'fib-arcs':
-        return paintFibArcs(p);
-      case 'fib-speed-fan':
-        return paintFibSpeedFan(p);
-      case 'fib-timezone':
-        return paintFibTimezone(p);
-      case 'fib-channel':
-        return paintFibChannel(p);
-      case 'fib-wedge':
-        return paintFibWedge(p);
-      case 'flat-channel':
-        return paintFlatChannel(p);
-      case 'regression-channel':
-        return paintRegressionChannel(p);
-      case 'elliott-impulse':
-      case 'elliott-correction':
-      case 'elliott-triangle':
-      case 'three-drives':
-      case 'head-and-shoulders':
-        return paintLabelledPolyline(p, false);
-      case 'abcd-pattern':
-      case 'xabcd-pattern':
-      case 'triangle-pattern':
-        return paintLabelledPolyline(p, true);
-      case 'curve':
-        return paintCurve(p);
-      case 'arc':
-        return paintArc(p);
-      case 'polyline':
-        return paintLabelledPolyline(p, false);
-      case 'flag':
-        return paintMarker(p, '⚑', false);
-      case 'signpost':
-        return paintMarker(p, '📍', false);
-      case 'price-label':
-        return paintMarker(p, '', true);
-      case 'disjoint-angle':
-        if (pts.length >= 3) {
-          this.line(ctx, pts[0], pts[1]);
-          this.line(ctx, pts[1], pts[2]);
-        } else if (pts.length >= 2) {
-          this.line(ctx, pts[0], pts[1]);
-        }
-        return;
-      case 'fib-spiral':
-        return paintFibSpiral(p);
-      case 'fib-resistance-arcs':
-        return paintFibArcs(p);
-      case 'cyclic-lines':
-        return paintCyclicLines(p);
-      case 'time-cycles':
-        return paintTimeCycles(p);
-      case 'sine-line':
-        return paintSineLine(p);
-      case 'bars-pattern':
-        return paintBarRegion(p, 'bars pattern');
-      case 'ghost-feed':
-        return paintBarRegion(p, 'ghost feed');
-      case 'projection':
-        return paintLabelledPolyline(p, false);
-      case 'elliott-double-combo':
-      case 'elliott-triple-combo':
-      case 'elliott-minor':
-      case 'elliott-intermediate':
-        return paintLabelledPolyline(p, false);
-      case 'cypher-pattern':
-      case 'five-point-pattern':
-        return paintLabelledPolyline(p, true);
-      case 'head-and-shoulders-inverse':
-        return paintLabelledPolyline(p, false);
-      case 'gann-fan-fixed':
-        // One anchor: the fan uses a default unit box so the 1×1 is meaningful
-        // without a second click.
-        return paintGannFan({ ...p, pts: [pts[0], { x: pts[0].x + 200, y: pts[0].y - 200 }] });
-      case 'gann-grid':
-        return paintGannGrid(p);
-      case 'gann-square-fixed':
-        return paintGannSquareFixed(p);
-      case 'trend-angle':
-        return paintTrendAngle(p);
-      case 'info-line':
-      case 'ruler':
-        return paintInfoLine(p);
-      case 'forecast':
-        return paintForecast(p);
-      case 'trend-fib-time':
-        return paintTrendFibTime(p);
-      case 'circle':
-        return paintCircle(p);
-      case 'arrow-mark-up':
-        return paintArrowMark(p, 'up');
-      case 'arrow-mark-down':
-        return paintArrowMark(p, 'down');
-      case 'arrow-mark-left':
-        return paintArrowMark(p, 'left');
-      case 'arrow-mark-right':
-        return paintArrowMark(p, 'right');
-      case 'anchored-volume-profile':
-        return paintVolumeProfile(p, 'anchored');
-      case 'fixed-range-volume-profile':
-        return paintVolumeProfile(p, 'fixed');
-      case 'pitchfan':
-        return paintPitchfork(p, 'pitchfork');
-      case 'rotated-rectangle':
-        return paintRotatedRectangle(p);
-      case 'arc-curve':
-        return paintCurve(p);
-      case 'double-curve':
-        return paintDoubleCurve(p);
-      case 'highlighter':
-        return paintLabelledPolyline(p, false);
-      case 'comment':
-        return paintMarker(p, '🗨', false);
-      case 'balloon':
-        return paintMarker(p, '🎈', false);
-      case 'sticker':
-        return paintMarker(p, '⭐', false);
-      case 'table':
-        return paintMarker(p, '▦', false);
-      case 'idea':
-        return paintMarker(p, '💡', false);
-      case 'anchored-note':
-        if (pts.length >= 2) {
-          this.line(ctx, pts[0], pts[1]);
-          return paintMarker({ ...p, pts: [pts[1]] }, '📌', false);
-        }
-        return paintMarker(p, '📌', false);
-      case 'anchored-vwap':
-        // The VWAP itself is computed by the indicator engine from the anchor;
-        // here we only mark where the anchor sits.
-        return paintMarker(p, '⚓', true);
-      default:
-        if (pts.length >= 2) this.line(ctx, pts[0], pts[1]);
-    }
-  }
-
-  private line(ctx: CanvasRenderingContext2D, a: Pt, b: Pt): void {
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  }
-
-  private arrowHead(ctx: CanvasRenderingContext2D, a: Pt, b: Pt, color: string): void {
-    const angle = Math.atan2(b.y - a.y, b.x - a.x);
-    const size = 10;
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.moveTo(b.x, b.y);
-    ctx.lineTo(
-      b.x - size * Math.cos(angle - Math.PI / 7),
-      b.y - size * Math.sin(angle - Math.PI / 7),
-    );
-    ctx.lineTo(
-      b.x - size * Math.cos(angle + Math.PI / 7),
-      b.y - size * Math.sin(angle + Math.PI / 7),
-    );
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  /**
-   * Fibonacci levels between two anchors.
-   *
-   * Retracement measures 0→1 across the anchors; extension projects the same
-   * ratios beyond the second leg, which is why it takes a third point.
-   */
-  private fib(
-    ctx: CanvasRenderingContext2D,
-    drawing: Drawing,
-    a: Pt,
-    b: Pt,
-    w: number,
-    extension: boolean,
-    origin?: Pt,
-  ): void {
-    const left = Math.min(a.x, b.x, origin?.x ?? a.x);
-    const span = b.y - a.y;
-    ctx.save();
-    ctx.font = `${drawing.style.fontSize}px -apple-system, system-ui, sans-serif`;
-    ctx.textBaseline = 'bottom';
-
-    let previousY: number | null = null;
-    for (const level of FIB_LEVELS) {
-      const y = extension ? b.y + span * level : a.y + span * level;
-      if (drawing.style.fill && previousY !== null) {
-        ctx.fillStyle = drawing.style.fill;
-        ctx.fillRect(left, Math.min(previousY, y), w - left, Math.abs(y - previousY));
-      }
-      previousY = y;
-      ctx.beginPath();
-      ctx.strokeStyle = drawing.style.color;
-      ctx.lineWidth = level === 0 || level === 1 ? drawing.style.width : 1;
-      ctx.setLineDash(level === 0 || level === 1 ? [] : [4, 3]);
-      ctx.moveTo(left, y);
-      ctx.lineTo(w, y);
-      ctx.stroke();
-      if (drawing.style.showLabels) {
-        ctx.fillStyle = drawing.style.color;
-        ctx.fillText(level.toFixed(3).replace(/0+$/, '').replace(/\.$/, ''), left + 4, y - 2);
-      }
-    }
-    ctx.restore();
-  }
-
-  private priceTag(ctx: CanvasRenderingContext2D, drawing: Drawing, y: number, w: number): void {
-    if (!drawing.style.showLabels) return;
-    const price = this.series()?.coordinateToPrice(y);
-    if (price === null || price === undefined) return;
-    const label = price.toFixed(this.precision());
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.font = '11px -apple-system, system-ui, sans-serif';
-    const tw = ctx.measureText(label).width + 8;
-    ctx.fillStyle = drawing.style.color;
-    ctx.fillRect(w - tw - 2, y - 8, tw, 16);
-    ctx.fillStyle = '#fff';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, w - tw + 2, y);
-    ctx.restore();
-  }
-
-  private text(ctx: CanvasRenderingContext2D, drawing: Drawing, at: Pt, boxed = false): void {
-    const label = drawing.style.text || 'Text';
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.font = `${drawing.style.fontSize}px -apple-system, system-ui, sans-serif`;
-    ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(label).width;
-    if (boxed) {
-      ctx.fillStyle = drawing.style.fill ?? 'rgba(41,98,255,0.12)';
-      ctx.fillRect(at.x - 4, at.y - 11, tw + 8, 22);
-      ctx.strokeStyle = drawing.style.color;
-      ctx.lineWidth = 1;
-      ctx.strokeRect(at.x - 4, at.y - 11, tw + 8, 22);
-    }
-    ctx.fillStyle = drawing.style.color;
-    ctx.fillText(label, at.x, at.y);
-    ctx.restore();
-  }
-
-  private measureLabel(ctx: CanvasRenderingContext2D, drawing: Drawing, a: Pt, b: Pt): void {
-    const series = this.series();
-    if (!series || !drawing.style.showLabels) return;
-    const p1 = series.coordinateToPrice(a.y);
-    const p2 = series.coordinateToPrice(b.y);
-    if (p1 === null || p2 === null) return;
-    const delta = p2 - p1;
-    const pct = p1 !== 0 ? (delta / p1) * 100 : 0;
-    this.badge(
-      ctx,
-      `${delta >= 0 ? '+' : ''}${delta.toFixed(this.precision())}  (${pct.toFixed(2)}%)`,
-      { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - 14 },
-      drawing.style.color,
-    );
-  }
-
-  private priceRange(ctx: CanvasRenderingContext2D, drawing: Drawing, a: Pt, b: Pt): void {
-    const r = rectOf(a, b);
-    if (drawing.style.fill) {
-      ctx.fillStyle = drawing.style.fill;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-    }
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
-    this.measureLabel(ctx, drawing, a, b);
-  }
-
-  private dateRange(
-    ctx: CanvasRenderingContext2D,
-    drawing: Drawing,
-    a: Pt,
-    b: Pt,
-    h: number,
-  ): void {
-    ctx.save();
-    ctx.setLineDash([4, 3]);
-    this.line(ctx, { x: a.x, y: 0 }, { x: a.x, y: h });
-    this.line(ctx, { x: b.x, y: 0 }, { x: b.x, y: h });
-    ctx.restore();
-    if (!drawing.style.showLabels) return;
-    const chart = this.chart();
-    const t1 = chart?.timeScale().coordinateToTime(a.x);
-    const t2 = chart?.timeScale().coordinateToTime(b.x);
-    if (typeof t1 === 'number' && typeof t2 === 'number') {
-      const hours = Math.abs(t2 - t1) / 3600;
-      const label = hours >= 48 ? `${(hours / 24).toFixed(1)}d` : `${hours.toFixed(1)}h`;
-      this.badge(ctx, label, { x: (a.x + b.x) / 2, y: 16 }, drawing.style.color);
-    }
-  }
-
-  /**
-   * Long/short position tool: entry → target → stop, with the R:R that falls
-   * out of them. This is the one drawing that states a trade rather than
-   * describing the chart, so the ratio is the point of it.
-   */
-  private position(ctx: CanvasRenderingContext2D, drawing: Drawing, pts: Pt[]): void {
-    const [entry, target, stop] = pts;
-    const right = Math.max(entry.x, target?.x ?? entry.x, stop?.x ?? entry.x);
-    const left = Math.min(entry.x, target?.x ?? entry.x, stop?.x ?? entry.x);
-    const boxWidth = Math.max(right - left, 40);
-
-    ctx.save();
-    ctx.setLineDash([]);
-    if (target) {
-      ctx.fillStyle = 'rgba(38,166,154,0.18)';
-      ctx.fillRect(left, Math.min(entry.y, target.y), boxWidth, Math.abs(target.y - entry.y));
-    }
-    if (stop) {
-      ctx.fillStyle = 'rgba(239,83,80,0.18)';
-      ctx.fillRect(left, Math.min(entry.y, stop.y), boxWidth, Math.abs(stop.y - entry.y));
-    }
-    ctx.strokeStyle = drawing.style.color;
-    ctx.lineWidth = 1;
-    this.line(ctx, { x: left, y: entry.y }, { x: left + boxWidth, y: entry.y });
-    ctx.restore();
-
-    if (!drawing.style.showLabels || !target || !stop) return;
-    const series = this.series();
-    if (!series) return;
-    const pe = series.coordinateToPrice(entry.y);
-    const pt = series.coordinateToPrice(target.y);
-    const ps = series.coordinateToPrice(stop.y);
-    if (pe === null || pt === null || ps === null) return;
-    const reward = Math.abs(pt - pe);
-    const risk = Math.abs(pe - ps);
-    const rr = risk > 0 ? reward / risk : 0;
-    this.badge(
-      ctx,
-      `R:R ${rr.toFixed(2)}  ·  +${reward.toFixed(this.precision())} / −${risk.toFixed(this.precision())}`,
-      { x: left + boxWidth / 2, y: entry.y - 14 },
-      drawing.style.color,
-    );
-  }
-
-  private badge(ctx: CanvasRenderingContext2D, label: string, at: Pt, color: string): void {
-    ctx.save();
-    ctx.setLineDash([]);
-    ctx.font = '11px -apple-system, system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const tw = ctx.measureText(label).width + 10;
-    ctx.fillStyle = color;
-    ctx.fillRect(at.x - tw / 2, at.y - 9, tw, 18);
-    ctx.fillStyle = '#fff';
-    ctx.fillText(label, at.x, at.y);
-    ctx.restore();
-  }
-
   /**
    * TradingView anchor handles: white disc, 1.5px #2962FF ring. Hover draws
    * them at reduced opacity; a locked drawing greys the ring so it is obvious
@@ -1030,17 +492,6 @@ function dashArray(dash: DashStyle, width: number): number[] {
   if (dash === 'dashed') return [width * 3, width * 2];
   if (dash === 'dotted') return [1, width * 2];
   return [];
-}
-
-/** Extend a→b to the edge of the canvas, for rays and extended lines. */
-export function extend(a: Pt, b: Pt, w: number, h: number): Pt {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  if (dx === 0 && dy === 0) return b;
-  // Scale far enough to leave the viewport in any direction; the canvas clips.
-  const scale = (Math.abs(w) + Math.abs(h)) * 2;
-  const len = Math.hypot(dx, dy);
-  return { x: a.x + (dx / len) * scale, y: a.y + (dy / len) * scale };
 }
 
 /** Index of the last bar at or before `timeMs` (bars ascending, time inside the range). */

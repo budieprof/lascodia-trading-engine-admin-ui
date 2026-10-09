@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import type { Pt } from '../geometry';
 import type { Drawing } from '../model';
 import type { ToolBehavior, ToolBehaviorMap, ToolOption } from './types';

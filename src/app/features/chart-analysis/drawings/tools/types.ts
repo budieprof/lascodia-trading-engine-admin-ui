@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import type { Pt } from '../geometry';
 import type { Drawing, DrawingKind, DrawingPoint, DrawingStyle } from '../model';
 import type { Bar } from '../../datafeed/candle-feed.service';

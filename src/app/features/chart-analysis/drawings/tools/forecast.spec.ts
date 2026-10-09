@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Drawing } from '../model';
-import { BEHAVIORS, barsPatternCopy, measureLines, movePositionHandle, positionLevels } from './forecast';
+import {
+  BEHAVIORS,
+  barsPatternCopy,
+  measureLines,
+  movePositionHandle,
+  positionLevels,
+  profileSpan,
+} from './forecast';
 import {
   anchoredVwap,
   barsBetween,
@@ -234,5 +241,24 @@ describe('registry', () => {
       expect(BEHAVIORS[k]?.paint).toBeTypeOf('function');
     }
     expect(BEHAVIORS['long-position']!.points).toBe(1);
+  });
+});
+
+// DR-21: moved from the deleted advanced-painters spec onto the live tool.
+describe('volume-profile drawing span', () => {
+  it('anchored runs from its anchor to the newest bar, whatever that is', () => {
+    expect(profileSpan('anchored', [{ time: 200 }])).toEqual({ t0: 200, t1: Infinity, fixed: false });
+  });
+
+  it('fixed spans its two anchors in either drag order', () => {
+    const a = profileSpan('fixed', [{ time: 200 }, { time: 600 }]);
+    const b = profileSpan('fixed', [{ time: 600 }, { time: 200 }]);
+    expect(a).toEqual(b);
+    expect(a).toEqual({ t0: 200, t1: 600, fixed: true });
+  });
+
+  it('a fixed profile still being placed previews as anchored; no anchor, no span', () => {
+    expect(profileSpan('fixed', [{ time: 300 }])).toEqual({ t0: 300, t1: Infinity, fixed: false });
+    expect(profileSpan('fixed', [])).toBeNull();
   });
 });

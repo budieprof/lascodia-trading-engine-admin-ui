@@ -1,4 +1,4 @@
-import type { PaintCtx } from '../advanced-painters';
+import type { PaintCtx } from '../paint-ctx';
 import { distanceToSegment, type Pt } from '../geometry';
 import type { Drawing, DrawingPoint } from '../model';
 import type { ToolBehavior, ToolBehaviorMap, ToolOption } from './types';
@@ -849,13 +849,29 @@ const PROFILE_OPTIONS: readonly ToolOption[] = [
   { key: 'extendPoc', label: 'Extend POC right', type: 'bool', default: false },
 ];
 
+/**
+ * The time span a volume-profile drawing covers, in MODEL time: fixed = between its two anchors, in either drag
+ * order; anchored = from its anchor to the newest bar, whatever that is (an unbounded end, never a screen x — the
+ * old painter asked the time scale for the pane's right edge, which is past the data, got null and drew nothing).
+ * A fixed profile still being placed (one anchor) previews as anchored. Null without an anchor.
+ */
+export function profileSpan(
+  mode: 'fixed' | 'anchored',
+  anchors: readonly { time: number }[],
+): { t0: number; t1: number; fixed: boolean } | null {
+  if (anchors.length === 0) return null;
+  const fixed = mode === 'fixed' && anchors.length >= 2;
+  return fixed
+    ? { t0: Math.min(anchors[0].time, anchors[1].time), t1: Math.max(anchors[0].time, anchors[1].time), fixed }
+    : { t0: anchors[0].time, t1: Infinity, fixed };
+}
+
 function profileGeo(p: Ctx, mode: 'fixed' | 'anchored') {
   const axis = axisOf(p);
   const m = anchorsOf(p, axis);
-  if (!axis || m.length === 0) return null;
-  const fixed = mode === 'fixed' && m.length >= 2;
-  const t0 = fixed ? Math.min(m[0].time, m[1].time) : m[0].time;
-  const t1 = fixed ? Math.max(m[0].time, m[1].time) : Infinity;
+  const span = profileSpan(mode, m);
+  if (!axis || !span) return null;
+  const { t0, t1, fixed } = span;
   const inRange = barsOf(p).filter((b) => b.time >= t0 && b.time <= t1);
   const rows = Math.max(1, Math.round(num(p.options, 'rows', 24)));
   const prof = volumeProfileRows(inRange, rows, num(p.options, 'valueArea', 70));
