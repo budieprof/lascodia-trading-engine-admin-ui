@@ -9,6 +9,7 @@ import {
 } from './chart-script.model';
 import { EXAMPLE_STRATEGIES } from './example-strategies';
 import { scriptRenderModel } from './script-model-cache';
+import { normalizeStrategyReport } from '@features/scripting/report/strategy-report.model';
 import type { PlotLayer } from '@shared/pine-chart/render/render-model';
 
 describe('toChartSeconds', () => {
@@ -91,6 +92,12 @@ describe('toChartScriptResult — real Bollinger backtest run', () => {
     expect(s.equity.length).toBe(60);
     expect(s.equity[0].time).toBe(raw.bars[0].t / 1000);
     expect(s.equity[0].value).toBe(100000);
+  });
+
+  it('keeps the report as the strategy report reads it — reading it again changes nothing (PC-I5)', () => {
+    // The Strategy Tester hands this report to app-strategy-report, which normalises what it gets.
+    const report = r.strategy!.report;
+    expect(normalizeStrategyReport(report)).toEqual(report);
   });
 });
 
