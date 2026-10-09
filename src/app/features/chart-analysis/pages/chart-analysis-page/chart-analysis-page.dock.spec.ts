@@ -167,6 +167,8 @@ describe('chart page — keyboard shortcuts leave the Pine editor’s typing alo
   function keyed(): Page {
     const p = page();
     Object.assign(p, {
+      replayActive: signal(false),
+      paletteOpen: signal(false),
       technicalsOpen: signal(false),
       seasonalsOpen: signal(false),
       tool: signal(null),
@@ -206,6 +208,39 @@ describe('chart page — keyboard shortcuts leave the Pine editor’s typing alo
     p.onKeydown(ev);
     expect(p.drawings.remove).not.toHaveBeenCalled();
     expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it('Ctrl+Shift+K on the chart opens its command palette — not the console’s (CC-I11)', () => {
+    const p = keyed();
+    const ev = key('K', chart, { ctrlKey: true, shiftKey: true });
+    const stop = vi.spyOn(ev, 'stopPropagation');
+    p.onKeydown(ev);
+    expect(p.paletteOpen()).toBe(true);
+    expect(stop).toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(true);
+  });
+
+  it('TradingView’s Alt keys drive the scale; "/" opens the indicators (CC-I11)', () => {
+    const p = keyed();
+    Object.assign(p, {
+      invertScale: signal(false),
+      scaleMode: signal('normal'),
+      resetScales: vi.fn(),
+      openStudiesDialog: vi.fn(),
+    });
+    p.onKeydown(key('®', chart, { altKey: true, code: 'KeyR' }));
+    expect(p.resetScales).toHaveBeenCalled();
+    p.onKeydown(key('ˆ', chart, { altKey: true, code: 'KeyI' }));
+    expect(p.invertScale()).toBe(true);
+    p.onKeydown(key('¬', chart, { altKey: true, code: 'KeyL' }));
+    expect(p.scaleMode()).toBe('log');
+    p.onKeydown(key('¬', chart, { altKey: true, code: 'KeyL' }));
+    expect(p.scaleMode()).toBe('normal');
+    p.onKeydown(key('/', chart));
+    expect(p.openStudiesDialog).toHaveBeenCalled();
+    // Typing "/" in the editor stays text.
+    p.onKeydown(key('/', editor));
+    expect(p.openStudiesDialog).toHaveBeenCalledTimes(1);
   });
 
   it('Ctrl+Z in the editor undoes text, not a drawing', () => {

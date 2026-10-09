@@ -8,6 +8,8 @@ import type {
 import type { ScriptInputValues } from '@core/api/scripting.types';
 import type { ScriptDisplaySettings } from '../scripts/script-display';
 import type { LegacyChartLayout } from './layout-store.service';
+import type { ChartAppearance } from '../chart/appearance';
+import type { CompareSeriesSpec } from '../compare/compare-series';
 
 /** A Pine script on the chart, as a layout restores it. */
 export interface WorkspaceScript {
@@ -66,12 +68,39 @@ export function restoredScriptItem(
   };
 }
 
+/** The other charts of a multi-chart layout (CC-I5): each its own series, studies and scripts. */
+export interface ChartPanelState {
+  symbol: string;
+  resolution: string;
+  /** Its own built-in studies. */
+  indicators?: ActiveIndicator[];
+  /** Its own Pine scripts (indicators). */
+  scripts?: WorkspaceScript[];
+  /** Its link group, 1 … 3 (absent or 0: not linked): charts in one group follow each other (`sync`). */
+  link?: number;
+}
+
+/** What linked charts follow of each other (CC-I5); absent: symbol and interval no, crosshair and time yes. */
+export interface ChartSync {
+  symbol?: boolean;
+  interval?: boolean;
+  crosshair?: boolean;
+  time?: boolean;
+}
+
+/** The layout state version this console writes. */
+export const WORKSPACE_VERSION = 2;
+
 /**
  * Everything a chart-analysis workspace restores (engine `ChartLayout.state`). Versioned with
  * `v`; every field but `v` is optional so an older or partial state still applies.
+ *
+ * v2 (CC-I5, multi-chart): the main chart keeps every v1 field at the top level; the layout's other charts are
+ * `charts` (each with its own studies, scripts and link group), with `link` / `sync` for the main chart's group and
+ * what linked charts follow. v1's `split.panels` (symbol and timeframe only) become `charts` ({@link migrateWorkspaceState}).
  */
 export interface ChartWorkspaceState {
-  v: 1;
+  v: 1 | 2;
   symbol?: string;
   resolution?: TvResolution;
   style?: ChartStyle;
@@ -85,6 +114,15 @@ export interface ChartWorkspaceState {
   sessionBreaks?: boolean;
   /** Countdown to bar close on the price scale (default on). */
   countdown?: boolean;
+  /** Candle colours, grid lines, background over the theme's (CC-I11 chart settings); absent: the theme's. */
+  appearance?: ChartAppearance;
+  /** Compare overlays and synthetic series (CC-I12); absent: none. */
+  compare?: CompareSeriesSpec[];
+  /**
+   * Layout memory per symbol (CC-I11): `on` — a symbol switched to opens on the timeframe and zoom it was left on;
+   * `symbols` — what each was left on (`workspace/symbol-memory.ts`). Absent: off.
+   */
+  symbolMemory?: { on?: boolean; symbols?: Record<string, { resolution: string; view?: ChartViewState }> };
   timezone?: string;
   /** How the price-based styles are built (CC-I10); absent: ATR × 1, no wicks, 3 lines. */
   priceBased?: {
@@ -93,6 +131,8 @@ export interface ChartWorkspaceState {
     boxPips?: number;
     renkoWicks?: boolean;
     lineBreakLines?: number;
+    /** Point & Figure's reversal in boxes (CC-I10); absent: 3. */
+    pnfReversal?: number;
   };
   indicators?: ActiveIndicator[];
   scripts?: WorkspaceScript[];
@@ -117,11 +157,17 @@ export interface ChartWorkspaceState {
     /** Whether the trade lines widen the price scale's fit (default on). */
     fitTradeLines?: boolean;
   };
-  /** The split view: its arrangement and each comparison panel's series (CC-12). */
+  /** The split view: its arrangement — and, in v1, each comparison panel's series (CC-12; v2: `charts`). */
   split?: {
     layout?: string;
     panels?: { symbol: string; resolution: string }[];
   };
+  /** v2: the layout's other charts, in order (CC-I5). */
+  charts?: ChartPanelState[];
+  /** v2: the main chart's link group (1 … 3; absent or 0: not linked). */
+  link?: number;
+  /** v2: what linked charts follow of each other. */
+  sync?: ChartSync;
   panel?: {
     watchlistOpen?: boolean;
     width?: number;
@@ -152,6 +198,7 @@ export interface PriceBasedSettings {
   boxPips: number;
   renkoWicks: boolean;
   lineBreakLines: number;
+  pnfReversal: number;
 }
 
 /**
@@ -162,12 +209,14 @@ export function restoredPriceBased(pb: ChartWorkspaceState['priceBased']): Price
   const positive = (v: number | undefined, fallback: number) =>
     typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : fallback;
   const lines = pb?.lineBreakLines;
+  const rev = pb?.pnfReversal;
   return {
     boxMethod: pb?.boxMethod === 'pips' ? 'pips' : 'atr',
     boxSizeAtr: positive(pb?.boxSizeAtr, 1),
     boxPips: positive(pb?.boxPips, 10),
     renkoWicks: pb?.renkoWicks === true,
     lineBreakLines: typeof lines === 'number' && lines >= 1 && lines <= 10 ? Math.round(lines) : 3,
+    pnfReversal: typeof rev === 'number' && rev >= 1 && rev <= 10 ? Math.round(rev) : 3,
   };
 }
 
@@ -226,5 +275,39 @@ export function legacyToState(l: LegacyChartLayout): ChartWorkspaceState {
 }
 
 export function isWorkspaceState(x: unknown): x is ChartWorkspaceState {
-  return !!x && typeof x === 'object' && (x as { v?: unknown }).v === 1;
+  const v = !!x && typeof x === 'object' ? (x as { v?: unknown }).v : undefined;
+  return v === 1 || v === 2;
+}
+
+/**
+ * A layout state as v2 (CC-I5). A v1 state loses nothing: every field stays where it was and its split panels'
+ * series become `charts` (the arrangement stays in `split.layout`). A v2 state comes back as it is.
+ */
+export function migrateWorkspaceState(s: ChartWorkspaceState): ChartWorkspaceState {
+  if (s.v === 2) return s;
+  const { split, ...rest } = s;
+  const charts: ChartPanelState[] = (split?.panels ?? [])
+    .filter((p) => p && typeof p.symbol === 'string' && typeof p.resolution === 'string')
+    .map((p) => ({ symbol: p.symbol, resolution: p.resolution }));
+  return {
+    ...rest,
+    v: 2,
+    ...(split ? { split: { ...(split.layout !== undefined ? { layout: split.layout } : {}) } } : {}),
+    ...(charts.length ? { charts } : {}),
+  };
+}
+
+/** A link group as a layout may hold it: 1 … 3, else 0 (not linked). */
+export function linkGroupOf(raw: unknown): number {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw >= 1 && raw <= 3 ? raw : 0;
+}
+
+/** What linked charts follow, with the defaults for what a layout leaves out. */
+export function restoredSync(raw: ChartSync | undefined): Required<ChartSync> {
+  return {
+    symbol: raw?.symbol === true,
+    interval: raw?.interval === true,
+    crosshair: raw?.crosshair !== false,
+    time: raw?.time !== false,
+  };
 }

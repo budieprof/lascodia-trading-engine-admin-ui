@@ -5,7 +5,12 @@ import { firstValueFrom, timeout } from 'rxjs';
 import { ChartLayoutsService, type ChartLayoutDto } from '@core/services/chart-layouts.service';
 import type { ResponseData } from '@core/api/api.types';
 import { ChartLayoutStore } from './layout-store.service';
-import { isWorkspaceState, legacyToState, type ChartWorkspaceState } from './workspace-state';
+import {
+  WORKSPACE_VERSION,
+  isWorkspaceState,
+  legacyToState,
+  type ChartWorkspaceState,
+} from './workspace-state';
 
 export const WORKSPACE_CACHE_KEY = 'lascodia.chart.workspace.v1';
 export const DEFAULT_LAYOUT_NAME = 'Unnamed';
@@ -170,7 +175,10 @@ export class ChartWorkspaceSync {
     await this.flush();
     return this.adopt(
       await this.call(
-        this.remote.create({ name: name.trim() || DEFAULT_LAYOUT_NAME, state: { v: 1 } }),
+        this.remote.create({
+          name: name.trim() || DEFAULT_LAYOUT_NAME,
+          state: { v: WORKSPACE_VERSION },
+        }),
       ),
     );
   }

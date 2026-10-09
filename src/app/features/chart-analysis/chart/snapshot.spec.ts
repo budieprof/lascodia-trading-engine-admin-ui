@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TableLayout } from '@shared/pine-chart/render/render-model';
-import { placeTable, toCsv } from './snapshot';
+import { TABLE_EDGE, TABLE_GAP, placeTable, stackTables, toCsv } from './snapshot';
 
 /** 7 px per character, whatever the font: geometry, not typography. */
 const measure = (text: string) => text.length * 7;
@@ -78,6 +78,36 @@ describe('snapshot — a script’s table drawn from its layout (CC-22)', () => 
     );
     const header = t.cells.find((c) => c.text === 'Header')!;
     expect(header.w).toBe(t.w);
+  });
+});
+
+describe('snapshot — tables laid out as the chart shows them (pine-chart follow-up)', () => {
+  const two = [cell(0, 0, 'Trend'), cell(0, 1, 'Up'), cell(1, 0, 'RSI'), cell(1, 1, '61.2')];
+  const wide = [cell(0, 0, 'A much wider heading'), cell(0, 1, 'x')];
+
+  it('stacks tables at one anchor one under the other instead of on top of each other', () => {
+    const a = placeTable(table('top_right', two), 800, 400, measure);
+    const b = placeTable(table('top_right', wide), 800, 400, measure);
+    const [sa, sb] = stackTables([a, b], ['top_right', 'top_right'], 800, 400);
+    expect(sa.y).toBe(TABLE_EDGE);
+    expect(sb.y).toBe(TABLE_EDGE + a.h + TABLE_GAP);
+    // Right-aligned in the stack, each against the pane's right edge.
+    expect(sa.x + sa.w).toBe(800 - TABLE_EDGE);
+    expect(sb.x + sb.w).toBe(800 - TABLE_EDGE);
+    // The cells moved with their table.
+    expect(sb.cells[0].y).toBe(sb.y);
+  });
+
+  it('starts the top-left stack below the legend and lifts a bottom stack off the edge', () => {
+    const t = placeTable(table('top_left', two), 800, 400, measure);
+    const [tl] = stackTables([t], ['top_left'], 800, 400, 30);
+    expect(tl).toMatchObject({ x: TABLE_EDGE, y: TABLE_EDGE + 30 });
+    const u = placeTable(table('bottom_center', two), 800, 400, measure);
+    const v = placeTable(table('bottom_center', wide), 800, 400, measure);
+    const [bu, bv] = stackTables([u, v], ['bottom_center', 'bottom_center'], 800, 400);
+    expect(bv.y + bv.h).toBeCloseTo(400 - TABLE_EDGE, 9);
+    expect(bu.y + bu.h + TABLE_GAP).toBeCloseTo(bv.y, 9);
+    expect(bu.x + bu.w / 2).toBeCloseTo(400, 9);
   });
 });
 

@@ -83,6 +83,8 @@ import {
   type WatchColumnKey,
 } from './watchlist-columns';
 import { ChartPrefsService } from '../workspace/chart-prefs.service';
+import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
+import { askName, confirmDelete } from '../dialog/chart-dialogs';
 
 const QUOTE_REFRESH_MS = 30_000;
 /** Calendar, news pressure and positions change slowly; one read per this period while their column shows. */
@@ -150,6 +152,7 @@ export class WatchlistPanelComponent {
   private readonly realtime = inject(RealtimeService);
   private readonly alerts = inject(ChartAlertsService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly dialogs = inject(ScriptDialogService);
 
   readonly pairs = input<CurrencyPairDto[]>([]);
   readonly current = input.required<string>();
@@ -656,10 +659,15 @@ export class WatchlistPanelComponent {
     this.edit((l) => toggleSection(l, id));
   }
 
-  newSection(): void {
-    const name = prompt('Section name', 'New section');
-    if (name !== null) this.edit((l) => addSection(l, name));
+  async newSection(): Promise<void> {
     this.moreMenuOpen.set(false);
+    const name = await askName(this.dialogs, {
+      title: 'New section',
+      label: 'Section name',
+      value: 'New section',
+      confirmLabel: 'Add',
+    });
+    if (name !== null) this.edit((l) => addSection(l, name));
   }
 
   commitSectionName(id: string, name: string): void {
@@ -751,31 +759,49 @@ export class WatchlistPanelComponent {
   // ── lists ──
   async newList(): Promise<void> {
     this.listMenuOpen.set(false);
-    const name = prompt('New watchlist name', 'Watchlist');
-    if (name?.trim()) {
+    const name = await askName(this.dialogs, {
+      title: 'New watchlist',
+      label: 'Watchlist name',
+      value: 'Watchlist',
+      confirmLabel: 'Create',
+    });
+    if (name !== null) {
       this.view.set({ kind: 'list' });
-      await this.store.create(name.trim());
+      await this.store.create(name);
     }
   }
 
   async copyList(): Promise<void> {
     this.listMenuOpen.set(false);
     const list = this.list();
-    const name = list && prompt('Name of the copy', `${list.name} copy`);
-    if (list && name?.trim()) await this.store.create(name.trim(), list);
+    if (!list) return;
+    const name = await askName(this.dialogs, {
+      title: 'Copy watchlist',
+      label: 'Name of the copy',
+      value: `${list.name} copy`,
+      confirmLabel: 'Copy',
+    });
+    if (name !== null) await this.store.create(name, list);
   }
 
   async renameList(): Promise<void> {
     this.listMenuOpen.set(false);
     const list = this.list();
-    const name = list && prompt('Rename watchlist', list.name);
-    if (list && name?.trim()) await this.store.rename(list.id, name);
+    if (!list) return;
+    const name = await askName(this.dialogs, {
+      title: 'Rename watchlist',
+      label: 'Watchlist name',
+      value: list.name,
+      confirmLabel: 'Rename',
+    });
+    if (name !== null) await this.store.rename(list.id, name);
   }
 
   async deleteList(): Promise<void> {
     this.listMenuOpen.set(false);
     const list = this.list();
-    if (list && confirm(`Delete the watchlist "${list.name}"?`)) await this.store.remove(list.id);
+    if (list && (await confirmDelete(this.dialogs, `the watchlist “${list.name}”`)))
+      await this.store.remove(list.id);
   }
 
   openAdd(ev: Event): void {

@@ -292,6 +292,53 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
+import { ReplayController } from '../../replay/replay-controller';
+import type { UiCommand } from '@core/assistant/ui-command.types';
+import { buildPaletteActions, type PaletteAction } from '../../palette/chart-palette';
+import { ChartPaletteComponent } from '../../palette/chart-palette.component';
+import {
+  comparePanes,
+  compareSymbolsOf,
+  compareTitle,
+  restoredCompare,
+  type CompareSeriesSpec,
+} from '../../compare/compare-series';
+import { CompareDialogComponent } from '../../compare/compare-dialog.component';
+import {
+  linkedCharts,
+  panelLayers,
+  panelStudyChoices,
+  sharedRun,
+  withStudy,
+  withoutStudy,
+  type PanelScript,
+} from '../../workspace/chart-panels';
+import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
+import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
+import {
+  recalled,
+  rememberSymbol,
+  restoredSymbolMemory,
+  type SymbolMemory,
+} from '../../workspace/symbol-memory';
+import {
+  ChartSettingsDialogComponent,
+  type ChartSettings,
+} from '../../chart/chart-settings-dialog.component';
+import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
+import { askName, confirmDelete } from '../../dialog/chart-dialogs';
+import {
+  UndoHistory,
+  describeChange,
+  sameUndoable,
+  undoableOf,
+  type UndoEntry,
+  type UndoableChart,
+} from '../../workspace/undo-history';
+import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
+import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
+import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
+import { ReplayPanelComponent } from '../../replay/replay-panel.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
 import type {
@@ -305,11 +352,17 @@ import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/
 import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
 import type { TicketPrefill } from '../../trading/ticket-model';
 import {
+  WORKSPACE_VERSION,
   dockStateOf,
+  linkGroupOf,
+  migrateWorkspaceState,
   restoredDock,
   restoredPriceBased,
   restoredScriptItem,
+  restoredSync,
   workspaceScriptOf,
+  type ChartPanelState,
+  type ChartSync,
   type ChartWorkspaceState,
   type DockView,
   type WorkspaceScript,
@@ -360,7 +413,7 @@ interface ScriptUpdate {
   replaces: string | null;
 }
 
-/** One comparison chart in a split layout. */
+/** One of a multi-chart layout's other charts (CC-12, CC-I5). */
 export interface ComparePanel {
   id: string;
   symbol: string;
@@ -368,6 +421,12 @@ export interface ComparePanel {
   bars: Bar[];
   /** Its oldest bar is the start of the engine's history: scroll-back stops asking (CC-14). */
   historyComplete?: boolean;
+  /** Its own built-in studies (CC-I5). */
+  indicators: ActiveIndicator[];
+  /** Its link group, 1 … 3; 0: not linked (CC-I5). */
+  link: number;
+  /** Its own Pine indicators (CC-I5). */
+  scripts: PanelScript[];
 }
 
 const RESOLUTION_GROUPS: Array<{
@@ -541,6 +600,15 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
   KeyF: 'fib-retracement',
 };
 
+/** TradingView's chart hotkeys (Alt + key), by `KeyboardEvent.code` (CC-I11). */
+const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'percent' | 'snapshot'>> = {
+  KeyR: 'reset',
+  KeyI: 'invert',
+  KeyL: 'log',
+  KeyP: 'percent',
+  KeyS: 'snapshot',
+};
+
 @Component({
   selector: 'app-chart-analysis-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -583,6 +651,11 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     FavoritesBarComponent,
     PatternScorecardDialogComponent,
     ChartScriptAlertFormComponent,
+    ReplayPanelComponent,
+    ChartSettingsDialogComponent,
+    ChartPaletteComponent,
+    MeasuredBottomDirective,
+    CompareDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1338,6 +1411,8 @@ export class ChartAnalysisPageComponent {
       const sym = String(a.params['symbol'] ?? '').toUpperCase();
       if (sym && sym !== this.symbol().toUpperCase()) out.add(sym);
     }
+    // The compare overlays' and synthetic series' symbols (CC-I12) load the same way.
+    for (const sym of compareSymbolsOf(this.compareSeries(), this.symbol())) out.add(sym);
     return [...out].sort();
   });
   readonly symbolMenuOpen = signal(false);
@@ -1402,6 +1477,7 @@ export class ChartAnalysisPageComponent {
     ...this.closedTradeMarkers(),
     ...this.timelineMarkers(),
     ...this.analysisMarkers(),
+    ...this.replay.markers(),
   ]);
 
   // ── SP-I5 (analysis): the analysis panel, its plan / watch overlay and the watches' fire markers ──
@@ -1662,33 +1738,41 @@ export class ChartAnalysisPageComponent {
   });
   readonly prices = signal<Record<string, { bid: number; prev: number }>>({});
 
-  // ── Bar replay ───────────────────────────────────────────────────────────
+  // ── Bar replay (CC-I4) ───────────────────────────────────────────────────
   //
-  // Replay is a pure VIEW over the loaded bars: it truncates the series rather
-  // than refetching. Everything downstream — indicators, the legend, drawings —
-  // already follows the plotted bars, so they rewind for free and, critically,
-  // an indicator cannot accidentally see bars from the future.
-  readonly replayActive = signal(false);
-  readonly replayIndex = signal(0);
-  readonly replayPlaying = signal(false);
-  readonly replaySpeed = signal(4);
-  private replayTimer: ReturnType<typeof setInterval> | null = null;
-
-  /** What the chart actually plots — the full series, or a replay prefix. */
-  readonly displayBars = computed(() => {
-    const all = this.bars();
-    if (!this.replayActive()) return all;
-    return all.slice(0, Math.max(1, Math.min(this.replayIndex(), all.length)));
+  // Replay is a VIEW over the loaded bars: it shows a prefix of them, and with intrabar steps the
+  // next bar forming from its 1m (1h above a day) bars. Everything downstream — indicators, the
+  // legend, drawings — follows the plotted bars, so they rewind for free and an indicator cannot
+  // see bars from the future. Its paper trades stay in this tab (`replay/paper-broker.ts`).
+  readonly replay = new ReplayController({
+    bars: () => this.bars(),
+    resolution: () => this.resolution(),
+    digits: () => this.precision(),
+    symbolFacts: () => ({
+      pipSize: this.pipSize(),
+      contractSize: this.currentPair()?.contractSize || 100_000,
+    }),
+    fetchIntrabar: (resolution, fromMs, toMs, count) =>
+      this.feed.getBars(this.symbol(), resolution, fromMs, toMs, count).then((r) => r.bars),
   });
+  readonly replayActive = this.replay.active;
+  readonly replayIndex = this.replay.index;
+  readonly replayPlaying = this.replay.playing;
+  readonly replaySpeed = this.replay.speed;
 
-  readonly replayAtEnd = computed(() => this.replayIndex() >= this.bars().length);
+  /** What the chart actually plots — the full series, or the replay's bars. */
+  readonly displayBars = this.replay.view;
+
+  readonly replayAtEnd = this.replay.atEnd;
+  /** The last closed bar at the replay head (a bar forming from intrabar steps is not closed); null outside replay. */
+  readonly replayClosedHead = this.replay.closedHead;
   /**
-   * Bar Replay's head: the open (Unix ms) of the last bar the chart shows; null outside replay. The
-   * scripts run to it (PC-08, PC-I8) — never a bar past it.
+   * Bar Replay's head: the open (Unix ms) of the last closed bar the chart shows; null outside replay. The
+   * scripts run to it (PC-08, PC-I8) — never a bar past it, nor the bar forming from intrabar steps.
    */
-  readonly replayHead = computed(() =>
-    this.replayActive() ? (this.displayBars().at(-1)?.time ?? null) : null,
-  );
+  readonly replayHead = computed(() => this.replayClosedHead()?.time ?? null);
+  /** The indicators' engine replay sessions: a head moving forward executes only the new bars (CC-I4). */
+  private readonly replayScripts = new ReplayScriptSessions(inject(ScriptingRunService));
   readonly tools = TOOLS;
   readonly tool = signal<DrawingKind | null>(null);
   readonly magnet = signal(false);
@@ -1791,6 +1875,8 @@ export class ChartAnalysisPageComponent {
   readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
   protected readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
+  /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
+  private readonly dialogs = inject(ScriptDialogService);
   /**
    * Whether the page is fullscreen, as the browser says (CC-20): leaving with Esc fires only
    * `fullscreenchange`, so the button stayed lit and the assistant read the wrong state.
@@ -1821,6 +1907,8 @@ export class ChartAnalysisPageComponent {
   readonly renkoWicks = signal(false);
   /** Line break: lines a reversal must break. */
   readonly lineBreakLines = signal(3);
+  /** Point & Figure: the reversal, in boxes (CC-I10; TradingView's default 3). */
+  readonly pnfReversal = signal(3);
   /** One pip of this symbol, in price (the engine's rule: ten points on fractional FX quotes). */
   readonly pipSize = computed(() =>
     pipSizeFor(
@@ -2124,6 +2212,20 @@ export class ChartAnalysisPageComponent {
       if (!this.restored || this.applyingState) return;
       untracked(() => this.workspace.markDirty(state));
     });
+    // CC-I11: one undo history. Drawing steps arrive from the drawing store; studies, scripts and chart settings are
+    // recorded here as the operator changes them (a burst of changes within half a second is one step).
+    this.drawings.undoHook = {
+      recorded: (symbol) => this.undoHistory.record({ kind: 'drawing', symbol }),
+      dropped: (symbol) => this.undoHistory.dropDrawing(symbol),
+    };
+    this.destroyRef.onDestroy(() => {
+      this.drawings.undoHook = null;
+      clearTimeout(this.undoTimer);
+    });
+    effect(() => {
+      const now = this.undoableState();
+      untracked(() => this.noteUndoable(now));
+    });
     // A live price belongs to one symbol: a switch waits for the new symbol's first tick.
     effect(() => {
       this.symbol();
@@ -2140,6 +2242,21 @@ export class ChartAnalysisPageComponent {
       const items = this.active().filter((a) => a.visible && studyKind(a.defId) === 'fundamental');
       const symbol = this.symbol();
       untracked(() => this.loadFundamentals(items, symbol));
+    });
+
+    // The other charts' scripts (CC-I5) run when their chart has bars and again at each new bar — not per tick —
+    // unless the main chart's identical run covers them.
+    effect(() => {
+      const panels = this.comparePanels();
+      const main = this.scriptRuns();
+      untracked(() => {
+        for (const p of panels) {
+          const last = p.bars.at(-1)?.time;
+          if (last === undefined) continue;
+          for (const s of p.scripts)
+            if (s.ranTo !== last && !sharedRun(main, s, p.symbol, p.resolution)) this.runPanelScript(p.id, s.item.key);
+        }
+      });
     });
 
     // Compare studies need the other symbol's bars on the same resolution.
@@ -2347,8 +2464,7 @@ export class ChartAnalysisPageComponent {
 
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const host = this;
-    this.uiCommands.register(
-      chartCommands({
+    this.chartCommandList = chartCommands({
         symbol: this.symbol,
         resolution: this.resolution,
         style: this.style,
@@ -2410,8 +2526,8 @@ export class ChartAnalysisPageComponent {
             symbol: l.isActive ? this.symbol() : '',
             resolution: l.isActive ? this.resolution() : '',
           })),
-        // The toolbar asks for names through prompt(), which nothing outside the browser can
-        // answer — so the workspace is called directly with the given name.
+        // The toolbar asks for names in a dialog, which nothing outside the browser can answer —
+        // so the workspace is called directly with the given name.
         saveLayout: (name) => {
           void this.workspace.duplicate(name);
           return '';
@@ -2481,9 +2597,9 @@ export class ChartAnalysisPageComponent {
             ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
             : null;
         },
-      }),
-      this.destroyRef,
-    );
+      });
+    // The same commands drive the operator's command palette (CC-I11).
+    this.uiCommands.register(this.chartCommandList, this.destroyRef);
 
     // Keep the live-price subscriptions in step with what is on screen: the
     // primary chart, every comparison panel, and — only while it is open —
@@ -2567,7 +2683,10 @@ export class ChartAnalysisPageComponent {
     });
     // A running replay interval would outlive the page and keep stepping a
     // chart nobody is looking at.
-    this.destroyRef.onDestroy(() => this.pauseReplay());
+    this.destroyRef.onDestroy(() => {
+      this.replay.pause();
+      this.replayScripts.stopAll();
+    });
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
     // a position or a signal without the operator re-selecting anything.
@@ -2808,52 +2927,94 @@ export class ChartAnalysisPageComponent {
 
   // ── Replay controls ──────────────────────────────────────────────────────
 
+  /**
+   * Bar Replay on: the whole chart shows and the next click on it picks the bar replay starts at
+   * (TradingView's "Select bar"); the replay bar also takes a date and time.
+   */
   startReplay(): void {
     const total = this.bars().length;
     if (total === 0) return;
-    // Start two thirds in, so there is visible history to reason from and
-    // enough ahead to be worth stepping through.
-    this.replayIndex.set(Math.max(1, Math.floor(total * 0.66)));
-    this.replayActive.set(true);
+    this.replay.start(total);
+    void this.pickReplayStart();
+  }
+
+  /** The next click on the chart picks the bar replay starts at; Esc keeps where it is. */
+  async pickReplayStart(): Promise<void> {
+    const host = this.host();
+    if (!host || !this.replayActive()) return;
+    this.replay.pause();
+    this.replay.selecting.set(true);
+    const pick = await host.pickPoint('time');
+    this.replay.selecting.set(false);
+    if (pick && this.replayActive()) this.replay.startAt(pick.time);
+  }
+
+  /**
+   * Start replay at a date and time on the chart's clock (`yyyy-mm-ddThh:mm`), loading history back to
+   * it first — as go-to-date does, at most {@link GO_TO_DATE_PAGES} pages — and showing it.
+   */
+  async startReplayAt(value: string): Promise<void> {
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(value);
+    if (!m) return;
+    const t =
+      midnightOnClock(Number(m[1]), Number(m[2]) - 1, Number(m[3]), this.timezone()) +
+      Number(m[4] ?? 0) * 3_600_000 +
+      Number(m[5] ?? 0) * 60_000;
+    this.host()?.cancelPick();
+    await this.loadBackTo(t);
+    const oldest = this.bars()[0];
+    if (!oldest) return;
+    if (oldest.time > t && !this.historyComplete())
+      this.notify.warning(
+        `History before ${this.barTimeLabel(oldest)} is not loaded: replay starts at the oldest bar.`,
+      );
+    if (!this.replayActive()) this.replay.start(this.bars().length);
+    this.replay.startAt(t);
+    const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
+    this.pendingRange = { fromMs: t - span * 0.8, toMs: t + span * 0.2 };
+    this.flushPendingRange();
+  }
+
+  /** Load history pages until the bars reach back to `t` (at most {@link GO_TO_DATE_PAGES} pages). */
+  private async loadBackTo(t: number): Promise<void> {
+    for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
+      const held = this.bars();
+      if (!held.length || held[0].time <= t || this.historyComplete()) break;
+      await this.loadOlder();
+      if (this.bars()[0]?.time === held[0].time) break; // nothing older came back
+    }
+  }
+
+  /** The series changed in replay: history back to the head's instant, and the head on its bar there. */
+  private async reanchorReplay(anchor: number): Promise<void> {
+    this.replayScripts.stopAll();
+    this.replay.reanchor(anchor);
+    if ((this.bars()[0]?.time ?? anchor) > anchor) {
+      await this.loadBackTo(anchor);
+      if (this.replayActive()) this.replay.reanchor(anchor);
+    }
   }
 
   exitReplay(): void {
-    this.pauseReplay();
-    this.replayActive.set(false);
+    this.host()?.cancelPick();
+    this.replay.exit();
+    this.replayScripts.stopAll();
   }
 
   stepReplay(delta: number): void {
-    const total = this.bars().length;
-    this.replayIndex.update((i) => Math.max(1, Math.min(total, i + delta)));
-    if (this.replayAtEnd()) this.pauseReplay();
+    const dir = delta < 0 ? -1 : 1;
+    const n = Math.max(1, Math.abs(Math.trunc(delta)) || 1);
+    if (n === 1) {
+      void this.replay.step(dir);
+      return;
+    }
+    // Many at once (the assistant): whole bars.
+    const c = this.replay.cursor();
+    this.replay.moveTo({ index: c.index + dir * n, sub: null });
   }
 
   toggleReplayPlay(): void {
-    if (this.replayPlaying()) this.pauseReplay();
-    else this.playReplay();
-  }
-
-  private playReplay(): void {
-    if (this.replayAtEnd()) return;
-    this.pauseReplay();
-    this.replayPlaying.set(true);
-    // Speed is bars per second; the interval is derived so changing speed
-    // mid-playback takes effect on the next tick rather than needing a restart.
-    this.replayTimer = setInterval(
-      () => {
-        this.stepReplay(1);
-        if (this.replayAtEnd()) this.pauseReplay();
-      },
-      1000 / Math.max(1, this.replaySpeed()),
-    );
-  }
-
-  private pauseReplay(): void {
-    if (this.replayTimer !== null) {
-      clearInterval(this.replayTimer);
-      this.replayTimer = null;
-    }
-    this.replayPlaying.set(false);
+    this.replay.togglePlay();
   }
 
   setBoxSize(raw: string): void {
@@ -2864,6 +3025,11 @@ export class ChartAnalysisPageComponent {
   setBoxPips(raw: string): void {
     const value = Number(raw);
     if (Number.isFinite(value) && value > 0) this.boxPips.set(value);
+  }
+
+  setPnfReversal(raw: string): void {
+    const value = Math.round(Number(raw));
+    if (Number.isFinite(value) && value >= 1 && value <= 10) this.pnfReversal.set(value);
   }
 
   setLineBreakLines(raw: string): void {
@@ -2883,21 +3049,23 @@ export class ChartAnalysisPageComponent {
   );
 
   setReplaySpeed(raw: string): void {
-    const speed = Number(raw);
-    if (!Number.isFinite(speed)) return;
-    this.replaySpeed.set(speed);
-    if (this.replayPlaying()) this.playReplay();
+    this.replay.setSpeed(Number(raw));
   }
 
   setReplayIndex(raw: string): void {
-    const index = Number(raw);
-    if (Number.isFinite(index)) this.replayIndex.set(index);
+    this.replay.setIndex(Number(raw));
   }
 
-  /** The time at the replay head, for the toolbar readout. */
+  /**
+   * The time at the replay head, for the replay bar: the bar's, or — while a bar forms from intrabar
+   * steps — the last intrabar bar's open on the chart's clock.
+   */
   replayTime(): string {
-    const bars = this.displayBars();
-    return bars.length ? this.barTimeLabel(bars[bars.length - 1]) : '';
+    const head = this.replay.headBar();
+    if (!head) return '';
+    if (this.replay.cursor().sub === null) return this.barTimeLabel(head);
+    const zone = this.timezone();
+    return this.formatTime(head.time + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, head.time) * 60_000));
   }
 
   /** What the events on the chart were fetched for, and the window they cover (UTC ms). */
@@ -3137,6 +3305,8 @@ export class ChartAnalysisPageComponent {
     const symbol = this.symbol();
     const resolution = this.resolution();
     this.requested = { symbol, resolution };
+    // Bar Replay stays at its instant across a symbol or timeframe switch (CC-I4).
+    const replayAnchor = this.replayHead();
     /** Still the chart's series? A switch made while this loads has a reload of its own. */
     const current = () => symbol === this.symbol() && resolution === this.resolution();
     this.loading.set(true);
@@ -3158,6 +3328,7 @@ export class ChartAnalysisPageComponent {
       this.historyStart.set(null);
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
+      if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
       this.tailMergedAt = this.ticksApplied;
       this.lastStored = lastCompleteBarTime(bars, resolution);
       // The stored history ends at the last CLOSED bar; build the one still forming from real data
@@ -3230,7 +3401,7 @@ export class ChartAnalysisPageComponent {
           this.bars.set(next);
           // Replay counts bars from the left: the head stays on its bar (CC-11 — it jumped ~1,500
           // bars into the future with every page of history).
-          if (this.replayActive() && added > 0) this.replayIndex.update((i) => i + added);
+          this.replay.shift(added);
           // The events of the history just loaded (the layer covered the first window only), and the
           // compare studies' other symbols over it.
           this.loadEvents(true);
@@ -3412,20 +3583,37 @@ export class ChartAnalysisPageComponent {
     window.addEventListener('pointerup', up);
   }
 
-  selectSymbol(symbol: string): void {
+  /** Switch the main chart's symbol — and, with symbol sync on, the charts linked to it (CC-I5). */
+  selectSymbol(symbol: string, propagate = true): void {
     this.symbolMenuOpen.set(false);
     this.symbolQuery.set('');
     if (symbol === this.symbol()) return;
+    // Layout memory per symbol (CC-I11): the symbol left is remembered as it is; the one switched to opens as it was left.
+    this.symbolMemory.update((m) =>
+      rememberSymbol(m, this.symbol(), {
+        resolution: this.resolution(),
+        ...(this.viewSnapshot() ? { view: this.viewSnapshot()! } : {}),
+      }),
+    );
+    const memory = this.rememberPerSymbol() ? recalled(this.symbolMemory(), symbol) : null;
+    if (memory && isSupportedResolution(memory.resolution)) this.resolution.set(memory.resolution);
+    if (memory?.view) {
+      this.pendingView = memory.view;
+      this.pendingViewFor = { symbol, resolution: this.resolution() };
+    }
     this.symbol.set(symbol);
     void this.router.navigate(['/chart-analysis', symbol], {
       queryParams: { tf: this.resolution() },
       replaceUrl: true,
     });
     void this.reload();
+    if (propagate) this.linkSymbol('main', symbol);
   }
 
-  selectResolution(r: TvResolution): void {
+  /** Switch the main chart's timeframe — and, with interval sync on, the charts linked to it (CC-I5). */
+  selectResolution(r: TvResolution, propagate = true): void {
     if (r === this.resolution()) return;
+    if (propagate) this.linkInterval('main', r);
     this.resolution.set(r);
     void this.router.navigate([], {
       relativeTo: this.route,
@@ -3727,7 +3915,89 @@ export class ChartAnalysisPageComponent {
       this.runScheduler.settle(key, ticket);
       return;
     }
+    if (this.replayActive() && this.stepReplayRun(run, ticket)) return;
     this.runScript(run.item, run.values, true, undefined, ticket);
+  }
+
+  /**
+   * Bar Replay moved forward (CC-I4): an indicator's run on the chart follows through its engine replay session —
+   * only the bars the head moved over are executed — instead of a full run to the new head. False (the caller runs
+   * it in full) for a strategy (its tester result is not in a frame), a basis other than the standard bars, a run
+   * that is not at an earlier head, or a move the step endpoint does not take; a step that fails also ends in a full
+   * run.
+   */
+  private stepReplayRun(run: ChartScriptRun, ticket: number): boolean {
+    const head = this.replayClosedHead();
+    const until = run.until ?? null;
+    const runBars = run.result.run?.bars ?? [];
+    if (
+      run.result.kind === 'strategy' ||
+      (run.chartType ?? 'standard') !== 'standard' ||
+      until === null ||
+      !head ||
+      head.time <= until ||
+      !runBars.length
+    )
+      return false;
+    const bars = this.bars();
+    const untilIdx = bars.findIndex((b) => b.time === until);
+    const headIdx = this.replay.cursor().index - 1;
+    const steps = headIdx - untilIdx;
+    // The session's window reaches the last closed bar loaded, so later steps need no new session.
+    const now = this.serverClock.now();
+    let lastClosed = bars.length - 1;
+    while (lastClosed > headIdx && barCloseMs(bars[lastClosed], run.resolution) > now) lastClosed--;
+    const lastBars = runBars.length + (lastClosed - untilIdx);
+    const signature = JSON.stringify([
+      run.item.strategyId ?? run.item.pineSource ?? '',
+      run.values,
+      run.symbol,
+      run.resolution,
+    ]);
+    if (untilIdx < 0 || lastBars > MAX_SCRIPT_BARS || !this.replayScripts.usable(signature, steps)) return false;
+    const request: PineRunRequest = {
+      symbol: run.symbol,
+      timeframe: runTimeframeFor(run.resolution),
+      lastBars,
+      mode: 'preview',
+      toUtc: new Date(barCloseMs(bars[lastClosed], run.resolution)).toISOString(),
+      ...(run.item.strategyId !== undefined ? { strategyId: run.item.strategyId } : { source: run.item.pineSource ?? '' }),
+      ...(Object.keys(run.values).length ? { inputs: run.values } : {}),
+    };
+    const key = run.item.key;
+    void this.replayScripts
+      .step(
+        {
+          key,
+          signature,
+          request,
+          startBar: runBars.length - 1,
+          firstTime: runBars[0].t,
+          fromTime: until,
+          toTime: head.time,
+          steps,
+        },
+        run.result,
+      )
+      .then((result) => {
+        if (!this.runScheduler.isCurrent(key, ticket)) {
+          this.runScheduler.settle(key, ticket);
+          return;
+        }
+        const held = this.scriptRuns().find((r) => r.item.key === key);
+        if (!result || held !== run) {
+          // The step failed, or the run changed meanwhile: in full, as before.
+          this.runScript(run.item, run.values, true, undefined, ticket);
+          return;
+        }
+        this.scriptRuns.update((list) =>
+          list.map((r) => (r === run ? { ...r, result, until: head.time, landedAt: Date.now() } : r)),
+        );
+        this.runScheduler.settle(key, ticket);
+        // The head moved on (or replay ended) while it stepped: once more, to where it is now.
+        if (head.time !== this.replayHead()) this.runScheduler.request(key);
+      });
+    return true;
   }
 
   /**
@@ -3805,7 +4075,7 @@ export class ChartAnalysisPageComponent {
       // the engine's clock (the session grid's periods open and close at the engine's instants).
       // Both taken again for a retry after a busy refusal: it runs to the head, or on the bar
       // forming, then.
-      const head = this.replayActive() ? (this.displayBars().at(-1) ?? null) : null;
+      const head = this.replayActive() ? this.replayClosedHead() : null;
       until = head?.time ?? null;
       const liveBar = head
         ? null
@@ -4311,6 +4581,8 @@ export class ChartAnalysisPageComponent {
 
   /** Abort the run of `key` in flight, if any; whoever waits on it is told `why`. */
   private abortRun(key: string, why: string): void {
+    // Its replay session follows the run on the chart; an explicit run replaces that run.
+    this.replayScripts.stop(key);
     const run = this.runsInFlight.get(key);
     if (!run) return;
     this.runsInFlight.delete(key);
@@ -4779,6 +5051,9 @@ export class ChartAnalysisPageComponent {
         symbol,
         resolution: this.resolution(),
         bars: [],
+        indicators: [],
+        link: 0,
+        scripts: [],
       });
     }
     this.comparePanels.set([...current, ...added]);
@@ -4842,17 +5117,23 @@ export class ChartAnalysisPageComponent {
     this.panelLegends.update((all) => ({ ...all, [id]: snapshot }));
   }
 
-  setPanelSymbol(id: string, symbol: string): void {
+  setPanelSymbol(id: string, symbol: string, propagate = true): void {
+    if (propagate) this.linkSymbol(id, symbol.toUpperCase());
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [] } : p)),
+      list.map((p) =>
+        p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) } : p,
+      ),
     );
     void this.loadPanel(id);
   }
 
-  setPanelResolution(id: string, resolution: string): void {
+  setPanelResolution(id: string, resolution: string, propagate = true): void {
+    if (propagate) this.linkInterval(id, resolution);
     this.comparePanels.update((list) =>
       list.map((p) =>
-        p.id === id ? { ...p, resolution: resolution as TvResolution, bars: [] } : p,
+        p.id === id
+          ? { ...p, resolution: resolution as TvResolution, bars: [], scripts: freshRuns(p.scripts) }
+          : p,
       ),
     );
     void this.loadPanel(id);
@@ -4864,13 +5145,180 @@ export class ChartAnalysisPageComponent {
     if (!panel) return;
     const previous = { symbol: this.symbol(), resolution: this.resolution() };
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [] } : p)),
+      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [], scripts: freshRuns(p.scripts) } : p)),
     );
     this.symbol.set(panel.symbol);
     this.resolution.set(panel.resolution);
     void this.reload();
     void this.loadPanel(id);
   }
+
+  // ── Linked charts (CC-I5) ──────────────────────────────────────────────────
+
+  /** A chart's link group ('main' is the main chart). */
+  private linkOf(id: string): number {
+    return id === 'main' ? this.mainLink() : (this.comparePanels().find((p) => p.id === id)?.link ?? 0);
+  }
+
+  /** The charts in `id`'s link group besides it. */
+  private linkedTo(id: string): string[] {
+    return linkedCharts(id, this.linkOf(id), this.mainLink(), this.comparePanels());
+  }
+
+  private hostOf(id: string): ChartHostComponent | undefined {
+    if (id === 'main') return this.host();
+    return this.panelHosts()[this.comparePanels().findIndex((p) => p.id === id)];
+  }
+
+  /** The operator's crosshair on one chart: the linked charts put theirs on the same bar (crosshair sync). */
+  onChartCrosshair(id: string, utcMs: number | null): void {
+    if (!this.chartSync().crosshair) return;
+    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncCrosshair(utcMs);
+  }
+
+  /** The operator panned or zoomed one chart: the linked charts show the same span (time sync). */
+  onChartRange(id: string, range: { fromMs: number; toMs: number }): void {
+    if (!this.chartSync().time) return;
+    for (const t of this.linkedTo(id)) this.hostOf(t)?.syncRange(range.fromMs, range.toMs);
+  }
+
+  /** A chart switched symbol: with symbol sync on, the charts linked to it follow. */
+  private linkSymbol(source: string, symbol: string): void {
+    if (!this.chartSync().symbol) return;
+    for (const t of this.linkedTo(source)) {
+      if (t === 'main') {
+        if (this.symbol() !== symbol) this.selectSymbol(symbol, false);
+      } else if (this.comparePanels().find((p) => p.id === t)?.symbol !== symbol) this.setPanelSymbol(t, symbol, false);
+    }
+  }
+
+  /** A chart switched timeframe: with interval sync on, the charts linked to it follow. */
+  private linkInterval(source: string, resolution: string): void {
+    if (!this.chartSync().interval) return;
+    for (const t of this.linkedTo(source)) {
+      if (t === 'main') {
+        if (this.resolution() !== resolution) this.selectResolution(resolution as TvResolution, false);
+      } else if (this.comparePanels().find((p) => p.id === t)?.resolution !== resolution)
+        this.setPanelResolution(t, resolution, false);
+    }
+  }
+
+  setPanelLink(id: string, link: number): void {
+    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, link: linkGroupOf(link) } : p)));
+  }
+
+  setMainLink(link: number): void {
+    this.mainLink.set(linkGroupOf(link));
+  }
+
+  /** The sync switches the layout menu offers. */
+  readonly syncKeys: ReadonlyArray<{ key: keyof ChartSync; label: string; title: string }> = [
+    { key: 'symbol', label: 'symbol', title: 'A symbol switch on one linked chart switches the others' },
+    { key: 'interval', label: 'interval', title: 'A timeframe switch on one linked chart switches the others' },
+    { key: 'crosshair', label: 'crosshair', title: 'The crosshair moves on every linked chart' },
+    { key: 'time', label: 'time range', title: 'Panning or zooming one linked chart shows the same span on the others' },
+  ];
+
+  setSync(key: keyof ChartSync, on: boolean): void {
+    this.chartSync.update((s) => ({ ...s, [key]: on }));
+  }
+
+  // ── The other charts' studies and scripts (CC-I5) ─────────────────────────
+
+  /** The studies another chart offers (those reading its own bars only). */
+  readonly panelStudyDefs = panelStudyChoices(INDICATORS);
+  /** The Pine indicators another chart offers: My scripts and the examples. */
+  readonly panelScriptChoices = computed(() => {
+    const c = this.scriptCatalog();
+    return c ? [...c.mine, ...c.examples].filter((i) => i.kind === 'indicator') : [];
+  });
+
+  /** "+ Study" on another chart: a built-in (`study:<id>`) or a Pine indicator (`script:<key>`). */
+  panelAdd(id: string, choice: string): void {
+    if (choice.startsWith('study:')) {
+      const def = indicatorById(choice.slice(6));
+      if (!def) return;
+      const uid = `${def.id}-${Date.now().toString(36)}`;
+      this.comparePanels.update((list) =>
+        list.map((p) => (p.id === id ? { ...p, indicators: withStudy(p.indicators, def, uid) } : p)),
+      );
+    } else if (choice.startsWith('script:')) {
+      const item = this.panelScriptChoices().find((i) => i.key === choice.slice(7));
+      if (!item) return;
+      this.comparePanels.update((list) =>
+        list.map((p) =>
+          p.id === id && !p.scripts.some((s) => s.item.key === item.key)
+            ? { ...p, scripts: [...p.scripts, { item, values: {}, result: null, error: null, ranTo: null }] }
+            : p,
+        ),
+      );
+    }
+  }
+
+  removePanelStudy(id: string, uid: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, indicators: withoutStudy(p.indicators, uid) } : p)),
+    );
+  }
+
+  removePanelScript(id: string, key: string): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, scripts: p.scripts.filter((s) => s.item.key !== key) } : p)),
+    );
+  }
+
+  /** Runs of the other charts' scripts in flight, by `panel|key`. */
+  private readonly panelRuns = new Set<string>();
+
+  /**
+   * Run one of another chart's scripts on its series, to now. A run the main chart already has (same script, inputs
+   * and series) is drawn from there instead — a second chart never doubles the engine's work for it.
+   */
+  private runPanelScript(id: string, key: string): void {
+    const panel = this.comparePanels().find((p) => p.id === id);
+    const script = panel?.scripts.find((s) => s.item.key === key);
+    const last = panel?.bars.at(-1);
+    if (!panel || !script || !last) return;
+    const flight = `${id}|${key}`;
+    if (this.panelRuns.has(flight)) return;
+    this.panelRuns.add(flight);
+    const { symbol, resolution } = panel;
+    const land = (patch: Partial<PanelScript>): void => {
+      this.panelRuns.delete(flight);
+      this.comparePanels.update((list) =>
+        list.map((p) =>
+          p.id === id && p.symbol === symbol && p.resolution === resolution
+            ? { ...p, scripts: p.scripts.map((s) => (s.item.key === key ? { ...s, ...patch, ranTo: last.time } : s)) }
+            : p,
+        ),
+      );
+    };
+    const bars = Math.min(Math.max(panel.bars.length, PAGE_BARS), MAX_SCRIPT_BARS);
+    this.chartScripts
+      .runOnChart(script.item, symbol, resolution, script.values, bars, { chartType: 'standard' })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (result) => land(result.error ? { error: result.error } : { result, error: null }),
+        error: (e: unknown) =>
+          land({ error: isBusy(e) ? 'The engine is busy: it runs again at the next bar.' : e instanceof Error ? e.message : 'The run failed.' }),
+      });
+  }
+
+  /** Each other chart's script layers, the same array while nothing it draws changed (no redraw per tick). */
+  private readonly panelLayerCache = new Map<string, ChartScriptLayer[]>();
+  readonly panelLayerMap = computed(() => {
+    const main = this.scriptRuns();
+    const out = new Map<string, ChartScriptLayer[]>();
+    for (const p of this.comparePanels()) {
+      const next = panelLayers(p.scripts, main, p.symbol, p.resolution);
+      const prev = this.panelLayerCache.get(p.id);
+      const layers = prev && sameLayers(prev, next) ? prev : next;
+      this.panelLayerCache.set(p.id, layers);
+      out.set(p.id, layers);
+    }
+    return out;
+  });
+  readonly noLayers: ChartScriptLayer[] = [];
 
   panelPrecision(symbol: string): number {
     const pair = this.symbols().find(
@@ -4885,25 +5333,50 @@ export class ChartAnalysisPageComponent {
    * The split layout as a layout saves it (CC-12: it was not saved): the arrangement and each
    * panel's symbol and timeframe — not their bars, which move with every tick.
    */
-  private readonly splitState = computed(
-    () => ({
-      layout: this.splitLayout(),
-      panels: this.comparePanels().map((p) => ({ symbol: p.symbol, resolution: p.resolution })),
-    }),
+  private readonly splitState = computed(() => ({ layout: this.splitLayout() }), {
+    equal: (a, b) => a.layout === b.layout,
+  });
+
+  /** The other charts as the layout saves them (v2 `charts`): series, studies, link — not their bars. */
+  private readonly panelStates = computed<ChartPanelState[]>(
+    () =>
+      this.comparePanels().map((p) => ({
+        symbol: p.symbol,
+        resolution: p.resolution,
+        ...(p.indicators.length ? { indicators: p.indicators.map((i) => ({ ...i, params: { ...i.params } })) } : {}),
+        ...(p.scripts.length
+          ? { scripts: p.scripts.map((s) => workspaceScriptOf({ item: s.item, values: s.values })) }
+          : {}),
+        ...(p.link ? { link: p.link } : {}),
+      })),
     { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );
 
-  /** A layout's split view, restored: the arrangement, then each panel's series, loaded. */
-  private restoreSplit(split: ChartWorkspaceState['split']): void {
+  /** The main chart's link group (CC-I5): 1 … 3, 0 not linked. */
+  readonly mainLink = signal(0);
+  /** What linked charts follow of each other (CC-I5). */
+  readonly chartSync = signal<Required<ChartSync>>(restoredSync(undefined));
+
+  /** A layout's split view, restored: the arrangement, then each other chart's series and studies, loaded. */
+  private restoreSplit(split: ChartWorkspaceState['split'], charts: ChartPanelState[] | undefined): void {
     const layout = this.splitLayouts.find((l) => l.id === split?.layout)?.id ?? '1';
     const wanted = this.splitLayouts.find((l) => l.id === layout)?.panels ?? 0;
-    const saved: ComparePanel[] = (split?.panels ?? []).slice(0, wanted).map((p, i) => ({
+    const saved: ComparePanel[] = (charts ?? []).slice(0, wanted).map((p, i) => ({
       id: `p${Date.now().toString(36)}${i}`,
       symbol: p.symbol.toUpperCase(),
       resolution: isSupportedResolution(p.resolution)
         ? (p.resolution as TvResolution)
         : this.resolution(),
       bars: [],
+      indicators: (p.indicators ?? []).map((ind) => ({ ...ind, params: { ...ind.params } })),
+      link: linkGroupOf(p.link),
+      scripts: (p.scripts ?? []).map((w) => ({
+        item: restoredScriptItem(w, this.chartScripts.savedScripts()),
+        values: { ...w.values },
+        result: null,
+        error: null,
+        ranTo: null,
+      })),
     }));
     this.comparePanels.set(saved);
     // The arrangement; a layout saved with fewer panels than it shows gets the rest as new ones.
@@ -4914,7 +5387,7 @@ export class ChartAnalysisPageComponent {
   /** The whole chart set-up, as the engine saves it (`ChartLayout.state`). */
   captureState(): ChartWorkspaceState {
     return {
-      v: 1,
+      v: WORKSPACE_VERSION,
       symbol: this.symbol(),
       resolution: this.resolution(),
       style: this.style(),
@@ -4924,6 +5397,11 @@ export class ChartAnalysisPageComponent {
       scaleSide: this.scaleSide(),
       sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
+      ...(this.appearance() ? { appearance: { ...this.appearance()! } } : {}),
+      ...(this.compareSeries().length ? { compare: this.compareSeries().map((c) => ({ ...c })) } : {}),
+      ...(this.rememberPerSymbol() || Object.keys(this.symbolMemory()).length
+        ? { symbolMemory: { on: this.rememberPerSymbol(), symbols: this.symbolMemory() } }
+        : {}),
       timezone: this.timezone(),
       priceBased: {
         boxMethod: this.boxMethod(),
@@ -4931,6 +5409,7 @@ export class ChartAnalysisPageComponent {
         boxPips: this.boxPips(),
         renkoWicks: this.renkoWicks(),
         lineBreakLines: this.lineBreakLines(),
+        pnfReversal: this.pnfReversal(),
       },
       indicators: this.active().map((i) => ({ ...i, params: { ...i.params } })),
       scripts: this.savedScriptsState(),
@@ -4950,6 +5429,9 @@ export class ChartAnalysisPageComponent {
         fitTradeLines: this.fitTradeLines(),
       },
       split: this.splitState(),
+      ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
+      ...(this.mainLink() ? { link: this.mainLink() } : {}),
+      sync: this.chartSync(),
       panel: {
         watchlistOpen: this.watchlistOpen(),
         width: this.dockWidth(),
@@ -4999,8 +5481,282 @@ export class ChartAnalysisPageComponent {
     return [...waiting, ...runs].sort((a, b) => a.key.localeCompare(b.key));
   }
 
+  // ── Chart settings dialog (CC-I11) ───────────────────────────────────────
+
+  /** Candle colours, grid lines and background over the theme's; null: the theme's look. */
+  readonly appearance = signal<ChartAppearance | null>(null);
+  /** How far down the floating legend reaches (px in the chart area): the chart keeps its top-left tables below it. */
+  readonly legendBottom = signal<number | null>(null);
+  readonly chartSettingsOpen = signal(false);
+  /** Layout memory per symbol (CC-I11): on, and what each symbol was left on. */
+  readonly rememberPerSymbol = signal(false);
+  readonly symbolMemory = signal<SymbolMemory>({});
+
+  /** The chart's settings as the dialog edits them. */
+  chartSettings(): ChartSettings {
+    return {
+      appearance: this.appearance(),
+      rememberPerSymbol: this.rememberPerSymbol(),
+      showVolume: this.showVolume(),
+      countdown: this.showCountdown(),
+      scaleMode: this.scaleMode(),
+      invertScale: this.invertScale(),
+      scaleSide: this.scaleSide(),
+      timezone: this.timezone(),
+      sessionBreaks: this.sessionBreaks(),
+      showEvents: this.showEvents(),
+      minEventImpact: this.minEventImpact(),
+      showBlackout: this.showBlackout(),
+      showPositions: this.showPositions(),
+      showOrders: this.showOrders(),
+      showOverlays: this.showOverlays(),
+      showClosedTrades: this.showClosedTrades(),
+      fitTradeLines: this.fitTradeLines(),
+    };
+  }
+
+  /** The dialog's edit (or its Cancel putting the opening settings back), applied at once. */
+  applySettingsFromDialog(s: ChartSettings): void {
+    this.appearance.set(restoredAppearance(s.appearance));
+    this.rememberPerSymbol.set(s.rememberPerSymbol);
+    this.showVolume.set(s.showVolume);
+    this.showCountdown.set(s.countdown);
+    this.scaleMode.set(s.scaleMode);
+    this.invertScale.set(s.invertScale);
+    this.scaleSide.set(s.scaleSide);
+    this.timezone.set(s.timezone);
+    this.sessionBreaks.set(s.sessionBreaks);
+    this.showEvents.set(s.showEvents);
+    this.minEventImpact.set(s.minEventImpact);
+    this.showBlackout.set(s.showBlackout);
+    this.showPositions.set(s.showPositions);
+    this.showOrders.set(s.showOrders);
+    this.showOverlays.set(s.showOverlays);
+    this.showClosedTrades.set(s.showClosedTrades);
+    this.fitTradeLines.set(s.fitTradeLines);
+  }
+
+  // ── Compare overlays and synthetic series (CC-I12) ───────────────────────
+
+  readonly compareSeries = signal<CompareSeriesSpec[]>([]);
+  readonly compareOpen = signal(false);
+  readonly compareTitleOf = compareTitle;
+  readonly symbolNames = computed(() =>
+    this.symbols()
+      .map((p) => p.symbol ?? '')
+      .filter((s) => !!s),
+  );
+  /** The compare lines, from the chart's bars and the other symbols' (live, extended on scroll-back). */
+  private readonly comparePaneList = computed(() => {
+    const specs = this.compareSeries();
+    if (!specs.length) return [];
+    const own = this.symbol().toUpperCase();
+    const bars = this.bars();
+    const others = this.compareBars();
+    const digits = new Map(this.symbols().map((p) => [p.symbol ?? '', Math.trunc(p.decimalPlaces) || 5]));
+    return comparePanes(
+      specs,
+      (sym) => (sym === own ? bars : others[sym]),
+      (sym) => digits.get(sym) ?? 5,
+    );
+  });
+  /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
+  readonly chartExternalPanes = computed(() => [...this.externalPanes(), ...this.comparePaneList()]);
+
+  /**
+   * Add a compare series. A compare symbol goes on the price's scale, so the scale turns to Percent (each line from
+   * 0 % at the first bar on screen) unless it already compares (percent or indexed to 100).
+   */
+  addCompare(spec: CompareSeriesSpec): void {
+    this.compareSeries.update((l) => [...l, spec]);
+    const mode = this.scaleMode();
+    if (spec.kind === 'compare' && mode !== 'percent' && mode !== 'indexed') {
+      this.scaleMode.set('percent');
+      this.notify.info('The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.');
+    }
+  }
+
+  removeCompare(id: string): void {
+    this.compareSeries.update((l) => l.filter((c) => c.id !== id));
+  }
+
+  // ── Command palette (CC-I11) ─────────────────────────────────────────────
+
+  /** The chart's commands (the assistant's), which the palette offers too. */
+  private chartCommandList: UiCommand[] = [];
+  readonly paletteOpen = signal(false);
+  /** Palette entries run lately, newest first (this page's session). */
+  readonly paletteRecent = signal<string[]>([]);
+  readonly paletteActions = computed(() =>
+    this.paletteOpen()
+      ? buildPaletteActions(this.chartCommandList, {
+          symbols: this.symbols()
+            .map((p) => p.symbol ?? '')
+            .filter((s) => !!s),
+          indicators: INDICATORS.map((d) => ({ id: d.id, name: d.name })),
+          active: this.active().map((i) => ({ uid: i.uid, label: this.labelFor(i) })),
+          tools: TOOLS.map((t) => ({ label: t.label })),
+          timezones: this.timezones,
+          styleLabel: (id) => CHART_STYLES.find((s) => s.id === id)?.label ?? id,
+        })
+      : [],
+  );
+
+  /** Run a palette entry through its chart command — asking first for one that destroys work — and say what happened. */
+  async runPaletteAction(a: PaletteAction): Promise<void> {
+    this.paletteOpen.set(false);
+    const cmd = this.chartCommandList.find((c) => c.id === a.commandId);
+    if (!cmd) return;
+    if (
+      a.confirm &&
+      !(await this.dialogs.confirm({
+        title: `${a.title}?`,
+        message: cmd.description,
+        confirmLabel: 'Go ahead',
+        tone: 'danger',
+      }))
+    )
+      return;
+    this.paletteRecent.update((l) => [a.id, ...l.filter((id) => id !== a.id)].slice(0, 8));
+    try {
+      const r = await cmd.run(a.args);
+      if (r.ok) this.notify.success(r.message);
+      else this.notify.error(r.message);
+    } catch (e) {
+      this.notify.error(e instanceof Error && e.message ? e.message : `${a.title} failed.`);
+    }
+  }
+
+  // ── One undo history (CC-I11) ────────────────────────────────────────────
+
+  readonly undoHistory = new UndoHistory();
+  /** What undo covers of the chart as it stands (studies, scripts, settings), changing only when that changes. */
+  private readonly undoableState = computed(() => undoableOf(this.captureState()), { equal: sameUndoable });
+  /** The chart as the last recorded step left it. */
+  private undoBaseline: UndoableChart | null = null;
+  /** The chart before a burst of changes still settling; recorded as one step when it settles. */
+  private undoPending: UndoableChart | null = null;
+  private undoTimer: ReturnType<typeof setTimeout> | undefined;
+  /** True while an undo / redo puts the chart back: that is not a new step. */
+  private undoing = false;
+
+  /** A step of the history applies to the chart on screen: chart steps always, drawing steps of this symbol. */
+  private readonly undoApplies = (e: UndoEntry): boolean =>
+    e.kind === 'chart' || e.symbol === this.symbol();
+
+  readonly undoTitle = computed(() => {
+    this.undoHistory.revision();
+    const e = this.undoHistory.peekUndo(this.undoApplies);
+    return e ? `Undo ${this.undoEntryLabel(e)} (⌘Z)` : 'Nothing to undo';
+  });
+  readonly redoTitle = computed(() => {
+    this.undoHistory.revision();
+    const e = this.undoHistory.peekRedo(this.undoApplies);
+    return e ? `Redo ${this.undoEntryLabel(e)} (⇧⌘Z)` : 'Nothing to redo';
+  });
+  readonly canUndo = computed(() => {
+    this.undoHistory.revision();
+    this.drawings.canUndo();
+    return this.undoHistory.peekUndo(this.undoApplies) !== null;
+  });
+  readonly canRedo = computed(() => {
+    this.undoHistory.revision();
+    this.drawings.canRedo();
+    return this.undoHistory.peekRedo(this.undoApplies) !== null;
+  });
+
+  private undoEntryLabel(e: UndoEntry): string {
+    return e.kind === 'drawing' ? 'drawing' : e.label;
+  }
+
+  /** The undoable chart changed: a new step once the burst settles (not while a layout or an undo is applied). */
+  private noteUndoable(now: UndoableChart): void {
+    if (!this.restored || this.applyingState || this.undoing) {
+      if (!this.undoPending) this.undoBaseline = now;
+      return;
+    }
+    if (!this.undoBaseline) {
+      this.undoBaseline = now;
+      return;
+    }
+    if (sameUndoable(now, this.undoBaseline)) return;
+    this.undoPending ??= this.undoBaseline;
+    this.undoBaseline = now;
+    clearTimeout(this.undoTimer);
+    this.undoTimer = setTimeout(() => this.commitUndoStep(), 500);
+  }
+
+  private commitUndoStep(): void {
+    clearTimeout(this.undoTimer);
+    const before = this.undoPending;
+    const after = this.undoBaseline;
+    this.undoPending = null;
+    if (!before || !after || sameUndoable(before, after)) return;
+    this.undoHistory.record({
+      kind: 'chart',
+      before,
+      after,
+      label: describeChange(before, after, (i) => this.labelFor(i)),
+    });
+  }
+
+  /** Ctrl+Z, the toolbar and the context menu: the newest step that applies to this chart goes back. */
+  undo(): void {
+    this.commitUndoStep();
+    const e = this.undoHistory.undo(this.undoApplies);
+    if (!e) return;
+    if (e.kind === 'drawing') this.drawings.undo();
+    else this.restoreUndoable(e.before);
+  }
+
+  redo(): void {
+    this.commitUndoStep();
+    const e = this.undoHistory.redo(this.undoApplies);
+    if (!e) return;
+    if (e.kind === 'drawing') this.drawings.redo();
+    else this.restoreUndoable(e.after);
+  }
+
+  /**
+   * Put the chart's studies, scripts and settings back as `u` held them. Scripts that left come back (run again
+   * with their inputs), scripts that came go, scripts whose inputs changed run again with the old ones; a change of
+   * display only is applied in place.
+   */
+  private restoreUndoable(u: UndoableChart): void {
+    this.undoing = true;
+    try {
+      this.applyChartSettings(u.settings);
+      this.active.set(u.indicators.map((i) => ({ ...i, params: { ...i.params } })));
+      const target = new Map(u.scripts.map((w) => [w.key, w]));
+      for (const w of this.workspaceScripts()) if (!target.has(w.key)) this.removeScriptFromChart(w.key);
+      for (const w of u.scripts) {
+        const run = this.scriptRuns().find((r) => r.item.key === w.key);
+        if (run && JSON.stringify(run.values) === JSON.stringify(w.values)) {
+          if (JSON.stringify(run.display ?? {}) !== JSON.stringify(w.display ?? {}))
+            this.scriptRuns.update((list) =>
+              list.map((r) => (r === run ? { ...r, display: w.display ? { ...w.display } : undefined } : r)),
+            );
+          continue;
+        }
+        if (!run) this.restoringScripts.update((l) => [...l.filter((x) => x.key !== w.key), w]);
+        this.runScript(
+          run?.item ?? restoredScriptItem(w, this.chartScripts.savedScripts()),
+          { ...w.values },
+          true,
+        );
+      }
+    } finally {
+      queueMicrotask(() => {
+        this.undoBaseline = this.undoableState();
+        this.undoing = false;
+      });
+    }
+  }
+
   /** Zoom/scroll/pane heights waiting for the chart's first data. */
   private pendingView: ChartWorkspaceState['view'] = null;
+  /** The series a pending view is for (a symbol's remembered zoom); null: whatever loads next. */
+  private pendingViewFor: SeriesId | null = null;
   /** True while a saved state is being applied, so applying it does not save it back. */
   private applyingState = false;
   /** Set once the saved state (or the defaults) has been applied; nothing saves before. */
@@ -5013,7 +5769,8 @@ export class ChartAnalysisPageComponent {
    * (`{ v: 1 }`) opens a clean chart. `keepSymbol` lets a deep link's symbol/timeframe win.
    */
   applyState(st: ChartWorkspaceState | null, keepSymbol = false): void {
-    const s = st ?? { v: 1 as const };
+    // v1 layouts (one chart and split panels) read as v2 (CC-I5): nothing is lost.
+    const s = migrateWorkspaceState(st ?? { v: WORKSPACE_VERSION });
     this.applyingState = true;
     try {
       const symbolBefore = this.symbol();
@@ -5023,35 +5780,10 @@ export class ChartAnalysisPageComponent {
         if (s.resolution && isSupportedResolution(s.resolution)) this.resolution.set(s.resolution);
         else this.resolution.set('60');
       }
-      this.style.set(s.style ?? 'candles');
-      this.showVolume.set(s.showVolume ?? true);
-      this.scaleMode.set(s.scaleMode ?? 'normal');
-      this.invertScale.set(s.invertScale === true);
-      this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
-      this.sessionBreaks.set(s.sessionBreaks === true);
-      this.showCountdown.set(s.countdown ?? true);
-      this.timezone.set(s.timezone ?? 'UTC');
-      const pb = restoredPriceBased(s.priceBased);
-      this.boxMethod.set(pb.boxMethod);
-      this.boxSizeAtr.set(pb.boxSizeAtr);
-      this.boxPips.set(pb.boxPips);
-      this.renkoWicks.set(pb.renkoWicks);
-      this.lineBreakLines.set(pb.lineBreakLines);
+      this.applyChartSettings(s);
+      this.rememberPerSymbol.set(s.symbolMemory?.on === true);
+      this.symbolMemory.set(restoredSymbolMemory(s.symbolMemory?.symbols));
       this.active.set((s.indicators ?? []).map((i) => ({ ...i, params: { ...i.params } })));
-      const o = s.overlays ?? {};
-      // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
-      this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
-      this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
-      this.showOverlays.set(o.showOverlays ?? false);
-      this.showVolumeProfile.set(o.showVolumeProfile ?? false);
-      if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
-      this.showSupportResistance.set(o.showSupportResistance ?? false);
-      this.showStructure.set(o.showStructure ?? false);
-      this.showEvents.set(o.showEvents ?? true);
-      this.minEventImpact.set(o.minEventImpact ?? 'Medium');
-      this.showBlackout.set(o.showBlackout ?? true);
-      this.showClosedTrades.set(o.showClosedTrades ?? false);
-      this.fitTradeLines.set(o.fitTradeLines ?? true);
       const p = s.panel ?? {};
       if (p.watchlistOpen !== undefined) this.watchlistOpen.set(p.watchlistOpen);
       if (p.width && p.width >= 240 && p.width <= 640) this.dockWidth.set(p.width);
@@ -5059,8 +5791,11 @@ export class ChartAnalysisPageComponent {
       this.calendarAll.set(p.calendarAll ?? false);
       this.calendarMinImpact.set(p.calendarMinImpact ?? 'Low');
       this.pendingView = s.view ?? null;
+      this.pendingViewFor = null;
       this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
-      this.restoreSplit(s.split);
+      this.mainLink.set(linkGroupOf(s.link));
+      this.chartSync.set(restoredSync(s.sync));
+      this.restoreSplit(s.split, s.charts);
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy. Runs of the
       // layout being replaced that are still in flight must not land on this one, nor an Undo for
@@ -5086,15 +5821,61 @@ export class ChartAnalysisPageComponent {
         this.workspace.rebase(this.captureState());
         this.applyingState = false;
         this.restored = true;
+        // Another layout's chart: its steps are not this one's to undo (drawing steps stay, they are per symbol).
+        clearTimeout(this.undoTimer);
+        this.undoPending = null;
+        this.undoBaseline = this.undoableState();
+        this.undoHistory.clearChart();
       });
     }
+  }
+
+  /**
+   * A layout's chart settings — style, volume, scales, session breaks, countdown, zone, price-based boxes, overlays —
+   * with the chart's defaults for whatever it leaves out (a layout, or an undo step: CC-I11).
+   */
+  private applyChartSettings(s: UndoableChart['settings']): void {
+    this.style.set(s.style ?? 'candles');
+    this.showVolume.set(s.showVolume ?? true);
+    this.scaleMode.set(s.scaleMode ?? 'normal');
+    this.invertScale.set(s.invertScale === true);
+    this.scaleSide.set(s.scaleSide === 'left' ? 'left' : 'right');
+    this.sessionBreaks.set(s.sessionBreaks === true);
+    this.showCountdown.set(s.countdown ?? true);
+    this.appearance.set(restoredAppearance(s.appearance));
+    this.compareSeries.set(restoredCompare(s.compare));
+    this.timezone.set(s.timezone ?? 'UTC');
+    const pb = restoredPriceBased(s.priceBased);
+    this.boxMethod.set(pb.boxMethod);
+    this.boxSizeAtr.set(pb.boxSizeAtr);
+    this.boxPips.set(pb.boxPips);
+    this.renkoWicks.set(pb.renkoWicks);
+    this.lineBreakLines.set(pb.lineBreakLines);
+    this.pnfReversal.set(pb.pnfReversal);
+    const o = s.overlays ?? {};
+    // Layouts saved before the split had one "Trades & signals" switch: it drove all three.
+    this.showPositions.set(o.showPositions ?? o.showOverlays ?? false);
+    this.showOrders.set(o.showOrders ?? o.showOverlays ?? false);
+    this.showOverlays.set(o.showOverlays ?? false);
+    this.showVolumeProfile.set(o.showVolumeProfile ?? false);
+    if (o.volumeProfileMode) this.volumeProfileMode.set(o.volumeProfileMode as VolumeProfileMode);
+    this.showSupportResistance.set(o.showSupportResistance ?? false);
+    this.showStructure.set(o.showStructure ?? false);
+    this.showEvents.set(o.showEvents ?? true);
+    this.minEventImpact.set(o.minEventImpact ?? 'Medium');
+    this.showBlackout.set(o.showBlackout ?? true);
+    this.showClosedTrades.set(o.showClosedTrades ?? false);
+    this.fitTradeLines.set(o.fitTradeLines ?? true);
   }
 
   private flushPendingView(): void {
     const v = this.pendingView;
     const host = this.host();
     if (!v || !host || !this.bars().length) return;
+    // A remembered zoom waits for its symbol's bars, not the ones still on screen.
+    if (this.pendingViewFor && !sameSeries(this.barsFor(), this.pendingViewFor)) return;
     this.pendingView = null;
+    this.pendingViewFor = null;
     host.applyViewState(v);
     // Indicator panes are created a moment after the data; size them once they exist.
     setTimeout(() => host.applyViewState({ ...v, barSpacing: NaN, rightOffset: NaN }), 1_200);
@@ -5126,25 +5907,38 @@ export class ChartAnalysisPageComponent {
 
   // ── Layout menu (server-backed) ──────────────────────────────────────────
 
-  newLayout(): void {
-    const name = prompt('New layout name', 'Unnamed');
-    if (name === null) return;
+  async newLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.newLayout(name);
+    const name = await askName(this.dialogs, {
+      title: 'New layout',
+      label: 'Layout name',
+      value: 'Unnamed',
+      confirmLabel: 'Create',
+    });
+    if (name !== null) void this.workspace.newLayout(name);
   }
 
-  renameLayout(): void {
-    const name = prompt('Rename layout', this.workspace.active().name);
-    if (name === null || !name.trim()) return;
+  async renameLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.rename(name);
+    const name = await askName(this.dialogs, {
+      title: 'Rename layout',
+      label: 'Layout name',
+      value: this.workspace.active().name,
+      confirmLabel: 'Rename',
+    });
+    if (name !== null) void this.workspace.rename(name);
   }
 
-  duplicateLayout(): void {
-    const name = prompt('Copy layout as', `${this.workspace.active().name} copy`);
-    if (name === null) return;
+  async duplicateLayout(): Promise<void> {
     this.layoutMenuOpen.set(false);
-    void this.workspace.duplicate(name);
+    const name = await askName(this.dialogs, {
+      title: 'Copy layout',
+      message: 'The copy keeps this layout’s symbol, studies, scripts and drawings settings.',
+      label: 'Name of the copy',
+      value: `${this.workspace.active().name} copy`,
+      confirmLabel: 'Copy',
+    });
+    if (name !== null) void this.workspace.duplicate(name);
   }
 
   switchLayout(id: number): void {
@@ -5155,16 +5949,22 @@ export class ChartAnalysisPageComponent {
   removeLayout(id: number, ev: Event): void {
     ev.stopPropagation();
     const l = this.workspace.layouts().find((x) => x.id === id);
-    if (!confirm(`Delete layout “${l?.name ?? id}”? This cannot be undone.`)) return;
-    void this.workspace.remove(id);
+    void confirmDelete(this.dialogs, `layout “${l?.name ?? id}”`).then((yes) => {
+      if (yes) void this.workspace.remove(id);
+    });
   }
 
-  saveTemplate(): void {
+  async saveTemplate(): Promise<void> {
     if (this.active().length === 0) return;
-    const name = prompt('Template name', 'My studies');
-    if (name === null) return;
-    this.layoutStore.saveTemplate(name, this.active());
     this.layoutMenuOpen.set(false);
+    const name = await askName(this.dialogs, {
+      title: 'Save indicator template',
+      message: 'The studies on this chart, with their inputs and styles.',
+      label: 'Template name',
+      value: 'My studies',
+      confirmLabel: 'Save',
+    });
+    if (name !== null) this.layoutStore.saveTemplate(name, this.active());
   }
 
   applyTemplate(template: StudyTemplate): void {
@@ -5581,15 +6381,23 @@ export class ChartAnalysisPageComponent {
     }
 
     const mod = ev.metaKey || ev.ctrlKey;
+    // The chart's command palette (CC-I11): ⌘⇧K / Ctrl+Shift+K (⌘K alone is the console's page search).
+    if (mod && ev.shiftKey && ev.key.toLowerCase() === 'k') {
+      ev.preventDefault();
+      // The console's palette listens on the document for ⌘K with or without Shift: not this one.
+      ev.stopPropagation();
+      this.paletteOpen.set(true);
+      return;
+    }
     if (mod && ev.key.toLowerCase() === 'z') {
       ev.preventDefault();
-      if (ev.shiftKey) this.drawings.redo();
-      else this.drawings.undo();
+      if (ev.shiftKey) this.redo();
+      else this.undo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'y') {
       ev.preventDefault();
-      this.drawings.redo();
+      this.redo();
       return;
     }
     if (mod && ev.key.toLowerCase() === 'c' && !ev.shiftKey) {
@@ -5634,10 +6442,35 @@ export class ChartAnalysisPageComponent {
     // TradingView's drawing hotkeys (DR-I12), by physical key so Alt's characters on a Mac
     // (Alt+T types "†") do not get in the way.
     if (ev.altKey && !mod) {
+      // TradingView's chart keys (CC-I11): reset the view, invert / log / percent scale, snapshot.
+      const action = CHART_HOTKEYS[ev.code];
+      if (action) {
+        ev.preventDefault();
+        if (action === 'reset') this.resetScales();
+        else if (action === 'invert') this.invertScale.set(!this.invertScale());
+        else if (action === 'log') this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
+        else if (action === 'percent')
+          this.scaleMode.set(this.scaleMode() === 'percent' ? 'normal' : 'percent');
+        else this.takeSnapshot();
+        return;
+      }
       const kind = DRAWING_HOTKEYS[ev.code];
       if (kind) {
         ev.preventDefault();
         this.tool.set(kind);
+        return;
+      }
+    }
+    // Bar Replay, TradingView's keys: Shift+→ forward, Shift+← back, Shift+↓ play / pause (CC-I4).
+    if (this.replayActive() && ev.shiftKey && !mod && !ev.altKey) {
+      const replayKey =
+        ev.key === 'ArrowRight' ? () => void this.replay.step(1)
+        : ev.key === 'ArrowLeft' ? () => void this.replay.step(-1)
+        : ev.key === 'ArrowDown' ? () => this.replay.togglePlay()
+        : null;
+      if (replayKey) {
+        ev.preventDefault();
+        replayKey();
         return;
       }
     }
@@ -5647,6 +6480,12 @@ export class ChartAnalysisPageComponent {
       const bars = ev.key === 'ArrowLeft' ? -k : ev.key === 'ArrowRight' ? k : 0;
       const px = ev.key === 'ArrowUp' ? -k : ev.key === 'ArrowDown' ? k : 0;
       if (this.host()?.nudgeSelectedDrawing(bars, px)) ev.preventDefault();
+      return;
+    }
+    // TradingView: "/" opens the indicators.
+    if (ev.key === '/' && !mod && !ev.altKey) {
+      ev.preventDefault();
+      this.openStudiesDialog();
       return;
     }
     if (ev.key.toLowerCase() === 'm' && !mod) {
@@ -5733,4 +6572,9 @@ export function normaliseView(v: ChartViewState): ChartViewState {
     rightOffset: Math.round(v.rightOffset),
     paneHeights: v.paneHeights.map((h) => Math.round(h)),
   };
+}
+
+/** A chart's scripts on a new series: their runs were the old series'. */
+function freshRuns(scripts: readonly PanelScript[]): PanelScript[] {
+  return scripts.map((s) => ({ ...s, result: null, error: null, ranTo: null }));
 }

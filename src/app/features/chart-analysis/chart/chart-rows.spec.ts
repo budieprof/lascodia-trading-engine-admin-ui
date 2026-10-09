@@ -12,6 +12,7 @@ import {
   type VolumeRow,
 } from './chart-rows';
 import { PlottedBars } from './plotted-bars';
+import { toKagi, toPointAndFigure } from './price-transforms';
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 
 const H = 3_600_000;
@@ -248,5 +249,24 @@ describe('what a live price costs the chart (CC-I1 harness)', () => {
     h.apply(all.slice(0, 79));
     expect(h.price.calls).toEqual(['pop(1)']);
     expect(h.price.data.length).toBe(79);
+  });
+});
+
+describe('price rows of the P&F and Kagi custom series (CC-I10)', () => {
+  const palette = { up: '#0f0', down: '#f00', volumeUp: '#0f0', volumeDown: '#f00' };
+  const H = 3_600_000;
+  const closes = [100, 101.5, 103.4, 101.2, 100.0, 102.5, 104.0, 110, 104, 108, 101];
+  const bars = closes.map((c, i) => ({ time: i * H, open: c, high: c, low: c, close: c, volume: 1 }));
+
+  it('P&F rows carry the box and the column’s direction', () => {
+    const rows = priceRowsFrom('pnf', toPointAndFigure(bars, 1, 3), null, palette, 0, []);
+    expect(rows[0]).toMatchObject({ low: 100, high: 103, box: 1, up: true });
+    expect(rows[1]).toMatchObject({ box: 1, up: false });
+  });
+
+  it('Kagi rows carry the thickness and where it changes, and a change of it is a changed row', () => {
+    const rows = priceRowsFrom('kagi', toKagi(bars, 3), null, palette, 0, []);
+    expect(rows.every((r) => typeof r.thickStart === 'boolean' && r.switchAt !== undefined)).toBe(true);
+    expect(samePriceRow(rows[0], { ...rows[0], switchAt: 1 })).toBe(false);
   });
 });

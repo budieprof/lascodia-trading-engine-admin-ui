@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { TradingCalendar } from '../datafeed/session-calendar';
-import { sessionBreakIndexes, utcDay } from './session-breaks';
+import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from './session-breaks';
 
 const H = 3_600_000;
 const FX = new TradingCalendar({ session: '1700-1700:23456', timeZone: 'America/New_York' });
@@ -28,5 +28,22 @@ describe('session breaks (CC-I9)', () => {
   it('has nothing to break on one bar or none', () => {
     expect(sessionBreakIndexes([start], utcDay)).toEqual([]);
     expect(sessionBreakIndexes([], utcDay)).toEqual([]);
+  });
+});
+
+describe('SessionBreaksRenderer (every pane draws the price pane’s breaks)', () => {
+  it('repaints only when the breaks change — a tick asks every pane again', () => {
+    const r = new SessionBreaksRenderer(
+      () => null,
+      () => false,
+    );
+    const requestUpdate = vi.fn();
+    r.attached({ requestUpdate });
+    r.setBreaks([3, 27]);
+    r.setBreaks([3, 27]);
+    expect(requestUpdate).toHaveBeenCalledTimes(1);
+    expect(r.breaks()).toEqual([3, 27]);
+    r.setBreaks([3, 27, 51]);
+    expect(requestUpdate).toHaveBeenCalledTimes(2);
   });
 });

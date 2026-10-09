@@ -212,6 +212,19 @@
               </button>
             }
           }
+          @if (style() === 'pnf') {
+            <label class="tb-menu-field" title="Boxes a close must move against a column to start the next one">
+              Reversal
+              <input
+                type="number"
+                min="1"
+                max="10"
+                step="1"
+                [value]="pnfReversal()"
+                (change)="setPnfReversal($any($event.target).value)"
+              />
+            </label>
+          }
           @if (style() === 'line-break') {
             <div class="tb-menu-sep"></div>
             <label class="tb-menu-field" title="How many lines a reversal must break">
@@ -240,6 +253,16 @@
       aria-label="Indicators"
     >
       <app-chart-icon name="indicators" [size]="28" /><span class="tb-label">Indicators</span>
+    </button>
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="compareOpen.set(true)"
+      [class.active]="compareSeries().length > 0"
+      title="Compare: another symbol in %, a ratio, a spread or a basket"
+      data-testid="open-compare"
+    >
+      <app-chart-icon name="plus" [size]="28" />
     </button>
     @if (indicatorMenuOpen()) {
       <app-indicators-dialog
@@ -593,18 +616,18 @@
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="drawings.undo()"
-      [disabled]="!drawings.canUndo()"
-      title="Undo (⌘Z)"
+      (click)="undo()"
+      [disabled]="!canUndo()"
+      [title]="undoTitle()"
     >
       <app-chart-icon name="undo" [size]="28" />
     </button>
     <button
       type="button"
       class="tb-btn tb-wide"
-      (click)="drawings.redo()"
-      [disabled]="!drawings.canRedo()"
-      title="Redo (⇧⌘Z)"
+      (click)="redo()"
+      [disabled]="!canRedo()"
+      [title]="redoTitle()"
     >
       <app-chart-icon name="redo" [size]="28" />
     </button>
@@ -680,6 +703,30 @@
             >
               <app-chart-icon [name]="'layout-' + l.id" [size]="28" />
             </button>
+          }
+          @if (comparePanels().length) {
+            <!-- Linked charts (CC-I5): the main chart's group, and what linked charts follow. -->
+            <div class="tb-menu-sep"></div>
+            <label class="tb-menu-field" title="Charts in one link group follow each other">
+              Main chart link
+              <select [value]="mainLink()" (change)="setMainLink(+$any($event.target).value)">
+                <option value="0">None</option>
+                <option value="1">Group 1</option>
+                <option value="2">Group 2</option>
+                <option value="3">Group 3</option>
+              </select>
+            </label>
+            @for (k of syncKeys; track k.key) {
+              <button
+                type="button"
+                class="tb-menu-item tb-check"
+                [class.on]="chartSync()[k.key]"
+                (click)="setSync(k.key, !chartSync()[k.key])"
+                [title]="k.title"
+              >
+                Sync {{ k.label }}
+              </button>
+            }
           }
         </div>
       }
@@ -793,6 +840,15 @@
     >
       <app-chart-icon name="camera" [size]="28" />
     </button>
+    <button
+      type="button"
+      class="tb-btn tb-wide"
+      (click)="chartSettingsOpen.set(true)"
+      title="Chart settings"
+      data-testid="chart-settings"
+    >
+      <app-chart-icon name="settings" [size]="28" />
+    </button>
     <!-- A narrow toolbar's ⋯ menu: the tb-wide buttons, as TradingView's narrow layout has them. -->
     <div class="tb-menu-anchor tb-more-anchor">
       <button
@@ -812,8 +868,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="drawings.undo(); openMenu.set(null)"
-            [disabled]="!drawings.canUndo()"
+            (click)="undo(); openMenu.set(null)"
+            [disabled]="!canUndo()"
           >
             <app-chart-icon name="undo" [size]="28" /> Undo
           </button>
@@ -821,8 +877,8 @@
             type="button"
             role="menuitem"
             class="tb-menu-item"
-            (click)="drawings.redo(); openMenu.set(null)"
-            [disabled]="!drawings.canRedo()"
+            (click)="redo(); openMenu.set(null)"
+            [disabled]="!canRedo()"
           >
             <app-chart-icon name="redo" [size]="28" /> Redo
           </button>
@@ -858,6 +914,22 @@
             (click)="takeSnapshot(); openMenu.set(null)"
           >
             <app-chart-icon name="camera" [size]="28" /> Take a snapshot
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="chartSettingsOpen.set(true); openMenu.set(null)"
+          >
+            <app-chart-icon name="settings" [size]="28" /> Chart settings
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-menu-item"
+            (click)="compareOpen.set(true); openMenu.set(null)"
+          >
+            <app-chart-icon name="plus" [size]="28" /> Compare
           </button>
         </div>
       }
@@ -1153,7 +1225,7 @@
         (contextmenu)="openContextMenu($event)"
         (pointerdown)="drawingMenu.set(null)"
       >
-        <div class="legend">
+        <div class="legend" appMeasuredBottom (bottomChange)="legendBottom.set($event)">
           <div class="legend-title">
             <strong>{{ symbol() }}</strong>
             <span class="muted">{{ resolutionLabel(resolution()) }}</span>
@@ -1212,6 +1284,12 @@
               </div>
             }
           }
+          <!-- Compare overlays and synthetic series (CC-I12). -->
+          @for (c of compareSeries(); track c.id) {
+            <div class="legend-indicator">
+              <span [style.color]="c.color">● {{ compareTitleOf(c) }}</span>
+            </div>
+          }
           <!-- Overlay Pine scripts' status lines (PC-I2); pane scripts' sit over their panes. -->
           @for (row of legendScriptRows(); track row.key) {
             <app-script-status-line [row]="row" (action)="onScriptAction($event)" />
@@ -1226,6 +1304,10 @@
           #host
           (viewChanged)="onViewChanged()"
           [showCountdown]="showCountdown()"
+          [appearance]="appearance()"
+          [legendBottom]="legendBottom()"
+          (crosshairSync)="onChartCrosshair('main', $event)"
+          (rangeSync)="onChartRange('main', $event)"
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"
@@ -1256,6 +1338,7 @@
           [pipSize]="pipSize()"
           [renkoWicks]="renkoWicks()"
           [lineBreakLines]="lineBreakLines()"
+          [pnfReversal]="pnfReversal()"
           [showVolumeProfile]="showVolumeProfile()"
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"
@@ -1270,7 +1353,7 @@
           [scriptResults]="scriptResults()"
           (scriptAction)="onScriptAction($event)"
           (scriptTradeClick)="onScriptTradeClick($event)"
-          [externalPanes]="externalPanes()"
+          [externalPanes]="chartExternalPanes()"
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
           (toolComplete)="onToolComplete()"
@@ -1431,6 +1514,12 @@
               (click)="showCountdown.set(!showCountdown()); closeContextMenu()"
             >
               {{ showCountdown() ? '✓ ' : '' }}Countdown to bar close
+            </button>
+            <button type="button" (click)="chartSettingsOpen.set(true); closeContextMenu()">
+              Settings…
+            </button>
+            <button type="button" (click)="paletteOpen.set(true); closeContextMenu()" title="⌘⇧K">
+              Commands…
             </button>
             <button type="button" (click)="takeSnapshot()">Save image…</button>
             <button type="button" (click)="copySnapshot()">Copy image</button>
@@ -1705,6 +1794,63 @@
                 <option [value]="r">{{ resolutionLabel(r) }}</option>
               }
             </select>
+            <select
+              class="panel-select"
+              [ngModel]="panel.link"
+              (ngModelChange)="setPanelLink(panel.id, +$event)"
+              [ngModelOptions]="{ standalone: true }"
+              aria-label="Link group"
+              title="Charts in one link group follow each other (the layout menu says what they follow)"
+            >
+              <option [ngValue]="0">No link</option>
+              <option [ngValue]="1">Link 1</option>
+              <option [ngValue]="2">Link 2</option>
+              <option [ngValue]="3">Link 3</option>
+            </select>
+            <!-- Its own studies and Pine indicators (CC-I5). -->
+            <select
+              class="panel-select"
+              (change)="panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''"
+              aria-label="Add a study or a script to this chart"
+            >
+              <option value="">+ Study</option>
+              <optgroup label="Indicators">
+                @for (d of panelStudyDefs; track d.id) {
+                  <option [value]="'study:' + d.id">{{ d.name }}</option>
+                }
+              </optgroup>
+              @if (panelScriptChoices().length) {
+                <optgroup label="Pine scripts">
+                  @for (it of panelScriptChoices(); track it.key) {
+                    <option [value]="'script:' + it.key">{{ it.name }}</option>
+                  }
+                </optgroup>
+              }
+            </select>
+            @for (ind of panel.indicators; track ind.uid) {
+              <button
+                type="button"
+                class="panel-select"
+                (click)="removePanelStudy(panel.id, ind.uid)"
+                [title]="'Remove ' + labelFor(ind)"
+              >
+                {{ labelFor(ind) }} ×
+              </button>
+            }
+            @for (s of panel.scripts; track s.item.key) {
+              <button
+                type="button"
+                class="panel-select"
+                (click)="removePanelScript(panel.id, s.item.key)"
+                [title]="
+                  s.error
+                    ? s.item.name + ': ' + s.error + ' — click to remove'
+                    : 'Remove ' + s.item.name + ' (it runs again at each new bar)'
+                "
+              >
+                {{ s.item.name }}{{ s.error ? ' ⚠' : '' }} ×
+              </button>
+            }
             <button
               type="button"
               class="panel-focus"
@@ -1752,6 +1898,18 @@
               </div>
             }
           }
+          @if (panelLegends()[panel.id]; as pl) {
+            @for (ind of pl.indicators; track ind.uid) {
+              <div class="legend-indicator panel-legend">
+                <span class="muted">{{ ind.label }}</span>
+                @for (v of ind.values; track v.title) {
+                  <span class="legend-value" [style.color]="v.color">
+                    {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+                  </span>
+                }
+              </div>
+            }
+          }
           <app-chart-host
             #panelHost
             [bars]="panel.bars"
@@ -1759,7 +1917,10 @@
             [historyComplete]="!!panel.historyComplete"
             [style]="style()"
             [showVolume]="false"
-            [indicators]="[]"
+            [indicators]="panel.indicators"
+            (crosshairSync)="onChartCrosshair(panel.id, $event)"
+            (rangeSync)="onChartRange(panel.id, $event)"
+            [scriptResults]="panelLayerMap().get(panel.id) ?? noLayers"
             [precision]="panelPrecision(panel.symbol)"
             [scaleMode]="scaleMode()"
             [timezone]="timezone()"
@@ -1820,37 +1981,17 @@
   />
 
   @if (replayActive()) {
-    <div class="replay-bar">
-      <button type="button" (click)="stepReplay(-1)" title="Back one bar">
-        <app-chart-icon name="step-back" [size]="18" />
-      </button>
-      <button type="button" (click)="toggleReplayPlay()" title="Play / pause">
-        <app-chart-icon [name]="replayPlaying() ? 'pause' : 'play'" [size]="18" />
-      </button>
-      <button type="button" (click)="stepReplay(1)" title="Forward one bar">
-        <app-chart-icon name="step-forward" [size]="18" />
-      </button>
-      <input
-        type="range"
-        class="replay-scrub"
-        min="1"
-        [max]="bars().length"
-        [value]="replayIndex()"
-        (input)="setReplayIndex($any($event.target).value)"
-      />
-      <span class="muted">{{ replayIndex() }} / {{ bars().length }}</span>
-      <span class="muted">{{ replayTime() }}</span>
-      <label class="replay-speed">
-        Speed
-        <select [value]="replaySpeed()" (change)="setReplaySpeed($any($event.target).value)">
-          <option value="1">1×</option>
-          <option value="4">4×</option>
-          <option value="10">10×</option>
-          <option value="30">30×</option>
-        </select>
-      </label>
-      <button type="button" (click)="exitReplay()">Exit</button>
-    </div>
+    <app-replay-panel
+      [replay]="replay"
+      [total]="bars().length"
+      [headLabel]="replayTime()"
+      [digits]="precision()"
+      [pipSize]="pipSize()"
+      [currency]="currentPair()?.quoteCurrency ?? ''"
+      (pickStart)="pickReplayStart()"
+      (startAt)="startReplayAt($event)"
+      (exit)="exitReplay()"
+    />
   }
 
   <!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
@@ -2008,6 +2149,38 @@
       (exportPine)="openPineDraft($event)"
     />
   }
+  <!-- Compare overlays and synthetic series (CC-I12). -->
+  @if (compareOpen()) {
+    <app-compare-dialog
+      [series]="compareSeries()"
+      [symbols]="symbolNames()"
+      [chartSymbol]="symbol()"
+      (add)="addCompare($event)"
+      (remove)="removeCompare($event)"
+      (closed)="compareOpen.set(false)"
+    />
+  }
+
+  <!-- The chart's command palette (CC-I11): ⌘⇧K, or the context menu. -->
+  @if (paletteOpen()) {
+    <app-chart-palette
+      [actions]="paletteActions()"
+      [recent]="paletteRecent()"
+      (run)="runPaletteAction($event)"
+      (closed)="paletteOpen.set(false)"
+    />
+  }
+
+  <!-- The chart's Settings (CC-I11): applied as they are edited; Cancel puts them back. -->
+  @if (chartSettingsOpen()) {
+    <app-chart-settings-dialog
+      [settings]="chartSettings()"
+      [timezones]="timezones"
+      (changed)="applySettingsFromDialog($event)"
+      (closed)="chartSettingsOpen.set(false)"
+    />
+  }
+
   <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->
   @if (studySettingsStudy(); as st) {
     <app-study-settings-dialog
