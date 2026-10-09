@@ -364,6 +364,19 @@
           >
             <app-chart-icon name="trades" [size]="28" /> Closed trades
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="showTradeTimeline()"
+            (click)="showTradeTimeline.set(!showTradeTimeline())"
+            [title]="
+              tradeTimelineInfo() ??
+              'The chart strategy\'s trades on one timeline: backtest, live session, paper and account fills, each with its slippage'
+            "
+            data-testid="toggle-trade-timeline"
+          >
+            <app-chart-icon name="trades" [size]="28" /> Trade timeline
+          </button>
           @if (showPositions() || showOrders()) {
             <button
               type="button"
@@ -540,6 +553,18 @@
         </div>
       }
     </div>
+
+    <!-- SP-I4 (trading): the order ticket — a manual signal for one account, paper by default. -->
+    <button
+      type="button"
+      class="tb-btn tb-text"
+      [class.active]="ticketOpen()"
+      (click)="ticketOpen.set(!ticketOpen())"
+      title="Order ticket: a paper or live manual trade on this symbol, checked by the engine before it is sent"
+      data-testid="open-ticket"
+    >
+      <app-chart-icon name="trades" [size]="28" /><span class="tb-label">Trade</span>
+    </button>
 
     <button
       type="button"
@@ -1242,6 +1267,23 @@
           (drawingContextMenu)="openDrawingMenu($event, chartArea)"
         />
 
+        <!-- SP-I3/SP-I4 (trading): the order ticket and the draggable trading lines on the price pane. -->
+        <app-chart-trading
+          [host]="host"
+          [symbol]="symbol()"
+          [precision]="precision()"
+          [pipSize]="pipSize()"
+          [quote]="liveQuote()"
+          [(open)]="ticketOpen"
+          [prefill]="ticketPrefill()"
+          [lotStep]="currentPair()?.lotStep || 0.01"
+          [positions]="openPositions()"
+          [orders]="workingOrders()"
+          [accountIds]="accountIdsInScope()"
+          (submitted)="onTicketSubmitted()"
+          (changed)="onChartTradeChanged()"
+        />
+
         <!-- A strategy the operator added replaced the one on the chart: say so, with Undo. -->
         <app-undo-notice
           [message]="replacedNotice()?.message ?? null"
@@ -1940,14 +1982,6 @@
       [pivotDepth]="scorecardDepth()"
       (closed)="scorecardOpen.set(false)"
       (exportPine)="openPineDraft($event)"
-    />
-  }
-  <!-- A position tool staged as a manual signal (DR-I9): the existing dialog, filled in; nothing is sent until Create. -->
-  @if (stagePrefill(); as pf) {
-    <app-create-signal-dialog
-      [prefill]="pf"
-      (closed)="stagePrefill.set(null)"
-      (created)="onStagedSignal($event)"
     />
   }
   <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->

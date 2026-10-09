@@ -233,10 +233,6 @@ import { PatternScorecardDialogComponent } from '../../patterns/scorecard-dialog
 import type { CandleTrendFilter } from '../../patterns/candlestick-patterns';
 import type { AutoAnalysisSettings } from '../../overlays/auto-analysis';
 import { positionAccountFacts, positionOrderPrefill } from '../../drawings/position-link';
-import {
-  CreateSignalDialogComponent,
-  type SignalPrefill,
-} from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
 import type { ChartAlertDto } from '../../alerts/chart-alerts.types';
 import {
   parseStudyInput,
@@ -303,6 +299,10 @@ import type {
   UpcomingEconomicEvent,
 } from '@core/services/economic-calendar.service';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
+import { ChartTradingComponent } from '../../trading/chart-trading.component';
+import { timelineMarkers, timelineSummary, timelineWindow } from '../../trading/trade-timeline';
+import { ScriptStrategyService } from '@features/scripting/api/script-strategy.service';
+import type { TicketPrefill } from '../../trading/ticket-model';
 import {
   dockStateOf,
   restoredDock,
@@ -547,6 +547,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     FormsModule,
     DecimalPipe,
     ChartHostComponent,
+    ChartTradingComponent,
     DataWindowComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
@@ -577,7 +578,6 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ChartAlertManagerComponent,
     ObjectTreeComponent,
     StudySettingsDialogComponent,
-    CreateSignalDialogComponent,
     FavoritesBarComponent,
     PatternScorecardDialogComponent,
     ChartScriptAlertFormComponent,
@@ -1353,13 +1353,13 @@ export class ChartAnalysisPageComponent {
    * martingale-rung markers. The position lines are re-drawn from these on every live price (their
    * P&L), never re-fetched for it.
    */
-  private readonly openPositions = signal<ChartPosition[]>([]);
-  private readonly workingOrders = signal<OrderDto[]>([]);
+  protected readonly openPositions = signal<ChartPosition[]>([]);
+  protected readonly workingOrders = signal<OrderDto[]>([]);
   private readonly closedPositions = signal<ChartPosition[]>([]);
   private readonly signalMarkers = signal<ChartMarker[]>([]);
   private readonly rungMarkers = signal<ChartMarker[]>([]);
   /** The chart symbol's live quote (bid and ask), for the open positions' P&L at the exit side. */
-  private readonly liveQuote = signal<LiveQuote | null>(null);
+  protected readonly liveQuote = signal<LiveQuote | null>(null);
 
   /** The account scope, as a filter: only the selected account's positions and orders are drawn. */
   private inTradeScope(): (accountId: number | null | undefined) => boolean {
@@ -1398,7 +1398,52 @@ export class ChartAnalysisPageComponent {
     ...this.signalMarkers(),
     ...this.rungMarkers(),
     ...this.closedTradeMarkers(),
+    ...this.timelineMarkers(),
   ]);
+
+  // ── BX-1 (trading): the chart strategy's trade timeline — backtest, live session, paper and broker fills ──
+  private readonly scriptStrategies = inject(ScriptStrategyService);
+  /** The timeline is drawn (overlays menu "Trade timeline"); it needs an engine strategy script on the chart. */
+  readonly showTradeTimeline = signal(false);
+  readonly tradeTimelineStrategyId = computed(() => this.strategyRun()?.item.strategyId ?? null);
+  private readonly timelineMarkers = signal<ChartMarker[]>([]);
+  /** What the drawn timeline holds, or why nothing is drawn (the overlays menu shows it). */
+  readonly tradeTimelineInfo = signal<string | null>(null);
+  private timelineSeq = 0;
+  private readonly loadTradeTimeline = effect((onCleanup) => {
+    const show = this.showTradeTimeline();
+    const strategyId = this.tradeTimelineStrategyId();
+    const symbol = this.symbol();
+    const seq = ++this.timelineSeq;
+    if (!show || strategyId === null) {
+      this.timelineMarkers.set([]);
+      this.tradeTimelineInfo.set(show ? 'Add an engine strategy script to the chart to draw its trades.' : null);
+      return;
+    }
+    const oldest = untracked(() => this.bars()[0]?.time ?? null);
+    const sub = this.scriptStrategies
+      .getParityTimeline(strategyId, timelineWindow(oldest, Date.now()))
+      .subscribe({
+        next: (res) => {
+          if (seq !== this.timelineSeq) return;
+          if (!res?.status || !res.data) {
+            this.timelineMarkers.set([]);
+            this.tradeTimelineInfo.set(res?.message || 'The trade timeline could not be loaded.');
+            return;
+          }
+          this.timelineMarkers.set(timelineMarkers(res.data, symbol));
+          this.tradeTimelineInfo.set(
+            res.data.symbol.toUpperCase() === symbol.toUpperCase()
+              ? [timelineSummary(res.data), ...res.data.notes].join(' — ')
+              : `The strategy trades ${res.data.symbol}, not ${symbol}.`,
+          );
+        },
+        error: () => {
+          if (seq === this.timelineSeq) this.tradeTimelineInfo.set('The engine did not answer.');
+        },
+      });
+    onCleanup(() => sub.unsubscribe());
+  });
   /**
    * Engine state on the chart, each toggled on its own (all off until the operator asks):
    * open positions (entry/SL/TP), pending orders (working limit/stop orders and their O·SL/O·TP),
@@ -1669,22 +1714,37 @@ export class ChartAnalysisPageComponent {
     });
     return facts ? { ...facts } : null;
   });
-  /** A position tool staged as a manual signal: the dialog's starting values (DR-I9). */
-  readonly stagePrefill = signal<SignalPrefill | null>(null);
+  /** SP-I4 (trading): the order ticket is open, and the values a "Stage…" opens it with. */
+  readonly ticketOpen = signal(false);
+  /** The account scope's ids, for the chart's trading lines (the same filter the trade layer draws with). */
+  readonly accountIdsInScope = computed(() => this.accountScope.accountIds());
+  readonly ticketPrefill = signal<TicketPrefill | null>(null);
 
-  /** "Stage…" on a Long / Short Position: the manual-signal dialog, filled in. The chart sends nothing itself. */
+  /** A ticket went through: the trade layers show the new position / order once the engine reports it. */
+  onTicketSubmitted(): void {
+    this.scheduleTradeRefresh({ symbol: this.symbol() });
+  }
+
+  /** SP-I3: a position or order was changed from the chart (or a change was refused): re-read the trade layers. */
+  onChartTradeChanged(): void {
+    this.loadTradingOverlays();
+  }
+
+  /**
+   * "Stage…" on a Long / Short Position (DR-I9 → SP-I4): the order ticket opens with the tool's side, stop and target,
+   * in paper at market (the drawn entry is kept for a live "At price" order). The chart sends nothing until Submit,
+   * and the engine judges the ticket again then.
+   */
   stageOrder(id: string): void {
     const d = this.drawings.allDrawings().find((x) => x.id === id);
     const prefill = d ? positionOrderPrefill(d) : null;
-    if (prefill) this.stagePrefill.set(prefill);
-  }
-
-  /** The operator created the signal in the dialog: it waits as Pending for approval and the risk checks. */
-  onStagedSignal(id: number): void {
-    this.stagePrefill.set(null);
-    this.notify.success(
-      `Signal #${id} queued as Pending — approval and the risk checks decide whether it trades.`,
-    );
+    if (!prefill?.direction) return;
+    this.ticketPrefill.set({
+      direction: prefill.direction,
+      entry: prefill.entryPrice ?? null,
+      stop: prefill.stopLoss ?? null,
+      target: prefill.takeProfit ?? null,
+    });
   }
 
   /** The studies' names by uid (the object tree names the pane a drawing is in, DR-I10). */
