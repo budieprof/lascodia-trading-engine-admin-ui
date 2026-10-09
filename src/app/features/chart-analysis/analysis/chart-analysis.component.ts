@@ -14,14 +14,19 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { merge } from 'rxjs';
+import { firstValueFrom, merge } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
 
 import type { MarketAnalysisResultDto } from '@core/api/api.types';
+import { UiCommandService } from '@core/assistant/ui-command.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 
 import type { ChartHostComponent, ChartMarker } from '../chart/chart-host.component';
+import { ChartAlertsService } from '../alerts/chart-alerts.service';
 import type { TicketPrefill } from '../trading/ticket-model';
+import { WatchlistService } from '../watchlist/watchlist.service';
+import { addSymbol, listSymbols, removeSymbol } from '../watchlist/watchlist.model';
+import { analysisCommands, type AnalysisCommandHost } from './analysis-commands';
 import { AnalysisLevelsPrimitive } from './analysis-levels-primitive';
 import {
   analysisOutcome,
@@ -534,6 +539,8 @@ export class ChartAnalysisComponent {
   private readonly service = inject(ChartAnalysisService);
   private readonly realtime = inject(RealtimeService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly alerts = inject(ChartAlertsService);
+  private readonly watchlists = inject(WatchlistService);
 
   /** The chart host the overlay draws on (the page's primary chart). */
   readonly host = input<ChartHostComponent | undefined>(undefined);
@@ -621,6 +628,9 @@ export class ChartAnalysisComponent {
   );
 
   constructor() {
+    // SP-I8: the assistant's chart tools, for as long as the chart is mounted (the browser registry is the gate).
+    inject(UiCommandService).register(analysisCommands(this.commandHost()), this.destroyRef);
+
     effect((onCleanup) => {
       const host = this.host();
       if (!host) return;
@@ -864,6 +874,80 @@ export class ChartAnalysisComponent {
           },
         });
     });
+  }
+
+  /** What the assistant's chart tools act through: the chart, the existing alert and watchlist services, this panel. */
+  private commandHost(): AnalysisCommandHost {
+    return {
+      symbol: () => this.symbol(),
+      resolution: () => this.resolution(),
+      precision: () => this.precision(),
+      lastPrice: () => this.lastPrice(),
+      valueRows: () => this.host()?.exportRows() ?? null,
+      listAlerts: async () => {
+        const res = await firstValueFrom(this.service.alerts());
+        if (!res?.status) throw new Error(res?.message || 'The alerts could not be read.');
+        return res.data ?? [];
+      },
+      createAlert: async (input) => {
+        const res = await firstValueFrom(this.alerts.create(input));
+        return res?.status && res.data
+          ? { ok: true, message: res.message || 'Created.', alert: res.data }
+          : { ok: false, message: res?.message || 'The engine did not create the alert.' };
+      },
+      deleteAlert: async (id) => {
+        const res = await firstValueFrom(this.alerts.delete(id));
+        return res?.status
+          ? { ok: true, message: `Deleted alert ${id}.` }
+          : { ok: false, message: res?.message || `Alert ${id} was not deleted.` };
+      },
+      watchlist: async () => {
+        if (!this.watchlists.loaded()) await this.watchlists.load();
+        const active = this.watchlists.active();
+        if (!active)
+          return this.watchlists.error()
+            ? null
+            : { name: 'Watchlist', symbols: [], otherLists: [] };
+        return {
+          name: active.name,
+          symbols: listSymbols(active),
+          otherLists: this.watchlists
+            .lists()
+            .filter((l) => l.id !== active.id)
+            .map((l) => l.name),
+        };
+      },
+      addToWatchlist: async (symbol) => {
+        if (!/^[A-Z0-9._-]{2,20}$/.test(symbol))
+          return { ok: false, message: `"${symbol}" is not a symbol.` };
+        // The engine must know the symbol: a typo would sit in the list as a row with no prices.
+        const quotes = await this.watchlists.quotes([symbol]).catch(() => []);
+        if (!quotes.some((q) => q.symbol.toUpperCase() === symbol))
+          return { ok: false, message: `The engine has no prices for ${symbol}; not added.` };
+        if (!this.watchlists.loaded()) await this.watchlists.load();
+        const active = this.watchlists.active();
+        if (!active) return { ok: false, message: 'There is no watchlist to add to.' };
+        if (listSymbols(active).includes(symbol))
+          return { ok: true, message: `${symbol} is already on ${active.name}.` };
+        this.watchlists.update(addSymbol(active, symbol));
+        this.watchlists.flush();
+        return { ok: true, message: `Added ${symbol} to ${active.name}.` };
+      },
+      removeFromWatchlist: async (symbol) => {
+        if (!this.watchlists.loaded()) await this.watchlists.load();
+        const active = this.watchlists.active();
+        if (!active || !listSymbols(active).includes(symbol))
+          return { ok: false, message: `${symbol} is not on the active watchlist.` };
+        this.watchlists.update(removeSymbol(active, symbol));
+        this.watchlists.flush();
+        return { ok: true, message: `Removed ${symbol} from ${active.name}.` };
+      },
+      analyse: (mode) => {
+        this.open.set(true);
+        return this.analyse(mode);
+      },
+      proposeTrade: (prefill) => this.ticket.emit(prefill),
+    };
   }
 
   private loadLatest(): void {

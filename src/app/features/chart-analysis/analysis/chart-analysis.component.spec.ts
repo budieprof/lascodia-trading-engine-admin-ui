@@ -7,6 +7,7 @@ import { Subject } from 'rxjs';
 
 import type { MarketAnalysisResultDto } from '@core/api/api.types';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { UiCommandService } from '@core/assistant/ui-command.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
@@ -80,7 +81,7 @@ describe('ChartAnalysisComponent', () => {
   let tickets: TicketPrefill[];
   const byId = <T extends Element>(id: string) => el.querySelector(`[data-testid="${id}"]`) as T;
 
-  const flushStart = (latest: unknown = ok(ANALYSIS)) => {
+  const flushStart = (latest: object = ok(ANALYSIS)) => {
     http
       .expectOne((r) => r.url.startsWith(`${BASE}/market-data/analysis-monitors/chart?`))
       .flush(ok(MONITORS));
@@ -213,5 +214,31 @@ describe('ChartAnalysisComponent', () => {
     cmp.watchOpen.set(true);
     fixture.detectChanges();
     expect(byId('watch-result').textContent).toContain('already says ready');
+  });
+
+  it('registers the assistant chart tools while mounted; proposeTrade fills the ticket, chart.analyse waits for a click', async () => {
+    flushStart();
+    const ui = TestBed.inject(UiCommandService);
+    for (const id of [
+      'chart.readValues',
+      'chart.alerts.create',
+      'chart.watchlist.add',
+      'chart.analyse',
+      'chart.proposeTrade',
+    ])
+      expect(ui.has(id)).toBe(true);
+    expect(ui.requiresConfirmation('chart.analyse')).toBe(true);
+    expect(ui.requiresConfirmation('chart.proposeTrade')).toBe(false);
+
+    const res = await ui.execute('chart.proposeTrade', {
+      side: 'Buy',
+      stop: '1.144',
+      target: 1.158,
+    });
+    expect(res.ok).toBe(true);
+    expect(tickets).toEqual([{ direction: 'Buy', entry: null, stop: 1.144, target: 1.158 }]);
+
+    fixture.destroy();
+    expect(ui.has('chart.readValues')).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ import type {
 } from '@core/api/api.types';
 import { MarketDataService } from '@core/services/market-data.service';
 
+import type { ChartAlertDto } from '../alerts/chart-alerts.types';
 import type {
   AnalysisRequestMode,
   ChartAnalysisMonitors,
@@ -64,6 +65,11 @@ export class ChartAnalysisService {
     if (fromUtcMs !== null) p.set('fromUtc', new Date(fromUtcMs).toISOString());
     if (toUtcMs !== null) p.set('toUtc', new Date(toUtcMs).toISOString());
     return this.api.get(`/market-data/analysis-monitors/chart?${p.toString()}`, { silent: true });
+  }
+
+  /** `GET chart-alert` — every chart alert of the operator (the assistant's `chart.alerts.list` filters the symbol). */
+  alerts(): Observable<ResponseData<ChartAlertDto[]>> {
+    return this.api.get('/chart-alert', { silent: true });
   }
 
   /** `POST market-data/analysis-monitors` with a Structure Watch script. The engine checks the script before arming. */
