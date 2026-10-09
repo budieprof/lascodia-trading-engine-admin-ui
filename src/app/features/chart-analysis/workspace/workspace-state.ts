@@ -106,6 +106,11 @@ export interface ChartWorkspaceState {
     /** Whether the trade lines widen the price scale's fit (default on). */
     fitTradeLines?: boolean;
   };
+  /** The split view: its arrangement and each comparison panel's series (CC-12). */
+  split?: {
+    layout?: string;
+    panels?: { symbol: string; resolution: string }[];
+  };
   panel?: {
     watchlistOpen?: boolean;
     width?: number;

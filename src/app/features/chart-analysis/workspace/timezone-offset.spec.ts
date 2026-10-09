@@ -3,6 +3,7 @@ import {
   BROKER_SERVER_TIMEZONE,
   BROWSER_TIMEZONE,
   CHART_TIMEZONES,
+  midnightOnClock,
   resolveTimezone,
   timezoneOffsetMinutes,
 } from './layout-store.service';
@@ -90,5 +91,23 @@ describe('chart time zones — broker server and browser (CC-I9)', () => {
     expect(timezoneOffsetMinutes(BROWSER_TIMEZONE, at)).toBe(
       timezoneOffsetMinutes(resolveTimezone(BROWSER_TIMEZONE), at),
     );
+  });
+});
+
+describe("midnightOnClock — a date on the chart's clock (CC-15)", () => {
+  it('is UTC midnight on UTC, and 04:00 UTC on New York in summer', () => {
+    expect(midnightOnClock(2026, 9, 9, 'UTC')).toBe(Date.parse('2026-10-09T00:00:00Z'));
+    expect(midnightOnClock(2026, 9, 9, 'America/New_York')).toBe(
+      Date.parse('2026-10-09T04:00:00Z'),
+    );
+    expect(midnightOnClock(2026, 11, 1, 'America/New_York')).toBe(
+      Date.parse('2026-12-01T05:00:00Z'),
+    );
+  });
+
+  it('lands on the midnight of a day whose clock changes', () => {
+    // London springs forward at 01:00 UTC on 29 Mar 2026: that day's midnight is still GMT.
+    expect(midnightOnClock(2026, 2, 29, 'Europe/London')).toBe(Date.parse('2026-03-29T00:00:00Z'));
+    expect(midnightOnClock(2026, 2, 30, 'Europe/London')).toBe(Date.parse('2026-03-29T23:00:00Z'));
   });
 });

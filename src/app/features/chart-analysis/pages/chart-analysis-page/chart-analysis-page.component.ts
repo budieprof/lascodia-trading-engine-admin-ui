@@ -8,6 +8,7 @@ import {
   signal,
   untracked,
   viewChild,
+  viewChildren,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
@@ -56,6 +57,7 @@ import {
   mergeSessionTail,
 } from '../../datafeed/session-bars';
 import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
+import { liveTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { pipSizeFor, priceScaleFor } from '../../datafeed/symbol-info';
@@ -186,6 +188,7 @@ import {
 import type { ChartMarker } from '../../chart/chart-host.component';
 import {
   CHART_TIMEZONES,
+  midnightOnClock,
   timezoneOffsetMinutes,
   ChartLayoutStore,
   type StudyTemplate,
@@ -243,6 +246,8 @@ export interface ComparePanel {
   symbol: string;
   resolution: TvResolution;
   bars: Bar[];
+  /** Its oldest bar is the start of the engine's history: scroll-back stops asking (CC-14). */
+  historyComplete?: boolean;
 }
 
 /** Labels for the timeframe bar, in TradingView's shorthand. */
@@ -291,6 +296,9 @@ const RESOLUTION_GROUPS: Array<{
 ];
 
 const DAY = 86_400_000;
+/** Pages of history go-to-date loads at most to reach a date (1,500 bars each). */
+const GO_TO_DATE_PAGES = 12;
+
 /** TradingView's bottom-bar presets: each picks the interval it shows the span at. */
 const RANGE_PRESETS: Array<{
   id: string;
@@ -540,19 +548,40 @@ export class ChartAnalysisPageComponent {
         ? 'all'
         : {
             fromMs:
-              p.spanMs === 'ytd' ? Date.UTC(new Date(now).getUTCFullYear(), 0, 1) : now - p.spanMs,
+              p.spanMs === 'ytd'
+                ? midnightOnClock(new Date(now).getUTCFullYear(), 0, 1, this.timezone())
+                : now - p.spanMs,
             toMs: now,
           };
     if (this.resolution() !== p.resolution) this.selectResolution(p.resolution);
     else this.flushPendingRange();
   }
 
-  goToDate(value: string): void {
-    const t = Date.parse(`${value}T00:00:00Z`);
-    if (!Number.isFinite(t)) return;
+  /**
+   * Centre the chart on a day (`yyyy-mm-dd`) — midnight on the CHART's clock, not UTC's (CC-15) —
+   * loading history back to it first: a date before the loaded bars did nothing. At most
+   * {@link GO_TO_DATE_PAGES} pages of history; past that the oldest loaded bars show, and the
+   * operator is told.
+   */
+  async goToDate(value: string): Promise<void> {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!m) return;
+    const t = midnightOnClock(Number(m[1]), Number(m[2]) - 1, Number(m[3]), this.timezone());
     // Centre the day: a window the width of what is on screen, around the date.
     const span = Math.max((resolutionMs(this.resolution()) ?? DAY) * 120, DAY);
-    this.pendingRange = { fromMs: t - span / 2, toMs: t + span / 2 };
+    const from = t - span / 2;
+    for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
+      const held = this.bars();
+      if (!held.length || held[0].time <= from || this.historyComplete()) break;
+      await this.loadOlder();
+      if (this.bars()[0]?.time === held[0].time) break; // nothing older came back
+    }
+    const oldest = this.bars()[0]?.time;
+    if (oldest !== undefined && oldest > t && !this.historyComplete())
+      this.notify.warning(
+        `History before ${this.barTimeLabel(this.bars()[0])} is not loaded: showing the oldest bars.`,
+      );
+    this.pendingRange = { fromMs: from, toMs: t + span / 2 };
     this.flushPendingRange();
   }
 
@@ -640,6 +669,14 @@ export class ChartAnalysisPageComponent {
     const b = this.barsFor();
     return b ? `${b.symbol}|${b.resolution}` : '';
   });
+  /**
+   * The series whose oldest loaded bar is the start of the engine's history (a scroll-back page came
+   * back empty): the chart stops asking for more (CC-14). Cleared by every load of a series.
+   */
+  private readonly historyStart = signal<string | null>(null);
+  readonly historyComplete = computed(
+    () => !!this.dataKey() && this.historyStart() === this.dataKey(),
+  );
   /**
    * The symbol's session as the engine reports it with its chart bars: the trading days the chart's
    * day-based studies and the Details pane count in, and the calendar a live price opens the next
@@ -1732,6 +1769,8 @@ export class ChartAnalysisPageComponent {
       const wanted = new Set<string>([
         this.symbol().toUpperCase(),
         ...this.comparePanels().map((p) => p.symbol.toUpperCase()),
+        // A compare study's other symbol follows its live price (CC-13).
+        ...this.compareSymbols(),
         ...(this.watchlistOpen() ? this.watchlistSymbols() : []),
       ]);
       wanted.delete('');
@@ -1793,6 +1832,8 @@ export class ChartAnalysisPageComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((tick) => {
         this.applyTick(tick);
+        this.applyCompareTick(tick);
+        this.applyPanelTick(tick);
         this.recordQuote(tick);
       });
 
@@ -2354,6 +2395,7 @@ export class ChartAnalysisPageComponent {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
       // Landing after a switch, these would go on screen under the next symbol's name.
       if (!current()) return;
+      this.historyStart.set(null);
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
       this.tailMergedAt = this.ticksApplied;
@@ -2413,14 +2455,27 @@ export class ChartAnalysisPageComponent {
         PAGE_BARS,
       );
       // After a switch made meanwhile these are another series' history: not prepended.
-      if (bars.length > 0 && sameSeries(this.barsFor(), series)) {
-        const merged = new Map<number, Bar>();
-        for (const b of bars) merged.set(b.time, b);
-        // The bars as they are now: ticks may have moved the newest one during the load.
-        for (const b of this.bars()) merged.set(b.time, b);
-        this.bars.set([...merged.values()].sort((a, b) => a.time - b.time));
-        // The events of the history just loaded (the layer covered the first window only).
-        this.loadEvents(true);
+      if (sameSeries(this.barsFor(), series)) {
+        const older = bars.filter((b) => b.time < oldest);
+        if (older.length === 0) {
+          // Nothing before the oldest bar: the start of history. Stop asking at the left edge.
+          this.historyStart.set(`${series.symbol}|${series.resolution}`);
+        } else {
+          const merged = new Map<number, Bar>();
+          for (const b of older) merged.set(b.time, b);
+          // The bars as they are now: ticks may have moved the newest one during the load.
+          for (const b of this.bars()) merged.set(b.time, b);
+          const next = [...merged.values()].sort((a, b) => a.time - b.time);
+          const added = next.length - this.bars().length;
+          this.bars.set(next);
+          // Replay counts bars from the left: the head stays on its bar (CC-11 — it jumped ~1,500
+          // bars into the future with every page of history).
+          if (this.replayActive() && added > 0) this.replayIndex.update((i) => i + added);
+          // The events of the history just loaded (the layer covered the first window only), and the
+          // compare studies' other symbols over it.
+          this.loadEvents(true);
+          void this.extendCompareBars(next[0].time);
+        }
       }
     } catch {
       // The engine refused or could not be reached: the history stays as it is, and the next
@@ -2621,7 +2676,14 @@ export class ChartAnalysisPageComponent {
     void this.reload();
   }
 
+  /**
+   * The compare studies' other symbols, on this resolution, back to the chart's oldest bar (CC-13:
+   * they read the first 1,500 bars only, never extended nor updated). Ticks keep them live
+   * ({@link applyCompareTick}); scroll-back extends them ({@link extendCompareBars}).
+   */
+  private compareRequest = 0;
   private async loadCompareBars(symbols: string[], resolution: TvResolution): Promise<void> {
+    const request = ++this.compareRequest;
     const now = Date.now();
     const next: Record<string, Bar[]> = {};
     await Promise.all(
@@ -2634,8 +2696,96 @@ export class ChartAnalysisPageComponent {
       }),
     );
     // Drop the result if the operator moved on while it loaded.
-    if (resolution !== this.resolution()) return;
+    if (request !== this.compareRequest || resolution !== this.resolution()) return;
     this.compareBars.set(next);
+    const oldest = this.bars()[0]?.time;
+    if (oldest !== undefined) void this.extendCompareBars(oldest);
+  }
+
+  /** Extend every compare series back to `oldestMs` (the chart's oldest bar), a page at a time. */
+  private async extendCompareBars(oldestMs: number): Promise<void> {
+    const resolution = this.resolution();
+    const request = this.compareRequest;
+    for (const sym of Object.keys(this.compareBars())) {
+      for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
+        const held = this.compareBars()[sym];
+        if (!held?.length || held[0].time <= oldestMs) break;
+        let older: Bar[] = [];
+        try {
+          const res = await this.feed.getBars(sym, resolution, 0, held[0].time - 1, PAGE_BARS);
+          older = res.bars.filter((b) => b.time < held[0].time);
+        } catch {
+          break;
+        }
+        if (request !== this.compareRequest || resolution !== this.resolution()) return;
+        if (!older.length) break;
+        this.compareBars.update((all) => {
+          const current = all[sym] ?? [];
+          return {
+            ...all,
+            [sym]: [...older.filter((b) => b.time < (current[0]?.time ?? Infinity)), ...current],
+          };
+        });
+      }
+    }
+  }
+
+  /** A live price of a compare study's other symbol moves its bars (CC-13). */
+  private applyCompareTick(tick: {
+    symbol?: string;
+    bid?: number;
+    price?: number;
+    ask?: number;
+  }): void {
+    const symbol = tick?.symbol?.toUpperCase();
+    const price = tick?.bid ?? tick?.price ?? tick?.ask;
+    if (!symbol || typeof price !== 'number') return;
+    const held = this.compareBars()[symbol];
+    if (!held?.length) return;
+    const next = liveTick(
+      held,
+      price,
+      this.serverClock.now(),
+      this.resolution(),
+      this.calendarOf(symbol),
+    );
+    if (next) this.compareBars.update((all) => ({ ...all, [symbol]: next }));
+  }
+
+  /** A live price moves the split panels that show its symbol (CC-12: they were static). */
+  private applyPanelTick(tick: {
+    symbol?: string;
+    bid?: number;
+    price?: number;
+    ask?: number;
+  }): void {
+    const symbol = tick?.symbol?.toUpperCase();
+    const price = tick?.bid ?? tick?.price ?? tick?.ask;
+    if (!symbol || typeof price !== 'number') return;
+    const panels = this.comparePanels();
+    if (!panels.some((p) => p.symbol.toUpperCase() === symbol && p.bars.length)) return;
+    const now = this.serverClock.now();
+    this.comparePanels.set(
+      panels.map((p) => {
+        if (p.symbol.toUpperCase() !== symbol || !p.bars.length) return p;
+        const next = liveTick(p.bars, price, now, p.resolution, this.calendarOf(symbol));
+        return next ? { ...p, bars: next } : p;
+      }),
+    );
+  }
+
+  /** A symbol's trading calendar, once the engine has reported its session. */
+  private readonly calendars = new Map<string, TradingCalendar>();
+  private calendarOf(symbol: string): TradingCalendar | null {
+    const spec = this.feed.sessionOf(symbol);
+    if (!spec) return null;
+    const key = `${spec.session}|${spec.timeZone}`;
+    let calendar = this.calendars.get(key);
+    if (!calendar) {
+      calendar = new TradingCalendar(spec);
+      this.calendars.set(key, calendar);
+    }
+    return calendar;
   }
 
   private fundamentalsRequest = 0;
@@ -3200,6 +3350,54 @@ export class ChartAnalysisPageComponent {
     this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, bars } : p)));
   }
 
+  /** The split panels' chart hosts, in panel order. */
+  private readonly panelHosts = viewChildren<ChartHostComponent>('panelHost');
+
+  /**
+   * Scroll-back on a split panel (CC-12: panels held their first 1,500 bars and never loaded more):
+   * the page before its oldest bar, prepended; an empty page is the start of its history.
+   */
+  async loadPanelOlder(id: string): Promise<void> {
+    const index = this.comparePanels().findIndex((p) => p.id === id);
+    const panel = this.comparePanels()[index];
+    const host = () => this.panelHosts()[index];
+    if (!panel?.bars.length || panel.historyComplete) {
+      host()?.historyLoaded();
+      return;
+    }
+    const oldest = panel.bars[0].time;
+    try {
+      const { bars } = await this.feed.getBars(
+        panel.symbol,
+        panel.resolution,
+        0,
+        oldest - 1,
+        PAGE_BARS,
+      );
+      const older = bars.filter((b) => b.time < oldest);
+      this.comparePanels.update((list) =>
+        list.map((p) => {
+          // A panel switched meanwhile has bars of its own.
+          if (p.id !== id || p.symbol !== panel.symbol || p.resolution !== panel.resolution)
+            return p;
+          return older.length
+            ? { ...p, bars: [...older, ...p.bars.filter((b) => b.time >= oldest)] }
+            : { ...p, historyComplete: true };
+        }),
+      );
+    } catch {
+      // Unreachable: the panel keeps what it has, and the next scroll to the edge asks again.
+    } finally {
+      host()?.historyLoaded();
+    }
+  }
+
+  /** Each split panel's legend: the bar under its crosshair (CC-12). */
+  readonly panelLegends = signal<Record<string, LegendSnapshot>>({});
+  onPanelLegend(id: string, snapshot: LegendSnapshot): void {
+    this.panelLegends.update((all) => ({ ...all, [id]: snapshot }));
+  }
+
   setPanelSymbol(id: string, symbol: string): void {
     this.comparePanels.update((list) =>
       list.map((p) => (p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [] } : p)),
@@ -3239,6 +3437,36 @@ export class ChartAnalysisPageComponent {
 
   // ── Workspace actions ────────────────────────────────────────────────────
 
+  /**
+   * The split layout as a layout saves it (CC-12: it was not saved): the arrangement and each
+   * panel's symbol and timeframe — not their bars, which move with every tick.
+   */
+  private readonly splitState = computed(
+    () => ({
+      layout: this.splitLayout(),
+      panels: this.comparePanels().map((p) => ({ symbol: p.symbol, resolution: p.resolution })),
+    }),
+    { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+  );
+
+  /** A layout's split view, restored: the arrangement, then each panel's series, loaded. */
+  private restoreSplit(split: ChartWorkspaceState['split']): void {
+    const layout = this.splitLayouts.find((l) => l.id === split?.layout)?.id ?? '1';
+    const wanted = this.splitLayouts.find((l) => l.id === layout)?.panels ?? 0;
+    const saved: ComparePanel[] = (split?.panels ?? []).slice(0, wanted).map((p, i) => ({
+      id: `p${Date.now().toString(36)}${i}`,
+      symbol: p.symbol.toUpperCase(),
+      resolution: (SUPPORTED_RESOLUTIONS as readonly string[]).includes(p.resolution)
+        ? (p.resolution as TvResolution)
+        : this.resolution(),
+      bars: [],
+    }));
+    this.comparePanels.set(saved);
+    // The arrangement; a layout saved with fewer panels than it shows gets the rest as new ones.
+    this.setSplitLayout(layout);
+    for (const panel of saved) void this.loadPanel(panel.id);
+  }
+
   /** The whole chart set-up, as the engine saves it (`ChartLayout.state`). */
   captureState(): ChartWorkspaceState {
     return {
@@ -3274,6 +3502,7 @@ export class ChartAnalysisPageComponent {
         showClosedTrades: this.showClosedTrades(),
         fitTradeLines: this.fitTradeLines(),
       },
+      split: this.splitState(),
       panel: {
         watchlistOpen: this.watchlistOpen(),
         width: this.dockWidth(),
@@ -3382,6 +3611,7 @@ export class ChartAnalysisPageComponent {
       this.calendarMinImpact.set(p.calendarMinImpact ?? 'Low');
       this.pendingView = s.view ?? null;
       this.viewSnapshot.set(s.view ? normaliseView(s.view) : null);
+      this.restoreSplit(s.split);
 
       // Pine scripts: the newest saved version of "My scripts", else the inline copy. Runs of the
       // layout being replaced that are still in flight must not land on this one, nor an Undo for

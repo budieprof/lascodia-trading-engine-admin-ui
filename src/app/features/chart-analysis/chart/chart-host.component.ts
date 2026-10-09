@@ -549,6 +549,11 @@ export class ChartHostComponent implements OnDestroy {
    * session and periodic profiles. Null: UTC days.
    */
   readonly session = input<SessionSpec | null>(null);
+  /**
+   * The bars reach back to the start of the engine's history: scrolling to the left edge stops
+   * asking for more (CC-14 — every pan to the edge used to fetch again, for nothing).
+   */
+  readonly historyComplete = input<boolean>(false);
   /** TradingView's countdown to bar close under the last-price label. */
   readonly showCountdown = input(true);
   /** When the last live price arrived (client ms); null = no live feed. Stale ⇒ no countdown. */
@@ -953,14 +958,20 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.applyPrecision(precision));
     });
 
-    // Studies: their inputs, the other symbols' bars the compare studies read, and the trading days
-    // the day-based ones count in (they recount when the symbol's session becomes known). A change of
-    // the chart's own bars reaches them through syncData, which writes only their tails.
+    // Studies: their inputs, and the trading days the day-based ones count in (they recount when the
+    // symbol's session becomes known). A change of the chart's own bars reaches them through syncData,
+    // which writes only their tails.
     effect(() => {
       const active = this.indicators();
-      this.compareBars();
       this.calendar();
       untracked(() => this.applyStudies(active));
+    });
+
+    // The other symbols' bars the compare studies read: they follow those symbols' live prices and
+    // scroll-back (CC-13), so only the series are rewritten here — not the patterns and profiles.
+    effect(() => {
+      this.compareBars();
+      untracked(() => this.applyIndicators(this.indicators(), this.plotted.length));
     });
 
     // Drawing state → renderer. Reads the store's signals so any mutation
@@ -1222,10 +1233,19 @@ export class ChartHostComponent implements OnDestroy {
     if (!scale) return false;
     const from = Math.min(fromMs, toMs);
     const to = Math.max(fromMs, toMs);
+    // By bar index, on the display clock (CC-15): the bars' times are zone-shifted, so a window of
+    // UTC seconds landed hours off on a New York axis — and between bars, or past the last one,
+    // the time scale has no time to land on.
+    const a = this.logicalAtMs(from);
+    const b = this.logicalAtMs(to);
+    if (a !== null && b !== null && b > a) {
+      scale.setVisibleLogicalRange({ from: a as Logical, to: b as Logical });
+      return true;
+    }
     try {
       scale.setVisibleRange({
-        from: Math.floor(from / 1000) as unknown as Time,
-        to: Math.floor(to / 1000) as unknown as Time,
+        from: Math.floor((from + this.timezoneShiftMs(from)) / 1000) as unknown as Time,
+        to: Math.floor((to + this.timezoneShiftMs(to)) / 1000) as unknown as Time,
       });
       return true;
     } catch {
@@ -1578,7 +1598,7 @@ export class ChartHostComponent implements OnDestroy {
     // frame of a drag, and without it one flick queues dozens of fetches.
     this.chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
       if (!range || this.plotted.length === 0) return;
-      if (range.from < 10 && !this.loadMorePending()) {
+      if (range.from < 10 && !this.loadMorePending() && !this.historyComplete()) {
         this.loadMorePending.set(true);
         this.loadMore.emit();
       }

@@ -244,6 +244,17 @@ export function timezoneOffsetMinutes(timezone: string, atMs: number): number {
   return Number.isNaN(offset) ? exactOffsetMinutes(zone, atMs) : offset;
 }
 
+/**
+ * Midnight of a calendar date (`month` 0-based) on a chart time zone's clock, as a UTC instant (ms):
+ * what "go to 9 Oct" means on a New York axis. The offset is read at that midnight — twice, so a day
+ * whose clock changes lands on its own midnight.
+ */
+export function midnightOnClock(year: number, month: number, day: number, zone: string): number {
+  const asUtc = Date.UTC(year, month, day);
+  const first = asUtc - timezoneOffsetMinutes(zone, asUtc) * 60_000;
+  return asUtc - timezoneOffsetMinutes(zone, first) * 60_000;
+}
+
 /** {@link timezoneOffsetMinutes} straight from `Intl`, at exactly `atMs`. */
 function exactOffsetMinutes(timezone: string, atMs: number): number {
   if (timezone === 'UTC') return 0;

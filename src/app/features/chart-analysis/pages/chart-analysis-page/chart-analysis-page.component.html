@@ -1054,6 +1054,7 @@
           [liveAt]="liveAt()"
           [bars]="displayBars()"
           [dataKey]="dataKey()"
+          [historyComplete]="historyComplete()"
           [style]="style()"
           [showVolume]="showVolume()"
           [indicators]="active()"
@@ -1427,8 +1428,45 @@
               <app-chart-icon name="swap" [size]="18" />
             </button>
           </div>
+          @if (panelLegends()[panel.id]; as pl) {
+            @if (pl.close !== null) {
+              <div class="panel-legend" [class.up]="(pl.close ?? 0) >= (pl.open ?? 0)">
+                <span
+                  >O<b>{{
+                    pl.open
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >H<b>{{
+                    pl.high
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >L<b>{{
+                    pl.low
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+                <span
+                  >C<b>{{
+                    pl.close
+                      | number
+                        : '1.' + panelPrecision(panel.symbol) + '-' + panelPrecision(panel.symbol)
+                  }}</b></span
+                >
+              </div>
+            }
+          }
           <app-chart-host
+            #panelHost
             [bars]="panel.bars"
+            [dataKey]="panel.symbol + '|' + panel.resolution"
+            [historyComplete]="!!panel.historyComplete"
             [style]="style()"
             [showVolume]="false"
             [indicators]="[]"
@@ -1437,6 +1475,8 @@
             [timezone]="timezone()"
             [symbol]="panel.symbol"
             [resolution]="panel.resolution"
+            (loadMore)="loadPanelOlder(panel.id)"
+            (legend)="onPanelLegend(panel.id, $event)"
           />
         </div>
       }
