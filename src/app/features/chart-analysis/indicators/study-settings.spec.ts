@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { FillPrimitive } from './fill-primitive';
-import { INDICATORS } from './registry';
+import { INDICATORS, indicatorById, indicatorLabel } from './registry';
 import {
   effectivePlot,
   joinClosed,
+  mtfCapable,
+  parseStudyInput,
+  remapStudySources,
+  sourceGroups,
+  timeframeChoices,
   padResults,
   parseStudySource,
   plotColors,
@@ -152,5 +157,83 @@ describe('study settings (DR-I4 / DR-I5)', () => {
     view.renderer().draw(target as never);
     expect(fills).toEqual(['up', 'down', 'up']);
     expect(view.zOrder()).toBe('bottom');
+  });
+
+  it("offers price sources and other studies' plots — never one that reads this study (no loops)", () => {
+    const rsi = { uid: 'r', defId: 'rsi', params: { length: 14, source: 'close' } };
+    const sma = { uid: 's', defId: 'sma', params: { length: 9, source: studySource('r', 'rsi') } };
+    const ema = { uid: 'e', defId: 'ema', params: { length: 5, source: 'close' } };
+    const describe = (s: { defId: string; params: Record<string, number | string> }) => {
+      const def = indicatorById(s.defId);
+      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
+    };
+    const forRsi = sourceGroups(rsi, [rsi, sma, ema], describe);
+    expect(forRsi[0].choices.map((c) => c.value)).toContain('hlcc4');
+    // The SMA reads the RSI: offering it to the RSI would close a loop; the RSI itself is not offered either.
+    expect(forRsi.flatMap((g) => g.choices).some((c) => c.value.startsWith('study:s:'))).toBe(
+      false,
+    );
+    expect(forRsi.flatMap((g) => g.choices).some((c) => c.value.startsWith('study:r:'))).toBe(
+      false,
+    );
+    expect(forRsi.flatMap((g) => g.choices).some((c) => c.value === studySource('e', 'ma'))).toBe(
+      true,
+    );
+    const forSma = sourceGroups(sma, [rsi, sma, ema], describe);
+    expect(forSma.flatMap((g) => g.choices).some((c) => c.value === studySource('r', 'rsi'))).toBe(
+      true,
+    );
+  });
+
+  it('parses inputs by type: sources and sessions as text, times as ms, numbers within range (DR-16, DR-22)', () => {
+    const src = { key: 'source', label: 'Source', type: 'source' as const, default: 'close' };
+    expect(parseStudyInput(src, 'hl2')).toBe('hl2');
+    expect(parseStudyInput(src, studySource('a', 'b'))).toBe('study:a:b');
+    expect(parseStudyInput(src, 'nonsense')).toBeNull();
+    const ses = { key: 's', label: 'S', type: 'session' as const, default: '0800-1700' };
+    expect(parseStudyInput(ses, '08:30-16:00')).toBe('0830-1600');
+    expect(parseStudyInput(ses, '8-16')).toBeNull();
+    const time = { key: 't', label: 'T', type: 'time' as const, default: 0 };
+    expect(parseStudyInput(time, '')).toBe(0);
+    expect(parseStudyInput(time, '1760000000000')).toBe(1760000000000);
+    const len = {
+      key: 'length',
+      label: 'Length',
+      type: 'number' as const,
+      default: 14,
+      min: 1,
+      max: 500,
+    };
+    expect(parseStudyInput(len, '0')).toBe(1);
+    expect(parseStudyInput(len, 'x')).toBeNull();
+    const sel = {
+      key: 'm',
+      label: 'M',
+      type: 'select' as const,
+      default: 'SMA',
+      options: ['SMA', 'EMA'],
+    };
+    expect(parseStudyInput(sel, 'EMA')).toBe('EMA');
+    expect(parseStudyInput(sel, 'WMA')).toBeNull();
+  });
+
+  it("offers timeframes above the chart's, and only for studies a higher timeframe suits", () => {
+    expect(timeframeChoices(['1', '60', '240', '1D'], '60')).toEqual(['240', '1D']);
+    expect(timeframeChoices(['1', '60', '240', '1D'], '1D', '240')).toEqual(['240']);
+    expect(mtfCapable(indicatorById('rsi')!)).toBe(true);
+    expect(mtfCapable(indicatorById('ichimoku')!)).toBe(false);
+    expect(mtfCapable(indicatorById('sessions')!)).toBe(false);
+    expect(mtfCapable(indicatorById('anchored-vwap')!)).toBe(false);
+    expect(mtfCapable(indicatorById('correlation')!)).toBe(false);
+  });
+
+  it('keeps a copied study reading its copied source', () => {
+    const copies = [
+      { uid: 'n1', params: { source: 'close' } },
+      { uid: 'n2', params: { source: studySource('o1', 'rsi') } },
+      { uid: 'n3', params: { source: studySource('gone', 'x') } },
+    ];
+    const out = remapStudySources(copies, new Map([['o1', 'n1']]));
+    expect(out.map((s) => s.params.source)).toEqual(['close', 'study:n1:rsi', 'close']);
   });
 });

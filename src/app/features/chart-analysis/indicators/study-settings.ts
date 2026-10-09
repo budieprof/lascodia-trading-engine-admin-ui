@@ -13,8 +13,9 @@
  *
  * Pure: no Angular, no chart; unit-tested directly.
  */
+import { resolutionMs } from '../datafeed/resolution';
 import type { Maybe, Ohlc } from './math';
-import type { PlotKind, PlotSpec } from './registry';
+import type { IndicatorDef, IndicatorInput, PlotKind, PlotSpec } from './registry';
 
 export interface PlotStyle {
   color?: string;
@@ -202,5 +203,161 @@ export function plotColors(
         // TradingView's AO: `diff <= 0` is red; the first bar (no diff) is green.
         return prev === null || prev === undefined || v > prev ? UP : DOWN;
     }
+  });
+}
+
+// ── The settings dialog's choices ───────────────────────────────────────────
+
+/** The price sources a `source` input offers (Pine's). */
+export const PRICE_SOURCES: readonly string[] = [
+  'open',
+  'high',
+  'low',
+  'close',
+  'hl2',
+  'hlc3',
+  'ohlc4',
+  'hlcc4',
+];
+
+export interface SourceChoice {
+  /** A price source, or `study:<uid>:<plot>`. */
+  value: string;
+  label: string;
+}
+
+export interface SourceGroup {
+  label: string;
+  choices: SourceChoice[];
+}
+
+type StudyRef = { uid: string; defId: string; params: Record<string, number | string> };
+
+/**
+ * The Source dropdown (DR-16 / DR-I5): the price sources, then the plots of every other study — except those that
+ * read this one, directly or through others (choosing one would close a loop), and marker plots (a value per signal,
+ * not a series).
+ */
+export function sourceGroups(
+  self: StudyRef,
+  studies: readonly StudyRef[],
+  describe: (
+    s: StudyRef,
+  ) => { label: string; plots: readonly Pick<PlotSpec, 'key' | 'title' | 'kind'>[] } | null,
+): SourceGroup[] {
+  const byUid = new Map(studies.map((s) => [s.uid, s]));
+  const readsSelf = (s: StudyRef): boolean => {
+    const seen = new Set<string>();
+    let cur: StudyRef | undefined = s;
+    while (cur && !seen.has(cur.uid)) {
+      if (cur.uid === self.uid) return true;
+      seen.add(cur.uid);
+      const ref = parseStudySource(cur.params['source']);
+      cur = ref ? byUid.get(ref.uid) : undefined;
+    }
+    return false;
+  };
+  const groups: SourceGroup[] = [
+    { label: 'Price', choices: PRICE_SOURCES.map((v) => ({ value: v, label: v })) },
+  ];
+  for (const s of studies) {
+    if (readsSelf(s)) continue;
+    const d = describe(s);
+    if (!d) continue;
+    const choices = d.plots
+      .filter((p) => p.kind !== 'markers')
+      .map((p) => ({ value: studySource(s.uid, p.key), label: `${d.label}: ${p.title}` }));
+    if (choices.length) groups.push({ label: d.label, choices });
+  }
+  return groups;
+}
+
+/**
+ * Whether a built-in takes a Timeframe (DR-I5): not the compare studies (another symbol's bars), the session / VWAP
+ * / pivot / structure ones (they read the clock or their own periods), those with marker plots (one shape per
+ * higher bar would repeat on every chart bar) or values past the last bar (Ichimoku's cloud ahead, the Alligator).
+ */
+export function mtfCapable(def: IndicatorDef): boolean {
+  if (def.needsCompare || def.ahead) return false;
+  if (
+    def.category === 'Sessions' ||
+    def.category === 'Structure' ||
+    def.category === 'Multi-symbol'
+  )
+    return false;
+  if (def.plots.some((p) => p.kind === 'markers')) return false;
+  if (def.inputs.some((i) => i.type === 'time' || i.type === 'session')) return false;
+  return !/vwap|pivot/i.test(def.id);
+}
+
+/** The timeframes a study can be computed on: those above the chart's (and the one it has, if not among them). */
+export function timeframeChoices(
+  resolutions: readonly string[],
+  chartResolution: string,
+  current?: string,
+): string[] {
+  const chartMs = resolutionMs(chartResolution) ?? 0;
+  const ms = (r: string) => resolutionMs(r) ?? 0;
+  const out = resolutions.filter((r) => ms(r) > chartMs);
+  if (current && !out.includes(current)) out.push(current);
+  return out.sort((a, b) => ms(a) - ms(b));
+}
+
+/**
+ * An input's typed value as the study keeps it, or null when it is not one (the edit is ignored): text for
+ * select / symbol / source / session (DR-16: a source went through `Number` and became NaN), a session as
+ * `HHMM-HHMM`, a time as UTC ms (0 = not set), a number within the input's range.
+ */
+export function parseStudyInput(
+  input: IndicatorInput | undefined,
+  raw: string,
+): number | string | null {
+  const text = String(raw ?? '').trim();
+  switch (input?.type) {
+    case 'select':
+      return text && (!input.options || input.options.includes(text)) ? text : null;
+    case 'symbol':
+      return text ? text.toUpperCase() : null;
+    case 'source':
+      return PRICE_SOURCES.includes(text) || parseStudySource(text) ? text : null;
+    case 'session':
+      return sessionText(text);
+    case 'time': {
+      if (!text) return 0;
+      const n = Number(text);
+      return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+    }
+    default: {
+      if (!text) return null;
+      const n = Number(text);
+      if (!Number.isFinite(n)) return null;
+      const lo = input?.min ?? -Infinity;
+      const hi = input?.max ?? Infinity;
+      return Math.min(hi, Math.max(lo, n));
+    }
+  }
+}
+
+/** `HHMM-HHMM` (a colon allowed) as `HHMM-HHMM`; null when it is not one — the rule of `sessions.ts` (not imported:
+ * it reads the workspace's zone offsets, and the workspace reads this file). */
+function sessionText(text: string): string | null {
+  const m = /^(\d{2}):?(\d{2})\s*-\s*(\d{2}):?(\d{2})$/.exec(text);
+  if (!m) return null;
+  const ok = (h: string, mm: string) => Number(h) <= 24 && Number(mm) < 60;
+  return ok(m[1], m[2]) && ok(m[3], m[4]) ? `${m[1]}${m[2]}-${m[3]}${m[4]}` : null;
+}
+
+/**
+ * Studies copied under new ids (a template applied, a layout duplicated): a source naming a copied study names its
+ * copy; one naming a study left behind falls back to `close`.
+ */
+export function remapStudySources<
+  T extends { uid: string; params: Record<string, number | string> },
+>(copies: readonly T[], newUidOf: ReadonlyMap<string, string>): T[] {
+  return copies.map((s) => {
+    const ref = parseStudySource(s.params['source']);
+    if (!ref) return s;
+    const to = newUidOf.get(ref.uid);
+    return { ...s, params: { ...s.params, source: to ? studySource(to, ref.plot) : 'close' } };
   });
 }

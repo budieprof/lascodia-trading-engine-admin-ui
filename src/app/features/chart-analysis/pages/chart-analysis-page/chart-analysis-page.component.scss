@@ -625,6 +625,7 @@ $pane-gap: 4px;
 }
 
 .study-toggle,
+.study-settings,
 .study-remove {
   border: 0;
   background: transparent;
@@ -636,6 +637,38 @@ $pane-gap: 4px;
 
   &:hover {
     color: inherit;
+  }
+}
+
+// Source (DR-16), sessions and picked times (DR-22) on the studies bar.
+.source-input {
+  max-width: 132px;
+  padding: 1px 2px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.study-input input.session-input {
+  width: 84px;
+}
+
+.pick-input {
+  padding: 2px 6px;
+  border: 1px dashed var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: crosshair;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
   }
 }
 
@@ -1164,6 +1197,7 @@ $pane-gap: 4px;
 .menu-action,
 .market-status,
 .study-toggle,
+.study-settings,
 .study-remove,
 .tree-remove,
 .panel-focus {
@@ -1813,6 +1847,7 @@ $strip-width: 46px;
   }
 
   .study-toggle,
+  .study-settings,
   .study-remove {
     justify-content: center;
     min-width: 40px;

@@ -1749,33 +1749,83 @@
           @for (input of inputsFor(item); track input.key) {
             <label class="study-input">
               {{ input.label }}
-              @if (input.type === 'select') {
-                <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
-                  @for (opt of input.options ?? []; track opt) {
-                    <option [value]="opt" [selected]="item.params[input.key] === opt">
-                      {{ opt }}
-                    </option>
-                  }
-                </select>
-              } @else if (input.type === 'symbol') {
-                <input
-                  type="text"
-                  class="symbol-input"
-                  [value]="item.params[input.key]"
-                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
-                />
-              } @else {
-                <input
-                  type="number"
-                  [value]="item.params[input.key]"
-                  [min]="input.min ?? 0"
-                  [max]="input.max ?? 100000"
-                  step="any"
-                  (change)="setParam(item.uid, input.key, $any($event.target).value)"
-                />
+              @switch (input.type) {
+                @case ('select') {
+                  <select (change)="setParam(item.uid, input.key, $any($event.target).value)">
+                    @for (opt of input.options ?? []; track opt) {
+                      <option [value]="opt" [selected]="item.params[input.key] === opt">
+                        {{ opt }}
+                      </option>
+                    }
+                  </select>
+                }
+                @case ('source') {
+                  <!-- DR-16 / DR-I5: a price, or another study's plot. -->
+                  <select
+                    class="source-input"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  >
+                    @for (g of sourceGroupsFor(item); track g.label) {
+                      <optgroup [label]="g.label">
+                        @for (c of g.choices; track c.value) {
+                          <option [value]="c.value" [selected]="item.params[input.key] === c.value">
+                            {{ c.label }}
+                          </option>
+                        }
+                      </optgroup>
+                    }
+                  </select>
+                }
+                @case ('symbol') {
+                  <input
+                    type="text"
+                    class="symbol-input"
+                    [value]="item.params[input.key]"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
+                @case ('session') {
+                  <input
+                    type="text"
+                    class="session-input"
+                    placeholder="0800-1700"
+                    [value]="item.params[input.key]"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
+                @case ('time') {
+                  <!-- DR-22: picked on the chart, never typed as milliseconds. -->
+                  <button
+                    type="button"
+                    class="pick-input"
+                    [disabled]="!canPickOnChart()"
+                    (click)="pickStudyTime(item.uid, input.key)"
+                  >
+                    {{ studyTimeLabel(item.params[input.key]) }}
+                  </button>
+                }
+                @default {
+                  <input
+                    type="number"
+                    [value]="item.params[input.key]"
+                    [min]="input.min ?? 0"
+                    [max]="input.max ?? 100000"
+                    step="any"
+                    (change)="setParam(item.uid, input.key, $any($event.target).value)"
+                  />
+                }
               }
             </label>
           }
+          <button
+            type="button"
+            class="study-settings"
+            (click)="studySettingsFor.set(item.uid)"
+            title="Settings"
+            aria-label="Settings"
+          >
+            <app-chart-icon name="settings" [size]="14" />
+          </button>
           <button
             type="button"
             class="study-remove"
@@ -1787,6 +1837,19 @@
         </div>
       }
     </aside>
+  }
+  <!-- A built-in study's Settings (DR-I4): Inputs / Style / Visibility, applied live; Cancel puts it back. -->
+  @if (studySettingsStudy(); as st) {
+    <app-study-settings-dialog
+      [study]="st"
+      [studies]="active()"
+      [resolutions]="resolutions"
+      [chartResolution]="resolution()"
+      [canPick]="canPickOnChart()"
+      (changed)="replaceStudy($event)"
+      (pick)="onStudyPick($event)"
+      (closed)="studySettingsFor.set(null)"
+    />
   }
   <!-- A Pine script's Settings: its inputs, applied live; Ok keeps them, Cancel puts them back. -->
   @if (settings.run(); as run) {

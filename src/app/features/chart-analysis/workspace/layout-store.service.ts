@@ -1,6 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import type { ActiveIndicator, ChartStyle } from '../chart/chart-host.component';
 import type { TvResolution } from '../datafeed/resolution';
+import { remapStudySources } from '../indicators/study-settings';
 import { ChartPrefsService } from './chart-prefs.service';
 
 /** Pre-engine storage: layouts + templates in one record, and the last layout's id. */
@@ -79,11 +80,19 @@ export class ChartLayoutStore {
    * are never created and the operator sees nothing happen.
    */
   instantiate(template: StudyTemplate): ActiveIndicator[] {
-    return template.indicators.map((i, index) => ({
-      ...i,
-      params: { ...i.params },
-      uid: `${i.defId}-${Date.now().toString(36)}-${index}`,
-    }));
+    const stamp = Date.now().toString(36);
+    const uids = new Map(
+      template.indicators.map((i, index) => [i.uid, `${i.defId}-${stamp}-${index}`]),
+    );
+    // A study on another study's plot (DR-I5) reads that study's copy.
+    return remapStudySources(
+      template.indicators.map((i, index) => ({
+        ...i,
+        params: { ...i.params },
+        uid: `${i.defId}-${stamp}-${index}`,
+      })),
+      uids,
+    );
   }
 
   /** Layouts this browser saved before they moved to the engine, and the one last opened. */

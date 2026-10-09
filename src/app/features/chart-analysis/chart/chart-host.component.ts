@@ -332,8 +332,12 @@ interface IndicatorSeries {
   uid: string;
   /** The inputs the series show; other inputs recompute every value. */
   paramsKey: string;
-  /** What the series were built for (style, pane, plots shown): a change rebuilds them. */
-  layoutKey: string;
+  /** Where the series draw ({@link ChartHostComponent.placeKeyOf}): a change makes them again elsewhere. */
+  placeKey: string;
+  /** Which plots are drawn and how, the levels, the fill: a change makes them again in the same pane. */
+  styleKey: string;
+  /** The plots' colours and widths: a change is applied to the series as they are. */
+  paintKey: string;
   /** Drawn on the price pane, on its scale (takes the symbol's precision). */
   overlay: boolean;
   series: IndicatorPlotSeries[];
@@ -2634,8 +2638,8 @@ export class ChartHostComponent implements OnDestroy {
     );
     this.studyDrawn = new Set(drawn.map((a) => a.uid));
 
-    // Drop series for indicators that are gone, hidden or off this timeframe, or whose style or pane changed — and
-    // the studies drawn in a dropped one's pane with it, so they follow it into the pane it is made in again.
+    // Drop series for indicators that are gone, hidden or off this timeframe, or whose place changed — and the
+    // studies drawn in a dropped one's pane with it, so they follow it into the pane it is made in again.
     const wanted = new Map(drawn.map((a) => [a.uid, a]));
     const dropped = new Set<string>();
     let more = true;
@@ -2648,7 +2652,7 @@ export class ChartHostComponent implements OnDestroy {
         if (
           !item ||
           !def ||
-          held.layoutKey !== this.layoutKeyOf(item, def) ||
+          held.placeKey !== this.placeKeyOf(item, def) ||
           (host && dropped.has(host))
         ) {
           this.removeIndicatorSeries(held);
@@ -2663,9 +2667,18 @@ export class ChartHostComponent implements OnDestroy {
       const def = indicatorById(item.defId);
       if (!def) continue;
       const computed = this.computeFor(item, def, bars);
-      const target =
-        this.indicatorSeries.find((s) => s.uid === item.uid) ??
-        this.createIndicatorSeries(item, def);
+      let target = this.indicatorSeries.find((s) => s.uid === item.uid) ?? null;
+      if (target && target.styleKey !== this.styleKeyOf(item, def)) {
+        // Plots switched on or off, drawn another way, levels or fill changed: made again in the same pane — the
+        // new series first, so the pane (and its place and height) never empties.
+        const pane = this.paneIndexOf(target);
+        const fresh = this.createIndicatorSeries(item, def, pane);
+        this.removeIndicatorSeries(target);
+        target = fresh;
+      } else if (target && target.paintKey !== this.paintKeyOf(item, def)) {
+        this.repaintIndicatorSeries(target, item, def);
+      }
+      target ??= this.createIndicatorSeries(item, def);
       if (!target) continue;
       target.paramsKey = JSON.stringify(item.params);
 
@@ -2721,12 +2734,59 @@ export class ChartHostComponent implements OnDestroy {
     return { overlay: indicatorById(source.defId)?.target === 'overlay' };
   }
 
-  /**
-   * What a study's series are built for: its style, where it draws ({@link studyPlace}) and which study it is.
-   * Inputs are not part of it — they only change values.
-   */
-  private layoutKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
-    return JSON.stringify([item.style ?? null, this.studyPlace(item, def), def.id]);
+  /** Where a study's series draw ({@link studyPlace}), and which study it is. */
+  private placeKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    return JSON.stringify([this.studyPlace(item, def), def.id]);
+  }
+
+  /** Which plots are drawn and how, the levels and the fill (inputs only change values; colours, {@link paintKeyOf}). */
+  private styleKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    const plots = def.plots
+      .map((p) => effectivePlot(p, item.style))
+      .filter((p) => p.visible)
+      .map((p) => `${p.key}:${p.kind}`);
+    return JSON.stringify([plots, item.style?.levels ?? null, item.style?.fill ?? null]);
+  }
+
+  /** The drawn plots' colours and widths. */
+  private paintKeyOf(item: ActiveIndicator, def: IndicatorDef): string {
+    return JSON.stringify(
+      def.plots
+        .map((p) => effectivePlot(p, item.style))
+        .filter((p) => p.visible)
+        .map((p) => [p.color, p.lineWidth ?? null]),
+    );
+  }
+
+  /** A study's new colours and widths, on its series as they are (no new series, no new pane). */
+  private repaintIndicatorSeries(target: IndicatorSeries, item: ActiveIndicator, def: IndicatorDef): void {
+    const plots = new Map(def.plots.map((p) => [p.key, effectivePlot(p, item.style)]));
+    for (const s of target.series) {
+      const plot = plots.get(s.key);
+      if (!plot) continue;
+      s.color = plot.color;
+      try {
+        s.api.applyOptions(
+          plot.kind === 'histogram'
+            ? { color: plot.color }
+            : { color: plot.color, lineWidth: (plot.lineWidth ?? 2) as DeepPartial<1 | 2 | 3 | 4> },
+        );
+      } catch {
+        // Went with a rebuilt chart.
+      }
+      // Markers carry the plot's colour: write them again.
+      if (s.markers) s.markers.last = '';
+    }
+    target.paintKey = this.paintKeyOf(item, def);
+  }
+
+  /** The pane a study's series are in; undefined when they have none any more. */
+  private paneIndexOf(held: IndicatorSeries): number | undefined {
+    try {
+      return held.series[0]?.api.getPane().paneIndex();
+    } catch {
+      return undefined;
+    }
   }
 
   /** Per-bar colours on the rows written from `from` (the rows before keep theirs). */
@@ -3564,7 +3624,14 @@ export class ChartHostComponent implements OnDestroy {
   /** Candlestick + chart-pattern studies → the shared pattern renderer. */
   private applyPatterns(active: ActiveIndicator[]): void {
     const bars = this.plotted;
-    const studies = active.filter((a) => a.visible && studyKind(a.defId) !== 'indicator');
+    // Per-timeframe Visibility (DR-I4) as for the built-ins.
+    const resolution = this.resolution();
+    const studies = active.filter(
+      (a) =>
+        a.visible &&
+        studyKind(a.defId) !== 'indicator' &&
+        isShownOn({ visibleOn: a.visibleOn }, resolution),
+    );
     const candles = studies.filter((a) => studyKind(a.defId) === 'candle-pattern');
     const charts = studies.filter((a) => studyKind(a.defId) === 'chart-pattern');
     this.patternRenderer.setBars(bars);
@@ -3613,7 +3680,13 @@ export class ChartHostComponent implements OnDestroy {
    */
   private applyProfiles(active: ActiveIndicator[]): void {
     if (!this.price) return;
-    const wanted = active.filter((a) => a.visible && studyKind(a.defId) === 'profile');
+    const resolution = this.resolution();
+    const wanted = active.filter(
+      (a) =>
+        a.visible &&
+        studyKind(a.defId) === 'profile' &&
+        isShownOn({ visibleOn: a.visibleOn }, resolution),
+    );
     const keep = new Set(wanted.map((a) => a.uid));
     for (const [uid, r] of [...this.profileRenderers]) {
       if (!keep.has(uid)) {
@@ -3705,20 +3778,20 @@ export class ChartHostComponent implements OnDestroy {
     }, 120);
   }
 
-  private createIndicatorSeries(item: ActiveIndicator, def: IndicatorDef): IndicatorSeries | null {
+  private createIndicatorSeries(
+    item: ActiveIndicator,
+    def: IndicatorDef,
+    inPane?: number,
+  ): IndicatorSeries | null {
     const chart = this.chart;
     if (!chart) return null;
     // Overlays live on the price pane (0); everything else gets its own pane, which is what makes RSI and MACD
     // behave like TradingView studies rather than lines squashed onto the price scale. A study on another study's
     // plot draws in that study's pane (an SMA of RSI under the RSI), on its scale ({@link studyPlace}).
+    // Made again in place: the pane it was in.
     const place = this.studyPlace(item, def);
     const host = place.host ? this.indicatorSeries.find((s) => s.uid === place.host) : undefined;
-    let hostPane: number | undefined;
-    try {
-      hostPane = host?.series[0]?.api.getPane().paneIndex();
-    } catch {
-      hostPane = undefined;
-    }
+    const hostPane = inPane ?? (host ? this.paneIndexOf(host) : undefined);
     const overlay = hostPane !== undefined ? hostPane === 0 : place.overlay;
     const paneIndex = hostPane ?? (overlay ? 0 : chart.panes().length);
     // An overlay shares the price scale; without the symbol's precision the axis
@@ -3824,7 +3897,9 @@ export class ChartHostComponent implements OnDestroy {
     const entry: IndicatorSeries = {
       uid: item.uid,
       paramsKey: JSON.stringify(item.params),
-      layoutKey: this.layoutKeyOf(item, def),
+      placeKey: this.placeKeyOf(item, def),
+      styleKey: this.styleKeyOf(item, def),
+      paintKey: this.paintKeyOf(item, def),
       overlay,
       series,
       fill,

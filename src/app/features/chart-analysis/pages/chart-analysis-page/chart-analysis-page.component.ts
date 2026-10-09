@@ -210,6 +210,16 @@ import { ChartAlertsService } from '../../alerts/chart-alerts.service';
 import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
 import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
 import { ObjectTreeComponent } from '../../drawings/ui/object-tree.component';
+import {
+  StudySettingsDialogComponent,
+  type StudyPick,
+} from '../../indicators/study-settings-dialog.component';
+import {
+  parseStudyInput,
+  parseStudySource,
+  sourceGroups,
+  type SourceGroup,
+} from '../../indicators/study-settings';
 import { AlertLinesPrimitive, type AlertLineMove } from '../../alerts/alert-lines-primitive';
 import { alertLinesFor, movedBounds } from '../../alerts/alert-lines-geometry';
 import { inputOf } from '../../alerts/chart-alert-rules';
@@ -536,6 +546,7 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
     ObjectTreeComponent,
+    StudySettingsDialogComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1564,6 +1575,12 @@ export class ChartAnalysisPageComponent {
   readonly stayInDrawing = signal<boolean>(readPref('stayInDrawing', false));
   /** Drawing whose Settings dialog is open. */
   readonly settingsFor = signal<string | null>(null);
+  /** Built-in study whose Settings dialog is open (DR-I4). */
+  readonly studySettingsFor = signal<string | null>(null);
+  readonly studySettingsStudy = computed(
+    () => this.active().find((i) => i.uid === this.studySettingsFor()) ?? null,
+  );
+  private readonly studyDialog = viewChild(StudySettingsDialogComponent);
   /** Right-click menu on a drawing (page-relative coordinates). */
   readonly drawingMenu = signal<{ id: string; x: number; y: number } | null>(null);
   readonly scaleMode = signal<ScaleMode>('normal');
@@ -4099,7 +4116,52 @@ export class ChartAnalysisPageComponent {
   }
 
   removeIndicator(uid: string): void {
-    this.active.update((list) => list.filter((i) => i.uid !== uid));
+    // Studies read from its plots go back to the close (DR-I5), rather than keeping a reference to nothing.
+    this.active.update((list) =>
+      list
+        .filter((i) => i.uid !== uid)
+        .map((i) =>
+          parseStudySource(i.params['source'])?.uid === uid
+            ? { ...i, params: { ...i.params, source: 'close' } }
+            : i,
+        ),
+    );
+    if (this.studySettingsFor() === uid) this.studySettingsFor.set(null);
+  }
+
+  /** A study as its Settings dialog left it (live preview; Cancel sends back the one it opened with). */
+  replaceStudy(next: ActiveIndicator): void {
+    this.active.update((list) => list.map((i) => (i.uid === next.uid ? next : i)));
+  }
+
+  /** The Settings dialog asks for a time on the chart (DR-22): the next click's bar. */
+  async onStudyPick(req: StudyPick): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint(req.kind) : null;
+    this.studyDialog()?.finishPick(point === null ? null : point.time);
+  }
+
+  /** A time input picked straight from the studies bar (DR-22: it was typed as UTC milliseconds). */
+  async pickStudyTime(uid: string, key: string): Promise<void> {
+    const host = this.host();
+    const point = host ? await host.pickPoint('time') : null;
+    if (point !== null) this.setParam(uid, key, String(point.time));
+  }
+
+  /** A time input's value on the studies bar: the picked bar (UTC), or what to do. */
+  studyTimeLabel(v: number | string | undefined): string {
+    const ms = Number(v);
+    return Number.isFinite(ms) && ms > 0
+      ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
+      : 'Pick on chart';
+  }
+
+  /** The Source dropdown's choices for a study (DR-16 / DR-I5). */
+  sourceGroupsFor(item: ActiveIndicator): SourceGroup[] {
+    return sourceGroups(item, this.active(), (s) => {
+      const def = indicatorById(s.defId);
+      return def ? { label: indicatorLabel(def, s.params), plots: def.plots } : null;
+    });
   }
 
   toggleIndicator(uid: string): void {
@@ -4111,17 +4173,18 @@ export class ChartAnalysisPageComponent {
   setParam(uid: string, key: string, raw: string): void {
     const item = this.active().find((i) => i.uid === uid);
     const input = item ? studyMeta(item.defId)?.inputs.find((i) => i.key === key) : undefined;
-    // Select and symbol inputs are strings; everything else must parse as a number.
-    let value: number | string;
-    if (input && (input.type === 'select' || input.type === 'symbol')) {
-      value = input.type === 'symbol' ? raw.trim().toUpperCase() : raw;
-      if (!value) return;
-    } else {
-      value = Number(raw);
-      if (!Number.isFinite(value)) return;
-    }
+    // By the input's type (DR-16: a Source went through Number and became NaN, so 38 built-ins were stuck on close);
+    // a value the input does not take is ignored.
+    const value = parseStudyInput(input, raw);
+    if (value === null) return;
     this.active.update((list) =>
-      list.map((i) => (i.uid === uid ? { ...i, params: { ...i.params, [key]: value } } : i)),
+      list.map((i) => {
+        if (i.uid !== uid) return i;
+        const next: ActiveIndicator = { ...i, params: { ...i.params, [key]: value } };
+        // On another study's plot it is on that one's bars: no timeframe of its own.
+        if (key === 'source' && parseStudySource(value)) delete next.timeframe;
+        return next;
+      }),
     );
   }
 
@@ -4130,7 +4193,7 @@ export class ChartAnalysisPageComponent {
   }
 
   inputsFor(item: ActiveIndicator) {
-    return studyMeta(item.defId)?.inputs.filter((i) => i.type !== 'source') ?? [];
+    return studyMeta(item.defId)?.inputs ?? [];
   }
 
   onLegend(snapshot: LegendSnapshot): void {

@@ -252,6 +252,8 @@ export interface IndicatorDef {
   keywords?: string[];
   /** True when compute needs `ctx.compareBars` (the host fetches the `symbol` input's bars). */
   needsCompare?: boolean;
+  /** True when compute also returns values past the last bar ({@link aheadKey}). */
+  ahead?: boolean;
   /** `overlay` draws on the price pane; `pane` gets its own pane below. */
   target: 'overlay' | 'pane';
   inputs: IndicatorInput[];
@@ -353,6 +355,17 @@ const MA_TYPES = ['SMA', 'EMA'] as const;
 
 const maOf = (type: string, values: number[], len: number): Maybe[] =>
   type === 'EMA' ? ema(values, len) : sma(values, len);
+
+/**
+ * A picked instant (UTC ms) as the time of the bar it falls on in `bars`. The chart's bars carry the display zone's
+ * shifted times, while a pick is a real instant: matched through `utcTimes` when the chart passes them, so an anchor
+ * stays on its bar whatever zone the axis shows. 0 (not set) stays 0; past the last bar, beyond every bar.
+ */
+const plottedAnchor = (bars: Ohlc[], anchorUtc: number, utcTimes?: readonly number[]): number => {
+  if (anchorUtc <= 0 || !utcTimes || utcTimes.length !== bars.length) return anchorUtc;
+  const i = utcTimes.findIndex((t) => t >= anchorUtc);
+  return i < 0 ? Number.POSITIVE_INFINITY : bars[i].time;
+};
 
 /** Compare-symbol closes aligned to `bars` by time; all null when no compare bars were supplied. */
 const compareCloses = (bars: Ohlc[], ctx?: IndicatorContext): Maybe[] =>
@@ -580,6 +593,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Tenkan, Kijun, the leading spans (cloud) and the lagging span.',
     keywords: ['cloud', 'kumo'],
     target: 'overlay',
+    ahead: true,
     inputs: [
       { key: 'conversion', label: 'Conversion', type: 'number', default: 9, min: 1, max: 200 },
       { key: 'base', label: 'Base', type: 'number', default: 26, min: 1, max: 200 },
@@ -1210,6 +1224,7 @@ export const INDICATORS: readonly IndicatorDef[] = [
     description: 'Three smoothed, forward-shifted MAs: jaw, teeth and lips.',
     keywords: ['williams'],
     target: 'overlay',
+    ahead: true,
     inputs: [],
     plots: [
       { key: 'jaw', title: 'Jaw', kind: 'line', color: '#2962FF' },
@@ -2071,11 +2086,11 @@ export const INDICATORS: readonly IndicatorDef[] = [
       NUM('mult2', 'Band 2 ×', 2, 0.1, 10),
     ],
     plots: VWAP_BAND_PLOTS,
-    compute: (bars, p) => ({
+    compute: (bars, p, ctx) => ({
       ...anchoredVwap(
         bars,
         num(p, 'barsBack', 100),
-        num(p, 'anchorTime', 0),
+        plottedAnchor(bars, num(p, 'anchorTime', 0), ctx?.utcTimes),
         num(p, 'mult1', 1),
         num(p, 'mult2', 2),
       ),

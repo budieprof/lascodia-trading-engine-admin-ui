@@ -101,6 +101,12 @@ describe('indicator registry', () => {
     describe(def.id, () => {
       const result = def.compute(bars, defaultParams(def), { compareBars });
 
+      it('declares `ahead` exactly when it returns values past the last bar', () => {
+        // The flag keeps such studies off the higher-timeframe join (DR-I5), which has no bars ahead.
+        const hasAhead = Object.keys(result).some((k) => k.endsWith(':ahead'));
+        expect(!!def.ahead, `${def.id}.ahead`).toBe(hasAhead);
+      });
+
       it('returns a series for every declared plot', () => {
         // The trap: a plot whose key `compute` never returns draws nothing,
         // silently. The legend still lists it, so it looks configured.
