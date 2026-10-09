@@ -14,6 +14,7 @@ import type {
   ScriptExportDto,
   ScriptLibraryDetailDto,
   ScriptLibraryDto,
+  ScriptLibraryUsageDto,
   ScriptLibraryVisibility,
 } from '@core/api/scripting.types';
 import { ScriptingService, toScriptingError } from '@core/services/scripting.service';
@@ -26,6 +27,10 @@ import { ScriptWorkbenchComponent } from '../../components/script-workbench/scri
 import { SCRIPTING_UI_STYLES } from '../../components/scripting-ui.styles';
 import { readDeclarationHeader } from '../../pine/pine-scan';
 import { PineCatalogService } from '../../services/pine-catalog.service';
+import { ScriptDiffComponent } from '../../shared/script-diff.component';
+import { ScriptDialogService, confirmDiscard } from '../../shared/script-dialog.service';
+import { warnBeforeUnload, type HasUnsavedChanges } from '../../shared/unsaved-changes';
+import { exportChanges, newestVersionOf, previousVersionOf, versionsOf } from './library-versions';
 
 /** The engine's built-in library publisher (`lascodia/std/1`). */
 export const BUILTIN_PUBLISHER = 'lascodia';
@@ -64,7 +69,22 @@ interface LibraryDraft {
   description: string;
   visibility: ScriptLibraryVisibility;
   source: string;
+  /** What the draft opened with — anything else is an unsaved change (PE-14). */
+  startName: string;
+  startDescription: string;
+  startSource: string;
+  /**
+   * PE-I12: the newest version the draft knew about (0 for a new library) — the engine refuses the
+   * publish with `-409` when a newer one exists, instead of dropping its changes unseen.
+   */
+  basedOnVersion: number;
+  /** The exports of that newest version: a publish that drops any asks first. */
+  baseExports: ScriptExportDto[] | null;
 }
+
+type DetailTab = 'source' | 'exports' | 'changes' | 'usage';
+
+const DRAFT_UNSAVED = 'The library draft has unsaved changes';
 
 /**
  * Pine libraries (`scripting/libraries`): browse and filter, read a version's source and exports,
@@ -82,6 +102,7 @@ interface LibraryDraft {
     RelativeTimePipe,
     PineEditorComponent,
     ScriptWorkbenchComponent,
+    ScriptDiffComponent,
   ],
   template: `
     <div class="page">
@@ -211,12 +232,20 @@ interface LibraryDraft {
                   />
                 </label>
               </div>
+              @if (d.baseId) {
+                <p class="muted small">
+                  Starts from v{{ d.basedOnVersion }}; publishes v{{ d.basedOnVersion + 1 }}.
+                  Scripts keep importing the version they name until they are moved.
+                </p>
+              }
               <app-script-workbench
                 [source]="d.source"
                 (sourceChange)="patchDraft({ source: $event })"
                 [fileName]="(d.name || 'library') + '.pine'"
                 label="Library source"
                 editorHeight="420px"
+                saveShortcut="save"
+                (saveRequested)="publish()"
                 (compiled)="draftCompile.set($event)"
               />
               @if (draftCompile()?.exports?.length) {
@@ -301,6 +330,24 @@ interface LibraryDraft {
                 >
                   Exports ({{ exportsOf(lib).length }})
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="detail-tab"
+                  [class.is-active]="detailTab() === 'changes'"
+                  (click)="openChanges(lib)"
+                >
+                  Changes
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="detail-tab"
+                  [class.is-active]="detailTab() === 'usage'"
+                  (click)="openUsage(lib)"
+                >
+                  Used by
+                </button>
               </div>
               @if (detailTab() === 'source') {
                 @if (loadingDetail()) {
@@ -311,6 +358,139 @@ interface LibraryDraft {
                     [readOnly]="true"
                     height="480px"
                   />
+                }
+              } @else if (detailTab() === 'changes') {
+                <!-- PE-I12: what changed between two versions of this library. -->
+                @if (otherVersions(lib).length === 0) {
+                  <p class="muted small">
+                    This is the only version of {{ lib.publisher }}/{{ lib.name }}.
+                  </p>
+                } @else {
+                  <label class="compare-bar">
+                    <span class="muted small">Compare v{{ lib.version }} with</span>
+                    <select
+                      class="field-input"
+                      (change)="compareWith(+$any($event.target).value)"
+                      aria-label="Version to compare with"
+                    >
+                      @for (v of otherVersions(lib); track v.id) {
+                        <option [value]="v.id" [selected]="v.id === compareId()">
+                          v{{ v.version }}
+                        </option>
+                      }
+                    </select>
+                  </label>
+                  @if (compareLoading() || loadingDetail()) {
+                    <p class="muted small">Loading the versions…</p>
+                  } @else if (comparePair(); as pair) {
+                    <app-script-diff
+                      [before]="pair.older.source"
+                      [after]="pair.newer.source"
+                      [beforeLabel]="'v' + pair.older.version"
+                      [afterLabel]="'v' + pair.newer.version"
+                      maxHeight="480px"
+                    />
+                    @if (exportDiff(); as x) {
+                      <div class="export-diff" data-testid="export-diff">
+                        @if (x.added.length + x.removed.length + x.changed.length === 0) {
+                          <p class="muted small">The exports are the same.</p>
+                        }
+                        @for (e of x.added; track e.name) {
+                          <p class="small">
+                            <span class="tag tag-add">added</span>
+                            <span class="mono">{{ e.name }}</span>
+                          </p>
+                        }
+                        @for (e of x.removed; track e.name) {
+                          <p class="small">
+                            <span class="tag tag-del">removed</span>
+                            <span class="mono">{{ e.name }}</span>
+                          </p>
+                        }
+                        @for (e of x.changed; track e.name) {
+                          <p class="small">
+                            <span class="tag">changed</span>
+                            <span class="mono">{{ e.before }}</span> →
+                            <span class="mono">{{ e.after }}</span>
+                          </p>
+                        }
+                      </div>
+                    }
+                  }
+                  @if (compareError(); as e) {
+                    <div class="error-box">{{ e }}</div>
+                  }
+                }
+              } @else if (detailTab() === 'usage') {
+                <!-- PE-I12: what imports this version, directly or through another library. -->
+                @if (usageLoading()) {
+                  <p class="muted small">Looking for importers…</p>
+                } @else if (usageError(); as e) {
+                  <div class="error-box">{{ e }}</div>
+                } @else if (usage(); as u) {
+                  @if (u.strategies.length + u.chartScripts.length + u.libraries.length === 0) {
+                    <p class="muted small" data-testid="usage-none">
+                      Nothing imports {{ u.importPath }}: deleting it breaks no script.
+                    </p>
+                  } @else {
+                    <div class="usage" data-testid="usage">
+                      @if (u.strategies.length > 0) {
+                        <h4 class="usage-title">Strategies ({{ u.strategies.length }})</h4>
+                        <ul>
+                          @for (st of u.strategies; track st.id) {
+                            <li>
+                              <a [routerLink]="['/strategies', st.id]">{{ st.name }}</a>
+                              <span class="muted small">
+                                {{ st.symbol }} {{ st.timeframe }} · {{ st.status }} ·
+                                {{ st.lifecycleStage }}
+                                {{ st.direct ? '' : '· through another library' }}
+                              </span>
+                              @if (st.blocksDelete) {
+                                <span
+                                  class="chip chip-warn"
+                                  title="Live, approved, shadow-live or paper trading"
+                                  >trading</span
+                                >
+                              }
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (u.chartScripts.length > 0) {
+                        <h4 class="usage-title">Chart scripts ({{ u.chartScripts.length }})</h4>
+                        <ul>
+                          @for (c of u.chartScripts; track c.id) {
+                            <li>
+                              {{ c.name }}
+                              <span class="muted small">
+                                {{
+                                  c.ownedByMe
+                                    ? 'yours'
+                                    : 'shared by ' + (c.createdBy || 'another operator')
+                                }}
+                                {{ c.direct ? '' : '· through another library' }}
+                              </span>
+                            </li>
+                          }
+                        </ul>
+                      }
+                      @if (u.libraries.length > 0) {
+                        <h4 class="usage-title">Libraries ({{ u.libraries.length }})</h4>
+                        <ul>
+                          @for (l of u.libraries; track l.id) {
+                            <li>
+                              <span class="mono"
+                                >{{ l.publisher }}/{{ l.name }}/{{ l.version }}</span
+                              >
+                              <span class="muted small">{{
+                                l.direct ? '' : 'through another library'
+                              }}</span>
+                            </li>
+                          }
+                        </ul>
+                      }
+                    </div>
+                  }
                 }
               } @else {
                 @if (exportsOf(lib).length === 0) {
@@ -569,18 +749,62 @@ interface LibraryDraft {
         justify-content: flex-end;
         gap: 8px;
       }
+      .compare-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .compare-bar .field-input {
+        width: auto;
+      }
+      .export-diff p,
+      .usage ul {
+        margin: 0;
+      }
+      .usage ul {
+        padding-left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 13px;
+      }
+      .usage-title {
+        margin: 8px 0 4px;
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+      }
+      .tag {
+        display: inline-block;
+        padding: 0 6px;
+        border-radius: 999px;
+        font-size: 10px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+      }
+      .tag-add {
+        background: rgba(52, 199, 89, 0.15);
+      }
+      .tag-del {
+        background: rgba(255, 59, 48, 0.15);
+      }
+      .chip-warn {
+        border-color: rgba(255, 149, 0, 0.5);
+      }
       a.btn {
         text-decoration: none;
       }
     `,
   ],
 })
-export class LibrariesPageComponent implements OnInit {
+export class LibrariesPageComponent implements OnInit, HasUnsavedChanges {
   private readonly scripting = inject(ScriptingService);
   private readonly language = inject(PineCatalogService);
   private readonly notifications = inject(NotificationService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private readonly dialogs = inject(ScriptDialogService);
 
   readonly libraries = signal<ScriptLibraryDto[]>([]);
   readonly loading = signal(false);
@@ -596,7 +820,16 @@ export class LibrariesPageComponent implements OnInit {
   readonly detail = signal<ScriptLibraryDetailDto | null>(null);
   readonly loadingDetail = signal(false);
   readonly detailError = signal<string | null>(null);
-  readonly detailTab = signal<'source' | 'exports'>('source');
+  readonly detailTab = signal<DetailTab>('source');
+
+  // PE-I12: version comparison and usage.
+  readonly compareId = signal<number | null>(null);
+  readonly compareDetail = signal<ScriptLibraryDetailDto | null>(null);
+  readonly compareLoading = signal(false);
+  readonly compareError = signal<string | null>(null);
+  readonly usage = signal<ScriptLibraryUsageDto | null>(null);
+  readonly usageLoading = signal(false);
+  readonly usageError = signal<string | null>(null);
 
   readonly draft = signal<LibraryDraft | null>(null);
   readonly draftCompile = signal<ScriptCompileResult | null>(null);
@@ -632,6 +865,32 @@ export class LibrariesPageComponent implements OnInit {
     return null;
   });
   readonly canPublish = computed(() => this.publishBlockedReason() === null);
+  /** The two versions being compared, older first; null until both sources are loaded. */
+  readonly comparePair = computed(() => {
+    const cur = this.detail();
+    const other = this.compareDetail();
+    if (!cur || !other || cur.id === other.id) return null;
+    return other.version < cur.version
+      ? { older: other, newer: cur }
+      : { older: cur, newer: other };
+  });
+  readonly exportDiff = computed(() => {
+    const pair = this.comparePair();
+    return pair ? exportChanges(pair.older.exports ?? [], pair.newer.exports ?? []) : null;
+  });
+
+  /** PE-14: the draft holds something it did not open with. */
+  readonly draftDirty = computed(() => {
+    const d = this.draft();
+    return (
+      !!d &&
+      (d.source !== d.startSource || d.name !== d.startName || d.description !== d.startDescription)
+    );
+  });
+
+  // Closing or reloading the browser tab with an unpublished draft asks the browser's question.
+  private readonly unloadGuard = warnBeforeUnload(() => this.hasUnsavedChanges());
+
   readonly deleteMessage = computed(() => {
     const t = this.deleteTarget();
     if (!t) return '';
@@ -679,12 +938,33 @@ export class LibrariesPageComponent implements OnInit {
     void this.load();
   }
 
+  /** PE-14: an unpublished draft holds changes (the route guard and the browser ask first). */
+  hasUnsavedChanges(): boolean {
+    return this.draftDirty() && !this.publishing();
+  }
+
+  unsavedChangesNote(): string {
+    return DRAFT_UNSAVED;
+  }
+
+  /** Runs `then` at once when no draft would be lost; otherwise only after the operator agrees. */
+  private leaveDraft(then: () => void | Promise<void>): void | Promise<void> {
+    if (!this.hasUnsavedChanges()) return then();
+    return confirmDiscard(this.dialogs, DRAFT_UNSAVED).then((ok) => (ok ? then() : undefined));
+  }
+
   async select(id: number): Promise<void> {
+    if (this.hasUnsavedChanges() && !(await confirmDiscard(this.dialogs, DRAFT_UNSAVED))) return;
     this.draft.set(null);
     this.selectedId.set(id);
     this.detail.set(null);
     this.detailError.set(null);
     this.detailTab.set('source');
+    this.compareId.set(null);
+    this.compareDetail.set(null);
+    this.compareError.set(null);
+    this.usage.set(null);
+    this.usageError.set(null);
     void this.router.navigate([], {
       queryParams: { id },
       replaceUrl: true,
@@ -698,6 +978,53 @@ export class LibrariesPageComponent implements OnInit {
       this.detailError.set(toScriptingError(err, 'The library could not be loaded.').message);
     } finally {
       this.loadingDetail.set(false);
+    }
+  }
+
+  /** The library's other listed versions, newest first. */
+  otherVersions(lib: ScriptLibraryDto): ScriptLibraryDto[] {
+    return versionsOf(this.libraries(), lib).filter((v) => v.id !== lib.id);
+  }
+
+  /** The Changes tab: compares with the previous version (or the next, for a first version). */
+  openChanges(lib: ScriptLibraryDto): void {
+    this.detailTab.set('changes');
+    if (this.compareId() !== null) return;
+    const other = previousVersionOf(this.libraries(), lib) ?? this.otherVersions(lib).at(-1);
+    if (other) void this.compareWith(other.id);
+  }
+
+  async compareWith(id: number): Promise<void> {
+    this.compareId.set(id);
+    this.compareError.set(null);
+    this.compareLoading.set(true);
+    try {
+      const d = await firstValueFrom(this.scripting.getLibrary(id));
+      if (this.compareId() === id) this.compareDetail.set(d);
+    } catch (err) {
+      if (this.compareId() === id) {
+        this.compareError.set(toScriptingError(err, 'That version could not be loaded.').message);
+      }
+    } finally {
+      if (this.compareId() === id) this.compareLoading.set(false);
+    }
+  }
+
+  /** The Used-by tab: strategies, chart scripts and libraries importing this version. */
+  async openUsage(lib: ScriptLibraryDto): Promise<void> {
+    this.detailTab.set('usage');
+    if (this.usage()?.libraryId === lib.id || this.usageLoading()) return;
+    this.usageLoading.set(true);
+    this.usageError.set(null);
+    try {
+      const u = await firstValueFrom(this.scripting.getLibraryUsage(lib.id));
+      if (this.selectedId() === lib.id) this.usage.set(u);
+    } catch (err) {
+      if (this.selectedId() === lib.id) {
+        this.usageError.set(toScriptingError(err, 'Its importers could not be listed.').message);
+      }
+    } finally {
+      this.usageLoading.set(false);
     }
   }
 
@@ -717,30 +1044,88 @@ export class LibrariesPageComponent implements OnInit {
 
   // ── Publishing ─────────────────────────────────────────────────────────
 
-  startNew(): void {
-    this.selectedId.set(null);
-    this.publishError.set(null);
-    this.draftCompile.set(null);
-    this.draft.set({
-      baseId: null,
-      name: '',
-      description: '',
-      visibility: 'Private',
-      source: NEW_LIBRARY_TEMPLATE,
+  startNew(): void | Promise<void> {
+    return this.leaveDraft(() => {
+      this.selectedId.set(null);
+      this.publishError.set(null);
+      this.draftCompile.set(null);
+      this.draft.set({
+        baseId: null,
+        name: '',
+        description: '',
+        visibility: 'Private',
+        source: NEW_LIBRARY_TEMPLATE,
+        startName: '',
+        startDescription: '',
+        startSource: NEW_LIBRARY_TEMPLATE,
+        basedOnVersion: 0,
+        baseExports: null,
+      });
     });
   }
 
-  startNewVersion(lib: ScriptLibraryDto): void {
-    const detail = this.detail();
+  /**
+   * A new version starts from the newest one (PE-14): starting from an older version would publish
+   * its source over the newer versions' changes. From an older version it asks which to start from.
+   */
+  async startNewVersion(lib: ScriptLibraryDto): Promise<void> {
+    const newest = newestVersionOf(this.libraries(), lib);
+    let from = newest;
+    if (newest.id !== lib.id) {
+      const answer = await this.dialogs.ask<'newest' | 'this'>({
+        title: 'Start the new version from which version?',
+        message: `v${lib.version} is not the newest version of ${lib.publisher}/${lib.name} — v${newest.version} is. Whichever you start from is published as v${newest.version + 1}.`,
+        details: [
+          `Starting from v${lib.version} drops whatever v${lib.version + 1}–v${newest.version} changed, unless you bring it back.`,
+        ],
+        choices: [
+          { id: 'newest', label: `Start from v${newest.version}`, tone: 'primary' },
+          { id: 'this', label: `Start from v${lib.version}` },
+        ],
+        cancelLabel: 'Cancel',
+      });
+      if (!answer.choice) return;
+      from = answer.choice === 'newest' ? newest : lib;
+    }
+    if (this.hasUnsavedChanges() && !(await confirmDiscard(this.dialogs, DRAFT_UNSAVED))) return;
     this.publishError.set(null);
-    this.draftCompile.set(null);
-    this.draft.set({
-      baseId: lib.id,
-      name: lib.name,
-      description: lib.description ?? '',
-      visibility: lib.visibility === 'Shared' ? 'Shared' : 'Private',
-      source: detail?.id === lib.id ? detail.source : '',
-    });
+    try {
+      const source = await this.sourceOf(from);
+      const baseExports = await this.exportsOfVersion(newest);
+      this.draftCompile.set(null);
+      this.draft.set({
+        baseId: lib.id,
+        name: lib.name,
+        description: from.description ?? '',
+        visibility: from.visibility === 'Shared' ? 'Shared' : 'Private',
+        source,
+        startName: lib.name,
+        startDescription: from.description ?? '',
+        startSource: source,
+        basedOnVersion: newest.version,
+        baseExports,
+      });
+    } catch (err) {
+      this.notifications.error(toScriptingError(err, 'That version could not be loaded.').message);
+    }
+  }
+
+  private async sourceOf(lib: ScriptLibraryDto): Promise<string> {
+    const d = this.detail();
+    if (d?.id === lib.id) return d.source;
+    return (await firstValueFrom(this.scripting.getLibrary(lib.id))).source;
+  }
+
+  /** A version's exports: the loaded detail's, the list's, else read from the engine. */
+  private async exportsOfVersion(lib: ScriptLibraryDto): Promise<ScriptExportDto[] | null> {
+    const d = this.detail();
+    if (d?.id === lib.id && d.exports) return d.exports;
+    if (lib.exports) return lib.exports;
+    try {
+      return (await firstValueFrom(this.scripting.getLibrary(lib.id))).exports ?? null;
+    } catch {
+      return null;
+    }
   }
 
   patchDraft(patch: Partial<LibraryDraft>): void {
@@ -749,25 +1134,49 @@ export class LibrariesPageComponent implements OnInit {
     this.draft.set({ ...d, ...patch });
   }
 
-  cancelDraft(): void {
-    const baseId = this.draft()?.baseId ?? null;
-    this.draft.set(null);
-    this.publishError.set(null);
-    if (baseId) this.selectedId.set(baseId);
+  cancelDraft(): void | Promise<void> {
+    return this.leaveDraft(() => {
+      const baseId = this.draft()?.baseId ?? null;
+      this.draft.set(null);
+      this.publishError.set(null);
+      if (baseId) this.selectedId.set(baseId);
+    });
   }
 
+  /**
+   * Publishes the draft. A new version that drops exports the newest version has asks first
+   * (PE-I12); a newer version published since the draft started comes back as `-409` and opens a
+   * comparison with it.
+   */
   async publish(): Promise<void> {
     const d = this.draft();
     if (!d || !this.canPublish() || this.publishing()) return;
+    const removed = this.removedExports(d);
+    if (removed.length > 0) {
+      const ok = await this.dialogs.confirm({
+        title: 'Publish without some exports?',
+        message: `This version drops ${removed.length === 1 ? 'an export' : `${removed.length} exports`} v${d.basedOnVersion} has: ${removed.join(', ')}.`,
+        details: [
+          `Scripts importing v${d.basedOnVersion} or older keep working: an import names its version.`,
+          'A script moved to the new version stops compiling wherever it uses them.',
+        ],
+        confirmLabel: 'Publish anyway',
+        cancelLabel: 'Keep editing',
+        tone: 'danger',
+      });
+      if (!ok || this.draft() !== d) return;
+    }
     this.publishing.set(true);
     this.publishError.set(null);
+    const name = (d.name.trim() || this.suggestedName()).trim();
     try {
       const lib = await firstValueFrom(
         this.scripting.createLibrary({
-          name: (d.name.trim() || this.suggestedName()).trim(),
+          name,
           description: d.description.trim() || null,
           visibility: d.visibility,
           source: d.source,
+          basedOnVersion: d.basedOnVersion,
         }),
       );
       this.notifications.success(`Published ${lib.publisher}/${lib.name}/${lib.version}`);
@@ -778,10 +1187,82 @@ export class LibrariesPageComponent implements OnInit {
     } catch (err) {
       const e = toScriptingError(err, 'Publishing the library failed.');
       if (e.compile) this.draftCompile.set(e.compile);
+      if (e.isConflict && (await this.resolveNewerVersion(d, name, e.message))) return;
       this.publishError.set(e.message);
     } finally {
       this.publishing.set(false);
     }
+  }
+
+  /** Export names the newest version has and the draft's compiled exports do not. */
+  private removedExports(d: LibraryDraft): string[] {
+    const compiled = this.draftCompile();
+    if (!d.baseExports || !compiled?.exports) return [];
+    const now = new Set(compiled.exports.map((e) => e.name));
+    return d.baseExports.filter((e) => !now.has(e.name)).map((e) => e.name);
+  }
+
+  /**
+   * `-409` on publish: a version newer than the one the draft started from exists. Shows it next to
+   * the draft; "Publish anyway" re-bases the draft on it and publishes again (asking again about
+   * dropped exports). False when the conflict is something else (the message is shown instead).
+   */
+  private async resolveNewerVersion(
+    d: LibraryDraft,
+    name: string,
+    message: string,
+  ): Promise<boolean> {
+    await this.load();
+    const publisher = this.myPublisher();
+    const mine = this.libraries().filter(
+      (l) =>
+        l.name.toLowerCase() === name.toLowerCase() &&
+        (publisher === null || l.publisher.toLowerCase() === publisher.toLowerCase()),
+    );
+    const newest = mine.sort((a, b) => b.version - a.version)[0];
+    if (!newest || newest.version <= d.basedOnVersion) return false;
+    let newestDetail: ScriptLibraryDetailDto;
+    try {
+      newestDetail = await firstValueFrom(this.scripting.getLibrary(newest.id));
+    } catch {
+      return false;
+    }
+    const answer = await this.dialogs.ask<'publish'>({
+      title: d.baseId
+        ? 'A newer version was published'
+        : `${newest.publisher}/${newest.name} already exists`,
+      message: d.baseId
+        ? message
+        : `You already publish a library named ${newest.name} (v${newest.version}). Publishing adds v${newest.version + 1} to it.`,
+      details: ['Compare the two, bring over what you need, then publish again.'],
+      compare: {
+        before: newestDetail.source,
+        after: d.source,
+        beforeLabel: `v${newest.version}`,
+        afterLabel: 'Your draft',
+      },
+      choices: [
+        { id: 'publish', label: `Publish as v${newest.version + 1} anyway`, tone: 'danger' },
+      ],
+      cancelLabel: 'Keep editing',
+      tone: 'danger',
+    });
+    const current = this.draft();
+    if (!current) return true;
+    if (answer.choice !== 'publish') {
+      this.publishError.set(
+        `v${newest.version} was published after this draft started. Compare, then publish again.`,
+      );
+      return true;
+    }
+    this.draft.set({
+      ...current,
+      basedOnVersion: newest.version,
+      baseExports: newestDetail.exports ?? newest.exports ?? null,
+    });
+    this.publishing.set(false);
+    await this.publish();
+    return true;
   }
 
   // ── Deleting ───────────────────────────────────────────────────────────

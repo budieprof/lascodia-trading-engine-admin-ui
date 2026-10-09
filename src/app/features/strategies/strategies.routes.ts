@@ -53,6 +53,8 @@ export const STRATEGIES_ROUTES: Routes = [
     // Pine script libraries (ADR-0027 §7). Declared before ':id' so it is never read as an id.
     path: 'libraries',
     data: { breadcrumb: 'Pine Libraries' },
+    // PE-14: an unpublished library draft asks before the page is left.
+    canDeactivate: [unsavedChangesGuard],
     loadComponent: () =>
       import('@features/scripting/pages/libraries-page/libraries-page.component').then(
         (m) => m.LibrariesPageComponent,
