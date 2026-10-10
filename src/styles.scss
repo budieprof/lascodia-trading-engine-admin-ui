@@ -116,6 +116,14 @@
   animation-delay: 280ms;
 }
 
+// Tailwind's preflight sets `margin: 0` on every element — which removes the browser's own `margin: auto` that
+// centres a modal <dialog>, so every showModal() dialog (Chart settings, …) sat in the top-left corner. Modal
+// dialogs get their centring back here; a dialog that positions itself keeps its own rule (component styles are more
+// specific than this).
+dialog:modal {
+  margin: auto;
+}
+
 // Overlays must not take part in the choreography. `animation … both` keeps
 // the final `transform: translateY(0)` applied, and a transformed element is
 // the containing block for every `position: fixed` descendant — so a dialog
