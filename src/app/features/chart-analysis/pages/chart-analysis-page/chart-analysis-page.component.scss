@@ -1403,7 +1403,12 @@ $pane-gap: 4px;
 // Dark values mirror the canvas palette in ChartHostComponent.
 // ═══════════════════════════════════════════════════════════════════════════
 
-.chart-page {
+// The theme's colours live on the page's root — not on .chart-page — so the panels, pop-ups and dialogs the page
+// renders beside the chart follow the theme too. Every colour name a chart component uses resolves here: the
+// TradingView set (--tv-*) and the names components were written against (--surface, --text, --border, … and the
+// -1 variants), which before fell back to hard-coded LIGHT colours in dark mode (a white "details" pane on a dark
+// chart) or to DARK ones in light mode.
+:host {
   --tv-ink: #131722;
   --tv-muted: #787b86;
   --tv-line: #e0e3eb;
@@ -1415,7 +1420,36 @@ $pane-gap: 4px;
   --tv-up: #089981;
   --tv-down: #f23645;
   --tv-gutter: #e0e3eb;
+  --tv-raised: #ffffff;
 
+  --surface: var(--tv-bg);
+  --surface-1: var(--tv-raised);
+  --surface-hover: var(--tv-hover);
+  --text: var(--tv-ink);
+  --text-1: var(--tv-ink);
+  --text-muted: var(--tv-muted);
+  --muted: var(--tv-muted);
+  --border: var(--tv-line);
+  --border-1: var(--tv-line);
+  --accent: var(--tv-blue);
+  --accent-soft: color-mix(in srgb, var(--tv-blue) 14%, transparent);
+}
+
+:host-context(.dark),
+:host-context([data-theme='dark']) {
+  --tv-ink: #dbdbdb;
+  --tv-muted: #8b8b8b;
+  --tv-line: #2e2e2e;
+  --tv-hover: #2a2a2a;
+  --tv-active-bg: #142e61;
+  --tv-bg: #0f0f0f;
+  --tv-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  --tv-gutter: #2e2e2e;
+  // Pop-ups and menus sit one step above the panes, as on TradingView's dark theme.
+  --tv-raised: #1e1e1e;
+}
+
+.chart-page {
   // The page is the gutter; every pane paints --tv-bg over it, so the
   // $pane-gap between panes reads as a band.
   gap: $pane-gap;
@@ -1427,19 +1461,6 @@ $pane-gap: 4px;
   border-radius: 4px;
 }
 
-:host-context(.dark),
-:host-context([data-theme='dark']) {
-  .chart-page {
-    --tv-ink: #dbdbdb;
-    --tv-muted: #8b8b8b;
-    --tv-line: #2e2e2e;
-    --tv-hover: #2a2a2a;
-    --tv-active-bg: #142e61;
-    --tv-bg: #0f0f0f;
-    --tv-menu-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-    --tv-gutter: #2e2e2e;
-  }
-}
 
 .muted {
   color: var(--tv-muted);
