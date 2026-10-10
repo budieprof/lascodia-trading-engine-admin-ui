@@ -34,7 +34,7 @@ describe('ChartPrefsService', () => {
 
   it('hydrate: the engine wins in the cache, and local-only keys are uploaded once', async () => {
     localStorage.setItem('lascodia.chart.favouriteStudies', '["old"]');
-    localStorage.setItem('lascodia.chart.watchlist.split', '0.4');
+    localStorage.setItem('lascodia.chart.pref.magnetStrength', 'strong');
     const { prefs, setPreference } = make([
       { key: 'lascodia.chart.favouriteStudies', value: '["rsi"]' },
     ]);
@@ -42,7 +42,22 @@ describe('ChartPrefsService', () => {
     expect(localStorage.getItem('lascodia.chart.favouriteStudies')).toBe('["rsi"]');
     await vi.advanceTimersByTimeAsync(900);
     expect(setPreference).toHaveBeenCalledTimes(1);
-    expect(setPreference).toHaveBeenCalledWith('lascodia.chart.watchlist.split', '0.4');
+    expect(setPreference).toHaveBeenCalledWith('lascodia.chart.pref.magnetStrength', 'strong');
+  });
+
+  it('screen-dependent positions and splits stay on this device: never uploaded, never taken from the engine', async () => {
+    localStorage.setItem('lascodia.chart.watchlist.split', '0.4');
+    localStorage.setItem('lascodia.chart.drawing-toolbar.pos.v1', '{"x":40,"y":80}');
+    const { prefs, setPreference } = make([
+      { key: 'lascodia.chart.watchlist.split', value: '0.9' },
+      { key: 'lascodia.chart.favoritesBar.pos.v1', value: '{"x":1500,"y":20}' },
+    ]);
+    await prefs.hydrate();
+    prefs.setItem('lascodia.chart.watchlist.split', '0.5');
+    await vi.advanceTimersByTimeAsync(900);
+    expect(localStorage.getItem('lascodia.chart.watchlist.split')).toBe('0.5');
+    expect(localStorage.getItem('lascodia.chart.favoritesBar.pos.v1')).toBeNull();
+    expect(setPreference).not.toHaveBeenCalled();
   });
 
   it('setItem writes the cache at once and pushes synced keys after a debounce, unsynced never', async () => {

@@ -4,7 +4,10 @@ import { firstValueFrom, timeout } from 'rxjs';
 import { ChartLayoutsService } from '@core/services/chart-layouts.service';
 
 /**
- * The chart's per-viewer preferences that follow the operator across browsers and machines.
+ * The chart's per-viewer preferences that follow the operator across browsers and machines. Screen-dependent ones —
+ * the floating drawing toolbar's and favourites bar's positions, the watchlist's list/details split — stay in the
+ * browser (a laptop and a large monitor must not move each other's toolbars), as do pane heights and panel widths
+ * (`device-sizes.ts`).
  * Each is the localStorage key the feature always used; the engine (`chart/preferences`) holds
  * the same string under the same key.
  */
@@ -12,8 +15,6 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.favouriteStudies',
   'lascodia.chart.studyTemplates.v1',
   'lascodia.chart.drawing-templates.v1',
-  'lascodia.chart.drawing-toolbar.pos.v1',
-  'lascodia.chart.watchlist.split',
   'lascodia.chart.pref.magnetStrength',
   'lascodia.chart.pref.stayInDrawing',
   'lascodia.chart.pref.favouriteIntervals',
@@ -21,7 +22,6 @@ export const SYNCED_PREF_KEYS = [
   'lascodia.chart.scriptInputTemplates.v1',
   // Favourite drawing tools and their toolbar's place (DR-I12, `drawings/drawing-favorites.service.ts`).
   'lascodia.chart.favoriteDrawingTools.v1',
-  'lascodia.chart.favoritesBar.pos.v1',
   // Auto analysis layers (DR-I11).
   'lascodia.chart.pref.autoAnalysis',
 ] as const;
