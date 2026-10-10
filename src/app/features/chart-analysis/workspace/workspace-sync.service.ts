@@ -5,6 +5,7 @@ import { firstValueFrom, timeout } from 'rxjs';
 import { ChartLayoutsService, type ChartLayoutDto } from '@core/services/chart-layouts.service';
 import type { ResponseData } from '@core/api/api.types';
 import { ChartLayoutStore } from './layout-store.service';
+import { readDeviceSizes, rememberDeviceSizes, withDeviceSizes, withoutDeviceSizes } from './device-sizes';
 import {
   WORKSPACE_VERSION,
   isWorkspaceState,
@@ -17,6 +18,11 @@ export const DEFAULT_LAYOUT_NAME = 'Unnamed';
 const SAVE_DEBOUNCE_MS = 1_500;
 const LOAD_TIMEOUT_MS = 5_000;
 const RETRY_MS = [5_000, 10_000, 20_000, 30_000];
+
+/** A layout as the engine holds it — device sizes left out (`device-sizes.ts`): what "changed" is judged on. */
+function sharedJson(state: ChartWorkspaceState): string {
+  return JSON.stringify(withoutDeviceSizes(state));
+}
 
 export type WorkspaceSaveStatus =
   | 'idle'
@@ -123,8 +129,14 @@ export class ChartWorkspaceSync {
 
   /** The page's current state; saved after the debounce when it differs from the last one. */
   markDirty(state: ChartWorkspaceState): void {
-    const json = JSON.stringify(state);
-    if (json === this.lastJson) return;
+    // Pane heights and panel width stay on this device; a change to only those is remembered here and never saved.
+    rememberDeviceSizes(this.active().id, state);
+    const json = sharedJson(state);
+    if (json === this.lastJson) {
+      this.current = state;
+      this.writeCache();
+      return;
+    }
     this.lastJson = json;
     this.current = state;
     this.dirty = true;
@@ -139,7 +151,7 @@ export class ChartWorkspaceSync {
    */
   rebase(state: ChartWorkspaceState): void {
     if (this.dirty) return; // an unconfirmed edit still has to go up
-    this.lastJson = JSON.stringify(state);
+    this.lastJson = sharedJson(state);
     this.current = state;
   }
 
@@ -236,7 +248,7 @@ export class ChartWorkspaceSync {
         name: cache?.name ?? DEFAULT_LAYOUT_NAME,
         version: cache?.version ?? 0,
       });
-      this.lastJson = cache?.state ? JSON.stringify(cache.state) : null;
+      this.lastJson = cache?.state ? sharedJson(cache.state) : null;
       this.current = cache?.state ?? null;
       this.dirty = !!cache?.dirty;
       this.status.set('offline');
@@ -246,20 +258,20 @@ export class ChartWorkspaceSync {
 
     if (res.data) {
       const l = res.data;
-      const serverState = isWorkspaceState(l.state) ? l.state : null;
+      const serverState = isWorkspaceState(l.state) ? withDeviceSizes(l.state, readDeviceSizes(l.id)) : null;
       if (cache?.dirty && cache.layoutId === l.id && cache.version === l.version && cache.state) {
         // An edit this browser never got confirmed, and nobody saved since: it is the newest.
         this.initialState = cache.state;
         this.active.set({ id: l.id, name: l.name, version: l.version });
         this.current = cache.state;
-        this.lastJson = JSON.stringify(cache.state);
+        this.lastJson = sharedJson(cache.state);
         this.dirty = true;
         this.schedule(0);
       } else {
         this.initialState = serverState;
         this.active.set({ id: l.id, name: l.name, version: l.version });
         this.current = serverState;
-        this.lastJson = serverState ? JSON.stringify(serverState) : null;
+        this.lastJson = serverState ? sharedJson(serverState) : null;
         this.dirty = false;
         this.writeCache();
         this.status.set('saved');
@@ -278,7 +290,7 @@ export class ChartWorkspaceSync {
     const created = await this.call(
       this.remote.create({
         name: last?.name ?? DEFAULT_LAYOUT_NAME,
-        state: initial,
+        state: initial ? withoutDeviceSizes(initial) : initial,
         activate: true,
       }),
     );
@@ -301,7 +313,7 @@ export class ChartWorkspaceSync {
     if (all) this.legacy.clearLegacyLayouts();
     this.initialState = initial;
     this.current = initial;
-    this.lastJson = initial ? JSON.stringify(initial) : null;
+    this.lastJson = initial ? sharedJson(initial) : null;
     this.dirty = false;
     this.active.set({
       id: created.data.id,
@@ -337,9 +349,9 @@ export class ChartWorkspaceSync {
       res =
         id === null
           ? await firstValueFrom(
-              this.remote.create({ name: this.active().name, state, activate: true }),
+              this.remote.create({ name: this.active().name, state: withoutDeviceSizes(state), activate: true }),
             )
-          : await firstValueFrom(this.remote.update(id, { state, expectedVersion: version }));
+          : await firstValueFrom(this.remote.update(id, { state: withoutDeviceSizes(state), expectedVersion: version }));
     } catch (err) {
       if (
         err instanceof HttpErrorResponse &&
@@ -408,11 +420,11 @@ export class ChartWorkspaceSync {
   private adopt(res: ResponseData<ChartLayoutDto | null> | null, apply = true): boolean {
     if (!res?.status || !res.data) return this.fail(res);
     const l = res.data;
-    const state = isWorkspaceState(l.state) ? l.state : null;
+    const state = isWorkspaceState(l.state) ? withDeviceSizes(l.state, readDeviceSizes(l.id)) : null;
     this.active.set({ id: l.id, name: l.name, version: l.version });
     if (apply) {
       this.current = state;
-      this.lastJson = state ? JSON.stringify(state) : null;
+      this.lastJson = state ? sharedJson(state) : null;
       this.dirty = false;
       this.incoming.set({ state, seq: ++this.seq });
     }
@@ -443,11 +455,12 @@ export class ChartWorkspaceSync {
     if (!this.dirty || id === null || !this.current) return;
     // No expectedVersion: this is the newest edit there is. The cache stays dirty on its old
     // version, so if the request is lost the next load still uploads it.
-    this.remote.sendOnUnload(`/chart/layouts/${id}`, 'PUT', { state: this.current });
+    this.remote.sendOnUnload(`/chart/layouts/${id}`, 'PUT', { state: withoutDeviceSizes(this.current) });
   }
 
   private writeCache(): void {
     const { id, name, version } = this.active();
+    rememberDeviceSizes(id, this.current);
     const cache: WorkspaceCache = {
       layoutId: id,
       name,
