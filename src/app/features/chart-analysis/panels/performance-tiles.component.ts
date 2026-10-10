@@ -63,7 +63,8 @@ import { performanceTiles, type DailyBar } from './performance';
       }
       .tiles {
         display: grid;
-        grid-template-columns: repeat(3, 1fr);
+        // minmax(0, …): the tiles shrink with a narrow watchlist instead of pushing the card wider than it.
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 4px;
         padding: 0 12px;
       }
