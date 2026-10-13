@@ -59,3 +59,56 @@ export function mergeOptimisticTurns(
   );
   return pending.length === 0 ? [...server] : [...server, ...pending];
 }
+
+/**
+ * True when the REQUEST was lost rather than refused: the connection dropped, a proxy gave up
+ * waiting (a tunnel answers 524 at about 100 s), or the client timed out. The engine keeps
+ * working through all of these, so the answer still lands on the thread — it just has nobody
+ * listening for it. A 4xx or a 500 is a verdict, not a loss.
+ */
+export function isTransportLoss(err: unknown): boolean {
+  const e = err as { status?: unknown; name?: unknown } | null | undefined;
+  if (!e) return false;
+  if (e.name === 'TimeoutError') return true;
+  const status = typeof e.status === 'number' ? e.status : -1;
+  return (
+    status === 0 ||
+    status === 408 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504 ||
+    (status >= 520 && status <= 524)
+  );
+}
+
+/** The newest turn that says where the question stands; the task plan card is rewritten in
+ *  place and stamped with the real clock, so it can sort after the turn that matters. */
+export function threadTail(
+  thread: readonly SpotAnalysisFollowUpTurnDto[],
+): SpotAnalysisFollowUpTurnDto | null {
+  for (let i = thread.length - 1; i >= 0; i--) {
+    if (thread[i].id > 0 && thread[i].toolName !== 'plan') return thread[i];
+  }
+  return null;
+}
+
+/**
+ * Where a question whose request was lost stands, read off the thread:
+ * `lost` — nothing was written after `sinceId`, so the engine never got it;
+ * `working` — the engine is still on it; `paused` — it stopped at a checkpoint and waits to be
+ * resumed; `answered` — it ended (a reply, an approval card, or a closing notice).
+ */
+export type LostRequestState = 'lost' | 'working' | 'paused' | 'answered';
+
+export function lostRequestState(
+  thread: readonly SpotAnalysisFollowUpTurnDto[],
+  sinceId: number,
+  isCheckpoint: (t: SpotAnalysisFollowUpTurnDto) => boolean,
+): LostRequestState {
+  const tail = threadTail(thread);
+  if (!tail || tail.id <= sinceId) return 'lost';
+  if (isCheckpoint(tail)) return 'paused';
+  if (tail.role === 'User' || tail.role === 'Tool') return 'working';
+  if (tail.role === 'Assistant' && tail.toolName === 'thought') return 'working';
+  return 'answered';
+}
