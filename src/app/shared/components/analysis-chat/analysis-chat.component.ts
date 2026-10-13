@@ -2,6 +2,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  DestroyRef,
   effect,
   ElementRef,
   inject,
@@ -57,7 +58,14 @@ import {
   runPresence,
   type ChatItem,
 } from '@shared/components/engineer-chat/engineer-turns';
-import { isPinnedToBottom, jumpLabel, mergeOptimisticTurns } from './chat-live';
+import {
+  isPinnedToBottom,
+  isTransportLoss,
+  jumpLabel,
+  lostRequestState,
+  mergeOptimisticTurns,
+  threadTail,
+} from './chat-live';
 import { UI_ACTION_TOOL, parseUiAction } from './ui-action';
 import {
   ACCEPT_ATTR,
@@ -913,6 +921,17 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
           <div class="chat-state error">{{ error() }}</div>
         }
 
+        <!-- A question left at a checkpoint with nobody resuming it: the page was closed or
+             reloaded mid-answer, or Stop was pressed. Without this it sat there looking busy. -->
+        @if (pausedTail()) {
+          <div class="chat-state paused">
+            This question paused before it finished.
+            <button type="button" class="continue-paused" (click)="continuePaused()">
+              Continue
+            </button>
+          </div>
+        }
+
         @if (!loading() && messages().length === 0 && !sending() && !error() && !opener()) {
           <div class="chat-empty">{{ emptyText() }}</div>
         }
@@ -1405,6 +1424,15 @@ export function isCheckpointTurn(t: SpotAnalysisFollowUpTurnDto | null | undefin
       }
       .chat-state.error {
         color: var(--loss);
+      }
+      .continue-paused {
+        font: inherit;
+        color: var(--text-primary);
+        background: transparent;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 2px 10px;
+        cursor: pointer;
       }
       .msg {
         display: flex;
@@ -2273,6 +2301,7 @@ export class AnalysisChatComponent {
     // (by this operator in another tab, by another operator, or by a monitor
     // firing). When it's the thread we're showing, silently refresh so new turns,
     // flipped action statuses, and filed-signal badges appear without a reload.
+    inject(DestroyRef).onDestroy(() => this.clearLostWatch());
     this.realtime.connect();
     this.realtime
       .on<{ llmInvocationId: number }>('analysisConversationChanged')
@@ -2393,6 +2422,7 @@ export class AnalysisChatComponent {
     this.sending.set(true);
     this.stopped = false;
     this.error.set(null);
+    const sinceId = threadTail(this.messages())?.id ?? 0;
 
     let pageContext: unknown | null = null;
     try {
@@ -2431,6 +2461,10 @@ export class AnalysisChatComponent {
           }
         },
         error: (err) => {
+          if (isTransportLoss(err) && !this.isAgent()) {
+            this.watchLostRequest(id, sinceId, err);
+            return;
+          }
           this.sending.set(false);
           this.error.set(err?.message ?? 'Follow-up failed. Is the engine reachable?');
         },
@@ -2464,6 +2498,7 @@ export class AnalysisChatComponent {
       return;
     }
     this.sending.set(true);
+    const sinceId = threadTail(this.messages())?.id ?? 0;
     this.askSub = this.marketData.resumeAnalysisFollowUp(id).subscribe({
       next: (res) => {
         if (this.llmInvocationId() !== id) {
@@ -2480,12 +2515,104 @@ export class AnalysisChatComponent {
         }
       },
       error: (err) => {
+        if (isTransportLoss(err)) {
+          this.watchLostRequest(id, sinceId, err);
+          return;
+        }
         this.sending.set(false);
         this.error.set(
           err?.message ?? 'The assistant could not continue. Reply "continue" to retry.',
         );
       },
     });
+  }
+
+  /** How often a lost request's thread is re-read, and how long a silent thread is trusted. */
+  private static readonly LOST_POLL_MS = 4_000;
+  private static readonly LOST_GIVE_UP_MS = 10 * 60_000;
+  private lostTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Follow a question whose request was lost on the way back.
+   *
+   * <p>A long segment outlives the transport: the tunnel in front of the console gives up at
+   * about 100 s, and one model round writing four scripts ran 166 s. The engine finishes
+   * regardless and leaves a checkpoint, but the reply saying "resume me" went to a connection
+   * that no longer existed, so the question sat paused for good (conversation #40936). The
+   * thread is the durable record, so read where the question stands from there instead.</p>
+   */
+  private watchLostRequest(id: number, sinceId: number, err: unknown): void {
+    this.clearLostWatch();
+    let seenId = sinceId;
+    let quietSince = Date.now();
+    const fail = (message: string) => {
+      this.sending.set(false);
+      this.error.set(message);
+    };
+    const poll = () => {
+      this.lostTimer = null;
+      if (this.stopped) return;
+      if (this.llmInvocationId() !== id) return this.sending.set(false);
+      this.marketData.getAnalysisFollowUps(id, undefined, MAX_THREAD_TURNS).subscribe({
+        next: (res) => {
+          if (this.stopped) return;
+          if (this.llmInvocationId() !== id) return this.sending.set(false);
+          const thread = res?.status && res.data ? res.data : null;
+          if (!thread) return again();
+          this.messages.set(mergeOptimisticTurns(thread, this.messages()));
+          const state = lostRequestState(thread, sinceId, isCheckpointTurn);
+          const tailId = threadTail(thread)?.id ?? 0;
+          if (tailId !== seenId) {
+            seenId = tailId;
+            quietSince = Date.now();
+          }
+          if (state === 'paused') return this.resumePaused(id, 1);
+          if (state === 'answered') {
+            this.sending.set(false);
+            this.loadMonitors(id);
+            this.loadRecs(id);
+            return;
+          }
+          if (state === 'lost')
+            return fail(
+              (err as { message?: string })?.message ??
+                'Follow-up failed. Is the engine reachable?',
+            );
+          again();
+        },
+        error: () => again(),
+      });
+    };
+    const again = () => {
+      if (Date.now() - quietSince > AnalysisChatComponent.LOST_GIVE_UP_MS)
+        return fail('Lost contact with the assistant. Reply "continue" to pick it up.');
+      this.lostTimer = setTimeout(poll, AnalysisChatComponent.LOST_POLL_MS);
+    };
+    poll();
+  }
+
+  private clearLostWatch(): void {
+    if (this.lostTimer) clearTimeout(this.lostTimer);
+    this.lostTimer = null;
+  }
+
+  /** The thread ends on a checkpoint and nothing here is resuming it. */
+  protected readonly pausedTail = computed(
+    () =>
+      !this.sending() &&
+      !this.loading() &&
+      this.resolvingId() === null &&
+      !this.isAgent() &&
+      isCheckpointTurn(threadTail(this.messages())),
+  );
+
+  /** Resume a question found paused — the operator's click, so a second tab cannot race it. */
+  protected continuePaused(): void {
+    const id = this.llmInvocationId();
+    if (!id || this.sending()) return;
+    this.stopped = false;
+    this.error.set(null);
+    this.resumePaused(id, 1);
   }
 
   /** The request answering the current question (the first ask or a resume). */
@@ -2503,6 +2630,7 @@ export class AnalysisChatComponent {
    */
   protected stopAsking(): void {
     this.stopped = true;
+    this.clearLostWatch();
     this.askSub?.unsubscribe();
     this.askSub = null;
     this.sending.set(false);
@@ -3339,13 +3467,17 @@ export class AnalysisChatComponent {
  * `clientBuffer` (written into the assistant's buffer store, never echoed into the thread), and
  * everything else as `clientData`, which the assistant reads as the command's result.
  */
-export function splitClientData(data: unknown): Pick<ResolveApprovalOptions, 'clientData' | 'clientBuffer'> {
+export function splitClientData(
+  data: unknown,
+): Pick<ResolveApprovalOptions, 'clientData' | 'clientBuffer'> {
   if (data === undefined || data === null) return {};
   if (typeof data === 'object' && !Array.isArray(data) && 'buffer' in data) {
     const { buffer, ...rest } = data as { buffer: unknown } & Record<string, unknown>;
     const b = buffer as { name?: unknown; text?: unknown } | null;
     const clientBuffer =
-      b && typeof b.name === 'string' && typeof b.text === 'string' ? { name: b.name, text: b.text } : null;
+      b && typeof b.name === 'string' && typeof b.text === 'string'
+        ? { name: b.name, text: b.text }
+        : null;
     return {
       ...(clientBuffer ? { clientBuffer } : {}),
       ...(Object.keys(rest).length ? { clientData: rest } : {}),

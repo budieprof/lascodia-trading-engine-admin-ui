@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { SpotAnalysisFollowUpTurnDto } from '@core/api/api.types';
-import { isPinnedToBottom, jumpLabel, mergeOptimisticTurns } from './chat-live';
+import {
+  isPinnedToBottom,
+  jumpLabel,
+  mergeOptimisticTurns,
+  isTransportLoss,
+  lostRequestState,
+  threadTail,
+} from './chat-live';
 
 describe('isPinnedToBottom', () => {
   it('is pinned at the bottom', () => {
@@ -71,5 +78,68 @@ describe('mergeOptimisticTurns', () => {
   it('is a plain copy when nothing is pending', () => {
     const server = [t({ id: 1 }), t({ id: 2 })];
     expect(mergeOptimisticTurns(server, server)).toEqual(server);
+  });
+});
+
+describe('a request lost on the way back', () => {
+  const t = (over: Partial<SpotAnalysisFollowUpTurnDto>): SpotAnalysisFollowUpTurnDto => ({
+    id: 1,
+    llmInvocationId: 40936,
+    role: 'Assistant',
+    content: '',
+    createdAtUtc: '2026-10-13T07:53:12Z',
+    ...over,
+  });
+  const checkpoint = (id: number) =>
+    t({ id, toolName: 'run_notice', toolResultJson: '{"kind":"checkpoint","segment":1}' });
+  const isCheckpoint = (x: SpotAnalysisFollowUpTurnDto) =>
+    x.toolName === 'run_notice' && !!x.toolResultJson?.includes('checkpoint');
+
+  it('tells a dropped connection or a proxy timeout from an engine verdict', () => {
+    expect(isTransportLoss({ status: 0 })).toBe(true);
+    expect(isTransportLoss({ status: 524 })).toBe(true); // the tunnel gave up waiting
+    expect(isTransportLoss({ status: 504 })).toBe(true);
+    expect(isTransportLoss({ name: 'TimeoutError' })).toBe(true);
+    expect(isTransportLoss({ status: 400 })).toBe(false);
+    expect(isTransportLoss({ status: 500 })).toBe(false);
+    expect(isTransportLoss(null)).toBe(false);
+  });
+
+  it('reads the tail past the plan card and the unsent optimistic turn', () => {
+    const thread = [t({ id: 5 }), t({ id: 9, toolName: 'plan' }), t({ id: -1, role: 'User' })];
+    expect(threadTail(thread)?.id).toBe(5);
+    expect(threadTail([])).toBeNull();
+  });
+
+  it('is lost when the engine wrote nothing after the question was sent', () => {
+    expect(lostRequestState([t({ id: 5 })], 5, isCheckpoint)).toBe('lost');
+  });
+
+  it('is working while the newest turn is the question, a tool result or narration', () => {
+    expect(lostRequestState([t({ id: 6, role: 'User' })], 5, isCheckpoint)).toBe('working');
+    expect(lostRequestState([t({ id: 7, role: 'Tool', toolName: 'sql' })], 5, isCheckpoint)).toBe(
+      'working',
+    );
+    expect(lostRequestState([t({ id: 8, toolName: 'thought' })], 5, isCheckpoint)).toBe('working');
+  });
+
+  it('is paused at a checkpoint — conversation #40936 sat here with nobody resuming it', () => {
+    expect(lostRequestState([t({ id: 8, role: 'Tool' }), checkpoint(9)], 5, isCheckpoint)).toBe(
+      'paused',
+    );
+  });
+
+  it('is answered by a reply, an approval card or a closing notice', () => {
+    expect(lostRequestState([t({ id: 9 })], 5, isCheckpoint)).toBe('answered');
+    expect(lostRequestState([t({ id: 9, role: 'ActionProposal' })], 5, isCheckpoint)).toBe(
+      'answered',
+    );
+    expect(
+      lostRequestState(
+        [t({ id: 9, toolName: 'run_notice', toolResultJson: '{"kind":"interrupted"}' })],
+        5,
+        isCheckpoint,
+      ),
+    ).toBe('answered');
   });
 });
