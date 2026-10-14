@@ -179,6 +179,71 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                 </p>
               </div>
 
+              <div class="field">
+                <label for="pt-engine">Analysis engine</label>
+                <select id="pt-engine" [(ngModel)]="d.analysisEngine" name="analysisEngine">
+                  <option value="Assistant">
+                    Assistant — full assistant analysis, one card per idea, each watched
+                  </option>
+                  <option value="Classic">Classic — JSON view + a single plan</option>
+                </select>
+                <p class="muted small">
+                  Assistant reads the market the way the console assistant does — any tool, as many
+                  rounds as it needs — and writes a recommendation card for every viable idea, each
+                  with the condition that should trigger it. Cards that pass the plan checker are
+                  armed as watches that file exactly that card; alternatives can be grouped
+                  one-cancels-other.
+                </p>
+              </div>
+
+              @if (d.analysisEngine === 'Assistant') {
+                <div class="row-2">
+                  <div class="field">
+                    <label for="pt-maxcards">Max cards per market</label>
+                    <input
+                      id="pt-maxcards"
+                      type="number"
+                      min="1"
+                      max="6"
+                      [(ngModel)]="d.maxCardsPerAnalysis"
+                      name="maxCardsPerAnalysis"
+                    />
+                  </div>
+                  <div class="field">
+                    <label for="pt-watchh">Card watch life (h)</label>
+                    <input
+                      id="pt-watchh"
+                      type="number"
+                      min="1"
+                      max="72"
+                      [(ngModel)]="d.cardWatchExpiryHours"
+                      name="cardWatchExpiryHours"
+                    />
+                  </div>
+                  <div class="field">
+                    <label for="pt-resumes">Max resumes per analysis</label>
+                    <input
+                      id="pt-resumes"
+                      type="number"
+                      min="0"
+                      max="30"
+                      [(ngModel)]="d.analysisMaxResumes"
+                      name="analysisMaxResumes"
+                    />
+                  </div>
+                  <div class="field">
+                    <label for="pt-analyst">Run as admin id (0 = oldest)</label>
+                    <input
+                      id="pt-analyst"
+                      type="number"
+                      min="0"
+                      [(ngModel)]="d.analystAdminUserId"
+                      name="analystAdminUserId"
+                    />
+                  </div>
+                </div>
+              }
+
               <details class="cfg-group" open>
                 <summary class="sub-label">Markets</summary>
                 <div class="tf-row">
@@ -564,6 +629,17 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                             >💬</a
                           >
                         }
+                        @if (v.analysisLlmInvocationId; as aid) {
+                          <a
+                            class="thread-link"
+                            [routerLink]="['/conversations']"
+                            [queryParams]="{ conversation: aid }"
+                            (click)="$event.stopPropagation()"
+                            title="Open the full assistant analysis behind this view — every tool call, chart and card, with a follow-up box"
+                            aria-label="Open the assistant analysis"
+                            >🔎</a
+                          >
+                        }
                         <span class="chev">{{ isViewOpen(v.id) ? '▴' : '▾' }}</span>
                       </header>
 
@@ -656,6 +732,33 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
                                 class="conviction-tag"
                                 title="Backed above the ordinary bar — tracked separately"
                                 >high</span
+                              >
+                            }
+                            @if (p.recommendationId) {
+                              <span
+                                class="card-tag"
+                                [title]="
+                                  'Card #' +
+                                  p.recommendationId +
+                                  (p.entryMonitorId
+                                    ? ' — watch #' +
+                                      p.entryMonitorId +
+                                      ' files it when its condition is met'
+                                    : '')
+                                "
+                                >card #{{ p.recommendationId }}</span
+                              >
+                            }
+                            @if (p.ocoGroupId) {
+                              <span
+                                class="oco-tag"
+                                [style.--oco-hue]="ocoHue(p.ocoGroupId)"
+                                [title]="
+                                  'One-cancels-other group ' +
+                                  p.ocoGroupId +
+                                  ' — the first of these to file stands the others down'
+                                "
+                                >OCO</span
                               >
                             }
                           </td>
@@ -1183,6 +1286,26 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
+      .card-tag,
+      .oco-tag {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: var(--radius-full);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+      }
+      .card-tag {
+        background: color-mix(in srgb, var(--text-muted, #64748b) 14%, transparent);
+        color: var(--text-muted, #64748b);
+      }
+      /* One hue per group, so the alternatives of one move read as a set down the table. */
+      .oco-tag {
+        background: hsl(var(--oco-hue, 200) 70% 50% / 0.16);
+        color: hsl(var(--oco-hue, 200) 60% 38%);
+        letter-spacing: 0.04em;
+      }
       /* Its own line: the pre-mortem is a sentence, not a badge, and inlining it
          beside the thesis made both unreadable. */
       .premortem {
@@ -1437,6 +1560,13 @@ export class PatientTraderPageComponent {
       default:
         return 'neutral';
     }
+  }
+
+  /** A stable hue per one-cancels-other group, so one move's alternatives share a colour. */
+  ocoHue(groupId: string): number {
+    let h = 0;
+    for (let i = 0; i < groupId.length; i++) h = (h * 31 + groupId.charCodeAt(i)) % 360;
+    return h;
   }
 
   outcomeOf(plan: PatientTraderPlan) {

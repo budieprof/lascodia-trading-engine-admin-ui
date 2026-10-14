@@ -67,7 +67,23 @@ export interface PatientTraderConfig {
 
   /** View prompt arm: 'a' (control), 'b' (argue the other side first), or 'split'. */
   promptVariant: string;
+
+  /**
+   * 'Assistant': a full admin-assistant analysis that writes one card per viable idea, each armed
+   * as a watch that files that exact card when its condition is met. 'Classic': JSON view + one plan.
+   */
+  analysisEngine: PatientTraderEngine;
+  /** Most cards one market may have armed at once (1-6). */
+  maxCardsPerAnalysis: number;
+  /** How many times one analysis may resume after pausing at the assistant's per-request budget. */
+  analysisMaxResumes: number;
+  /** Default life of a card's watch when the analyst does not say (1-72h). */
+  cardWatchExpiryHours: number;
+  /** Admin user the headless analysis runs as; 0 = the oldest active admin. */
+  analystAdminUserId: number;
 }
+
+export type PatientTraderEngine = 'Assistant' | 'Classic';
 
 /**
  * Defaults mirroring the engine's own. Used to backfill a partial read so a newly added field
@@ -104,6 +120,11 @@ export const DEFAULT_PATIENT_TRADER_CONFIG: PatientTraderConfig = {
   highConvictionRewardRiskBonus: 0.5,
   highConvictionMinConfidence: 0.7,
   promptVariant: 'a',
+  analysisEngine: 'Assistant',
+  maxCardsPerAnalysis: 6,
+  analysisMaxResumes: 8,
+  cardWatchExpiryHours: 24,
+  analystAdminUserId: 0,
 };
 
 /** One market's current standing view. */
@@ -127,6 +148,10 @@ export interface PatientTraderView {
    * in, with a follow-up box under it.
    */
   journalLlmInvocationId: number | null;
+  /** The assistant conversation behind the view (Assistant engine only) — the full analysis. */
+  analysisLlmInvocationId: number | null;
+  /** Which engine wrote the view. */
+  engine: PatientTraderEngine;
   createdAtUtc: string;
   ageMinutes: number;
 }
@@ -144,7 +169,7 @@ export interface PatientTraderPlan {
   id: number;
   symbol: string;
   direction: string;
-  /** Proposed | Armed | Filled | Settled | Rejected | Declined | Expired. */
+  /** Proposed | Armed | Filled | Settled | Rejected | Declined | Expired | Invalidated | Withdrawn. */
   status: string;
   entryPrice: number;
   stopLoss: number;
@@ -174,6 +199,14 @@ export interface PatientTraderPlan {
   invalidationNote: string | null;
   /** The price at which the plan is abandoned before entry, if one was armed. */
   invalidationPrice: number | null;
+  /** The recommendation card this plan is (Assistant engine). */
+  recommendationId: number | null;
+  /** The watch armed on the plan. */
+  entryMonitorId: number | null;
+  /** One-cancels-other group: plans sharing it are alternatives — at most one files. */
+  ocoGroupId: string | null;
+  /** When the plan's watch gives up. */
+  expiresAtUtc: string;
 }
 
 /** Resolved outcome of a plan, from the position-free forward walk. */
