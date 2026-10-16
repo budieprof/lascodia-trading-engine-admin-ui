@@ -72,6 +72,20 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
         gap: var(--space-3);
         flex-shrink: 0;
       }
+
+      /* On a phone the actions cannot sit beside the title: a no-shrink row of two or three
+         buttons pushed the recommendation detail page to 502px wide at 390. Stack and wrap. */
+      @media (max-width: 640px) {
+        .page-header {
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .header-actions {
+          flex-shrink: 1;
+          flex-wrap: wrap;
+          gap: var(--space-2);
+        }
+      }
     `,
   ],
 })

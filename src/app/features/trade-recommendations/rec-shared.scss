@@ -1,0 +1,187 @@
+// Shared look for the recommendations feature: pills, tones, mono numbers, panels.
+// Pulled in by each component's styleUrls so the per-component budgets stay small.
+
+.mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.muted {
+  color: var(--text-secondary);
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.pill--buy {
+  background: rgba(52, 199, 89, 0.15);
+  color: var(--profit);
+}
+.pill--sell {
+  background: rgba(255, 59, 48, 0.15);
+  color: var(--loss);
+}
+.pill--good {
+  background: rgba(52, 199, 89, 0.15);
+  color: var(--profit);
+}
+.pill--bad {
+  background: rgba(255, 59, 48, 0.15);
+  color: var(--loss);
+}
+.pill--warn {
+  background: rgba(255, 149, 0, 0.16);
+  color: var(--warning);
+}
+.pill--info {
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent);
+}
+a.pill--link,
+.pill--link {
+  background: rgba(0, 113, 227, 0.12);
+  color: var(--accent);
+  cursor: pointer;
+}
+a.pill--link:hover {
+  text-decoration: underline;
+}
+.profit {
+  color: var(--profit);
+}
+.loss {
+  color: var(--loss);
+}
+.panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  padding: var(--space-4);
+  min-width: 0;
+}
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.panel-head h2 {
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+  margin: 0;
+  color: var(--text-primary);
+}
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px var(--space-3);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+.kv dt {
+  color: var(--text-secondary);
+}
+.kv dd {
+  margin: 0;
+  color: var(--text-primary);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.prose {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+pre.code {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  margin: 0;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.btn {
+  height: 32px;
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  font-family: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.btn:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn--primary:hover:not(:disabled) {
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+.btn--sm {
+  height: 26px;
+  padding: 0 var(--space-3);
+  font-size: 12px;
+}
+.empty-line {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 0;
+}
+table.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+table.grid th {
+  text-align: left;
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.grid td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table.grid tr:last-child td {
+  border-bottom: none;
+}
+.table-wrap {
+  overflow-x: auto;
+}

@@ -56,6 +56,14 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'trade-recommendations',
+        data: { breadcrumb: 'Recommendations' },
+        loadChildren: () =>
+          import('@features/trade-recommendations/trade-recommendations.routes').then(
+            (m) => m.TRADE_RECOMMENDATIONS_ROUTES,
+          ),
+      },
+      {
         path: 'pending-signal-recs',
         data: { breadcrumb: 'Pending Recs' },
         loadChildren: () =>
