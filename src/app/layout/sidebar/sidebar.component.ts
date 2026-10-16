@@ -452,6 +452,9 @@ export class SidebarComponent {
         { label: 'Signal Sensitivity', route: '/signal-sensitivity', icon: '🎛' },
         { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },
         { label: 'Signal Rejections', route: '/rejections', icon: '🚫' },
+        // Every trade card an analysis wrote, with what became of it — the cards the chat,
+        // Patient Trader and monitor reviews produce, one page each.
+        { label: 'Recommendations', route: '/trade-recommendations', icon: '🃏' },
         { label: 'Pending Recs', route: '/pending-signal-recs', icon: '⏸' },
         { label: 'Market Data', route: '/market-data', icon: '📈' },
         { label: 'Watchlist', route: '/watchlist', icon: '👁' },
@@ -486,7 +489,12 @@ export class SidebarComponent {
         { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },
         { label: 'Backtesting', route: '/backtests', icon: '📈', policy: 'Analyst' },
         { label: 'Walk-Forward', route: '/walk-forward', icon: '🔄', policy: 'Analyst' },
-        { label: 'Portfolio Backtests', route: '/portfolio-backtests', icon: '🧺', policy: 'Analyst' },
+        {
+          label: 'Portfolio Backtests',
+          route: '/portfolio-backtests',
+          icon: '🧺',
+          policy: 'Analyst',
+        },
       ],
     },
     {
