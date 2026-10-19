@@ -59,6 +59,16 @@ function fmtPips(v: number | null | undefined, digits = 2): string {
   return `${n.toFixed(digits)}p`;
 }
 
+/**
+ * A fill price at the quote's own precision: FX majors quote to 5 decimals, JPY pairs, metals and
+ * indices to 2–3. The log carries no symbol digits, so price size stands in — five decimals on
+ * USDJPY ("157.27000") claimed a precision the broker never quoted.
+ */
+function fmtPrice(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return '—';
+  return v.toFixed(Math.abs(v) >= 20 ? 3 : 5);
+}
+
 function fmtMs(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return '—';
   return `${Math.round(v).toLocaleString('en-US')} ms`;
@@ -657,7 +667,7 @@ function fmtMs(v: number | null | undefined): string {
       }
       .eq-pill.warn {
         background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .muted {
         color: var(--text-tertiary);
@@ -721,76 +731,93 @@ export class ExecutionQualityPageComponent {
 
   private readonly strategyNames = signal(new Map<number, string>());
 
+  /**
+   * Widths sum to the card at 1440px. The shared table fits columns to the card but never below
+   * their minWidth (88 by default), so single-word headers wider than that broke mid-word
+   * ("STRATE GY", "SLIPPAG E", "LATENC Y") while short columns (Order, Fill %) wasted space.
+   */
   readonly columnDefs: ColDef<ExecutionQualityLogDto>[] = [
     {
       headerName: 'Recorded',
       field: 'recordedAt',
       width: 170,
+      // Fit-to-width squeezed this to "9 Oct 2026, 02:4" — the minute cut off.
+      minWidth: 165,
       valueFormatter: (p) => formatStamp(p.value as string),
     },
-    { headerName: 'Order', field: 'orderId', width: 100 },
-    { headerName: 'Symbol', field: 'symbol', width: 110 },
+    { headerName: 'Order', field: 'orderId', width: 76, minWidth: 76 },
+    { headerName: 'Symbol', field: 'symbol', width: 86, minWidth: 86 },
     {
       headerName: 'Strategy',
       field: 'strategyId',
-      width: 160,
-      valueFormatter: (p) => {
-        const id = p.value as number | null;
-        if (id == null) return '—';
-        return this.strategyNames().get(id) ?? `#${id}`;
-      },
+      width: 112,
+      minWidth: 112,
+      valueFormatter: (p) => this.strategyLabel(p.value as number | null),
+      tooltipValueGetter: (p) => this.strategyLabel(p.value as number | null),
     },
-    { headerName: 'Session', field: 'session', width: 120 },
+    { headerName: 'Session', field: 'session', width: 120, minWidth: 120, tooltipField: 'session' },
     {
       headerName: 'Requested',
       field: 'requestedPrice',
-      width: 120,
-      valueFormatter: (p) => (p.value as number)?.toFixed(5) ?? '—',
+      width: 108,
+      minWidth: 108,
+      valueFormatter: (p) => fmtPrice(p.value as number | null),
     },
     {
       headerName: 'Filled',
       field: 'filledPrice',
-      width: 120,
-      valueFormatter: (p) => (p.value as number)?.toFixed(5) ?? '—',
+      width: 92,
+      minWidth: 92,
+      valueFormatter: (p) => fmtPrice(p.value as number | null),
     },
     {
       headerName: 'Slippage',
       field: 'slippagePips',
-      width: 120,
+      width: 100,
+      minWidth: 100,
       valueFormatter: (p) => fmtPips(p.value as number),
       cellStyle: (p) => {
         const tone = slipTone(p.value as number);
-        if (tone === 'bad') return { color: '#D70015', fontWeight: 600 };
-        if (tone === 'good') return { color: '#248A3D', fontWeight: 600 };
+        if (tone === 'bad') return { color: 'var(--tone-red)', fontWeight: 600 };
+        if (tone === 'good') return { color: 'var(--tone-green)', fontWeight: 600 };
         return null;
       },
     },
     {
       headerName: 'Latency',
       field: 'submitToFillMs',
-      width: 120,
+      width: 96,
+      minWidth: 96,
       // A 0 here is an unrecorded measurement, not an instant fill.
       valueFormatter: (p) => ((p.value as number) > 0 ? fmtMs(p.value as number) : '—'),
     },
     {
       headerName: 'Fill %',
       field: 'fillRate',
-      width: 100,
+      width: 80,
+      minWidth: 80,
       valueFormatter: (p) => (p.value != null ? `${((p.value as number) * 100).toFixed(1)}%` : '—'),
       cellStyle: (p) => {
         const v = p.value as number | null;
         // Above 100 % is a corrupt filled/requested pair, flagged not hidden.
-        if (v != null && (v > 1.0005 || v < 0.95)) return { color: '#D70015', fontWeight: 600 };
+        if (v != null && (v > 1.0005 || v < 0.95))
+          return { color: 'var(--tone-red)', fontWeight: 600 };
         return null;
       },
     },
     {
       headerName: 'Partial',
       field: 'wasPartialFill',
-      width: 100,
+      width: 76,
+      minWidth: 76,
       cellRenderer: (p: { value: unknown }) => (p.value ? 'Yes' : 'No'),
     },
   ];
+
+  private strategyLabel(id: number | null): string {
+    if (id == null) return '—';
+    return this.strategyNames().get(id) ?? `#${id}`;
+  }
 
   readonly fetchExecutions = (
     params: PagerRequest,
@@ -1058,12 +1085,16 @@ export class ExecutionQualityPageComponent {
                     : '#5AC8FA',
               borderRadius: [4, 4, 0, 0],
             },
+            // A negative bar's "top" is the zero line, where its label sat on the axis and the
+            // neighbouring labels; put it under the bar's end instead.
+            label: { position: r.value < 0 ? ('bottom' as const) : ('top' as const) },
           })),
           barMaxWidth: 48,
           label: {
             show: true,
             position: 'top',
             fontSize: 10,
+            textBorderWidth: 0,
             formatter: ((p: { value: number }) =>
               unit === 'pips' ? fmtPips(p.value) : fmtMs(p.value)) as never,
           },
@@ -1091,6 +1122,7 @@ export class ExecutionQualityPageComponent {
       this.recent().map((r) => r.fillRate * 100),
       10,
       'Fill rate (%)',
+      '%',
     ),
   );
 
@@ -1099,6 +1131,7 @@ export class ExecutionQualityPageComponent {
       this.recent().map((r) => r.slippagePips),
       16,
       'Slippage (pips)',
+      'p',
     ),
   );
   readonly latencyHistogram = computed<EChartsOption>(() =>
@@ -1106,6 +1139,7 @@ export class ExecutionQualityPageComponent {
       this.recent().map((r) => r.submitToFillMs),
       16,
       'Latency (ms)',
+      ' ms',
     ),
   );
 
@@ -1232,12 +1266,19 @@ function tickLabel(v: number): string {
   return (Object.is(rounded, -0) ? 0 : rounded).toFixed(1);
 }
 
-function histogramChart(values: number[], bins: number, label: string): EChartsOption {
+function histogramChart(
+  values: number[],
+  bins: number,
+  label: string,
+  unit: string,
+): EChartsOption {
   if (values.length === 0) return emptyChart('No fills in the sample');
   const min = Math.min(...values);
   const max = Math.max(...values);
   if (max === min) {
-    return emptyChart(`Every fill in the sample is ${tickLabel(min)} — nothing to distribute`);
+    return emptyChart(
+      `Every fill in the sample is ${tickLabel(min)}${unit} — nothing to distribute`,
+    );
   }
   const size = (max - min) / bins;
   const counts = new Array<number>(bins).fill(0);
@@ -1252,7 +1293,20 @@ function histogramChart(values: number[], bins: number, label: string): EChartsO
     counts[idx]++;
   }
   return {
-    tooltip: { trigger: 'axis' },
+    // Axis labels name each bucket's lower edge only; the tooltip gives its full range, so the
+    // last bucket (which holds the maximum) is not a bare unlabeled bar.
+    tooltip: {
+      trigger: 'axis',
+      formatter: (params: unknown) => {
+        const p = (Array.isArray(params) ? params[0] : params) as {
+          dataIndex: number;
+          value: number;
+        };
+        const lo = min + size * p.dataIndex;
+        const hi = p.dataIndex === bins - 1 ? max : lo + size;
+        return `${tickLabel(lo)}${unit} … ${tickLabel(hi)}${unit}<br/>${p.value} fill${p.value === 1 ? '' : 's'}`;
+      },
+    },
     grid: { left: 50, right: 20, top: 32, bottom: 50 },
     xAxis: {
       type: 'category',

@@ -256,9 +256,12 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
         margin: 0 0 var(--space-3);
         font-size: 1rem;
       }
+      /* minmax(0, 1fr) + width:100% on the select: a bare 1fr track keeps the
+         select's intrinsic width (its longest option — a 40-char version slug), which
+         pushed the Candidate select past the card on an 820px tablet. */
       .picker-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: var(--space-4);
       }
       @media (max-width: 800px) {
@@ -270,8 +273,12 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
         display: flex;
         flex-direction: column;
         gap: 0.35rem;
+        min-width: 0;
       }
       .picker-field select {
+        width: 100%;
+        min-width: 0;
+        text-overflow: ellipsis;
         background: var(--bg-primary);
         color: var(--text-primary);
         border: 1px solid var(--border);

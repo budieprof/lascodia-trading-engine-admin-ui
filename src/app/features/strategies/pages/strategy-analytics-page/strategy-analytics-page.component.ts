@@ -46,6 +46,11 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
  * the rest render a "coming soon" placeholder so the IA reads complete and
  * the URL/tab params are stable for future fills.
  */
+/** True for a backtest row that closed no trade — its ratios were never measured. */
+function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
+  return row?.totalTrades === 0;
+}
+
 @Component({
   selector: 'app-strategy-analytics-page',
   standalone: true,
@@ -711,26 +716,28 @@ export class StrategyAnalyticsPageComponent {
     },
     // One pipe per metric, matching the backtest detail page: percentages
     // carry their sign, ratios two decimals, the engine's 9999 "undefined
-    // ratio" sentinel reads as ∞ instead of a number.
+    // ratio" sentinel reads as ∞ instead of a number. A run that closed no
+    // trade has no win rate, Sharpe or PF (the engine stores 0.0): "—".
     {
       field: 'winRate',
       headerName: 'Win rate',
       width: 90,
-      valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(2)}%` : '—',
+      valueFormatter: (p: { value: number | null; data?: BacktestRunDto }) =>
+        p.value != null && !noTradeRun(p.data) ? `${(p.value * 100).toFixed(2)}%` : '—',
     },
     {
       field: 'sharpeRatio',
       headerName: 'Sharpe',
       width: 80,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(2) : '—'),
+      valueFormatter: (p: { value: number | null; data?: BacktestRunDto }) =>
+        p.value != null && !noTradeRun(p.data) ? p.value.toFixed(2) : '—',
     },
     {
       field: 'profitFactor',
       headerName: 'PF',
       width: 70,
-      valueFormatter: (p: { value: number | null }) =>
-        p.value == null ? '—' : p.value >= 9999 ? '∞' : p.value.toFixed(2),
+      valueFormatter: (p: { value: number | null; data?: BacktestRunDto }) =>
+        p.value == null || noTradeRun(p.data) ? '—' : p.value >= 9999 ? '∞' : p.value.toFixed(2),
     },
     {
       field: 'maxDrawdownPct',

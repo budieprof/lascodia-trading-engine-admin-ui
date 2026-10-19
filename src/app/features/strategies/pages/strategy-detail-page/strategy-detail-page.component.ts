@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { formatDate } from '@angular/common';
 import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
@@ -80,6 +81,11 @@ import {
   type HasUnsavedChanges,
 } from '@features/scripting/shared/unsaved-changes';
 
+/** A backtest row that closed at least one trade; without one its ratios are not measured. */
+function runHasTrades(row: { totalTrades?: number | null } | null | undefined): boolean {
+  return row?.totalTrades == null || row.totalTrades > 0;
+}
+
 @Component({
   selector: 'app-strategy-detail-page',
   standalone: true,
@@ -139,84 +145,89 @@ import {
             }
             <app-presence-badge [routeKey]="'strategy:' + strategyId" />
           </span>
-          @if (canSubmitForApproval()) {
+          <!-- The shared header keeps its actions on one unshrinkable row; a script strategy's
+               eight buttons pushed the page to 1,608px at a 1,440px window and squeezed the title
+               and description into a 160px column. They wrap here instead. -->
+          <div class="detail-actions">
+            @if (canSubmitForApproval()) {
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="openApproval()"
+                title="Run the promotion gates; on a pass the strategy moves to Approved and paper-trades"
+              >
+                Submit for approval
+              </button>
+            }
+            @if (canStartPaperTrading()) {
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-testid="start-paper-trading"
+                (click)="onStartPaperTrading()"
+                [disabled]="actionLoading()"
+                title="Paper-trade this script before approval: its trades are recorded as paper executions and nothing is sent to an account"
+              >
+                Start paper trading
+              </button>
+            }
+            @if (isPaperOnlyStage()) {
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-testid="stop-paper-trading"
+                (click)="onStopPaperTrading()"
+                [disabled]="actionLoading()"
+                title="Stop paper trading: the strategy goes back to Draft; its paper executions are kept"
+              >
+                Stop paper trading
+              </button>
+            }
+            @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
+              <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
+                Activate
+              </button>
+            }
+            @if (strategy()!.status === 'Active') {
+              <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
+                Pause
+              </button>
+            }
+            <!-- PE-I13: the engine refuses edits without operator access. -->
             <button
-              type="button"
-              class="btn btn-primary"
-              (click)="openApproval()"
-              title="Run the promotion gates; on a pass the strategy moves to Approved and paper-trades"
+              class="btn btn-secondary"
+              (click)="openEdit()"
+              [disabled]="!canOperate()"
+              [title]="canOperate() ? 'Edit this strategy' : 'Editing needs operator access'"
             >
-              Submit for approval
+              Edit
             </button>
-          }
-          @if (canStartPaperTrading()) {
             <button
               type="button"
               class="btn btn-secondary"
-              data-testid="start-paper-trading"
-              (click)="onStartPaperTrading()"
-              [disabled]="actionLoading()"
-              title="Paper-trade this script before approval: its trades are recorded as paper executions and nothing is sent to an account"
+              (click)="cloneTarget.set(strategy())"
+              title="Copy this strategy onto another symbol or timeframe as a Paused draft"
             >
-              Start paper trading
+              Clone…
             </button>
-          }
-          @if (isPaperOnlyStage()) {
+            <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
             <button
               type="button"
               class="btn btn-secondary"
-              data-testid="stop-paper-trading"
-              (click)="onStopPaperTrading()"
-              [disabled]="actionLoading()"
-              title="Stop paper trading: the strategy goes back to Draft; its paper executions are kept"
+              (click)="showRejectionDrawer.set(true)"
+              title="Show per-gate signal-rejection counts for this strategy"
             >
-              Stop paper trading
+              Why no signals?
             </button>
-          }
-          @if (strategy()!.status === 'Paused' || strategy()!.status === 'Stopped') {
-            <button class="btn btn-success" (click)="onActivate()" [disabled]="actionLoading()">
-              Activate
+            <button
+              class="btn btn-secondary btn-danger-text"
+              (click)="showDeleteConfirm.set(true)"
+              title="Delete this strategy"
+            >
+              Delete
             </button>
-          }
-          @if (strategy()!.status === 'Active') {
-            <button class="btn btn-warning" (click)="onPause()" [disabled]="actionLoading()">
-              Pause
-            </button>
-          }
-          <!-- PE-I13: the engine refuses edits without operator access. -->
-          <button
-            class="btn btn-secondary"
-            (click)="openEdit()"
-            [disabled]="!canOperate()"
-            [title]="canOperate() ? 'Edit this strategy' : 'Editing needs operator access'"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            (click)="cloneTarget.set(strategy())"
-            title="Copy this strategy onto another symbol or timeframe as a Paused draft"
-          >
-            Clone…
-          </button>
-          <button class="btn btn-secondary" (click)="openAnalytics()">Open analytics →</button>
-          <button
-            type="button"
-            class="btn btn-secondary"
-            (click)="showRejectionDrawer.set(true)"
-            title="Show per-gate signal-rejection counts for this strategy"
-          >
-            Why no signals?
-          </button>
-          <button
-            class="btn btn-secondary btn-danger-text"
-            (click)="showDeleteConfirm.set(true)"
-            title="Delete this strategy"
-          >
-            Delete
-          </button>
-          <button class="btn btn-ghost" (click)="goBack()">← Back</button>
+            <button class="btn btn-ghost" (click)="goBack()">← Back</button>
+          </div>
         </app-page-header>
 
         <!--
@@ -375,7 +386,7 @@ import {
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Symbol</span>
-                      <span class="detail-value">{{ strategy()!.symbol }}</span>
+                      <span class="detail-value">{{ strategy()!.symbol || '—' }}</span>
                     </div>
                     <div class="detail-item">
                       <span class="detail-label">Timeframe</span>
@@ -577,12 +588,16 @@ import {
                 (queued)="backtestTable?.loadData()"
               />
             }
-            <app-data-table
-              #backtestTable
-              [columnDefs]="backtestColumns"
-              [fetchData]="fetchBacktests"
-              (rowClick)="onBacktestRowClick($event)"
-            />
+            <!-- Tighter cells: at the grid's default padding the "(override)" marker and the
+                 Started column were clipped and single-word headers broke mid-word. -->
+            <div class="bt-runs">
+              <app-data-table
+                #backtestTable
+                [columnDefs]="backtestColumns"
+                [fetchData]="fetchBacktests"
+                (rowClick)="onBacktestRowClick($event)"
+              />
+            </div>
             <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
             <app-run-comparison [strategyId]="strategyId" />
           }
@@ -905,6 +920,14 @@ import {
         flex-wrap: wrap;
         gap: var(--space-2);
       }
+      .detail-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        align-items: center;
+        gap: var(--space-2);
+        max-width: min(640px, 55vw);
+      }
       .stage-chip {
         display: inline-flex;
       }
@@ -980,6 +1003,9 @@ import {
       }
       .json-fold {
         margin-top: var(--space-4);
+      }
+      .bt-runs ::ng-deep .ag-theme-alpine {
+        --ag-cell-horizontal-padding: 12px;
       }
       .json-fold summary {
         cursor: pointer;
@@ -1929,79 +1955,127 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
       .pipe(map((res) => res.data!));
 
+  // Minimums sized to each header and widest value at 12px cell padding (.bt-runs): they sum to
+  // ~1,100px, inside the tab's card, so sizeColumnsToFit never squeezes one past its content.
   readonly backtestColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 80 },
-    { field: 'symbol', headerName: 'Symbol', width: 110 },
+    { field: 'id', headerName: 'ID', width: 70, minWidth: 60 },
     {
-      field: 'timeframe',
-      headerName: 'TF',
-      width: 80,
-      valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
+      field: 'symbol',
+      headerName: 'Market',
+      width: 176,
+      minWidth: 172,
+      // A run with a symbol/timeframe override tested the rules on another market — never
+      // promotion evidence; the promotion gate ignores it (its verdict says "No completed backtest
+      // on the strategy's own market" and counts the override runs). Say so on the row too.
+      valueFormatter: (p: any) => {
+        const d = p.data as
+          | {
+              symbol?: string;
+              timeframe?: string;
+              symbolOverride?: string | null;
+              timeframeOverride?: string | null;
+            }
+          | undefined;
+        if (!d) return p.value ?? '—';
+        // The timeframe code ("H1"), as on the Backtests page: "1 Hour (override)" did not fit.
+        const market = `${d.symbol ?? '—'} · ${d.timeframe ?? '—'}`;
+        return d.symbolOverride || d.timeframeOverride ? `${market} (override)` : market;
+      },
+      tooltipValueGetter: (p: any) =>
+        p.data?.symbolOverride || p.data?.timeframeOverride
+          ? "Override run: the strategy's rules on another market or timeframe — not promotion evidence"
+          : null,
     },
+    // UTC dates: toLocaleDateString printed a window ending 2026-09-30T23:00Z as "10/1/2026".
+    // One "from – to" column (sorts by its start) leaves room for the rest.
     {
       field: 'fromDate',
-      headerName: 'From',
-      width: 120,
-      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
-    },
-    {
-      field: 'toDate',
-      headerName: 'To',
-      width: 120,
-      valueFormatter: (p: any) => (p.value ? new Date(p.value).toLocaleDateString() : '—'),
+      headerName: 'Window (UTC)',
+      width: 200,
+      minWidth: 196,
+      valueFormatter: (p: any) =>
+        p.data ? `${this.utcDay(p.data.fromDate)} – ${this.utcDay(p.data.toDate)}` : '—',
     },
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 112,
+      minWidth: 106,
       cellRenderer: StatusPillCellComponent,
       cellRendererParams: { label: 'Backtest status' },
     },
     {
       field: 'totalTrades',
       headerName: 'Trades',
-      width: 90,
+      width: 80,
+      minWidth: 76,
       valueFormatter: (p: any) => (p.value != null ? p.value : '—'),
     },
+    // A run that closed no trade has no win rate, PF or Sharpe (the engine stores 0.0): "—".
     {
       field: 'winRate',
       headerName: 'Win %',
-      width: 90,
-      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
+      width: 76,
+      minWidth: 70,
+      valueFormatter: (p: any) =>
+        p.value != null && runHasTrades(p.data) ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       field: 'profitFactor',
       headerName: 'PF',
-      width: 80,
-      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(2) : '—'),
+      width: 64,
+      minWidth: 60,
+      // 9999 is the engine's "no losing trade" sentinel, not a measured ratio.
+      valueFormatter: (p: any) =>
+        p.value == null || !runHasTrades(p.data) ? '—' : p.value >= 9999 ? '∞' : p.value.toFixed(2),
     },
     {
       field: 'maxDrawdownPct',
       headerName: 'Max DD',
-      width: 100,
+      width: 84,
+      minWidth: 80,
       valueFormatter: (p: any) => (p.value != null ? `${p.value.toFixed(2)}%` : '—'),
     },
     {
       field: 'sharpeRatio',
       headerName: 'Sharpe',
-      width: 90,
-      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(2) : '—'),
+      width: 80,
+      minWidth: 76,
+      valueFormatter: (p: any) =>
+        p.value != null && runHasTrades(p.data) ? p.value.toFixed(2) : '—',
     },
     {
       field: 'totalReturn',
       headerName: 'Return',
-      width: 100,
+      width: 92,
+      minWidth: 88,
       // BacktestEngine stores TotalReturn already in percent (0.1089 = 0.1089%);
       // multiplying by 100 again printed 10.89% for a $10.89 gain on $10,000.
       valueFormatter: (p: any) => (p.value != null ? `${Number(p.value).toFixed(2)}%` : '—'),
     },
     {
-      field: 'startedAt',
-      headerName: 'Started',
-      width: 120,
-      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
+      // The engine's backtest row has no `startedAt` (a stale typed field), so this column was
+      // blank: it sends `executionStartedAt`, and `claimedAt` for a run not yet executing.
+      colId: 'executionStartedAt',
+      headerName: 'Started (UTC)',
+      flex: 1,
+      minWidth: 112,
+      valueGetter: (p: any) =>
+        p.data?.executionStartedAt ?? p.data?.claimedAt ?? p.data?.startedAt ?? null,
+      // "about 19 hours ago" did not fit the column; the date does, the rest is in the tooltip.
+      valueFormatter: (p: any) => (p.value ? this.utcDay(p.value) : '—'),
+      tooltipValueGetter: (p: any) =>
+        p.value
+          ? `${formatDate(p.value, 'MMM d, yyyy HH:mm', 'en-US', 'UTC')} UTC · ${this.relativeTime.transform(p.value)}`
+          : null,
     },
   ];
+
+  /** "Sep 30, 2026" in UTC — a backtest window is a UTC range. */
+  private utcDay(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    return formatDate(iso, 'MMM d, yyyy', 'en-US', 'UTC');
+  }
 
   onBacktestRowClick(run: BacktestRunDto): void {
     this.router.navigate(['/backtests', run.id]);

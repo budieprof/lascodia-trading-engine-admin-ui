@@ -171,7 +171,7 @@ const PALETTE = [
                         <tr [class.zero-weight]="row.weight === 0">
                           <td>{{ i + 1 }}</td>
                           <td>
-                            <span class="dot" [style.background]="colorFor(i)"></span>
+                            <span class="dot" [style.background]="colorById(row.strategyId)"></span>
                             {{ row.strategyName ?? '#' + row.strategyId }}
                           </td>
                           <td class="num">{{ (row.weight * 100).toFixed(1) }}%</td>
@@ -973,7 +973,7 @@ export class EnsemblePageComponent {
     // they don't render on top of each other (otherwise a degenerate
     // post-rebalance state with N identical strategies stacks N labels).
     const buckets = new Map<string, number>();
-    const data = allocs.map((a, i) => {
+    const data = allocs.map((a) => {
       const x = +a.rollingSharpRatio.toFixed(3);
       const y = +(a.weight * 100).toFixed(2);
       const key = `${x}|${y}`;
@@ -982,7 +982,7 @@ export class EnsemblePageComponent {
       return {
         name: a.strategyName ?? `#${a.strategyId}`,
         value: [x, y],
-        itemStyle: { color: PALETTE[i % PALETTE.length] },
+        itemStyle: { color: this.colorById(a.strategyId) },
         // Stagger label position to avoid stacking — each successive collider
         // gets pushed further right of the marker.
         _collision: collisionIdx,
@@ -1229,10 +1229,10 @@ export class EnsemblePageComponent {
     const data = onLatest
       .filter((r) => r.weight > 0)
       .sort((a, b) => b.weight - a.weight)
-      .map((r, i) => ({
+      .map((r) => ({
         name: r.strategyName ?? `#${r.strategyId}`,
         value: +(r.weight * 100).toFixed(2),
-        itemStyle: { color: PALETTE[i % PALETTE.length] },
+        itemStyle: { color: this.colorById(r.strategyId) },
       }));
     if (data.length === 0) return {};
     return {
@@ -1278,9 +1278,9 @@ export class EnsemblePageComponent {
         {
           type: 'bar',
           data: sorted
-            .map((d, i) => ({
+            .map((d) => ({
               value: +(d.avgWeight * 100).toFixed(2),
-              itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [0, 4, 4, 0] },
+              itemStyle: { color: this.colorById(d.strategyId), borderRadius: [0, 4, 4, 0] },
             }))
             .reverse(),
           barWidth: 14,
@@ -1378,10 +1378,10 @@ export class EnsemblePageComponent {
     // no arc; the table beside the chart still lists them.
     const data = this.rankedAllocations()
       .filter((a) => a.weight > 0)
-      .map((a, i) => ({
+      .map((a) => ({
         name: a.strategyName ?? `#${a.strategyId}`,
         value: +(a.weight * 100).toFixed(2),
-        itemStyle: { color: PALETTE[i % PALETTE.length] },
+        itemStyle: { color: this.colorById(a.strategyId) },
       }));
     if (data.length === 0) return {};
     return {
@@ -1451,19 +1451,30 @@ export class EnsemblePageComponent {
     const strategyIds = Array.from(strategyNames.keys());
     // Time axis, not categories: four events 49 days apart must not look
     // like four consecutive weeks.
-    const series = strategyIds.map((id, i) => ({
+    // A step-end series draws each allocation up to the NEXT rebalance, so the latest one had no
+    // interval and never appeared (the chart ended on the previous allocation). Holding the last
+    // allocation through to today draws it.
+    const lastDate = dates[dates.length - 1];
+    const now = Date.now();
+    const holdUntil = now > new Date(lastDate).getTime() ? now : null;
+    const series = strategyIds.map((id) => ({
       name: strategyNames.get(id)!,
       type: 'line' as const,
       stack: 'total',
       step: 'end' as const,
-      areaStyle: { color: PALETTE[i % PALETTE.length], opacity: 0.5 },
+      areaStyle: { color: this.colorById(id), opacity: 0.5 },
       lineStyle: { width: 0 },
-      itemStyle: { color: PALETTE[i % PALETTE.length] },
+      itemStyle: { color: this.colorById(id) },
       emphasis: { focus: 'series' as const },
-      data: dates.map((d) => {
-        const w = buckets.get(d)?.get(id) ?? 0;
-        return [new Date(d).getTime(), +(w * 100).toFixed(2)];
-      }),
+      data: [
+        ...dates.map((d) => {
+          const w = buckets.get(d)?.get(id) ?? 0;
+          return [new Date(d).getTime(), +(w * 100).toFixed(2)];
+        }),
+        ...(holdUntil != null
+          ? [[holdUntil, +((buckets.get(lastDate)?.get(id) ?? 0) * 100).toFixed(2)]]
+          : []),
+      ],
     }));
 
     return {
@@ -1503,8 +1514,21 @@ export class EnsemblePageComponent {
     };
   });
 
-  colorFor(index: number): string {
-    return PALETTE[index % PALETTE.length];
+  /**
+   * One colour per strategy across every chart and table on the page. Colours used to follow each
+   * chart's own rank order, so #2 was blue in one chart and green in the legend beside it.
+   */
+  private readonly colorIndex = computed(() => {
+    const ids = new Set<number>();
+    for (const r of this.historyResource.value() ?? []) ids.add(r.strategyId);
+    for (const a of this.currentAllocations()) ids.add(a.strategyId);
+    const sorted = [...ids].sort((a, b) => a - b);
+    return new Map(sorted.map((id, i) => [id, i]));
+  });
+
+  colorById(strategyId: number): string {
+    const i = this.colorIndex().get(strategyId) ?? 0;
+    return PALETTE[i % PALETTE.length];
   }
 
   doRebalance(): void {

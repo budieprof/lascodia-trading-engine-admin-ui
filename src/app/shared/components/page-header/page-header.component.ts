@@ -66,11 +66,22 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
         letter-spacing: var(--tracking-normal);
       }
 
+      /* The title keeps a readable minimum; the actions take the rest and WRAP. With
+         flex-shrink: 0 and no wrap, eight actions on a strategy detail page pushed it to 1608px
+         in a 1440px window. Few actions still sit on one line, right-aligned. */
+      .header-left {
+        flex: 1 1 320px;
+        min-width: 0;
+      }
+
       .header-actions {
         display: flex;
         align-items: center;
         gap: var(--space-3);
-        flex-shrink: 0;
+        flex: 0 1 auto;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        min-width: 0;
       }
 
       /* On a phone the actions cannot sit beside the title: a no-shrink row of two or three

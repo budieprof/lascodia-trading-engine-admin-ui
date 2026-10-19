@@ -264,16 +264,19 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
         padding: var(--card-padding);
         height: 100%;
       }
+      /* Full row for the heading + blurb: capped at 32ch it wrapped the title and its pills into
+         "Pending-signal re- / validation  ENGINE- / WIDE" beside an empty half-card. */
       .psr-info {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        min-width: 240px;
-        max-width: 32ch;
+        flex: 1 1 100%;
+        min-width: 0;
       }
       .psr-headline {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: var(--space-2);
       }
       .psr-label {
@@ -288,13 +291,14 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
       }
       .psr-pill.warn {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .psr-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--bg-tertiary);
         color: var(--text-tertiary);
       }
       .psr-desc {
@@ -304,9 +308,8 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
-        flex-grow: 1;
-        min-width: 280px;
-        max-width: 520px;
+        flex: 1 1 280px;
+        min-width: 0;
       }
       .psr-section {
         display: flex;
@@ -367,10 +370,10 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
         min-height: 1.2em;
       }
       .psr-status .ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .psr-status .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .psr-buttons {
         display: flex;

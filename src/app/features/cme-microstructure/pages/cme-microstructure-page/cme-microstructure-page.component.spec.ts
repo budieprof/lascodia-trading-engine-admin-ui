@@ -1,14 +1,61 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { TestBed } from '@angular/core/testing';
+import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
-import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
 
 import { CmeMicrostructurePageComponent } from './cme-microstructure-page.component';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
+import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
+
+// JIT (no CLI transform) sees signal inputs/outputs only once declared — the back-adjust spec renders the page.
+declareSignalIo(PageHeaderComponent, { inputs: ['title', 'subtitle'] });
+declareSignalIo(MetricCardComponent, { inputs: ['label', 'value', 'format'] });
+declareSignalIo(ConfirmDialogComponent, {
+  inputs: ['open', 'title', 'message', 'confirmLabel', 'confirmVariant', 'loading'],
+  outputs: ['confirm', 'cancelled'],
+});
+declareSignalIo(RefreshButtonComponent, { inputs: ['refreshing'], outputs: ['refresh'] });
+declareSignalIo(CmeExperimentTradesComponent, { inputs: ['runId'] });
+
+const STATUS = {
+  contractCount: 4,
+  frontMonthContract: '6EU5',
+  tradeCount: 1_000,
+  bookSnapshotCount: 500,
+  barCount: 60,
+  latestBarUtc: null,
+  shadowSignalCount: 0,
+  contracts: [],
+  recentShadowSignals: [],
+  feedHealth: {
+    status: 'NoData' as const,
+    latestBarAgeSeconds: null,
+    maxFlowStalenessSeconds: 120,
+    tradesLast24h: 0,
+    booksLast24h: 0,
+    barsLast24h: 0,
+    ingestEnabled: true,
+    shadowMonitorEnabled: true,
+  },
+  warmTier: {
+    configured: false,
+    contracts: [],
+    sessionCount: 0,
+    earliestSession: null,
+    latestSession: null,
+  },
+  v11Models: [],
+};
 
 describe('CmeMicrostructurePageComponent', () => {
   let cmp: CmeMicrostructurePageComponent;
+  let fixture: ComponentFixture<CmeMicrostructurePageComponent>;
 
   beforeEach(() => {
     TestBed.configureTestingModule({
@@ -20,7 +67,7 @@ describe('CmeMicrostructurePageComponent', () => {
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
       ],
     });
-    const fixture = TestBed.createComponent(CmeMicrostructurePageComponent);
+    fixture = TestBed.createComponent(CmeMicrostructurePageComponent);
     cmp = fixture.componentInstance;
   });
 
@@ -65,36 +112,31 @@ describe('CmeMicrostructurePageComponent', () => {
     });
 
     it('flips once trades exist', () => {
-      cmp['status'].set({
-        contractCount: 4,
-        frontMonthContract: '6EU5',
-        tradeCount: 1_000,
-        bookSnapshotCount: 500,
-        barCount: 60,
-        latestBarUtc: null,
-        shadowSignalCount: 0,
-        contracts: [],
-        recentShadowSignals: [],
-        feedHealth: {
-          status: 'NoData',
-          latestBarAgeSeconds: null,
-          maxFlowStalenessSeconds: 120,
-          tradesLast24h: 0,
-          booksLast24h: 0,
-          barsLast24h: 0,
-          ingestEnabled: true,
-          shadowMonitorEnabled: true,
-        },
-        warmTier: {
-          configured: false,
-          contracts: [],
-          sessionCount: 0,
-          earliestSession: null,
-          latestSession: null,
-        },
-        v11Models: [],
-      });
+      cmp['status'].set(STATUS);
       expect(cmp['hasData']()).toBe(true);
+    });
+  });
+
+  describe('back-adjust', () => {
+    // A Command that overwrites the chain's stored roll offsets: it fired straight from one click.
+    it('asks first, and sends only on confirm', () => {
+      const http = TestBed.inject(HttpTestingController);
+      const isBackAdjust = (r: { url: string }) => r.url.endsWith('/cme-contracts/back-adjust');
+      cmp['status'].set(STATUS);
+      fixture.detectChanges();
+      const el = fixture.nativeElement as HTMLElement;
+      const button = (label: string) =>
+        [...el.querySelectorAll('button')].find((b) => b.textContent?.trim() === label)!;
+
+      button('Back-adjust rolls').click();
+      fixture.detectChanges();
+      expect(http.match(isBackAdjust)).toHaveLength(0);
+      expect(el.querySelector('[role="dialog"]')?.textContent).toContain('overwrites the stored');
+
+      button('Back-adjust').click();
+      fixture.detectChanges();
+      expect(http.match(isBackAdjust)).toHaveLength(1);
+      expect(el.querySelector('[role="dialog"]')).toBeNull();
     });
   });
 });

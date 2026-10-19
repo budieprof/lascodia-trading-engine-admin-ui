@@ -24,6 +24,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 interface DepthLevel {
   side: 'bid' | 'ask';
@@ -50,6 +51,7 @@ interface DepthLevel {
     EmptyStateComponent,
     RelativeTimePipe,
     OrderBookHeatmapComponent,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -59,14 +61,11 @@ interface DepthLevel {
       >
         <a routerLink="/market-data" class="btn btn-secondary">← Market Data</a>
         <a [routerLink]="['/market-data/coverage']" class="btn btn-secondary">Candle coverage →</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Only once a book streams (before that the form's Load is the action). Bound to
+             loading(), true only before the first answer, the old button showed nothing. -->
+        @if (symbol()) {
+          <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
+        }
       </app-page-header>
 
       <section class="controls">
@@ -257,6 +256,32 @@ interface DepthLevel {
         min-width: 200px;
         text-transform: uppercase;
         font-family: var(--font-mono);
+      }
+      /* The typed symbol is upper-cased; the hint is not ("E.G. EURUSD"). */
+      .field input::placeholder {
+        text-transform: none;
+      }
+      /* The header's "← Market Data" / "… →" / Refresh: without a local rule .btn-secondary is
+         only the global press feedback, so they rendered as bare text beside the title. */
+      .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-secondary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .btn-primary {
         padding: 8px 18px;

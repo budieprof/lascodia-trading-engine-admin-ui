@@ -27,6 +27,18 @@
 	# container's exposed port. Cloudflared can't reach this port directly
 	# from outside, hence the proxy. This also carries the SignalR hub at
 	# /api/hubs/trading; reverse_proxy upgrades WebSockets automatically.
+	# SECURITY (2026-10-19): never forward the engine's dev-token endpoint. It mints an ADMIN JWT
+	# (valid ~1 year, any role the caller asks for) with no password whenever the engine runs with
+	# ASPNETCORE_ENVIRONMENT=Development -- which the live engine does. Through this site that was
+	# a public, passwordless Admin login. Nothing operational uses it: EAs authenticate with
+	# /auth/login, /auth/register and /auth/refresh; it exists for local development against :5081
+	# directly. A single path matcher, so it sorts ahead of `handle /api/*`; Caddy path matching is
+	# case-insensitive and the trailing * covers `/auth/token/`. The live file carries the same
+	# block in its app.codiapay.com:443 LAN site too.
+	handle /api/v1/lascodia-trading-engine/auth/token* {
+		respond 404
+	}
+
 	handle /api/* {
 		# SS-08: the API's JSON is compressed HERE. A chart's script run or a
 		# screener answer is hundreds of kB of JSON that shrinks ~10x, and it

@@ -22,6 +22,7 @@ import {
 import { Timeframe } from '@core/api/api.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 const STATUS_FILTERS: { label: string; value: string | null }[] = [
   { label: 'All', value: null },
@@ -108,6 +109,7 @@ function normalizeStatus(s: BacktestStatus | string | null | undefined): Backtes
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    ModalA11yDirective,
     CommonModule,
     CurrencyPipe,
     DatePipe,
@@ -329,7 +331,7 @@ function normalizeStatus(s: BacktestStatus | string | null | undefined): Backtes
               <th class="col-er">ER</th>
               <th class="col-recs">Viable / Recs</th>
               <th class="col-prompt">Prompt</th>
-              <th class="col-created">Created</th>
+              <th class="col-created">Created (UTC)</th>
               <th class="col-duration">Dur</th>
               <th class="col-actions"></th>
             </tr>
@@ -509,7 +511,7 @@ function normalizeStatus(s: BacktestStatus | string | null | undefined): Backtes
                   </td>
                   <td class="col-created">
                     <div class="stack">
-                      <div>{{ r.createdAt | date: 'yyyy-MM-dd HH:mm' }}</div>
+                      <div>{{ r.createdAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</div>
                       <div class="muted small">{{ relativeTime(r.createdAt) }}</div>
                     </div>
                   </td>
@@ -566,9 +568,17 @@ function normalizeStatus(s: BacktestStatus | string | null | undefined): Backtes
 
       <!-- Cancel confirm modal -->
       @if (cancelTarget()) {
-        <div class="modal-scrim" (click)="cancelTarget.set(null)">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Cancel run?</h2></div>
+        <div class="modal-scrim" (click)="closeCancel()">
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bt-cancel-title"
+            appModalA11y
+            (dismiss)="closeCancel()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="bt-cancel-title">Cancel run?</h2></div>
             <div class="modal-body">
               <p>
                 Cancel run <strong>#{{ cancelTarget()!.id }} {{ cancelTarget()!.name }}</strong
@@ -580,7 +590,12 @@ function normalizeStatus(s: BacktestStatus | string | null | undefined): Backtes
               </p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary btn-sm" (click)="cancelTarget.set(null)">
+              <button
+                type="button"
+                class="btn-secondary btn-sm"
+                (click)="closeCancel()"
+                data-autofocus
+              >
                 Back
               </button>
               <button
@@ -1447,6 +1462,12 @@ export class LlmBacktestIndexPageComponent implements OnInit, OnDestroy {
   confirmCancel(r: LlmBacktestRunSummary): void {
     this.cancelTarget.set(r);
   }
+  /** Close the cancel confirmation — not while its request is in flight. */
+  closeCancel(): void {
+    if (this.cancellingId() !== null) return;
+    this.cancelTarget.set(null);
+  }
+
   executeCancel(): void {
     const target = this.cancelTarget();
     if (!target) return;
@@ -1497,8 +1518,13 @@ export class LlmBacktestIndexPageComponent implements OnInit, OnDestroy {
   llmCallCount(r: LlmBacktestRunSummary): number {
     return Math.max(0, r.completedPoints - r.cacheHits);
   }
+  /**
+   * The engine serialises Timeframe as its NAME ("H1"); only older payloads sent
+   * the ordinal. Indexing the ordinal map with "H1" missed and rendered "TFH1".
+   */
   timeframeLabel(tf: Timeframe | number): string {
-    return TIMEFRAME_LABEL[tf as number] ?? `TF${tf}`;
+    if (typeof tf === 'string') return tf;
+    return TIMEFRAME_LABEL[tf] ?? `TF${tf}`;
   }
   windowDurationLabel(r: LlmBacktestRunSummary): string {
     if (!r.windowStartUtc || !r.windowEndUtc) return '';

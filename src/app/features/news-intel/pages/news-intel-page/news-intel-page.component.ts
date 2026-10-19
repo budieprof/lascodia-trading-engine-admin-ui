@@ -3,6 +3,8 @@ import { DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { NewsIntelService } from '@core/services/news-intel.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import {
   NewsArticleView,
   NewsClassificationStatus,
@@ -28,7 +30,7 @@ import {
 @Component({
   selector: 'app-news-intel-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, PercentPipe],
+  imports: [DatePipe, DecimalPipe, PercentPipe, ConfirmDialogComponent, RefreshButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -409,6 +411,15 @@ import {
                           "
                         ></div>
                       </div>
+                    </td>
+                    <!-- The header always named this column; its cell was missing, so every value
+                         from here on sat one column left (Live under "In play", stories under
+                         "Live", …) and "As of" stood over nothing. -->
+                    <td
+                      class="num mono"
+                      title="Unsigned weight — how much news is active regardless of direction"
+                    >
+                      {{ row.absolutePressure | number: '1.3-3' }}
                     </td>
                     <td
                       class="num mono"
@@ -804,7 +815,12 @@ import {
               <option value="Skipped">Skipped</option>
               <option value="Failed">Failed</option>
             </select>
-            <button type="button" class="btn subtle" (click)="articles.refresh()">Refresh</button>
+            <!-- The plain button changed nothing on screen when the list came back the same. -->
+            <app-refresh-button
+              variant="outline"
+              [refreshing]="articles.refreshing()"
+              (refresh)="articles.refresh()"
+            />
           </div>
         </div>
 
@@ -1026,12 +1042,27 @@ import {
           </details>
         }
       </section>
+
+      <!-- The two header switches change what every live analysis is told; one stray click used
+           to write the knob at once. -->
+      <app-confirm-dialog
+        [open]="pendingSwitch() !== null"
+        [title]="switchDialog().title"
+        [message]="switchDialog().message"
+        [confirmLabel]="switchDialog().confirmLabel"
+        [confirmVariant]="switchDialog().destructive ? 'destructive' : 'primary'"
+        [loading]="saving()"
+        (confirm)="confirmSwitch()"
+        (cancelled)="pendingSwitch.set(null)"
+      />
     </div>
   `,
   styles: [
     `
+      /* The shell already pads the content area; a second inset set this page in from every
+         sibling's left edge. */
       .page {
-        padding: var(--space-6) var(--space-8);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
@@ -2473,14 +2504,60 @@ export class NewsIntelPageComponent {
     this.persist(changes, { clearEdits: true });
   }
 
+  /** Which header switch is waiting on the confirm dialog. */
+  readonly pendingSwitch = signal<'module' | 'prompt' | null>(null);
+
+  readonly switchDialog = computed(() => {
+    if (this.pendingSwitch() === 'module') {
+      return this.moduleEnabled()
+        ? {
+            title: 'Stop the news module?',
+            message:
+              'Polling, classification and scoring stop, and analyses lose the newsPressure block until it is started again.',
+            confirmLabel: 'Stop module',
+            destructive: true,
+          }
+        : {
+            title: 'Start the news module?',
+            message:
+              'Feeds are polled and articles classified by the model again — that spends LLM budget.',
+            confirmLabel: 'Start module',
+            destructive: false,
+          };
+    }
+    return this.promptEnabled()
+      ? {
+          title: 'Take news out of the prompt?',
+          message:
+            'Collecting carries on, but spot analyses stop receiving the newsPressure block from their next run.',
+          confirmLabel: 'Remove from prompt',
+          destructive: true,
+        }
+      : {
+          title: 'Put news into the prompt?',
+          message: 'Every spot analysis from its next run is told the newsPressure block.',
+          confirmLabel: 'Add to prompt',
+          destructive: false,
+        };
+  });
+
   toggleModule(): void {
-    const next = this.moduleEnabled() ? 'false' : 'true';
-    this.persist([{ key: 'NewsIntel:Enabled', value: next, dataType: 'Bool' }]);
+    this.pendingSwitch.set('module');
   }
 
   togglePrompt(): void {
-    const next = this.promptEnabled() ? 'false' : 'true';
-    this.persist([{ key: 'NewsIntel:Prompt:Enabled', value: next, dataType: 'Bool' }]);
+    this.pendingSwitch.set('prompt');
+  }
+
+  confirmSwitch(): void {
+    const which = this.pendingSwitch();
+    if (which === 'module') {
+      const next = this.moduleEnabled() ? 'false' : 'true';
+      this.persist([{ key: 'NewsIntel:Enabled', value: next, dataType: 'Bool' }]);
+    } else if (which === 'prompt') {
+      const next = this.promptEnabled() ? 'false' : 'true';
+      this.persist([{ key: 'NewsIntel:Prompt:Enabled', value: next, dataType: 'Bool' }]);
+    }
   }
 
   /**
@@ -2501,6 +2578,7 @@ export class NewsIntelPageComponent {
       .subscribe({
         next: (messages) => {
           this.saving.set(false);
+          this.pendingSwitch.set(null);
           this.saveMessages.set(messages);
           if (opts?.clearEdits) this.resetConfig();
           this.loadConfig();
@@ -2508,6 +2586,7 @@ export class NewsIntelPageComponent {
         },
         error: () => {
           this.saving.set(false);
+          this.pendingSwitch.set(null);
           this.error.set('Save failed — the configuration was not changed.');
         },
       });

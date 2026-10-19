@@ -16,7 +16,6 @@ import {
   takeUntil,
   catchError,
   of,
-  Observable,
   map,
   concatMap,
   first,
@@ -29,7 +28,6 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { TabsComponent } from '@shared/components/ui/tabs/tabs.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
-import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { SparklineComponent } from '@shared/components/sparkline/sparkline.component';
 import { TradingChartComponent } from '@shared/components/trading-chart/trading-chart.component';
 import { MarketDataService } from '@core/services/market-data.service';
@@ -38,12 +36,13 @@ import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { PositionsService } from '@core/services/positions.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import { WatchlistService } from '@features/chart-analysis/watchlist/watchlist.service';
+import type { WatchQuote } from '@features/chart-analysis/watchlist/watchlist.model';
+import { pipSizeFor } from '@features/chart-analysis/datafeed/symbol-info';
+import { CandleHistoryComponent } from '../../components/candle-history/candle-history.component';
 import {
   LivePriceDto,
-  PagerRequest,
-  PagedData,
   CandleDto,
-  ResponseData,
   MarketRegimeSnapshotDto,
   TradeSignalDto,
   PositionDto,
@@ -51,13 +50,21 @@ import {
   OrderBookLevels,
 } from '@core/api/api.types';
 import type { EChartsOption } from 'echarts';
-import type { ColDef } from 'ag-grid-community';
 
 interface PriceEntry extends LivePriceDto {
-  change: number;
-  changePct: number;
-  high24h: number;
-  low24h: number;
+  /**
+   * Change on the symbol's trading day: the bid against the engine's prior close
+   * (`market-data/watchlist-quotes`). Null until that snapshot has arrived — it used to be the
+   * move since the PREVIOUS 3-second poll, which the page labelled "24h change", so every pair
+   * read "+0.00%" and the movers table ranked noise.
+   */
+  change: number | null;
+  changePct: number | null;
+  /** The trading day's range so far (the live bid widens it); null without a day snapshot. */
+  dayHigh: number | null;
+  dayLow: number | null;
+  /** Move since the previous poll — the tick flash and the activity feed read this. */
+  tickChange: number;
   sparkData: number[];
   prevBid: number;
   direction: 'up' | 'down' | 'none';
@@ -78,9 +85,9 @@ interface PriceEntry extends LivePriceDto {
     TabsComponent,
     ChartCardComponent,
     MetricCardComponent,
-    DataTableComponent,
     SparklineComponent,
     TradingChartComponent,
+    CandleHistoryComponent,
   ],
   template: `
     <div class="page">
@@ -179,10 +186,10 @@ interface PriceEntry extends LivePriceDto {
               format="number"
               dotColor="#FF3B30"
             />
+            <!-- The label promised two numbers and the card showed one (the up count). -->
             <app-metric-card
-              label="Up / Down"
-              [value]="upPairsCount()"
-              format="number"
+              label="Up / Down today"
+              [displayValue]="upDownLabel()"
               [dotColor]="upPairsCount() >= downPairsCount() ? '#34C759' : '#FF3B30'"
             />
             <!-- Local tile: the shared card only takes a number, and
@@ -736,10 +743,11 @@ interface PriceEntry extends LivePriceDto {
                 @if (card.live) {
                   <span
                     class="watch-change"
-                    [class.up]="card.live.change > 0"
-                    [class.down]="card.live.change < 0"
+                    [class.up]="(card.live.changePct ?? 0) > 0"
+                    [class.down]="(card.live.changePct ?? 0) < 0"
+                    title="Change on the trading day, against the prior close"
                   >
-                    {{ card.live.change >= 0 ? '+' : '' }}{{ card.live.changePct.toFixed(2) }}%
+                    {{ formatChangePct(card.live.changePct) }}
                   </span>
                 } @else {
                   <span class="watch-change muted">—</span>
@@ -770,7 +778,7 @@ interface PriceEntry extends LivePriceDto {
                   @if (card.live && sparkHasMovement(card.live.sparkData)) {
                     <app-sparkline
                       [data]="card.live.sparkData"
-                      [color]="sparkColor(card.live.change)"
+                      [color]="sparkColor(card.live.changePct ?? 0)"
                       width="100%"
                       height="22px"
                     />
@@ -789,7 +797,7 @@ interface PriceEntry extends LivePriceDto {
           <section class="movers">
             <header class="movers-head">
               <h3>Top movers</h3>
-              <span class="muted">Sorted by 24h change %</span>
+              <span class="muted">Sorted by day change % (against the prior close)</span>
             </header>
             @if (topMovers().length > 0) {
               <table class="movers-table">
@@ -797,8 +805,8 @@ interface PriceEntry extends LivePriceDto {
                   <tr>
                     <th>Symbol</th>
                     <th class="num">Bid</th>
-                    <th class="num">Change %</th>
-                    <th class="num">24h range</th>
+                    <th class="num">Day change</th>
+                    <th class="num">Day range</th>
                     <th class="num">Spread</th>
                   </tr>
                 </thead>
@@ -812,14 +820,12 @@ interface PriceEntry extends LivePriceDto {
                         [class.profit]="p.changePct > 0"
                         [class.loss]="p.changePct < 0"
                       >
-                        {{ p.changePct >= 0 ? '+' : '' }}{{ p.changePct.toFixed(2) }}%
+                        {{ formatChangePct(p.changePct) }}
                       </td>
                       <td class="num mono">
-                        <!-- A candle-fallback row carries one close for both
-                             ends of its "range"; that is not a range. -->
-                        @if (!p.fromCandle && p.high24h > p.low24h) {
-                          {{ formatPrice(p.low24h, p.symbol) }}–{{
-                            formatPrice(p.high24h, p.symbol)
+                        @if (p.dayLow !== null && p.dayHigh !== null && p.dayHigh > p.dayLow) {
+                          {{ formatPrice(p.dayLow, p.symbol) }}–{{
+                            formatPrice(p.dayHigh, p.symbol)
                           }}
                         } @else {
                           <span class="muted">—</span>
@@ -842,8 +848,10 @@ interface PriceEntry extends LivePriceDto {
                   <span class="muted">Waiting for live price feed…</span>
                   <span class="empty-hint">Movers populate once the EA pushes a tick.</span>
                 } @else {
-                  <span class="muted">No pair has moved this session.</span>
-                  <span class="empty-hint">Every watched pair is flat since the first poll.</span>
+                  <span class="muted">No day change to rank yet.</span>
+                  <span class="empty-hint"
+                    >Waiting for the engine's day snapshot (prior close per symbol).</span
+                  >
                 }
               </div>
             }
@@ -891,7 +899,7 @@ interface PriceEntry extends LivePriceDto {
         <section class="symbol-matrix">
           <header class="movers-head">
             <h3>Symbol matrix</h3>
-            <span class="muted">Live snapshot · history grows as ticks arrive</span>
+            <span class="muted">Live quote · the trading day's range and change</span>
           </header>
           <div class="matrix-scroll">
             <table class="movers-table">
@@ -901,10 +909,10 @@ interface PriceEntry extends LivePriceDto {
                   <th class="num">Bid</th>
                   <th class="num">Ask</th>
                   <th class="num">Spread</th>
-                  <th class="num">High</th>
-                  <th class="num">Low</th>
-                  <th class="num">Range (pips)</th>
-                  <th class="num">Δ %</th>
+                  <th class="num">Day high</th>
+                  <th class="num">Day low</th>
+                  <th class="num">Day range (pips)</th>
+                  <th class="num">Day Δ %</th>
                   <th>Trend</th>
                 </tr>
               </thead>
@@ -938,15 +946,15 @@ interface PriceEntry extends LivePriceDto {
                       }
                     </td>
                     <td class="num mono">
-                      @if (row.live && !row.live.fromCandle) {
-                        {{ formatPrice(row.live.high24h, row.symbol) }}
+                      @if (row.live && row.live.dayHigh !== null) {
+                        {{ formatPrice(row.live!.dayHigh!, row.symbol) }}
                       } @else {
                         <span class="muted">—</span>
                       }
                     </td>
                     <td class="num mono">
-                      @if (row.live && !row.live.fromCandle) {
-                        {{ formatPrice(row.live.low24h, row.symbol) }}
+                      @if (row.live && row.live.dayLow !== null) {
+                        {{ formatPrice(row.live!.dayLow!, row.symbol) }}
                       } @else {
                         <span class="muted">—</span>
                       }
@@ -960,11 +968,11 @@ interface PriceEntry extends LivePriceDto {
                     </td>
                     <td
                       class="num mono"
-                      [class.profit]="row.live && row.live.changePct > 0"
-                      [class.loss]="row.live && row.live.changePct < 0"
+                      [class.profit]="(row.live?.changePct ?? 0) > 0"
+                      [class.loss]="(row.live?.changePct ?? 0) < 0"
                     >
                       @if (row.live) {
-                        {{ row.live.changePct >= 0 ? '+' : '' }}{{ row.live.changePct.toFixed(2) }}%
+                        {{ formatChangePct(row.live.changePct) }}
                       } @else {
                         <span class="muted">—</span>
                       }
@@ -1160,7 +1168,7 @@ interface PriceEntry extends LivePriceDto {
               title="Spread comparison"
               [subtitle]="spreadChartCaption()"
               [options]="spreadChartOptions()"
-              height="240px"
+              [height]="spreadChartHeight()"
             />
           } @else {
             <article class="chart-empty-card">
@@ -1235,10 +1243,8 @@ interface PriceEntry extends LivePriceDto {
             dotColor="#FF3B30"
           />
           <app-metric-card
-            label="Up / Down"
-            [value]="upPairsCount()"
-            [delta]="upPairsCount() - downPairsCount()"
-            format="number"
+            label="Up / Down today"
+            [displayValue]="upDownLabel()"
             [dotColor]="upPairsCount() >= downPairsCount() ? '#34C759' : '#FF3B30'"
           />
           <app-metric-card
@@ -1263,10 +1269,11 @@ interface PriceEntry extends LivePriceDto {
                   <span class="symbol-name">{{ price.symbol }}</span>
                   <span
                     class="symbol-change"
-                    [class.up]="price.change > 0"
-                    [class.down]="price.change < 0"
+                    [class.up]="(price.changePct ?? 0) > 0"
+                    [class.down]="(price.changePct ?? 0) < 0"
+                    title="Change on the trading day, against the prior close"
                   >
-                    {{ price.change >= 0 ? '+' : '' }}{{ price.changePct.toFixed(2) }}%
+                    {{ formatChangePct(price.changePct) }}
                   </span>
                 </div>
                 <!-- Spread only when it is a real one; the card's source pill
@@ -1305,23 +1312,26 @@ interface PriceEntry extends LivePriceDto {
                 </div>
               </div>
 
-              <div class="price-range">
-                <span class="range-label">L {{ formatPrice(price.low24h, price.symbol) }}</span>
+              <div class="price-range" title="The trading day's range">
+                <span class="range-label"
+                  >L {{ formatPriceOrDash(price.dayLow, price.symbol) }}</span
+                >
                 <div class="range-bar">
-                  <div
-                    class="range-fill"
-                    [style.left]="getRangePosition(price) + '%'"
-                    [style.width]="'4px'"
-                  ></div>
+                  @let pos = getRangePosition(price);
+                  @if (pos !== null) {
+                    <div class="range-fill" [style.left]="pos + '%'" [style.width]="'4px'"></div>
+                  }
                 </div>
-                <span class="range-label">H {{ formatPrice(price.high24h, price.symbol) }}</span>
+                <span class="range-label"
+                  >H {{ formatPriceOrDash(price.dayHigh, price.symbol) }}</span
+                >
               </div>
 
               <div class="price-sparkline">
                 @if (sparkHasMovement(price.sparkData)) {
                   <app-sparkline
                     [data]="price.sparkData"
-                    [color]="sparkColor(price.change)"
+                    [color]="sparkColor(price.changePct ?? 0)"
                     width="100%"
                     height="36px"
                   />
@@ -1336,7 +1346,9 @@ interface PriceEntry extends LivePriceDto {
                 <span class="foot-pill" [class.candle]="price.fromCandle">
                   {{ price.fromCandle ? 'CANDLE' : 'LIVE' }}
                 </span>
-                <span class="foot-stat"> Range {{ rangeInPips(price).toFixed(1) }} pips </span>
+                <span class="foot-stat" title="The trading day's range">
+                  Day range {{ fixedOrDash(rangeInPips(price), 1) }} pips
+                </span>
                 <span class="foot-time">
                   {{ price.timestamp | date: 'HH:mm:ss' }}
                 </span>
@@ -1361,7 +1373,7 @@ interface PriceEntry extends LivePriceDto {
                   <th class="num">Ask</th>
                   <th class="num">Mid</th>
                   <th class="num">Spread</th>
-                  <th class="num">Range pips</th>
+                  <th class="num">Day range (pips)</th>
                   <th>Source</th>
                 </tr>
               </thead>
@@ -1379,7 +1391,7 @@ interface PriceEntry extends LivePriceDto {
                         <span class="muted">—</span>
                       }
                     </td>
-                    <td class="num mono">{{ rangeInPips(p).toFixed(1) }}</td>
+                    <td class="num mono">{{ fixedOrDash(rangeInPips(p), 1) }}</td>
                     <td>
                       <span class="src-pill" [class.candle]="p.fromCandle">
                         {{ p.fromCandle ? 'CANDLE' : 'LIVE' }}
@@ -1399,17 +1411,17 @@ interface PriceEntry extends LivePriceDto {
           @if (!currencyStrengthAllFlat()) {
             <app-chart-card
               title="Currency strength"
-              subtitle="Aggregate Δ% across each currency's pairs (positive = base appreciating)"
+              subtitle="Average day change % across each currency's pairs (positive = currency appreciating)"
               [options]="currencyStrengthOptions()"
               height="280px"
             />
           } @else {
             <article class="chart-empty-card">
               <h3 class="chart-title">Currency strength</h3>
-              <p class="chart-subtitle">Aggregate Δ% across each currency's pairs</p>
+              <p class="chart-subtitle">Average day change % across each currency's pairs</p>
               <div class="chart-empty-body" [style.height.px]="280">
-                <span class="muted">All currencies flat.</span>
-                <span class="empty-hint">No watched pair has moved since the first poll.</span>
+                <span class="muted">No day change yet.</span>
+                <span class="empty-hint">Waiting for the engine's prior-close snapshot.</span>
               </div>
             </article>
           }
@@ -1419,7 +1431,7 @@ interface PriceEntry extends LivePriceDto {
               title="Spread comparison"
               [subtitle]="spreadChartCaption()"
               [options]="spreadChartOptions()"
-              height="280px"
+              [height]="spreadChartHeight()"
             />
           } @else {
             <article class="chart-empty-card">
@@ -1549,7 +1561,7 @@ interface PriceEntry extends LivePriceDto {
           @if (hasSeries(spreadHistoryOptions())) {
             <app-chart-card
               title="Spread History"
-              subtitle="Spread over time per pair (live-only)"
+              subtitle="Live FX spread over time per pair, in pips (non-FX and exotic pairs off)"
               [options]="spreadHistoryOptions()"
               height="320px"
             />
@@ -1685,7 +1697,7 @@ interface PriceEntry extends LivePriceDto {
                 <th class="num">Range (pips)</th>
                 <th class="num">Vol (bps)</th>
                 <th class="num">Z-score</th>
-                <th class="num">Δ %</th>
+                <th class="num">Day Δ %</th>
                 <th>Source</th>
               </tr>
             </thead>
@@ -1710,10 +1722,10 @@ interface PriceEntry extends LivePriceDto {
                   </td>
                   <td
                     class="num mono"
-                    [class.profit]="s.changePct > 0"
-                    [class.loss]="s.changePct < 0"
+                    [class.profit]="(s.changePct ?? 0) > 0"
+                    [class.loss]="(s.changePct ?? 0) < 0"
                   >
-                    {{ s.changePct >= 0 ? '+' : '' }}{{ s.changePct.toFixed(3) }}%
+                    {{ formatChangePct(s.changePct, 3) }}
                   </td>
                   <td>
                     <span class="src-pill" [class.candle]="s.fromCandle">
@@ -1729,249 +1741,13 @@ interface PriceEntry extends LivePriceDto {
 
       <!-- ═══════════ CANDLE HISTORY TAB ═══════════ -->
       @if (activeTab() === 'candles') {
-        <!-- 8-card KPI strip — derived from a 200-candle analytics sample -->
-        <div class="kpi-strip">
-          <app-metric-card
-            label="Candles in sample"
-            [value]="candleAnalytics().total"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Symbols"
-            [value]="candleAnalytics().symbolCount"
-            format="number"
-            dotColor="#5AC8FA"
-          />
-          <app-metric-card
-            label="Timeframes"
-            [value]="candleAnalytics().timeframeCount"
-            format="number"
-            dotColor="#AF52DE"
-          />
-          <app-metric-card
-            label="Bullish %"
-            [value]="candleAnalytics().bullPct"
-            format="percent"
-            [dotColor]="candleAnalytics().bullPct >= 50 ? '#34C759' : '#FF3B30'"
-          />
-          <app-metric-card
-            label="Avg range (pips)"
-            [value]="candleAnalytics().avgRangePips"
-            format="number"
-            dotColor="#FF9500"
-          />
-          <app-metric-card
-            label="Max range (pips)"
-            [value]="candleAnalytics().maxRangePips"
-            format="number"
-            dotColor="#FF2D55"
-          />
-          <app-metric-card
-            label="Avg volume"
-            [value]="candleAnalytics().avgVolume"
-            format="number"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Total volume"
-            [value]="candleAnalytics().totalVolume"
-            format="number"
-            dotColor="#0071E3"
-          />
-        </div>
-
-        <!-- 3-col chart row: bull/bear donut, range histogram, volume by symbol -->
-        <div class="charts-grid three">
-          <app-chart-card
-            title="Bull vs Bear"
-            subtitle="Direction distribution across the sample"
-            [options]="bullBearDonutOptions()"
-            height="260px"
-          />
-          <app-chart-card
-            title="Range distribution"
-            subtitle="Histogram of high–low range in pips"
-            [options]="rangeHistogramOptions()"
-            height="260px"
-          />
-          <app-chart-card
-            title="Volume by symbol"
-            subtitle="Total candle volume across the sample"
-            [options]="volumeBySymbolOptions()"
-            height="260px"
-          />
-        </div>
-
-        <!-- Per-symbol + per-timeframe summary tables side-by-side -->
-        <div class="summary-row">
-          <section class="summary-card">
-            <header class="board-head">
-              <h3>Per-symbol breakdown</h3>
-              <span class="muted">Aggregated over the sample</span>
-            </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th class="num">Candles</th>
-                  <th class="num">Bull %</th>
-                  <th class="num">Avg range (pips)</th>
-                  <th class="num">Max range (pips)</th>
-                  <th class="num">Total volume</th>
-                  <th class="num">Net Δ %</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of perSymbolCandleStats(); track row.symbol) {
-                  <tr>
-                    <td class="mono">{{ row.symbol }}</td>
-                    <td class="num mono">{{ row.candles }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="row.bullPct >= 60"
-                      [class.loss]="row.bullPct <= 40"
-                    >
-                      {{ row.bullPct.toFixed(0) }}%
-                    </td>
-                    <td class="num mono">{{ row.avgRangePips.toFixed(1) }}</td>
-                    <td class="num mono">{{ row.maxRangePips.toFixed(1) }}</td>
-                    <td class="num mono">{{ formatVolume(row.totalVolume) }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="row.netChangePct > 0"
-                      [class.loss]="row.netChangePct < 0"
-                    >
-                      {{ row.netChangePct >= 0 ? '+' : '' }}{{ row.netChangePct.toFixed(2) }}%
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </section>
-
-          <section class="summary-card">
-            <header class="board-head">
-              <h3>Per-timeframe breakdown</h3>
-              <span class="muted">Activity per chart resolution</span>
-            </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>TF</th>
-                  <th class="num">Candles</th>
-                  <th class="num">Bull %</th>
-                  <th class="num">Avg range (pips)</th>
-                  <th class="num">Avg volume</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of perTimeframeCandleStats(); track row.timeframe) {
-                  <tr>
-                    <td class="mono">{{ row.timeframe }}</td>
-                    <td class="num mono">{{ row.candles }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="row.bullPct >= 60"
-                      [class.loss]="row.bullPct <= 40"
-                    >
-                      {{ row.bullPct.toFixed(0) }}%
-                    </td>
-                    <td class="num mono">{{ row.avgRangePips.toFixed(1) }}</td>
-                    <td class="num mono">{{ formatVolume(row.avgVolume) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <!-- Notable candles + main table -->
-        <div class="notable-row">
-          <section class="summary-card">
-            <header class="board-head">
-              <h3>Top movers in sample</h3>
-              <span class="muted">Largest body % per direction</span>
-            </header>
-            <table class="board-table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>TF</th>
-                  <th class="num">Open</th>
-                  <th class="num">Close</th>
-                  <th class="num">Δ pips</th>
-                  <th class="num">Body %</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (c of notableCandles(); track c.id) {
-                  <tr>
-                    <td class="mono">{{ c.symbol }}</td>
-                    <td class="mono">{{ c.timeframe }}</td>
-                    <td class="num mono">{{ formatPrice(c.open, c.symbol) }}</td>
-                    <td class="num mono">{{ formatPrice(c.close, c.symbol) }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="c.deltaPips > 0"
-                      [class.loss]="c.deltaPips < 0"
-                    >
-                      {{ c.deltaPips >= 0 ? '+' : '' }}{{ c.deltaPips.toFixed(1) }}
-                    </td>
-                    <td
-                      class="num mono"
-                      [class.profit]="c.bodyPct > 0"
-                      [class.loss]="c.bodyPct < 0"
-                    >
-                      {{ c.bodyPct >= 0 ? '+' : '' }}{{ c.bodyPct.toFixed(2) }}%
-                    </td>
-                    <td class="mono">{{ formatUtcMinute(c.timestamp) }}</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </section>
-        </div>
-
-        <!-- Existing paged candle data-table — full historical browser. -->
-        <!-- Generated bars used to fill this table silently whenever the
-             endpoint came back empty — random prices with hour-spaced stamps
-             read as real history. They are opt-in now and labelled. -->
-        @if (showSampleCandles()) {
-          <div class="sample-banner warn" role="status">
-            <span>
-              <b>Sample data.</b> These bars are randomly generated for layout checks — not market
-              history. Prices, times and volumes are invented.
-            </span>
-            <button type="button" class="link-btn" (click)="toggleSampleCandles()">
-              Back to engine data
-            </button>
-          </div>
-        } @else if (candleSourceEmpty()) {
-          <div class="sample-banner" role="status">
-            <span>
-              The engine returned no candles for this query (<code>/market-data/candle/list</code>).
-              Check the EA candle backfill or widen the filter.
-            </span>
-            <button type="button" class="link-btn" (click)="toggleSampleCandles()">
-              Show sample data
-            </button>
-          </div>
-        }
-        <section class="data-table-card">
-          <header class="board-head">
-            <h3>All candles</h3>
-            <span class="muted">
-              {{
-                showSampleCandles()
-                  ? 'Sample data — not market history'
-                  : 'Browse the complete OHLCV history'
-              }}
-            </span>
-          </header>
-          <app-data-table [columnDefs]="candleColumns" [fetchData]="fetchCandles" />
-        </section>
+        <app-candle-history
+          [symbols]="watchedSymbols()"
+          [initialSymbol]="chartSymbol()"
+          [initialTimeframe]="chartTimeframe()"
+          [pipFactor]="pipFactorFn"
+          [formatPrice]="formatPriceFn"
+        />
       }
     </div>
   `,
@@ -2175,9 +1951,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     return { line: lastLine, signal: lastSignal, hist: lastLine - lastSignal };
   }
 
-  /** Pip factor for the focused symbol (JPY pairs = 100, others = 10000). */
+  /** Pip factor for the focused symbol — the page-wide rule ({@link pipFactorFor}). */
   private pipFactor(symbolSlash: string): number {
-    return symbolSlash.toUpperCase().includes('JPY') ? 100 : 10000;
+    return this.pipFactorFor(symbolSlash);
   }
 
   /**
@@ -2653,8 +2429,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       grid.push([p.t, yBin, p.vol]);
     }
     const yLabels: string[] = [];
-    const isJpy = this.chartSymbol().toUpperCase().includes('JPY');
-    const digits = isJpy ? 3 : 5;
+    const digits = this.decimalsFor(this.chartSymbol(), priceLo);
     for (let i = 0; i < PRICE_BINS; i++) {
       yLabels.push((priceLo + step * (i + 0.5)).toFixed(digits));
     }
@@ -2780,13 +2555,6 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   private hourlySpread: Record<string, { sum: number; count: number }[]> = {};
   private readonly hourlySpreadRev = signal(0);
 
-  // The candle endpoint can return nothing (fresh DB, filter mismatch). A
-  // locally generated sample used to fill the table silently — random
-  // prices with hour-spaced timestamps presented as market history. It is
-  // now opt-in and prominently labelled when shown.
-  readonly showSampleCandles = signal(false);
-  readonly candleSourceEmpty = signal(false);
-
   // Watched-pair catalogue is driven by the CurrencyPair API — fetched once
   // at OnInit and used as the source-of-truth for every spread / strength /
   // depth board on the page. A hardcoded majors list (the previous shape)
@@ -2805,6 +2573,24 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   ]);
   /** Display variant (slash-formatted) of {@link watchedSymbols}. Same length and order. */
   displaySymbols = computed(() => this.watchedSymbols().map((s) => this.formatPairSymbol(s)));
+
+  /**
+   * Per-symbol quote metadata from the CurrencyPair catalogue, keyed by the API symbol
+   * ("EURUSD"): one pip in price units (the engine's `InstrumentMath.ResolvePipSize` rule —
+   * ten points for FX, the point for an index or a metal), the quote's digits and the asset
+   * class. Before this every non-JPY symbol was priced at 0.0001 a pip, so DE40's 2-point
+   * range read "20000.0 pips" and USD/NGN's spread "12,160".
+   */
+  private readonly pairMeta = signal<
+    Record<string, { pipSize: number; digits: number; assetClass: string | null }>
+  >({});
+
+  /**
+   * The trading-day snapshot per API symbol (`market-data/watchlist-quotes`: prior close, day
+   * open / high / low — the same read the chart watchlist uses). Drives every "day" figure.
+   */
+  private readonly dayQuotes = signal<Record<string, WatchQuote>>({});
+  private readonly watchlistService = inject(WatchlistService);
 
   /** Insert a slash between the base and quote currencies (`EURUSD` → `EUR/USD`). */
   private formatPairSymbol(symbol: string): string {
@@ -2826,10 +2612,20 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       )
       .subscribe((res) => {
         if (!res?.status || !res.data?.data) return;
-        const symbols = res.data.data
-          .filter((p) => p.isActive && !!p.symbol)
-          .map((p) => p.symbol!.toUpperCase())
-          .sort();
+        const active = res.data.data.filter((p) => p.isActive && !!p.symbol);
+        // `assetClass` is on the wire but not yet on the generated DTO.
+        const meta: Record<string, { pipSize: number; digits: number; assetClass: string | null }> =
+          {};
+        for (const p of active) {
+          const assetClass = (p as { assetClass?: string | null }).assetClass ?? null;
+          meta[p.symbol!.toUpperCase()] = {
+            pipSize: pipSizeFor(p.decimalPlaces, assetClass),
+            digits: p.decimalPlaces,
+            assetClass,
+          };
+        }
+        this.pairMeta.set(meta);
+        const symbols = active.map((p) => p.symbol!.toUpperCase()).sort();
         if (symbols.length === 0) return;
         // Detect new pairs (catalogue grew vs the seeded defaults) so we
         // can backfill their spark histories. Without this, freshly-added
@@ -2842,6 +2638,27 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         const isNew = symbols.some((s) => !previous.has(s));
         const tf = this.chartTimeframe();
         if (isNew && tf) this.seedSparkHistory(tf);
+        if (isNew) this.loadDayQuotes();
+      });
+  }
+
+  /**
+   * One batched read of the trading-day snapshot for every watched symbol. A failure keeps
+   * the previous snapshot — day figures go stale by one cycle rather than blanking.
+   */
+  private loadDayQuotes(): void {
+    const symbols = this.watchedSymbols();
+    if (symbols.length === 0) return;
+    from(this.watchlistService.quotes(symbols))
+      .pipe(
+        catchError(() => of([] as WatchQuote[])),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((rows) => {
+        if (rows.length === 0) return;
+        const next: Record<string, WatchQuote> = { ...this.dayQuotes() };
+        for (const q of rows) if (q.symbol) next[q.symbol.toUpperCase()] = q;
+        this.dayQuotes.set(next);
       });
   }
 
@@ -2898,7 +2715,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     for (const p of this.livePrices()) {
       const sym = p.symbol ?? '';
       const parts = sym.split('/');
-      if (parts.length !== 2) continue;
+      if (parts.length !== 2 || p.changePct === null) continue;
       const [base, quote] = parts;
       if (buckets[base]) {
         buckets[base].sum += p.changePct;
@@ -2970,305 +2787,14 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // windows.
   activityFeed = computed(() => this.activityBuffer().slice(0, 12));
 
-  rangeInPips(p: PriceEntry): number {
-    return (p.high24h - p.low24h) * this.pipFactorFor(p.symbol);
+  /** The trading day's range in pips; null until the day snapshot has arrived. */
+  rangeInPips(p: PriceEntry): number | null {
+    if (p.dayHigh === null || p.dayLow === null) return null;
+    return (p.dayHigh - p.dayLow) * this.pipFactorFor(p.symbol);
   }
 
   /** Every currency bucket at exactly zero — the chart would be eight grey stubs. */
   currencyStrengthAllFlat = computed(() => this.currencyStrength().every((d) => d.strength === 0));
-
-  // ── Candle History tab — analytics over a 200-candle sample ────────
-  // Lazy-loaded the first time the user opens this tab (or when invalidated
-  // by `loadCandleAnalytics()`). Keeping it separate from the paged data
-  // table means we get stable cross-page aggregations even when the user
-  // browses to page 5 of the table.
-  candleAnalyticsSample = signal<CandleDto[]>([]);
-  private candleAnalyticsLoaded = false;
-
-  candleAnalytics = computed(() => {
-    const candles = this.candleAnalyticsSample();
-    if (candles.length === 0) {
-      return {
-        total: 0,
-        symbolCount: 0,
-        timeframeCount: 0,
-        bullPct: 0,
-        bearPct: 0,
-        avgRangePips: 0,
-        maxRangePips: 0,
-        avgVolume: 0,
-        totalVolume: 0,
-      };
-    }
-    const symbols = new Set<string>();
-    const timeframes = new Set<string>();
-    let bullCount = 0;
-    let bearCount = 0;
-    let totalRangePips = 0;
-    let maxRangePips = 0;
-    let totalVolume = 0;
-    for (const c of candles) {
-      if (c.symbol) symbols.add(c.symbol);
-      if (c.timeframe) timeframes.add(c.timeframe);
-      if (c.close > c.open) bullCount++;
-      else if (c.close < c.open) bearCount++;
-      const isJPY = (c.symbol ?? '').includes('JPY');
-      const pipFactor = isJPY ? 100 : 10000;
-      const rangePips = (c.high - c.low) * pipFactor;
-      totalRangePips += rangePips;
-      if (rangePips > maxRangePips) maxRangePips = rangePips;
-      totalVolume += c.volume ?? 0;
-    }
-    return {
-      total: candles.length,
-      symbolCount: symbols.size,
-      timeframeCount: timeframes.size,
-      bullPct: (bullCount / candles.length) * 100,
-      bearPct: (bearCount / candles.length) * 100,
-      avgRangePips: +(totalRangePips / candles.length).toFixed(1),
-      maxRangePips: +maxRangePips.toFixed(1),
-      avgVolume: Math.round(totalVolume / candles.length),
-      totalVolume,
-    };
-  });
-
-  bullBearDonutOptions = computed<EChartsOption>(() => {
-    const a = this.candleAnalytics();
-    if (a.total === 0) return {};
-    const dojiPct = Math.max(0, 100 - a.bullPct - a.bearPct);
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: [
-            { value: +a.bullPct.toFixed(1), name: 'Bullish', itemStyle: { color: '#34C759' } },
-            { value: +a.bearPct.toFixed(1), name: 'Bearish', itemStyle: { color: '#FF3B30' } },
-            { value: +dojiPct.toFixed(1), name: 'Doji', itemStyle: { color: '#8E8E93' } },
-          ],
-        },
-      ],
-    };
-  });
-
-  rangeHistogramOptions = computed<EChartsOption>(() => {
-    const candles = this.candleAnalyticsSample();
-    if (candles.length === 0) return {};
-    const ranges = candles.map((c) => {
-      const isJPY = (c.symbol ?? '').includes('JPY');
-      const pipFactor = isJPY ? 100 : 10000;
-      return (c.high - c.low) * pipFactor;
-    });
-    const max = Math.max(...ranges);
-    const bins = 16;
-    const width = max > 0 ? max / bins : 1;
-    const counts = new Array(bins).fill(0);
-    ranges.forEach((r) => {
-      const idx = Math.min(Math.floor(r / width), bins - 1);
-      counts[idx]++;
-    });
-    return {
-      grid: { top: 10, right: 20, bottom: 30, left: 40 },
-      tooltip: {
-        trigger: 'axis',
-        formatter: (p: any) => `${p[0].name} pips<br/>${p[0].value} candles`,
-      },
-      xAxis: {
-        type: 'category',
-        // Bin ranges ("0–5"), not "0+" — the rotated "+" glyph read as an
-        // asterisk at 9px and the labels overprinted each other.
-        data: counts.map((_, i) => `${(i * width).toFixed(0)}–${((i + 1) * width).toFixed(0)}`),
-        axisLabel: { fontSize: 9, color: '#6E6E73', hideOverlap: true },
-        axisTick: { show: false },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: counts.map((c) => ({
-            value: c,
-            itemStyle: { color: '#FF9500', borderRadius: [4, 4, 0, 0] },
-          })),
-          barWidth: '80%',
-        },
-      ],
-    };
-  });
-
-  volumeBySymbolOptions = computed<EChartsOption>(() => {
-    const map: Record<string, number> = {};
-    for (const c of this.candleAnalyticsSample()) {
-      const key = c.symbol ?? '';
-      map[key] = (map[key] ?? 0) + (c.volume ?? 0);
-    }
-    const entries = Object.entries(map).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return {};
-    return {
-      grid: { top: 10, right: 56, bottom: 30, left: 80 },
-      xAxis: {
-        type: 'value',
-        axisLabel: {
-          fontSize: 10,
-          color: '#6E6E73',
-          hideOverlap: true,
-          formatter: (v: number) => this.formatVolume(v),
-        },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: entries.map(([s]) => s),
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: entries.map(([, v]) => ({
-            value: v,
-            itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
-          })),
-          barWidth: 14,
-          label: {
-            show: true,
-            position: 'right',
-            fontSize: 9,
-            color: '#6E6E73',
-            formatter: (p: any) => this.formatVolume(p.value),
-          },
-        },
-      ],
-    };
-  });
-
-  perSymbolCandleStats = computed(() => {
-    const groups: Record<
-      string,
-      {
-        candles: CandleDto[];
-      }
-    > = {};
-    for (const c of this.candleAnalyticsSample()) {
-      const key = c.symbol ?? '';
-      if (!groups[key]) groups[key] = { candles: [] };
-      groups[key].candles.push(c);
-    }
-    return Object.entries(groups)
-      .map(([symbol, { candles }]) => {
-        const isJPY = symbol.includes('JPY');
-        const pipFactor = isJPY ? 100 : 10000;
-        let bull = 0;
-        let totalRange = 0;
-        let maxRange = 0;
-        let totalVolume = 0;
-        for (const c of candles) {
-          if (c.close > c.open) bull++;
-          const r = (c.high - c.low) * pipFactor;
-          totalRange += r;
-          if (r > maxRange) maxRange = r;
-          totalVolume += c.volume ?? 0;
-        }
-        const sorted = [...candles].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-        );
-        const first = sorted[0];
-        const last = sorted[sorted.length - 1];
-        const netChangePct = first.open > 0 ? ((last.close - first.open) / first.open) * 100 : 0;
-        return {
-          symbol,
-          candles: candles.length,
-          bullPct: (bull / candles.length) * 100,
-          avgRangePips: totalRange / candles.length,
-          maxRangePips: maxRange,
-          totalVolume,
-          netChangePct,
-        };
-      })
-      .sort((a, b) => b.candles - a.candles);
-  });
-
-  perTimeframeCandleStats = computed(() => {
-    const groups: Record<string, CandleDto[]> = {};
-    for (const c of this.candleAnalyticsSample()) {
-      const key = c.timeframe ?? '';
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(c);
-    }
-    // Stable canonical timeframe order.
-    const order = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1', 'MN'];
-    return Object.entries(groups)
-      .map(([timeframe, candles]) => {
-        let bull = 0;
-        let totalRange = 0;
-        let totalVolume = 0;
-        for (const c of candles) {
-          const isJPY = (c.symbol ?? '').includes('JPY');
-          const pipFactor = isJPY ? 100 : 10000;
-          if (c.close > c.open) bull++;
-          totalRange += (c.high - c.low) * pipFactor;
-          totalVolume += c.volume ?? 0;
-        }
-        return {
-          timeframe,
-          candles: candles.length,
-          bullPct: (bull / candles.length) * 100,
-          avgRangePips: totalRange / candles.length,
-          avgVolume: totalVolume / candles.length,
-        };
-      })
-      .sort((a, b) => order.indexOf(a.timeframe) - order.indexOf(b.timeframe));
-  });
-
-  // Top 8 most-significant candles by absolute body %, alternating bull/bear.
-  notableCandles = computed(() => {
-    return this.candleAnalyticsSample()
-      .map((c) => {
-        const isJPY = (c.symbol ?? '').includes('JPY');
-        const pipFactor = isJPY ? 100 : 10000;
-        const deltaPips = (c.close - c.open) * pipFactor;
-        const bodyPct = c.open > 0 ? ((c.close - c.open) / c.open) * 100 : 0;
-        return { ...c, deltaPips, bodyPct };
-      })
-      .sort((a, b) => Math.abs(b.bodyPct) - Math.abs(a.bodyPct))
-      .slice(0, 8);
-  });
-
-  private loadCandleAnalytics() {
-    if (this.candleAnalyticsLoaded) return;
-    this.candleAnalyticsLoaded = true;
-    this.marketDataService
-      .listCandles({ currentPage: 1, itemCountPerPage: 200, filter: null })
-      .pipe(
-        catchError(() => of(null)),
-        takeUntil(this.destroy$),
-      )
-      .subscribe((res: any) => {
-        const data: CandleDto[] = res?.data?.data ?? [];
-        if (data.length > 0) {
-          this.candleSourceEmpty.set(false);
-          this.candleAnalyticsSample.set(data);
-        } else {
-          // Nothing (or 4xx) from /market-data/candle/list. Only the explicit
-          // sample toggle substitutes generated bars — and then the tab
-          // carries a "sample data" banner so nobody reads them as history.
-          this.candleSourceEmpty.set(true);
-          this.candleAnalyticsSample.set(
-            this.showSampleCandles()
-              ? this.generateSampleCandles({ currentPage: 1, itemCountPerPage: 200, filter: null })
-                  .data
-              : [],
-          );
-        }
-      });
-  }
 
   /// Returns spread values to compute KPIs from. Prefers live ticks; when
   /// the EA tick stream is stale and every current row is a candle-fallback
@@ -3306,8 +2832,14 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     if (spreads.length === 0) return null;
     return +Math.max(...spreads).toFixed(1);
   });
-  upPairsCount = computed(() => this.livePrices().filter((p) => p.changePct > 0).length);
-  downPairsCount = computed(() => this.livePrices().filter((p) => p.changePct < 0).length);
+  upPairsCount = computed(() => this.livePrices().filter((p) => (p.changePct ?? 0) > 0).length);
+  downPairsCount = computed(() => this.livePrices().filter((p) => (p.changePct ?? 0) < 0).length);
+  /** "15 / 11" — or "—" until the day snapshot lands, rather than a confident "0 / 0". */
+  upDownLabel = computed(() =>
+    this.livePrices().some((p) => p.changePct !== null)
+      ? `${this.upPairsCount()} / ${this.downPairsCount()}`
+      : '—',
+  );
 
   // Stale-feed indicator. Compares the freshest LivePriceDto.timestamp against
   // wall-clock now. > 60s usually means the EA stopped pushing ticks.
@@ -3333,9 +2865,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // ribbon — operators want to spot symbols breaking out without scanning
   // every card.
   topMovers = computed(() => {
-    // Only pairs that have moved: six rows of "+0.00%" is not a movers table.
+    // Only pairs that have moved on the day: six rows of "+0.00%" is not a movers table.
     return this.livePrices()
-      .filter((p) => p.changePct !== 0)
+      .filter((p): p is PriceEntry & { changePct: number } => !!p.changePct)
       .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
       .slice(0, 6);
   });
@@ -3366,27 +2898,22 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     }));
   });
 
-  // Per-symbol matrix row. `rangePips` is derived from priceHistory so we
-  // get richer info even when a single tick has been received (the live DTO's
-  // own high/low collapses to one point on first arrival).
+  // Per-symbol matrix row. `rangePips` is the trading day's range (engine day snapshot widened
+  // by the live bid). It used to be max − min of this page's own ≤100-poll tick buffer — a few
+  // minutes of quotes under a column that read as the session's range.
   symbolMatrix = computed<
     { symbol: string; live: PriceEntry | null; spark: number[]; rangePips: number | null }[]
   >(() => {
     const live = this.livePrices();
     return this.displaySymbols().map((sym, i) => {
       const apiSym = this.watchedSymbols()[i];
-      // rangePips stays on the live-tick buffer (it's a live range read);
-      // the spark uses the timeframe-aligned series so it doesn't churn.
-      const hist = this.priceHistory[apiSym] ?? [];
       // Candle closes only — no tick-buffer fallback, for the same reason as the
       // watch ribbon: a quiet pair's tick slice draws a flat line that reads as
-      // real, unmoving history. rangePips below still uses `hist`; that one IS a
-      // live-tick read and is labelled as such.
+      // real, unmoving history.
       const sparkHist = this.sparkSeries[apiSym] ?? [];
       const liveEntry = live.find((p) => p.symbol === sym) ?? null;
-      const pipFactor = this.pipFactorFor(sym);
-      const rangePips =
-        hist.length > 1 ? +((Math.max(...hist) - Math.min(...hist)) * pipFactor).toFixed(1) : null;
+      const dayRange = liveEntry ? this.rangeInPips(liveEntry) : null;
+      const rangePips = dayRange === null ? null : +dayRange.toFixed(1);
       return {
         symbol: sym,
         live: liveEntry,
@@ -3516,72 +3043,6 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     }
     return out;
   });
-
-  // Prices take the row's own symbol precision (JPY 3dp, majors 5dp) and the
-  // timestamp uses the same yyyy-MM-dd HH:mm formatter as the rest of the
-  // tab — the previous toLocaleString() printed "9/4/2026, 10:49:13 PM" next
-  // to a "02/09 21:49" table above it.
-  candleColumns: ColDef[] = [
-    { field: 'symbol', headerName: 'Symbol', width: 110 },
-    { field: 'timeframe', headerName: 'TF', width: 80 },
-    {
-      field: 'open',
-      headerName: 'Open',
-      width: 120,
-      cellClass: 'ag-right-aligned-cell',
-      valueFormatter: (p: any) =>
-        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
-    },
-    {
-      field: 'high',
-      headerName: 'High',
-      width: 120,
-      cellClass: 'ag-right-aligned-cell',
-      valueFormatter: (p: any) =>
-        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
-    },
-    {
-      field: 'low',
-      headerName: 'Low',
-      width: 120,
-      cellClass: 'ag-right-aligned-cell',
-      valueFormatter: (p: any) =>
-        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
-    },
-    {
-      field: 'close',
-      headerName: 'Close',
-      width: 120,
-      cellClass: 'ag-right-aligned-cell',
-      valueFormatter: (p: any) =>
-        p.value == null ? '—' : this.formatPrice(p.value, p.data?.symbol ?? null),
-    },
-    {
-      field: 'volume',
-      headerName: 'Volume',
-      width: 110,
-      cellClass: 'ag-right-aligned-cell',
-      valueFormatter: (p: any) => (p.value == null ? '—' : this.formatVolume(p.value)),
-    },
-    {
-      field: 'timestamp',
-      headerName: 'Time (UTC)',
-      flex: 1,
-      valueFormatter: (p: any) => this.formatUtcMinute(p.value),
-    },
-  ];
-
-  /** yyyy-MM-dd HH:mm in UTC — the one timestamp format on the candle tab. */
-  formatUtcMinute(iso: string | null | undefined): string {
-    if (!iso) return '—';
-    const d = new Date(iso);
-    if (!Number.isFinite(d.getTime())) return '—';
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return (
-      `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
-      `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-    );
-  }
 
   /**
    * Minimum shared samples before a correlation / z-score is quoted. With a
@@ -3731,7 +3192,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         symbol: sym,
         points: hist.length,
         current,
-        changePct: live?.changePct ?? 0,
+        changePct: live?.changePct ?? null,
         direction: live?.direction ?? 'none',
         fromCandle: live?.fromCandle ?? false,
       };
@@ -3840,9 +3301,9 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             value: [+s.rangePips.toFixed(1), +s.volatility.toFixed(2), s.symbol],
             itemStyle: {
               color:
-                s.changePct > 0
+                (s.changePct ?? 0) > 0
                   ? 'rgba(52,199,89,0.85)'
-                  : s.changePct < 0
+                  : (s.changePct ?? 0) < 0
                     ? 'rgba(255,59,48,0.85)'
                     : 'rgba(142,142,147,0.7)',
               borderColor: '#fff',
@@ -3990,20 +3451,43 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
       series = [];
     }
     return {
-      included: series.filter((s) => !this.isExoticPair(s.symbol)),
-      excluded: series.filter((s) => this.isExoticPair(s.symbol)),
+      included: series.filter((s) => this.spreadExclusion(s.symbol) === null),
+      nonFx: series.filter((s) => this.spreadExclusion(s.symbol) === 'non-fx'),
+      exotic: series.filter((s) => this.spreadExclusion(s.symbol) === 'exotic'),
     };
   });
 
-  /// Caption for the Spread comparison card — notes any exotic pairs dropped
-  /// from the chart so the exclusion is visible, not silent.
+  /**
+   * Why a symbol stays off the spread comparison, or null to chart it. A spread in pips only
+   * compares across FX: an index or metal pip is its own point, so NAS/100 at 0.0 and XAU/USD
+   * at 35 say nothing next to EUR/USD at 0.3. Exotic FX is dropped for scale (USD/NGN's ~120
+   * pips flattens every major). The asset class comes from the catalogue; by symbol alone,
+   * "NAS/100" and "XAU/USD" were called exotic while DE40 and US500 were charted as FX.
+   */
+  private spreadExclusion(symbol: string): 'non-fx' | 'exotic' | null {
+    const assetClass = this.pairMeta()[(symbol ?? '').replace('/', '').toUpperCase()]?.assetClass;
+    if (assetClass && !/^fx/i.test(assetClass)) return 'non-fx';
+    const cleaned = (symbol ?? '').replace('/', '');
+    // No catalogue row yet: a symbol that is not two ISO codes is not an FX pair either.
+    if (!assetClass && !/^[A-Z]{6}$/i.test(cleaned)) return 'non-fx';
+    return this.isExoticPair(symbol) ? 'exotic' : null;
+  }
+
+  /// Caption for the Spread comparison card — names the symbols dropped from
+  /// the chart so the exclusion is visible, not silent.
   spreadChartCaption = computed(() => {
-    const excluded = this.spreadChartData().excluded;
-    const base = 'Live-only spreads across watched pairs';
-    if (excluded.length === 0) return base;
-    const names = excluded.map((e) => e.symbol).join(', ');
-    return `${base} · excludes ${excluded.length} exotic (${names})`;
+    const { nonFx, exotic } = this.spreadChartData();
+    const parts: string[] = [];
+    if (nonFx.length) parts.push(`non-FX ${nonFx.map((e) => e.symbol).join(', ')}`);
+    if (exotic.length) parts.push(`exotic ${exotic.map((e) => e.symbol).join(', ')}`);
+    const base = 'Live FX spreads across watched pairs, in pips';
+    return parts.length ? `${base} · excludes ${parts.join('; ')}` : base;
   });
+
+  /** One readable row per pair: 22 bars in a fixed 240px drew 9px slots under 11px labels. */
+  spreadChartHeight = computed(
+    () => `${Math.max(240, this.spreadChartData().included.length * 18 + 50)}px`,
+  );
 
   // Dynamic computed chart options
   spreadChartOptions = computed<EChartsOption>(() => {
@@ -4124,14 +3608,31 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   });
 
   spreadHistoryOptions = computed<EChartsOption>(() => {
+    // `spreadHistory` is a plain object: without this read the computed had no signal to
+    // depend on and kept its first evaluation for the life of the page.
+    this.livePrices();
     const history = this.spreadHistory;
-    const symbols = Object.keys(history).filter((s) => history[s].length > 1);
+    // Same set as the spread comparison: an index or metal "pip" and USD/NGN's ~120 pips put
+    // every major on one flat line along the floor.
+    const symbols = Object.keys(history).filter(
+      (s) => history[s].length > 1 && this.spreadExclusion(s) === null,
+    );
     if (symbols.length === 0) return {};
-    const colors = ['#0071E3', '#34C759', '#FF9500', '#AF52DE'];
+    const colors = [
+      '#0071E3',
+      '#34C759',
+      '#FF9500',
+      '#AF52DE',
+      '#5AC8FA',
+      '#FF2D55',
+      '#64D2FF',
+      '#FF3B30',
+    ];
     const maxLen = Math.max(...symbols.map((s) => history[s].length));
     return {
-      grid: { top: 30, right: 20, bottom: 30, left: 50 },
-      legend: { top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      // Scrollable legend above a reserved band — four wrapped rows of names drew over the plot.
+      grid: { top: 44, right: 20, bottom: 30, left: 50 },
+      legend: { type: 'scroll', top: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
       xAxis: {
         type: 'category',
         data: Array.from({ length: maxLen }, (_, i) => `${i}`),
@@ -4147,14 +3648,15 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         nameTextStyle: { fontSize: 10, color: '#6E6E73' },
       },
       tooltip: { trigger: 'axis' },
+      // A spread holds until the next quote changes it: steps, not splines (a smoothed 0.2 → 0.1
+      // drop dipped below 0.1), and no area fills — 20+ translucent fills stacked into one smear.
       series: symbols.map((sym, i) => ({
         name: sym,
         type: 'line',
         data: history[sym],
-        smooth: true,
+        step: 'end',
         symbol: 'none',
         lineStyle: { color: colors[i % colors.length], width: 1.5 },
-        areaStyle: { color: colors[i % colors.length] + '10' },
       })),
     };
   });
@@ -4259,13 +3761,6 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
-    // Lazy-load the candle analytics sample the first time the user lands on
-    // the Candle History tab. Loading on every page mount would cost a 200-
-    // candle round-trip even for users who never open this tab.
-    effect(() => {
-      if (this.activeTab() === 'candles') this.loadCandleAnalytics();
-    });
-
     // Refresh Market Insights immediately when the operator switches
     // symbol/timeframe on the chart — don't make them wait up to 5s for
     // the timer-based poller to catch up.
@@ -4360,6 +3855,12 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     timer(0, 30_000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => this.nowMs.set(Date.now()));
+
+    // The day snapshot (prior close, day high / low) moves slowly — one batched read every
+    // 15 s; the live bid on each 3 s poll keeps change % and the range current between reads.
+    timer(0, 15_000)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe(() => this.loadDayQuotes());
 
     // Market Insights cadence: 5s. Pulls the latest regime snapshot and the
     // most recent trade signal (which carries ML scoring fields) for the
@@ -4567,13 +4068,20 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             // within a poll or two.
             const sparkData = this.sparkSeries[sym] ?? [];
 
+            // The trading day, from the engine's day snapshot: the bid against the prior close,
+            // and the day's high/low widened by the bid (the snapshot is up to 15 s old).
+            const day = this.dayQuotes()[sym];
+            const prevClose = day?.prevClose ?? null;
+            const dayChange = prevClose ? data.bid - prevClose : null;
+
             return {
               ...data,
               spread: spreadPips,
-              change,
-              changePct: prevBid > 0 ? (change / prevBid) * 100 : 0,
-              high24h: Math.max(...(this.priceHistory[sym] || [data.bid])),
-              low24h: Math.min(...(this.priceHistory[sym] || [data.bid])),
+              change: dayChange,
+              changePct: dayChange !== null && prevClose ? (dayChange / prevClose) * 100 : null,
+              dayHigh: day?.dayHigh != null ? Math.max(day.dayHigh, data.bid) : null,
+              dayLow: day?.dayLow != null ? Math.min(day.dayLow, data.bid) : null,
+              tickChange: change,
               sparkData,
               prevBid,
               direction:
@@ -4607,7 +4115,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
             symbol: p.symbol ?? '',
             direction: p.direction,
             price: this.formatPrice(p.bid, p.symbol),
-            delta: p.change * pipFactor,
+            delta: p.tickChange * pipFactor,
           });
         }
         if (newEvents.length > 0) {
@@ -4755,6 +4263,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
 
   private decimalsFor(symbol: string | null, price?: number): number {
     const s = (symbol ?? '').toUpperCase();
+    const digits = this.pairMeta()[s.replace('/', '')]?.digits;
+    if (digits !== undefined && digits >= 0) return digits;
     if (s.includes('XAU')) return 2;
     if (s.includes('XAG')) return 3;
     if (s.includes('JPY')) return 3;
@@ -4763,14 +4273,18 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   }
 
   /**
-   * Price units per pip. One definition for the whole page — the same
-   * `isJPY ? 100 : 10000` guess was repeated in a dozen places and was wrong
-   * for metals, where a pip is 0.1 (XAU) / 0.01 (XAG).
+   * Pips per unit of price — one definition for the whole page. The engine's own pip comes
+   * first: the day snapshot's broker-reported `pipSize`, then the catalogue's digits and asset
+   * class (`pipSizeFor`, the engine rule). The symbol guess below only covers the first poll,
+   * before either has arrived.
    */
   private pipFactorFor(symbol: string | null): number {
     const s = (symbol ?? '').toUpperCase();
-    if (s.includes('XAU')) return 10;
-    if (s.includes('XAG')) return 100;
+    const key = s.replace('/', '');
+    const pip = this.dayQuotes()[key]?.pipSize || this.pairMeta()[key]?.pipSize;
+    if (pip && pip > 0) return pip < 1 ? Math.round(1 / pip) : 1 / pip;
+    if (s.includes('XAU')) return 100;
+    if (s.includes('XAG')) return 1000;
     if (s.includes('JPY')) return 100;
     return 10000;
   }
@@ -4827,10 +4341,23 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     return change > 0 ? '#34C759' : change < 0 ? '#FF3B30' : '#8E8E93';
   }
 
-  getRangePosition(price: PriceEntry): number {
-    const range = price.high24h - price.low24h;
+  /** Where the bid sits in the day's range, 0–100; null without a day snapshot. */
+  getRangePosition(price: PriceEntry): number | null {
+    if (price.dayHigh === null || price.dayLow === null) return null;
+    const range = price.dayHigh - price.dayLow;
     if (range === 0) return 50;
-    return ((price.bid - price.low24h) / range) * 100;
+    return ((price.bid - price.dayLow) / range) * 100;
+  }
+
+  /** The page's pip rule and price formatter, handed to the Candle History tab. */
+  readonly pipFactorFn = (symbol: string | null): number => this.pipFactorFor(symbol);
+  readonly formatPriceFn = (price: number, symbol: string | null): string =>
+    this.formatPrice(price, symbol);
+
+  /** "+0.14%", "−0.89%", or "—" when the day's change is not known. */
+  formatChangePct(pct: number | null, digits = 2): string {
+    if (pct === null || !Number.isFinite(pct)) return '—';
+    return `${pct >= 0 ? '+' : ''}${pct.toFixed(digits)}%`;
   }
 
   formatVolume(v: number | undefined | null): string {
@@ -4838,86 +4365,5 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
     return v.toFixed(0);
-  }
-
-  fetchCandles = (params: PagerRequest): Observable<PagedData<CandleDto>> => {
-    if (this.showSampleCandles()) return of(this.generateSampleCandles(params));
-    const empty: PagedData<CandleDto> = {
-      pager: {
-        totalItemCount: 0,
-        currentPage: params.currentPage ?? 1,
-        itemCountPerPage: params.itemCountPerPage ?? 25,
-        pageNo: 0,
-        pageSize: params.itemCountPerPage ?? 25,
-        filter: null,
-      },
-      data: [],
-    };
-    return this.marketDataService.listCandles(params).pipe(
-      map((res: ResponseData<PagedData<CandleDto>>) => {
-        const rows = res.data?.data ?? [];
-        this.candleSourceEmpty.set(rows.length === 0);
-        return rows.length > 0 ? res.data! : empty;
-      }),
-      catchError(() => {
-        this.candleSourceEmpty.set(true);
-        return of(empty);
-      }),
-    );
-  };
-
-  /** Flip the sample-data toggle and rebuild both the analytics sample and the table. */
-  toggleSampleCandles(): void {
-    this.showSampleCandles.update((v) => !v);
-    this.candleAnalyticsLoaded = false;
-    this.candleAnalyticsSample.set([]);
-    this.loadCandleAnalytics();
-    // The data table re-fetches when its fetchData input identity changes.
-    this.fetchCandles = this.fetchCandles.bind(this);
-  }
-
-  private generateSampleCandles(params: PagerRequest): PagedData<CandleDto> {
-    const symbols = ['EUR/USD', 'GBP/USD', 'USD/JPY', 'AUD/USD'];
-    const timeframes = ['M5', 'M15', 'H1', 'H4', 'D1'];
-    const pageSize = params.itemCountPerPage ?? 25;
-    const candles: CandleDto[] = [];
-    const now = new Date();
-    for (let i = 0; i < pageSize; i++) {
-      const sym = symbols[i % symbols.length];
-      const isJPY = sym.includes('JPY');
-      let price = isJPY ? 150.5 : 1.085;
-      price += (Math.random() - 0.5) * (isJPY ? 2 : 0.01);
-      const vol = isJPY ? 0.3 : 0.001;
-      const o = price,
-        c = o + (Math.random() - 0.48) * vol;
-      const h = Math.max(o, c) + Math.random() * vol * 0.4;
-      const l = Math.min(o, c) - Math.random() * vol * 0.4;
-      const time = new Date(now.getTime() - (pageSize - i) * 3600000);
-      candles.push({
-        id: i + 1,
-        symbol: sym,
-        timeframe: timeframes[i % timeframes.length],
-        open: +o.toFixed(isJPY ? 3 : 5),
-        high: +h.toFixed(isJPY ? 3 : 5),
-        low: +l.toFixed(isJPY ? 3 : 5),
-        close: +c.toFixed(isJPY ? 3 : 5),
-        volume: Math.floor(200 + Math.random() * 3000),
-        timestamp: time.toISOString(),
-        isClosed: true,
-      });
-    }
-    return {
-      pager: {
-        totalItemCount: 200,
-        currentPage: params.currentPage ?? 1,
-        itemCountPerPage: pageSize,
-        // Page count must follow the page size the table asked for — a fixed
-        // 8 with a 25-row page printed "1–25 of 200" over a three-page pager.
-        pageNo: Math.ceil(200 / pageSize),
-        pageSize,
-        filter: null,
-      },
-      data: candles,
-    };
   }
 }

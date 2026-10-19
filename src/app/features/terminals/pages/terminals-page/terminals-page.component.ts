@@ -8,7 +8,7 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, finalize, map, of } from 'rxjs';
+import { catchError, finalize, map, of, tap } from 'rxjs';
 
 import { TerminalsService } from '@core/services/terminals.service';
 import type { DaemonOrphanDto, TerminalDaemonDto, TerminalSessionDto } from '@core/api/api.types';
@@ -20,8 +20,32 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-terminal-wizard/add-broker-terminal-wizard.component';
+
+/**
+ * A daemon / session operation held until the operator confirms it. These used window.confirm(),
+ * which an automated session dismisses unseen (that is why "Rotate API key" appeared to do
+ * nothing) and which this console does not otherwise use.
+ */
+interface TerminalAsk {
+  title: string;
+  message: string;
+  details?: string[];
+  confirmLabel: string;
+  variant: 'primary' | 'destructive';
+  run: () => void;
+}
+
+/** A freshly rotated daemon key — shown once, in-page, with a copy button. */
+interface RotatedKey {
+  daemonName: string;
+  key: string;
+  remediation: string;
+}
 
 /**
  * Phase-12 admin page: cross-broker MT5 lifecycle management via the
@@ -51,6 +75,9 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
     ProgressBarComponent,
     RelativeTimePipe,
     AddBrokerTerminalWizardComponent,
+    ConfirmDialogComponent,
+    ModalA11yDirective,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -58,18 +85,11 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
         title="Terminals"
         subtitle="Launch, monitor and close MT5 terminals through the supervisor daemon running on each host."
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refreshAll()"
-          [disabled]="loading()"
-        >
-          @if (loading()) {
-            Refreshing…
-          } @else {
-            Refresh
-          }
-        </button>
+        <!-- Bound to the resources' first-load flag, the old button never changed on a click. -->
+        <app-refresh-button
+          [refreshing]="daemonsResource.refreshing() || sessionsResource.refreshing()"
+          (refresh)="refreshAll()"
+        />
       </app-page-header>
 
       <ui-progress-bar [active]="loading()" />
@@ -406,7 +426,7 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
                         <button
                           type="button"
                           class="btn btn-secondary btn-sm"
-                          (click)="onClose(s)"
+                          (click)="askClose(s)"
                           [disabled]="closingSessionId() === s.id"
                         >
                           @if (closingSessionId() === s.id) {
@@ -437,17 +457,138 @@ import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-te
           (closed)="onWizardClosed($event)"
         />
       }
+
+      <app-confirm-dialog
+        [open]="ask() !== null"
+        [title]="ask()?.title ?? ''"
+        [message]="ask()?.message ?? ''"
+        [confirmLabel]="ask()?.confirmLabel ?? 'Confirm'"
+        [confirmVariant]="ask()?.variant ?? 'primary'"
+        (confirm)="confirmAsk()"
+        (cancelled)="ask.set(null)"
+      >
+        @if (ask()?.details?.length) {
+          <ul class="ask-details">
+            @for (line of ask()!.details!; track $index) {
+              <li>{{ line }}</li>
+            }
+          </ul>
+        }
+      </app-confirm-dialog>
+
+      @if (rotatedKey(); as rk) {
+        <div class="key-overlay" role="presentation">
+          <div
+            class="key-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="rotated-key-title"
+            appModalA11y
+            (dismiss)="rotatedKey.set(null)"
+          >
+            <h3 id="rotated-key-title">New API key for {{ rk.daemonName }}</h3>
+            <p class="small muted">
+              Shown once. Copy it before closing — the engine still has the old key pinned.
+            </p>
+            <div class="key-row">
+              <input
+                class="input mono"
+                readonly
+                [value]="rk.key"
+                aria-label="New daemon API key"
+                (focus)="$any($event.target).select()"
+              />
+              <button
+                type="button"
+                class="btn btn-primary"
+                (click)="copyKey(rk.key)"
+                data-autofocus
+              >
+                Copy
+              </button>
+            </div>
+            @if (rk.remediation) {
+              <p class="small key-remediation">{{ rk.remediation }}</p>
+            }
+            <div class="key-actions">
+              <button type="button" class="btn btn-secondary" (click)="rotatedKey.set(null)">
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   `,
   styles: [
     `
+      /* Same frame as every other page: the extra side padding indented this page's title 16px. */
       .page {
         max-width: var(--page-max-width);
         margin: 0 auto;
-        padding: var(--space-4);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .ask-details {
+        margin: var(--space-2) 0 0;
+        padding-left: 18px;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+      .key-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-4);
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(4px);
+      }
+      .key-dialog {
+        width: min(560px, 100%);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-5) var(--space-6);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        box-shadow: var(--shadow-lg);
+      }
+      .key-dialog h3 {
+        margin: 0;
+        font-size: var(--text-lg);
+      }
+      .key-dialog p {
+        margin: 0;
+      }
+      .key-row {
+        display: flex;
+        gap: var(--space-2);
+      }
+      .key-row .input {
+        flex: 1;
+        min-width: 0;
+        height: 36px;
+        padding: 0 var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-xs);
+      }
+      .key-remediation {
+        white-space: pre-line;
+        color: var(--text-secondary);
+      }
+      .key-actions {
+        display: flex;
+        justify-content: flex-end;
       }
       .block {
         display: flex;
@@ -839,6 +980,8 @@ export class TerminalsPageComponent {
     () =>
       this.terminals.listDaemons().pipe(
         map((res) => res.data ?? []),
+        // A later success clears an earlier failure; the error used to stick until "Refresh".
+        tap(() => this.daemonsErr.set(null)),
         catchError((err) => {
           this.daemonsErr.set(err?.message ?? 'Failed to load daemons.');
           return of<TerminalDaemonDto[]>([]);
@@ -851,6 +994,7 @@ export class TerminalsPageComponent {
     () =>
       this.terminals.listSessions({ includeClosed: this.includeClosed }).pipe(
         map((res) => res.data ?? []),
+        tap(() => this.sessionsErr.set(null)),
         catchError((err) => {
           this.sessionsErr.set(err?.message ?? 'Failed to load sessions.');
           return of<TerminalSessionDto[]>([]);
@@ -884,16 +1028,41 @@ export class TerminalsPageComponent {
     this.sessionsResource.refresh();
   }
 
+  // ── Confirmations ──────────────────────────────────────────────────
+  protected readonly ask = signal<TerminalAsk | null>(null);
+  protected readonly rotatedKey = signal<RotatedKey | null>(null);
+
+  protected confirmAsk(): void {
+    const a = this.ask();
+    this.ask.set(null);
+    a?.run();
+  }
+
+  protected copyKey(key: string): void {
+    if (!navigator.clipboard?.writeText) {
+      this.notify.error('Clipboard unavailable — select the key and copy it manually.');
+      return;
+    }
+    navigator.clipboard
+      .writeText(key)
+      .then(() => this.notify.success('API key copied.'))
+      .catch(() => this.notify.error('Copy failed — select the key and copy it manually.'));
+  }
+
   // Phase-15 waves 2 + 3 — install delete + daemon ops + log tail.
 
   protected onDeleteInstall(daemonId: number, installId: string): void {
-    if (
-      !confirm(
-        `Remove install '${installId}' from this daemon?\n` +
-          `The daemon will stop advertising it; running sessions on this install must be closed first.`,
-      )
-    )
-      return;
+    this.ask.set({
+      title: `Remove install '${installId}'?`,
+      message:
+        'The daemon stops advertising it; running sessions on this install must be closed first.',
+      confirmLabel: 'Remove install',
+      variant: 'destructive',
+      run: () => this.deleteInstall(daemonId, installId),
+    });
+  }
+
+  private deleteInstall(daemonId: number, installId: string): void {
     const key = `${daemonId}:${installId}`;
     this.deletingInstall.set(key);
     this.terminals
@@ -913,15 +1082,19 @@ export class TerminalsPageComponent {
   }
 
   protected onRestartDaemon(daemonId: number, daemonName: string): void {
-    if (
-      !confirm(
-        `Restart daemon '${daemonName}'?\n` +
-          `The daemon will self-exit; launchd's KeepAlive respawns it within ~2s.  Running ` +
-          `MT5 sessions survive (spawned with start_new_session=True) — only the supervisor ` +
-          `process restarts.`,
-      )
-    )
-      return;
+    this.ask.set({
+      title: `Restart daemon '${daemonName}'?`,
+      message:
+        "The daemon self-exits and launchd's KeepAlive respawns it within ~2 s. Running MT5 " +
+        'sessions survive (spawned with start_new_session=True) — only the supervisor process ' +
+        'restarts.',
+      confirmLabel: 'Restart daemon',
+      variant: 'primary',
+      run: () => this.restartDaemon(daemonId, daemonName),
+    });
+  }
+
+  private restartDaemon(daemonId: number, daemonName: string): void {
     const key = `${daemonId}:restart`;
     this.daemonOpInFlight.set(key);
     this.terminals
@@ -944,18 +1117,24 @@ export class TerminalsPageComponent {
   }
 
   protected onRotateApiKey(daemonId: number, daemonName: string): void {
-    if (
-      !confirm(
-        `Rotate API key for daemon '${daemonName}'?\n\n` +
-          `WARNING: the engine's TOFU rule means the engine still has the OLD key pinned.\n` +
-          `After rotation the daemon will be LOCKED OUT of /auth until you:\n` +
-          `  1. delete the engine-side TerminalDaemon row, OR\n` +
-          `  2. manually update its DaemonApiKey column to the new value\n` +
-          `…and then restart the daemon so it re-auths.\n\n` +
-          `The new key will be shown in a popup — copy it before dismissing.`,
-      )
-    )
-      return;
+    this.ask.set({
+      title: `Rotate the API key for '${daemonName}'?`,
+      message:
+        "The engine's TOFU rule keeps the OLD key pinned, so after rotation the daemon is LOCKED " +
+        'OUT of /auth until you either:',
+      details: [
+        'delete the engine-side TerminalDaemon row, or',
+        'update its DaemonApiKey column to the new value,',
+        '…and then restart the daemon so it re-authenticates.',
+        'The new key is shown once on the next screen — copy it there.',
+      ],
+      confirmLabel: 'Rotate key',
+      variant: 'destructive',
+      run: () => this.rotateApiKey(daemonId, daemonName),
+    });
+  }
+
+  private rotateApiKey(daemonId: number, daemonName: string): void {
     const key = `${daemonId}:rotate`;
     this.daemonOpInFlight.set(key);
     this.terminals
@@ -964,13 +1143,13 @@ export class TerminalsPageComponent {
       .subscribe({
         next: (res) => {
           if (res.status && res.data) {
-            // alert() is the simplest way to surface a copyable
-            // string without building a custom modal.  Operators
-            // who rotate keys often grab the value and paste it
-            // into a DB row + restart the daemon.
-            alert(
-              `New daemon_api_key (copy this):\n\n${res.data.newApiKey}\n\n${res.data.remediation}`,
-            );
+            // Operators paste the key into a DB row and restart the daemon, so it is shown
+            // in-page with a copy button (an alert's text could not be copied reliably).
+            this.rotatedKey.set({
+              daemonName,
+              key: res.data.newApiKey,
+              remediation: res.data.remediation ?? '',
+            });
           } else {
             this.notify.error(res.message ?? 'Rotate failed.');
           }
@@ -1073,14 +1252,17 @@ export class TerminalsPageComponent {
   }
 
   protected onKillOrphan(daemonId: number, pid: number, force: boolean): void {
-    const action = force ? 'force-kill (SIGKILL)' : 'terminate (SIGTERM → SIGKILL after 10s)';
-    if (
-      !confirm(
-        `${action} MT5 process pid=${pid} on this daemon's host?\n\n` +
-          `MT5 will stop immediately; any chart with an EA attached will disconnect from the engine.`,
-      )
-    )
-      return;
+    const action = force ? 'Force-kill (SIGKILL)' : 'Terminate (SIGTERM → SIGKILL after 10 s)';
+    this.ask.set({
+      title: `${action} MT5 process ${pid}?`,
+      message: 'MT5 stops immediately; any chart with an EA attached disconnects from the engine.',
+      confirmLabel: force ? 'Force-kill' : 'Terminate',
+      variant: 'destructive',
+      run: () => this.killOrphan(daemonId, pid, force),
+    });
+  }
+
+  private killOrphan(daemonId: number, pid: number, force: boolean): void {
     this.killingOrphanPid.set(pid);
     this.terminals
       .killOrphanOnDaemon(daemonId, pid, { force, graceSeconds: 10 })
@@ -1147,7 +1329,21 @@ export class TerminalsPageComponent {
       });
   }
 
-  protected onClose(session: TerminalSessionDto): void {
+  /** Closing a session stops that MT5 terminal — and every EA on its charts. It asks first. */
+  protected askClose(session: TerminalSessionDto): void {
+    this.ask.set({
+      title: `Close terminal session ${session.id}?`,
+      message:
+        `Stops MT5 '${session.installId}' (pid ${session.pid ?? '?'}) on ${session.daemonName}. ` +
+        'Every EA attached to its charts disconnects from the engine until the terminal is ' +
+        'launched again.',
+      confirmLabel: 'Close terminal',
+      variant: 'destructive',
+      run: () => this.onClose(session),
+    });
+  }
+
+  private onClose(session: TerminalSessionDto): void {
     this.closingSessionId.set(session.id);
     this.terminals
       .closeSession(session.id, 'Operator-initiated close from admin UI')

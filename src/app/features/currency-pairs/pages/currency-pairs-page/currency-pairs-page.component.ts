@@ -204,8 +204,9 @@ import {
           format="number"
           dotColor="#5AC8FA"
         />
+        <!-- FX pairs only: index CFDs (NAS100 / US500 report USD on both sides) are not pairs. -->
         <app-metric-card
-          label="USD pairs"
+          label="USD pairs (FX)"
           [value]="sampleError() ? null : cpStats().usdPairs"
           format="number"
           dotColor="#FF2D55"
@@ -234,19 +235,19 @@ import {
         <div class="cp-charts">
           <app-chart-card
             title="Pairs by base currency"
-            subtitle="How many pairs use each currency as the base"
+            subtitle="How many currency pairs use each currency as the base (indices excluded)"
             [options]="byBaseOptions()"
             height="260px"
           />
           <app-chart-card
             title="Pairs by quote currency"
-            subtitle="How many pairs use each currency as the quote"
+            subtitle="How many currency pairs use each currency as the quote (indices excluded)"
             [options]="byQuoteOptions()"
             height="260px"
           />
           <app-chart-card
             title="Currency exposure"
-            subtitle="Total appearances (base + quote) per currency"
+            subtitle="Total appearances (base + quote) per currency, currency pairs only"
             [options]="exposureOptions()"
             height="260px"
           />
@@ -568,6 +569,17 @@ export class CurrencyPairsPageComponent implements OnInit {
   /** Why the catalogue sample failed to load, or null. */
   readonly sampleError = signal<string | null>(null);
 
+  /**
+   * Symbols that are not currency pairs. An index CFD carries its denomination as both "base" and
+   * "quote" (NAS100 = USD/USD, DE40 = EUR/EUR), so counting it as a pair labelled NAS100 a "Major",
+   * made it a "USD pair" and counted USD twice in the exposure matrix (14 appearances, 12 symbols).
+   */
+  isNonPair(p: CurrencyPairDto): boolean {
+    return p.assetClass === 'Index' || (!!p.baseCurrency && p.baseCurrency === p.quoteCurrency);
+  }
+  /** The catalogue minus index symbols — what the currency charts and the matrix count. */
+  private readonly fxSample = computed(() => this.pairsSample().filter((p) => !this.isNonPair(p)));
+
   cpStats = computed(() => {
     const rows = this.pairsSample();
     if (rows.length === 0) {
@@ -578,6 +590,7 @@ export class CurrencyPairsPageComponent implements OnInit {
         baseCurrencies: 0,
         quoteCurrencies: 0,
         usdPairs: 0,
+        nonPairs: 0,
       };
     }
     const baseSet = new Set<string>();
@@ -585,9 +598,12 @@ export class CurrencyPairsPageComponent implements OnInit {
     let active = 0;
     let usd = 0;
     for (const r of rows) {
+      if (r.isActive) active++;
+    }
+    const fx = this.fxSample();
+    for (const r of fx) {
       if (r.baseCurrency) baseSet.add(r.baseCurrency);
       if (r.quoteCurrency) quoteSet.add(r.quoteCurrency);
-      if (r.isActive) active++;
       if (r.baseCurrency === 'USD' || r.quoteCurrency === 'USD') usd++;
     }
     return {
@@ -597,6 +613,7 @@ export class CurrencyPairsPageComponent implements OnInit {
       baseCurrencies: baseSet.size,
       quoteCurrencies: quoteSet.size,
       usdPairs: usd,
+      nonPairs: rows.length - fx.length,
     };
   });
 
@@ -636,7 +653,7 @@ export class CurrencyPairsPageComponent implements OnInit {
 
   private countByCurrency(pick: (r: CurrencyPairDto) => string | null): [string, number][] {
     const map: Record<string, number> = {};
-    for (const r of this.pairsSample()) {
+    for (const r of this.fxSample()) {
       const k = pick(r) ?? '—';
       map[k] = (map[k] ?? 0) + 1;
     }
@@ -687,7 +704,7 @@ export class CurrencyPairsPageComponent implements OnInit {
       pairs: string[];
     };
     const rows: Record<string, Row> = {};
-    for (const p of this.pairsSample()) {
+    for (const p of this.fxSample()) {
       const sym = p.symbol ?? '';
       const ensure = (c: string): Row => {
         if (!rows[c])
@@ -793,10 +810,13 @@ export class CurrencyPairsPageComponent implements OnInit {
       valueGetter: (p: any) => this.classifyPair(p.data),
       cellRenderer: (p: { value: string }) => {
         const map: Record<string, { bg: string; color: string }> = {
-          Major: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Cross: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Exotic: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
-          Other: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+          Major: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          Cross: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
+          Exotic: { bg: 'rgba(255,149,0,0.12)', color: 'var(--tone-amber)' },
+          Index: { bg: 'rgba(175,82,222,0.14)', color: 'var(--tone-purple)' },
+          Commodity: { bg: 'rgba(255,204,0,0.16)', color: 'var(--tone-amber)' },
+          Crypto: { bg: 'rgba(90,200,250,0.16)', color: 'var(--tone-blue)' },
+          Other: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
         };
         const v = map[p.value] ?? map['Other'];
         return `<span style="background:${v.bg};color:${v.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
@@ -862,23 +882,37 @@ export class CurrencyPairsPageComponent implements OnInit {
       cellRenderer: (p: { value: unknown }) => {
         const active = Boolean(p.value);
         const bg = active ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
-        const color = active ? '#248A3D' : '#636366';
+        const color = active ? 'var(--tone-green)' : 'var(--tone-grey)';
         const label = active ? 'Active' : 'Inactive';
         return `<span style="background:${bg};color:${color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
       },
     },
   ];
 
-  // Major: USD vs EUR/GBP/JPY/CHF/AUD/NZD/CAD. Cross: two majors without USD.
-  // Exotic: anything else. Quick classification used by the table + KPIs.
+  /**
+   * The engine's AssetClass is authoritative — it drives pip/point conventions — so it is shown
+   * whenever set. The old inference ("USD on either side ⇒ Major") called NAS100, US500, USDNGN and
+   * USDCNH Majors and DE40 a Cross. The inference remains only for pairs the engine left at None.
+   */
   private readonly majorCcys = new Set(['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'AUD', 'NZD', 'CAD']);
+  private static readonly ASSET_CLASS_LABEL: Record<string, string> = {
+    FxMajor: 'Major',
+    FxMinor: 'Cross',
+    FxExotic: 'Exotic',
+    Index: 'Index',
+    Commodity: 'Commodity',
+    Crypto: 'Crypto',
+  };
   classifyPair(p?: CurrencyPairDto | null): string {
     if (!p) return 'Other';
+    const engine = p.assetClass ? CurrencyPairsPageComponent.ASSET_CLASS_LABEL[p.assetClass] : null;
+    if (engine) return engine;
+    if (this.isNonPair(p)) return 'Index';
     const b = p.baseCurrency ?? '';
     const q = p.quoteCurrency ?? '';
-    if (b === 'USD' || q === 'USD') return 'Major';
-    if (this.majorCcys.has(b) && this.majorCcys.has(q)) return 'Cross';
-    return 'Exotic';
+    if (b === 'XAU' || b === 'XAG' || b === 'XPT' || b === 'XPD') return 'Commodity';
+    if (!this.majorCcys.has(b) || !this.majorCcys.has(q)) return 'Exotic';
+    return b === 'USD' || q === 'USD' ? 'Major' : 'Cross';
   }
 
   readonly fetchData = (params: PagerRequest): Observable<PagedData<CurrencyPairDto>> =>

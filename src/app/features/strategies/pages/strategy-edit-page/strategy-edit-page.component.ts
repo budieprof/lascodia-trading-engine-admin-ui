@@ -151,7 +151,8 @@ export class StrategyEditPageComponent implements OnInit, HasUnsavedChanges {
 
   subtitle(): string {
     const s = this.strategy();
-    return s ? `${s.symbol} · ${s.timeframe} · ${s.strategyType}` : '';
+    // A no-symbol strategy (LLM Spot Analysis) printed " · H1 · Custom".
+    return s ? `${s.symbol || 'No symbol'} · ${s.timeframe} · ${s.strategyType}` : '';
   }
 
   /** Set once an update was accepted: the page leaves with nothing unsaved. */

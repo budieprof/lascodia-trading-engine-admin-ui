@@ -71,7 +71,7 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
         <section class="report-meta">
           <span>
             {{ report()!.symbol }} / {{ report()!.timeframe }} @
-            {{ report()!.sampleAt | date: 'medium' }} —
+            {{ report()!.sampleAt | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC' }} UTC —
             <strong
               [class.pass-strong]="report()!.failedCount === 0"
               [class.fail-strong]="report()!.failedCount > 0"
@@ -130,13 +130,15 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
       .back-link:hover {
         text-decoration: underline;
       }
+      /* Theme tokens throughout: --card-bg does not exist, so the #1a1f2b fallback
+         painted a dark-navy slab with unreadable labels on the light theme. */
       .form {
         display: flex;
         gap: 1rem;
         align-items: flex-end;
         flex-wrap: wrap;
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-radius: 8px;
         padding: 1rem;
       }
@@ -152,14 +154,14 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
       .field input,
       .field select {
         padding: 0.35rem 0.5rem;
-        background: transparent;
-        color: inherit;
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
         border-radius: 4px;
         min-width: 120px;
       }
       .run-btn {
-        background: var(--accent, #4f8cff);
+        background: var(--accent);
         color: #fff;
         border: none;
         padding: 0.45rem 1rem;
@@ -172,17 +174,17 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
         cursor: not-allowed;
       }
       .status.error {
-        color: #f66;
+        color: var(--loss);
         padding: 0.5rem;
       }
       .report-meta {
         font-size: 0.9rem;
       }
       .pass-strong {
-        color: #4fd1c5;
+        color: var(--profit);
       }
       .fail-strong {
-        color: #ff7a7a;
+        color: var(--loss);
       }
       .test-list {
         list-style: none;
@@ -193,20 +195,20 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
         gap: 0.5rem;
       }
       .test {
-        background: var(--card-bg, #1a1f2b);
-        border: 1px solid var(--border, #2a2f3a);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
         border-left-width: 4px;
         border-radius: 6px;
         padding: 0.75rem 1rem;
       }
       .test--passed {
-        border-left-color: #4fd1c5;
+        border-left-color: var(--profit);
       }
       .test--failed {
-        border-left-color: #ff7a7a;
+        border-left-color: var(--loss);
       }
       .test--skipped {
-        border-left-color: #888;
+        border-left-color: var(--text-tertiary);
       }
       .test header {
         display: flex;
@@ -227,16 +229,16 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
         font-weight: 700;
       }
       .test--passed .status-pill {
-        background: rgba(79, 209, 197, 0.2);
-        color: #4fd1c5;
+        background: color-mix(in srgb, var(--profit) 20%, transparent);
+        color: var(--profit);
       }
       .test--failed .status-pill {
-        background: rgba(255, 122, 122, 0.2);
-        color: #ff7a7a;
+        background: color-mix(in srgb, var(--loss) 20%, transparent);
+        color: var(--loss);
       }
       .test--skipped .status-pill {
-        background: rgba(136, 136, 136, 0.2);
-        color: #aaa;
+        background: color-mix(in srgb, var(--text-tertiary) 20%, transparent);
+        color: var(--text-secondary);
       }
       .detail {
         margin: 0.25rem 0 0;
@@ -280,11 +282,13 @@ export class LookAheadAuditPageComponent {
     this.errorMessage.set(null);
     this.report.set(null);
 
-    // Convert datetime-local (local timezone) to UTC ISO string when present.
+    // The field is labelled "UTC", so read it as UTC. `new Date(raw)` parses a
+    // zone-less datetime-local value as BROWSER-local time — an operator in WAT who
+    // typed 10:00 (UTC, as asked) audited 09:00 UTC, a different bar.
     let sampleAtIso: string | undefined;
     const raw = this.sampleAtLocal();
     if (raw) {
-      const d = new Date(raw);
+      const d = new Date(`${raw.length === 16 ? raw + ':00' : raw}Z`);
       if (!isNaN(d.getTime())) sampleAtIso = d.toISOString();
     }
 

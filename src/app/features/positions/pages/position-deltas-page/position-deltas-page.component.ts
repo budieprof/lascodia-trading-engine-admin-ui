@@ -5,12 +5,13 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { PositionsService } from '@core/services/positions.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
@@ -22,6 +23,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
@@ -93,6 +95,7 @@ interface AnomalyFlag {
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -102,14 +105,9 @@ interface AnomalyFlag {
         subtitle="Fleet-wide position-lifecycle event stream"
       >
         <a routerLink="/positions" class="btn btn-secondary">← Positions</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so a click on the old button changed nothing on screen. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="filter-bar">
@@ -230,7 +228,7 @@ interface AnomalyFlag {
             dotColor="#0071E3"
           />
           <app-metric-card
-            label="StaleCloses"
+            label="Stale closes"
             [value]="staleCloseCount()"
             format="number"
             [dotColor]="staleCloseCount() > 0 ? '#FF3B30' : '#34C759'"
@@ -522,6 +520,26 @@ interface AnomalyFlag {
   `,
   styles: [
     `
+      /* No global .btn-secondary exists (styles.scss only adds the press feel), so
+         "← Positions" rendered as bare text. Same pill as Signal exits. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        display: inline-flex;
+        align-items: center;
+        text-decoration: none;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        background: var(--bg-tertiary);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -1004,6 +1022,11 @@ export class PositionDeltasPageComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['positionOpened', 'positionClosed', 'positionLifecycleEvent', 'orderFilled'],
+      // The filter effect below runs once on creation and issues the first
+      // fetch. Running immediately here as well meant every page open sent the
+      // ~0.6 s lifecycle query twice, the first aborted mid-flight by the
+      // effect's refresh() (the crawl's "FAILED position/lifecycle/list").
+      runImmediately: false,
     },
   );
 
@@ -1012,8 +1035,10 @@ export class PositionDeltasPageComponent {
       this.windowHours();
       this.sourceFilter();
       this.eventTypeFilter();
-      this.livePrepend.set([]);
-      this.resource.refresh();
+      untracked(() => {
+        this.livePrepend.set([]);
+        this.resource.refresh();
+      });
     });
 
     this.realtime
@@ -1064,9 +1089,10 @@ export class PositionDeltasPageComponent {
     return `No position changed in the last ${window}${scope}. Widen the window or clear a filter to look further back.`;
   });
 
+  /** Null (the tile shows "—") when there is no event — "0 min ago" read as "just now". */
   protected readonly lastEventMinutes = computed(() => {
     const rows = this.filteredRows();
-    if (rows.length === 0) return 0;
+    if (rows.length === 0) return null;
     const latest = rows.reduce(
       (max, r) => (r.occurredAt > max ? r.occurredAt : max),
       rows[0].occurredAt,

@@ -948,6 +948,8 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
 
   private formSub?: Subscription;
   private formTickSub?: Subscription;
+  /** The in-flight estimate request; a newer one cancels it. */
+  private estimateSub?: Subscription;
 
   /**
    * Bumped on every form value/status change. The `computed` gates below read
@@ -1189,8 +1191,14 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
       .subscribe(() => this.refreshEstimate());
 
     // Undebounced: the submit gate and inline validators must follow the
-    // form immediately, not 300 ms later.
-    this.formTickSub = this.form.valueChanges.subscribe(() => this.formTick.update((n) => n + 1));
+    // form immediately, not 300 ms later. The estimate on screen describes the
+    // PREVIOUS grid until the debounced refresh lands, so it is marked pending
+    // here — Launch used to stay enabled in that 300 ms gap and submit a grid
+    // whose cost had not been checked against the budget.
+    this.formTickSub = this.form.valueChanges.subscribe(() => {
+      this.formTick.update((n) => n + 1);
+      this.estimating.set(true);
+    });
 
     // Kick off an initial estimate so the right-side card isn't empty on load.
     this.refreshEstimate();
@@ -1264,6 +1272,7 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     this.formSub?.unsubscribe();
     this.formTickSub?.unsubscribe();
+    this.estimateSub?.unsubscribe();
   }
 
   // ── Chip handlers ───────────────────────────────────────────────────────
@@ -1362,17 +1371,35 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
     };
   }
 
+  /**
+   * Re-price the current grid. Each call cancels the previous request: with
+   * independent subscriptions a slow answer for an older selection (rapid chip
+   * clicks) could land last and leave a stale cost on screen — and its
+   * `estimating = false` re-enabled Launch while the newest request was still out.
+   */
   refreshEstimate(): void {
+    this.estimateSub?.unsubscribe();
     const spec = this.buildSpec();
     if (!spec) {
+      this.estimating.set(false);
       this.estimate.set(null);
       this.estimateError.set(null);
       return;
     }
     this.estimating.set(true);
-    this.svc
+    let transportError: string | null = null;
+    this.estimateSub = this.svc
       .estimateCost({ spec })
-      .pipe(catchError(() => of(null)))
+      .pipe(
+        catchError((err) => {
+          transportError =
+            err?.error?.message ??
+            (err?.status === 0
+              ? 'Estimate failed — the engine could not be reached.'
+              : `Estimate failed (${err?.message ?? 'request error'}).`);
+          return of(null);
+        }),
+      )
       .subscribe((res) => {
         this.estimating.set(false);
         if (res?.status && res.data) {
@@ -1380,7 +1407,9 @@ export class LlmBacktestNewPageComponent implements OnInit, OnDestroy {
           this.estimateError.set(null);
         } else {
           this.estimate.set(null);
-          this.estimateError.set(res?.message ?? 'Estimate failed. Check your inputs.');
+          this.estimateError.set(
+            transportError ?? res?.message ?? 'Estimate failed. Check your inputs.',
+          );
         }
       });
   }

@@ -46,9 +46,13 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
-      <app-page-header title="Trading Accounts" subtitle="Manage broker trading accounts">
-        <button class="btn btn-primary" (click)="onAddAccount()">+ Add Account</button>
-      </app-page-header>
+      <!-- The primary "+ Add Account" button only toasted "coming soon". Accounts
+           are created when an EA registers against a broker login, so the page
+           says that instead of offering a dead primary action. -->
+      <app-page-header
+        title="Trading Accounts"
+        subtitle="Broker trading accounts — each one registers itself when an EA attaches to its broker login; activate, sync and size them here"
+      />
 
       @if (loadError()) {
         <app-error-state
@@ -78,26 +82,32 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
           <span class="kpi-label">Demo · Paper</span>
           <span class="kpi-value">{{ tile(stats().demo) }} · {{ tile(stats().paper) }}</span>
         </div>
-        <div class="kpi">
-          <span class="kpi-label">Total balance</span>
+        <!--
+          Money tiles sum ACTIVE accounts only. An inactive account's balance,
+          margin and floating P&L are the last snapshot before it stopped
+          syncing (Raw Spread #25: Sep 6, $35k margin "in use"), so summing
+          them reported +$530 unrealized on a fleet with no open position.
+        -->
+        <div class="kpi" [title]="inactiveNote()">
+          <span class="kpi-label">Total balance · active</span>
           <span class="kpi-value mono">
             {{ money(stats().totalBalance, primaryCurrency()) }}
           </span>
         </div>
-        <div class="kpi">
-          <span class="kpi-label">Total equity</span>
+        <div class="kpi" [title]="inactiveNote()">
+          <span class="kpi-label">Total equity · active</span>
           <span class="kpi-value mono">
             {{ money(stats().totalEquity, primaryCurrency()) }}
           </span>
         </div>
-        <div class="kpi">
-          <span class="kpi-label">Margin used</span>
+        <div class="kpi" [title]="inactiveNote()">
+          <span class="kpi-label">Margin used · active</span>
           <span class="kpi-value mono">
             {{ money(stats().marginUsed, primaryCurrency()) }}
           </span>
         </div>
-        <div class="kpi">
-          <span class="kpi-label">Unrealized P&L</span>
+        <div class="kpi" [title]="inactiveNote()">
+          <span class="kpi-label">Unrealized P&L · active</span>
           <span
             class="kpi-value mono"
             [class.good]="stats().unrealizedPnL > 0"
@@ -466,7 +476,9 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
         gap: var(--space-3);
         margin-bottom: var(--space-3);
       }
-      @media (max-width: 1100px) {
+      /* Side by side only where both tables fit: at 1440px six money columns
+         in a 1.4fr / 1fr split were cut off mid-header ("MARGIN USE…"). */
+      @media (max-width: 1700px) {
         .breakdown-row {
           grid-template-columns: 1fr;
         }
@@ -727,6 +739,8 @@ export class AccountsPageComponent implements OnInit {
         default:
           live++;
       }
+      // Money from active accounts only — see the KPI strip comment.
+      if (!a.isActive) continue;
       totalBalance += a.balance ?? 0;
       totalEquity += a.equity ?? 0;
       marginUsed += a.marginUsed ?? 0;
@@ -742,6 +756,13 @@ export class AccountsPageComponent implements OnInit {
       marginUsed,
       unrealizedPnL: totalEquity - totalBalance,
     };
+  });
+
+  inactiveNote = computed(() => {
+    const n = this.stats().total - this.stats().active;
+    return n > 0
+      ? `Summed over the ${this.stats().active} active accounts; ${n} inactive account${n === 1 ? '' : 's'} hold a stale last snapshot and are left out`
+      : '';
   });
 
   envSplit = computed(() => {
@@ -1028,10 +1049,6 @@ export class AccountsPageComponent implements OnInit {
       error: (err) =>
         this.loadError.set(err?.error?.message ?? err?.message ?? 'Engine returned an error.'),
     });
-  }
-
-  onAddAccount(): void {
-    this.notifications.info('Add Account dialog coming soon');
   }
 
   activateAccount(account: TradingAccountDto): void {

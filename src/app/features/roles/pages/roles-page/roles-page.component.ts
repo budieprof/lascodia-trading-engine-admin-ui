@@ -8,6 +8,8 @@ import { NotificationService } from '@core/notifications/notification.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
 type PermissionGroup = { category: string; permissions: PermissionDto[] };
 
@@ -24,7 +26,13 @@ type EditorMode = 'idle' | 'edit' | 'create';
   selector: 'app-roles-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, EmptyStateComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    EmptyStateComponent,
+    ErrorStateComponent,
+    ConfirmDialogComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -47,6 +55,13 @@ type EditorMode = 'idle' | 'edit' | 'create';
 
           @if (loading() && roles().length === 0) {
             <p class="muted small pad">Loading…</p>
+          } @else if (loadError() && roles().length === 0) {
+            <!-- Not "No roles — create the first one": a failed read must not invite that. -->
+            <app-error-state
+              title="Could not load roles"
+              [message]="loadError()!"
+              (retry)="reload()"
+            />
           } @else if (roles().length === 0) {
             <app-empty-state
               title="No roles"
@@ -139,7 +154,7 @@ type EditorMode = 'idle' | 'edit' | 'create';
                     type="button"
                     class="btn btn-danger"
                     [disabled]="savePending()"
-                    (click)="deleteRole(role)"
+                    (click)="pendingDelete.set(role)"
                   >
                     Delete role
                   </button>
@@ -232,6 +247,18 @@ type EditorMode = 'idle' | 'edit' | 'create';
           }
         </section>
       </div>
+
+      <!-- Deleting a role strips its permissions from every user who holds it. -->
+      <app-confirm-dialog
+        [open]="pendingDelete() !== null"
+        [title]="'Delete role ' + (pendingDelete()?.name ?? '') + '?'"
+        [message]="deleteMessage()"
+        confirmLabel="Delete role"
+        confirmVariant="destructive"
+        [loading]="savePending()"
+        (confirm)="confirmDelete()"
+        (cancelled)="pendingDelete.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -276,6 +303,11 @@ type EditorMode = 'idle' | 'edit' | 'create';
       }
       .muted {
         color: var(--text-secondary);
+      }
+      /* Header/toolbar captions sat at body size — larger than the 13px card title beside them. */
+      .card-head .muted,
+      .toolbar .muted {
+        font-size: var(--text-xs);
       }
       .small {
         font-size: var(--text-xs);
@@ -524,8 +556,20 @@ export class RolesPageComponent {
   readonly roles = signal<RoleDto[]>([]);
   readonly catalog = signal<PermissionDto[]>([]);
   readonly loading = signal(false);
+  readonly loadError = signal<string | null>(null);
   readonly createPending = signal(false);
   readonly savePending = signal(false);
+  /** The role waiting on the delete confirmation. */
+  readonly pendingDelete = signal<RoleDto | null>(null);
+  readonly deleteMessage = computed(() => {
+    const r = this.pendingDelete();
+    if (!r) return '';
+    const users =
+      r.userCount === 0
+        ? 'No user holds it.'
+        : `${r.userCount} user${r.userCount === 1 ? '' : 's'} lose${r.userCount === 1 ? 's' : ''} its ${r.permissionKeys.length} permission${r.permissionKeys.length === 1 ? '' : 's'} at their next sign-in.`;
+    return `${users} This cannot be undone.`;
+  });
 
   readonly mode = signal<EditorMode>('idle');
   readonly selectedId = signal<number | null>(null);
@@ -571,16 +615,20 @@ export class RolesPageComponent {
 
   reload(): void {
     this.loading.set(true);
-    this.rolesService
-      .getRoles()
-      .pipe(catchError(() => of([] as RoleDto[])))
-      .subscribe((roles) => {
+    this.rolesService.getRoles().subscribe({
+      next: (roles) => {
         this.roles.set(roles);
+        this.loadError.set(null);
         this.loading.set(false);
         // Re-sync the open editor with fresh data.
         const sel = this.selectedRole();
         if (sel && this.mode() === 'edit') this.hydrateEditor(sel);
-      });
+      },
+      error: (err) => {
+        this.loadError.set(err?.message ?? 'The engine could not be reached.');
+        this.loading.set(false);
+      },
+    });
   }
 
   // ── Selection / editor ───────────────────────────────────────────────────
@@ -672,18 +720,21 @@ export class RolesPageComponent {
       });
   }
 
-  deleteRole(role: RoleDto): void {
-    if (role.isSystem) return;
+  confirmDelete(): void {
+    const role = this.pendingDelete();
+    if (!role || role.isSystem || this.savePending()) return;
     this.savePending.set(true);
     this.rolesService.deleteRole(role.id).subscribe({
       next: (msg) => {
         this.savePending.set(false);
+        this.pendingDelete.set(null);
         this.notify.success(msg || `Role "${role.name}" deleted`);
         this.clearSelection();
         this.reload();
       },
       error: (err) => {
         this.savePending.set(false);
+        this.pendingDelete.set(null);
         this.notify.error(err?.message ?? 'Failed to delete role');
       },
     });

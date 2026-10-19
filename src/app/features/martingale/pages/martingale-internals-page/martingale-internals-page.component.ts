@@ -931,7 +931,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .chain-cols,
       .chain-head {
         display: grid;
-        grid-template-columns: 7.5rem minmax(10rem, 1fr) 4rem 9rem 8rem minmax(8rem, 1.2fr) 1.2rem;
+        /* 9.5rem: "Reset by operator" in caps is the longest status and was cut to "RESET BY OPERAT…". */
+        grid-template-columns: 9.5rem minmax(10rem, 1fr) 4rem 9rem 8rem minmax(8rem, 1.2fr) 1.2rem;
         align-items: center;
         gap: 0.75rem;
         padding: 0.6rem 0.85rem;
@@ -1057,12 +1058,16 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
       }
+      /* Headers may wrap between words: at 1440px the ten laddered-symbol columns overflowed by
+         one ("Live now" was cut at the box edge) because two-word headers set the widths. */
       th {
         font-size: 0.72rem;
         text-transform: uppercase;
         letter-spacing: 0.04em;
         color: var(--text-secondary);
         font-weight: 600;
+        white-space: normal;
+        vertical-align: bottom;
       }
       td.num,
       th.num {

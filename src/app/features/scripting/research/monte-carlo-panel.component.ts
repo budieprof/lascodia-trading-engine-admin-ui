@@ -130,6 +130,10 @@ export function mcValue(v: number, unit: McRow['unit']): string {
       </div>
       @if (error(); as e) {
         <p class="error-box" role="alert">{{ e }}</p>
+      } @else if (refusal(); as r) {
+        <!-- The engine declining a run it cannot simulate (too few trades with a stop) is a
+             property of the run, not a failure: it reads as a note, not a red alert. -->
+        <p class="muted refusal" data-testid="mc-refusal">{{ r }}</p>
       } @else if (dto(); as d) {
         <div class="chips">
           <span
@@ -266,6 +270,10 @@ export function mcValue(v: number, unit: McRow['unit']): string {
       p {
         margin: 0;
       }
+      .refusal {
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
     `,
   ],
 })
@@ -279,6 +287,8 @@ export class MonteCarloPanelComponent {
   readonly dto = signal<MonteCarloDto | null>(null);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+  /** The engine's own reason for declining (HTTP 200, `status: false`), shown as a note. */
+  readonly refusal = signal<string | null>(null);
 
   readonly rows = computed(() => {
     const d = this.dto();
@@ -316,9 +326,15 @@ export class MonteCarloPanelComponent {
     const source = this.source();
     this.loading.set(true);
     this.error.set(null);
+    this.refusal.set(null);
     try {
       const res = await firstValueFrom(this.api.monteCarlo(source, this.params()));
       if (source !== this.source()) return;
+      if (res && res.status === false && res.message) {
+        this.dto.set(null);
+        this.refusal.set(res.message);
+        return;
+      }
       if (!res?.status || !res.data) throw res;
       this.dto.set(res.data);
     } catch (err) {

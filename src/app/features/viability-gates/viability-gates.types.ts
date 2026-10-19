@@ -43,15 +43,26 @@ export interface ViabilityGateThreshold {
   helpText?: string | null;
 }
 
-/** Trailing-24h firing + ghost-outcome breakdown for one gate. */
+/**
+ * Firing + ghost-outcome breakdown for one gate. The two halves cover DIFFERENT
+ * windows: `today*` counts are the trailing 24h (from `statsWindowStartUtc`); every
+ * `ghost*` count and both averages are cumulative — every rejected / advisory signal
+ * the GhostOutcomeWorker ever resolved for this gate (engine GetViabilityGatesQuery).
+ */
 export interface ViabilityGateFiringStats {
   todayRejectionCount: number;
   todayAdvisoryCount: number;
+  /** Every resolved ghost row (all time), including {@link ghostUnresolvable}. */
   ghostResolvedCount: number;
   ghostWouldHaveWon: number;
   ghostWouldHaveLost: number;
   ghostEntryNotReached: number;
   ghostWouldHaveExpired: number;
+  /**
+   * Resolved as `Unresolvable` (no candles to walk) — the part of `ghostResolvedCount` the four
+   * outcome counts above do not cover. Engine field since 2026-10-19; the page used to derive it.
+   */
+  ghostUnresolvable: number;
   /** Null when WouldHaveWon subset is empty. */
   avgWinPips: number | null;
   /** Null when WouldHaveLost subset is empty (negative number when present). */
@@ -105,6 +116,23 @@ export interface UpdateViabilityGateThresholdItem {
 export interface UpdateViabilityGateResult {
   written: number;
   message: string | null;
+}
+
+/**
+ * One entry of the engine's cooling-off queue (`GET config/pending`). A
+ * risk-loosening gate change saved with a reason but without "apply
+ * immediately" lands here instead of in EngineConfig, so the card keeps showing
+ * the old mode until `effectiveAt` — the page lists the queued change on its card.
+ */
+export interface PendingConfigChange {
+  id: number;
+  key: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string | null;
+  requestedAt: string;
+  effectiveAt: string;
+  status: string | null;
 }
 
 /** Mode picker options — used by the UI dropdown. */

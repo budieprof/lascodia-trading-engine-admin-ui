@@ -1,7 +1,6 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  HostListener,
   ViewChild,
   computed,
   effect,
@@ -34,8 +33,14 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
-type DateRange = 'all' | 'today' | 'week' | 'next24h' | 'past24h';
+/**
+ * 'upcoming' is the default view (from now on). It used to be labelled "All time" while silently
+ * bounding the list to the future — "Showing 1–25 of 154" under "All time" over 94,321 events.
+ * 'all' now really is unbounded (latest first unless a column is sorted).
+ */
+type DateRange = 'upcoming' | 'all' | 'today' | 'week' | 'next24h' | 'past24h';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -69,6 +74,7 @@ const fmt = (n: number): string => numberFmt.format(n);
     FormFieldComponent,
     FormFieldControlDirective,
     DatePipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -177,7 +183,14 @@ const fmt = (n: number): string => numberFmt.format(n);
       -->
       @if (mode() === 'actual' && selectedEvent(); as evt) {
         <div class="drawer-backdrop" (click)="cancel()" aria-hidden="true"></div>
-        <aside class="drawer" role="dialog" aria-label="Economic event detail">
+        <aside
+          class="drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Economic event detail"
+          appModalA11y
+          (dismiss)="cancel()"
+        >
           <header class="drawer-head">
             <div class="drawer-head-meta">
               <div class="drawer-chips">
@@ -430,6 +443,7 @@ const fmt = (n: number): string => numberFmt.format(n);
           [ngModel]="dateRangeFilter()"
           (ngModelChange)="onFilterChange('dateRange', $event)"
         >
+          <option value="upcoming">Upcoming</option>
           <option value="all">All time</option>
           <option value="today">Today</option>
           <option value="next24h">Next 24h</option>
@@ -539,22 +553,22 @@ const fmt = (n: number): string => numberFmt.format(n);
       }
       .chip-impact[data-impact='High'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .chip-impact[data-impact='Medium'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .chip-impact[data-impact='Low'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .chip-source {
         font-size: 11px;
       }
       .chip-desc[data-source='Scraped'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .chip-desc[data-source='LlmGenerated'] {
         background: rgba(191, 90, 242, 0.14);
@@ -1130,15 +1144,15 @@ const fmt = (n: number): string => numberFmt.format(n);
       }
       .impact-pill.high {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .impact-pill.medium {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .impact-pill.low {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .mono {
         font-family: 'SF Mono', 'Menlo', monospace;
@@ -1185,7 +1199,7 @@ export class EconomicEventsPageComponent {
   readonly fmt = fmt;
 
   readonly columns: ColDef<EconomicEventDto>[] = [
-    { headerName: 'Title', field: 'title', flex: 2, minWidth: 240 },
+    { headerName: 'Title', field: 'title', flex: 2, minWidth: 240, tooltipField: 'title' },
     { headerName: 'Currency', field: 'currency', width: 110, minWidth: 110 },
     {
       headerName: 'Impact',
@@ -1194,9 +1208,9 @@ export class EconomicEventsPageComponent {
       cellRenderer: (p: { value: unknown }) => {
         const v = String(p.value ?? '');
         const palette: Record<string, { bg: string; color: string }> = {
-          High: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Medium: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
-          Low: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
+          High: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
+          Medium: { bg: 'rgba(255,149,0,0.12)', color: 'var(--tone-amber)' },
+          Low: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
         };
         const s = palette[v] ?? palette['Low'];
         return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${v}</span>`;
@@ -1233,7 +1247,8 @@ export class EconomicEventsPageComponent {
       cellRenderer: (p: { data: EconomicEventDto }) => {
         const delta = parseSurprise(p.data?.actual ?? null, p.data?.forecast ?? null);
         if (delta === null) return '—';
-        const color = delta > 0 ? '#248A3D' : delta < 0 ? '#D70015' : '#636366';
+        const color =
+          delta > 0 ? 'var(--tone-green)' : delta < 0 ? 'var(--tone-red)' : 'var(--tone-grey)';
         const sign = delta > 0 ? '+' : '';
         return `<span style="color:${color};font-weight:600;font-variant-numeric:tabular-nums">${sign}${delta.toFixed(2)}</span>`;
       },
@@ -1250,7 +1265,7 @@ export class EconomicEventsPageComponent {
   // ── Filter state ────────────────────────────────────────────────────────
   readonly currencyFilter = signal('');
   readonly impactFilter = signal('');
-  readonly dateRangeFilter = signal<DateRange>('all');
+  readonly dateRangeFilter = signal<DateRange>('upcoming');
 
   // ── Analytics resource — probe-and-fetch the latest-scheduled window ────
   // Powers KPIs, charts, and the upcoming-high-impact panel without a count
@@ -1335,7 +1350,7 @@ export class EconomicEventsPageComponent {
 
   readonly sortNote = computed(() =>
     this.hasUpcoming()
-      ? 'sorted upcoming first — pick a date range or sort the Scheduled column to browse past events'
+      ? 'sorted upcoming first — pick All time or a date range, or sort the Scheduled column, to browse past events'
       : 'sorted latest first — nothing upcoming on the calendar',
   );
 
@@ -1555,13 +1570,15 @@ export class EconomicEventsPageComponent {
 
   // ── Filter helpers ──────────────────────────────────────────────────────
   hasActiveFilters(): boolean {
-    return !!this.currencyFilter() || !!this.impactFilter() || this.dateRangeFilter() !== 'all';
+    return (
+      !!this.currencyFilter() || !!this.impactFilter() || this.dateRangeFilter() !== 'upcoming'
+    );
   }
 
   resetFilters(): void {
     this.currencyFilter.set('');
     this.impactFilter.set('');
-    this.dateRangeFilter.set('all');
+    this.dateRangeFilter.set('upcoming');
   }
 
   onFilterChange(field: 'currency' | 'impact' | 'dateRange', value: string): void {
@@ -1630,9 +1647,11 @@ export class EconomicEventsPageComponent {
     let sortDirection = params.sortDirection;
     if (!sortBy) {
       sortBy = 'scheduledAt';
-      if (this.hasUpcoming()) {
+      if (range === 'all') {
+        sortDirection = 'desc';
+      } else if (this.hasUpcoming()) {
         sortDirection = 'asc';
-        if (range === 'all') merged['from'] = new Date(now).toISOString();
+        if (range === 'upcoming') merged['from'] = new Date(now).toISOString();
       } else {
         sortDirection = 'desc';
       }
@@ -1683,16 +1702,6 @@ export class EconomicEventsPageComponent {
     this.currentDescriptionSource.set('None');
     this.currentDescriptionUpdatedAt.set(null);
     this.descriptionLoading.set(false);
-  }
-
-  //--- Escape key closes the side drawer (modal-style affordance).  Only
-  //--- fires when there's an open detail; otherwise let the key bubble so
-  //--- other surfaces (e.g. the global command palette) can claim it.
-  @HostListener('document:keydown.escape')
-  onEscapeKey(): void {
-    if (this.mode() === 'actual' && this.selectedEvent()) {
-      this.cancel();
-    }
   }
 
   /**

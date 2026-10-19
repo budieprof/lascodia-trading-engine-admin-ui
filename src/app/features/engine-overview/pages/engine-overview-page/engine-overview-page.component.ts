@@ -13,11 +13,18 @@ import { catchError, forkJoin, interval, of, startWith, type Observable } from '
 import { HealthService } from '@core/services/health.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeadLetterService } from '@core/services/dead-letter.service';
-import type { DeadLetterDto, EngineStatusDto, WorkerHealthDto } from '@core/api/api.types';
+import { NotificationService } from '@core/notifications/notification.service';
+import type {
+  DeadLetterDto,
+  EngineStatusDto,
+  ResponseData,
+  WorkerHealthDto,
+} from '@core/api/api.types';
 
 import type { EChartsOption } from 'echarts';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -46,6 +53,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     CardSkeletonComponent,
     EmptyStateComponent,
     ChartCardComponent,
+    ConfirmDialogComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -124,9 +132,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
           <div class="kpi">
             <span class="label">Unresolved DLQ</span>
-            <span class="value" [class.bad]="deadLetters().length > 0">
-              {{ deadLetters().length }}
-            </span>
+            <!-- The queue's total, not the 25 rows the panel below lists. -->
+            <span class="value" [class.bad]="dlqTotal() > 0">{{ dlqTotal() }}</span>
           </div>
         </section>
 
@@ -295,9 +302,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               />
             } @else {
               <p class="muted small list-caption">
-                {{ deadLetters().length }} unresolved
-                {{ deadLetters().length === 1 ? 'row' : 'rows' }} — newest 25. Retry re-publishes
-                the event; Discard marks it resolved without replaying.
+                {{ dlqTotal() }} unresolved {{ dlqTotal() === 1 ? 'row' : 'rows'
+                }}{{
+                  dlqTotal() > deadLetters().length
+                    ? ' — newest ' + deadLetters().length + ' shown'
+                    : ''
+                }}. Retry re-publishes the event; Discard marks it resolved without replaying. Both
+                ask first.
               </p>
               <ul class="dlq-list">
                 @for (d of deadLetters(); track d.id) {
@@ -322,7 +333,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         type="button"
                         class="btn-mini"
                         [disabled]="dlqBusy().has(d.id)"
-                        (click)="retryDeadLetter(d)"
+                        (click)="askDlqAction(d, 'retry')"
                       >
                         Retry
                       </button>
@@ -330,7 +341,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         type="button"
                         class="btn-mini danger"
                         [disabled]="dlqBusy().has(d.id)"
-                        (click)="discardDeadLetter(d)"
+                        (click)="askDlqAction(d, 'discard')"
                       >
                         Discard
                       </button>
@@ -342,6 +353,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           </div>
         </section>
       }
+
+      <!-- Both actions change an operational record: Retry re-publishes the event to every
+           handler, Discard closes it for good. Neither fires from one click. -->
+      <app-confirm-dialog
+        [open]="pendingDlq() !== null"
+        [title]="dlqConfirmTitle()"
+        [message]="dlqConfirmMessage()"
+        [confirmLabel]="pendingDlq()?.action === 'discard' ? 'Discard' : 'Retry'"
+        [confirmVariant]="pendingDlq()?.action === 'discard' ? 'destructive' : 'primary'"
+        [loading]="dlqConfirmLoading()"
+        (confirm)="confirmDlqAction()"
+        (cancelled)="pendingDlq.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -431,8 +455,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         .status-row {
           grid-template-columns: repeat(2, 1fr);
         }
+        /* minmax(0, …) here too: a bare 1fr let the unbreakable DLQ error line widen the
+           single column to ~2,000px at tablet width. */
         .row:not(.status-row):not(.charts-row) {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
       }
       @media (max-width: 560px) {
@@ -566,7 +592,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--profit);
       }
       .value.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .value.bad {
         color: var(--loss);
@@ -580,12 +606,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       /* 3-col chart row (compact mode only — wall mode keeps the 2-panel layout) */
       .charts-row {
         display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: var(--space-3);
       }
       @media (max-width: 1100px) {
         .charts-row {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
       }
 
@@ -644,17 +670,19 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         border-radius: var(--radius-sm);
         background: var(--bg-tertiary);
       }
+      /* Theme tones: the fixed light-theme hues (#0040dd idle, #c93400 degraded) were near
+         invisible on the dark panel. */
       .bucket[data-bucket='healthy'] {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .bucket[data-bucket='degraded'] {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .bucket[data-bucket='failed'] {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .bucket[data-bucket='idle'] {
-        color: #636366;
+        color: var(--tone-blue);
       }
       .bucket.zero {
         color: var(--text-tertiary);
@@ -771,23 +799,23 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
         background: rgba(142, 142, 147, 0.12);
-        color: #636366;
+        color: var(--tone-grey);
       }
       .page.wall .status-pill {
         font-size: var(--text-sm);
         padding: 4px 10px;
       }
       .worker-item[data-status='degraded'] .status-pill {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
       .worker-item[data-status='failed'] .status-pill {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .worker-item[data-status='idle'] .status-pill {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
       .worker-name {
         font-family: var(--font-mono);
@@ -842,7 +870,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       /* Escalation colour only once retries are actually piling up. */
       .dlq-attempts.hot {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .dlq-err {
         font-family: var(--font-mono);
@@ -888,11 +916,14 @@ export class EngineOverviewPageComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly notify = inject(NotificationService);
 
   readonly loading = signal(true);
   readonly status = signal<EngineStatusDto | null>(null);
   readonly workerSnapshots = signal<WorkerHealthDto[]>([]);
   readonly deadLetters = signal<DeadLetterDto[]>([]);
+  /** Unresolved rows in the whole queue (pager total) — `deadLetters` holds only the newest 25. */
+  readonly dlqTotal = signal(0);
   readonly lastRefreshAt = signal<string | null>(null);
 
   /** Toggled via `?wall=1` query param or the in-page button. */
@@ -1109,24 +1140,65 @@ export class EngineOverviewPageComponent {
   // ── Dead-letter actions ────────────────────────────────────────────
   // The card used to show only an unlabeled "×N" per row; an operator scanning the wall had no
   // way to act without leaving the page. Both actions refresh so the row disappears on success.
+  // Both go through a confirmation: the 2026-10-19 review caught Discard closing an operational
+  // record (PUT dead-letter/{id}/resolve) straight from one click.
   readonly dlqBusy = signal<ReadonlySet<number>>(new Set());
+  readonly pendingDlq = signal<{ row: DeadLetterDto; action: 'retry' | 'discard' } | null>(null);
+  protected readonly dlqConfirmLoading = computed(() => {
+    const p = this.pendingDlq();
+    return p !== null && this.dlqBusy().has(p.row.id);
+  });
+  protected readonly dlqConfirmTitle = computed(() =>
+    this.pendingDlq()?.action === 'discard'
+      ? `Discard dead letter #${this.pendingDlq()!.row.id}?`
+      : `Retry dead letter #${this.pendingDlq()?.row.id ?? ''}?`,
+  );
+  protected readonly dlqConfirmMessage = computed(() => {
+    const p = this.pendingDlq();
+    if (!p) return '';
+    const type = p.row.eventType ?? 'this event';
+    return p.action === 'discard'
+      ? `${type} will be marked resolved and never replayed. Whatever its handlers should have done stays undone.`
+      : `${type} is re-published to every handler now. Handlers that already applied part of it will see it again.`;
+  });
 
-  protected retryDeadLetter(d: DeadLetterDto): void {
-    this.runDlqAction(d.id, this.deadLetterSvc.replay(d.id));
+  protected askDlqAction(d: DeadLetterDto, action: 'retry' | 'discard'): void {
+    this.pendingDlq.set({ row: d, action });
   }
 
-  protected discardDeadLetter(d: DeadLetterDto): void {
-    this.runDlqAction(d.id, this.deadLetterSvc.resolve(d.id));
+  protected confirmDlqAction(): void {
+    const p = this.pendingDlq();
+    if (!p || this.dlqBusy().has(p.row.id)) return;
+    const call =
+      p.action === 'discard'
+        ? this.deadLetterSvc.resolve(p.row.id)
+        : this.deadLetterSvc.replay(p.row.id);
+    this.runDlqAction(p.row, p.action, call);
   }
 
-  private runDlqAction(id: number, call: Observable<unknown>): void {
+  private runDlqAction(
+    row: DeadLetterDto,
+    action: 'retry' | 'discard',
+    call: Observable<ResponseData<unknown>>,
+  ): void {
+    const id = row.id;
     this.dlqBusy.update((s) => new Set(s).add(id));
-    call.pipe(catchError(() => of(null))).subscribe(() => {
+    // HTTP failures are toasted by the error interceptor; a refused envelope (status false,
+    // e.g. "already resolved") arrives as a 200 and used to vanish without a word.
+    call.pipe(catchError(() => of(null))).subscribe((res) => {
       this.dlqBusy.update((s) => {
         const next = new Set(s);
         next.delete(id);
         return next;
       });
+      this.pendingDlq.set(null);
+      if (res?.status) {
+        this.notify.success(
+          action === 'discard' ? `Dead letter #${id} discarded` : `Dead letter #${id} replayed`,
+        );
+      } else if (res) {
+        this.notify.error(res.message ?? `Could not ${action} dead letter #${id}`);
+      }
       this.refresh();
     });
   }
@@ -1168,13 +1240,23 @@ export class EngineOverviewPageComponent {
       status: this.health.getStatus().pipe(catchError(() => of(null))),
       workers: this.workers.list().pipe(catchError(() => of(null))),
       deadLetters: this.deadLetterSvc
-        .list({ currentPage: 1, itemCountPerPage: 25, filter: { isResolved: false } })
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 25,
+          filter: { isResolved: false },
+          sortBy: 'deadLetteredAt',
+          sortDirection: 'desc',
+        })
         .pipe(catchError(() => of(null))),
     }).subscribe(({ status, workers, deadLetters }) => {
       if (status?.data) this.status.set(status.data);
       // /health/workers returns a raw array, not a ResponseData envelope.
       if (workers) this.workerSnapshots.set(workers);
-      if (deadLetters?.data) this.deadLetters.set(deadLetters.data.data ?? []);
+      if (deadLetters?.data) {
+        const rows = deadLetters.data.data ?? [];
+        this.deadLetters.set(rows);
+        this.dlqTotal.set(deadLetters.data.pager?.totalItemCount ?? rows.length);
+      }
       this.lastRefreshAt.set(new Date().toISOString());
       this.loading.set(false);
     });

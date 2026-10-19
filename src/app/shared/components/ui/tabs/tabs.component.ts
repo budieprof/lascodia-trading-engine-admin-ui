@@ -32,16 +32,22 @@ export interface TabItem {
   `,
   styles: [
     `
+      /* Tabs wrap: a sideways-scrolling bar with its scrollbar hidden cut the 14th tab of a
+         strategy ("Lineage") off at 1440px with nothing to say more existed. On a phone, where
+         wrapping would stack many rows, it scrolls — with a visible (thin) scrollbar. */
       .tabs__bar {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-1);
         padding: 2px;
-        overflow-x: auto;
-        scrollbar-width: none;
       }
 
-      .tabs__bar::-webkit-scrollbar {
-        display: none;
+      @media (max-width: 767.98px) {
+        .tabs__bar {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          scrollbar-width: thin;
+        }
       }
 
       .tabs__tab {

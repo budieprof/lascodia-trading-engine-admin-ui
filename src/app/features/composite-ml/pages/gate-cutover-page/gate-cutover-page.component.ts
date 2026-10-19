@@ -1,11 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, finalize, map, of } from 'rxjs';
+import { finalize, map } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
-import type { GateCutoverStatusDto, GateCutoverStatusRowDto } from '@core/api/api.types';
+import { NotificationService } from '@core/notifications/notification.service';
+import { unwrapResponse } from '@core/api/api.service';
+import type { GateCutoverStatusRowDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -13,6 +15,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 interface PendingFlip {
@@ -20,7 +23,13 @@ interface PendingFlip {
   intended: boolean;
 }
 
-const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
+/**
+ * `Generator.OutcomeModel.PerPair` → `['Generator.', 'OutcomeModel.', 'PerPair']`, so the template
+ * can offer a line break after each dot instead of breaking inside a word.
+ */
+function dotSegments(id: string): string[] {
+  return id.split(/(?<=\.)/);
+}
 
 @Component({
   selector: 'app-gate-cutover-page',
@@ -35,6 +44,7 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -44,7 +54,7 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -79,20 +89,32 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
             <table class="cutover-table">
               <thead>
                 <tr>
-                  <th>Layer key</th>
+                  <th>Layer</th>
                   <th>Covered knob</th>
-                  <th>Description</th>
                   <th>Source of truth</th>
                   <th>Flipped</th>
-                  <th></th>
+                  <th><span class="sr-only">Action</span></th>
                 </tr>
               </thead>
               <tbody>
                 @for (row of rows(); track row.layerKey) {
                   <tr [class.on-ledger]="row.returnLedgerCount">
-                    <td class="mono key-cell">{{ row.layerKey }}</td>
-                    <td class="mono small knob-cell">{{ row.coveredKnob }}</td>
-                    <td class="desc" [title]="row.description">{{ row.description }}</td>
+                    <!-- Key and description share a column: as two columns the key
+                         broke mid-word ("…Exploratio / n") and the description
+                         was clipped to ~30 characters. -->
+                    <td class="layer-cell">
+                      <span class="mono key">
+                        @for (seg of dotSegments(row.layerKey); track $index) {
+                          <span>{{ seg }}</span
+                          ><wbr />
+                        }
+                      </span>
+                      <span class="desc" [title]="row.description">{{ row.description }}</span>
+                    </td>
+                    <td class="knob-cell" [title]="row.coveredKnob">
+                      <span class="mono knob-owner">{{ knobOwner(row.coveredKnob) }}</span>
+                      <span class="mono knob-name">{{ knobName(row.coveredKnob) }}</span>
+                    </td>
                     <td class="state-cell">
                       @if (row.returnLedgerCount) {
                         <span class="state-pill ledger">ledger</span>
@@ -135,9 +157,20 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
 
       @if (pendingFlip(); as p) {
         <div class="modal-overlay" (click)="cancelFlip()">
-          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+          <!-- A consequential flip: focus starts on Cancel so Enter never confirms. -->
+          <div
+            class="modal"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="gate-cutover-title"
+            appModalA11y
+            (dismiss)="cancelFlip()"
+          >
             <header class="modal-head">
-              <h2>{{ p.intended ? 'Cut over to ledger' : 'Revert to legacy idiom' }}</h2>
+              <h2 id="gate-cutover-title">
+                {{ p.intended ? 'Cut over to ledger' : 'Revert to legacy idiom' }}
+              </h2>
               <button type="button" class="close-btn" (click)="cancelFlip()" aria-label="Close">
                 ×
               </button>
@@ -166,7 +199,9 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
             </label>
 
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="cancelFlip()">Cancel</button>
+              <button type="button" class="btn btn-secondary" data-autofocus (click)="cancelFlip()">
+                Cancel
+              </button>
               <button
                 type="button"
                 class="btn btn-primary"
@@ -183,6 +218,25 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -216,6 +270,10 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
         overflow-x: auto;
+        /* The containing block for the header's absolutely positioned sr-only "Action" label.
+           Without it the label escaped this scroller and sat at its static position past the
+           900px table — the page itself scrolled sideways at 820px (scrollWidth 878). */
+        position: relative;
       }
       /* Fixed layout with the description as the only elastic column. With
          auto layout the unbreakable mono layer keys claimed the width, the
@@ -246,30 +304,54 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
       .cutover-table tr.on-ledger {
         background: rgba(52, 199, 89, 0.04);
       }
-      .cutover-table th:nth-child(1) {
-        width: 22%;
-      }
       .cutover-table th:nth-child(2) {
-        width: 16%;
+        width: 32%;
       }
-      .cutover-table th:nth-child(4) {
+      .cutover-table th:nth-child(3) {
         width: 120px;
       }
+      .cutover-table th:nth-child(4) {
+        width: 110px;
+      }
       .cutover-table th:nth-child(5) {
-        width: 130px;
+        width: 160px;
       }
-      .cutover-table th:nth-child(6) {
-        width: 150px;
-      }
-      .key-cell,
+      .layer-cell,
       .knob-cell {
-        overflow-wrap: anywhere;
         line-height: 1.35;
       }
-      .desc {
+      .layer-cell .key,
+      .knob-cell .knob-name {
+        display: block;
+        overflow-wrap: anywhere;
+        color: var(--text-primary);
+      }
+      .layer-cell .desc {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--text-xs);
         color: var(--text-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .knob-cell .knob-owner {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .knob-cell .knob-name {
+        font-size: 0.9em;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
         white-space: nowrap;
       }
       .state-cell,
@@ -295,11 +377,11 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
       }
       .state-pill.ledger {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .state-pill.legacy {
         background: rgba(142, 142, 147, 0.16);
-        color: #636366;
+        color: var(--tone-grey);
       }
       .time {
         color: var(--text-secondary);
@@ -379,7 +461,7 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
       .modal-warn {
         margin: 0;
         font-size: var(--text-xs);
-        color: #c93400;
+        color: var(--tone-amber);
         background: rgba(255, 149, 0, 0.08);
         padding: 8px 12px;
         border-left: 3px solid #ff9500;
@@ -430,13 +512,15 @@ const EMPTY_STATUS: GateCutoverStatusDto = { rows: [] };
 export class GateCutoverPageComponent {
   private readonly compositeMl = inject(CompositeMLService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
+
+  protected readonly dotSegments = dotSegments;
 
   protected readonly resource = createPolledResource(
     () =>
-      this.compositeMl.getGateCutoverStatus().pipe(
-        map((res) => res.data ?? EMPTY_STATUS),
-        catchError(() => of(EMPTY_STATUS)),
-      ),
+      // Errors propagate to resource.error(): swallowed, an engine failure
+      // rendered as "No catalogue layers registered".
+      this.compositeMl.getGateCutoverStatus().pipe(map(unwrapResponse)),
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -469,6 +553,18 @@ export class GateCutoverPageComponent {
     this.pendingFlip.set(null);
   }
 
+  /** `CompositeMLGeneratorOptions` of `CompositeMLGeneratorOptions.IpwMinDecidedObservations`. */
+  protected knobOwner(knob: string): string {
+    const i = knob.lastIndexOf('.');
+    return i > 0 ? knob.slice(0, i) : '';
+  }
+
+  /** `.IpwMinDecidedObservations` — the property the gate actually reads. */
+  protected knobName(knob: string): string {
+    const i = knob.lastIndexOf('.');
+    return i > 0 ? knob.slice(i) : knob;
+  }
+
   protected canSubmit = (): boolean => {
     if (this.submitting()) return false;
     return this.reasonText.trim().length >= 4;
@@ -484,32 +580,41 @@ export class GateCutoverPageComponent {
       .pipe(
         finalize(() => {
           this.submitting.set(false);
-          this.pendingFlip.set(null);
           this.resource.refresh();
         }),
       )
       .subscribe({
         next: (res) => {
-          if (res.status) {
-            this.auditTrail
-              .create({
-                entityType: 'CompositeMLGateCutover',
-                entityId: 0,
-                decisionType: 'GateCutoverFlip',
-                outcome: p.intended ? 'Cutover' : 'Reverted',
-                reason: this.reasonText.trim(),
-                contextJson: JSON.stringify(payload),
-                source: 'AdminUI',
-              })
-              .subscribe({
-                error: () => {
-                  /* best-effort */
-                },
-              });
+          // A refused flip keeps the dialog open with the engine's reason —
+          // it used to close silently as if the gate had flipped.
+          if (!res.status) {
+            this.notifications.error(res.message ?? 'The engine refused the flip.');
+            return;
           }
+          this.pendingFlip.set(null);
+          this.notifications.success(
+            `${p.row.layerKey} ${p.intended ? 'now reads the ledger' : 'reverted to the legacy idiom'}.`,
+          );
+          this.auditTrail
+            .create({
+              entityType: 'CompositeMLGateCutover',
+              entityId: 0,
+              decisionType: 'GateCutoverFlip',
+              outcome: p.intended ? 'Cutover' : 'Reverted',
+              reason: this.reasonText.trim(),
+              contextJson: JSON.stringify(payload),
+              source: 'AdminUI',
+            })
+            .subscribe({
+              error: () => {
+                /* best-effort */
+              },
+            });
         },
         error: () => {
-          /* error state surfaces via the polled-resource on next refresh */
+          // A failed write is not a polled-resource error: nothing on the page
+          // would ever say so. Keep the dialog and say it here.
+          this.notifications.error('Could not reach the engine — the gate was not flipped.');
         },
       });
   }

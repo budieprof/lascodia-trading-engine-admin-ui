@@ -134,9 +134,10 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           format="currency"
           dotColor="#FF9500"
         />
+        <!-- Averages over an empty window are "—", not a measured 0 / $0.00. -->
         <app-metric-card
           label="Avg latency (s)"
-          [value]="summary().avgLatencyMs / 1000"
+          [value]="summary().analyses > 0 ? summary().avgLatencyMs / 1000 : null"
           format="number"
           dotColor="#8E8E93"
         />
@@ -208,6 +209,10 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
         [options]="pnlChart()"
         height="240px"
         [loading]="loading()"
+        [emptyMessage]="timeSeries().length === 0 ? 'No spot analyses in this window.' : null"
+        [emptyHint]="
+          timeSeries().length === 0 ? 'Widen the window (30d / All) to see history.' : null
+        "
       />
 
       @if (error(); as e) {
@@ -674,8 +679,10 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
   `,
   styles: [
     `
+      /* The shell already pads the content area; a second inset set this page in from every
+         sibling's left edge. */
       .page {
-        padding: var(--space-5);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
@@ -1266,17 +1273,18 @@ export class SpotAnalysisReportPageComponent implements OnInit {
     if (v < 40) return '#FF3B30';
     return '#8E8E93';
   });
+  // A ratio with an empty denominator is unknown, not $0.00 — null renders "—".
   readonly kpiAvgPnlPerAnalysis = computed(() => {
     const s = this.summary();
-    return s.analyses > 0 ? s.totalPnl / s.analyses : 0;
+    return s.analyses > 0 ? s.totalPnl / s.analyses : null;
   });
   readonly kpiCostPerSignal = computed(() => {
     const s = this.summary();
-    return s.signalsCreated > 0 ? s.totalCostUsd / s.signalsCreated : 0;
+    return s.signalsCreated > 0 ? s.totalCostUsd / s.signalsCreated : null;
   });
   readonly kpiCostPerProfitable = computed(() => {
     const s = this.summary();
-    return s.profitableAnalyses > 0 ? s.totalCostUsd / s.profitableAnalyses : 0;
+    return s.profitableAnalyses > 0 ? s.totalCostUsd / s.profitableAnalyses : null;
   });
 
   /** Funnel stages — counts + conversion-% relative to the prior stage. */

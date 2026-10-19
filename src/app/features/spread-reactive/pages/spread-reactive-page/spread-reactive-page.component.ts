@@ -17,7 +17,6 @@ import { SpreadReactiveService } from '@core/services/spread-reactive.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { ApiError } from '@core/api/api.types';
 import {
-  DEFAULT_SPREAD_REACTIVE_CONFIG,
   SpreadCondition,
   SpreadReactiveConfig,
   SpreadStateEntry,
@@ -25,6 +24,8 @@ import {
 import { SlAuditPageComponent } from '@features/sl-audit/pages/sl-audit-page/sl-audit-page.component';
 import { BaselineFloorsTabComponent } from '@features/spread-reactive/components/baseline-floors-tab/baseline-floors-tab.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 /**
  * Spread-reactive subsystem: config + live state dashboard.
@@ -41,7 +42,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 @Component({
   selector: 'app-spread-reactive-page',
   standalone: true,
-  imports: [DecimalPipe, SlAuditPageComponent, BaselineFloorsTabComponent, PageHeaderComponent],
+  imports: [
+    DecimalPipe,
+    SlAuditPageComponent,
+    BaselineFloorsTabComponent,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    RefreshButtonComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -49,10 +57,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         title="Spread-Reactive"
         subtitle="Opt-in SL widening on broker spread spikes — protects open positions during NY close, news, and weekend gaps.  Per-account baselines so Exness Raw vs Standard vs other brokers don't share one wrong number."
       >
-        @if (config(); as cfg) {
+        @if (serverConfig(); as cfg) {
           <!-- State badge + action button are separate: the badge says what
-               the subsystem IS, the button says what clicking DOES. The old
-               green-outlined "■ Disable" read as "enabled and healthy". -->
+               the subsystem IS (the server's value, never a draft), the button
+               says what clicking DOES. The old green-outlined "■ Disable" read
+               as "enabled and healthy". -->
           <span class="state-badge" [class.on]="cfg.enabled">
             {{ cfg.enabled ? 'Enabled' : 'Disabled' }}
           </span>
@@ -61,7 +70,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
             class="power-btn"
             [class.on]="cfg.enabled"
             [disabled]="saving()"
-            (click)="toggleEnabled()"
+            (click)="confirmAction.set('toggle')"
           >
             {{ cfg.enabled ? '■ Disable' : '▶ Enable' }}
           </button>
@@ -147,14 +156,13 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                 (input)="onStateFilter($any($event.target).value)"
                 aria-label="Filter live state rows"
               />
-              <button
-                type="button"
-                class="btn ghost"
-                (click)="state.refresh()"
-                [disabled]="state.loading()"
-              >
-                {{ state.loading() ? 'Refreshing…' : 'Refresh' }}
-              </button>
+              <!-- Bound to refreshing(), not loading(): loading() is true only until the
+                   first paint, so a click that fetched unchanged rows showed nothing. -->
+              <app-refresh-button
+                variant="outline"
+                [refreshing]="state.refreshing()"
+                (refresh)="state.refresh()"
+              />
             </span>
           </div>
           <!-- Summary strip: "162 pairs observed" over a wall of grey WARMING
@@ -162,9 +170,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                baseline and how many are still warming / elevated. -->
           @if (stateRows().length > 0) {
             <div class="state-summary" role="status">
-              <span class="summary-item" [class.warn]="stateSummary().withBaseline === 0"
+              <span
+                class="summary-item"
+                [class.warn]="stateSummary().withBaseline === 0"
+                title="Pairs with a persistent floor — the anchor Elevated / Normal is judged against. Pairs without one stand down."
                 >{{ stateSummary().withBaseline }} of {{ stateRows().length }} pairs have a
-                baseline</span
+                floor</span
               >
               <span class="summary-item">
                 <span class="condition-pill normal">{{ stateSummary().normal }}</span> normal
@@ -192,13 +203,35 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                 <tr>
                   <th>Account</th>
                   <th>Symbol</th>
-                  <th>Condition</th>
+                  <!-- The engine stores the latest tick's spread on every tick but
+                       re-classifies only once per worker pass, so a row could read
+                       ELEVATED at 0.5 × floor (or NORMAL at 3 ×) for up to one loop.
+                       The figure under the pill is the spread the verdict was decided on
+                       (conditionSpread, engine 2026-10-19). -->
+                  <th
+                    [attr.title]="
+                      'From the worker’s last evaluation (every ' +
+                      (serverConfig()?.loopIntervalSeconds ?? '?') +
+                      ' s); the figure under it is the spread that verdict was decided on. Spread and × floor are the latest tick, so for up to one pass they can differ.'
+                    "
+                  >
+                    Condition
+                  </th>
                   <th class="num">Spread</th>
                   <th class="num">Floor</th>
                   <th class="num">Baseline (median)</th>
                   <th class="num">× floor</th>
                   <th class="num">Samples</th>
-                  <th class="num">Calm run</th>
+                  <th
+                    class="num"
+                    [attr.title]="
+                      'Consecutive samples at or below floor × revert ratio. An active bump reverts after ' +
+                      (revertSamples() ?? '?') +
+                      ' in a row.'
+                    "
+                  >
+                    Calm run
+                  </th>
                   <th>Last sample</th>
                 </tr>
               </thead>
@@ -229,8 +262,24 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                           [class.elevated]="r.condition === 'Elevated'"
                           >{{ r.condition }}</span
                         >
+                        @if (r.conditionSpread !== null && r.conditionSpread !== undefined) {
+                          <span class="decided-on" [attr.title]="decidedOnTitle(r)">
+                            on {{ r.conditionSpread | number: '1.5-5' }}
+                            @if (decidedOnRatio(r); as ratio) {
+                              · {{ ratio }}×
+                            }
+                          </span>
+                        }
                       </td>
-                      <td class="num mono">{{ r.currentSpread | number: '1.5-5' }}</td>
+                      <!-- A never-sampled pair carries currentSpread 0: show "—", not a
+                           spread of 0.00000 and a "× floor" of 0.00 it never measured. -->
+                      <td class="num mono">
+                        @if (hasSample(r)) {
+                          {{ r.currentSpread | number: '1.5-5' }}
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
                       <td class="num mono">
                         @if (r.floorBaseline !== null) {
                           {{ r.floorBaseline | number: '1.5-5' }}
@@ -529,7 +578,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
                   type="button"
                   class="btn primary"
                   [disabled]="firingPreEmptive()"
-                  (click)="firePreEmptiveNow()"
+                  (click)="confirmAction.set('fire')"
                 >
                   {{ firingPreEmptive() ? 'Firing…' : 'Fire pre-emption now' }}
                 </button>
@@ -671,7 +720,40 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         </div>
       } @else if (activeTab() === 'settings' && loading()) {
         <div class="muted">Loading…</div>
+      } @else if (activeTab() === 'settings') {
+        <!-- Never fall back to defaults on a failed read: Save / Enable would then
+             write those defaults over the engine's real settings. -->
+        <div class="card muted">
+          Settings could not be loaded, so none are shown (saving defaults over the live values is
+          exactly what that would invite).
+          <button type="button" class="btn ghost" (click)="load()">Retry</button>
+        </div>
       }
+
+      <app-confirm-dialog
+        [open]="confirmAction() === 'toggle'"
+        [title]="serverConfig()?.enabled ? 'Disable spread-reactive?' : 'Enable spread-reactive?'"
+        [message]="
+          serverConfig()?.enabled
+            ? 'Stops SL widening fleet-wide on the worker’s next tick. Bumps already applied stay where they are; open positions lose spread-spike protection.'
+            : 'The worker starts widening (and reverting) stop-losses on live open positions on its next tick, using the current saved settings.'
+        "
+        [confirmLabel]="serverConfig()?.enabled ? 'Disable' : 'Enable'"
+        [confirmVariant]="serverConfig()?.enabled ? 'destructive' : 'primary'"
+        [loading]="saving()"
+        (confirm)="toggleEnabled()"
+        (cancelled)="confirmAction.set(null)"
+      />
+      <app-confirm-dialog
+        [open]="confirmAction() === 'fire'"
+        title="Fire pre-emptive widening now?"
+        message="Widens the stop-loss on every open position that has no active bump, by up to the max bump distance — the same pass the daily schedule runs. Bumps revert normally once the protection window closes."
+        confirmLabel="Fire now"
+        confirmVariant="destructive"
+        [loading]="firingPreEmptive()"
+        (confirm)="firePreEmptiveNow()"
+        (cancelled)="confirmAction.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -789,7 +871,9 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         align-items: center;
         justify-content: flex-end;
         gap: 10px;
-        padding: 10px 14px;
+        /* Right padding clears the floating "Ask" assistant pill (fixed, bottom-right,
+           ~100px wide): it sat squarely on top of Save in this sticky footer. */
+        padding: 10px var(--assistant-fab-clearance, 132px) 10px 14px;
         margin: 0 calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-4, 16px));
         background: var(--bg-secondary);
         border-top: 1px solid var(--border);
@@ -809,9 +893,9 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         cursor: pointer;
       }
       .btn.primary {
-        background: var(--primary, #2070d6);
+        background: var(--accent);
         color: #fff;
-        border-color: var(--primary, #2070d6);
+        border-color: var(--accent);
       }
       .btn:disabled {
         opacity: 0.6;
@@ -821,13 +905,15 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
         padding: 10px 14px;
         border-radius: 6px;
       }
+      /* Theme tokens: the light-only pink / mint fallbacks (no --error-bg or
+         --success-bg token exists) painted pale slabs on the dark theme. */
       .banner.error {
-        background: var(--error-bg, #fde2e1);
-        color: var(--error, #a32928);
+        background: color-mix(in srgb, var(--loss) 12%, transparent);
+        color: var(--loss);
       }
       .banner.ok {
-        background: var(--success-bg, #e7f5ec);
-        color: var(--success, #2c8a3f);
+        background: color-mix(in srgb, var(--profit) 14%, transparent);
+        color: var(--profit);
       }
       .status-head {
         display: flex;
@@ -906,6 +992,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
       .condition-pill.elevated {
         background: color-mix(in srgb, #ff453a 22%, transparent);
         color: #c93631;
+      }
+      .decided-on {
+        display: block;
+        margin-top: 2px;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: 10px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
       }
       .state-table-wrap {
         overflow-x: auto;
@@ -1023,6 +1117,12 @@ export class SpreadReactivePageComponent {
   protected readonly error = signal<string | null>(null);
   protected readonly firingPreEmptive = signal(false);
   protected readonly preEmptiveFireResult = signal<string | null>(null);
+  /** Which consequential action is awaiting its confirm dialog. */
+  protected readonly confirmAction = signal<'toggle' | 'fire' | null>(null);
+  /** Calm samples the worker needs before reverting a bump (saved value). */
+  protected readonly revertSamples = computed(
+    () => this.serverConfig()?.consecutiveCalmSamplesToRevert ?? null,
+  );
 
   protected readonly dirty = computed(() => {
     const c = this.config();
@@ -1134,30 +1234,58 @@ export class SpreadReactivePageComponent {
     this.activeTab.set(tab);
   }
 
-  private load(): void {
+  /**
+   * Read the saved config. A failed read leaves the form EMPTY — it used to
+   * substitute the compile-time defaults (enabled: false) and present them as
+   * the engine's settings, one Save / Enable away from writing them over the
+   * real values.
+   */
+  protected load(): void {
     this.loading.set(true);
+    this.error.set(null);
     this.service
       .getConfig()
       .pipe(
         catchError((e) => {
           this.error.set(this.toMessage(e));
-          return of({ ...DEFAULT_SPREAD_REACTIVE_CONFIG });
+          return of(null);
         }),
       )
       .subscribe((c) => {
+        this.loading.set(false);
+        if (!c) return;
         this.config.set({ ...c });
         this.serverConfig.set({ ...c });
-        this.loading.set(false);
       });
   }
 
+  /**
+   * Flip the master switch (after its confirm). Writes the SAVED config with only
+   * `enabled` changed: the old path saved the whole draft, so unsaved Settings edits
+   * went live with it — and on success replaced the draft, losing the rest.
+   */
   protected toggleEnabled(): void {
-    const c = this.config();
-    if (!c) return;
-    const next = { ...c, enabled: !c.enabled };
-    this.config.set(next);
-    // Immediate save on the master switch — operator intent is unambiguous.
-    this.save(next);
+    const s = this.serverConfig();
+    if (!s || this.saving()) return;
+    this.saving.set(true);
+    this.error.set(null);
+    this.service
+      .saveConfig({ ...s, enabled: !s.enabled })
+      .pipe(
+        catchError((e) => {
+          this.error.set(this.toMessage(e));
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        this.saving.set(false);
+        this.confirmAction.set(null);
+        if (!res) return;
+        this.serverConfig.set({ ...res });
+        const draft = this.config();
+        this.config.set(draft ? { ...draft, enabled: res.enabled } : { ...res });
+        this.saved.set(true);
+      });
   }
 
   protected patch(p: Partial<SpreadReactiveConfig>): void {
@@ -1166,9 +1294,9 @@ export class SpreadReactivePageComponent {
     this.config.set({ ...c, ...p });
   }
 
-  protected save(override?: SpreadReactiveConfig): void {
-    const c = override ?? this.config();
-    if (!c) return;
+  protected save(): void {
+    const c = this.config();
+    if (!c || this.saving()) return;
     this.saving.set(true);
     this.error.set(null);
     this.service
@@ -1205,11 +1333,13 @@ export class SpreadReactivePageComponent {
         catchError((e) => {
           this.error.set(this.toMessage(e));
           this.firingPreEmptive.set(false);
+          this.confirmAction.set(null);
           return of(null);
         }),
       )
       .subscribe((bumped) => {
         this.firingPreEmptive.set(false);
+        this.confirmAction.set(null);
         if (bumped !== null) {
           this.preEmptiveFireResult.set(`Fired — bumped ${bumped} position(s).`);
           setTimeout(() => this.preEmptiveFireResult.set(null), 6000);
@@ -1230,8 +1360,27 @@ export class SpreadReactivePageComponent {
     return Number.isFinite(n) ? n : fallback;
   }
 
-  /** current / floor ratio for the table — "—" when no floor has been established. */
+  /** conditionSpread / floor — the ratio the verdict was made on; null without a floor. */
+  protected decidedOnRatio(r: SpreadStateEntry): string | null {
+    if (r.conditionSpread == null || r.floorBaseline == null || r.floorBaseline <= 0) return null;
+    return (r.conditionSpread / r.floorBaseline).toFixed(2);
+  }
+
+  protected decidedOnTitle(r: SpreadStateEntry): string {
+    const at = r.conditionEvaluatedAt ? new Date(r.conditionEvaluatedAt) : null;
+    const when =
+      at && !Number.isNaN(at.getTime())
+        ? ` (sample at ${at.toISOString().slice(0, 19).replace('T', ' ')} UTC)`
+        : '';
+    return `The spread this ${r.condition} verdict was decided on${when}. Spread and × floor to the right are the latest tick.`;
+  }
+
+  /**
+   * current / floor ratio for the table — "—" when no floor has been established,
+   * or when the pair was never sampled (its currentSpread 0 printed "0.00 ×").
+   */
   protected ratioOf(r: SpreadStateEntry): string {
+    if (!this.hasSample(r)) return '—';
     if (r.floorBaseline == null || r.floorBaseline <= 0) return '—';
     return (r.currentSpread / r.floorBaseline).toFixed(2);
   }

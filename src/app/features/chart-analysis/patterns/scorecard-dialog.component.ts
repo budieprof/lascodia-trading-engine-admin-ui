@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import type { Ohlc } from '../indicators/math';
 import type { CandleTrendFilter } from './candlestick-patterns';
 import { canExportPine, pineStrategyFor } from './pine-export';
@@ -24,6 +25,7 @@ const SECTIONS: { source: ScoreSource; title: string }[] = [
 @Component({
   selector: 'app-pattern-scorecard-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [ModalA11yDirective],
   template: `
     <div class="sc-backdrop" (pointerdown)="closed.emit()"></div>
     <div
@@ -31,7 +33,8 @@ const SECTIONS: { source: ScoreSource; title: string }[] = [
       role="dialog"
       aria-modal="true"
       aria-label="Pattern scorecard"
-      (keydown.escape)="closed.emit()"
+      appModalA11y
+      (dismiss)="closed.emit()"
     >
       <header class="sc-head">
         <span class="sc-title"

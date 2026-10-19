@@ -14,6 +14,7 @@ import { buildRecPreviewChartOption } from '@shared/components/analysis-recommen
 import { catchError, of } from 'rxjs';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
 import {
   RecFileEditorComponent,
@@ -48,10 +49,18 @@ type AnalysisMode = 'spot' | 'limitBuy' | 'limitSell' | 'stopBuy' | 'stopSell';
     RecFileEditorComponent,
     MarkdownCopyDirective,
     RouterLink,
+    ModalA11yDirective,
   ],
   template: `
     <div class="backdrop" (click)="closed.emit()">
-      <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+      <div
+        class="modal"
+        (click)="$event.stopPropagation()"
+        role="dialog"
+        aria-modal="true"
+        appModalA11y
+        (dismiss)="closed.emit()"
+      >
         <header class="head">
           <div class="title">
             <strong>{{ symbol() }}</strong>

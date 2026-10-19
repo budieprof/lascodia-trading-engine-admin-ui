@@ -1,20 +1,15 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, map, of } from 'rxjs';
+import { map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type { CatalogueDriftHistoryDto, Timeframe } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -25,6 +20,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type LookbackDays = 7 | 30 | 90 | 365;
+
+/** A series tagged with the query it answers, so a lookback switch never shows the old window. */
+interface DriftHistoryResult {
+  queryKey: string;
+  history: CatalogueDriftHistoryDto;
+}
 
 @Component({
   selector: 'app-drift-history-page',
@@ -55,7 +56,7 @@ type LookbackDays = 7 | 30 | 90 | 365;
         backLink="/composite-ml/drift"
         backLabel="Drift Summary"
         [showRefresh]="!!layerKey()"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -179,6 +180,25 @@ type LookbackDays = 7 | 30 | 90 | 365;
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -258,12 +278,12 @@ type LookbackDays = 7 | 30 | 90 | 365;
       }
       .warm-pill.warm {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       /* Cold = amber, the same warning pair the cold-start and drift pages use. */
       .warm-pill.cold {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .card {
         background: var(--bg-secondary);
@@ -309,10 +329,10 @@ type LookbackDays = 7 | 30 | 90 | 365;
         color: var(--text-tertiary);
       }
       .positive {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .negative {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .time {
         color: var(--text-secondary);
@@ -343,15 +363,23 @@ export class DriftHistoryPageComponent {
     { initialValue: null },
   );
 
+  /** Identity of the series the controls currently ask for (declared before the resource that reads it). */
+  private readonly queryKey = computed(
+    () => `${this.layerKey()}|${this.symbol() ?? ''}|${this.timeframe() ?? ''}|${this.lookback()}`,
+  );
+
   // Single polled resource that reads layerKey/symbol/timeframe/lookback at
-  // fetcher-call time. An effect re-fires resource.refresh() whenever any of
-  // those signals changes so the displayed series updates immediately on
+  // fetcher-call time. refetchOnChange (constructor) re-fires resource.refresh()
+  // whenever any of those signals changes so the displayed series updates on
   // navigation or lookback toggle. createPolledResource handles the periodic
   // refresh + the visibilityState pause; we don't need to layer rxjs flows.
-  protected readonly resource = createPolledResource(
+  protected readonly resource = createPolledResource<DriftHistoryResult | null>(
     () => {
       const key = this.layerKey();
-      if (!key) return of<CatalogueDriftHistoryDto | null>(null);
+      if (!key) return of(null);
+      const queryKey = this.queryKey();
+      // Errors propagate to resource.error() — they used to become null, which
+      // left the skeleton up and the error state unreachable.
       return this.compositeMl
         .getCatalogueDriftHistory({
           layerKey: key,
@@ -360,8 +388,8 @@ export class DriftHistoryPageComponent {
           lookbackDays: this.lookback(),
         })
         .pipe(
-          map((res) => (res.status ? (res.data ?? null) : null)),
-          catchError(() => of<CatalogueDriftHistoryDto | null>(null)),
+          map(unwrapResponse),
+          map((history) => ({ queryKey, history })),
         );
     },
     {
@@ -373,20 +401,21 @@ export class DriftHistoryPageComponent {
   );
 
   constructor() {
-    // Re-fetch on any signal change. Reading all four signals subscribes the
-    // effect; resource.refresh() fires the fetcher which re-reads them.
-    effect(() => {
-      this.layerKey();
-      this.symbol();
-      this.timeframe();
-      this.lookback();
-      this.resource.refresh();
-    });
+    // Re-fetch when the entry or the lookback changes (not on start-up: the
+    // resource's own first fetch covers that).
+    refetchOnChange(
+      () => this.queryKey(),
+      () => this.resource.refresh(),
+    );
   }
 
-  protected readonly loaded = computed(() => this.resource.value());
+  /** The loaded series, or null while the asked-for one has not arrived yet. */
+  protected readonly loaded = computed(() => {
+    const v = this.resource.value();
+    return v && v.queryKey === this.queryKey() ? v.history : null;
+  });
   protected readonly loading = computed(
-    () => this.resource.loading() && this.resource.value() === null,
+    () => this.resource.loading() || (this.loaded() === null && !this.resource.error()),
   );
 
   protected readonly points = computed(() => this.loaded()?.points ?? []);

@@ -38,6 +38,7 @@ import {
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
+import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/analytics-sample';
 
 @Component({
   selector: 'app-walk-forward-page',
@@ -158,26 +159,34 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           scores and histogram below. They still count toward run totals.
         </p>
       }
-      <!-- KPI strip — fleet-wide walk-forward posture -->
+      @if (ready() && sampleTotal() > wfSample().length) {
+        <p class="wiped-note">
+          Tiles, charts and breakdowns cover the newest {{ fmtInt(wfSample().length) }} of
+          {{ fmtInt(sampleTotal()) }} runs — a full sample would be too large to fetch. The table
+          below pages through all of them.
+        </p>
+      }
+      <!-- KPI strip — fleet-wide walk-forward posture. "—" until the sample lands: a row of
+           zeros beside a table of 2,973 runs read as "no runs". -->
       <div class="wf-kpis">
         <div class="wf-kpi">
           <span class="kpi-label">Total runs</span>
-          <span class="kpi-value">{{ sampleFailed() ? '—' : wfStats().total }}</span>
+          <span class="kpi-value">{{ ready() ? fmtInt(sampleTotal()) : '—' }}</span>
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Completed</span>
-          <span class="kpi-value" [class.good]="wfStats().completed > 0">{{
-            sampleFailed() ? '—' : wfStats().completed
+          <span class="kpi-value" [class.good]="ready() && wfStats().completed > 0">{{
+            ready() ? wfStats().completed : '—'
           }}</span>
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Failed</span>
           <span
             class="kpi-value"
-            [class.bad]="wfStats().failed > 0"
-            [class.good]="wfStats().failed === 0"
+            [class.bad]="ready() && wfStats().failed > 0"
+            [class.good]="ready() && wfStats().failed === 0"
           >
-            {{ wfStats().failed }}
+            {{ ready() ? wfStats().failed : '—' }}
           </span>
         </div>
         <div class="wf-kpi">
@@ -210,11 +219,11 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Avg IS days</span>
-          <span class="kpi-value">{{ wfStats().avgIs }}</span>
+          <span class="kpi-value">{{ ready() ? wfStats().avgIs : '—' }}</span>
         </div>
         <div class="wf-kpi">
           <span class="kpi-label">Avg OOS days</span>
-          <span class="kpi-value">{{ wfStats().avgOosDays }}</span>
+          <span class="kpi-value">{{ ready() ? wfStats().avgOosDays : '—' }}</span>
         </div>
       </div>
 
@@ -674,10 +683,19 @@ export class WalkForwardPageComponent implements OnInit {
   readonly showCreatePanel = signal(false);
   readonly strategies = signal<StrategyDto[]>([]);
 
-  // Analytics sample — probe-and-fetch capped at 5000.
+  // Analytics sample — probe-and-fetch, sized by analyticsSampleSize.
   readonly wfSample = signal<WalkForwardRunDto[]>([]);
+  /** The list's true size (from the probe) — "Total runs" is this, not the sample's length. */
+  readonly sampleTotal = signal(0);
+  /** False until the first sample lands: the tiles read "—", not a row of zeros. */
+  readonly sampleLoaded = signal(false);
 
   readonly sampleFailed = signal(false);
+  readonly ready = computed(() => this.sampleLoaded() && !this.sampleFailed());
+
+  fmtInt(n: number): string {
+    return this.decimalPipe.transform(n, '1.0-0') ?? String(n);
+  }
 
   wfStats = computed(() => {
     const all = this.wfSample();
@@ -932,47 +950,58 @@ export class WalkForwardPageComponent implements OnInit {
     initialBalance: [10000, [Validators.required, Validators.min(1)]],
   });
 
+  // Widths sized to header + value so nothing wraps mid-word ("CONSISTENC Y"); dates in UTC — a
+  // window ending 2026-09-30T23:00Z printed "Oct 1" in the browser's zone.
   readonly columnDefs: ColDef<WalkForwardRunDto>[] = [
-    { field: 'id', headerName: 'Run', width: 90 },
-    { field: 'strategyId', headerName: 'Strategy', width: 100 },
-    { field: 'symbol', headerName: 'Symbol', width: 110 },
-    { field: 'timeframe', headerName: 'TF', width: 80 },
+    { field: 'id', headerName: 'Run', width: 80, minWidth: 72 },
+    { field: 'strategyId', headerName: 'Strategy', width: 100, minWidth: 96 },
+    { field: 'symbol', headerName: 'Symbol', width: 100, minWidth: 92 },
+    { field: 'timeframe', headerName: 'TF', width: 70, minWidth: 64 },
     {
       field: 'fromDate',
-      headerName: 'From',
+      headerName: 'From (UTC)',
       width: 120,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, yyyy') ?? '-',
+      minWidth: 112,
+      valueFormatter: (p) =>
+        this.datePipe.transform(p.value as string, 'MMM d, yyyy', 'UTC') ?? '-',
     },
     {
       field: 'toDate',
-      headerName: 'To',
+      headerName: 'To (UTC)',
       width: 120,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, yyyy') ?? '-',
+      minWidth: 112,
+      valueFormatter: (p) =>
+        this.datePipe.transform(p.value as string, 'MMM d, yyyy', 'UTC') ?? '-',
     },
     {
       field: 'averageOutOfSampleScore',
       headerName: 'Avg OOS',
-      width: 110,
+      width: 100,
+      minWidth: 92,
       valueFormatter: (p) => this.decimalPipe.transform(p.value as number, '1.2-2') ?? '-',
     },
     {
       field: 'scoreConsistency',
       headerName: 'Consistency',
-      width: 120,
+      width: 132,
+      minWidth: 128,
       valueFormatter: (p) => this.decimalPipe.transform(p.value as number, '1.2-2') ?? '-',
     },
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 118,
+      minWidth: 112,
       cellRenderer: StatusPillCellComponent,
       cellRendererParams: { label: 'Walk-forward status' },
     },
     {
       field: 'startedAt',
-      headerName: 'Started',
-      width: 150,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, HH:mm') ?? '-',
+      headerName: 'Started (UTC)',
+      flex: 1,
+      minWidth: 130,
+      valueFormatter: (p) =>
+        this.datePipe.transform(p.value as string, 'MMM d, HH:mm', 'UTC') ?? '-',
     },
   ];
 
@@ -989,12 +1018,22 @@ export class WalkForwardPageComponent implements OnInit {
     // indicate list-affecting progress (status flips, avg OOS score, etc.).
     // Throttle at 5s — a completed walk-forward fires many backtest events in
     // quick succession as each window finishes, and we only need one reload.
-    merge(this.realtime.on('backtestCompleted'), this.realtime.on('optimizationCompleted'))
+    const progress$ = merge(
+      this.realtime.on('backtestCompleted'),
+      this.realtime.on('optimizationCompleted'),
+    );
+    progress$
       .pipe(throttleTime(5_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed())
-      .subscribe(() => {
-        this.runsTable()?.loadData();
-        this.loadAnalyticsSample();
-      });
+      .subscribe(() => this.runsTable()?.loadData());
+    // The analytics sample is megabytes, and every backtest completing anywhere in the fleet
+    // fires backtestCompleted — re-fetching it every 5 s kept the page downloading forever.
+    // A minute is fresh enough for fleet-level tiles; the table above stays at 5 s.
+    progress$
+      .pipe(
+        throttleTime(60_000, undefined, { leading: false, trailing: true }),
+        takeUntilDestroyed(),
+      )
+      .subscribe(() => this.loadAnalyticsSample());
   }
 
   ngOnInit(): void {
@@ -1003,26 +1042,30 @@ export class WalkForwardPageComponent implements OnInit {
 
   protected loadAnalyticsSample(): void {
     this.sampleFailed.set(false);
-    this.service.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).subscribe({
+    this.service.list(newestRowsRequest(1)).subscribe({
       next: (probe) => {
         if (!probe?.status) {
           this.sampleFailed.set(true);
           return;
         }
         const total = probe?.data?.pager?.totalItemCount ?? 0;
+        this.sampleTotal.set(total);
         if (total === 0) {
           this.wfSample.set([]);
+          this.sampleLoaded.set(true);
           return;
         }
-        this.service
-          .list({ currentPage: 1, itemCountPerPage: Math.min(total, 5000), filter: null })
-          .subscribe({
-            next: (full) => {
-              this.sampleFailed.set(!full?.status);
-              this.wfSample.set(full?.data?.data ?? []);
-            },
-            error: () => this.sampleFailed.set(true),
-          });
+        // List rows used to carry windowResultsJson (~64 KB each; 117 MB for 2,973 runs). The
+        // engine now leaves it to the detail GET; the probe row's size still bounds the download.
+        const size = analyticsSampleSize(total, probe?.data?.data?.[0]);
+        this.service.list(newestRowsRequest(size)).subscribe({
+          next: (full) => {
+            this.sampleFailed.set(!full?.status);
+            this.wfSample.set(full?.data?.data ?? []);
+            this.sampleLoaded.set(true);
+          },
+          error: () => this.sampleFailed.set(true),
+        });
       },
       error: () => this.sampleFailed.set(true),
     });
@@ -1049,11 +1092,15 @@ export class WalkForwardPageComponent implements OnInit {
     this.service.create(request).subscribe({
       next: (res) => {
         this.busy.set(false);
-        if (res.status && res.data) {
-          this.notifications.success(`Walk-forward run #${res.data.id} queued`);
+        // `POST walk-forward` answers with the new run's id (ResponseData<long>), not the run —
+        // reading `.id` off the number queued "#undefined" and opened /walk-forward/undefined.
+        const data = res.data as unknown;
+        const id = typeof data === 'number' ? data : ((data as { id?: number } | null)?.id ?? null);
+        if (res.status && id != null) {
+          this.notifications.success(`Walk-forward run #${id} queued`);
           this.showCreatePanel.set(false);
           this.loadAnalyticsSample();
-          this.router.navigate(['/walk-forward', res.data.id]);
+          this.router.navigate(['/walk-forward', id]);
         } else {
           this.notifications.error(res.message ?? 'Failed to queue walk-forward run');
         }

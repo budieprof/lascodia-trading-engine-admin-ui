@@ -193,7 +193,7 @@ import {
       .vd-table td {
         vertical-align: top;
         padding: 3px 6px;
-        border-top: 1px solid var(--border-subtle, #eef0f3);
+        border-top: 1px solid var(--border);
       }
       .vd-path {
         font-family: var(--font-mono, monospace);

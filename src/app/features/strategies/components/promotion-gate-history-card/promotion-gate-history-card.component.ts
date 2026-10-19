@@ -206,7 +206,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         display: block;
       }
       .card {
-        background: var(--surface, #fff);
+        background: var(--bg-secondary);
         border: 1px solid var(--border, #e5e7eb);
         border-radius: 10px;
         padding: 16px;
@@ -230,7 +230,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         max-width: 70ch;
       }
       .btn-refresh {
-        background: var(--surface-2, #f3f4f6);
+        background: var(--bg-tertiary);
         border: 1px solid var(--border, #e5e7eb);
         border-radius: 6px;
         padding: 5px 10px;
@@ -247,7 +247,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         padding: 12px;
         border-radius: 8px;
         font-size: 13px;
-        background: var(--surface-2, #f3f4f6);
+        background: var(--bg-tertiary);
       }
       .banner.error {
         background: rgba(192, 57, 43, 0.1);
@@ -266,7 +266,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         border-radius: 8px;
         margin-bottom: 14px;
         border-left: 3px solid var(--text-tertiary, #9ca3af);
-        background: var(--surface-2, #f3f4f6);
+        background: var(--bg-tertiary);
       }
       .verdict.pass {
         border-left-color: var(--profit, #1f8a4c);
@@ -275,7 +275,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         border-left-color: var(--loss, #c0392b);
       }
       .verdict.stall {
-        border-left-color: #b45309;
+        border-left-color: var(--warning);
       }
       .verdict-icon {
         font-size: 18px;
@@ -321,7 +321,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         border-radius: 9999px;
         font-size: 11px;
         font-weight: 650;
-        background: var(--surface-2, #f3f4f6);
+        background: var(--bg-tertiary);
         color: var(--text-secondary, #6b7280);
       }
       .badge.pass {
@@ -334,7 +334,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .badge.stall {
         background: rgba(245, 158, 11, 0.16);
-        color: #b45309;
+        color: var(--warning);
       }
       .ts {
         font-size: 12px;
@@ -353,7 +353,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         margin-top: 10px;
         padding: 10px;
         border-radius: 8px;
-        background: var(--surface-2, #f3f4f6);
+        background: var(--bg-tertiary);
       }
       .cpcv-head {
         display: flex;
@@ -374,7 +374,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .method.gated {
         background: rgba(59, 130, 246, 0.16);
-        color: #1d4ed8;
+        color: var(--accent);
       }
       .method.diag {
         background: rgba(120, 120, 128, 0.18);

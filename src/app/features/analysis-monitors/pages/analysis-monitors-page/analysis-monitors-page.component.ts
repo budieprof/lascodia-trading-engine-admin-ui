@@ -34,6 +34,9 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /** Status filter chips, in the order an operator scans them. */
 const STATUS_FILTERS = [
@@ -86,6 +89,9 @@ const STATUS_FILTERS = [
     ErrorStateComponent,
     MonitorBuilderComponent,
     MonitorTemplatesComponent,
+    ConfirmDialogComponent,
+    RefreshButtonComponent,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -100,14 +106,9 @@ const STATUS_FILTERS = [
         <button type="button" class="btn btn-primary" (click)="openBuilder(null)">
           New monitor
         </button>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="board.refresh()"
-          [disabled]="board.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to loading(), which is true only before the first answer, the old button showed
+             nothing on a click. -->
+        <app-refresh-button [refreshing]="board.refreshing()" (refresh)="board.refresh()" />
       </app-page-header>
 
       @if (counters(); as c) {
@@ -353,16 +354,20 @@ const STATUS_FILTERS = [
                     <td class="actions-col" (click)="$event.stopPropagation()">
                       @if (m.status === 'Active') {
                         <button
+                          type="button"
                           class="act"
                           title="Pause — stops evaluation, keeps the watch"
+                          [attr.aria-label]="'Pause monitor #' + m.id"
                           [disabled]="busyId() === m.id"
                           (click)="pause(m)"
                         >
                           ⏸
                         </button>
                         <button
+                          type="button"
                           class="act"
                           title="Fire now — runs the action regardless of trigger"
+                          [attr.aria-label]="'Fire monitor #' + m.id + ' now'"
                           [disabled]="busyId() === m.id"
                           (click)="fire(m)"
                         >
@@ -370,8 +375,10 @@ const STATUS_FILTERS = [
                         </button>
                       } @else if (m.status === 'Paused') {
                         <button
+                          type="button"
                           class="act"
                           title="Resume"
+                          [attr.aria-label]="'Resume monitor #' + m.id"
                           [disabled]="busyId() === m.id"
                           (click)="resume(m)"
                         >
@@ -380,16 +387,20 @@ const STATUS_FILTERS = [
                       }
                       @if (m.status === 'Active' || m.status === 'Paused') {
                         <button
+                          type="button"
                           class="act"
                           title="Extend expiry by 6 hours"
+                          [attr.aria-label]="'Extend monitor #' + m.id + ' by 6 hours'"
                           [disabled]="busyId() === m.id"
                           (click)="extend(m, 6)"
                         >
                           ⏱
                         </button>
                         <button
+                          type="button"
                           class="act danger"
                           title="Cancel this monitor"
+                          [attr.aria-label]="'Cancel monitor #' + m.id"
                           [disabled]="busyId() === m.id"
                           (click)="cancel(m)"
                         >
@@ -399,6 +410,7 @@ const STATUS_FILTERS = [
                       <a
                         class="act"
                         title="Open the conversation that created this monitor"
+                        aria-label="Open the conversation that created this monitor"
                         [routerLink]="['/conversations']"
                         [queryParams]="{ conversation: m.anchorLlmInvocationId }"
                         >💬</a
@@ -697,7 +709,10 @@ const STATUS_FILTERS = [
           class="script-chart-panel"
           (click)="$event.stopPropagation()"
           role="dialog"
+          aria-modal="true"
           aria-label="Structure Watch chart"
+          appModalA11y
+          (dismiss)="scriptChart.set(null)"
         >
           <div class="script-chart-head">
             <strong>{{ sc.title }}</strong>
@@ -708,6 +723,31 @@ const STATUS_FILTERS = [
         </div>
       </div>
     }
+
+    <!-- Fire and cancel ask here: they used native confirm() / prompt(), unthemed, and dismissed
+         unseen by anything that answers browser dialogs automatically. -->
+    <app-confirm-dialog
+      [open]="pendingAction() !== null"
+      [title]="actionDialog().title"
+      [message]="actionDialog().message"
+      [confirmLabel]="actionDialog().confirmLabel"
+      [confirmVariant]="pendingAction()?.kind === 'cancel' ? 'destructive' : 'primary'"
+      (confirm)="confirmAction()"
+      (cancelled)="pendingAction.set(null)"
+    >
+      @if (pendingAction()?.kind === 'cancel') {
+        <label class="reason-field">
+          <span>Reason (optional)</span>
+          <input
+            type="text"
+            maxlength="500"
+            placeholder="Kept in the monitor's history"
+            [ngModel]="cancelReason()"
+            (ngModelChange)="cancelReason.set($event)"
+          />
+        </label>
+      }
+    </app-confirm-dialog>
   `,
   styles: [
     `
@@ -876,6 +916,8 @@ const STATUS_FILTERS = [
       .board-table td.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+        /* "22h 27m" broke across two lines in the Expires column. */
+        white-space: nowrap;
       }
       .mon-row {
         cursor: pointer;
@@ -964,8 +1006,12 @@ const STATUS_FILTERS = [
         border-color: transparent;
         font-weight: 600;
       }
+      /* The ellipsis must live on the block that overflows: on the cell alone the intent was cut
+         mid-word ("…Bottom of the floor zon") with no sign there was more. */
       .intent .intent-text {
         display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .link-btn {
         background: none;
@@ -1147,6 +1193,23 @@ const STATUS_FILTERS = [
       .act.danger:hover:not(:disabled) {
         border-color: var(--loss);
         color: var(--loss);
+      }
+      /* Projected into the cancel confirm. */
+      .reason-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: var(--space-3);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .reason-field input {
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font: inherit;
       }
 
       .detail-row td {
@@ -1716,25 +1779,58 @@ export class AnalysisMonitorsPageComponent {
     this.run(m.id, this.svc.extend(m.id, hours), `Expiry extended by ${hours}h.`);
   }
 
+  /** Force-fire and cancel ask first (the confirm dialog); pause / resume / extend are reversible. */
+  protected readonly pendingAction = signal<{
+    kind: 'fire' | 'cancel';
+    monitor: AnalysisMonitorDto;
+  } | null>(null);
+  protected readonly cancelReason = signal('');
+
+  protected readonly actionDialog = computed(() => {
+    const a = this.pendingAction();
+    if (!a) return { title: '', message: '', confirmLabel: '' };
+    const m = a.monitor;
+    if (a.kind === 'fire') {
+      // Force-fire runs the monitor's action for real — a re-analysis, and for a
+      // proposeTrade monitor a signal through the risk gates.
+      const proposes = /"proposeTrade"\s*:\s*true/.test(m.actionSpecJson ?? '');
+      return {
+        title: `Fire monitor #${m.id} now?`,
+        message:
+          `${m.symbol} ${m.timeframe}: its action runs now, whatever the trigger says.` +
+          (proposes
+            ? ' Auto-propose is ON: any viable setup from the re-run is filed through the risk gates.'
+            : ''),
+        confirmLabel: 'Fire now',
+      };
+    }
+    return {
+      title: `Cancel monitor #${m.id}?`,
+      message: `${m.symbol} ${m.timeframe} stops watching for good; its history stays. Pause it instead to keep it for later.`,
+      confirmLabel: 'Cancel monitor',
+    };
+  });
+
   protected fire(m: AnalysisMonitorDto): void {
-    // Force-fire runs the monitor's action for real — a re-analysis, and for a
-    // proposeTrade monitor a signal through the risk gates. Worth a confirm.
-    const proposes = /"proposeTrade"\s*:\s*true/.test(m.actionSpecJson ?? '');
-    const warning = proposes
-      ? '\n\nThis monitor has auto-propose ON: any viable setup from the re-run will be filed through the risk gates.'
-      : '';
-    if (!confirm(`Fire monitor #${m.id} (${m.symbol} ${m.timeframe}) now?${warning}`)) return;
-    this.run(m.id, this.svc.forceFire(m.id), 'Fire queued — the worker will run it shortly.');
+    this.pendingAction.set({ kind: 'fire', monitor: m });
   }
 
   protected cancel(m: AnalysisMonitorDto): void {
-    const reason = prompt(
-      `Cancel monitor #${m.id} (${m.symbol} ${m.timeframe})?\n\nReason (optional):`,
-    );
-    // `prompt` returns null on dismiss and '' on an empty submit — only the
-    // former means "don't do it".
-    if (reason === null) return;
-    this.run(m.id, this.svc.cancel(m.id, reason || undefined), 'Monitor cancelled.');
+    this.cancelReason.set('');
+    this.pendingAction.set({ kind: 'cancel', monitor: m });
+  }
+
+  protected confirmAction(): void {
+    const a = this.pendingAction();
+    if (!a) return;
+    this.pendingAction.set(null);
+    const id = a.monitor.id;
+    if (a.kind === 'fire') {
+      this.run(id, this.svc.forceFire(id), 'Fire queued — the worker will run it shortly.');
+    } else {
+      const reason = this.cancelReason().trim();
+      this.run(id, this.svc.cancel(id, reason || undefined), 'Monitor cancelled.');
+    }
   }
 
   private run(

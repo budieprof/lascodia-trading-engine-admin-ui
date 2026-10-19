@@ -40,6 +40,7 @@ import {
 import { NotificationService } from '@core/notifications/notification.service';
 import { ThemeService } from '@core/theme/theme.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 import {
   BacktestChartSelection,
@@ -79,6 +80,7 @@ const OUTCOME_FILTERS = [
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    ModalA11yDirective,
     CurrencyPipe,
     DatePipe,
     DecimalPipe,
@@ -143,20 +145,24 @@ const OUTCOME_FILTERS = [
               <!-- API serialises enum as string ("Spot"/"Macro"); TS enum is int-valued. Accept both shapes. -->
               <span>{{ modelTierLabel(r.modelTier) }}</span>
             </div>
-            <!-- One timestamp format on this page (and the index / compare
-                 pages): the header used 'medium' while the drill-down used
-                 'short', so the same run showed two date styles. -->
+            <!-- One timestamp format AND zone on this page (and the index / compare
+                 pages): UTC, like the window and the drill-down's "As of (UTC)". These
+                 three used to render in browser time, an hour off the rest in WAT. -->
             <div class="kv">
-              <span class="label">Created</span>
-              <span>{{ r.createdAt | date: 'yyyy-MM-dd HH:mm' }}</span>
+              <span class="label">Created (UTC)</span>
+              <span>{{ r.createdAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}</span>
             </div>
             <div class="kv">
-              <span class="label">Started</span>
-              <span>{{ r.startedAt ? (r.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</span>
+              <span class="label">Started (UTC)</span>
+              <span>{{
+                r.startedAt ? (r.startedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—'
+              }}</span>
             </div>
             <div class="kv">
-              <span class="label">Completed</span>
-              <span>{{ r.completedAt ? (r.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</span>
+              <span class="label">Completed (UTC)</span>
+              <span>{{
+                r.completedAt ? (r.completedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—'
+              }}</span>
             </div>
           </div>
 
@@ -229,13 +235,18 @@ const OUTCOME_FILTERS = [
               <span class="stat-label">Rejected by gate</span>
               <span class="stat-value">{{ s.rejectedByGateCount }}</span>
             </div>
+            <!-- Not a subset of Viable: the engine counts one entry per (rec, gate) the
+                 rec passed only via the confidence bypass or an advisory structural rule
+                 (the backtest runs those as advisory), and the rec may still be rejected
+                 by another gate. Run #81: 15 entries from 9 recs against 6 viable — the
+                 old "of 6 viable" foot read as an impossible 15 of 6. -->
             <div
               class="stat-card"
-              title="Viable recommendations that only cleared a soft viability gate because the high-confidence bypass (Llm:SpotAnalysisHighConfidenceBypassThreshold) let them through. They are a subset of Viable, not an extra bucket — so Viable + Rejected = Total, and Bypassed is not part of that sum."
+              title="Gate hits a recommendation got past only via the high-confidence bypass (Llm:SpotAnalysisHighConfidenceBypassThreshold) or a structural rule the backtest runs as advisory. One entry per (rec, gate): a rec that trips three advisory rules counts three times, and it can still be rejected by another gate — so this is not a subset of Viable."
             >
-              <span class="stat-label">Bypassed gate</span>
+              <span class="stat-label">Bypassed gate hits</span>
               <span class="stat-value">{{ s.bypassedCount }}</span>
-              <span class="stat-foot">of {{ s.viableCount }} viable · via confidence bypass</span>
+              <span class="stat-foot">bypass / advisory hits · a rec can trip several</span>
             </div>
             <div class="stat-card stat-card--hl">
               <span class="stat-label">Hit rate</span>
@@ -1074,14 +1085,27 @@ const OUTCOME_FILTERS = [
       />
 
       @if (confirmCancel()) {
-        <div class="modal-scrim" (click)="confirmCancel.set(false)">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Cancel this run?</h2></div>
+        <div class="modal-scrim" (click)="closeCancelConfirm()">
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bt-detail-cancel-title"
+            appModalA11y
+            (dismiss)="closeCancelConfirm()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="bt-detail-cancel-title">Cancel this run?</h2></div>
             <div class="modal-body">
               The worker will stop at the next point boundary. Already-processed points stay.
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" (click)="confirmCancel.set(false)">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="closeCancelConfirm()"
+                data-autofocus
+              >
                 Keep running
               </button>
               <button
@@ -1320,9 +1344,11 @@ const OUTCOME_FILTERS = [
         flex-direction: column;
         gap: 4px;
       }
+      /* Tint the card surface, not the page: a translucent blue over the black page
+         read as a darker, navy "hole" beside the grey cards on the dark theme. */
       .stat-card--hl {
-        background: rgba(0, 113, 227, 0.08);
-        border-color: rgba(0, 113, 227, 0.25);
+        background: color-mix(in srgb, var(--accent) 10%, var(--bg-secondary));
+        border-color: color-mix(in srgb, var(--accent) 35%, transparent);
       }
       .stat-label {
         font-size: 0.7rem;
@@ -2102,13 +2128,13 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
   /**
    * Aggregate one point's walker outcomes into chip rows (label + count).
    *
-   * The points endpoint currently returns `status: null` for every outcome:
-   * the walker persists the field as `Label` but `BacktestPointOutcomeDto`
-   * reads `Status`, so the label is lost in deserialisation (the summary
-   * donut is aggregated by a different path and is correct). Until that is
-   * fixed server-side the chip says what we do know — the sign of the
-   * walked P&L — and is explicit that the label itself was not recorded,
-   * instead of printing "UNKNOWN" as though the walker had no verdict.
+   * Until 2026-10-19 the points endpoint returned every outcome field as null:
+   * the worker stores `{ Recommendation, Outcome: { Label, … } }` and the query
+   * read it as the flat DTO. The engine now projects the stored pair
+   * (LlmBacktestStoredOutcomes), so `status` is the walker's label. An outcome
+   * that still arrives without one keeps the defensive chip — the sign of the
+   * walked P&L when present, and that the verdict did not come back — rather
+   * than "UNKNOWN" as though the walker had no verdict.
    */
   outcomeSummary(
     p: LlmBacktestPoint,
@@ -2121,12 +2147,12 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
         missing = true;
         lbl =
           o.pnlPips == null
-            ? 'label not recorded'
+            ? 'outcome not returned'
             : o.pnlPips > 0
-              ? `+${o.pnlPips.toFixed(1)} pips · label not recorded`
+              ? `+${o.pnlPips.toFixed(1)} pips · outcome not returned`
               : o.pnlPips < 0
-                ? `${o.pnlPips.toFixed(1)} pips · label not recorded`
-                : 'flat · label not recorded';
+                ? `${o.pnlPips.toFixed(1)} pips · outcome not returned`
+                : 'flat · outcome not returned';
       }
       const cur = counts.get(lbl);
       if (cur) cur.count++;
@@ -2135,7 +2161,7 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
           count: 1,
           missing,
           title: missing
-            ? 'The walker verdict (HitTP / HitSL / Expired…) is missing from the points API for this run; the Outcomes donut above is aggregated separately and is authoritative.'
+            ? 'The points API returned no walker verdict (HitTP / HitSL / Expired…) for this rec; the Outcomes donut above is aggregated separately and is authoritative.'
             : undefined,
         });
     }
@@ -2317,13 +2343,17 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
           radius: ['45%', '70%'],
           center: ['50%', '45%'],
           avoidLabelOverlap: true,
-          // The shared theme paints a thick white text-border on labels,
-          // which blurred these small two-line slice labels into a smear.
+          // ECharts 6 strokes outside labels by default, which blurred these small
+          // two-line slice labels into a smear. Width 0 alone did not remove it
+          // (v2b re-crawl still showed the outline), so the stroke and shadow
+          // colours are cleared as well.
           label: {
             formatter: '{b}\n{c}',
             fontSize: 10,
             textBorderWidth: 0,
+            textBorderColor: 'transparent',
             textShadowBlur: 0,
+            textShadowColor: 'transparent',
           },
           data,
         },
@@ -2357,13 +2387,28 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
           type: 'bar',
           data: values,
           itemStyle: { color: '#c4290a' },
-          label: { show: true, position: 'right', fontSize: 10 },
+          // Same as the outcome donut: the shared theme's text border smeared the
+          // count digits ("7", "5", "4") into outlined blobs.
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            textBorderWidth: 0,
+            textBorderColor: 'transparent',
+            textShadowColor: 'transparent',
+          },
         },
       ],
     };
   });
 
   // ── Cancel ──────────────────────────────────────────────────────────────
+
+  /** Close the cancel confirmation — not while its request is in flight. */
+  closeCancelConfirm(): void {
+    if (this.cancelling()) return;
+    this.confirmCancel.set(false);
+  }
 
   executeCancel(): void {
     const id = this.id();

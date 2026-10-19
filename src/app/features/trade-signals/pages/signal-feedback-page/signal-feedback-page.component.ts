@@ -5,6 +5,7 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -20,6 +21,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
@@ -91,6 +93,7 @@ interface AnomalyFlag {
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -100,14 +103,9 @@ interface AnomalyFlag {
         subtitle="Rejected & expired trade-signals — EA feedback, strategy decisions, and engine expirations"
       >
         <a routerLink="/trade-signals" class="btn btn-secondary">← Signals</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so a click on the old button changed nothing on screen. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="filter-bar">
@@ -1022,6 +1020,11 @@ export class SignalFeedbackPageComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+      // The effect below runs once on creation and issues the first fetch;
+      // running immediately as well sent trade-signal/list twice on every
+      // open, the first aborted by the effect's refresh() (the crawl's
+      // "FAILED /trade-signal/list").
+      runImmediately: false,
     },
   );
 
@@ -1029,7 +1032,7 @@ export class SignalFeedbackPageComponent {
     effect(() => {
       this.windowHours();
       this.statusFilter();
-      this.resource.refresh();
+      untracked(() => this.resource.refresh());
     });
   }
 

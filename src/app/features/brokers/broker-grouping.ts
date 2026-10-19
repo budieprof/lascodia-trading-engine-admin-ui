@@ -1,4 +1,22 @@
-import type { EAInstanceDto, TradingAccountDto } from '@core/api/api.types';
+import type { EAFleetItem, TradingAccountDto } from '@core/api/api.types';
+import { fleetStatusOf } from '@features/ea-instances/current-fleet';
+
+/**
+ * The EA fields the broker pages read. Both pages feed it the admin fleet list (every status), cut
+ * down to the current fleet (see `currentFleetIds`); `/ea/instances` returned Active rows only, so
+ * "disconnected EA(s)" could never be anything but 0.
+ */
+export type BrokerEa = Pick<
+  EAFleetItem,
+  | 'instanceId'
+  | 'tradingAccountId'
+  | 'symbols'
+  | 'status'
+  | 'lastHeartbeat'
+  | 'registeredAt'
+  | 'eaVersion'
+  | 'isCoordinator'
+>;
 
 /**
  * Broker identity derived from trading accounts + EA instances.
@@ -27,25 +45,34 @@ export interface BrokerGroup {
   /** Distinct account currencies (usually one). */
   currencies: string[];
   accounts: TradingAccountDto[];
-  eaInstances: EAInstanceDto[];
+  eaInstances: BrokerEa[];
   realAccounts: number;
   demoAccounts: number;
   contestAccounts: number;
   paperAccounts: number;
   activeAccounts: number;
+  /**
+   * Money totals cover ACTIVE accounts only. An inactive account keeps its last-synced snapshot
+   * forever (one held a $966k balance and the fleet's entire $35k "margin used" 42 days after it
+   * stopped syncing), so summing it reported money nobody is trading.
+   */
   totalBalance: number;
   totalEquity: number;
   totalMargin: number;
   totalMarginAvailable: number;
   marginUtilizationPct: number;
   activeEas: number;
+  /** Shutdowns in flight only — a long-silent ShuttingDown row is a finished deregistration. */
   shuttingDownEas: number;
+  /** Not running: Disconnected, or Deregistered (see `fleetStatusOf`). */
   disconnectedEas: number;
   newestHeartbeatAgeSec: number | null;
   oldestHeartbeatAgeSec: number | null;
   symbolsCovered: string[];
   /** Most recent `lastSyncedAt` across the group's accounts, or null. */
   lastSyncedAt: string | null;
+  /** Last-synced balance still held by the group's inactive accounts (excluded from totals). */
+  inactiveBalance: number;
 }
 
 export type AccountModeClass = 'paper' | 'real' | 'demo' | 'contest' | 'unknown';
@@ -104,7 +131,7 @@ export function accountMode(a: TradingAccountDto): { label: string; cls: Account
 }
 
 /** Split the engine's CSV `symbols` field into a clean array. */
-export function eaSymbols(ea: EAInstanceDto): string[] {
+export function eaSymbols(ea: Pick<BrokerEa, 'symbols'>): string[] {
   if (!ea?.symbols) return [];
   return ea.symbols
     .split(',')
@@ -131,7 +158,7 @@ export function ageSec(iso: string | null | undefined, nowMs: number): number | 
 /** Distinct brokers with derived aggregates, most accounts first. */
 export function buildBrokerGroups(
   accounts: readonly TradingAccountDto[],
-  eaInstances: readonly EAInstanceDto[],
+  eaInstances: readonly BrokerEa[],
   nowMs: number,
 ): BrokerGroup[] {
   const accountsByBroker = new Map<string, TradingAccountDto[]>();
@@ -144,7 +171,7 @@ export function buildBrokerGroups(
     accountsByBroker.set(k, bucket);
   }
 
-  const eaByBroker = new Map<string, EAInstanceDto[]>();
+  const eaByBroker = new Map<string, BrokerEa[]>();
   for (const ea of eaInstances) {
     const brokerKey = accountIdToBroker.get(ea.tradingAccountId);
     if (brokerKey === undefined) continue;
@@ -159,11 +186,17 @@ export function buildBrokerGroups(
   const out: BrokerGroup[] = [];
   for (const [key, group] of accountsByBroker) {
     const eas = eaByBroker.get(key) ?? [];
-    const totalBalance = group.reduce((acc, a) => acc + (a.balance ?? 0), 0);
-    const totalEquity = group.reduce((acc, a) => acc + (a.equity ?? 0), 0);
-    const totalMargin = group.reduce((acc, a) => acc + (a.marginUsed ?? 0), 0);
-    const totalMarginAvailable = group.reduce((acc, a) => acc + (a.marginAvailable ?? 0), 0);
+    const live = group.filter((a) => a.isActive);
+    const totalBalance = live.reduce((acc, a) => acc + (a.balance ?? 0), 0);
+    const totalEquity = live.reduce((acc, a) => acc + (a.equity ?? 0), 0);
+    const totalMargin = live.reduce((acc, a) => acc + (a.marginUsed ?? 0), 0);
+    const totalMarginAvailable = live.reduce((acc, a) => acc + (a.marginAvailable ?? 0), 0);
+    const inactiveBalance = group
+      .filter((a) => !a.isActive)
+      .reduce((acc, a) => acc + (a.balance ?? 0), 0);
+    // Heartbeat ages describe the live EAs; a disconnected row's age is its downtime.
     const heartbeats = eas
+      .filter((ea) => ea.status === 'Active')
       .map((ea) => ageSec(ea.lastHeartbeat, nowMs))
       .filter((v): v is number => v !== null);
     const syncTimes = group
@@ -189,12 +222,17 @@ export function buildBrokerGroups(
       totalMarginAvailable,
       marginUtilizationPct: totalEquity > 0 ? (totalMargin / totalEquity) * 100 : 0,
       activeEas: eas.filter((ea) => ea.status === 'Active').length,
-      shuttingDownEas: eas.filter((ea) => ea.status === 'ShuttingDown').length,
-      disconnectedEas: eas.filter((ea) => ea.status === 'Disconnected').length,
+      shuttingDownEas: eas.filter((ea) => fleetStatusOf(ea, nowMs) === 'ShuttingDown').length,
+      disconnectedEas: eas.filter((ea) => {
+        const st = fleetStatusOf(ea, nowMs);
+        return st === 'Disconnected' || st === 'Deregistered';
+      }).length,
       newestHeartbeatAgeSec: heartbeats.length > 0 ? Math.min(...heartbeats) : null,
       oldestHeartbeatAgeSec: heartbeats.length > 0 ? Math.max(...heartbeats) : null,
-      symbolsCovered: distinct(eas.flatMap(eaSymbols)),
+      // Only a live EA covers a symbol; a dead row keeps its old CSV.
+      symbolsCovered: distinct(eas.filter((ea) => ea.status === 'Active').flatMap(eaSymbols)),
       lastSyncedAt: syncTimes.length > 0 ? new Date(Math.max(...syncTimes)).toISOString() : null,
+      inactiveBalance,
     });
   }
   return out.sort((a, b) => b.accounts.length - a.accounts.length || a.key.localeCompare(b.key));

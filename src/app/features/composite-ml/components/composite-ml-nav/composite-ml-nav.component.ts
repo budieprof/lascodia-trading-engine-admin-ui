@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+
 interface NavTab {
   label: string;
   path: string;
@@ -21,7 +23,7 @@ interface NavTab {
   selector: 'app-composite-ml-nav',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RouterLinkActive],
+  imports: [RouterLink, RouterLinkActive, RefreshButtonComponent],
   template: `
     <nav class="ml-nav" aria-label="CompositeML sections">
       @if (backLink(); as back) {
@@ -42,9 +44,12 @@ interface NavTab {
         }
       </div>
       @if (showRefresh()) {
-        <button type="button" class="ml-refresh" (click)="refresh.emit()" [disabled]="refreshing()">
-          {{ refreshing() ? 'Refreshing…' : '↻ Refresh' }}
-        </button>
+        <app-refresh-button
+          class="ml-refresh"
+          variant="outline"
+          [refreshing]="refreshing()"
+          (refresh)="refresh.emit()"
+        />
       }
     </nav>
   `,
@@ -53,10 +58,14 @@ interface NavTab {
       :host {
         display: block;
       }
+      /* Tabs wrap onto a second row rather than scrolling: the strip hid its
+         scrollbar, so at tablet width Cold-Start and Diff were simply gone
+         behind the Refresh button with nothing to say they existed. */
       .ml-nav {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
-        gap: var(--space-3);
+        gap: var(--space-2) var(--space-3);
         padding: 4px;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -77,14 +86,12 @@ interface NavTab {
       }
       .ml-tabs {
         display: flex;
+        flex-wrap: wrap;
         gap: var(--space-1);
-        overflow-x: auto;
-        scrollbar-width: none;
         min-width: 0;
-        flex: 1;
-      }
-      .ml-tabs::-webkit-scrollbar {
-        display: none;
+        /* Basis 0: the strip takes the room beside Refresh and wraps inside it,
+           rather than pushing Refresh onto a row of its own. */
+        flex: 1 1 0;
       }
       .ml-tab {
         display: inline-flex;
@@ -113,25 +120,7 @@ interface NavTab {
         outline-offset: 2px;
       }
       .ml-refresh {
-        flex-shrink: 0;
-        height: 32px;
-        padding: 0 var(--space-4);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font: inherit;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      .ml-refresh:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .ml-refresh:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
+        margin-left: auto;
       }
     `,
   ],
@@ -142,6 +131,7 @@ export class CompositeMlNavComponent {
   backLabel = input<string>('Back');
   /** Pages that own a polled resource show the Refresh button. */
   showRefresh = input(false);
+  /** Bind the resource's `refreshing()` — NOT `loading()`, which only covers the first paint. */
   refreshing = input(false);
   refresh = output<void>();
 

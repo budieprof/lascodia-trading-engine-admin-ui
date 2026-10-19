@@ -17,6 +17,7 @@ import type { EChartsOption } from 'echarts';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 import { PositionsService } from '@core/services/positions.service';
@@ -85,6 +86,7 @@ interface ActivityEntry {
     MetricCardComponent,
     ChartCardComponent,
     PageHeaderComponent,
+    ConfirmDialogComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -130,14 +132,14 @@ interface ActivityEntry {
             dotColor="#0071E3"
           />
           <!--
-            Reads the fetched closed-position window (most recent 1000 in
-            scope, closedAt desc), not all history — calling it "Lifetime"
-            overstated it on any account with more closed trades than the
-            page holds.
+            The same 30-day window the equity curve, daily P&L and P&L-by-symbol
+            charts draw. It used to sum the whole fetched page (the newest 1,000
+            closed trades, ~3 months), so the tile read −$148k directly above a
+            30-day curve ending at +$3k — two "recent" P&Ls on one screen.
           -->
           <app-metric-card
-            label="Realized P&L (recent)"
-            [value]="lifetimePnl()"
+            [label]="realizedLabel()"
+            [value]="realizedPnl30d()"
             format="currency"
             [colorByValue]="true"
           />
@@ -184,7 +186,7 @@ interface ActivityEntry {
         />
         <app-chart-card
           title="Daily P&L"
-          subtitle="Realized P&L per day"
+          subtitle="Realized P&L per day, last 30 days"
           [options]="dailyPnlChart()"
           height="260px"
           [loading]="loading()"
@@ -205,12 +207,19 @@ interface ActivityEntry {
           [height]="pnlBySymbolHeight()"
           [loading]="loading()"
         />
-        <section class="panel exposure-panel">
-          <header class="panel-head">
+        <!--
+          Styled like the chart cards it sits between (title over subtitle, card
+          padding) and stretched to the row, so an empty book no longer leaves a
+          short box and a hole beside two 300px charts.
+        -->
+        <section class="exposure-panel">
+          <header class="card-head">
             <h3>Position Exposure</h3>
-            <span class="muted">Open lots by symbol</span>
+            <p>Open lots by symbol</p>
           </header>
-          @if (exposureRows().length > 0) {
+          @if (!openPositionsKnown()) {
+            <div class="empty-panel">Open positions unavailable</div>
+          } @else if (exposureRows().length > 0) {
             <ul class="xbar-list">
               @for (r of exposureRows(); track r.symbol) {
                 <li class="xbar-row">
@@ -287,6 +296,8 @@ interface ActivityEntry {
                 }
               </tbody>
             </table>
+          } @else if (!openPositionsKnown()) {
+            <div class="empty-panel">Open positions unavailable</div>
           } @else {
             <div class="empty-panel">No open positions</div>
           }
@@ -323,7 +334,7 @@ interface ActivityEntry {
                     <button
                       type="button"
                       class="action-btn approve"
-                      (click)="approveSignal(sig.id)"
+                      (click)="signalAction.set({ kind: 'approve', signal: sig })"
                       [attr.aria-label]="'Approve signal ' + sig.symbol + ' ' + sig.direction"
                       title="Approve"
                     >
@@ -332,7 +343,7 @@ interface ActivityEntry {
                     <button
                       type="button"
                       class="action-btn reject"
-                      (click)="rejectSignal(sig.id)"
+                      (click)="signalAction.set({ kind: 'reject', signal: sig })"
                       [attr.aria-label]="'Reject signal ' + sig.symbol + ' ' + sig.direction"
                       title="Reject"
                     >
@@ -357,7 +368,7 @@ interface ActivityEntry {
         <section class="panel ops-activity">
           <header class="panel-head">
             <h3>Recent Activity</h3>
-            <span class="muted">Last {{ activityFeed().length }} events</span>
+            <span class="panel-note">Last {{ activityFeed().length }} events</span>
           </header>
           @if (activityFeed().length > 0) {
             <ul class="activity">
@@ -413,7 +424,7 @@ interface ActivityEntry {
               @for (w of problemWorkers(); track w.name) {
                 <li class="worker-row" [attr.data-status]="w.statusLabel">
                   <span class="status-dot" [attr.data-status]="w.statusLabel"></span>
-                  <span class="worker-name mono">{{ w.name }}</span>
+                  <span class="worker-name mono" [title]="w.name">{{ w.name }}</span>
                   <span class="worker-meta muted">{{ w.statusLabel }}</span>
                   @if (w.lastErrorMessage) {
                     <span class="worker-err" [title]="w.lastErrorMessage">
@@ -459,6 +470,8 @@ interface ActivityEntry {
                 </li>
               }
             </ul>
+          } @else if (alertsUnavailable()) {
+            <div class="empty-panel">Recently fired alerts could not be loaded</div>
           } @else {
             <div class="empty-panel">No alert has fired yet</div>
           }
@@ -577,6 +590,21 @@ interface ActivityEntry {
           }
         </div>
       </div>
+
+      <!--
+        Approving a signal sends it to the accounts for execution — one stray
+        click on a 26px tick used to do that with no second step.
+      -->
+      <app-confirm-dialog
+        [open]="signalAction() !== null"
+        [title]="signalAction()?.kind === 'approve' ? 'Approve signal' : 'Reject signal'"
+        [message]="signalActionMessage()"
+        [confirmLabel]="signalAction()?.kind === 'approve' ? 'Approve' : 'Reject'"
+        [confirmVariant]="signalAction()?.kind === 'approve' ? 'primary' : 'destructive'"
+        [loading]="signalActionBusy()"
+        (confirm)="confirmSignalAction()"
+        (cancelled)="signalAction.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -799,18 +827,55 @@ interface ActivityEntry {
         }
       }
 
+      /* Exposure card — mirrors app-chart-card (its row neighbours): card
+         padding, base-size title with the subtitle beneath it, and stretched to
+         the row so it never collapses into a short box beside two charts. */
+      .exposure-panel {
+        align-self: stretch;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+      }
+      .card-head {
+        margin-bottom: var(--space-4);
+      }
+      .card-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .card-head p {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .exposure-panel .empty-panel {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+      }
+
       /* Exposure bar list */
       .xbar-list {
         list-style: none;
         margin: 0;
-        padding: var(--space-2) 0;
+        padding: 0;
       }
       .xbar-row {
         display: grid;
         grid-template-columns: 72px 1fr 56px;
         align-items: center;
         gap: var(--space-3);
-        padding: 5px var(--space-4);
+        padding: 5px 0;
         font-size: var(--text-xs);
       }
       .xbar-symbol {
@@ -833,7 +898,8 @@ interface ActivityEntry {
         font-variant-numeric: tabular-nums;
       }
       .xbar-total {
-        padding: var(--space-2) var(--space-4) var(--space-3);
+        margin-top: auto;
+        padding-top: var(--space-2);
         font-size: 10.5px;
         border-top: 1px solid var(--border);
       }
@@ -866,6 +932,13 @@ interface ActivityEntry {
       }
       .link:hover {
         text-decoration: underline;
+      }
+      /* A panel-head annotation sits where its siblings put their link, at the
+         link's size — inheriting the body size made it outweigh the title. */
+      .panel-note {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+        white-space: nowrap;
       }
 
       .table {
@@ -1109,14 +1182,22 @@ interface ActivityEntry {
         max-height: 220px;
         overflow-y: auto;
       }
+      /* minmax(0, 1fr): a plain 1fr track is at least as wide as its content,
+         so a 46-character worker name pushed the status label out of the card. */
       .worker-row {
         display: grid;
-        grid-template-columns: 12px 1fr auto;
+        grid-template-columns: 12px minmax(0, 1fr) auto;
         align-items: center;
         gap: var(--space-2);
         padding: 6px var(--space-4);
         border-bottom: 1px solid var(--border);
         font-size: var(--text-xs);
+      }
+      .worker-name {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .worker-row:last-child {
         border-bottom: none;
@@ -1347,26 +1428,32 @@ export class DashboardPageComponent implements OnInit {
 
   // ── Data signals ──────────────────────────────────────────────────────
   readonly loading = signal(true);
-  // Derived from openPositions() — re-derives when scope changes.
-  readonly unrealizedPnl = computed<number | null>(() => {
-    const open = this.openPositions();
-    if (open.length === 0) return null;
-    return open.reduce((s, p) => s + p.unrealizedPnL, 0);
-  });
-  readonly openPositionCount = computed<number | null>(() => this.openPositions().length || null);
-  readonly strategies = signal<StrategyDto[]>([]);
   /**
-   * A strategy is "active" if its status says so OR the ensemble is giving it
-   * weight — the allocation donut draws the second set, so counting only the
-   * first showed "Active Strategies 0" beside a donut of six.
+   * True once the open-positions query has answered for the current scope.
+   * An empty book is a measurement (0 positions, $0.00 unrealized); a failed
+   * or pending fetch is not — the tiles used to print "—" for both, so a flat
+   * account looked like a broken one.
    */
-  readonly activeStrategyCount = computed<number | null>(() => {
-    const ids = new Set<number>();
-    for (const s of this.strategies()) if (s.status === 'Active') ids.add(s.id);
-    for (const a of this.allocations()) if (a.weight > 0) ids.add(a.strategyId);
-    if (this.strategies().length === 0 && this.allocations().length === 0) return null;
-    return ids.size;
-  });
+  readonly openPositionsKnown = signal(false);
+  // Derived from openPositions() — re-derives when scope changes.
+  readonly unrealizedPnl = computed<number | null>(() =>
+    this.openPositionsKnown()
+      ? this.openPositions().reduce((s, p) => s + p.unrealizedPnL, 0)
+      : null,
+  );
+  readonly openPositionCount = computed<number | null>(() =>
+    this.openPositionsKnown() ? this.openPositions().length : null,
+  );
+  /**
+   * Strategies with status Active, fetched with a server-side status filter
+   * (null until the query answers, or when it failed). The rebalancer only
+   * weights Active strategies, but it never retires the allocation rows of a
+   * strategy that later paused or was deleted — so counting "status Active OR
+   * has ensemble weight" reported 5 active strategies on an engine with one.
+   */
+  readonly activeStrategies = signal<StrategyDto[] | null>(null);
+  readonly activeStrategyTotal = signal<number | null>(null);
+  readonly activeStrategyCount = computed<number | null>(() => this.activeStrategyTotal());
   readonly pendingSignalCount = signal<number | null>(null);
   readonly pendingSignals = signal<TradeSignalDto[]>([]);
   readonly allSignals = signal<TradeSignalDto[]>([]);
@@ -1500,13 +1587,14 @@ export class DashboardPageComponent implements OnInit {
   });
   readonly allocations = signal<StrategyAllocationDto[]>([]);
   readonly alerts = signal<AlertDto[]>([]);
+  /** The alert query failed, or could not reach a fired alert (see loadRecentAlerts). */
+  readonly alertsUnavailable = signal(false);
   // Owned by AccountScopeService — refresh() writes the fetched list
   // there, not into a page-local copy.  This used to be a separate
   // `signal([])` that nothing ever set, which pinned the EA Connections
   // tile at 0 no matter how many EAs were attached.
   readonly eaInstances = this.accountScope.eaInstances;
   readonly workers = signal<WorkerHealthDto[]>([]);
-  readonly mlModels = signal<MLModelDto[]>([]);
   // Models flagged because in-sample CV Sharpe is materially higher than rolling
   // 7d live Sharpe — surfaced as a dashboard pin so operators see overfit before
   // drift workers get to it on lagging metrics.
@@ -1526,19 +1614,74 @@ export class DashboardPageComponent implements OnInit {
   readonly realtimeOnline = computed(() => this.realtime.isConnected());
 
   // ── Derived KPIs ──────────────────────────────────────────────────────
-  readonly todaysPnl = computed(() => {
-    const start = startOfToday();
+  /** True once the closed-positions query has answered for the current scope. */
+  readonly closedPositionsKnown = signal(false);
+
+  /**
+   * Start of the 30-day window every realized figure on the page reads — the
+   * headline tile, win rate, profit factor and all three P&L charts. Re-read
+   * on each refresh (via closedPositions) so a page left open keeps sliding.
+   */
+  private readonly windowStart = computed(() => {
+    this.closedPositions();
+    return Date.now() - WINDOW_MS;
+  });
+
+  /** Closed trades inside the 30-day window, oldest first. */
+  readonly closedInWindow = computed<PositionDto[]>(() => {
+    const cutoff = this.windowStart();
     return this.closedPositions()
-      .filter((p) => p.closedAt && new Date(p.closedAt).getTime() >= start)
+      .filter((p) => p.closedAt && new Date(p.closedAt).getTime() >= cutoff)
+      .sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));
+  });
+
+  /**
+   * True when the fetched page is full AND its oldest trade is still inside
+   * the window: trades older than the page exist that the window should have
+   * held, so the 30-day figures are a lower bound and the label says so.
+   */
+  readonly windowTruncated = computed(() => {
+    const closed = this.closedPositions();
+    if (this.rawClosedPositions().length < CLOSED_PAGE_SIZE) return false;
+    const oldest = closed.reduce<string | null>(
+      (min, p) => (p.closedAt && (min === null || p.closedAt < min) ? p.closedAt : min),
+      null,
+    );
+    return oldest !== null && new Date(oldest).getTime() >= this.windowStart();
+  });
+
+  /**
+   * Trades the engine could not recover a realized P&L for (`pnlUnreconciledAt`
+   * set): their 0.00 means UNKNOWN, so they are left out of win rate and profit
+   * factor rather than counted as break-even non-wins.
+   */
+  private readonly reconciledInWindow = computed(() =>
+    this.closedInWindow().filter((p) => !p.pnlUnreconciledAt),
+  );
+  readonly unreconciledInWindow = computed(
+    () => this.closedInWindow().length - this.reconciledInWindow().length,
+  );
+
+  readonly todaysPnl = computed<number | null>(() => {
+    if (!this.closedPositionsKnown()) return null;
+    const start = startOfToday();
+    return this.closedInWindow()
+      .filter((p) => new Date(p.closedAt!).getTime() >= start)
       .reduce((s, p) => s + p.realizedPnL, 0);
   });
 
-  readonly lifetimePnl = computed(() =>
-    this.closedPositions().reduce((s, p) => s + p.realizedPnL, 0),
+  readonly realizedPnl30d = computed<number | null>(() =>
+    this.closedPositionsKnown()
+      ? this.closedInWindow().reduce((s, p) => s + p.realizedPnL, 0)
+      : null,
+  );
+
+  readonly realizedLabel = computed(() =>
+    this.windowTruncated() ? 'Realized P&L (30d, partial)' : 'Realized P&L (30d)',
   );
 
   readonly winRatePct = computed(() => {
-    const closed = this.closedPositions();
+    const closed = this.reconciledInWindow();
     if (closed.length === 0) return 0;
     const wins = closed.filter((p) => p.realizedPnL > 0).length;
     return (wins / closed.length) * 100;
@@ -1546,7 +1689,7 @@ export class DashboardPageComponent implements OnInit {
 
   /** null when there is nothing to divide; Infinity when there were wins and no losses. */
   readonly profitFactor = computed<number | null>(() => {
-    const closed = this.closedPositions();
+    const closed = this.reconciledInWindow();
     if (closed.length === 0) return null;
     const grossWin = closed.filter((p) => p.realizedPnL > 0).reduce((s, p) => s + p.realizedPnL, 0);
     const grossLoss = Math.abs(
@@ -1591,9 +1734,16 @@ export class DashboardPageComponent implements OnInit {
     const pf = this.profitFactor();
     const pfTone: 'good' | 'bad' | 'warn' | '' =
       pf == null ? '' : pf >= 1.5 ? 'good' : pf >= 1 ? 'warn' : 'bad';
-    const closed = this.closedPositions().length;
+    const closed = this.reconciledInWindow().length;
+    const unknown = this.unreconciledInWindow();
+    const sample =
+      `${closed.toLocaleString('en-US')} closed trade${closed === 1 ? '' : 's'}, last 30 days` +
+      (unknown > 0 ? ` · ${unknown} with unknown P&L excluded` : '') +
+      (this.windowTruncated() ? ' · partial: fetch limit reached' : '');
     const failed = this.failedWorkerCount();
+    const degraded = this.degradedWorkerCount();
     const stale = this.staleWorkerCount();
+    const idle = this.idleWorkerCount();
     return [
       {
         label: 'Unrealized P&L',
@@ -1602,16 +1752,16 @@ export class DashboardPageComponent implements OnInit {
       },
       { label: 'Today P&L', value: money(this.todaysPnl()), tone: signTone(this.todaysPnl()) },
       {
-        label: 'Win rate',
+        label: 'Win rate (30d)',
         value: closed === 0 ? '—' : `${this.winRatePct().toFixed(1)}%`,
         tone: '',
-        hint: closed === 0 ? undefined : `${closed.toLocaleString('en-US')} recent closed trades`,
+        hint: closed === 0 ? undefined : sample,
       },
       {
-        label: 'Profit factor',
+        label: 'Profit factor (30d)',
         value: pf == null ? '—' : pf === Infinity ? '∞' : pf.toFixed(2),
         tone: pfTone,
-        hint: 'Gross wins ÷ gross losses over the recent closed window',
+        hint: `Gross wins ÷ gross losses · ${sample}`,
       },
       {
         label: 'Active strategies',
@@ -1631,8 +1781,11 @@ export class DashboardPageComponent implements OnInit {
       {
         label: 'Workers OK',
         value: `${this.healthyWorkerCount()} / ${this.totalWorkerCount()}`,
-        tone: failed > 0 ? 'bad' : stale > 0 ? 'warn' : '',
-        hint: failed > 0 || stale > 0 ? `${failed} failed · ${stale} stale` : undefined,
+        tone: failed > 0 ? 'bad' : degraded > 0 || stale > 0 ? 'warn' : '',
+        hint:
+          this.totalWorkerCount() === 0
+            ? undefined
+            : `${this.healthyWorkerCount()} healthy · ${degraded} degraded · ${failed} failed · ${idle} idle · ${stale} stale`,
       },
     ];
   });
@@ -1664,36 +1817,38 @@ export class DashboardPageComponent implements OnInit {
       .length;
   });
 
+  /**
+   * Every worker lands in exactly ONE bucket, so the five tiles always sum to
+   * the total and "Workers OK" is the Healthy tile over that total. `isStale`
+   * is a flag that overlaps the derived status, and counting it as a sixth
+   * column alongside the statuses read "69 healthy + 3 idle + 2 stale" against
+   * "69 / 72". Precedence: Failed > Degraded > Stale > Idle > Healthy.
+   *
+   * A completed one-shot worker (`isCompleted`: a backfill or warm-up that ran
+   * once and exited) has no next cycle to be late for, so it is never stale —
+   * its last success only gets older. Those two were the whole "2 stale".
+   */
+  private readonly workerBuckets = computed(() => {
+    const counts = { Healthy: 0, Degraded: 0, Failed: 0, Idle: 0, Stale: 0 };
+    for (const w of this.workers()) counts[workerBucket(w)]++;
+    return counts;
+  });
   readonly totalWorkerCount = computed(() => this.workers().length);
-  readonly healthyWorkerCount = computed(
-    () => this.workers().filter((w) => w.status === 'Healthy').length,
-  );
-  readonly degradedWorkerCount = computed(
-    () => this.workers().filter((w) => w.status === 'Degraded').length,
-  );
-  readonly failedWorkerCount = computed(
-    () => this.workers().filter((w) => w.status === 'Failed').length,
-  );
-  readonly idleWorkerCount = computed(
-    () => this.workers().filter((w) => w.status === 'Idle').length,
-  );
-  readonly staleWorkerCount = computed(() => this.workers().filter((w) => w.isStale).length);
+  readonly healthyWorkerCount = computed(() => this.workerBuckets().Healthy);
+  readonly degradedWorkerCount = computed(() => this.workerBuckets().Degraded);
+  readonly failedWorkerCount = computed(() => this.workerBuckets().Failed);
+  readonly idleWorkerCount = computed(() => this.workerBuckets().Idle);
+  readonly staleWorkerCount = computed(() => this.workerBuckets().Stale);
 
-  // Surface only the worth-investigating workers so the panel stays compact. Stale is a
-  // problem too: `isStale` is a flag that overlaps the status (a "Healthy" worker whose last
-  // heartbeat is old is stale), so the panel used to say "All 64 workers nominal" under a row
-  // reading 61 healthy · 3 idle · 2 stale — numbers that neither add up nor agree with the
-  // message.
+  // Surface only the worth-investigating workers so the panel stays compact; the
+  // row label is the worker's bucket, the same word the tile above counted it under.
   readonly problemWorkers = computed(() =>
     this.workers()
-      .filter((w) => w.status === 'Failed' || w.status === 'Degraded' || w.isStale)
-      .map((w) => ({
-        ...w,
-        // What the row SAYS. A stale worker keeps its engine status for filtering but is shown
-        // as stale, because that is the reason it is in this list.
-        statusLabel:
-          w.isStale && w.status !== 'Failed' && w.status !== 'Degraded' ? 'Stale' : w.status,
-      }))
+      .map((w) => ({ ...w, statusLabel: workerBucket(w) }))
+      .filter(
+        (w) =>
+          w.statusLabel === 'Failed' || w.statusLabel === 'Degraded' || w.statusLabel === 'Stale',
+      )
       .slice(0, 5),
   );
 
@@ -1724,16 +1879,13 @@ export class DashboardPageComponent implements OnInit {
       .slice(0, 6);
   });
 
-  readonly activeMlModelCount = computed(() =>
-    this.mlModels().length === 0 ? null : this.mlModels().filter((m) => m.isActive).length,
-  );
-
-  readonly mostRecentMlModel = computed(() => {
-    const active = this.mlModels()
-      .filter((m) => m.isActive)
-      .sort((a, b) => b.trainedAt.localeCompare(a.trainedAt));
-    return active[0] ?? null;
-  });
+  /**
+   * Counted server-side (`isActive` filter, the pager's total) — it used to
+   * count the active models inside the 25 most recently TRAINED models of 900+,
+   * which read "1 active" on an engine serving ten.
+   */
+  readonly activeMlModelCount = signal<number | null>(null);
+  readonly mostRecentMlModel = signal<MLModelDto | null>(null);
 
   readonly lastSignalAt = computed(() => {
     const sigs = this.allSignals();
@@ -1768,12 +1920,17 @@ export class DashboardPageComponent implements OnInit {
 
     for (const p of this.closedPositions().slice(0, 15)) {
       if (!p.closedAt) continue;
+      // openLots is decremented to 0 by a full close; tradedLots is the size that traded.
+      const lots = p.tradedLots ?? p.openLots;
       events.push({
         id: `pos-close-${p.id}`,
         kind: 'close',
         symbol: p.symbol ?? '—',
-        text: `Closed ${p.direction} ${p.openLots.toFixed(2)} lots`,
-        detail: `${p.realizedPnL >= 0 ? '+' : ''}${p.realizedPnL.toFixed(2)}`,
+        text: `Closed ${p.direction} ${lots.toFixed(2)} lots`,
+        // An unreconciled close's 0.00 is UNKNOWN, not break-even.
+        detail: p.pnlUnreconciledAt
+          ? 'P&L unknown'
+          : `${p.realizedPnL >= 0 ? '+' : ''}${p.realizedPnL.toFixed(2)}`,
         at: p.closedAt,
       });
     }
@@ -1806,36 +1963,54 @@ export class DashboardPageComponent implements OnInit {
   });
 
   // ── Charts ────────────────────────────────────────────────────────────
-  readonly equityCurveChart = computed<EChartsOption>(() => {
-    const closed = [...this.closedPositions()].filter((p) => p.closedAt);
-    if (closed.length === 0) return emptyChart('No closed positions yet');
-    closed.sort((a, b) => (a.closedAt ?? '').localeCompare(b.closedAt ?? ''));
+  /**
+   * Both P&L-over-time charts share a TIME axis pinned to the 30-day window.
+   * They were category axes — one slot per trade (or per trading day) — so 16
+   * trades on 22 Sep took half the width while the quiet 25 Sep → 6 Oct
+   * fortnight took one slot, and the two charts could not be read against
+   * each other.
+   */
+  private timeAxis(): EChartsOption['xAxis'] {
+    return {
+      type: 'time',
+      min: this.windowStart(),
+      max: Date.now(),
+      axisLabel: { fontSize: 10, hideOverlap: true, formatter: '{dd} {MMM}' },
+      splitLine: { show: false },
+    };
+  }
 
-    const cutoff = Date.now() - 30 * 24 * 3600_000;
-    const inWindow = closed.filter((p) => new Date(p.closedAt!).getTime() >= cutoff);
+  readonly equityCurveChart = computed<EChartsOption>(() => {
+    if (!this.closedPositionsKnown()) return emptyChart('Closed positions unavailable');
+    const inWindow = this.closedInWindow();
     if (inWindow.length === 0) return emptyChart('No trades in the last 30 days');
 
+    // Realized equity only moves when a trade closes: a step line from 0 at
+    // the window start. The old smoothed line drew curves between closes —
+    // including dips and recoveries no account ever had.
     let cum = 0;
-    const xs: string[] = [];
-    const ys: number[] = [];
+    const points: [number, number][] = [[this.windowStart(), 0]];
     for (const p of inWindow) {
       cum += p.realizedPnL;
-      xs.push(p.closedAt!.slice(5, 16).replace('T', ' '));
-      ys.push(+cum.toFixed(2));
+      points.push([new Date(p.closedAt!).getTime(), +cum.toFixed(2)]);
     }
-    const last = ys[ys.length - 1] ?? 0;
-    const lineColor = last >= 0 ? '#34C759' : '#FF3B30';
+    points.push([Date.now(), +cum.toFixed(2)]);
+    const lineColor = cum >= 0 ? '#34C759' : '#FF3B30';
     return {
       grid: { top: 16, right: 24, bottom: 28, left: 56 },
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: xs, axisLabel: { fontSize: 10, hideOverlap: true } },
+      tooltip: {
+        trigger: 'axis',
+        valueFormatter: (v) => usd(tooltipNumber(v)),
+      },
+      xAxis: this.timeAxis(),
       yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
       series: [
         {
           type: 'line',
-          smooth: true,
+          step: 'end',
           symbol: 'none',
-          data: ys,
+          name: 'Cumulative realized',
+          data: points,
           lineStyle: { color: lineColor, width: 2 },
           areaStyle: {
             color: {
@@ -1856,30 +2031,40 @@ export class DashboardPageComponent implements OnInit {
   });
 
   readonly dailyPnlChart = computed<EChartsOption>(() => {
-    const closed = this.closedPositions();
-    if (closed.length === 0) return emptyChart('No closed positions yet');
-    const buckets = new Map<string, number>();
-    const cutoff = Date.now() - 30 * 24 * 3600_000;
-    for (const p of closed) {
-      if (!p.closedAt) continue;
-      if (new Date(p.closedAt).getTime() < cutoff) continue;
-      const key = p.closedAt.slice(0, 10);
-      buckets.set(key, (buckets.get(key) ?? 0) + p.realizedPnL);
+    if (!this.closedPositionsKnown()) return emptyChart('Closed positions unavailable');
+    const inWindow = this.closedInWindow();
+    if (inWindow.length === 0) return emptyChart('No trades in the last 30 days');
+    // Local calendar days — the same days "Today P&L" counts — keyed by the
+    // day's local midnight. (It bucketed by UTC date while Today used local.)
+    const buckets = new Map<number, number>();
+    for (const p of inWindow) {
+      const day = new Date(p.closedAt!);
+      day.setHours(0, 0, 0, 0);
+      buckets.set(day.getTime(), (buckets.get(day.getTime()) ?? 0) + p.realizedPnL);
     }
-    const dates = Array.from(buckets.keys()).sort();
-    const values = dates.map((d) => +(buckets.get(d) ?? 0).toFixed(2));
+    const days = Array.from(buckets.keys()).sort((a, b) => a - b);
     return {
       grid: { top: 16, right: 12, bottom: 28, left: 50 },
-      xAxis: { type: 'category', data: dates.map((d) => d.slice(5)), axisLabel: { fontSize: 10 } },
+      xAxis: this.timeAxis(),
       yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
-      tooltip: { trigger: 'axis' },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        valueFormatter: (v) => usd(tooltipNumber(v)),
+      },
       series: [
         {
           type: 'bar',
-          data: values.map((v) => ({
-            value: v,
-            itemStyle: { color: v >= 0 ? '#34C759' : '#FF3B30', borderRadius: [3, 3, 0, 0] },
-          })),
+          name: 'Realized',
+          barMaxWidth: 10,
+          // Plotted at midday so each bar sits inside its own day on the axis.
+          data: days.map((d) => {
+            const v = +(buckets.get(d) ?? 0).toFixed(2);
+            return {
+              value: [d + 12 * 3600_000, v],
+              itemStyle: { color: v >= 0 ? '#34C759' : '#FF3B30', borderRadius: [3, 3, 0, 0] },
+            };
+          }),
         },
       ],
     };
@@ -1892,12 +2077,9 @@ export class DashboardPageComponent implements OnInit {
    * "Other" bar, and sizes its own height from the row count.
    */
   private readonly pnlBySymbolRows = computed(() => {
-    const closed = this.closedPositions();
     const buckets = new Map<string, number>();
-    const cutoff = Date.now() - 30 * 24 * 3600_000;
-    for (const p of closed) {
-      if (!p.closedAt || !p.symbol) continue;
-      if (new Date(p.closedAt).getTime() < cutoff) continue;
+    for (const p of this.closedInWindow()) {
+      if (!p.symbol) continue;
       buckets.set(p.symbol, (buckets.get(p.symbol) ?? 0) + p.realizedPnL);
     }
     const byMagnitude = Array.from(buckets.entries()).sort(
@@ -1928,7 +2110,7 @@ export class DashboardPageComponent implements OnInit {
   });
 
   readonly pnlBySymbolChart = computed<EChartsOption>(() => {
-    if (this.closedPositions().length === 0) return emptyChart('No closed trades yet');
+    if (!this.closedPositionsKnown()) return emptyChart('Closed positions unavailable');
     const { rows } = this.pnlBySymbolRows();
     if (rows.length === 0) return emptyChart('No trades in the last 30 days');
     return {
@@ -1978,46 +2160,79 @@ export class DashboardPageComponent implements OnInit {
 
   readonly exposureTotalLots = computed(() => this.exposureRows().reduce((s, r) => s + r.lots, 0));
 
+  /**
+   * The CURRENT ensemble: weighted allocations of strategies that are Active
+   * now. The raw list used to mix today's 100% with stale 100% / 50% / 50% /
+   * 33% rows from deleted strategies (no name, so "#405"), and the legend
+   * summed to 333%. Since 2026-10-19 the engine skips deleted strategies'
+   * rows and a rebalance zeroes the rest of the non-Active set — but a
+   * strategy paused since the last rebalance still carries its weight, so the
+   * Active filter stays. Shares are normalised over what is drawn so the
+   * legend and the ring agree. If the strategy query failed, a resolved name
+   * (the engine resolves names for non-deleted strategies only) is the
+   * fallback test.
+   */
+  private readonly currentAllocations = computed(() => {
+    const active = this.activeStrategies();
+    const names = new Map((active ?? []).map((s) => [s.id, s.name]));
+    const rows = this.allocations().filter(
+      (a) => a.weight > 0 && (active ? names.has(a.strategyId) : a.strategyName != null),
+    );
+    const total = rows.reduce((s, a) => s + a.weight, 0);
+    return rows
+      .map((a) => ({
+        strategyId: a.strategyId,
+        name: a.strategyName ?? names.get(a.strategyId) ?? `Strategy #${a.strategyId}`,
+        share: total > 0 ? (a.weight / total) * 100 : 0,
+      }))
+      .sort((a, b) => b.share - a.share);
+  });
+
   readonly allocationSubtitle = computed(() => {
-    const n = this.allocations().filter((a) => a.weight > 0).length;
+    const n = this.currentAllocations().length;
     return n === 0
-      ? 'Ensemble weights'
-      : `Ensemble weights · ${n} strateg${n === 1 ? 'y' : 'ies'} allocated`;
+      ? 'Ensemble weights of active strategies'
+      : `Ensemble weights · ${n} active strateg${n === 1 ? 'y' : 'ies'}`;
   });
 
   readonly allocationChart = computed<EChartsOption>(() => {
-    const allocs = this.allocations().filter((a) => a.weight > 0);
-    if (allocs.length === 0) return emptyChart('No active allocations');
-    const data = allocs
-      .slice()
-      .sort((a, b) => b.weight - a.weight)
-      .map((a, i) => ({
-        name: a.strategyName ?? `#${a.strategyId}`,
-        value: +(a.weight * 100).toFixed(2),
-        itemStyle: { color: PALETTE[i % PALETTE.length] },
-      }));
+    const rows = this.currentAllocations();
+    if (rows.length === 0) return emptyChart('No active strategy holds an allocation');
+    // ECharts keys legend entries by name; two strategies can share one, so a
+    // repeated name carries its id.
+    const seen = new Map<string, number>();
+    for (const r of rows) seen.set(r.name, (seen.get(r.name) ?? 0) + 1);
+    const data = rows.map((r, i) => ({
+      name: (seen.get(r.name) ?? 0) > 1 ? `${r.name} #${r.strategyId}` : r.name,
+      value: +r.share.toFixed(2),
+      itemStyle: { color: PALETTE[i % PALETTE.length] },
+    }));
     const pct = new Map(data.map((d) => [d.name, d.value]));
     return {
-      tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-      // A vertical legend beside the ring lists every strategy with its
-      // weight; the scrolling bottom legend showed one truncated name at a time.
+      tooltip: { trigger: 'item', formatter: '{b}: {c}%' },
+      // Ring on the left half, vertical legend on the right half. The ring
+      // used to be centred at 30% with a 72% radius (wider than its half) and
+      // the legend pinned to the right edge at a fixed 118px — the two
+      // overlapped and the ring's left edge was clipped.
       legend: {
         orient: 'vertical',
-        right: 0,
+        left: '54%',
         top: 'middle',
-        type: 'plain',
+        type: 'scroll',
         icon: 'circle',
         itemWidth: 8,
         itemHeight: 8,
-        itemGap: 6,
-        textStyle: { fontSize: 10, width: 118, overflow: 'truncate' },
+        itemGap: 8,
+        textStyle: { fontSize: 11, width: 96, overflow: 'truncate' },
         formatter: (name: string) => `${name}  ${(pct.get(name) ?? 0).toFixed(1)}%`,
+        // The full name when the 96px label truncates it.
+        tooltip: { show: true },
       },
       series: [
         {
           type: 'pie',
-          radius: ['46%', '72%'],
-          center: ['30%', '50%'],
+          radius: ['34%', '52%'],
+          center: ['26%', '50%'],
           label: { show: false },
           data,
         },
@@ -2079,6 +2294,11 @@ export class DashboardPageComponent implements OnInit {
 
   private refresh(): void {
     const generation = ++this.refreshGeneration;
+    // A query issued before the account list resolved is fleet-wide and then
+    // filtered to an empty scope on arrival — that is "not known yet", not
+    // "zero positions".
+    const scoped = this.accountScope.accountIds().length > 0;
+    this.loadRecentAlerts();
     forkJoin({
       // Open and closed are fetched as SEPARATE status-scoped queries, the
       // same way the Positions page loads its KPI window, and for the same
@@ -2104,36 +2324,60 @@ export class DashboardPageComponent implements OnInit {
           }),
         )
         .pipe(
-          map((r) => r.data?.data ?? []),
-          catchError(() => of([] as PositionDto[])),
+          map((r) => (r?.status === false ? null : (r.data?.data ?? []))),
+          catchError(() => of(null)),
         ),
-      // 1000 covers the 30-day window the charts draw with room to spare at
-      // current fleet volume (~870 closed trades / 30 days across six live
-      // accounts). The headline P&L / win-rate / profit-factor tiles read
-      // this same window — they are "recent", not all-time, and the labels
-      // say so.
+      // 1000 covers the 30-day window every realized tile and chart reads,
+      // with room to spare at current fleet volume; `windowTruncated` flags
+      // the figures as partial if it ever stops doing so.
       closedPositions: this.positionsService
         .list(
           this.scopedRequest({
             currentPage: 1,
-            itemCountPerPage: 1000,
+            itemCountPerPage: CLOSED_PAGE_SIZE,
             filter: { status: 'Closed' },
             sortBy: 'closedAt',
             sortDirection: 'desc',
           }),
         )
         .pipe(
-          map((r) => r.data?.data ?? []),
-          catchError(() => of([] as PositionDto[])),
+          map((r) => (r?.status === false ? null : (r.data?.data ?? []))),
+          catchError(() => of(null)),
         ),
-      strategies: this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as StrategyDto[])),
-      ),
+      // Server-side status filter: the count and the allocation ring both mean
+      // "Active now", whatever else the strategy table holds.
+      strategies: this.strategiesService
+        .list({ currentPage: 1, itemCountPerPage: 200, filter: { status: 'Active' } })
+        .pipe(
+          map((r) =>
+            r?.status === false || !r.data
+              ? null
+              : {
+                  rows: r.data.data ?? [],
+                  total: r.data.pager?.totalItemCount ?? r.data.data.length,
+                },
+          ),
+          catchError(() => of(null)),
+        ),
       signals: this.signalsService.list({ currentPage: 1, itemCountPerPage: 100 }).pipe(
         map((r) => r.data?.data ?? []),
         catchError(() => of([] as TradeSignalDto[])),
       ),
+      // Counted by the engine: filtering the 100 newest signals for Pending
+      // capped the tile at whatever that page happened to hold.
+      pending: this.signalsService
+        .list({ currentPage: 1, itemCountPerPage: 8, filter: { status: 'Pending' } })
+        .pipe(
+          map((r) =>
+            r?.status === false || !r.data
+              ? null
+              : {
+                  rows: r.data.data ?? [],
+                  total: r.data.pager?.totalItemCount ?? r.data.data.length,
+                },
+          ),
+          catchError(() => of(null)),
+        ),
       orders: this.ordersService
         .list(this.scopedRequest({ currentPage: 1, itemCountPerPage: 50 }))
         .pipe(
@@ -2166,31 +2410,44 @@ export class DashboardPageComponent implements OnInit {
         map((r) => r.data ?? []),
         catchError(() => of([] as StrategyAllocationDto[])),
       ),
-      alerts: this.alertsService.list({ currentPage: 1, itemCountPerPage: 25 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as AlertDto[])),
-      ),
       eaInstances: this.eaService.list().pipe(
         map((r) => r.data ?? []),
         catchError(() => of([] as EAInstanceDto[])),
       ),
       workers: this.workersService.list().pipe(catchError(() => of([] as WorkerHealthDto[]))),
-      mlModels: this.mlService.list({ currentPage: 1, itemCountPerPage: 25 }).pipe(
-        map((r) => r.data?.data ?? []),
-        catchError(() => of([] as MLModelDto[])),
-      ),
+      // Active models only, newest first: one row (the "latest") plus the
+      // pager total (the count).
+      mlModels: this.mlService
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 1,
+          filter: { isActive: true },
+          sortBy: 'trainedAt',
+          sortDirection: 'desc',
+        })
+        .pipe(
+          map((r) =>
+            r?.status === false || !r.data
+              ? null
+              : {
+                  latest: r.data.data?.[0] ?? null,
+                  total: r.data.pager?.totalItemCount ?? r.data.data?.length ?? 0,
+                },
+          ),
+          catchError(() => of(null)),
+        ),
     }).subscribe(
       ({
         openPositions,
         closedPositions,
         strategies,
         signals,
+        pending,
         orders,
         status,
         drawdown,
         accounts,
         allocations,
-        alerts,
         eaInstances,
         workers,
         mlModels,
@@ -2209,20 +2466,27 @@ export class DashboardPageComponent implements OnInit {
         // because they are still live broker exposure; the engine's
         // Status='Open' filter is an exact enum match and won't return
         // them, which matches how the Positions page loads its own window.
-        this.rawOpenPositions.set(
-          openPositions.filter((p) => p.status === 'Open' || p.status === 'Closing'),
-        );
-        this.rawClosedPositions.set(closedPositions.filter((p) => p.status === 'Closed'));
+        // A failed query (null) leaves the previous rows in place and marks
+        // the figures unknown rather than writing an empty book over them.
+        if (openPositions) {
+          this.rawOpenPositions.set(
+            openPositions.filter((p) => p.status === 'Open' || p.status === 'Closing'),
+          );
+        }
+        this.openPositionsKnown.set(openPositions !== null && scoped);
+        if (closedPositions) {
+          this.rawClosedPositions.set(closedPositions.filter((p) => p.status === 'Closed'));
+        }
+        this.closedPositionsKnown.set(closedPositions !== null && scoped);
         this.rawRecentOrders.set(orders);
 
-        this.strategies.set(strategies);
+        this.activeStrategies.set(strategies?.rows ?? null);
+        this.activeStrategyTotal.set(strategies?.total ?? null);
 
         // Signals are multi-account (engine-side fan-out via SignalAccountAttempt),
-        // so the Pending Signals tile stays fleet-wide and is labelled
-        // as such in the template.
-        const pending = signals.filter((s) => s.status === 'Pending');
-        this.pendingSignalCount.set(pending.length);
-        this.pendingSignals.set(pending.slice(0, 8));
+        // so the Pending Signals tile stays fleet-wide.
+        this.pendingSignalCount.set(pending?.total ?? null);
+        this.pendingSignals.set(pending?.rows ?? []);
         this.allSignals.set(signals);
 
         this.healthStatus.set(status?.isRunning ?? false);
@@ -2243,11 +2507,11 @@ export class DashboardPageComponent implements OnInit {
         // re-derives reactively from the refreshed accounts + the scope.
 
         this.allocations.set(allocations);
-        this.alerts.set(alerts);
         // eaInstances was set above (before the account/equity derivations)
         // so liveAccounts() resolves correctly on the same tick.
         this.workers.set(workers);
-        this.mlModels.set(mlModels);
+        this.activeMlModelCount.set(mlModels?.total ?? null);
+        this.mostRecentMlModel.set(mlModels?.latest ?? null);
 
         this.loading.set(false);
       },
@@ -2263,25 +2527,118 @@ export class DashboardPageComponent implements OnInit {
     });
   }
 
-  approveSignal(id: number): void {
-    this.signalsService.approve(id).subscribe({
-      next: () => {
-        this.notifications.success('Signal approved');
-        this.refresh();
-      },
-      error: () => this.notifications.error('Failed to approve signal'),
-    });
+  /**
+   * Recent Alerts reads alert RULES (2,000+ rows) and shows those that fired
+   * most recently. It used to take page 1 of 25 in the engine's default order
+   * (by IsActive), so it showed whatever rules sat first — fires five and six
+   * months old under "Recent" while rules fired minutes ago were never fetched.
+   *
+   * Sorting by lastTriggeredAt desc alone was not enough: Postgres put NULLs
+   * first on DESC, and ~770 rules have never fired. The engine's
+   * `hasTriggered` filter (AlertQueryFilter, 2026-10-19) drops those, and it
+   * now sorts never-fired rules last; the one-wider-page fallback for engines
+   * without it is gone. Rows are still checked for a fire time, cheaply.
+   * Polled at most once a minute — alert rules churn far slower than the 15 s
+   * position poll.
+   */
+  private alertsFetchedAt = 0;
+  private loadRecentAlerts(): void {
+    if (Date.now() - this.alertsFetchedAt < 60_000) return;
+    this.alertsFetchedAt = Date.now();
+    this.alertsService
+      .list({
+        currentPage: 1,
+        itemCountPerPage: RECENT_ALERT_PAGE,
+        sortBy: 'lastTriggeredAt',
+        sortDirection: 'desc',
+        filter: { hasTriggered: true },
+      })
+      .pipe(
+        map((r): AlertDto[] | null => (r?.status === false ? null : (r?.data?.data ?? []))),
+        catchError(() => of(null)),
+      )
+      .subscribe((rows) => {
+        if (rows === null) {
+          this.alertsUnavailable.set(true);
+          this.alertsFetchedAt = 0; // retry on the next refresh
+          return;
+        }
+        this.alertsUnavailable.set(false);
+        this.alerts.set(rows.filter((a) => !!a.lastTriggeredAt));
+      });
   }
 
-  rejectSignal(id: number): void {
-    this.signalsService.reject(id, { reason: 'Rejected from dashboard' }).subscribe({
-      next: () => {
-        this.notifications.warning('Signal rejected');
+  /** The signal the operator is about to approve or reject — drives the confirm dialog. */
+  readonly signalAction = signal<{ kind: 'approve' | 'reject'; signal: TradeSignalDto } | null>(
+    null,
+  );
+  readonly signalActionBusy = signal(false);
+  readonly signalActionMessage = computed(() => {
+    const a = this.signalAction();
+    if (!a) return '';
+    const s = a.signal;
+    const what = `#${s.id} ${s.direction} ${s.symbol ?? ''} (${(s.confidence * 100).toFixed(0)}% confidence)`;
+    return a.kind === 'approve'
+      ? `Approve signal ${what}? It is released to the trading accounts for execution.`
+      : `Reject signal ${what}? It will not be executed.`;
+  });
+
+  confirmSignalAction(): void {
+    const a = this.signalAction();
+    if (!a || this.signalActionBusy()) return;
+    this.signalActionBusy.set(true);
+    const call =
+      a.kind === 'approve'
+        ? this.signalsService.approve(a.signal.id)
+        : this.signalsService.reject(a.signal.id, { reason: 'Rejected from dashboard' });
+    const verb = a.kind === 'approve' ? 'approve' : 'reject';
+    call.subscribe({
+      next: (res) => {
+        this.signalActionBusy.set(false);
+        // HTTP 200 with status:false is a refusal (already expired, already
+        // decided, …) — it used to toast success regardless.
+        if (res?.status === false) {
+          this.notifications.error(res.message ?? `Failed to ${verb} signal`);
+          return;
+        }
+        this.signalAction.set(null);
+        if (a.kind === 'approve') this.notifications.success(`Signal #${a.signal.id} approved`);
+        else this.notifications.warning(`Signal #${a.signal.id} rejected`);
         this.refresh();
       },
-      error: () => this.notifications.error('Failed to reject signal'),
+      error: () => {
+        this.signalActionBusy.set(false);
+        this.notifications.error(`Failed to ${verb} signal`);
+      },
     });
   }
+}
+
+/** Every realized figure on the page reads the same 30-day window. */
+const WINDOW_MS = 30 * 24 * 3600_000;
+/** Closed-position page size; a full page whose oldest row is in the window means truncation. */
+const CLOSED_PAGE_SIZE = 1000;
+const RECENT_ALERT_PAGE = 25;
+
+function usd(v: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
+}
+
+/** A tooltip value as a number — a [time, value] point passes its value. */
+function tooltipNumber(v: unknown): number {
+  return Number(Array.isArray(v) ? v[v.length - 1] : v);
+}
+
+/**
+ * The single Worker Health bucket a worker is counted under (see workerBuckets).
+ * `isStale` is ignored for a completed one-shot worker: it has no next cycle.
+ */
+function workerBucket(w: WorkerHealthDto): 'Healthy' | 'Degraded' | 'Failed' | 'Idle' | 'Stale' {
+  if (w.status === 'Failed') return 'Failed';
+  if (w.status === 'Degraded') return 'Degraded';
+  if (w.isStale && !w.isCompleted) return 'Stale';
+  if (w.status === 'Idle') return 'Idle';
+  return 'Healthy';
 }
 
 function emptyChart(text: string): EChartsOption {

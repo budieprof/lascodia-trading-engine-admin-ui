@@ -182,12 +182,19 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
       <!-- Feed -->
       @if (loading()) {
         <div class="note">Loading rationales…</div>
+      } @else if (loadError(); as err) {
+        <!-- A failed list call used to render as "No rationales … match the filter". -->
+        <div class="note error">Could not load rationales: {{ err }}</div>
       } @else if (rationales().length === 0) {
-        <div class="note">
-          No rationales in the last {{ windowLabel() }} match the filter. The narrative layer writes
-          one row per persisted lifecycle event — widen the window, clear the filter, or check the
-          layer is enabled in <a routerLink="/llm/settings">Settings</a>.
-        </div>
+        <!-- With nothing fired in the window and no filter set, the coverage banner
+             above already says so — a second, longer copy of it read as two problems. -->
+        @if (hasFilter() || (coverage()?.totalRationales ?? 0) > 0) {
+          <div class="note">
+            No rationales in the last {{ windowLabel() }} match the filter. The narrative layer
+            writes one row per persisted lifecycle event — widen the window, clear the filter, or
+            check the layer is enabled in <a routerLink="/llm/settings">Settings</a>.
+          </div>
+        }
       } @else {
         <div class="feed">
           @for (r of rationales(); track r.id) {
@@ -541,6 +548,10 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         border: 1px dashed var(--border);
         border-radius: var(--radius-md);
       }
+      .note.error {
+        color: var(--loss);
+        border-color: color-mix(in srgb, var(--loss) 40%, transparent);
+      }
     `,
   ],
 })
@@ -553,6 +564,7 @@ export class LlmRationalesPageComponent implements OnInit {
   readonly currentPage = signal(1);
   readonly pageSize = 25;
   readonly loading = signal(true);
+  readonly loadError = signal<string | null>(null);
   readonly coverage = signal<RationaleCoverageDto | null>(null);
 
   /**
@@ -613,8 +625,14 @@ export class LlmRationalesPageComponent implements OnInit {
     this.resetAndReload();
   }
 
+  /** Any list filter beyond the window is set. */
+  hasFilter(): boolean {
+    return !!this.filterEventType || this.filterEventId != null || this.filterMinConfidence > 0;
+  }
+
   reload(): void {
     this.loading.set(true);
+    this.loadError.set(null);
     this.llm
       .listRationales({
         currentPage: this.currentPage(),
@@ -627,11 +645,15 @@ export class LlmRationalesPageComponent implements OnInit {
         },
       })
       .pipe(
-        catchError(() => of(null)),
+        catchError((err) => {
+          this.loadError.set(err?.error?.message ?? err?.message ?? 'Request failed.');
+          return of(null);
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.loading.set(false);
+        if (res && !res.status) this.loadError.set(res.message ?? 'The engine refused the query.');
         const data = res?.data;
         this.rationales.set(data?.data ?? []);
         this.totalRows.set(data?.pager?.totalItemCount ?? 0);

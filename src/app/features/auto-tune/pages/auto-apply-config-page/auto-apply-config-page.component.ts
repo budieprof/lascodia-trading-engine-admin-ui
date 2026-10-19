@@ -6,10 +6,12 @@ import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type { AutoApplyConfigDto, UpsertAutoApplyConfigRequest } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -30,12 +32,14 @@ interface EditForm {
   selector: 'app-auto-apply-config-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:keydown.escape)': 'onEscape()' },
   imports: [
     DatePipe,
     DecimalPipe,
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    RefreshButtonComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -49,14 +53,8 @@ interface EditForm {
         subtitle="Per-knob safety gates for autonomous proposal application. Operator-only."
       >
         <a routerLink="/auto-tune" class="btn btn-secondary">← Proposals</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to the first-load flag, the old button never changed on a click. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
         <!-- The empty state carries its own "New config" CTA; two buttons for one action is noise. -->
         @if (configs().length > 0) {
           <button type="button" class="btn btn-primary" (click)="openEditor(null)">
@@ -237,6 +235,9 @@ interface EditForm {
               </label>
             </div>
 
+            @if (saveError(); as e) {
+              <p class="save-error" role="alert">{{ e }}</p>
+            }
             <footer class="modal-foot">
               <button type="button" class="btn btn-secondary" (click)="cancelEdit()">Cancel</button>
               <button
@@ -481,6 +482,11 @@ interface EditForm {
       .modal.small {
         max-width: 440px;
       }
+      .save-error {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--loss);
+      }
       .modal-foot {
         position: sticky;
         bottom: calc(-1 * var(--space-5));
@@ -567,6 +573,7 @@ interface EditForm {
 export class AutoApplyConfigPageComponent {
   private readonly autoTune = inject(AutoTuneService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
 
   /**
    * Errors are left to the polled resource on purpose: swallowing them into `[]` rendered a
@@ -613,8 +620,17 @@ export class AutoApplyConfigPageComponent {
   protected readonly editingExisting = signal<boolean>(false);
   protected form: EditForm = blankForm();
   protected readonly submitting = signal(false);
+  /** The engine's refusal of a save, shown in the still-open editor so the form is not lost. */
+  protected readonly saveError = signal<string | null>(null);
+
+  /** Escape closes whichever modal is open (and never one mid-request). */
+  protected onEscape(): void {
+    if (this.deleting()) this.cancelDelete();
+    else if (this.editing()) this.cancelEdit();
+  }
 
   protected openEditor(c: AutoApplyConfigDto | null): void {
+    this.saveError.set(null);
     this.editingExisting.set(c !== null);
     this.form = c
       ? {
@@ -656,32 +672,39 @@ export class AutoApplyConfigPageComponent {
       minValue: this.form.minValue.trim() === '' ? null : Number(this.form.minValue),
       maxValue: this.form.maxValue.trim() === '' ? null : Number(this.form.maxValue),
     };
+    this.saveError.set(null);
     this.autoTune
       .upsertAutoApplyConfig(key, payload)
       .pipe(
         finalize(() => {
           this.submitting.set(false);
-          this.editing.set(false);
           this.resource.refresh();
         }),
       )
       .subscribe({
         next: (res) => {
-          if (res.status && res.data) {
-            this.auditTrail
-              .create({
-                entityType: 'AutoApplyConfig',
-                entityId: res.data.id,
-                decisionType: 'AutoApplyConfigUpserted',
-                outcome: this.editingExisting() ? 'Updated' : 'Created',
-                reason: null,
-                contextJson: JSON.stringify({ proposalKey: key, ...payload }),
-                source: 'AdminUI',
-              })
-              .subscribe({ error: () => undefined });
+          // A refusal (HTTP 200, status:false — e.g. min above max) used to close the editor
+          // with no word and the operator's input gone. It stays open with the reason.
+          if (!res.status || !res.data) {
+            this.saveError.set(res.message || 'The engine refused this config.');
+            return;
           }
+          this.editing.set(false);
+          this.notifications.success(`Saved the auto-apply config for ${key}`);
+          this.auditTrail
+            .create({
+              entityType: 'AutoApplyConfig',
+              entityId: res.data.id,
+              decisionType: 'AutoApplyConfigUpserted',
+              outcome: this.editingExisting() ? 'Updated' : 'Created',
+              reason: null,
+              contextJson: JSON.stringify({ proposalKey: key, ...payload }),
+              source: 'AdminUI',
+            })
+            .subscribe({ error: () => undefined });
         },
-        error: () => undefined,
+        // Transport errors are toasted by the error interceptor; the editor stays open.
+        error: () => this.saveError.set('The save did not reach the engine — try again.'),
       });
   }
 
@@ -712,7 +735,12 @@ export class AutoApplyConfigPageComponent {
       )
       .subscribe({
         next: (res) => {
-          if (res.status) {
+          if (!res.status) {
+            this.notifications.error(
+              res.message || `The engine refused to delete the config for ${c.proposalKey}.`,
+            );
+          } else {
+            this.notifications.success(`Deleted the auto-apply config for ${c.proposalKey}`);
             this.auditTrail
               .create({
                 entityType: 'AutoApplyConfig',

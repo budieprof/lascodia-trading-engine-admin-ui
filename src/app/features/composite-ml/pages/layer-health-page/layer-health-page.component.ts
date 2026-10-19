@@ -1,18 +1,13 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type { CompositeMLLayerHealthDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -23,6 +18,12 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 type LookbackDays = 1 | 7 | 30;
+
+/** A fetch result tagged with the window it covers, so a pill switch never shows the old window's rows. */
+interface LayerHealthResult {
+  lookback: LookbackDays;
+  rows: CompositeMLLayerHealthDto[];
+}
 
 @Component({
   selector: 'app-layer-health-page',
@@ -48,7 +49,7 @@ type LookbackDays = 1 | 7 | 30;
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -188,6 +189,25 @@ type LookbackDays = 1 | 7 | 30;
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -263,10 +283,10 @@ type LookbackDays = 1 | 7 | 30;
         font-variant-numeric: tabular-nums;
       }
       .layers-table td.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .layers-table td.bad {
-        color: #d70015;
+        color: var(--tone-red);
         font-weight: var(--font-semibold);
       }
       .mono {
@@ -286,15 +306,15 @@ type LookbackDays = 1 | 7 | 30;
       }
       .status-pill[data-status='on'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .status-pill[data-status='partial'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .status-pill[data-status='off'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .bar-cell {
         display: inline-flex;
@@ -347,12 +367,16 @@ export class LayerHealthPageComponent {
 
   protected readonly lookback = signal<LookbackDays>(7);
 
-  protected readonly resource = createPolledResource(
-    () =>
-      this.compositeMl.getLayerHealth(this.lookback()).pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of([] as CompositeMLLayerHealthDto[])),
-      ),
+  protected readonly resource = createPolledResource<LayerHealthResult>(
+    () => {
+      const lookback = this.lookback();
+      // Errors propagate to resource.error() — they used to become [] and read
+      // as "no layer state in this window".
+      return this.compositeMl.getLayerHealth(lookback).pipe(
+        map(unwrapResponse),
+        map((rows) => ({ lookback, rows })),
+      );
+    },
     // Health rolls forward continuously, so a model activation/retirement push
     // is what makes this move; the interval only heals a missed push.
     {
@@ -364,18 +388,25 @@ export class LayerHealthPageComponent {
   );
 
   constructor() {
-    // Force a refresh whenever the lookback selector changes so the
-    // displayed window matches what the user picked. createPolledResource
-    // doesn't re-fetch on dependency change by default.
-    effect(() => {
-      this.lookback();
-      this.resource.refresh();
-    });
+    // Refetch when the lookback pill changes (not on start-up: the resource's
+    // own first fetch covers that).
+    refetchOnChange(
+      () => this.lookback(),
+      () => this.resource.refresh(),
+    );
   }
 
-  protected readonly layers = computed(() => this.resource.value() ?? []);
+  /** The loaded result, or null while the picked window has not arrived yet. */
+  private readonly current = computed(() => {
+    const v = this.resource.value();
+    return v && v.lookback === this.lookback() ? v : null;
+  });
+  protected readonly layers = computed(() => this.current()?.rows ?? []);
+  /** First paint, or a lookback switch still in flight — never the previous window's numbers. */
   protected readonly loading = computed(
-    () => this.resource.loading() && this.layers().length === 0,
+    () =>
+      this.resource.loading() ||
+      (this.current() === null && this.resource.value() !== null && !this.resource.error()),
   );
 
   protected readonly sortedLayers = computed(() =>

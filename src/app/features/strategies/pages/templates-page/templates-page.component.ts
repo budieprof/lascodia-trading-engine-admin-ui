@@ -24,6 +24,7 @@ import {
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -100,6 +101,7 @@ const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; place
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    RefreshButtonComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -114,14 +116,8 @@ const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; place
         subtitle="Saved strategy templates. Apply across multiple symbols in a single round-trip."
       >
         <a routerLink="/strategies" class="btn btn-secondary">← Strategies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to the first-load flag, the old button never changed on a click. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       @if (loading()) {

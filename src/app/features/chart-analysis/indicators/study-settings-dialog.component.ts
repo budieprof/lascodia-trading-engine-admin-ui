@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import type { ActiveIndicator } from '../chart/chart-host.component';
 import {
   INTERVAL_GROUPS,
@@ -51,6 +52,7 @@ export interface StudyPick {
 @Component({
   selector: 'app-study-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [ModalA11yDirective],
   template: `
     @let s = study();
     <div class="ss-backdrop" [hidden]="picking() !== null" (pointerdown)="cancel()"></div>
@@ -60,7 +62,8 @@ export interface StudyPick {
       aria-modal="true"
       [attr.aria-label]="title()"
       [hidden]="picking() !== null"
-      (keydown.escape)="cancel()"
+      appModalA11y
+      (dismiss)="cancel()"
       (keydown.enter)="onEnter($event)"
     >
       <header class="ss-head">

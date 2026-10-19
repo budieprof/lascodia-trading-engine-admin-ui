@@ -376,8 +376,10 @@
   text-transform: uppercase;
 }
 
+/* Inset like the card header above it — with no side margin the sentence ran
+   flush against the card's left border. */
 .pad-blurb {
-  margin: var(--space-2) 0 var(--space-3);
+  margin: var(--space-3) var(--space-5) var(--space-1);
   font-size: 0.85em;
   color: var(--text-secondary);
 }

@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 import {
   EconomicCalendarService,
@@ -31,9 +32,8 @@ import { currencyFlag, eventCountdown, impactDots, isEventPast } from './economi
 @Component({
   selector: 'app-economic-event-modal',
   standalone: true,
-  imports: [DatePipe, RouterLink],
+  imports: [DatePipe, RouterLink, ModalA11yDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
     <div class="na-backdrop" (click)="closed.emit()"></div>
     <section
@@ -41,6 +41,8 @@ import { currencyFlag, eventCountdown, impactDots, isEventPast } from './economi
       role="dialog"
       aria-modal="true"
       [attr.aria-label]="'Economic event: ' + event().title"
+      appModalA11y
+      (dismiss)="closed.emit()"
     >
       <header class="na-head">
         <div>

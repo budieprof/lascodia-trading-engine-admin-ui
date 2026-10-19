@@ -36,10 +36,21 @@ import type { DaemonCloneMt5Response, DaemonInstallDto } from '@core/api/api.typ
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule],
   template: `
-    <dialog #dlg class="wizard">
+    <!-- (cancel) = Escape. Unhandled, the browser closed the dialog without the wizard emitting
+         \`closed\`, so the page still thought it was open and "+ Add broker terminal" could not
+         reopen it. -->
+    <dialog #dlg class="wizard" aria-labelledby="abt-title" (cancel)="onEscape($event)">
       <header class="head">
-        <h3>Add broker terminal</h3>
-        <button type="button" class="icon-btn" (click)="cancel()">×</button>
+        <h3 id="abt-title">Add broker terminal</h3>
+        <button
+          type="button"
+          class="icon-btn"
+          (click)="cancel()"
+          [disabled]="busy()"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </header>
 
       <ol class="steps">
@@ -196,7 +207,7 @@ import type { DaemonCloneMt5Response, DaemonInstallDto } from '@core/api/api.typ
         position: fixed;
         inset: 0;
         margin: auto;
-        border: none;
+        border: 1px solid var(--border);
         border-radius: 12px;
         padding: 0;
         width: max-content;
@@ -208,8 +219,11 @@ import type { DaemonCloneMt5Response, DaemonInstallDto } from '@core/api/api.typ
         color: var(--text-primary);
         box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
       }
+      /* 35% black barely separated the wizard from the page in the dark theme (#1c1c1e cards
+         dimmed to #121214, next to a #000 wizard with no border). */
       .wizard::backdrop {
-        background: rgba(0, 0, 0, 0.35);
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(4px);
       }
       .head {
         display: flex;
@@ -513,6 +527,13 @@ export class AddBrokerTerminalWizardComponent {
 
   protected cancel(): void {
     this.dlgRef.nativeElement.close();
-    this.closed.emit(null);
+    this.closed.emit(this.registered());
+  }
+
+  /** Escape: same as Cancel, except while a clone / register call is in flight. */
+  protected onEscape(e: Event): void {
+    e.preventDefault();
+    if (this.busy()) return;
+    this.cancel();
   }
 }

@@ -562,6 +562,33 @@ export const COMPILE_DEBOUNCE_MS = 700;
         margin-top: 6px;
         font-family: ui-monospace, 'SF Mono', Menlo, monospace;
       }
+      /* The global reset strips every field's border and background: on the dark theme the
+         rename box and the Ask / Port text areas were invisible — a label over black. */
+      .rename input,
+      .ask textarea,
+      .port textarea {
+        box-sizing: border-box;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--bg-secondary);
+        padding: 6px 8px;
+      }
+      .rename input:focus-visible,
+      .ask textarea:focus-visible,
+      .port textarea:focus-visible {
+        border-color: var(--accent);
+      }
+      /* Room to paste a whole script (it was a 367px box). */
+      .rename.port {
+        width: min(760px, 92vw);
+      }
+      .rename.ask {
+        width: min(560px, 92vw);
+      }
+      .rename::backdrop,
+      .proposal::backdrop {
+        background: rgba(0, 0, 0, 0.45);
+      }
       .rename .error {
         color: var(--loss);
       }
@@ -587,10 +614,6 @@ export const COMPILE_DEBOUNCE_MS = 700;
         max-height: 240px;
         overflow-y: auto;
       }
-      .port textarea {
-        font-family: var(--font-mono, monospace);
-        font-size: 12px;
-      }
       .checklist {
         list-style: none;
         margin: 8px 0;
@@ -606,10 +629,10 @@ export const COMPILE_DEBOUNCE_MS = 700;
         padding: 3px 0;
       }
       .checklist li[data-status='ok'] .mark {
-        color: #1f8a3b;
+        color: var(--profit);
       }
       .checklist li[data-status='check'] .mark {
-        color: #b25e00;
+        color: var(--warning);
       }
       .checklist li[data-status='problem'] .mark {
         color: var(--loss);
@@ -624,6 +647,11 @@ export const COMPILE_DEBOUNCE_MS = 700;
         width: 100%;
         margin-top: 4px;
         font: inherit;
+      }
+      /* After the shorthand above, which used to reset it: a pasted script reads in monospace. */
+      .port textarea {
+        font-family: var(--font-mono, monospace);
+        font-size: 12px;
       }
       .proposal {
         border: 1px solid var(--border);

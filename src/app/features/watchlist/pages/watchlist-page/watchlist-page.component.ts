@@ -35,6 +35,7 @@ import {
   type ChartWatchlist,
   type RemovedItem,
 } from '@features/chart-analysis/watchlist/watchlist.model';
+import { pipSizeFor } from '@features/chart-analysis/datafeed/symbol-info';
 
 import {
   MiniChartTileComponent,
@@ -135,8 +136,8 @@ const UNDO_MS = 8_000;
       @if (legacyWall().length > 0) {
         <div class="info-banner" role="status">
           <span>
-            This browser has a wall of <strong>{{ legacyWall().length }}</strong> symbols saved by the old
-            page. The wall now shows your engine watchlists.
+            This browser has a wall of <strong>{{ legacyWall().length }}</strong> symbols saved by
+            the old page. The wall now shows your engine watchlists.
           </span>
           <button type="button" class="btn-ghost" (click)="importLegacyWall()">
             Import as a watchlist
@@ -314,13 +315,20 @@ const UNDO_MS = 8_000;
             <h3>{{ sourceList()?.name ?? 'This list' }} is empty</h3>
             <p class="muted">
               Add a symbol above, or show
-              <button type="button" class="link-btn" (click)="setSource('all')">every active pair</button>.
+              <button type="button" class="link-btn" (click)="setSource('all')">
+                every active pair</button
+              >.
             </p>
             @if (sourceList() && suggestionSymbols().length > 0) {
               <div class="empty-suggest">
                 <span class="muted small">Quick add:</span>
                 @for (s of suggestionSymbols(); track s) {
-                  <button type="button" class="chip" (click)="addSymbolToList(s)" [title]="'Add ' + s">
+                  <button
+                    type="button"
+                    class="chip"
+                    (click)="addSymbolToList(s)"
+                    [title]="'Add ' + s"
+                  >
                     + {{ s }}
                   </button>
                 }
@@ -337,6 +345,8 @@ const UNDO_MS = 8_000;
               [size]="tileSize()"
               [barCount]="barCount()"
               [quote]="quotes()[e.symbol] ?? null"
+              [pipSize]="pairMeta()[e.symbol]?.pipSize ?? null"
+              [digits]="pairMeta()[e.symbol]?.digits ?? null"
               [positions]="scopedPositions()"
               [orders]="scopedOrders()"
               [showPositions]="showPositions()"
@@ -746,6 +756,19 @@ export class WatchlistPageComponent implements OnInit {
     return s === 'all' ? null : (this.store.lists().find((l) => l.id === s) ?? null);
   });
 
+  /** Pip size and quote digits per catalogue symbol — the tiles price spreads and quotes with them. */
+  protected readonly pairMeta = computed(() => {
+    const meta: Record<string, { pipSize: number; digits: number }> = {};
+    for (const p of this.catalogue()) {
+      const symbol = canonicalSymbol(p.symbol);
+      if (!symbol) continue;
+      // `assetClass` is on the wire but not yet on the generated DTO.
+      const assetClass = (p as { assetClass?: string | null }).assetClass ?? null;
+      meta[symbol] = { pipSize: pipSizeFor(p.decimalPlaces, assetClass), digits: p.decimalPlaces };
+    }
+    return meta;
+  });
+
   protected readonly catalogueSymbols = computed<readonly string[]>(() =>
     this.catalogue()
       .map((p) => canonicalSymbol(p.symbol))
@@ -755,7 +778,8 @@ export class WatchlistPageComponent implements OnInit {
 
   protected readonly entries = computed<WatchlistEntry[]>(() => {
     const tf = this.globalTimeframe();
-    const symbols = this.source() === 'all' ? this.catalogueSymbols() : listSymbols(this.sourceList());
+    const symbols =
+      this.source() === 'all' ? this.catalogueSymbols() : listSymbols(this.sourceList());
     return symbols.map((symbol) => ({ symbol, timeframe: tf }));
   });
 
@@ -777,7 +801,9 @@ export class WatchlistPageComponent implements OnInit {
 
   protected readonly canAdd = computed(() => {
     const draft = canonicalSymbol(this.addDraft());
-    return !!this.sourceList() && draft.length > 0 && !this.entries().some((e) => e.symbol === draft);
+    return (
+      !!this.sourceList() && draft.length > 0 && !this.entries().some((e) => e.symbol === draft)
+    );
   });
 
   /** Live quotes per symbol: pushed ticks, seeded by the day snapshot. */
@@ -788,14 +814,19 @@ export class WatchlistPageComponent implements OnInit {
   /** The old browser-only wall, offered for import once. */
   protected readonly legacyWall = signal<string[]>([]);
   /** The last tile removed from a list, for Undo. */
-  protected readonly undo = signal<{ listId: number; listName: string; removed: RemovedItem } | null>(null);
+  protected readonly undo = signal<{
+    listId: number;
+    listName: string;
+    removed: RemovedItem;
+  } | null>(null);
   private undoTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.destroyRef.onDestroy(() => {
       this.clearLoadFailures();
       if (this.undoTimer) clearTimeout(this.undoTimer);
-      for (const symbol of this.joined) void this.realtime.leave(`price:${symbol}`, 'UnsubscribePrice', symbol);
+      for (const symbol of this.joined)
+        void this.realtime.leave(`price:${symbol}`, 'UnsubscribePrice', symbol);
       this.joined.clear();
       this.store.flush();
     });
@@ -872,12 +903,14 @@ export class WatchlistPageComponent implements OnInit {
     if (this.read(SHOW_POSITIONS_STORAGE_KEY) === '1') this.showPositions.set(true);
     if (this.read(SHOW_ORDERS_STORAGE_KEY) === '1') this.showOrders.set(true);
     const acct = this.read(OVERLAY_ACCOUNT_STORAGE_KEY);
-    if (acct && acct !== 'all' && Number.isFinite(Number(acct))) this.overlayAccount.set(Number(acct));
+    if (acct && acct !== 'all' && Number.isFinite(Number(acct)))
+      this.overlayAccount.set(Number(acct));
     const src = this.read(SOURCE_STORAGE_KEY);
     if (src === 'all') this.pickedSource.set('all');
     else if (src && Number.isFinite(Number(src))) this.pickedSource.set(Number(src));
     // The old page's own wall: offer it once, unless already imported or dismissed.
-    if (this.read(LEGACY_DISMISSED_KEY) !== '1') this.legacyWall.set(readLegacyWall(this.read(LEGACY_WALL_KEY)));
+    if (this.read(LEGACY_DISMISSED_KEY) !== '1')
+      this.legacyWall.set(readLegacyWall(this.read(LEGACY_WALL_KEY)));
   }
 
   private loadCatalogue(): void {
@@ -941,7 +974,9 @@ export class WatchlistPageComponent implements OnInit {
     }
     this.setSource(String(created.id));
     this.dismissLegacyWall();
-    this.notifications.success(`Imported ${symbols.length} symbols into the watchlist "${created.name}".`);
+    this.notifications.success(
+      `Imported ${symbols.length} symbols into the watchlist "${created.name}".`,
+    );
   }
 
   protected dismissLegacyWall(): void {
@@ -1006,7 +1041,9 @@ export class WatchlistPageComponent implements OnInit {
     }
     if (this.catalogueSymbols().length > 0 && !this.catalogueSymbols().includes(sym)) {
       // Allowed: the catalogue may not have picked the symbol up yet; its tile will say there is no feed.
-      this.notifications.info(`${sym} isn't in the active currency-pair catalogue — its tile may show no prices.`);
+      this.notifications.info(
+        `${sym} isn't in the active currency-pair catalogue — its tile may show no prices.`,
+      );
     }
     this.store.update(addSymbol(list, sym));
   }
@@ -1014,7 +1051,9 @@ export class WatchlistPageComponent implements OnInit {
   protected removeEntry(target: WatchlistEntry): void {
     const list = this.sourceList();
     if (!list) {
-      this.notifications.info('"All active pairs" is not a list — pick a watchlist to remove symbols from it.');
+      this.notifications.info(
+        '"All active pairs" is not a list — pick a watchlist to remove symbols from it.',
+      );
       return;
     }
     const removed = locate(list, target.symbol);
@@ -1053,6 +1092,7 @@ export class WatchlistPageComponent implements OnInit {
     this.analysisTarget.set(null);
     // The modal's chart leaves its symbol's price room when it closes (one connection, no reference counting), which
     // would silently stop this tile's prices: join it again.
-    if (t && this.joined.has(t.symbol)) void this.realtime.join(`price:${t.symbol}`, 'SubscribePrice', t.symbol);
+    if (t && this.joined.has(t.symbol))
+      void this.realtime.join(`price:${t.symbol}`, 'SubscribePrice', t.symbol);
   }
 }

@@ -29,10 +29,21 @@ const WINDOWS: { label: string; days: number }[] = [
 const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 
 /**
- * Analyser Comparison — side-by-side card view of LLM vs Synthetic analyser
- * over a configurable window. Driven by /market-data/analyser-comparison/summary
- * which returns a stable 2-row shape (one row per source) so the page always
- * renders both columns even when one source has zero rows.
+ * A summary row plus the derived tripwire fields the engine computes
+ * (`PopulateDerivedBenchmarkFields`) but api.types' AnalyserComparisonRowDto
+ * does not declare. Optional so an older engine still type-checks.
+ */
+type BenchmarkRow = AnalyserComparisonRowDto & {
+  isValidBenchmark?: boolean;
+  holdPct?: number;
+};
+
+/**
+ * Analyser Comparison — side-by-side card view of the LLM analyser, the
+ * Synthetic analyser and the three baselines over a configurable window. Driven
+ * by /market-data/analyser-comparison/summary, which always returns every
+ * compared source (zero-row sources included) plus a per-model split of the
+ * synthetic side.
  *
  * Counterfactual P&L is shown in three flavours so the operator can pick the
  * comparison most relevant to a decision: Raw (thesis only), Managed
@@ -95,14 +106,14 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
       } @else if (summary()) {
         <section class="window-meta">
           <span>
-            Window: {{ summary()!.fromUtc | date: 'MMM d, yyyy HH:mm' }} →
-            {{ summary()!.toUtc | date: 'MMM d, yyyy HH:mm' }}
-            ({{ summary()!.symbol ?? 'all symbols' }},
-            {{ summary()!.timeframe ?? 'all timeframes' }})
+            Window: {{ summary()!.fromUtc | date: 'MMM d, yyyy HH:mm' : 'UTC' }} →
+            {{ summary()!.toUtc | date: 'MMM d, yyyy HH:mm' : 'UTC' }} UTC ({{
+              summary()!.symbol ?? 'all symbols'
+            }}, {{ summary()!.timeframe ?? 'all timeframes' }})
           </span>
         </section>
         <section class="grid">
-          @for (row of summary()!.sources; track row.source) {
+          @for (row of rows(); track row.source) {
             <article
               class="source-card"
               [class.source-card--llm]="row.source === 'SpotAnalysis'"
@@ -112,6 +123,16 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
                 <h2>{{ sourceLabel(row) }}</h2>
                 <span class="badge">{{ row.decisions | number }} decisions</span>
               </header>
+              <!-- The engine flags a source with too few actionable decisions to
+                   compare against; the card used to look as authoritative as the rest. -->
+              @if (row.isValidBenchmark === false) {
+                <p class="benchmark-warn" role="note">
+                  Not a valid benchmark — only {{ row.actionable | number }} actionable decision{{
+                    row.actionable === 1 ? '' : 's'
+                  }}
+                  in this window, too few to compare.
+                </p>
+              }
               <dl class="kv">
                 <div>
                   <dt>Actionable</dt>
@@ -179,14 +200,107 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
                     {{ row.counterfactualWins | number }} / {{ row.counterfactualLosses | number }}
                   </dd>
                 </div>
+                <!-- Two averages, labelled. The engine's is per backfilled ACTIONABLE
+                     (Buy/Sell) decision since 2026-10-19 — it used to count holds as $0,
+                     which diluted hold-heavy sources (the LLM: 188 of 298 rows) next to
+                     baselines that never hold. Per TRADE divides by wins + losses, so it
+                     also leaves breakevens out. -->
                 <div>
-                  <dt>Avg raw PnL</dt>
-                  <dd>{{ row.avgCounterfactualRawPnL ?? 0 | currency: 'USD' }}</dd>
+                  <dt
+                    title="Engine average over backfilled Buy/Sell decisions — holds excluded, breakevens included"
+                  >
+                    Avg raw P&amp;L / actionable
+                  </dt>
+                  <dd
+                    [class.profit]="(row.avgCounterfactualRawPnL ?? 0) > 0"
+                    [class.loss]="(row.avgCounterfactualRawPnL ?? 0) < 0"
+                  >
+                    @if (row.avgCounterfactualRawPnL !== null) {
+                      {{ row.avgCounterfactualRawPnL | currency: 'USD' }}
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </dd>
+                </div>
+                <div>
+                  <dt title="Raw P&L ÷ (wins + losses) — breakeven trades excluded">
+                    Avg raw P&amp;L / trade
+                  </dt>
+                  <dd
+                    [class.profit]="(perTrade(row) ?? 0) > 0"
+                    [class.loss]="(perTrade(row) ?? 0) < 0"
+                  >
+                    @if (perTrade(row) !== null) {
+                      {{ perTrade(row) | currency: 'USD' }}
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </dd>
                 </div>
               </dl>
             </article>
           }
         </section>
+
+        <!-- The engine splits the synthetic side by the model that produced each
+             decision (an architecture swap mid-window otherwise blends into one row);
+             the page never showed it. -->
+        @if (summary()!.perModel.length > 0) {
+          <section class="per-model">
+            <h2>Synthetic analyser by model</h2>
+            <div class="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Model</th>
+                    <th>Architecture</th>
+                    <th>Status</th>
+                    <th>Trained (UTC)</th>
+                    <th class="num">Decisions</th>
+                    <th class="num">Actionable</th>
+                    <th class="num">Buy / Sell / Hold</th>
+                    <th class="num">Avg conf.</th>
+                    <th class="num">Raw P&amp;L</th>
+                    <th class="num">Gated P&amp;L</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (m of summary()!.perModel; track m.mlModelId) {
+                    <tr>
+                      <td class="mono">#{{ m.mlModelId }}</td>
+                      <td>{{ m.architecture }}</td>
+                      <td>{{ m.modelStatus }}</td>
+                      <td class="mono">
+                        {{ m.trainedAt ? (m.trainedAt | date: 'yyyy-MM-dd' : 'UTC') : '—' }}
+                      </td>
+                      <td class="num">{{ m.decisions | number }}</td>
+                      <td class="num">{{ m.actionable | number }}</td>
+                      <td class="num">
+                        {{ m.buyCount | number }} / {{ m.sellCount | number }} /
+                        {{ m.holdCount | number }}
+                      </td>
+                      <td class="num">{{ m.avgConfidence | number: '1.2-2' }}</td>
+                      <td
+                        class="num"
+                        [class.profit]="m.sumCounterfactualRawPnL > 0"
+                        [class.loss]="m.sumCounterfactualRawPnL < 0"
+                      >
+                        {{ m.sumCounterfactualRawPnL | currency: 'USD' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.profit]="m.sumCounterfactualGatedPnL > 0"
+                        [class.loss]="m.sumCounterfactualGatedPnL < 0"
+                      >
+                        {{ m.sumCounterfactualGatedPnL | currency: 'USD' }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        }
       }
     </div>
   `,
@@ -203,9 +317,10 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
       }
       .header-controls {
         display: flex;
-        gap: var(--space-4);
+        gap: var(--space-3) var(--space-4);
         align-items: flex-end;
         flex-wrap: wrap;
+        justify-content: flex-end;
       }
       .chip-group {
         display: inline-flex;
@@ -366,11 +481,65 @@ const TIMEFRAMES: (Timeframe | '')[] = ['', 'M1', 'M5', 'M15', 'H1', 'H4', 'D1']
       .kv--pnl dd {
         font-size: var(--text-base);
       }
-      .profit {
+      /* Qualified with the element: ".kv dd" (0,1,1) out-ranked a bare ".profit"
+         (0,1,0), so every P&L figure rendered white whatever its sign. */
+      .profit,
+      .kv dd.profit {
         color: var(--profit);
       }
-      .loss {
+      .loss,
+      .kv dd.loss {
         color: var(--loss);
+      }
+      .muted {
+        color: var(--text-tertiary);
+        font-weight: var(--font-regular);
+      }
+      .benchmark-warn {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-xs);
+        color: var(--warning);
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+      }
+      .per-model {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+      }
+      .per-model h2 {
+        margin: 0 0 var(--space-3);
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .table-scroll {
+        overflow-x: auto;
+      }
+      .per-model table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+        font-variant-numeric: tabular-nums;
+      }
+      .per-model th,
+      .per-model td {
+        padding: 6px 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .per-model th {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+      }
+      .per-model .num {
+        text-align: right;
+      }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, monospace;
       }
     `,
   ],
@@ -388,6 +557,10 @@ export class AnalyserComparisonPageComponent implements OnInit {
   readonly loading = signal(true);
   readonly errorMessage = signal<string | null>(null);
   readonly summary = signal<AnalyserComparisonSummaryDto | null>(null);
+  /** Rows with the engine's benchmark tripwire, which api.types does not declare yet. */
+  readonly rows = computed(() => (this.summary()?.sources ?? []) as BenchmarkRow[]);
+  /** Sequence of the latest request — a slower earlier answer must not overwrite it. */
+  private requestSeq = 0;
 
   ngOnInit() {
     this.reload();
@@ -399,6 +572,7 @@ export class AnalyserComparisonPageComponent implements OnInit {
   }
 
   reload() {
+    const seq = ++this.requestSeq;
     this.loading.set(true);
     this.errorMessage.set(null);
     const days = this.activeWindow().days;
@@ -414,14 +588,24 @@ export class AnalyserComparisonPageComponent implements OnInit {
       .getSummary(filter)
       .pipe(
         catchError((err) => {
-          this.errorMessage.set(err?.message ?? 'Failed to load summary.');
+          if (seq === this.requestSeq)
+            this.errorMessage.set(err?.message ?? 'Failed to load summary.');
           return of(null);
         }),
       )
       .subscribe((res) => {
+        // Window chips and filters fire a request each; only the newest may land.
+        if (seq !== this.requestSeq) return;
         this.loading.set(false);
         if (res?.status && res.data) this.summary.set(res.data);
+        else if (res) this.errorMessage.set(res.message ?? 'The engine refused the summary query.');
       });
+  }
+
+  /** Raw counterfactual P&L per resolved trade (wins + losses); null when none resolved. */
+  perTrade(row: AnalyserComparisonRowDto): number | null {
+    const n = row.counterfactualWins + row.counterfactualLosses;
+    return n > 0 ? row.sumCounterfactualRawPnL / n : null;
   }
 
   sourceLabel(row: AnalyserComparisonRowDto): string {

@@ -18,6 +18,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /**
  * Right-side drawer that answers "why isn't this strategy generating signals?"
@@ -38,6 +39,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="overlay" (click)="closed.emit()" role="presentation">
@@ -47,6 +49,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         role="dialog"
         aria-modal="true"
         aria-labelledby="rdd-title"
+        appModalA11y
+        (dismiss)="closed.emit()"
       >
         <header class="drawer-head">
           <div>

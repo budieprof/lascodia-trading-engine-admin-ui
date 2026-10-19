@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute } from '@angular/router';
@@ -14,6 +14,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
 import { SlAuditService, type PagedEnvelope } from '@core/services/sl-audit.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import { priceDecimals } from '@shared/components/analysis-recommendations/rec-preview-chart';
 import { ApiError } from '@core/api/api.types';
 import {
   ALL_SL_CHANGE_SOURCES,
@@ -39,7 +41,7 @@ import {
 @Component({
   selector: 'app-sl-audit-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, FormsModule],
+  imports: [DatePipe, FormsModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="sl-audit">
@@ -146,8 +148,10 @@ import {
                   <th>Source</th>
                   <th class="num">Old SL</th>
                   <th class="num">New SL</th>
-                  <th class="num" title="New SL − Old SL">Δ</th>
-                  <th class="num" title="New SL − Initial SL (signed)">Δ vs init</th>
+                  <!-- Points (the symbol's last quoted digit), not raw price: "-0.00040" was too wide
+                       for the card and clipped to "-0.00"; 10 points = 1 pip on 5/3-digit FX. -->
+                  <th class="num" title="New SL − Old SL, in points">Δ pts</th>
+                  <th class="num" title="New SL − Initial SL (signed), in points">Δ vs init</th>
                   <th class="num">Spread</th>
                   <th>Actor</th>
                   <th>Reason</th>
@@ -178,14 +182,14 @@ import {
                     </td>
                     <td class="num mono" [class.muted]="r.entryPrice === null">
                       @if (r.entryPrice !== null) {
-                        {{ r.entryPrice | number: '1.5-5' }}
+                        {{ price(r.symbol, r.entryPrice) }}
                       } @else {
                         —
                       }
                     </td>
                     <td class="num mono" [class.muted]="r.initialSl === null">
                       @if (r.initialSl !== null) {
-                        {{ r.initialSl | number: '1.5-5' }}
+                        {{ price(r.symbol, r.initialSl) }}
                       } @else {
                         —
                       }
@@ -195,14 +199,14 @@ import {
                     </td>
                     <td class="num mono">
                       @if (r.oldSl !== null) {
-                        {{ r.oldSl | number: '1.5-5' }}
+                        {{ price(r.symbol, r.oldSl) }}
                       } @else {
                         <span class="muted">—</span>
                       }
                     </td>
                     <td class="num mono">
                       @if (r.newSl !== null) {
-                        {{ r.newSl | number: '1.5-5' }}
+                        {{ price(r.symbol, r.newSl) }}
                       } @else {
                         <span class="muted">—</span>
                       }
@@ -211,18 +215,19 @@ import {
                          (protection loosened = amber, tightened/restored =
                          green), not by its arithmetic sign — a bump that widens
                          a SHORT's SL is a negative number but still loosens it. -->
-                    <td [class]="'num mono ' + deltaClass(r)">
+                    <td [class]="'num mono ' + deltaClass(r)" [title]="deltaTitle(r, r.oldSl)">
                       {{ deltaStr(r) }}
                     </td>
                     <td
                       [class]="'num mono ' + deltaVsInitClass(r)"
                       [class.muted]="r.initialSl === null || r.newSl === null"
+                      [title]="deltaTitle(r, r.initialSl)"
                     >
                       {{ deltaVsInitStr(r) }}
                     </td>
                     <td class="num mono" [class.muted]="r.spread === null">
                       @if (r.spread !== null) {
-                        {{ r.spread | number: '1.5-5' }}
+                        {{ price(r.symbol, r.spread) }}
                       } @else {
                         —
                       }
@@ -487,6 +492,22 @@ export class SlAuditPageComponent {
       this.filterSource = (source as SlChangeSource) ?? '';
       this.search(1);
     });
+
+    // Per-symbol price precision. Best-effort: until (or unless) it lands, the JPY/5-digit rule.
+    this.pairs
+      .list({ currentPage: 1, itemCountPerPage: 500, filter: null })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        const rows = res?.data?.data ?? [];
+        const map = new Map<string, number>();
+        for (const p of rows) {
+          if (p.symbol && p.decimalPlaces > 0) map.set(p.symbol.toUpperCase(), p.decimalPlaces);
+        }
+        if (map.size > 0) this.decimalsBySymbol.set(map);
+      });
   }
 
   protected search(page: number = 1): void {
@@ -515,10 +536,17 @@ export class SlAuditPageComponent {
       )
       .subscribe((res) => {
         if (res) {
+          // The engine serialises the pager in camelCase; PagedEnvelope (core)
+          // declares PascalCase, so TotalItemCount was always undefined → 0
+          // rows total, "page 1 of 1", and the pager buttons dead over a
+          // 300k-row feed. Read either casing.
+          const pager = (res.pager ?? {}) as unknown as Record<string, number | undefined>;
           this.rows.set(res.data ?? []);
-          this.totalCount.set(res.pager?.TotalItemCount ?? 0);
-          this.currentPage.set(res.pager?.CurrentPage ?? page);
-          this.pageSize.set(res.pager?.ItemCountPerPage ?? this.pageSize());
+          this.totalCount.set(pager['totalItemCount'] ?? pager['TotalItemCount'] ?? 0);
+          this.currentPage.set(pager['currentPage'] ?? pager['CurrentPage'] ?? page);
+          this.pageSize.set(
+            pager['itemCountPerPage'] ?? pager['ItemCountPerPage'] ?? this.pageSize(),
+          );
         }
         this.loading.set(false);
       });
@@ -546,9 +574,35 @@ export class SlAuditPageComponent {
 
   protected deltaStr(r: PositionSlChangeLog): string {
     if (r.oldSl === null || r.newSl === null) return '—';
-    const d = r.newSl - r.oldSl;
-    const sign = d > 0 ? '+' : '';
-    return `${sign}${d.toFixed(5)}`;
+    return this.points(r.symbol, r.newSl - r.oldSl);
+  }
+
+  /** Quoted decimals per symbol, from the currency-pair catalogue (the JPY/5-digit rule until
+   *  it loads, or for a symbol it does not list). Prices were all printed to 5 places. */
+  private readonly decimalsBySymbol = signal<ReadonlyMap<string, number>>(new Map());
+  private readonly pairs = inject(CurrencyPairsService);
+
+  private decimals(symbol: string | null | undefined): number {
+    const sym = (symbol ?? '').toUpperCase();
+    return this.decimalsBySymbol().get(sym) ?? priceDecimals(sym);
+  }
+
+  protected price(symbol: string | null | undefined, v: number | null): string {
+    return v === null ? '—' : v.toFixed(this.decimals(symbol));
+  }
+
+  /** A price difference as signed points of the symbol's last quoted digit ("−4 pt"). */
+  private points(symbol: string | null | undefined, d: number): string {
+    const pts = Math.round(d * 10 ** this.decimals(symbol));
+    if (pts === 0) return '0';
+    return `${pts > 0 ? '+' : '−'}${Math.abs(pts).toLocaleString()}`;
+  }
+
+  /** Hover text with the raw price move behind a points cell. */
+  protected deltaTitle(r: PositionSlChangeLog, from: number | null): string {
+    if (from === null || r.newSl === null) return '';
+    const d = r.newSl - from;
+    return `${d > 0 ? '+' : ''}${d.toFixed(this.decimals(r.symbol))} in price`;
   }
 
   protected deltaVsInit(r: PositionSlChangeLog): number {
@@ -579,9 +633,7 @@ export class SlAuditPageComponent {
 
   protected deltaVsInitStr(r: PositionSlChangeLog): string {
     if (r.initialSl === null || r.newSl === null) return '—';
-    const d = r.newSl - r.initialSl;
-    const sign = d > 0 ? '+' : '';
-    return `${sign}${d.toFixed(5)}`;
+    return this.points(r.symbol, r.newSl - r.initialSl);
   }
 
   protected actorOf(r: PositionSlChangeLog): string {

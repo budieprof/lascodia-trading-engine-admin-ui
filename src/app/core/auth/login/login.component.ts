@@ -4,6 +4,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
 import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
 import { ThemeService } from '@core/theme/theme.service';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { LogoComponent } from '@shared/components/logo/logo.component';
 
 @Component({
@@ -40,20 +41,22 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
           >
             Operator
           </button>
-          <button
-            type="button"
-            role="tab"
-            class="mode-btn"
-            [class.active]="mode() === 'dev'"
-            [attr.aria-selected]="mode() === 'dev'"
-            (click)="mode.set('dev')"
-          >
-            Developer <span class="dev-tag">dev</span>
-          </button>
+          @if (devLoginAvailable) {
+            <button
+              type="button"
+              role="tab"
+              class="mode-btn"
+              [class.active]="mode() === 'dev'"
+              [attr.aria-selected]="mode() === 'dev'"
+              (click)="mode.set('dev')"
+            >
+              Developer <span class="dev-tag">dev</span>
+            </button>
+          }
         </div>
 
         @if (mode() === 'admin') {
-          <form (ngSubmit)="onAdminLogin()" class="login-form">
+          <form (ngSubmit)="onAdminLogin()" class="login-form" [class.no-dev]="!devLoginAvailable">
             <div class="field">
               <label for="username">Username</label>
               <input
@@ -94,7 +97,11 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
 
           <p class="dev-note">Admin user — username &amp; password.</p>
         } @else if (mode() === 'operator') {
-          <form (ngSubmit)="onOperatorLogin()" class="login-form">
+          <form
+            (ngSubmit)="onOperatorLogin()"
+            class="login-form"
+            [class.no-dev]="!devLoginAvailable"
+          >
             <div class="field">
               <label for="accountId">Account ID</label>
               <input
@@ -147,7 +154,7 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
 
           <p class="dev-note">Engine auth — JWT carries role claims.</p>
         } @else {
-          <form (ngSubmit)="onDevLogin()" class="login-form">
+          <form (ngSubmit)="onDevLogin()" class="login-form" [class.no-dev]="!devLoginAvailable">
             <p class="dev-warning" role="note">
               Development only — mints a shared-library token with no role claims. Not for operating
               a live engine.
@@ -271,6 +278,10 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
          * the card does not resize when the operator switches tabs; the
          * submit button is pinned to the bottom so it stays put as well. */
         min-height: 348px;
+      }
+      /* Without the Developer tab the tallest form is Operator (three fields). */
+      .login-form.no-dev {
+        min-height: 268px;
       }
       .login-form .login-btn {
         margin-top: auto;
@@ -452,6 +463,13 @@ export class LoginComponent {
   }
 
   readonly mode = signal<'admin' | 'operator' | 'dev'>('admin');
+
+  /**
+   * The Developer tab only where the console talks to an engine directly (a dev build, apiBaseUrl
+   * absolute). A release is same-origin through Caddy, which refuses the dev-token endpoint: on
+   * the live engine it minted a passwordless Admin token for anyone reaching the public tunnel.
+   */
+  readonly devLoginAvailable = !!inject(RUNTIME_CONFIG).apiBaseUrl;
 
   // Admin-mode fields (username + password)
   username = '';

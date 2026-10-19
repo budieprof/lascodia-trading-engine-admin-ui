@@ -8,7 +8,7 @@ import {
   runPresence,
   runStatusTone,
 } from '@shared/components/engineer-chat/engineer-turns';
-import { formatAge, type WorkOrderRow } from './agent-ops';
+import { formatAgo, type WorkOrderRow } from './agent-ops';
 
 /**
  * Every work order with a live run: what it is doing, what it has spent getting there, and the way
@@ -86,7 +86,7 @@ import { formatAge, type WorkOrderRow } from './agent-ops';
               <span class="stat of">👁 {{ r.watches.length }} watching</span>
             }
             <span class="stat of last" title="Last turn written to this conversation"
-              >active {{ age(r) }} ago</span
+              >active {{ age(r) }}</span
             >
           </div>
         </li>
@@ -266,6 +266,6 @@ export class OpsRunningComponent {
 
   protected age(r: WorkOrderRow): string {
     const t = Date.parse(r.lastActivityAtUtc);
-    return Number.isFinite(t) ? formatAge(this.nowMs() - t) : '—';
+    return Number.isFinite(t) ? formatAgo(this.nowMs() - t) : '—';
   }
 }

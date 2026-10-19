@@ -75,23 +75,31 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   </span>
                   <span class="meta-pair">
                     <span class="meta-label">Healthy %</span>
+                    <!-- Uncoloured "—" until workers report: a failed read is unknown, not 0%. -->
                     <span
                       class="meta-value"
-                      [class.good]="healthyPct() >= 95"
-                      [class.warn]="healthyPct() < 95 && healthyPct() >= 80"
-                      [class.bad]="healthyPct() < 80"
+                      [class.good]="workerSnapshots().length > 0 && healthyPct() >= 95"
+                      [class.warn]="
+                        workerSnapshots().length > 0 && healthyPct() < 95 && healthyPct() >= 80
+                      "
+                      [class.bad]="workerSnapshots().length > 0 && healthyPct() < 80"
+                      [title]="
+                        workersResource.error() && workerSnapshots().length === 0
+                          ? 'Worker snapshots could not be loaded'
+                          : 'Healthy workers / all workers. Idle workers (no completed cycle yet) count as not healthy.'
+                      "
                     >
-                      {{ healthyPct().toFixed(0) }}%
+                      {{ workerSnapshots().length > 0 ? healthyPct().toFixed(0) + '%' : '—' }}
                     </span>
                   </span>
                   <span class="meta-pair">
                     <span class="meta-label">Unresolved DLQ</span>
                     <span
                       class="meta-value"
-                      [class.bad]="deadLetters().length > 0"
-                      [class.good]="deadLetters().length === 0"
+                      [class.bad]="dlqTotal() !== null && dlqTotal()! > 0"
+                      [class.good]="dlqTotal() === 0"
                     >
-                      {{ deadLetters().length }}
+                      {{ dlqTotal() ?? '—' }}
                     </span>
                   </span>
                 </div>
@@ -143,9 +151,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 />
                 <app-metric-card
                   label="DLQ unresolved"
-                  [value]="deadLetters().length"
+                  [value]="dlqTotal()"
                   format="number"
-                  [dotColor]="deadLetters().length > 0 ? '#FF3B30' : '#34C759'"
+                  [dotColor]="(dlqTotal() ?? 0) > 0 ? '#FF3B30' : '#34C759'"
                 />
               </div>
 
@@ -193,13 +201,17 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 }
               </div>
 
-              <!-- Recent issues table — surfaces the most-pressing things -->
+              <!-- Non-healthy workers. Idle is listed but not called an issue: an idle worker is
+                   running and simply has not completed a cycle yet (nothing to do, long cadence). -->
               @if (issuesList().length > 0) {
                 <section class="hp-board">
                   <header class="hp-board-head">
-                    <h3>Active issues</h3>
+                    <h3>
+                      {{ problemCount() > 0 ? 'Active issues' : 'Workers not reporting healthy' }}
+                    </h3>
                     <span class="muted">
-                      {{ issuesList().length }} workers reporting non-healthy status
+                      {{ problemCount() }} failed or degraded · {{ workerCounts().Idle }} idle (no
+                      completed cycle yet)
                     </span>
                   </header>
                   <table class="hp-board-table">
@@ -208,7 +220,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         <th>Status</th>
                         <th>Worker</th>
                         <th>Message</th>
-                        <th>Last reported</th>
+                        <th>Last success</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -225,9 +237,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                             </span>
                           </td>
                           <td class="mono">{{ w.name }}</td>
-                          <td class="msg">{{ w.lastErrorMessage ?? '—' }}</td>
+                          <td class="msg" [title]="w.lastErrorMessage ?? ''">
+                            {{ w.lastErrorMessage ?? '—' }}
+                          </td>
+                          <!-- capturedAt is when the snapshot was taken (always "just now"); the
+                               worker's own last good cycle is what says how long it has been out. -->
                           <td class="mono">
-                            {{ w.capturedAt ? (w.capturedAt | relativeTime) : '—' }}
+                            {{ w.lastSuccessAt ? (w.lastSuccessAt | relativeTime) : 'never' }}
                           </td>
                         </tr>
                       }
@@ -251,7 +267,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 <a routerLink="/dead-letter" class="hp-action">
                   <span class="hp-action-label">Dead-letter queue</span>
                   <span class="hp-action-desc">
-                    {{ deadLetters().length }} unresolved · retry posture
+                    {{ dlqTotal() ?? '—' }} unresolved · retry posture
                   </span>
                 </a>
                 <a routerLink="/audit-trail" class="hp-action">
@@ -285,17 +301,23 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 format="number"
                 dotColor="#5AC8FA"
               />
+              <!-- Median, not mean: one hourly 13-minute retention sweep dragged the mean P95 to
+                   17 s while the typical worker cycles in under 100 ms. -->
               <app-metric-card
-                label="Avg P95 (ms)"
-                [value]="infraStats().avgP95Cycle"
+                label="Median P95 (ms)"
+                [value]="infraStats().medianP95Cycle"
                 format="number"
-                [dotColor]="infraStats().avgP95Cycle > 1000 ? '#FF9500' : '#34C759'"
+                [dotColor]="infraStats().medianP95Cycle > 1000 ? '#FF9500' : '#34C759'"
+                [attr.title]="'Mean of all P95s: ' + infraStats().avgP95Cycle + ' ms'"
               />
               <app-metric-card
                 label="Max P99 (ms)"
                 [value]="infraStats().maxP99Cycle"
                 format="number"
                 [dotColor]="infraStats().maxP99Cycle > 5000 ? '#FF3B30' : '#34C759'"
+                [attr.title]="
+                  infraStats().maxP99Worker ? 'Slowest: ' + infraStats().maxP99Worker : ''
+                "
               />
               <app-metric-card
                 label="Errors / hour"
@@ -314,6 +336,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 [value]="infraStats().totalBacklog"
                 format="number"
                 [dotColor]="infraStats().totalBacklog > 100 ? '#FF9500' : '#34C759'"
+                [attr.title]="'Sum of the backlog depth every worker reports: items waiting, not items processed. On an engine older than 2026-10-19, SpreadProfileWorker also adds the ticks it processed (millions), which then dominate the total.'"
               />
               <app-metric-card
                 label="Retries / hour"
@@ -345,7 +368,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 [subtitle]="
                   'Average P95 per category, slowest ' +
                   topCategoryLimit +
-                  ' shown — hover a bar for the value'
+                  ' shown · log scale — hover a bar for the value'
                 "
                 [options]="cycleDurationByCategoryOptions()"
                 height="300px"
@@ -393,10 +416,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         </td>
                         <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
                         <td class="num mono">{{ row.idle }}</td>
+                        <!-- Coloured by failures, not by the share: idle workers lower the % without
+                             anything being wrong (Feature read a red 33% for two idle workers). -->
                         <td
                           class="num mono"
-                          [class.good]="row.healthyPct >= 95"
-                          [class.bad]="row.healthyPct < 80"
+                          [class.good]="row.failed + row.degraded === 0 && row.idle === 0"
+                          [class.warn]="row.degraded > 0 && row.failed === 0"
+                          [class.bad]="row.failed > 0"
                         >
                           {{ row.healthyPct.toFixed(0) }}%
                         </td>
@@ -418,8 +444,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                         <td class="num mono">{{ workerCounts().Idle }}</td>
                         <td
                           class="num mono"
-                          [class.good]="healthyPct() >= 95"
-                          [class.bad]="healthyPct() < 80"
+                          [class.good]="problemCount() === 0"
+                          [class.warn]="workerCounts().Degraded > 0 && workerCounts().Failed === 0"
+                          [class.bad]="workerCounts().Failed > 0"
                         >
                           {{ healthyPct().toFixed(0) }}%
                         </td>
@@ -435,7 +462,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               <section class="hp-board">
                 <header class="hp-board-head">
                   <h3>Unresolved DLQ events</h3>
-                  <span class="muted">Newest 25 with their delivery attempts</span>
+                  <span class="muted">
+                    @if ((dlqTotal() ?? 0) > deadLetters().length) {
+                      Newest {{ deadLetters().length }} of {{ dlqTotal() }} with their delivery
+                      attempts
+                    } @else {
+                      All {{ deadLetters().length }} with their delivery attempts
+                    }
+                  </span>
                 </header>
                 <table class="hp-board-table">
                   <thead>
@@ -547,13 +581,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         border-radius: var(--radius-full);
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
         width: fit-content;
       }
       .mode-pill.live {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
       .metrics {
         display: grid;
@@ -615,7 +649,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--loss);
       }
       .meta-value.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
 
       /* KPI strip — 8 cards as 2 rows of 4. Eight across squeezed every label
@@ -780,7 +814,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         color: var(--profit);
       }
       .hp-board-table .warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .hp-board-table .bad {
         color: var(--loss);
@@ -799,19 +833,20 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-size: 10.5px;
         font-weight: var(--font-semibold);
         background: rgba(142, 142, 147, 0.14);
-        color: #636366;
+        color: var(--tone-grey);
       }
+      /* Theme tones — the light-theme hues (#0040dd on the dark board) were unreadable. */
       .hp-pill.warn {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
       .hp-pill.bad {
-        background: rgba(255, 59, 48, 0.14);
-        color: #d70015;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .hp-pill.info {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
 
       /* Quick actions row — links to drill-down pages */
@@ -890,19 +925,29 @@ export class HealthPageComponent {
 
   // Worker snapshots — same source as Engine Overview / Worker Health pages.
   // /health/workers returns a raw array, not a ResponseData envelope.
-  private readonly workersResource = createPolledResource(
-    () => this.workersService.list().pipe(catchError(() => of([] as WorkerHealthDto[]))),
-    { intervalMs: 15_000 },
-  );
+  // No catchError: a failed read used to become [] and paint "0%" healthy in red; the resource
+  // keeps the last good list and records the failure in error().
+  protected readonly workersResource = createPolledResource(() => this.workersService.list(), {
+    intervalMs: 15_000,
+  });
 
-  // Last 25 unresolved DLQ rows.
+  // Newest 25 unresolved DLQ rows plus the queue's real total (the page used to show the
+  // capped row count as "Unresolved DLQ").
   private readonly dlqResource = createPolledResource(
     () =>
       this.deadLetterSvc
-        .list({ currentPage: 1, itemCountPerPage: 25, filter: { isResolved: false } })
+        .list({
+          currentPage: 1,
+          itemCountPerPage: 25,
+          filter: { isResolved: false },
+          sortBy: 'deadLetteredAt',
+          sortDirection: 'desc',
+        })
         .pipe(
-          map((r) => r.data?.data ?? []),
-          catchError(() => of([] as DeadLetterDto[])),
+          map((r) => ({
+            rows: r.data?.data ?? [],
+            total: r.data?.pager?.totalItemCount ?? r.data?.data?.length ?? 0,
+          })),
         ),
     { intervalMs: 15_000 },
   );
@@ -910,7 +955,9 @@ export class HealthPageComponent {
   readonly status = computed(() => this.resource.value());
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);
   readonly workerSnapshots = computed(() => this.workersResource.value() ?? []);
-  readonly deadLetters = computed(() => this.dlqResource.value() ?? []);
+  readonly deadLetters = computed<DeadLetterDto[]>(() => this.dlqResource.value()?.rows ?? []);
+  /** Unresolved rows in the whole queue; null until the first read lands (rendered "—"). */
+  readonly dlqTotal = computed<number | null>(() => this.dlqResource.value()?.total ?? null);
 
   /** Bars per category chart. Beyond this the axis labels overlap and ECharts
    *  starts hiding every other one, which reads as bars being mislabelled. */
@@ -976,6 +1023,9 @@ export class HealthPageComponent {
     if (total === 0) return 0;
     return (this.workerCounts().Healthy / total) * 100;
   });
+
+  /** Failed + degraded — the workers that are actually wrong (idle ones are not). */
+  readonly problemCount = computed(() => this.workerCounts().Failed + this.workerCounts().Degraded);
 
   // Non-healthy workers, capped at 12 — the page's actionable issue list.
   readonly issuesList = computed(() => {
@@ -1155,7 +1205,9 @@ export class HealthPageComponent {
     if (ws.length === 0) {
       return {
         avgP95Cycle: 0,
+        medianP95Cycle: 0,
         maxP99Cycle: 0,
+        maxP99Worker: null as string | null,
         totalErrorsLastHour: 0,
         totalSuccessesLastHour: 0,
         totalBacklog: 0,
@@ -1164,16 +1216,19 @@ export class HealthPageComponent {
     }
     const p95s = ws.map((w) => w.cycleDurationP95Ms).filter((v) => Number.isFinite(v));
     const avgP95 = p95s.length > 0 ? p95s.reduce((a, b) => a + b, 0) / p95s.length : 0;
-    const maxP99 = ws.reduce(
-      (m, w) =>
-        Number.isFinite(w.cycleDurationP99Ms) && w.cycleDurationP99Ms > m
-          ? w.cycleDurationP99Ms
-          : m,
-      0,
-    );
+    let maxP99 = 0;
+    let maxP99Worker: string | null = null;
+    for (const w of ws) {
+      if (Number.isFinite(w.cycleDurationP99Ms) && w.cycleDurationP99Ms > maxP99) {
+        maxP99 = w.cycleDurationP99Ms;
+        maxP99Worker = w.name;
+      }
+    }
     return {
       avgP95Cycle: Math.round(avgP95),
+      medianP95Cycle: Math.round(median(p95s)),
       maxP99Cycle: Math.round(maxP99),
+      maxP99Worker,
       totalErrorsLastHour: ws.reduce((s, w) => s + (w.errorsLastHour ?? 0), 0),
       totalSuccessesLastHour: ws.reduce((s, w) => s + (w.successesLastHour ?? 0), 0),
       totalBacklog: ws.reduce((s, w) => s + (w.backlogDepth ?? 0), 0),
@@ -1194,8 +1249,10 @@ export class HealthPageComponent {
     // Slowest categories only — the tail (dozens of sub-100 ms categories)
     // is what piled 40 value labels into a 40 px strip. The value now lives
     // in the tooltip; the bar length and colour band carry the reading.
+    // A log axis cannot place 0 (or anything under 1 ms), so those categories are left out.
     const rows = Object.entries(groups)
       .map(([category, g]) => ({ category, avg: g.count > 0 ? g.sum / g.count : 0 }))
+      .filter((r) => r.avg >= 1)
       .sort((a, b) => b.avg - a.avg)
       .slice(0, this.topCategoryLimit);
     if (rows.length === 0) return {};
@@ -1208,12 +1265,24 @@ export class HealthPageComponent {
           return `${p.name}<br/>Avg P95: ${Math.round(p.value).toLocaleString()} ms`;
         },
       },
-      grid: { top: 10, right: 24, bottom: 30, left: 130 },
+      // Log scale: one 13-minute retention sweep made every other bar a hairline on a linear
+      // axis. right: 40 keeps the "ms" axis name from being clipped at the card edge.
+      grid: { top: 10, right: 40, bottom: 30, left: 130 },
       xAxis: {
-        type: 'value',
+        type: 'log',
+        logBase: 10,
+        min: 1,
         name: 'ms',
         nameTextStyle: { fontSize: 10, color: '#6E6E73' },
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        // Compact decades ("1k", "1M"): the full "1,000,000" labels ran into each other in the
+        // narrow card ("1 10 10(10(10…").
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          hideOverlap: true,
+          formatter: (v: number) =>
+            v >= 1e6 ? `${v / 1e6}M` : v >= 1e3 ? `${v / 1e3}k` : String(v),
+        },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {
@@ -1317,4 +1386,12 @@ export class HealthPageComponent {
       ],
     };
   });
+}
+
+/** Middle value (mean of the middle two for an even count); 0 for an empty list. */
+function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
 }

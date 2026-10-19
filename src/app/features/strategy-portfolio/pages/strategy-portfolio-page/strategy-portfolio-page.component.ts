@@ -71,16 +71,18 @@ import { DatePipe } from '@angular/common';
         </div>
         <div class="pf-kpi">
           <span class="kpi-label">Target Sharpe</span>
-          <span class="kpi-value">{{ portfolioKpis().targetSharpe.toFixed(2) }}</span>
+          <span class="kpi-value">{{
+            portfolioKpis().targetSharpe !== null ? portfolioKpis().targetSharpe!.toFixed(2) : '—'
+          }}</span>
         </div>
         <div class="pf-kpi">
           <span class="kpi-label">Avg recent Sharpe</span>
           <span
             class="kpi-value"
-            [class.good]="portfolioKpis().avgSharpe > 1"
-            [class.bad]="portfolioKpis().avgSharpe < 0"
+            [class.good]="(portfolioKpis().avgSharpe ?? 0) > 1"
+            [class.bad]="(portfolioKpis().avgSharpe ?? 0) < 0"
           >
-            {{ portfolioKpis().avgSharpe.toFixed(2) }}
+            {{ portfolioKpis().avgSharpe !== null ? portfolioKpis().avgSharpe!.toFixed(2) : '—' }}
           </span>
         </div>
         <div class="pf-kpi">
@@ -102,11 +104,14 @@ import { DatePipe } from '@angular/common';
         <header class="section-head">
           <h3>Throttle posture</h3>
           @if (weights(); as w) {
+            <!-- Never run: the engine's zero target / floor are defaults, not settings — the
+                 strip said "target Sharpe 0.00 · floor 0%" beside the tile's "—". -->
             <span class="muted small">
-              {{ w.coveredStrategies }} strategies · {{ w.throttledStrategies }} throttled · target
-              Sharpe {{ w.targetSharpe.toFixed(2) }} · floor {{ (w.minWeight * 100).toFixed(0) }}%
+              {{ w.coveredStrategies }} strategies · {{ w.throttledStrategies }} throttled
               @if (hasSnapshot(w)) {
-                · updated {{ w.latestComputedAt | relativeTime }}
+                · target Sharpe {{ w.targetSharpe.toFixed(2) }} · floor
+                {{ (w.minWeight * 100).toFixed(0) }}% · updated
+                {{ w.latestComputedAt | relativeTime }}
               } @else {
                 · never run
               }
@@ -626,11 +631,13 @@ export class StrategyPortfolioPageComponent {
     const f = this.fwer();
     const sharpes =
       w?.entries.filter((e) => Number.isFinite(e.recentSharpe)).map((e) => e.recentSharpe) ?? [];
+    // An allocator that has never run reports target 0 and no entries: those read "—", not a
+    // measured 0.00.
     return {
       covered: w?.coveredStrategies ?? 0,
       throttled: w?.throttledStrategies ?? 0,
-      targetSharpe: w?.targetSharpe ?? 0,
-      avgSharpe: sharpes.length > 0 ? sharpes.reduce((s, v) => s + v, 0) / sharpes.length : 0,
+      targetSharpe: w && (this.hasSnapshot(w) || w.targetSharpe !== 0) ? w.targetSharpe : null,
+      avgSharpe: sharpes.length > 0 ? sharpes.reduce((s, v) => s + v, 0) / sharpes.length : null,
       fwerActive: f?.totalActiveStrategies ?? 0,
       fwerEligible: f?.eligibleStrategies ?? 0,
       bonf: f?.bonferroniSurvivors ?? 0,

@@ -1,18 +1,19 @@
 import { Component, input, output, ChangeDetectionStrategy } from '@angular/core';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 @Component({
   selector: 'app-confirm-dialog',
   standalone: true,
+  imports: [ModalA11yDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (open()) {
-      <div
-        class="overlay"
-        role="presentation"
-        tabindex="-1"
-        (click)="onCancel()"
-        (keydown.escape)="onCancel()"
-      >
+      <!--
+        Escape + focus come from appModalA11y. The overlay's own (keydown.escape) never fired:
+        focus stayed on the trigger outside the dialog, and keydowns inside it are stopped
+        below (so page shortcuts don't fire while typing in projected content).
+      -->
+      <div class="overlay" role="presentation" (click)="onCancel()">
         <div
           class="dialog"
           role="dialog"
@@ -20,6 +21,8 @@ import { Component, input, output, ChangeDetectionStrategy } from '@angular/core
           tabindex="-1"
           [attr.aria-labelledby]="dialogTitleId"
           [attr.aria-describedby]="dialogBodyId"
+          appModalA11y
+          (dismiss)="onCancel()"
           (click)="$event.stopPropagation()"
           (keydown)="$event.stopPropagation()"
         >
@@ -31,11 +34,13 @@ import { Component, input, output, ChangeDetectionStrategy } from '@angular/core
             <ng-content />
           </div>
           <div class="dialog-actions">
+            <!-- Focus starts on Cancel: Enter must never confirm a live-console action by default. -->
             <button
               type="button"
               class="btn btn-secondary"
               (click)="onCancel()"
               [disabled]="loading()"
+              data-autofocus
             >
               Cancel
             </button>
@@ -46,7 +51,6 @@ import { Component, input, output, ChangeDetectionStrategy } from '@angular/core
               [class.btn-primary]="confirmVariant() === 'primary'"
               (click)="onConfirm()"
               [disabled]="loading()"
-              autofocus
             >
               @if (loading()) {
                 <span class="spinner" aria-label="Loading"></span>
@@ -216,6 +220,9 @@ export class ConfirmDialogComponent {
     this.confirm.emit();
   }
   onCancel() {
+    // Escape and the backdrop must not abandon an action that is already in flight — the
+    // Cancel button is disabled for the same reason.
+    if (this.loading()) return;
     this.cancelled.emit();
   }
 }

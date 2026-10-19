@@ -22,6 +22,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
  * cumulative-pnl scale loses meaning when half the lines are flat starting
  * regions.
  */
+/** Symbol-filter key for strategies with no single symbol (never a real symbol). */
+const NO_SYMBOL = '__none__';
+
 @Component({
   selector: 'app-strategies-compare-page',
   standalone: true,
@@ -63,7 +66,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 <button class="sb-chip" (click)="toggle(id)" [style.--accent]="lineColor(i)">
                   <span class="sb-chip-dot" [style.background]="lineColor(i)"></span>
                   <span class="sb-chip-name">{{ s.name }}</span>
-                  <span class="muted">({{ s.symbol }})</span>
+                  @if (s.symbol) {
+                    <span class="muted">({{ s.symbol }})</span>
+                  }
                   <span class="sb-chip-x">×</span>
                 </button>
               }
@@ -120,7 +125,8 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                 [class.active]="symbolFilter() === sym.symbol"
                 (click)="symbolFilter.set(sym.symbol)"
               >
-                {{ sym.symbol }} <span class="muted">({{ sym.count }})</span>
+                {{ sym.symbol === NO_SYMBOL ? 'No symbol' : sym.symbol }}
+                <span class="muted">({{ sym.count }})</span>
               </button>
             }
           </div>
@@ -148,7 +154,9 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     (click)="toggle(s.id)"
                   >
                     {{ s.name }}
-                    <span class="muted">({{ s.symbol }})</span>
+                    @if (s.symbol) {
+                      <span class="muted">({{ s.symbol }})</span>
+                    }
                   </button>
                 }
               </div>
@@ -643,6 +651,7 @@ export class StrategiesComparePageComponent {
   // Picker UX state — search term, symbol filter, expanded/collapsed.
   readonly searchTerm = signal('');
   readonly symbolFilter = signal('');
+  protected readonly NO_SYMBOL = NO_SYMBOL;
   readonly pickerExpanded = signal(true);
 
   readonly strategyById = computed(() => new Map(this.allStrategies().map((s) => [s.id, s])));
@@ -650,7 +659,9 @@ export class StrategiesComparePageComponent {
   readonly symbolFilters = computed(() => {
     const counts = new Map<string, number>();
     for (const s of this.allStrategies()) {
-      const sym = s.symbol ?? 'unknown';
+      // A Custom strategy (LLM Spot Analysis) has symbol "" — keyed as "" its chip printed "(1)"
+      // and lit up together with All, whose key is also "".
+      const sym = s.symbol || NO_SYMBOL;
       counts.set(sym, (counts.get(sym) ?? 0) + 1);
     }
     // Every symbol, not the top twelve: a chip row that silently drops nine
@@ -664,7 +675,7 @@ export class StrategiesComparePageComponent {
     const q = this.searchTerm().toLowerCase().trim();
     const sym = this.symbolFilter();
     return this.allStrategies().filter((s) => {
-      if (sym && s.symbol !== sym) return false;
+      if (sym && (s.symbol || NO_SYMBOL) !== sym) return false;
       if (q) {
         const hay = `${s.name ?? ''} ${s.symbol ?? ''}`.toLowerCase();
         if (!hay.includes(q)) return false;

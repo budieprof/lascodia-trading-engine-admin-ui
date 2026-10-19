@@ -1,18 +1,12 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, map, of } from 'rxjs';
+import { forkJoin, map } from 'rxjs';
 
 import { DeadLetterService } from '@core/services/dead-letter.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 import type { DeadLetterDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -21,6 +15,8 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 /**
  * Operator-facing dead-letter triage console — same dense layout as
@@ -85,6 +81,8 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    ConfirmDialogComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -93,19 +91,18 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
         title="Dead Letter Queue"
         subtitle="Integration events the engine could not process — inspect, replay, or resolve."
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so the old button never changed on a click. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="filter-bar">
         <div class="fb-field">
-          <label class="fb-label">Window</label>
+          <label
+            class="fb-label"
+            title="Limits resolved history. Unresolved dead letters are always listed, however old."
+            >Window</label
+          >
           <div class="window-presets">
             @for (p of windowPresets; track p) {
               <button
@@ -161,23 +158,33 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
 
       @if (loading()) {
         <app-card-skeleton [lines]="8" />
-      } @else if (resource.error()) {
+      } @else if (resource.error() && resource.value() === null) {
         <app-error-state
           title="Could not load dead letters"
           message="Engine returned an error. The dead-letter list endpoint may be unhealthy — check System Health."
           (retry)="resource.refresh()"
         />
       } @else if (totalCount() === 0) {
-        <!-- One compact state instead of eight zero tiles + empty tables. -->
+        <!-- One compact state instead of eight zero tiles + empty tables. Reached only when
+             nothing is unresolved at all: an unresolved row is listed whatever the window, so
+             "quiet" can no longer sit beside an Engine Overview that counts one. -->
         <app-empty-state
           title="Queue is quiet"
           [description]="
-            'No dead letters in the ' +
+            'Nothing unresolved, and nothing resolved in the ' +
             windowLabel() +
-            '. The engine is processing every integration event cleanly — widen the window to look further back.'
+            ' — widen the window to look further back.'
           "
         />
       } @else {
+        @if (unresolvedOutsideWindow() > 0) {
+          <p class="window-note">
+            {{ unresolvedOutsideWindow() }} unresolved dead
+            {{ unresolvedOutsideWindow() === 1 ? 'letter is' : 'letters are' }} older than the
+            {{ windowLabel() }} and listed anyway — an unresolved event stays in the queue until
+            someone replays or resolves it.
+          </p>
+        }
         <!-- Primary counts: four equal tiles, one-line labels. -->
         <div class="kpi-strip">
           <app-metric-card
@@ -240,7 +247,8 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
           <header class="insights-head">
             <h3>Queue insights</h3>
             <span class="muted">
-              {{ filteredRows().length | number }} matching · {{ windowLabel() }}
+              {{ filteredRows().length | number }} matching · unresolved always · resolved in the
+              {{ windowLabel() }}
             </span>
           </header>
           <div class="insights-grid">
@@ -449,8 +457,13 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                       {{ a.createdAt | relativeTime }}
                     </td>
                     <td class="time">
+                      <!-- The engine stores no resolve time (DeadLetterEvent has no ResolvedAt). -->
                       @if (a.resolvedAt) {
                         {{ a.resolvedAt | relativeTime }}
+                      } @else if (a.isResolved) {
+                        <span title="The engine does not record when a dead letter was resolved"
+                          >time not recorded</span
+                        >
                       } @else {
                         —
                       }
@@ -461,7 +474,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                           type="button"
                           class="btn btn-ghost btn-xs"
                           [disabled]="busy()"
-                          (click)="replay(a)"
+                          (click)="ask(a, 'replay')"
                         >
                           Replay
                         </button>
@@ -469,7 +482,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                           type="button"
                           class="btn btn-secondary btn-xs"
                           [disabled]="busy()"
-                          (click)="resolve(a)"
+                          (click)="ask(a, 'resolve')"
                         >
                           Resolve
                         </button>
@@ -495,7 +508,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                     type="button"
                     class="btn btn-ghost btn-xs"
                     [disabled]="busy()"
-                    (click)="replay(s)"
+                    (click)="ask(s, 'replay')"
                   >
                     Replay
                   </button>
@@ -503,7 +516,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                     type="button"
                     class="btn btn-secondary btn-xs"
                     [disabled]="busy()"
-                    (click)="resolve(s)"
+                    (click)="ask(s, 'resolve')"
                   >
                     Mark Resolved
                   </button>
@@ -525,20 +538,26 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                   <dd class="mono">{{ s.eventType ?? '—' }}</dd>
                 </div>
                 <div>
+                  <dt>Handler</dt>
+                  <dd class="mono">{{ s.handlerName ?? '—' }}</dd>
+                </div>
+                <div>
                   <dt>Attempts</dt>
                   <dd>{{ s.attemptCount }}</dd>
                 </div>
                 <div>
                   <dt>Created</dt>
-                  <dd>{{ s.createdAt | date: 'MMM d, yyyy HH:mm:ss' }}</dd>
+                  <dd>{{ s.createdAt | date: 'MMM d, yyyy HH:mm:ss' : 'UTC' }} UTC</dd>
                 </div>
                 <div>
                   <dt>Resolved</dt>
                   <dd>
                     @if (s.resolvedAt) {
-                      {{ s.resolvedAt | date: 'MMM d, yyyy HH:mm:ss' }}
+                      {{ s.resolvedAt | date: 'MMM d, yyyy HH:mm:ss' : 'UTC' }} UTC
+                    } @else if (s.isResolved) {
+                      Yes — time not recorded
                     } @else {
-                      —
+                      Not yet
                     }
                   </dd>
                 </div>
@@ -548,6 +567,12 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                   <h4>Error message</h4>
                   <pre>{{ s.errorMessage || '(empty)' }}</pre>
                 </div>
+                @if (s.stackTrace) {
+                  <div class="block">
+                    <h4>Stack trace</h4>
+                    <pre>{{ s.stackTrace }}</pre>
+                  </div>
+                }
                 <div class="block">
                   <h4>Payload</h4>
                   <pre>{{ formatJson(s.payloadJson || '(empty)') }}</pre>
@@ -557,6 +582,19 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
           </section>
         }
       }
+
+      <!-- Replay re-publishes the event to every handler; Resolve closes it for good. Both
+           change an operational record, so neither fires from a single click. -->
+      <app-confirm-dialog
+        [open]="pending() !== null"
+        [title]="confirmTitle()"
+        [message]="confirmMessage()"
+        [confirmLabel]="pending()?.action === 'resolve' ? 'Mark resolved' : 'Replay'"
+        [confirmVariant]="pending()?.action === 'resolve' ? 'destructive' : 'primary'"
+        [loading]="busy()"
+        (confirm)="confirmPending()"
+        (cancelled)="pending.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -566,6 +604,15 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .window-note {
+        margin: 0;
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid color-mix(in srgb, var(--tone-amber) 40%, transparent);
+        background: color-mix(in srgb, var(--tone-amber) 8%, transparent);
+        border-radius: var(--radius-md);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
 
       /* ── Filter bar ── */
@@ -939,7 +986,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
         background: rgba(239, 68, 68, 0.04);
       }
       .sev-warn {
-        color: rgb(220, 38, 38);
+        color: var(--tone-red);
         font-weight: var(--font-semibold);
       }
       .empty-row td {
@@ -973,12 +1020,12 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
         background: var(--bg-tertiary);
       }
       .status-pill[data-status='Unresolved'] {
-        background: rgba(239, 68, 68, 0.15);
-        color: rgb(220, 38, 38);
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .status-pill[data-status='Resolved'] {
-        background: rgba(34, 197, 94, 0.15);
-        color: rgb(22, 163, 74);
+        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
+        color: var(--tone-green);
       }
       .actions {
         display: flex;
@@ -1096,30 +1143,75 @@ export class DeadLetterPageComponent {
 
   protected readonly selected = signal<DeadLetterDto | null>(null);
   protected readonly busy = signal(false);
+  /** The row action waiting on the confirmation dialog. */
+  protected readonly pending = signal<{ row: DeadLetterDto; action: 'replay' | 'resolve' } | null>(
+    null,
+  );
 
-  // Refresh once a minute — the queue churns slowly; faster polling
-  // would mostly waste round-trips.
+  /**
+   * Two reads, merged by id:
+   *  - every UNRESOLVED row, whatever its age — the queue is the work list, and the old single
+   *    window-filtered read hid a two-month-old unresolved event while Engine Overview counted it
+   *    ("Queue is quiet" beside "Unresolved DLQ 1");
+   *  - the window's history (resolved or not), server-filtered by `from`.
+   * Both sorted newest first explicitly: the unsorted 500-row read returned whatever order the
+   * engine chose. No catchError — a failed read must reach the error state, not render as "quiet".
+   * Refresh once a minute: the queue churns slowly.
+   */
   protected readonly resource = createPolledResource(
     () =>
-      this.service.list({ currentPage: 1, itemCountPerPage: 500, filter: {} }).pipe(
-        map((res) => res.data?.data ?? []),
-        catchError(() => of<DeadLetterDto[]>([])),
+      forkJoin({
+        unresolved: this.service.list({
+          currentPage: 1,
+          itemCountPerPage: 500,
+          filter: { isResolved: false },
+          sortBy: 'deadLetteredAt',
+          sortDirection: 'desc',
+        }),
+        window: this.service.list({
+          currentPage: 1,
+          itemCountPerPage: 500,
+          filter: { from: new Date(Date.now() - this.windowHours() * 3_600_000).toISOString() },
+          sortBy: 'deadLetteredAt',
+          sortDirection: 'desc',
+        }),
+      }).pipe(
+        map(({ unresolved, window }) => {
+          const byId = new Map<number, DeadLetterDto>();
+          for (const r of [...(unresolved.data?.data ?? []), ...(window.data?.data ?? [])]) {
+            byId.set(r.id, r);
+          }
+          return [...byId.values()];
+        }),
       ),
     { intervalMs: 60_000 },
   );
 
   constructor() {
-    effect(() => {
-      this.windowHours();
-      this.resource.refresh();
-    });
+    // The window is a server filter now; refetch when it changes (not on the first run — the
+    // resource already fetched once, and refreshing here cancelled that request).
+    refetchOnChange(
+      () => this.windowHours(),
+      () => this.resource.refresh(),
+    );
   }
 
   // ── Filtering ──────────────────────────────────────────────────────
 
+  /** Unresolved rows of any age, plus everything dead-lettered inside the window. */
   protected readonly windowRows = computed(() => {
     const cutoffMs = Date.now() - this.windowHours() * 60 * 60 * 1000;
-    return (this.resource.value() ?? []).filter((a) => new Date(a.createdAt).getTime() >= cutoffMs);
+    return (this.resource.value() ?? []).filter(
+      (a) => !a.isResolved || new Date(a.createdAt).getTime() >= cutoffMs,
+    );
+  });
+
+  /** Unresolved rows listed only because unresolved rows ignore the window. */
+  protected readonly unresolvedOutsideWindow = computed(() => {
+    const cutoffMs = Date.now() - this.windowHours() * 60 * 60 * 1000;
+    return this.windowRows().filter(
+      (a) => !a.isResolved && new Date(a.createdAt).getTime() < cutoffMs,
+    ).length;
   });
 
   protected readonly filteredRows = computed<ParsedRow[]>(() => {
@@ -1352,11 +1444,40 @@ export class DeadLetterPageComponent {
     this.selected.set(row);
   }
 
+  protected ask(row: DeadLetterDto, action: 'replay' | 'resolve'): void {
+    this.pending.set({ row, action });
+  }
+
+  protected readonly confirmTitle = computed(() => {
+    const p = this.pending();
+    if (!p) return '';
+    return p.action === 'resolve'
+      ? `Mark dead letter #${p.row.id} resolved?`
+      : `Replay dead letter #${p.row.id}?`;
+  });
+
+  protected readonly confirmMessage = computed(() => {
+    const p = this.pending();
+    if (!p) return '';
+    const type = p.row.eventType ?? 'This event';
+    return p.action === 'resolve'
+      ? `${type} is closed without being replayed. Whatever its handlers should have done stays undone.`
+      : `${type} is re-published to every handler now. Handlers that already applied part of it will see it again.`;
+  });
+
+  protected confirmPending(): void {
+    const p = this.pending();
+    if (!p || this.busy()) return;
+    if (p.action === 'resolve') this.resolve(p.row);
+    else this.replay(p.row);
+  }
+
   replay(dl: DeadLetterDto): void {
     this.busy.set(true);
     this.service.replay(dl.id).subscribe({
       next: (res) => {
         this.busy.set(false);
+        this.pending.set(null);
         if (res.status) {
           this.notifications.success(`Dead letter #${dl.id} replayed`);
           this.resource.refresh();
@@ -1364,7 +1485,10 @@ export class DeadLetterPageComponent {
           this.notifications.error(res.message ?? 'Replay failed');
         }
       },
-      error: () => this.busy.set(false),
+      error: () => {
+        this.busy.set(false);
+        this.pending.set(null);
+      },
     });
   }
 
@@ -1373,6 +1497,7 @@ export class DeadLetterPageComponent {
     this.service.resolve(dl.id).subscribe({
       next: (res) => {
         this.busy.set(false);
+        this.pending.set(null);
         if (res.status) {
           this.notifications.success(`Dead letter #${dl.id} resolved`);
           // Optimistically update the selected drawer if it's the same row
@@ -1389,7 +1514,10 @@ export class DeadLetterPageComponent {
           this.notifications.error(res.message ?? 'Resolve failed');
         }
       },
-      error: () => this.busy.set(false),
+      error: () => {
+        this.busy.set(false);
+        this.pending.set(null);
+      },
     });
   }
 

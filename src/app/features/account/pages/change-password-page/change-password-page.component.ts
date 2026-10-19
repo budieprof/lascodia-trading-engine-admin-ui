@@ -66,6 +66,8 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
               <li [class.ok]="ruleLower()">A lowercase letter</li>
               <li [class.ok]="ruleDigit()">A number</li>
               <li [class.ok]="ruleMatch()">New password and confirmation match</li>
+              <!-- The engine refuses a "new" password equal to the current one; say so up front. -->
+              <li [class.ok]="ruleDiffers()">Different from your current password</li>
             </ul>
 
             <div class="form-actions">
@@ -221,6 +223,9 @@ export class ChangePasswordPageComponent {
   ruleMatch(): boolean {
     return this.newPassword.length > 0 && this.newPassword === this.confirmPassword;
   }
+  ruleDiffers(): boolean {
+    return this.newPassword.length > 0 && this.newPassword !== this.currentPassword;
+  }
 
   valid(): boolean {
     return (
@@ -229,7 +234,8 @@ export class ChangePasswordPageComponent {
       this.ruleUpper() &&
       this.ruleLower() &&
       this.ruleDigit() &&
-      this.ruleMatch()
+      this.ruleMatch() &&
+      this.ruleDiffers()
     );
   }
 

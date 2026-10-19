@@ -16,6 +16,7 @@ import type { StrategyRejectionSummaryDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -34,6 +35,7 @@ type SortMode = 'count' | 'recent' | 'strategy';
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    RefreshButtonComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -47,14 +49,8 @@ type SortMode = 'count' | 'recent' | 'strategy';
         subtitle="Fleet-wide aggregate of signal-rejection counts grouped by (strategy, stage, reason)"
       >
         <a routerLink="/strategies" class="btn btn-secondary">← Strategies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to the first-load flag, the old button never changed on a click. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="controls">

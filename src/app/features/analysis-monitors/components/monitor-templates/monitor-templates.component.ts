@@ -11,6 +11,7 @@ import { catchError, of } from 'rxjs';
 
 import { AnalysisMonitorsService } from '@core/services/analysis-monitors.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import type {
   MonitorInstantiationResult,
   MonitorTemplate,
@@ -34,15 +35,25 @@ import type {
   selector: 'app-monitor-templates',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule],
+  imports: [FormsModule, ModalA11yDirective],
   template: `
-    <div class="backdrop" (click)="closed.emit()">
-      <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+    <!-- appModalA11y: Escape closes it wherever focus is, focus moves in and Tab stays inside;
+         closing is held while monitors are being armed. -->
+    <div class="backdrop" (click)="close()">
+      <div
+        class="modal"
+        (click)="$event.stopPropagation()"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Monitor templates"
+        appModalA11y
+        (dismiss)="close()"
+      >
         <header class="head">
           <strong>Monitor templates</strong>
           <span class="muted">· instantiate a proven watch across many subjects</span>
           <div class="spacer"></div>
-          <button type="button" class="x" (click)="closed.emit()" aria-label="Close">×</button>
+          <button type="button" class="x" (click)="close()" aria-label="Close">×</button>
         </header>
 
         <div class="body">
@@ -152,7 +163,7 @@ import type {
 
         <footer class="foot">
           <div class="spacer"></div>
-          <button type="button" class="btn btn-secondary" (click)="closed.emit()">Close</button>
+          <button type="button" class="btn btn-secondary" (click)="close()">Close</button>
           <button
             type="button"
             class="btn btn-primary"
@@ -167,6 +178,28 @@ import type {
   `,
   styles: [
     `
+      /* Buttons: the global .btn / .btn-primary only add press feedback and a gradient, so on
+         their own these rendered as bare text ("Close  Create monitors"). */
+      .btn {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        padding: 7px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background-color: var(--bg-tertiary);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+      .btn-primary {
+        background-color: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       .backdrop {
         position: fixed;
         inset: 0;
@@ -177,9 +210,11 @@ import type {
         z-index: 60;
         padding: 24px;
       }
+      /* Theme tokens: --surface / --text are not defined app-wide, so these fell back to a white
+         sheet with dark text in the dark theme. */
       .modal {
-        background: var(--surface, #fff);
-        color: var(--text, #111);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
         border-radius: 10px;
         width: min(780px, 100%);
         max-height: 88vh;
@@ -193,11 +228,11 @@ import type {
         align-items: center;
         gap: 8px;
         padding: 14px 18px;
-        border-bottom: 1px solid var(--border, #e3e6e8);
+        border-bottom: 1px solid var(--border);
       }
       .foot {
         border-bottom: none;
-        border-top: 1px solid var(--border, #e3e6e8);
+        border-top: 1px solid var(--border);
       }
       .spacer {
         flex: 1;
@@ -208,7 +243,7 @@ import type {
         font-size: 22px;
         line-height: 1;
         cursor: pointer;
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
       }
       .body {
         overflow-y: auto;
@@ -220,8 +255,8 @@ import type {
       }
       .tpl {
         text-align: left;
-        background: var(--surface-2, #f7f9f9);
-        border: 1px solid var(--border, #e3e6e8);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
         border-radius: 7px;
         padding: 10px 12px;
         cursor: pointer;
@@ -229,8 +264,8 @@ import type {
         color: inherit;
       }
       .tpl.selected {
-        border-color: var(--accent, #0f5c57);
-        background: var(--accent-soft, #eaf3f2);
+        border-color: var(--accent);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
       }
       .tpl-head {
         display: flex;
@@ -244,23 +279,23 @@ import type {
         letter-spacing: 0.06em;
         padding: 2px 6px;
         border-radius: 3px;
-        background: var(--accent-soft, #dfeceb);
-        color: var(--accent, #0f5c57);
+        background: color-mix(in srgb, var(--accent) 14%, transparent);
+        color: var(--accent);
         font-weight: 600;
       }
       .chip.subtle {
-        background: var(--surface-3, #e8ecee);
-        color: var(--text-muted, #556);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
       }
       .desc {
         margin: 5px 0 0;
         font-size: 12.5px;
-        color: var(--text-muted, #556);
+        color: var(--text-secondary);
       }
       .detail {
         margin-top: 16px;
         padding-top: 14px;
-        border-top: 1px solid var(--border, #e3e6e8);
+        border-top: 1px solid var(--border);
       }
       .detail h3 {
         margin: 0 0 6px;
@@ -268,7 +303,7 @@ import type {
       }
       .intent {
         font-size: 13px;
-        color: var(--text-muted, #556);
+        color: var(--text-secondary);
         margin: 0 0 12px;
       }
       .params,
@@ -289,36 +324,36 @@ import type {
         width: 100%;
       }
       .field > span {
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
       }
       input,
       select {
         font: inherit;
         padding: 6px 8px;
-        border: 1px solid var(--border, #ccd2d6);
+        border: 1px solid var(--border);
         border-radius: 5px;
-        background: var(--surface, #fff);
+        background: var(--bg-primary);
         color: inherit;
       }
       .result {
         margin-top: 12px;
         padding: 10px 12px;
-        border-left: 3px solid var(--ok, #2c7a5b);
-        background: var(--surface-2, #f6f8f8);
+        border-left: 3px solid var(--profit);
+        background: var(--bg-primary);
         border-radius: 0 5px 5px 0;
         font-size: 12.5px;
       }
       .result.partial {
-        border-left-color: var(--warn, #a8761a);
+        border-left-color: var(--warning);
       }
       .result p {
         margin: 3px 0;
       }
       .err {
-        color: var(--danger, #a3352b);
+        color: var(--loss);
       }
       .muted {
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
         font-size: 12.5px;
       }
       code {
@@ -334,6 +369,11 @@ export class MonitorTemplatesComponent {
 
   readonly closed = output<void>();
   readonly instantiated = output<MonitorInstantiationResult>();
+
+  /** ×, Close, the backdrop or Escape — never while monitors are being armed (the result is shown here). */
+  protected close(): void {
+    if (!this.working()) this.closed.emit();
+  }
 
   protected readonly timeframes = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
 

@@ -15,7 +15,13 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, type ParamMap } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { DecimalPipe } from '@angular/common';
-import { clampSize, loadDockLayout, saveDockLayout, type DockLayout, type DockMode } from './dock-layout';
+import {
+  clampSize,
+  loadDockLayout,
+  saveDockLayout,
+  type DockLayout,
+  type DockMode,
+} from './dock-layout';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
@@ -339,6 +345,7 @@ import {
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ReplayPanelComponent } from '../../replay/replay-panel.component';
 import { ChartPanelsState } from '../../panels/side/chart-panels-state.service';
 import type { SidePanel } from '../../panels/side/chart-panels.types';
@@ -602,13 +609,14 @@ const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
 };
 
 /** TradingView's chart hotkeys (Alt + key), by `KeyboardEvent.code` (CC-I11). */
-const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'percent' | 'snapshot'>> = {
-  KeyR: 'reset',
-  KeyI: 'invert',
-  KeyL: 'log',
-  KeyP: 'percent',
-  KeyS: 'snapshot',
-};
+const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'percent' | 'snapshot'>> =
+  {
+    KeyR: 'reset',
+    KeyI: 'invert',
+    KeyL: 'log',
+    KeyP: 'percent',
+    KeyS: 'snapshot',
+  };
 
 @Component({
   selector: 'app-chart-analysis-page',
@@ -616,6 +624,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
   imports: [
     FormsModule,
     DecimalPipe,
+    ModalA11yDirective,
     ChartHostComponent,
     ChartTradingComponent,
     ChartAnalysisComponent,
@@ -756,7 +765,23 @@ export class ChartAnalysisPageComponent {
   toggleMenu(menu: ToolbarMenu, ev: Event): void {
     ev.stopPropagation();
     this.layoutMenuOpen.set(false);
+    this.symbolMenuOpen.set(false);
     this.openMenu.set(this.openMenu() === menu ? null : menu);
+  }
+
+  /** The symbol search and the layouts menu: one toolbar menu open at a time, as with {@link toggleMenu}. */
+  toggleSymbolMenu(ev: Event): void {
+    ev.stopPropagation();
+    const open = !this.symbolMenuOpen();
+    this.closeRailFlyout();
+    this.symbolMenuOpen.set(open);
+  }
+
+  toggleLayoutMenu(ev: Event): void {
+    ev.stopPropagation();
+    const open = !this.layoutMenuOpen();
+    this.closeRailFlyout();
+    this.layoutMenuOpen.set(open);
   }
 
   readonly styleLabel = computed(
@@ -1056,7 +1081,10 @@ export class ChartAnalysisPageComponent {
   );
   /** The overlay scripts' status lines, for the price pane's legend (PC-I2). */
   readonly legendScriptRows = computed(
-    () => this.host()?.scriptStatus().filter((r) => r.pane === 'main') ?? [],
+    () =>
+      this.host()
+        ?.scriptStatus()
+        .filter((r) => r.pane === 'main') ?? [],
   );
 
   /** A status line (or chip) asked for something of a script. */
@@ -1423,8 +1451,10 @@ export class ChartAnalysisPageComponent {
     const bodyTop = page.querySelector('.chart-body')?.getBoundingClientRect().top ?? box.top;
     const mode = this.dockMode();
     const move = (e: PointerEvent): void => {
-      if (mode === 'side') this.dockSideWidth.set(clampSize(box.right - e.clientX, 360, box.width - 320));
-      else if (mode === 'max') this.dockChartStrip.set(clampSize(e.clientY - bodyTop, 80, box.height - 260));
+      if (mode === 'side')
+        this.dockSideWidth.set(clampSize(box.right - e.clientX, 360, box.width - 320));
+      else if (mode === 'max')
+        this.dockChartStrip.set(clampSize(e.clientY - bodyTop, 80, box.height - 260));
       else this.dockHeight.set(clampSize(box.bottom - e.clientY, 140, box.height - 200));
     };
     // No text selection and the resize cursor everywhere while dragging (the pointer leaves the thin handle).
@@ -1594,7 +1624,9 @@ export class ChartAnalysisPageComponent {
     const seq = ++this.timelineSeq;
     if (!show || strategyId === null) {
       this.timelineMarkers.set([]);
-      this.tradeTimelineInfo.set(show ? 'Add an engine strategy script to the chart to draw its trades.' : null);
+      this.tradeTimelineInfo.set(
+        show ? 'Add an engine strategy script to the chart to draw its trades.' : null,
+      );
       return;
     }
     const oldest = untracked(() => this.bars()[0]?.time ?? null);
@@ -1745,7 +1777,11 @@ export class ChartAnalysisPageComponent {
   readonly watchHeadline = computed<WatchHeadline | null>(() => {
     const a = this.articles()[0];
     if (!a) return null;
-    return { title: a.title, source: a.sourceName, at: headlineAge(a.publishedAtUtc, this.headlineClock()) };
+    return {
+      title: a.title,
+      source: a.sourceName,
+      at: headlineAge(a.publishedAtUtc, this.headlineClock()),
+    };
   });
   /** The SP-I9 side panels (notes, broker depth, sentiment, account), one at a time beside the page's own panes. */
   readonly chartPanels = inject(ChartPanelsState);
@@ -2115,8 +2151,16 @@ export class ChartAnalysisPageComponent {
     return a.trendlines || a.htfLevels || a.autoFib;
   });
   readonly autoAnalysisLayers: { id: keyof AutoAnalysisSettings; label: string; hint: string }[] = [
-    { id: 'trendlines', label: 'Trendlines', hint: 'Fitted trendlines, scored by touches, age and recency' },
-    { id: 'htfLevels', label: 'HTF levels', hint: "The next higher timeframe's support and resistance" },
+    {
+      id: 'trendlines',
+      label: 'Trendlines',
+      hint: 'Fitted trendlines, scored by touches, age and recency',
+    },
+    {
+      id: 'htfLevels',
+      label: 'HTF levels',
+      hint: "The next higher timeframe's support and resistance",
+    },
     { id: 'autoFib', label: 'Auto Fib', hint: 'Fibonacci retracement of the last zig-zag leg' },
   ];
 
@@ -2197,6 +2241,7 @@ export class ChartAnalysisPageComponent {
     this.vpMenuOpen.set(false);
     this.openMenu.set(null);
     this.layoutMenuOpen.set(false);
+    this.symbolMenuOpen.set(false);
   }
 
   /** Flyout contents for the open group. */
@@ -2342,7 +2387,8 @@ export class ChartAnalysisPageComponent {
           const last = p.bars.at(-1)?.time;
           if (last === undefined) continue;
           for (const s of p.scripts)
-            if (s.ranTo !== last && !sharedRun(main, s, p.symbol, p.resolution)) this.runPanelScript(p.id, s.item.key);
+            if (s.ranTo !== last && !sharedRun(main, s, p.symbol, p.resolution))
+              this.runPanelScript(p.id, s.item.key);
         }
       });
     });
@@ -2553,139 +2599,139 @@ export class ChartAnalysisPageComponent {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     const host = this;
     this.chartCommandList = chartCommands({
-        symbol: this.symbol,
-        resolution: this.resolution,
-        style: this.style,
-        showVolume: this.showVolume,
-        // The assistant's single "trades" switch drives all three layers.
-        showOverlays: Object.assign(() => host.anyTradeOverlay(), {
-          set: (v: boolean) => {
-            host.showPositions.set(v);
-            host.showOrders.set(v);
-            host.showOverlays.set(v);
-          },
-        }),
-        showPositions: this.showPositions,
-        showOrders: this.showOrders,
-        showSignals: this.showOverlays,
-        showEvents: this.showEvents,
-        magnet: this.magnet,
-        scaleMode: this.scaleMode,
-        timezone: this.timezone,
-        splitLayout: this.splitLayout,
-        active: this.active,
-        boxSizeAtr: this.boxSizeAtr,
-        drawingCount: () => this.drawings.visible().length,
-        selectSymbol: (s) => this.selectSymbol(s),
-        selectResolution: (r) => this.selectResolution(r as TvResolution),
-        addIndicator: (id) => this.addIndicator(id),
-        removeIndicator: (uid) => this.removeIndicator(uid),
-        toggleIndicator: (uid) => this.toggleIndicator(uid),
-        setIndicatorParam: (uid, key, value) => this.setParam(uid, key, String(value)),
-        setSplitLayout: (id) => this.setSplitLayout(id),
-        selectTool: (kind) => this.tool.set(kind),
-        clearDrawings: () => this.drawings.clearVisible(),
-        takeSnapshot: () => this.takeSnapshot(),
-        knownSymbols: () =>
-          this.symbols()
-            .map((p) => p.symbol ?? '')
-            .filter(Boolean),
-        timezones: () => this.timezones,
-        bars: () => this.bars(),
-        drawings: () => this.drawings.visible(),
-        addDrawing: (kind, points, color) =>
-          this.drawings.add(kind, points, {
-            ...DEFAULT_STYLE,
-            ...(toolFor(kind)?.defaultStyle ?? {}),
-            ...(color ? { color } : {}),
-          }).id,
-        removeDrawing: (id) => this.drawings.remove(id),
-        styleDrawing: (id, patch) => this.drawings.updateStyle(id, patch),
-        setVisibleRange: (from, to) => this.host()?.setVisibleRange(from, to) ?? false,
-        showLastBars: (n) => this.host()?.showLastBars(n) ?? false,
-        fitContent: () => this.host()?.fitContent(),
-        scrollToRealtime: () => this.host()?.scrollToRealtime(),
-        resetScales: () => this.resetScales(),
+      symbol: this.symbol,
+      resolution: this.resolution,
+      style: this.style,
+      showVolume: this.showVolume,
+      // The assistant's single "trades" switch drives all three layers.
+      showOverlays: Object.assign(() => host.anyTradeOverlay(), {
+        set: (v: boolean) => {
+          host.showPositions.set(v);
+          host.showOrders.set(v);
+          host.showOverlays.set(v);
+        },
+      }),
+      showPositions: this.showPositions,
+      showOrders: this.showOrders,
+      showSignals: this.showOverlays,
+      showEvents: this.showEvents,
+      magnet: this.magnet,
+      scaleMode: this.scaleMode,
+      timezone: this.timezone,
+      splitLayout: this.splitLayout,
+      active: this.active,
+      boxSizeAtr: this.boxSizeAtr,
+      drawingCount: () => this.drawings.visible().length,
+      selectSymbol: (s) => this.selectSymbol(s),
+      selectResolution: (r) => this.selectResolution(r as TvResolution),
+      addIndicator: (id) => this.addIndicator(id),
+      removeIndicator: (uid) => this.removeIndicator(uid),
+      toggleIndicator: (uid) => this.toggleIndicator(uid),
+      setIndicatorParam: (uid, key, value) => this.setParam(uid, key, String(value)),
+      setSplitLayout: (id) => this.setSplitLayout(id),
+      selectTool: (kind) => this.tool.set(kind),
+      clearDrawings: () => this.drawings.clearVisible(),
+      takeSnapshot: () => this.takeSnapshot(),
+      knownSymbols: () =>
+        this.symbols()
+          .map((p) => p.symbol ?? '')
+          .filter(Boolean),
+      timezones: () => this.timezones,
+      bars: () => this.bars(),
+      drawings: () => this.drawings.visible(),
+      addDrawing: (kind, points, color) =>
+        this.drawings.add(kind, points, {
+          ...DEFAULT_STYLE,
+          ...(toolFor(kind)?.defaultStyle ?? {}),
+          ...(color ? { color } : {}),
+        }).id,
+      removeDrawing: (id) => this.drawings.remove(id),
+      styleDrawing: (id, patch) => this.drawings.updateStyle(id, patch),
+      setVisibleRange: (from, to) => this.host()?.setVisibleRange(from, to) ?? false,
+      showLastBars: (n) => this.host()?.showLastBars(n) ?? false,
+      fitContent: () => this.host()?.fitContent(),
+      scrollToRealtime: () => this.host()?.scrollToRealtime(),
+      resetScales: () => this.resetScales(),
 
-        layouts: () =>
-          this.workspace.layouts().map((l) => ({
-            id: String(l.id),
-            name: l.name,
-            symbol: l.isActive ? this.symbol() : '',
-            resolution: l.isActive ? this.resolution() : '',
-          })),
-        // The toolbar asks for names in a dialog, which nothing outside the browser can answer —
-        // so the workspace is called directly with the given name.
-        saveLayout: (name) => {
-          void this.workspace.duplicate(name);
-          return '';
-        },
-        applyLayout: (id) => void this.workspace.switchTo(Number(id)),
-        removeLayout: (id) => void this.workspace.remove(Number(id)),
-        studyTemplates: () =>
-          this.layoutStore.templates().map((t) => ({
-            id: t.id,
-            name: t.name,
-            count: t.indicators.length,
-          })),
-        saveStudyTemplate: (name) => {
-          if (this.active().length === 0) return false;
-          this.layoutStore.saveTemplate(name, this.active());
-          return true;
-        },
-        applyStudyTemplate: (id) => {
-          const found = this.layoutStore.templates().find((t) => t.id === id);
-          if (found) this.applyTemplate(found);
-        },
-        removeStudyTemplate: (id) => this.layoutStore.removeTemplate(id),
+      layouts: () =>
+        this.workspace.layouts().map((l) => ({
+          id: String(l.id),
+          name: l.name,
+          symbol: l.isActive ? this.symbol() : '',
+          resolution: l.isActive ? this.resolution() : '',
+        })),
+      // The toolbar asks for names in a dialog, which nothing outside the browser can answer —
+      // so the workspace is called directly with the given name.
+      saveLayout: (name) => {
+        void this.workspace.duplicate(name);
+        return '';
+      },
+      applyLayout: (id) => void this.workspace.switchTo(Number(id)),
+      removeLayout: (id) => void this.workspace.remove(Number(id)),
+      studyTemplates: () =>
+        this.layoutStore.templates().map((t) => ({
+          id: t.id,
+          name: t.name,
+          count: t.indicators.length,
+        })),
+      saveStudyTemplate: (name) => {
+        if (this.active().length === 0) return false;
+        this.layoutStore.saveTemplate(name, this.active());
+        return true;
+      },
+      applyStudyTemplate: (id) => {
+        const found = this.layoutStore.templates().find((t) => t.id === id);
+        if (found) this.applyTemplate(found);
+      },
+      removeStudyTemplate: (id) => this.layoutStore.removeTemplate(id),
 
-        replay: () => ({
-          active: this.replayActive(),
-          index: this.replayIndex(),
-          total: this.bars().length,
-          playing: this.replayPlaying(),
-          speed: this.replaySpeed(),
-        }),
-        startReplay: () => this.startReplay(),
-        exitReplay: () => this.exitReplay(),
-        stepReplay: (d) => this.stepReplay(d),
-        toggleReplayPlay: () => this.toggleReplayPlay(),
-        setReplaySpeed: (x) => this.setReplaySpeed(String(x)),
-        setReplayIndex: (i) => this.setReplayIndex(String(i)),
+      replay: () => ({
+        active: this.replayActive(),
+        index: this.replayIndex(),
+        total: this.bars().length,
+        playing: this.replayPlaying(),
+        speed: this.replaySpeed(),
+      }),
+      startReplay: () => this.startReplay(),
+      exitReplay: () => this.exitReplay(),
+      stepReplay: (d) => this.stepReplay(d),
+      toggleReplayPlay: () => this.toggleReplayPlay(),
+      setReplaySpeed: (x) => this.setReplaySpeed(String(x)),
+      setReplayIndex: (i) => this.setReplayIndex(String(i)),
 
-        loadOlder: () => this.loadOlder(),
-        eventImpact: () => this.minEventImpact(),
-        setEventImpact: (v) => {
-          this.minEventImpact.set(v);
-          this.loadEvents();
-        },
-        sidePane: () => this.sidePane(),
-        setSidePane: (v) => {
-          // openSidePane TOGGLES, which cannot express "open the news pane" when it is
-          // already open. Set the state outright and fire the same load it would have.
-          this.sidePane.set(v);
-          if (v === 'news') this.loadNews();
-        },
-        watchlistOpen: this.watchlistOpen,
-        objectTreeOpen: this.objectTreeOpen,
-        toggleFullscreen: () => this.toggleFullscreen(),
-        isFullscreen: () => this.isFullscreen(),
-        showVolumeProfile: this.showVolumeProfile,
-        showSupportResistance: this.showSupportResistance,
-        showStructure: this.showStructure,
-        // The window on screen — what the chart's own overlays describe (CC-21: these read every
-        // loaded bar while the chart drew the visible ones, so the assistant quoted other levels).
-        structureSummary: () => marketStructure(this.visibleBars()).summary,
-        // Computed on demand rather than held in a signal: the assistant asks rarely, and a
-        // second copy of this would be a second thing that can disagree with the chart.
-        srLevels: () => supportResistance(this.visibleBars()),
-        volumeProfile: () => {
-          const p = profileWithValueArea(this.visibleBars());
-          return p
-            ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
-            : null;
-        },
-      });
+      loadOlder: () => this.loadOlder(),
+      eventImpact: () => this.minEventImpact(),
+      setEventImpact: (v) => {
+        this.minEventImpact.set(v);
+        this.loadEvents();
+      },
+      sidePane: () => this.sidePane(),
+      setSidePane: (v) => {
+        // openSidePane TOGGLES, which cannot express "open the news pane" when it is
+        // already open. Set the state outright and fire the same load it would have.
+        this.sidePane.set(v);
+        if (v === 'news') this.loadNews();
+      },
+      watchlistOpen: this.watchlistOpen,
+      objectTreeOpen: this.objectTreeOpen,
+      toggleFullscreen: () => this.toggleFullscreen(),
+      isFullscreen: () => this.isFullscreen(),
+      showVolumeProfile: this.showVolumeProfile,
+      showSupportResistance: this.showSupportResistance,
+      showStructure: this.showStructure,
+      // The window on screen — what the chart's own overlays describe (CC-21: these read every
+      // loaded bar while the chart drew the visible ones, so the assistant quoted other levels).
+      structureSummary: () => marketStructure(this.visibleBars()).summary,
+      // Computed on demand rather than held in a signal: the assistant asks rarely, and a
+      // second copy of this would be a second thing that can disagree with the chart.
+      srLevels: () => supportResistance(this.visibleBars()),
+      volumeProfile: () => {
+        const p = profileWithValueArea(this.visibleBars());
+        return p
+          ? { poc: p.poc, valueAreaLow: p.valueAreaLow, valueAreaHigh: p.valueAreaHigh }
+          : null;
+      },
+    });
     // The same commands drive the operator's command palette (CC-I11).
     this.uiCommands.register(this.chartCommandList, this.destroyRef);
 
@@ -2709,11 +2755,9 @@ export class ChartAnalysisPageComponent {
     this.scriptHub.frames$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((frame) => this.onScriptFrame(frame));
-    this.scriptHub.reconnected$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        for (const s of this.warmSessions.all()) this.resyncWarm(s.key);
-      });
+    this.scriptHub.reconnected$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      for (const s of this.warmSessions.all()) this.resyncWarm(s.key);
+    });
     this.destroyRef.onDestroy(() => {
       for (const s of this.warmSessions.all()) this.releaseWarm(s.key);
     });
@@ -3153,7 +3197,9 @@ export class ChartAnalysisPageComponent {
     if (!head) return '';
     if (this.replay.cursor().sub === null) return this.barTimeLabel(head);
     const zone = this.timezone();
-    return this.formatTime(head.time + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, head.time) * 60_000));
+    return this.formatTime(
+      head.time + (zone === 'UTC' ? 0 : timezoneOffsetMinutes(zone, head.time) * 60_000),
+    );
   }
 
   /** What the events on the chart were fetched for, and the window they cover (UTC ms). */
@@ -3271,7 +3317,9 @@ export class ChartAnalysisPageComponent {
       .subscribe((lists) => {
         // A slower reply for the previous symbol must not replace this one's headlines.
         if (n !== this.newsSeq) return;
-        this.articles.set(mergeArticles(...lists.map((rows) => (Array.isArray(rows) ? rows : []))).slice(0, 60));
+        this.articles.set(
+          mergeArticles(...lists.map((rows) => (Array.isArray(rows) ? rows : []))).slice(0, 60),
+        );
         this.newsLoading.set(false);
       });
 
@@ -3655,7 +3703,11 @@ export class ChartAnalysisPageComponent {
   startDockResize(ev: PointerEvent): void {
     ev.preventDefault();
     const startX = ev.clientX;
-    const startW = this.dockWidth();
+    // From the width on screen: the dock is capped at 40% of the chart (the SCSS), so a narrow
+    // chart shows less than the remembered width and a drag from it would jump.
+    const shown = (ev.currentTarget as HTMLElement | null)?.parentElement?.getBoundingClientRect()
+      .width;
+    const startW = shown ? Math.round(shown) : this.dockWidth();
     const move = (e: PointerEvent) =>
       this.dockWidth.set(Math.min(640, Math.max(240, startW + (startX - e.clientX))));
     const up = () => {
@@ -4042,14 +4094,17 @@ export class ChartAnalysisPageComponent {
       run.symbol,
       run.resolution,
     ]);
-    if (untilIdx < 0 || lastBars > MAX_SCRIPT_BARS || !this.replayScripts.usable(signature, steps)) return false;
+    if (untilIdx < 0 || lastBars > MAX_SCRIPT_BARS || !this.replayScripts.usable(signature, steps))
+      return false;
     const request: PineRunRequest = {
       symbol: run.symbol,
       timeframe: runTimeframeFor(run.resolution),
       lastBars,
       mode: 'preview',
       toUtc: new Date(barCloseMs(bars[lastClosed], run.resolution)).toISOString(),
-      ...(run.item.strategyId !== undefined ? { strategyId: run.item.strategyId } : { source: run.item.pineSource ?? '' }),
+      ...(run.item.strategyId !== undefined
+        ? { strategyId: run.item.strategyId }
+        : { source: run.item.pineSource ?? '' }),
       ...(Object.keys(run.values).length ? { inputs: run.values } : {}),
     };
     const key = run.item.key;
@@ -4079,7 +4134,9 @@ export class ChartAnalysisPageComponent {
           return;
         }
         this.scriptRuns.update((list) =>
-          list.map((r) => (r === run ? { ...r, result, until: head.time, landedAt: Date.now() } : r)),
+          list.map((r) =>
+            r === run ? { ...r, result, until: head.time, landedAt: Date.now() } : r,
+          ),
         );
         this.runScheduler.settle(key, ticket);
         // The head moved on (or replay ended) while it stepped: once more, to where it is now.
@@ -4167,7 +4224,12 @@ export class ChartAnalysisPageComponent {
       until = head?.time ?? null;
       const liveBar = head
         ? null
-        : formingLiveBar(this.bars(), this.barsFor(), { symbol, resolution }, this.serverClock.now());
+        : formingLiveBar(
+            this.bars(),
+            this.barsFor(),
+            { symbol, resolution },
+            this.serverClock.now(),
+          );
       request = this.chartScripts
         .runOnChart(item, symbol, resolution, values, requestedBars, {
           liveBar,
@@ -4297,7 +4359,12 @@ export class ChartAnalysisPageComponent {
       (before.until ?? null) === until &&
       before.item.pineSource === item.pineSource &&
       JSON.stringify(before.values) === JSON.stringify(values);
-    result = this.truthful(key, result, result.session?.lastBarForming ?? on.forming === true, comparable ? 'run' : null);
+    result = this.truthful(
+      key,
+      result,
+      result.session?.lastBarForming ?? on.forming === true,
+      comparable ? 'run' : null,
+    );
     this.attachWarm(key, result);
     // The overrides as they apply to the script that ran: one for an input its source no longer
     // declares, or declares with another type, range or options, is dropped — that input runs on
@@ -4407,19 +4474,29 @@ export class ChartAnalysisPageComponent {
     }
     const forming = formingIndexOf(result, lastBarForming);
     if (compareWith && !this.scriptRepaints().has(key)) {
-      const previous = this.scriptRuns().find((r) => r.item.key === key)?.result.run?.outputs ?? null;
+      const previous =
+        this.scriptRuns().find((r) => r.item.key === key)?.result.run?.outputs ?? null;
       const prevForming = this.formingByKey.get(key) ?? null;
       const prevEnd = previous ? previous.bars.firstIndex + previous.bars.times.length : null;
       const closedBefore = prevForming ?? prevEnd;
-      const limit = closedBefore === null ? null : compareWith === 'run' ? closedBefore - 1 : closedBefore;
+      const limit =
+        closedBefore === null ? null : compareWith === 'run' ? closedBefore - 1 : closedBefore;
       const found = detectRepaint(previous, outputs, limit);
       if (found)
         this.scriptRepaints.update((m) =>
-          new Map(m).set(key, repaintText(found, (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC')),
+          new Map(m).set(
+            key,
+            repaintText(
+              found,
+              (ms) => new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC',
+            ),
+          ),
         );
     }
     this.formingByKey.set(key, forming);
-    return forming === null ? result : { ...result, run: { ...result.run, outputs: markUnconfirmed(outputs, forming) } };
+    return forming === null
+      ? result
+      : { ...result, run: { ...result.run, outputs: markUnconfirmed(outputs, forming) } };
   }
 
   private forgetTruth(key: string): void {
@@ -4547,7 +4624,8 @@ export class ChartAnalysisPageComponent {
 
   /** "Create alert on <script>" (PC-I14): the alert form for a script on the chart, in a dialog. */
   readonly scriptAlertTarget = signal<ScriptAlertTarget | null>(null);
-  private readonly scriptAlertDialog = viewChild<ElementRef<HTMLDialogElement>>('scriptAlertDialog');
+  private readonly scriptAlertDialog =
+    viewChild<ElementRef<HTMLDialogElement>>('scriptAlertDialog');
 
   openScriptAlert(key: string): void {
     const run = this.scriptRuns().find((r) => r.item.key === key);
@@ -4565,7 +4643,9 @@ export class ChartAnalysisPageComponent {
     this.scriptAlertTarget.set({
       chartScriptId: Number(id),
       scriptName: run.result.title || run.item.name,
-      alertConditions: (run.result.run?.outputs?.alertConditions ?? []).map((a) => a.title).filter(Boolean),
+      alertConditions: (run.result.run?.outputs?.alertConditions ?? [])
+        .map((a) => a.title)
+        .filter(Boolean),
       // A library it imports may call alert() too: the engine checks and says so when it does not.
       callsAlert: /(?<![\w.])alert\s*\(/.test(source) || /^\s*import\s+/m.test(source),
       isStrategy: run.result.kind === 'strategy',
@@ -4580,7 +4660,9 @@ export class ChartAnalysisPageComponent {
     this.scriptAlertDialog()?.nativeElement.close();
     this.scriptAlertTarget.set(null);
     if (saved)
-      this.notify.success(`Alert “${saved.displayName}” armed — the engine watches it whether or not this chart is open.`);
+      this.notify.success(
+        `Alert “${saved.displayName}” armed — the engine watches it whether or not this chart is open.`,
+      );
   }
 
   /**
@@ -5209,7 +5291,9 @@ export class ChartAnalysisPageComponent {
     if (propagate) this.linkSymbol(id, symbol.toUpperCase());
     this.comparePanels.update((list) =>
       list.map((p) =>
-        p.id === id ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) } : p,
+        p.id === id
+          ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) }
+          : p,
       ),
     );
     void this.loadPanel(id);
@@ -5220,7 +5304,12 @@ export class ChartAnalysisPageComponent {
     this.comparePanels.update((list) =>
       list.map((p) =>
         p.id === id
-          ? { ...p, resolution: resolution as TvResolution, bars: [], scripts: freshRuns(p.scripts) }
+          ? {
+              ...p,
+              resolution: resolution as TvResolution,
+              bars: [],
+              scripts: freshRuns(p.scripts),
+            }
           : p,
       ),
     );
@@ -5233,7 +5322,9 @@ export class ChartAnalysisPageComponent {
     if (!panel) return;
     const previous = { symbol: this.symbol(), resolution: this.resolution() };
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, ...previous, bars: [], scripts: freshRuns(p.scripts) } : p)),
+      list.map((p) =>
+        p.id === id ? { ...p, ...previous, bars: [], scripts: freshRuns(p.scripts) } : p,
+      ),
     );
     this.symbol.set(panel.symbol);
     this.resolution.set(panel.resolution);
@@ -5245,7 +5336,9 @@ export class ChartAnalysisPageComponent {
 
   /** A chart's link group ('main' is the main chart). */
   private linkOf(id: string): number {
-    return id === 'main' ? this.mainLink() : (this.comparePanels().find((p) => p.id === id)?.link ?? 0);
+    return id === 'main'
+      ? this.mainLink()
+      : (this.comparePanels().find((p) => p.id === id)?.link ?? 0);
   }
 
   /** The charts in `id`'s link group besides it. */
@@ -5276,7 +5369,8 @@ export class ChartAnalysisPageComponent {
     for (const t of this.linkedTo(source)) {
       if (t === 'main') {
         if (this.symbol() !== symbol) this.selectSymbol(symbol, false);
-      } else if (this.comparePanels().find((p) => p.id === t)?.symbol !== symbol) this.setPanelSymbol(t, symbol, false);
+      } else if (this.comparePanels().find((p) => p.id === t)?.symbol !== symbol)
+        this.setPanelSymbol(t, symbol, false);
     }
   }
 
@@ -5285,14 +5379,17 @@ export class ChartAnalysisPageComponent {
     if (!this.chartSync().interval) return;
     for (const t of this.linkedTo(source)) {
       if (t === 'main') {
-        if (this.resolution() !== resolution) this.selectResolution(resolution as TvResolution, false);
+        if (this.resolution() !== resolution)
+          this.selectResolution(resolution as TvResolution, false);
       } else if (this.comparePanels().find((p) => p.id === t)?.resolution !== resolution)
         this.setPanelResolution(t, resolution, false);
     }
   }
 
   setPanelLink(id: string, link: number): void {
-    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, link: linkGroupOf(link) } : p)));
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, link: linkGroupOf(link) } : p)),
+    );
   }
 
   setMainLink(link: number): void {
@@ -5301,10 +5398,22 @@ export class ChartAnalysisPageComponent {
 
   /** The sync switches the layout menu offers. */
   readonly syncKeys: ReadonlyArray<{ key: keyof ChartSync; label: string; title: string }> = [
-    { key: 'symbol', label: 'symbol', title: 'A symbol switch on one linked chart switches the others' },
-    { key: 'interval', label: 'interval', title: 'A timeframe switch on one linked chart switches the others' },
+    {
+      key: 'symbol',
+      label: 'symbol',
+      title: 'A symbol switch on one linked chart switches the others',
+    },
+    {
+      key: 'interval',
+      label: 'interval',
+      title: 'A timeframe switch on one linked chart switches the others',
+    },
     { key: 'crosshair', label: 'crosshair', title: 'The crosshair moves on every linked chart' },
-    { key: 'time', label: 'time range', title: 'Panning or zooming one linked chart shows the same span on the others' },
+    {
+      key: 'time',
+      label: 'time range',
+      title: 'Panning or zooming one linked chart shows the same span on the others',
+    },
   ];
 
   setSync(key: keyof ChartSync, on: boolean): void {
@@ -5328,7 +5437,9 @@ export class ChartAnalysisPageComponent {
       if (!def) return;
       const uid = `${def.id}-${Date.now().toString(36)}`;
       this.comparePanels.update((list) =>
-        list.map((p) => (p.id === id ? { ...p, indicators: withStudy(p.indicators, def, uid) } : p)),
+        list.map((p) =>
+          p.id === id ? { ...p, indicators: withStudy(p.indicators, def, uid) } : p,
+        ),
       );
     } else if (choice.startsWith('script:')) {
       const item = this.panelScriptChoices().find((i) => i.key === choice.slice(7));
@@ -5336,7 +5447,13 @@ export class ChartAnalysisPageComponent {
       this.comparePanels.update((list) =>
         list.map((p) =>
           p.id === id && !p.scripts.some((s) => s.item.key === item.key)
-            ? { ...p, scripts: [...p.scripts, { item, values: {}, result: null, error: null, ranTo: null }] }
+            ? {
+                ...p,
+                scripts: [
+                  ...p.scripts,
+                  { item, values: {}, result: null, error: null, ranTo: null },
+                ],
+              }
             : p,
         ),
       );
@@ -5351,7 +5468,9 @@ export class ChartAnalysisPageComponent {
 
   removePanelScript(id: string, key: string): void {
     this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, scripts: p.scripts.filter((s) => s.item.key !== key) } : p)),
+      list.map((p) =>
+        p.id === id ? { ...p, scripts: p.scripts.filter((s) => s.item.key !== key) } : p,
+      ),
     );
   }
 
@@ -5376,7 +5495,12 @@ export class ChartAnalysisPageComponent {
       this.comparePanels.update((list) =>
         list.map((p) =>
           p.id === id && p.symbol === symbol && p.resolution === resolution
-            ? { ...p, scripts: p.scripts.map((s) => (s.item.key === key ? { ...s, ...patch, ranTo: last.time } : s)) }
+            ? {
+                ...p,
+                scripts: p.scripts.map((s) =>
+                  s.item.key === key ? { ...s, ...patch, ranTo: last.time } : s,
+                ),
+              }
             : p,
         ),
       );
@@ -5388,7 +5512,13 @@ export class ChartAnalysisPageComponent {
       .subscribe({
         next: (result) => land(result.error ? { error: result.error } : { result, error: null }),
         error: (e: unknown) =>
-          land({ error: isBusy(e) ? 'The engine is busy: it runs again at the next bar.' : e instanceof Error ? e.message : 'The run failed.' }),
+          land({
+            error: isBusy(e)
+              ? 'The engine is busy: it runs again at the next bar.'
+              : e instanceof Error
+                ? e.message
+                : 'The run failed.',
+          }),
       });
   }
 
@@ -5431,7 +5561,9 @@ export class ChartAnalysisPageComponent {
       this.comparePanels().map((p) => ({
         symbol: p.symbol,
         resolution: p.resolution,
-        ...(p.indicators.length ? { indicators: p.indicators.map((i) => ({ ...i, params: { ...i.params } })) } : {}),
+        ...(p.indicators.length
+          ? { indicators: p.indicators.map((i) => ({ ...i, params: { ...i.params } })) }
+          : {}),
         ...(p.scripts.length
           ? { scripts: p.scripts.map((s) => workspaceScriptOf({ item: s.item, values: s.values })) }
           : {}),
@@ -5446,7 +5578,10 @@ export class ChartAnalysisPageComponent {
   readonly chartSync = signal<Required<ChartSync>>(restoredSync(undefined));
 
   /** A layout's split view, restored: the arrangement, then each other chart's series and studies, loaded. */
-  private restoreSplit(split: ChartWorkspaceState['split'], charts: ChartPanelState[] | undefined): void {
+  private restoreSplit(
+    split: ChartWorkspaceState['split'],
+    charts: ChartPanelState[] | undefined,
+  ): void {
     const layout = this.splitLayouts.find((l) => l.id === split?.layout)?.id ?? '1';
     const wanted = this.splitLayouts.find((l) => l.id === layout)?.panels ?? 0;
     const saved: ComparePanel[] = (charts ?? []).slice(0, wanted).map((p, i) => ({
@@ -5486,7 +5621,9 @@ export class ChartAnalysisPageComponent {
       sessionBreaks: this.sessionBreaks(),
       countdown: this.showCountdown(),
       ...(this.appearance() ? { appearance: { ...this.appearance()! } } : {}),
-      ...(this.compareSeries().length ? { compare: this.compareSeries().map((c) => ({ ...c })) } : {}),
+      ...(this.compareSeries().length
+        ? { compare: this.compareSeries().map((c) => ({ ...c })) }
+        : {}),
       ...(this.rememberPerSymbol() || Object.keys(this.symbolMemory()).length
         ? { symbolMemory: { on: this.rememberPerSymbol(), symbols: this.symbolMemory() } }
         : {}),
@@ -5642,7 +5779,9 @@ export class ChartAnalysisPageComponent {
     const own = this.symbol().toUpperCase();
     const bars = this.bars();
     const others = this.compareBars();
-    const digits = new Map(this.symbols().map((p) => [p.symbol ?? '', Math.trunc(p.decimalPlaces) || 5]));
+    const digits = new Map(
+      this.symbols().map((p) => [p.symbol ?? '', Math.trunc(p.decimalPlaces) || 5]),
+    );
     return comparePanes(
       specs,
       (sym) => (sym === own ? bars : others[sym]),
@@ -5650,7 +5789,10 @@ export class ChartAnalysisPageComponent {
     );
   });
   /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
-  readonly chartExternalPanes = computed(() => [...this.externalPanes(), ...this.comparePaneList()]);
+  readonly chartExternalPanes = computed(() => [
+    ...this.externalPanes(),
+    ...this.comparePaneList(),
+  ]);
 
   /**
    * Add a compare series. A compare symbol goes on the price's scale, so the scale turns to Percent (each line from
@@ -5661,7 +5803,9 @@ export class ChartAnalysisPageComponent {
     const mode = this.scaleMode();
     if (spec.kind === 'compare' && mode !== 'percent' && mode !== 'indexed') {
       this.scaleMode.set('percent');
-      this.notify.info('The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.');
+      this.notify.info(
+        'The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.',
+      );
     }
   }
 
@@ -5720,7 +5864,9 @@ export class ChartAnalysisPageComponent {
 
   readonly undoHistory = new UndoHistory();
   /** What undo covers of the chart as it stands (studies, scripts, settings), changing only when that changes. */
-  private readonly undoableState = computed(() => undoableOf(this.captureState()), { equal: sameUndoable });
+  private readonly undoableState = computed(() => undoableOf(this.captureState()), {
+    equal: sameUndoable,
+  });
   /** The chart as the last recorded step left it. */
   private undoBaseline: UndoableChart | null = null;
   /** The chart before a burst of changes still settling; recorded as one step when it settles. */
@@ -5817,13 +5963,16 @@ export class ChartAnalysisPageComponent {
       this.applyChartSettings(u.settings);
       this.active.set(u.indicators.map((i) => ({ ...i, params: { ...i.params } })));
       const target = new Map(u.scripts.map((w) => [w.key, w]));
-      for (const w of this.workspaceScripts()) if (!target.has(w.key)) this.removeScriptFromChart(w.key);
+      for (const w of this.workspaceScripts())
+        if (!target.has(w.key)) this.removeScriptFromChart(w.key);
       for (const w of u.scripts) {
         const run = this.scriptRuns().find((r) => r.item.key === w.key);
         if (run && JSON.stringify(run.values) === JSON.stringify(w.values)) {
           if (JSON.stringify(run.display ?? {}) !== JSON.stringify(w.display ?? {}))
             this.scriptRuns.update((list) =>
-              list.map((r) => (r === run ? { ...r, display: w.display ? { ...w.display } : undefined } : r)),
+              list.map((r) =>
+                r === run ? { ...r, display: w.display ? { ...w.display } : undefined } : r,
+              ),
             );
           continue;
         }
@@ -6455,7 +6604,13 @@ export class ChartAnalysisPageComponent {
   onKeydown(ev: KeyboardEvent): void {
     // Ctrl/Cmd+Shift+M: maximise ⇄ restore the Pine Editor / Tester dock — before the editable check, so it also
     // works while typing in the editor (CodeMirror binds nothing to it).
-    if (this.dockTab() && (ev.ctrlKey || ev.metaKey) && ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === 'm') {
+    if (
+      this.dockTab() &&
+      (ev.ctrlKey || ev.metaKey) &&
+      ev.shiftKey &&
+      !ev.altKey &&
+      ev.key.toLowerCase() === 'm'
+    ) {
       ev.preventDefault();
       this.setDockMode('max');
       return;
@@ -6517,9 +6672,26 @@ export class ChartAnalysisPageComponent {
       return;
     }
     if (ev.key === 'Escape') {
+      // An Esc this branch acts on is consumed (preventDefault): the open order ticket
+      // (appModalA11y, a document listener that skips handled keys) closes on the NEXT one.
+      // An open toolbar menu (interval, style, templates, overlays, layouts) is what Esc closes
+      // first; it used to stay open while Esc went to the drawings behind it.
+      if (this.openMenu() !== null || this.layoutMenuOpen() || this.symbolMenuOpen()) {
+        ev.preventDefault();
+        this.openMenu.set(null);
+        this.layoutMenuOpen.set(false);
+        this.symbolMenuOpen.set(false);
+        return;
+      }
       // TV: Esc first abandons a drawing in progress and drops the tool, then
       // clears the selection.
-      this.host()?.cancelDrawing();
+      const acted =
+        this.tool() !== null ||
+        this.railFlyout() !== null ||
+        this.magnetMenuOpen() ||
+        this.drawingMenu() !== null ||
+        this.drawings.selectedId() !== null;
+      if (this.host()?.cancelDrawing() || acted) ev.preventDefault();
       this.railFlyout.set(null);
       this.magnetMenuOpen.set(false);
       this.drawingMenu.set(null);
@@ -6545,7 +6717,8 @@ export class ChartAnalysisPageComponent {
         ev.preventDefault();
         if (action === 'reset') this.resetScales();
         else if (action === 'invert') this.invertScale.set(!this.invertScale());
-        else if (action === 'log') this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
+        else if (action === 'log')
+          this.scaleMode.set(this.scaleMode() === 'log' ? 'normal' : 'log');
         else if (action === 'percent')
           this.scaleMode.set(this.scaleMode() === 'percent' ? 'normal' : 'percent');
         else this.takeSnapshot();
@@ -6561,10 +6734,13 @@ export class ChartAnalysisPageComponent {
     // Bar Replay, TradingView's keys: Shift+→ forward, Shift+← back, Shift+↓ play / pause (CC-I4).
     if (this.replayActive() && ev.shiftKey && !mod && !ev.altKey) {
       const replayKey =
-        ev.key === 'ArrowRight' ? () => void this.replay.step(1)
-        : ev.key === 'ArrowLeft' ? () => void this.replay.step(-1)
-        : ev.key === 'ArrowDown' ? () => this.replay.togglePlay()
-        : null;
+        ev.key === 'ArrowRight'
+          ? () => void this.replay.step(1)
+          : ev.key === 'ArrowLeft'
+            ? () => void this.replay.step(-1)
+            : ev.key === 'ArrowDown'
+              ? () => this.replay.togglePlay()
+              : null;
       if (replayKey) {
         ev.preventDefault();
         replayKey();
@@ -6667,7 +6843,12 @@ export function normaliseView(v: ChartViewState): ChartViewState {
   return {
     barSpacing: Math.round(v.barSpacing * 100) / 100,
     rightOffset: Math.round(v.rightOffset),
-    paneHeights: v.paneHeights.map((h) => Math.round(h)),
+    // Pane heights are device-local (`withoutDeviceSizes`): a layout read from the engine on a
+    // browser that has none remembered — a new device, cleared storage — has a view WITHOUT
+    // them. `.map` on that threw inside applyState, after the symbol and studies were applied
+    // but before the split charts, Pine scripts and dock — and the half-applied layout became
+    // the baseline the next autosave wrote back.
+    paneHeights: (v.paneHeights ?? []).map((h) => Math.round(h)),
   };
 }
 

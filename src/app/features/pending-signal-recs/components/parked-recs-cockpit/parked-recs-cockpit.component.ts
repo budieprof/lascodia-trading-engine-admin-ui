@@ -11,7 +11,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import { auditTime, catchError, finalize, merge, of } from 'rxjs';
+import { auditTime, catchError, finalize, forkJoin, map, merge, of } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PendingSignalRecsService } from '@core/services/pending-signal-recs.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -93,7 +93,7 @@ interface AuditEntry {
         label="Active (parked / reval)"
         [value]="mActive()"
         format="number"
-        [dotColor]="mActive() > 0 ? '#FF9500' : '#34C759'"
+        [dotColor]="(mActive() ?? 0) > 0 ? '#FF9500' : '#34C759'"
       />
       <app-metric-card
         label="Approved → signal"
@@ -110,18 +110,24 @@ interface AuditEntry {
         dotColor="#34C759"
       />
       <app-metric-card
-        label="Avg confidence"
+        [label]="sampleIsPartial() ? 'Avg confidence (newest)' : 'Avg confidence'"
         [value]="mAvgConfidence()"
         format="percent"
         dotColor="#0071E3"
       />
       <app-metric-card
-        label="Sibling-validated"
+        [label]="sampleIsPartial() ? 'Sibling-validated (newest)' : 'Sibling-validated'"
         [value]="mSiblingValidated()"
         format="number"
         dotColor="#AF52DE"
       />
     </div>
+    @if (sampleIsPartial()) {
+      <p class="muted small sample-note">
+        State counts are engine totals; “newest” tiles cover the newest
+        {{ metricsRows().length | number }} of {{ mTotal() | number }} recs.
+      </p>
+    }
 
     <section class="filters">
       <div class="filter-group">
@@ -677,6 +683,9 @@ interface AuditEntry {
       .kpi-grid.loading {
         opacity: 0.55;
       }
+      .sample-note {
+        margin: 0;
+      }
 
       /* Pagination bar */
       .pager-bar {
@@ -825,6 +834,14 @@ interface AuditEntry {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+      }
+      /* The empty / error line used to sit flush against the box's left border
+         at body size; inset and centred like the other empty states. */
+      .table-wrap > p {
+        margin: 0;
+        padding: var(--space-6) var(--space-5);
+        text-align: center;
+        font-size: var(--text-sm);
       }
       table.grid {
         width: 100%;
@@ -1166,32 +1183,51 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   );
 
   // ── Analysis metrics ─────────────────────────────────────────────────────
-  // Computed over ALL recs matching the symbol filter, across EVERY state
-  // (independent of the table's state filter + paging) so the KPI strip is a
-  // true breakdown of the parked-rec funnel. Fetched separately from the table.
+  // A breakdown of the parked-rec funnel across EVERY state for the symbol
+  // filter (independent of the table's state filter + paging). The per-state
+  // tiles are engine totals — one count-only query per state. They used to be
+  // counted inside the newest 1,000 recs: with 1,631 in the table the 97
+  // older Approved recs fell outside it, so "Approved → signal" read 0 and
+  // "Conversion rate" 0.00% (DB, 2026-10-19: Approved 97 · Rejected 884 ·
+  // Expired 552 · Canceled 98). Confidence and sibling-validated still come
+  // from that newest-1,000 sample, and the strip says so when it is partial.
   protected readonly metricsRows = signal<PendingSignalRecDto[]>([]);
   protected readonly metricsTotal = signal(0);
   protected readonly metricsLoading = signal(true);
+  /** Engine total per state; a state whose count failed is absent (its tile shows "—"). */
+  private readonly stateTotals = signal<Partial<Record<string, number>>>({});
 
-  private countState(state: string): number {
-    return this.metricsRows().filter((r) => r.state === state).length;
+  private countState(state: string): number | null {
+    return this.stateTotals()[state] ?? null;
+  }
+  private sumStates(...states: string[]): number | null {
+    let sum = 0;
+    for (const s of states) {
+      const n = this.countState(s);
+      if (n === null) return null;
+      sum += n;
+    }
+    return sum;
   }
   /** Total across all states (accurate — from the pager, not the fetched slice). */
   protected readonly mTotal = computed(() => this.metricsTotal());
-  protected readonly mActive = computed(
-    () => this.countState('Parked') + this.countState('Revalidating'),
-  );
+  protected readonly mActive = computed(() => this.sumStates('Parked', 'Revalidating'));
   protected readonly mApproved = computed(() => this.countState('Approved'));
   protected readonly mRejected = computed(() => this.countState('Rejected'));
   protected readonly mExpired = computed(() => this.countState('Expired'));
+  /** The confidence / sibling tiles cover only the fetched sample when it is smaller than the total. */
+  protected readonly sampleIsPartial = computed(
+    () => this.metricsRows().length > 0 && this.metricsRows().length < this.metricsTotal(),
+  );
   protected readonly mSiblingValidated = computed(
     () => this.metricsRows().filter((r) => r.isSiblingValidated).length,
   );
   /** % of terminal recs that converted into a trade signal (Approved / terminal). */
   protected readonly mConversionPct = computed(() => {
-    const terminal =
-      this.mApproved() + this.mRejected() + this.mExpired() + this.countState('Canceled');
-    return terminal === 0 ? 0 : (this.mApproved() / terminal) * 100;
+    const approved = this.mApproved();
+    const terminal = this.sumStates('Approved', 'Rejected', 'Expired', 'Canceled');
+    if (approved === null || terminal === null) return null;
+    return terminal === 0 ? 0 : (approved / terminal) * 100;
   });
   /** Average generation confidence across the fetched recs (0–1 → percent). */
   protected readonly mAvgConfidence = computed(() => {
@@ -1476,14 +1512,10 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
    *  breakdown reflects the whole funnel rather than the current table page. */
   protected loadMetrics(): void {
     const symbol = this.symbolFilter().trim();
+    const search = symbol.length > 0 ? symbol : null;
     this.metricsLoading.set(true);
     this.svc
-      .query({
-        currentPage: 1,
-        itemCountPerPage: 1000,
-        states: null,
-        search: symbol.length > 0 ? symbol : null,
-      })
+      .query({ currentPage: 1, itemCountPerPage: 1000, states: null, search })
       .pipe(
         finalize(() => this.metricsLoading.set(false)),
         catchError(() => of(null)),
@@ -1493,6 +1525,21 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
         this.metricsRows.set(res.data?.data ?? []);
         this.metricsTotal.set(res.data?.pager?.totalItemCount ?? 0);
       });
+    // One count-only query (a single row + the pager total) per state.
+    const counts = Object.fromEntries(
+      this.allStates.map((s) => [
+        s,
+        this.svc.query({ currentPage: 1, itemCountPerPage: 1, states: [s], search }).pipe(
+          map((r) => (r?.status ? (r.data?.pager?.totalItemCount ?? null) : null)),
+          catchError(() => of(null)),
+        ),
+      ]),
+    );
+    forkJoin(counts).subscribe((totals) => {
+      const next: Partial<Record<string, number>> = {};
+      for (const [s, n] of Object.entries(totals)) if (n !== null) next[s] = n;
+      this.stateTotals.set(next);
+    });
   }
 
   protected cancel(row: PendingSignalRecDto): void {

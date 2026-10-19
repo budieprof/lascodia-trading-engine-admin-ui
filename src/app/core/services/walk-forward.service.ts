@@ -13,7 +13,8 @@ import {
 export class WalkForwardService {
   private readonly api = inject(ApiService);
 
-  create(data: CreateWalkForwardRequest): Observable<ResponseData<WalkForwardRunDto>> {
+  /** Queues a run; the engine answers with the new run's id (`ResponseData<long>`), not the run. */
+  create(data: CreateWalkForwardRequest): Observable<ResponseData<number>> {
     return this.api.post(`/walk-forward`, data);
   }
 

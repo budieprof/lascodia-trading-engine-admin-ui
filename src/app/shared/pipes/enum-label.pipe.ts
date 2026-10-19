@@ -73,6 +73,11 @@ export class EnumLabelPipe implements PipeTransform {
     if (enumType && LABEL_MAPS[enumType]) {
       return LABEL_MAPS[enumType][value] || value;
     }
-    return value.replace(/([A-Z])/g, ' $1').trim();
+    // Split camel case without breaking acronyms: "CompositeML" → "Composite ML" (it used to
+    // read "Composite M L"), "MLModelRetired" → "ML Model Retired".
+    return value
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+      .trim();
   }
 }

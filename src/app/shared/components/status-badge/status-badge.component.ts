@@ -33,7 +33,13 @@ const STATUS_MAP: Record<string, Record<string, BadgeVariant>> = {
   },
   broker: { Connected: 'success', Disconnected: 'error', Error: 'error' },
   health: { true: 'success', false: 'error' },
-  run: { Queued: 'neutral', Running: 'info', Completed: 'success', Failed: 'error' },
+  run: {
+    Queued: 'neutral',
+    Running: 'info',
+    Completed: 'success',
+    Failed: 'error',
+    Cancelled: 'neutral',
+  },
   // Strategy lifecycle stage: Draft → (BacktestQualified / PaperTrading / ShadowLive) → Approved → Active.
   lifecycle: {
     Draft: 'neutral',
@@ -50,11 +56,28 @@ const VARIANT_STYLES: Record<
   BadgeVariant,
   { bg: string; color: string; glyph: string; aria: string }
 > = {
-  success: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D', glyph: '●', aria: 'success' },
-  warning: { bg: 'rgba(255, 149, 0, 0.12)', color: '#C93400', glyph: '▲', aria: 'warning' },
-  error: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015', glyph: '■', aria: 'error' },
-  info: { bg: 'rgba(0, 113, 227, 0.12)', color: '#0040DD', glyph: '◆', aria: 'info' },
-  neutral: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366', glyph: '○', aria: 'neutral' },
+  // Text colour from the theme's tone tokens: the light-theme hexes that used to sit here read
+  // at ~2.2-3:1 on the dark background.
+  success: {
+    bg: 'rgba(52, 199, 89, 0.12)',
+    color: 'var(--tone-green)',
+    glyph: '●',
+    aria: 'success',
+  },
+  warning: {
+    bg: 'rgba(255, 149, 0, 0.12)',
+    color: 'var(--tone-amber)',
+    glyph: '▲',
+    aria: 'warning',
+  },
+  error: { bg: 'rgba(255, 59, 48, 0.12)', color: 'var(--tone-red)', glyph: '■', aria: 'error' },
+  info: { bg: 'rgba(0, 113, 227, 0.12)', color: 'var(--tone-blue)', glyph: '◆', aria: 'info' },
+  neutral: {
+    bg: 'rgba(142, 142, 147, 0.12)',
+    color: 'var(--tone-grey)',
+    glyph: '○',
+    aria: 'neutral',
+  },
 };
 
 @Component({

@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { catchError, forkJoin, map, merge, of, switchMap, throttleTime } from 'rxjs';
+import { catchError, finalize, forkJoin, map, merge, of, switchMap, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
@@ -31,6 +31,7 @@ import {
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
@@ -53,8 +54,12 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
 @Component({
   selector: 'app-strategies-page',
   standalone: true,
+  // Escape closes the open overlay from anywhere: the overlays' own (keydown.escape) never fired
+  // because focus stays on the button that opened them and the dialog swallows keydown.
+  host: { '(document:keydown.escape)': 'onEscape()' },
   imports: [
     PageHeaderComponent,
+    RefreshButtonComponent,
     DataTableComponent,
     MetricCardComponent,
     ChartCardComponent,
@@ -142,6 +147,11 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
                         </option>
                       }
                     </select>
+                    @if (templates().length === 0) {
+                      <span class="form-hint">
+                        No templates saved yet — save one from a strategy's detail page first.
+                      </span>
+                    }
                   </div>
 
                   <div class="form-group">
@@ -255,7 +265,7 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
                       </thead>
                       <tbody>
                         @for (p of riskProfilesList(); track p.id) {
-                          <tr style="border-bottom:1px solid var(--border-subtle,#eef0f3);">
+                          <tr style="border-bottom:1px solid var(--border);">
                             <td style="padding:6px 8px;">
                               {{ p.name ?? '(unnamed)' }}
                               @if (p.isDefault) {
@@ -535,14 +545,12 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
                     consistently misaligned with the gate.
                   </span>
                 </div>
-                <button
-                  type="button"
-                  class="btn btn-link"
-                  (click)="loadRejectionSummary()"
-                  style="font-size:12px;"
-                >
-                  Refresh
-                </button>
+                <!-- A bare link-button gave no sign that the click re-fetched anything. -->
+                <app-refresh-button
+                  variant="outline"
+                  [refreshing]="rejectionSummaryLoading()"
+                  (refresh)="loadRejectionSummary()"
+                />
               </header>
               <div style="overflow-x:auto;">
                 <table style="width:100%;font-size:12px;border-collapse:collapse;">
@@ -566,7 +574,7 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
                         </td>
                         <td style="padding:6px 8px;">
                           <span
-                            style="background:rgba(0,113,227,0.10);color:#0040DD;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;"
+                            style="background:rgba(0,113,227,0.14);color:var(--accent);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;"
                             >{{ r.stage }}</span
                           >
                         </td>
@@ -978,8 +986,14 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
         background: var(--accent);
         color: white;
       }
-      .btn-primary:hover {
+      .btn-primary:hover:not(:disabled) {
         background: var(--accent-hover);
+      }
+      /* A disabled Apply (no template / no symbols) looked exactly like an enabled one. */
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        transform: none;
       }
 
       .selector-bar {
@@ -1350,6 +1364,8 @@ export class StrategiesPageComponent {
 
   // ── Filtered-signals diagnostics ────────────────────────────────────────
   rejectionSummary = signal<StrategyRejectionSummaryDto[]>([]);
+  /** The Filtered Signals card's fetch is in flight (drives its Refresh button). */
+  readonly rejectionSummaryLoading = signal(false);
   rejectionLookbackHours = signal<number>(24);
 
   // Fleet-wide sample for analytics roll-ups (KPI strip + distribution
@@ -1792,13 +1808,24 @@ export class StrategiesPageComponent {
           ? '—'
           : `<span style="font-variant-numeric:tabular-nums;color:var(--text-secondary)">#${p.value}</span>`,
     },
-    { field: 'name', headerName: 'Name', flex: 2, minWidth: 160 },
-    { field: 'symbol', headerName: 'Symbol', flex: 1, minWidth: 100 },
+    // The grid is wider than the card and scrolls; at 160px every generated name was cut to
+    // "CompositeML-EURUSD" / "EURUSD Trend MACD \" — the name is what the operator reads, so it
+    // gets the room (full name in the tooltip).
+    { field: 'name', headerName: 'Name', flex: 2, minWidth: 260, tooltipField: 'name' },
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      flex: 1,
+      minWidth: 100,
+      // A Custom strategy (LLM Spot Analysis) has no single symbol — "—", not a blank cell.
+      valueFormatter: (p: any) => p.value || '—',
+    },
     {
       field: 'timeframe',
       headerName: 'Timeframe',
       flex: 1,
-      minWidth: 90,
+      // 90px wrapped the header mid-word ("TIMEFRA ME").
+      minWidth: 108,
       valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
     },
     {
@@ -1824,7 +1851,9 @@ export class StrategiesPageComponent {
       // via the bulk `/strategy/health/recent` endpoint, so this column
       // costs one extra round-trip per page (not per row).
       field: 'healthSeries',
-      headerName: 'Health (24m)',
+      // "Health (24m)" printed as "HEALTH (24M)" — read as 24 months; it is the last 24 snapshots.
+      headerName: 'Health trend',
+      headerTooltip: 'The latest 24 health-snapshot scores, oldest left',
       width: 140,
       sortable: false,
       filter: false,
@@ -2197,10 +2226,14 @@ export class StrategiesPageComponent {
    * (one aggregated query) so we re-fire on tab activation without a guard.
    */
   loadRejectionSummary(): void {
-    this.strategiesService.getRejectionSummary(this.rejectionLookbackHours(), 50).subscribe({
-      next: (res) => this.rejectionSummary.set(res?.data ?? []),
-      error: () => this.rejectionSummary.set([]),
-    });
+    this.rejectionSummaryLoading.set(true);
+    this.strategiesService
+      .getRejectionSummary(this.rejectionLookbackHours(), 50)
+      .pipe(finalize(() => this.rejectionSummaryLoading.set(false)))
+      .subscribe({
+        next: (res) => this.rejectionSummary.set(res?.data ?? []),
+        error: () => this.rejectionSummary.set([]),
+      });
   }
 
   openTemplatePanel(): void {
@@ -2373,6 +2406,11 @@ export class StrategiesPageComponent {
           this.notifications.error('Bulk update failed');
         },
       });
+  }
+
+  onEscape(): void {
+    if (this.showTemplatePanel() && !this.applyingTemplate()) this.closeTemplatePanel();
+    else if (this.showRiskPicker()) this.closeRiskPicker();
   }
 
   closeRiskPicker(): void {

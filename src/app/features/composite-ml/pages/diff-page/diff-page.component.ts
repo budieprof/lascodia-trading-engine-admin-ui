@@ -2,8 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, map, of, switchMap } from 'rxjs';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
+import { catchError, combineLatest, map, of, startWith, switchMap } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
 import type { PolicySnapshotDiffDto } from '@core/api/api.types';
@@ -20,8 +20,12 @@ const DELTA_BAR_CAP = 0.5;
 type DiffResult =
   | { state: 'idle' }
   | { state: 'loading' }
+  | { state: 'notFound'; message: string }
   | { state: 'error'; message: string }
   | { state: 'loaded'; data: PolicySnapshotDiffDto };
+
+/** The engine's "no such row" envelope code (HTTP 200, `status: false`). */
+const NOT_FOUND_CODE = '-14';
 
 @Component({
   selector: 'app-diff-page',
@@ -74,7 +78,7 @@ type DiffResult =
         </button>
       </section>
 
-      @switch (result()?.state) {
+      @switch (result().state) {
         @case ('idle') {
           <app-empty-state
             title="Pick two snapshots to compare"
@@ -84,11 +88,20 @@ type DiffResult =
         @case ('loading') {
           <app-card-skeleton [lines]="8" />
         }
+        @case ('notFound') {
+          <app-empty-state
+            title="Snapshot not found"
+            [description]="
+              errorMessage() +
+              '. Pick ids from the Active Policies table or from a snapshot lineage page.'
+            "
+          />
+        }
         @case ('error') {
           <app-error-state
             title="Could not load diff"
             [message]="errorMessage()"
-            (retry)="apply()"
+            (retry)="retry()"
           />
         }
         @case ('loaded') {
@@ -208,6 +221,25 @@ type DiffResult =
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -295,7 +327,7 @@ type DiffResult =
       }
       .schema-mismatch {
         font-size: var(--text-xs);
-        color: #c93400;
+        color: var(--tone-amber);
         font-style: italic;
       }
       .summary-count {
@@ -391,10 +423,10 @@ type DiffResult =
         width: 110px;
       }
       .delta-pct.positive {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .delta-pct.negative {
-        color: #d70015;
+        color: var(--tone-red);
       }
     `,
   ],
@@ -407,9 +439,17 @@ export class DiffPageComponent {
   protected readonly fromInput = signal<number | null>(null);
   protected readonly toInput = signal<number | null>(null);
 
+  private readonly retryTick = signal(0);
+
+  /**
+   * Fetches on new ids AND on retry, starting from the loading state. Before,
+   * Compare left the previous result on screen until the response landed (the
+   * 'loading' case was unreachable), and retry re-navigated to the same URL —
+   * a no-op for the router.
+   */
   protected readonly result = toSignal(
-    this.route.queryParamMap.pipe(
-      switchMap((qp): ReturnType<typeof this.fetchFor> => {
+    combineLatest([this.route.queryParamMap, toObservable(this.retryTick)]).pipe(
+      switchMap(([qp]): ReturnType<typeof this.fetchFor> => {
         const fromId = parseId(qp.get('fromId'));
         const toId = parseId(qp.get('toId'));
         // Keep the picker inputs in sync with the URL.
@@ -418,7 +458,7 @@ export class DiffPageComponent {
         if (fromId === null || toId === null) {
           return of<DiffResult>({ state: 'idle' });
         }
-        return this.fetchFor(fromId, toId);
+        return this.fetchFor(fromId, toId).pipe(startWith<DiffResult>({ state: 'loading' }));
       }),
     ),
     { initialValue: { state: 'idle' } as DiffResult },
@@ -431,7 +471,7 @@ export class DiffPageComponent {
 
   protected readonly errorMessage = computed(() => {
     const r = this.result();
-    return r?.state === 'error' ? r.message : '';
+    return r?.state === 'error' || r?.state === 'notFound' ? r.message : '';
   });
 
   protected readonly changedKnobs = computed(() => {
@@ -455,6 +495,10 @@ export class DiffPageComponent {
     });
   }
 
+  protected retry(): void {
+    this.retryTick.update((n) => n + 1);
+  }
+
   protected isChanged(from: number | null, to: number | null): boolean {
     if (from === null && to === null) return false;
     if (from === null || to === null) return true;
@@ -472,10 +516,10 @@ export class DiffPageComponent {
     return this.compositeMl.diffPolicySnapshots(fromId, toId).pipe(
       map((res): DiffResult => {
         if (!res.status || !res.data) {
-          return {
-            state: 'error',
-            message: res.message ?? 'Could not load diff.',
-          };
+          const message = res.message ?? 'Could not load diff.';
+          return res.responseCode === NOT_FOUND_CODE
+            ? { state: 'notFound', message }
+            : { state: 'error', message };
         }
         return { state: 'loaded', data: res.data };
       }),

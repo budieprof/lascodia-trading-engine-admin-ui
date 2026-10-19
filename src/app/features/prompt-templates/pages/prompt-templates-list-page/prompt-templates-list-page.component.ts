@@ -9,7 +9,7 @@ import {
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
-import { catchError, of } from 'rxjs';
+import { Subscription, catchError, of } from 'rxjs';
 
 import {
   ForkPromptTemplateRequest,
@@ -19,6 +19,8 @@ import {
 import { AuthService } from '@core/auth/auth.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /**
  * Seeded prompt-template `Name` values. Phase 3 only ships
@@ -44,7 +46,15 @@ const DEFAULT_PAGE_SIZE = 25;
   selector: 'app-prompt-templates-list-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, DatePipe, FormsModule, RouterLink, PageHeaderComponent],
+  imports: [
+    CommonModule,
+    DatePipe,
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    RefreshButtonComponent,
+    ModalA11yDirective,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -65,12 +75,16 @@ const DEFAULT_PAGE_SIZE = 25;
           <input type="checkbox" [(ngModel)]="showArchived" (ngModelChange)="onFilterChange()" />
           <span>Show archived</span>
         </label>
-        <button type="button" class="btn-secondary" (click)="refresh()">Refresh</button>
+        <!-- The old plain button gave no sign a click did anything: an unchanged list
+             re-rendered identically. The shared button stays busy until the fetch lands. -->
+        <app-refresh-button variant="outline" [refreshing]="loading()" (refresh)="refresh()" />
       </div>
 
       <section class="card">
         @if (loading() && rows().length === 0) {
           <div class="empty">Loading templates…</div>
+        } @else if (loadError() && rows().length === 0) {
+          <div class="empty load-error" role="alert">{{ loadError() }}</div>
         } @else if (rows().length === 0) {
           <div class="empty">
             No templates for <strong>{{ nameFilter }}</strong>
@@ -79,6 +93,11 @@ const DEFAULT_PAGE_SIZE = 25;
             }
           </div>
         } @else {
+          @if (loadError(); as err) {
+            <p class="load-error inline" role="alert">
+              {{ err }} — showing the last list that loaded.
+            </p>
+          }
           <div class="table-scroll">
             <table class="data-table">
               <thead>
@@ -104,7 +123,7 @@ const DEFAULT_PAGE_SIZE = 25;
                     [class.tpl-row--archived]="row.isArchived"
                   >
                     <td class="mono">#{{ row.id }}</td>
-                    <td class="mono">{{ row.name }}</td>
+                    <td class="mono nowrap">{{ row.name }}</td>
                     <td class="mono version" [title]="row.version">{{ row.version }}</td>
                     <td>
                       <span
@@ -146,39 +165,41 @@ const DEFAULT_PAGE_SIZE = 25;
                       </button>
                     </td>
                     <td class="actions-cell">
-                      <a
-                        class="btn-secondary btn-small"
-                        [routerLink]="['/prompt-templates', row.id]"
-                      >
-                        View
-                      </a>
-                      @if (canEdit()) {
-                        <button
-                          type="button"
+                      <div class="actions-inner">
+                        <a
                           class="btn-secondary btn-small"
-                          (click)="openForkModal(row)"
+                          [routerLink]="['/prompt-templates', row.id]"
                         >
-                          Fork
-                        </button>
-                      }
-                      @if (canPromote() && isDraft(row)) {
-                        <button
-                          type="button"
-                          class="btn-primary btn-small"
-                          (click)="openPromoteModal(row)"
-                        >
-                          Promote
-                        </button>
-                      }
-                      @if (canEdit() && isDraft(row)) {
-                        <button
-                          type="button"
-                          class="btn-danger btn-small"
-                          (click)="openArchiveModal(row)"
-                        >
-                          Archive
-                        </button>
-                      }
+                          View
+                        </a>
+                        @if (canEdit()) {
+                          <button
+                            type="button"
+                            class="btn-secondary btn-small"
+                            (click)="openForkModal(row)"
+                          >
+                            Fork
+                          </button>
+                        }
+                        @if (canPromote() && isDraft(row)) {
+                          <button
+                            type="button"
+                            class="btn-primary btn-small"
+                            (click)="openPromoteModal(row)"
+                          >
+                            Promote
+                          </button>
+                        }
+                        @if (canEdit() && isDraft(row)) {
+                          <button
+                            type="button"
+                            class="btn-danger btn-small"
+                            (click)="openArchiveModal(row)"
+                          >
+                            Archive
+                          </button>
+                        }
+                      </div>
                     </td>
                   </tr>
                 }
@@ -218,6 +239,8 @@ const DEFAULT_PAGE_SIZE = 25;
             role="dialog"
             aria-modal="true"
             aria-labelledby="fork-title"
+            appModalA11y
+            (dismiss)="closeForkModal()"
             (click)="$event.stopPropagation()"
           >
             <div class="modal-header">
@@ -276,8 +299,16 @@ const DEFAULT_PAGE_SIZE = 25;
       <!-- Promote modal --------------------------------------------------- -->
       @if (promoteTarget(); as p) {
         <div class="modal-scrim" (click)="closePromoteModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Promote to active?</h2></div>
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="promote-title"
+            appModalA11y
+            (dismiss)="closePromoteModal()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="promote-title">Promote to active?</h2></div>
             <div class="modal-body">
               <p>
                 Promoting <strong class="mono">{{ p.name }} / {{ p.version }}</strong> will demote
@@ -290,7 +321,12 @@ const DEFAULT_PAGE_SIZE = 25;
               </p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" (click)="closePromoteModal()">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="closePromoteModal()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -313,8 +349,16 @@ const DEFAULT_PAGE_SIZE = 25;
       <!-- Archive modal --------------------------------------------------- -->
       @if (archiveTarget(); as a) {
         <div class="modal-scrim" (click)="closeArchiveModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Archive draft?</h2></div>
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-title"
+            appModalA11y
+            (dismiss)="closeArchiveModal()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="archive-title">Archive draft?</h2></div>
             <div class="modal-body">
               <p>
                 Archiving <strong class="mono">{{ a.name }} / {{ a.version }}</strong>
@@ -323,7 +367,12 @@ const DEFAULT_PAGE_SIZE = 25;
               </p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" (click)="closeArchiveModal()">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="closeArchiveModal()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -460,6 +509,13 @@ const DEFAULT_PAGE_SIZE = 25;
         display: block;
         margin-top: 0.25rem;
       }
+      .load-error {
+        color: var(--loss);
+      }
+      .load-error.inline {
+        margin: 0 0 var(--space-3);
+        font-size: 0.85rem;
+      }
       .muted {
         color: var(--text-secondary);
         font-size: 0.78rem;
@@ -519,20 +575,23 @@ const DEFAULT_PAGE_SIZE = 25;
         background: #1f8a3d;
         border-radius: 2px;
       }
-      .tpl-row--archived td {
+      /* Not the pinned action cell: a translucent sticky cell lets the columns
+         scrolling underneath show through it. */
+      .tpl-row--archived td:not(.actions-cell) {
         opacity: 0.55;
       }
       .mono {
         font-family: var(--font-mono, monospace);
       }
       .notes {
-        max-width: 320px;
+        max-width: 240px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
       .pill {
         display: inline-block;
+        white-space: nowrap;
         padding: 0.15rem 0.55rem;
         border-radius: 999px;
         font-size: 0.7rem;
@@ -569,9 +628,23 @@ const DEFAULT_PAGE_SIZE = 25;
       .copy-btn:hover {
         opacity: 0.7;
       }
+      /* Eleven columns outgrow the card at 1440px (the "ACTIVE (NOT LIVE)" pill
+         wrapped to three lines and the View / Fork buttons sat past the right edge
+         of the scroller). Keep the actions pinned to the visible right edge. The
+         flex box lives on an inner div: display:flex on the <td> took it out of
+         table layout. */
+      .actions-cell,
+      .data-table th:last-child {
+        position: sticky;
+        right: 0;
+        background: var(--bg-secondary);
+      }
       .actions-cell {
+        box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.45);
+      }
+      .actions-inner {
         display: flex;
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         gap: 0.3rem;
         align-items: center;
       }
@@ -676,6 +749,9 @@ export class PromptTemplatesListPageComponent implements OnInit {
   readonly rows = signal<PromptTemplateSummary[]>([]);
   readonly totalItems = signal(0);
   readonly loading = signal(false);
+  /** Why the latest list call failed (null = it succeeded). */
+  readonly loadError = signal<string | null>(null);
+  private listSub: Subscription | null = null;
 
   // ── Modal state ────────────────────────────────────────────────────────
   readonly forkTarget = signal<PromptTemplateSummary | null>(null);
@@ -697,27 +773,42 @@ export class PromptTemplatesListPageComponent implements OnInit {
   }
 
   refresh(): void {
+    // A newer request (filter, page, Refresh) supersedes one still in flight, so a slow
+    // earlier reply can never land last and repaint the wrong page.
+    this.listSub?.unsubscribe();
     this.loading.set(true);
-    this.svc
+    this.listSub = this.svc
       .list({
         currentPage: this.page(),
         itemCountPerPage: this.pageSize,
         name: this.nameFilter,
         includeArchived: this.showArchived,
       })
-      .pipe(catchError(() => of(null)))
-      .subscribe((res) => {
-        this.loading.set(false);
-        if (res?.status && res.data) {
-          this.rows.set(res.data.data ?? []);
-          this.totalItems.set(res.data.pager?.totalItemCount ?? 0);
-        } else {
-          this.rows.set([]);
-          this.totalItems.set(0);
-          if (res && res.message) {
-            this.notifications.error(res.message);
+      .subscribe({
+        next: (res) => {
+          this.loading.set(false);
+          if (res?.status && res.data) {
+            this.rows.set(res.data.data ?? []);
+            this.totalItems.set(res.data.pager?.totalItemCount ?? 0);
+            this.loadError.set(null);
+          } else {
+            // The engine answered and refused: there is no current list to show.
+            this.rows.set([]);
+            this.totalItems.set(0);
+            this.loadError.set(res?.message || 'The engine refused the template list.');
           }
-        }
+        },
+        error: (err: { status?: number; error?: { message?: string } } | null) => {
+          this.loading.set(false);
+          // A transport failure used to clear the table and read "No templates for
+          // spot-analysis" over rows that exist. Keep the last list and say why.
+          this.loadError.set(
+            err?.error?.message ??
+              (err?.status === 0
+                ? 'The engine could not be reached.'
+                : `Could not load templates (HTTP ${err?.status ?? '?'}).`),
+          );
+        },
       });
   }
 
@@ -789,7 +880,9 @@ export class PromptTemplatesListPageComponent implements OnInit {
     this.forkNotes = '';
   }
 
+  // Escape / backdrop route here too (appModalA11y): never hide a write in flight.
   closeForkModal(): void {
+    if (this.submitting()) return;
     this.forkTarget.set(null);
     this.forkVersion = '';
     this.forkNotes = '';
@@ -827,6 +920,7 @@ export class PromptTemplatesListPageComponent implements OnInit {
   }
 
   closePromoteModal(): void {
+    if (this.submitting()) return;
     this.promoteTarget.set(null);
   }
 
@@ -855,6 +949,7 @@ export class PromptTemplatesListPageComponent implements OnInit {
   }
 
   closeArchiveModal(): void {
+    if (this.submitting()) return;
     this.archiveTarget.set(null);
   }
 

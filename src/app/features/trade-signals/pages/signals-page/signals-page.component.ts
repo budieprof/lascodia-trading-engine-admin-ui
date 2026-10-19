@@ -2,16 +2,26 @@ import {
   Component,
   ChangeDetectionStrategy,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
-import { catchError, map, of, throttleTime } from 'rxjs';
+import {
+  catchError,
+  debounceTime,
+  distinctUntilChanged,
+  forkJoin,
+  map,
+  of,
+  throttleTime,
+} from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
@@ -236,9 +246,10 @@ type DirectionChip = 'all' | TradeDirection;
             format="number"
             dotColor="#8E8E93"
           />
+          <!-- No pending signal → no average ("0.00%" read as a measured zero). -->
           <app-metric-card
             label="Avg confidence (pending)"
-            [value]="avgPendingConfidence() * 100"
+            [value]="avgPendingConfidence() === null ? null : avgPendingConfidence()! * 100"
             format="percent"
             dotColor="#0071E3"
           />
@@ -264,7 +275,9 @@ type DirectionChip = 'all' | TradeDirection;
                 [attr.aria-selected]="statusFilter() === s"
               >
                 {{ s === 'all' ? 'All' : s }}
-                <span class="chip-count">{{ statusCount(s) }}</span>
+                @if (statusCount(s) !== null) {
+                  <span class="chip-count">{{ statusCount(s) | number }}</span>
+                }
               </button>
             }
           </div>
@@ -294,7 +307,10 @@ type DirectionChip = 'all' | TradeDirection;
             (ngModelChange)="symbolFilter.set($event)"
           />
 
-          <label class="toggle">
+          <label
+            class="toggle"
+            title="Counts the recent signals whose ML direction disagrees (the figure beside it). The engine's signal list cannot filter on ML agreement, so the table is unaffected."
+          >
             <input
               type="checkbox"
               [checked]="mlDisagreementOnly()"
@@ -305,7 +321,7 @@ type DirectionChip = 'all' | TradeDirection;
 
           <span
             class="muted"
-            title="Chip counts and KPIs are computed over the most recent 500 signals; the table below pages through the full history."
+            title="The KPIs above and this figure are computed over the most recent 500 signals; the chip counts are engine totals for the table, which pages through the full history."
           >
             {{ visibleSignals().length }} of the last {{ recentSignals().length }} signals match
           </span>
@@ -337,7 +353,11 @@ type DirectionChip = 'all' | TradeDirection;
           (rowClick)="selectedDetail.set($event)"
         >
           <ng-template #bulkActions let-rows>
-            <button class="btn btn-success" (click)="bulkApprove(rows)" [disabled]="processing()">
+            <button
+              class="btn btn-success"
+              (click)="requestBulkApprove(rows)"
+              [disabled]="processing()"
+            >
               Approve {{ pendingInSelection(rows) }} pending
             </button>
             <button class="btn btn-danger" (click)="bulkReject(rows)" [disabled]="processing()">
@@ -569,6 +589,27 @@ type DirectionChip = 'all' | TradeDirection;
         </div>
       }
 
+      <!-- Bulk approve releases several live signals for execution at once; it
+           fired straight from the bulk-bar button with no second step. -->
+      <app-confirm-dialog
+        [open]="pendingApproveRows().length > 0"
+        title="Approve signals"
+        [message]="
+          'Approve ' +
+          pendingApproveRows().length +
+          ' pending signal' +
+          (pendingApproveRows().length === 1 ? '' : 's') +
+          ' (' +
+          approveDialogIds() +
+          ')? They are released to the trading accounts for execution.'
+        "
+        confirmLabel="Approve"
+        confirmVariant="primary"
+        [loading]="processing()"
+        (confirm)="confirmBulkApprove()"
+        (cancelled)="pendingApproveRows.set([])"
+      />
+
       <app-confirm-dialog
         [open]="showRejectDialog()"
         title="Reject signal(s)"
@@ -690,16 +731,23 @@ type DirectionChip = 'all' | TradeDirection;
         align-items: center;
         flex-wrap: wrap;
       }
+      /* The seven status chips carry engine totals ("Expired 5,430"), so the
+         track is wider than an 820 px tablet's content column; it wraps inside
+         the column instead of pushing the page sideways. 17 px = half a
+         one-row track (28 + 2×3), so a single row still reads as a pill. */
       .chip-group {
         display: inline-flex;
+        flex-wrap: wrap;
+        max-width: 100%;
         gap: 2px;
         padding: 3px;
         background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
+        border-radius: 17px;
       }
       .chip {
         height: 28px;
         padding: 0 12px;
+        white-space: nowrap;
         border: none;
         background: transparent;
         color: var(--text-secondary);
@@ -1256,9 +1304,9 @@ export class SignalsPageComponent {
   readonly rejectedToday = computed(() => this.countByStatusToday('Rejected'));
   readonly expiredToday = computed(() => this.countByStatusToday('Expired'));
 
-  readonly avgPendingConfidence = computed(() => {
+  readonly avgPendingConfidence = computed<number | null>(() => {
     const pending = this.recentSignals().filter((s) => s.status === 'Pending');
-    if (pending.length === 0) return 0;
+    if (pending.length === 0) return null;
     return pending.reduce((sum, s) => sum + s.confidence, 0) / pending.length;
   });
 
@@ -1272,10 +1320,53 @@ export class SignalsPageComponent {
     ).length;
   });
 
-  statusCount(s: StatusChip): number {
-    if (s === 'all') return this.recentSignals().length;
-    return this.recentSignals().filter((x) => x.status === s).length;
+  /**
+   * Engine totals per status chip under the table's direction / symbol
+   * filters — what clicking the chip lists. The chips counted the 500-signal
+   * KPI window ("All 500") above a table reading "Showing 1–25 of 7,980".
+   * Null until known; the chip then shows no number.
+   */
+  private readonly statusTotals = signal<Partial<Record<StatusChip, number | null>>>({});
+
+  statusCount(s: StatusChip): number | null {
+    return this.statusTotals()[s] ?? null;
   }
+
+  /** The table's server filter minus status (direction + symbol search). */
+  private baseSignalFilter(): Record<string, unknown> {
+    const filter: Record<string, unknown> = {};
+    const direction = this.directionFilter();
+    const symbol = this.debouncedSymbol().trim();
+    if (direction !== 'all') filter['direction'] = direction;
+    if (symbol) filter['search'] = symbol;
+    return filter;
+  }
+
+  private loadStatusTotals(): void {
+    const base = this.baseSignalFilter();
+    const calls = Object.fromEntries(
+      this.statusChips.map((s) => [
+        s,
+        this.signalsService
+          .list({
+            currentPage: 1,
+            itemCountPerPage: 1,
+            filter: s === 'all' ? base : { ...base, status: s },
+          })
+          .pipe(
+            map((r) => (r?.status === false ? null : (r.data?.pager?.totalItemCount ?? null))),
+            catchError(() => of(null)),
+          ),
+      ]),
+    );
+    forkJoin(calls).subscribe((totals) => this.statusTotals.set(totals));
+  }
+
+  /** The symbol box, settled — the table and chip totals re-query on this, not per keystroke. */
+  private readonly debouncedSymbol = toSignal(
+    toObservable(this.symbolFilter).pipe(debounceTime(300), distinctUntilChanged()),
+    { initialValue: '' },
+  );
 
   // ── Visible filter (for "X of Y" + ML-disagreement client-side) ──────
   // Note: this drives only the indicator above; the paginated table fetches
@@ -1418,6 +1509,30 @@ export class SignalsPageComponent {
     }));
 
     this.loadRecent();
+
+    // The status / direction / symbol filters only fed fetchData, and nothing
+    // re-ran it: clicking "Rejected" lit the chip and left the table listing
+    // every signal. Reload from page 1 whenever one settles. The first run
+    // (at creation) is skipped — the table does its own initial load.
+    let first = true;
+    effect(() => {
+      this.statusFilter();
+      this.directionFilter();
+      this.debouncedSymbol();
+      if (first) {
+        first = false;
+        return;
+      }
+      untracked(() => {
+        const table = this.dataTable();
+        if (table) {
+          table.currentPage.set(1);
+          table.loadData();
+        }
+        this.loadStatusTotals();
+      });
+    });
+
     // Realtime push — coalesce bursts so generation storms don't trigger 50
     // refetches in 2 seconds. 1s leading+trailing keeps the feed live without
     // hammering /trade-signal/list.
@@ -1486,6 +1601,8 @@ export class SignalsPageComponent {
         this.recentSignals.set(rows);
         this.metricsLoading.set(false);
       });
+    // Same triggers (open, push, an action) move the chip totals.
+    this.loadStatusTotals();
   }
 
   private countByStatusToday(status: TradeSignalStatus): number {
@@ -1654,11 +1771,8 @@ export class SignalsPageComponent {
       ...((params.filter as Record<string, unknown>) ?? {}),
     };
     const status = this.statusFilter();
-    const direction = this.directionFilter();
-    const symbol = this.symbolFilter().trim();
+    Object.assign(filterObj, this.baseSignalFilter());
     if (status !== 'all') filterObj['status'] = status;
-    if (direction !== 'all') filterObj['direction'] = direction;
-    if (symbol) filterObj['search'] = symbol;
     const merged: PagerRequest = {
       ...params,
       filter: Object.keys(filterObj).length > 0 ? filterObj : null,
@@ -1717,10 +1831,32 @@ export class SignalsPageComponent {
     this.showRejectDialog.set(true);
   }
 
-  bulkApprove(rows: TradeSignalDto[]): void {
+  /** Pending rows awaiting the bulk-approve confirmation; empty = dialog closed. */
+  readonly pendingApproveRows = signal<TradeSignalDto[]>([]);
+  readonly approveDialogIds = computed(() => {
+    const ids = this.pendingApproveRows().map((s) => `#${s.id}`);
+    return ids.length <= 6 ? ids.join(', ') : `${ids.slice(0, 6).join(', ')} …`;
+  });
+
+  requestBulkApprove(rows: TradeSignalDto[]): void {
     const pending = rows.filter((r) => r.status === 'Pending');
     if (pending.length === 0) {
       this.notifications.warning('No pending signals selected.');
+      return;
+    }
+    this.pendingApproveRows.set(pending);
+  }
+
+  confirmBulkApprove(): void {
+    const rows = this.pendingApproveRows();
+    this.bulkApprove(rows, () => this.pendingApproveRows.set([]));
+  }
+
+  bulkApprove(rows: TradeSignalDto[], done?: () => void): void {
+    const pending = rows.filter((r) => r.status === 'Pending');
+    if (pending.length === 0) {
+      this.notifications.warning('No pending signals selected.');
+      done?.();
       return;
     }
     this.processing.set(true);
@@ -1732,7 +1868,15 @@ export class SignalsPageComponent {
           if (res.status) approved++;
           if (--remaining === 0) {
             this.processing.set(false);
-            this.notifications.success(`Approved ${approved} of ${pending.length}`);
+            done?.();
+            // A partial result is not a success: say how many the engine refused.
+            if (approved === pending.length) {
+              this.notifications.success(`Approved ${approved} of ${pending.length}`);
+            } else {
+              this.notifications.warning(
+                `Approved ${approved} of ${pending.length} — the engine refused the rest`,
+              );
+            }
             this.dataTable()?.loadData();
             this.loadRecent();
           }
@@ -1740,7 +1884,12 @@ export class SignalsPageComponent {
         error: () => {
           if (--remaining === 0) {
             this.processing.set(false);
-            this.notifications.error('Bulk approve failed');
+            done?.();
+            this.notifications.error(
+              `Bulk approve failed — ${approved} of ${pending.length} approved`,
+            );
+            this.dataTable()?.loadData();
+            this.loadRecent();
           }
         },
       });

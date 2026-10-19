@@ -80,6 +80,15 @@ export interface SpreadStateEntry {
   sampleCountAtFloor: number | null;
   lowerCandidate: number | null;
   lowerCandidateObservedAt: string | null;
+  /**
+   * The spread `condition` was decided on (engine 2026-10-19). `currentSpread` moves on every
+   * tick while the condition is re-evaluated once per worker pass, so the two can disagree —
+   * ELEVATED beside a spread at half the floor. Null before the first evaluation with a sample;
+   * absent from older engines.
+   */
+  conditionSpread?: number | null;
+  /** UTC ISO of the sample the condition was decided on; null/absent as above. */
+  conditionEvaluatedAt?: string | null;
 }
 
 /**

@@ -18,6 +18,7 @@ import { MarketDataService } from '@core/services/market-data.service';
 import { ThemeService } from '@core/theme/theme.service';
 import { CandleDto, LlmInvocationDetailDto, Timeframe } from '@core/api/api.types';
 import { MarketAnalysisRecommendation } from '@core/services/llm-backtest.service';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /**
  * Modal payload — opened by the per-point drill-down rows on the LLM
@@ -60,11 +61,19 @@ export interface LlmInvocationModalContext {
   selector: 'app-llm-invocation-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [CommonModule, NgxEchartsDirective, ModalA11yDirective],
   template: `
     @if (ctx(); as c) {
       <div class="scrim" (click)="closed.emit()">
-        <div class="card" (click)="$event.stopPropagation()">
+        <div
+          class="card"
+          role="dialog"
+          aria-modal="true"
+          [attr.aria-label]="'LLM invocation #' + c.invocationId"
+          appModalA11y
+          (dismiss)="closed.emit()"
+          (click)="$event.stopPropagation()"
+        >
           <header class="card-head">
             <div class="head-titles">
               <h2>

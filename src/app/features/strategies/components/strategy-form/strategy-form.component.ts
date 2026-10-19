@@ -53,7 +53,6 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-strategy-dialog.component';
 import { StrategyVersionDiffComponent } from '../strategy-version-diff/strategy-version-diff.component';
 import { failureMessage } from '../../util/api-failure';
@@ -113,6 +112,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-strategy-form',
   standalone: true,
+  host: { '(document:keydown.escape)': 'onDocumentEscape($event)' },
   imports: [
     ReactiveFormsModule,
     SubConfigEditorComponent,
@@ -120,7 +120,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
     DecimalPipe,
     CloneStrategyDialogComponent,
     StrategyVersionDiffComponent,
-    ConfirmDialogComponent,
     ScriptAuthoringComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -132,7 +131,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         role="presentation"
         tabindex="-1"
         (click)="isPage() || requestClose()"
-        (keydown.escape)="isPage() || requestClose()"
       >
         <div
           class="dialog"
@@ -142,7 +140,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
           tabindex="-1"
           [class.dialog-wide]="isScriptAuthoring()"
           (click)="$event.stopPropagation()"
-          (keydown)="$event.stopPropagation()"
+          (keydown)="onDialogKeydown($event)"
         >
           <div class="dialog-header">
             <h3 class="dialog-title">{{ strategy() ? 'Edit Strategy' : 'Create Strategy' }}</h3>
@@ -304,7 +302,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                   <div class="form-group">
                     <label class="form-label">Symbol · Timeframe · Type</label>
                     <div class="readonly-identity">
-                      <span class="mono">{{ s.symbol }}</span>
+                      <!-- A Custom strategy (LLM Spot Analysis) has no symbol: the line used to
+                           start with a stray "·". -->
+                      <span class="mono">{{ s.symbol || 'No symbol' }}</span>
                       <span>·</span>
                       <span>{{ timeframeLabels[s.timeframe] }}</span>
                       <span>·</span>
@@ -1633,7 +1633,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .preview-snapshot-table td {
         text-align: left;
         padding: 4px 6px;
-        border-bottom: 1px solid var(--border-subtle, #eef0f3);
+        border-bottom: 1px solid var(--border);
       }
       .preview-snapshot-table th {
         font-weight: var(--font-semibold, 600);
@@ -1645,7 +1645,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .overlay-chart {
         margin-top: 8px;
         padding: 6px 4px 0;
-        border-top: 1px solid var(--border-subtle, #eef0f3);
+        border-top: 1px solid var(--border);
       }
       .overlay-chart-head {
         display: flex;
@@ -1742,7 +1742,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       .version-table td {
         text-align: left;
         padding: 4px 6px;
-        border-bottom: 1px solid var(--border-subtle, #eef0f3);
+        border-bottom: 1px solid var(--border);
       }
       .version-table tr:last-child td {
         border-bottom: none;
@@ -1753,7 +1753,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         align-items: center;
         padding: 6px 0;
         margin-bottom: 6px;
-        border-bottom: 1px dashed var(--border-subtle, #eef0f3);
+        border-bottom: 1px dashed var(--border);
       }
       .version-manual-capture .form-input {
         flex: 1;
@@ -1795,6 +1795,11 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       }
       .dialog.as-page .dialog-body {
         overflow: visible;
+      }
+      /* In the page the sticky action bar reaches the viewport's bottom-right corner, where the
+         floating assistant "Ask" pill sat over its last button (Update, half hidden at 1440px). */
+      .dialog.as-page .dialog-actions {
+        padding-right: var(--assistant-fab-clearance, 132px);
       }
       /* Name / identity / risk profile / description side by side instead of stacked. */
       .dialog.as-page .meta-block {
@@ -3029,6 +3034,34 @@ export class StrategyFormComponent implements OnInit, OnChanges {
 
   private scriptEdited(): boolean {
     return this.isScriptAuthoring() && (this.scriptAuthoring?.isDirty() ?? false);
+  }
+
+  /** True while an Escape-triggered close is asking "discard changes?" — one prompt at a time. */
+  private escapePrompting = false;
+
+  /**
+   * Escape closes the dialog. The overlay's (keydown.escape) never fired: the dialog swallowed every
+   * keydown, and right after opening focus is still on the button that opened it. Escape is handled
+   * here (focus inside) and on the document (focus outside); an Escape an inner widget already used
+   * — the editor's completion list — is left alone.
+   */
+  onDialogKeydown(event: KeyboardEvent): void {
+    event.stopPropagation();
+    if (event.key === 'Escape' && !event.defaultPrevented) void this.escapeClose();
+  }
+
+  onDocumentEscape(event: Event): void {
+    if (!event.defaultPrevented) void this.escapeClose();
+  }
+
+  private async escapeClose(): Promise<void> {
+    if (!this.open() || this.isPage() || this.escapePrompting) return;
+    this.escapePrompting = true;
+    try {
+      await this.requestClose();
+    } finally {
+      this.escapePrompting = false;
+    }
   }
 
   /** ×, Cancel, Escape or a click outside the dialog: asks first when something is unsaved. */

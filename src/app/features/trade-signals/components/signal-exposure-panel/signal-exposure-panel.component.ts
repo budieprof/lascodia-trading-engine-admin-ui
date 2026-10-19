@@ -11,6 +11,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 const EMPTY: LiveExposureDto = {
@@ -40,6 +41,7 @@ const EMPTY: LiveExposureDto = {
     EmptyStateComponent,
     ErrorStateComponent,
     ProgressBarComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -57,15 +59,14 @@ const EMPTY: LiveExposureDto = {
             }
           </span>
         </div>
-        <button
-          type="button"
-          class="btn btn-ghost"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-          title="Re-walk the book now"
-        >
-          {{ resource.loading() ? 'Refreshing…' : 'Refresh' }}
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so a click on the old button changed nothing on screen (an unchanged book is a
+             structural no-op). -->
+        <app-refresh-button
+          variant="outline"
+          [refreshing]="resource.refreshing()"
+          (refresh)="resource.refresh()"
+        />
       </header>
 
       <ui-progress-bar [active]="resource.loading()" />
@@ -329,25 +330,6 @@ const EMPTY: LiveExposureDto = {
       .pill.open {
         background: rgba(52, 199, 89, 0.15);
         color: var(--profit);
-      }
-      .btn {
-        height: 28px;
-        border: 1px solid var(--border);
-        background: transparent;
-        color: var(--text-secondary);
-        border-radius: var(--radius-sm);
-        padding: 0 var(--space-3);
-        cursor: pointer;
-        font-size: var(--text-xs);
-        font-family: inherit;
-      }
-      .btn:hover:not(:disabled) {
-        color: var(--text-primary);
-        background: var(--bg-tertiary);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: default;
       }
     `,
   ],

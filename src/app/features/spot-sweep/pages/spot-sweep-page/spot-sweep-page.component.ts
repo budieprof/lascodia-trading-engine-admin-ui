@@ -21,6 +21,7 @@ import {
 } from '@features/spot-sweep/spot-sweep.types';
 import { SignalExposureControlsComponent } from '@features/spot-sweep/components/signal-exposure-controls/signal-exposure-controls.component';
 import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symbol-cap-controls/symbol-cap-controls.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
 /**
  * Spot Sweep cockpit — configure + monitor the autonomous spot-analysis loop.
@@ -30,7 +31,13 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
 @Component({
   selector: 'app-spot-sweep-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, SignalExposureControlsComponent, SymbolCapControlsComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    SignalExposureControlsComponent,
+    SymbolCapControlsComponent,
+    ConfirmDialogComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -117,7 +124,10 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                 "
               >
                 <span class="countdown-dot"></span>
-                next in <strong class="mono">{{ formatCountdown(cooldownRemainingSec()!) }}</strong>
+                <!-- Outside Cooldown the timer is only the eligibility re-check: "next in" beside
+                     "Sweep disabled" read as a sweep about to run. -->
+                {{ st.phase === 'Cooldown' ? 'next in' : 're-check in' }}
+                <strong class="mono">{{ formatCountdown(cooldownRemainingSec()!) }}</strong>
               </span>
             }
             @if (sessionOpenInSec() !== null) {
@@ -989,7 +999,10 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                     <tr>
                       <td class="mono nowrap">{{ r.at | date: 'MMM d HH:mm:ss' }}</td>
                       <td class="mono">{{ r.symbol }}</td>
-                      <td class="muted">{{ r.timeframe }}</td>
+                      <!-- The engine does not persist the run's timeframe or cost on the signal
+                           (GetSpotSweepHistoryQuery sends "" and 0 for every row); "—" says
+                           "not reported" where a blank cell and "$0.00" read as facts. -->
+                      <td class="muted">{{ r.timeframe || '—' }}</td>
                       <td>
                         <span class="oc" [class]="'oc oc-' + r.outcome">{{ r.outcome }}</span>
                       </td>
@@ -1005,11 +1018,22 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
                         }
                       </td>
                       <td>
-                        <span class="mode-badge small-badge" [class.live]="r.mode === 'Live'">
-                          {{ r.mode }}
-                        </span>
+                        <!-- Mode is the ORDER's: a rejected signal with no order is neither
+                             paper nor live (the engine labels it "Paper"). -->
+                        @if (r.orderId) {
+                          <span class="mode-badge small-badge" [class.live]="r.mode === 'Live'">
+                            {{ r.mode }}
+                          </span>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
                       </td>
-                      <td class="num mono">{{ '$' + (r.costUsd | number: '1.2-2') }}</td>
+                      <td
+                        class="num mono"
+                        [title]="r.costUsd ? '' : 'Cost is not attributed per sweep run'"
+                      >
+                        {{ r.costUsd ? '$' + (r.costUsd | number: '1.2-2') : '—' }}
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -1020,12 +1044,31 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
           }
         }
       </section>
+
+      <!-- Start/Stop is persisted at once and starts (or halts) an autonomous loop that files
+           signals; one stray click used to do it. -->
+      <app-confirm-dialog
+        [open]="confirmToggle()"
+        [title]="config()?.enabled ? 'Stop the sweep?' : 'Start the sweep?'"
+        [message]="
+          config()?.enabled
+            ? 'No further sweep analyses run until it is started again.'
+            : 'The loop starts analysing every eligible pair on its interval with the SAVED configuration (unsaved edits below are not included) and acts on what it finds as that configuration says.'
+        "
+        [confirmLabel]="config()?.enabled ? 'Stop sweep' : 'Start sweep'"
+        [confirmVariant]="config()?.enabled ? 'destructive' : 'primary'"
+        [loading]="saving()"
+        (confirm)="applyToggle()"
+        (cancelled)="confirmToggle.set(false)"
+      />
     </div>
   `,
   styles: [
     `
+      /* The shell already pads the content area; a second inset put this page 32px in from
+         every sibling's left edge. */
       .page {
-        padding: var(--space-6) var(--space-8);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
@@ -1450,8 +1493,11 @@ import { SymbolCapControlsComponent } from '@features/spot-sweep/components/symb
       .session-check-list li {
         display: flex;
       }
+      /* Wraps: the weekly row (two days, two times and the timezone) is wider than the
+         configuration card, and its timezone select ran out past the card's edge ("WA"). */
       .blackout-row {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: 8px;
         margin: 6px 0;
@@ -2062,13 +2108,16 @@ export class SpotSweepPageComponent implements OnDestroy {
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
+  /** The config as the engine last returned it — what Start/Stop flips. */
+  private persistedConfig: SpotSweepConfig | null = null;
+
   private load(): void {
     this.loading.set(true);
     this.svc.getConfig().subscribe({
       next: (cfg) => {
         // Normalise blackout fields for configs saved before the feature
         // existed so the inputs always have concrete values.
-        this.config.set({
+        const normalised: SpotSweepConfig = {
           ...cfg,
           blackoutEnabled: cfg.blackoutEnabled ?? false,
           blackoutStart: cfg.blackoutStart || '22:00',
@@ -2089,7 +2138,9 @@ export class SpotSweepPageComponent implements OnDestroy {
           hunterSkipWhileArmed: cfg.hunterSkipWhileArmed ?? true,
           hunterMaxExpiryHours: cfg.hunterMaxExpiryHours ?? 72,
           hunterRefreshAfterMinutes: cfg.hunterRefreshAfterMinutes ?? 240,
-        });
+        };
+        this.persistedConfig = normalised;
+        this.config.set(normalised);
         // Seed the timeframe selector from existing pairs (uniform timeframe).
         if (cfg.pairs.length > 0) this.sweepTimeframe.set(cfg.pairs[0].timeframe);
         this.dirty.set(false);
@@ -2352,14 +2403,26 @@ export class SpotSweepPageComponent implements OnDestroy {
     this.saveInternal(cfg, 'Failed to save configuration.');
   }
 
-  /** Start/stop applies immediately (persisted), unlike the rest of the form. */
+  /** The Start/Stop confirm is open. */
+  readonly confirmToggle = signal(false);
+
+  /** Start/stop applies immediately (persisted), unlike the rest of the form — after a confirm. */
   toggleEnabled(): void {
-    const cfg = this.config();
-    if (!cfg) return;
-    this.saveInternal({ ...cfg, enabled: !cfg.enabled }, 'Failed to toggle sweep.');
+    if (this.config()) this.confirmToggle.set(true);
   }
 
-  private saveInternal(cfg: SpotSweepConfig, errorFallback: string): void {
+  /**
+   * Flips `enabled` on the PERSISTED config. It used to send the whole form, so pressing Start
+   * also saved every unsaved (possibly half-typed) edit in the draft below — and then threw the
+   * draft away. Pending edits now stay pending, with the new enabled state folded in.
+   */
+  applyToggle(): void {
+    const base = this.persistedConfig ?? this.config();
+    if (!base) return;
+    this.saveInternal({ ...base, enabled: !base.enabled }, 'Failed to toggle sweep.', true);
+  }
+
+  private saveInternal(cfg: SpotSweepConfig, errorFallback: string, keepDraft = false): void {
     this.saving.set(true);
     this.error.set(null);
     this.notice.set(null);
@@ -2367,8 +2430,15 @@ export class SpotSweepPageComponent implements OnDestroy {
       next: (result) => {
         // result.config is PERSISTED state — the engine echoes back what
         // the worker will actually run with, with any verdict in result.message.
-        this.config.set(result.config);
-        this.dirty.set(false);
+        this.persistedConfig = result.config;
+        const draft = this.config();
+        if (keepDraft && this.dirty() && draft) {
+          this.config.set({ ...draft, enabled: result.config.enabled });
+        } else {
+          this.config.set(result.config);
+          this.dirty.set(false);
+        }
+        this.confirmToggle.set(false);
         this.saving.set(false);
         if (result.message && result.message.toLowerCase().includes('cooling-off')) {
           this.notice.set(result.message);
@@ -2383,6 +2453,7 @@ export class SpotSweepPageComponent implements OnDestroy {
         // changes appear to silently revert.
         const message = err instanceof Error && err.message ? err.message : null;
         this.error.set(message ?? errorFallback);
+        this.confirmToggle.set(false);
         this.saving.set(false);
         // The draft is kept (form stays dirty) so the operator can add the
         // missing reason and retry without re-entering their changes.
