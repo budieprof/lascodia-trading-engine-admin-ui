@@ -11,11 +11,14 @@ import {
   ElementRef,
   OnInit,
   OnDestroy,
+  HostListener,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { NgxEchartsDirective } from 'ngx-echarts';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { MarkdownPipe } from '@shared/pipes/markdown.pipe';
 import { MarkdownCopyDirective } from '@shared/directives/markdown-copy.directive';
 import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis-chat.component';
@@ -29,7 +32,7 @@ import { Subject, timer, switchMap, takeUntil, catchError, of } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { PositionsService } from '@core/services/positions.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import { ConfigService } from '@core/services/config.service';
+import { ConfigService, isQueuedForCoolingOff } from '@core/services/config.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import {
   CandleDto,
@@ -332,9 +335,34 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
     AnalysisChatComponent,
     RecFileEditorComponent,
     MarkdownCopyDirective,
+    ConfirmDialogComponent,
+    ModalA11yDirective,
   ],
   template: `
     <div class="trading-chart">
+      <!--
+        Turning Live or Signals ON is a fleet-wide engine-config write (SpotAnalysisWorker:*):
+        Live spends LLM budget on every candle close, Signals makes each analysis create
+        auto-executing trade signals. One stray toolbar click used to do either. Turning them OFF
+        is the safe direction and stays one click.
+      -->
+      <app-confirm-dialog
+        [open]="pendingEnable() !== null"
+        [title]="pendingEnable() === 'signals' ? 'Turn on auto-signals?' : 'Turn on live analysis?'"
+        [message]="
+          pendingEnable() === 'signals'
+            ? 'Every live spot analysis will also create LIVE trade signals from each viable setup. They execute through the normal risk pipeline and can place real trades on every account. This is a global engine setting.'
+            : 'The engine will run a spot analysis for ' +
+              selectedSymbol() +
+              ' ' +
+              selectedTimeframe() +
+              ' on every candle close, spending LLM budget until you turn it off.'
+        "
+        [confirmLabel]="pendingEnable() === 'signals' ? 'Turn on signals' : 'Turn on live analysis'"
+        [confirmVariant]="pendingEnable() === 'signals' ? 'destructive' : 'primary'"
+        (confirm)="confirmEnable()"
+        (cancelled)="pendingEnable.set(null)"
+      />
       <!-- Toolbar -->
       <div class="chart-toolbar">
         <div class="toolbar-left">
@@ -446,7 +474,14 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
               {{ anyAnalysisRunning() ? '⏳ Analysing…' : '🔍 Analyse ▾' }}
             </button>
             @if (analyzeMenuOpen()) {
-              <div class="picker-dropdown" (click)="$event.stopPropagation()">
+              <div
+                class="picker-dropdown"
+                role="menu"
+                appModalA11y
+                [appModalA11yTrap]="false"
+                (dismiss)="analyzeMenuOpen.set(false)"
+                (click)="$event.stopPropagation()"
+              >
                 <button class="picker-item" [disabled]="analyzing()" (click)="pickAnalysis('spot')">
                   🔍 Spot analysis
                 </button>
@@ -618,13 +653,22 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
               <button
                 class="toggle-btn picker-btn"
                 [class.active]="pickerOpen()"
-                (click)="togglePicker()"
+                (click)="togglePicker($event)"
                 title="Add indicator"
               >
                 + Indicator
               </button>
               @if (pickerOpen()) {
-                <div class="picker-dropdown" (click)="$event.stopPropagation()">
+                <div
+                  class="picker-dropdown"
+                  role="menu"
+                  [class.up]="pickerPlacement().up"
+                  [style.max-height.px]="pickerPlacement().maxHeight"
+                  appModalA11y
+                  [appModalA11yTrap]="false"
+                  (dismiss)="pickerOpen.set(false)"
+                  (click)="$event.stopPropagation()"
+                >
                   <div class="picker-section">
                     <span class="picker-section-title">Overlays</span>
                     @for (def of indicatorCatalog; track def.type) {
@@ -2305,6 +2349,15 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         display: flex;
         flex-direction: column;
         gap: 6px;
+        /* The indicator list is ~490px tall; opened from the toolbar halfway down /market-data it
+           ran ~170px past the bottom of a 900px window. Cap it and scroll inside. */
+        max-height: min(480px, 60vh);
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+      .picker-dropdown.up {
+        top: auto;
+        bottom: calc(100% + 4px);
       }
       .picker-section {
         display: flex;
@@ -3249,6 +3302,24 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  on whenever ≥1 pair is watched. Switch the chart to another pair and
    *  toggle again to cover it too. */
   toggleLiveAnalysis(): void {
+    if (!this.watchPairs.includes(this.currentPairToken())) {
+      this.pendingEnable.set('live');
+      return;
+    }
+    this.applyLiveAnalysisToggle();
+  }
+
+  /** Which toolbar switch is waiting on the operator's confirmation to turn ON. */
+  readonly pendingEnable = signal<'live' | 'signals' | null>(null);
+
+  confirmEnable(): void {
+    const kind = this.pendingEnable();
+    this.pendingEnable.set(null);
+    if (kind === 'live') this.applyLiveAnalysisToggle();
+    else if (kind === 'signals') this.applySignalAutoGen(true);
+  }
+
+  private applyLiveAnalysisToggle(): void {
     const token = this.currentPairToken();
     const idx = this.watchPairs.indexOf(token);
     const adding = idx < 0;
@@ -3294,6 +3365,17 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       .upsert({ key, value, dataType, isHotReloadable: true })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
+        // HTTP 200 can still be a refusal (status false) or a change queued for cooling-off; the
+        // toolbar flipped optimistically, so say so and re-read what the engine really holds.
+        next: (res) => {
+          if (!res.status) {
+            this.notifications.error(res.message ?? `Couldn't save ${key}.`);
+            this.loadLiveAnalysisConfig();
+          } else if (isQueuedForCoolingOff(res)) {
+            this.notifications.info(res.message ?? `${key} queued for cooling-off.`);
+            this.loadLiveAnalysisConfig();
+          }
+        },
         error: () => {
           this.notifications.error(
             `Couldn't save ${key} — the live-analysis worker may not pick up this change.`,
@@ -3344,6 +3426,14 @@ export class TradingChartComponent implements OnInit, OnDestroy {
    *  as a live, auto-executing trade signal. Global across all watched pairs. */
   toggleSignalAutoGen(): void {
     const next = !this.signalAutoGenEnabled();
+    if (next) {
+      this.pendingEnable.set('signals');
+      return;
+    }
+    this.applySignalAutoGen(next);
+  }
+
+  private applySignalAutoGen(next: boolean): void {
     this.signalAutoGenEnabled.set(next);
     this.writeLiveConfig(CFG_LIVE_GENERATE_SIGNALS, String(next), 'Bool');
     // Console breadcrumb when the toggle flips OFF — a stray toolbar click
@@ -3691,14 +3781,47 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Open / close the "+ Indicator" picker dropdown. */
-  togglePicker() {
-    this.pickerOpen.set(!this.pickerOpen());
+  /**
+   * Where the "+ Indicator" list opens. With the toolbar half-way down /market-data a ~480px list
+   * dropping down ran past the bottom of the window; it now opens on the side with more room and
+   * is sized to it (scrolling inside).
+   */
+  readonly pickerPlacement = signal<{ up: boolean; maxHeight: number | null }>({
+    up: false,
+    maxHeight: null,
+  });
+
+  /** Open / close the "+ Indicator" picker dropdown (one toolbar menu open at a time). */
+  togglePicker(event?: MouseEvent) {
+    const trigger = event?.currentTarget as HTMLElement | null;
+    if (trigger && typeof window !== 'undefined') {
+      const r = trigger.getBoundingClientRect();
+      const below = window.innerHeight - r.bottom - 12;
+      const above = r.top - 12;
+      const up = below < 320 && above > below;
+      this.pickerPlacement.set({ up, maxHeight: Math.max(160, Math.min(480, up ? above : below)) });
+    }
+    const next = !this.pickerOpen();
+    this.pickerOpen.set(next);
+    if (next) this.analyzeMenuOpen.set(false);
   }
 
-  /** Open / close the combined LLM-analysis dropdown. */
+  /** Open / close the combined LLM-analysis dropdown (one toolbar menu open at a time). */
   toggleAnalyzeMenu() {
-    this.analyzeMenuOpen.set(!this.analyzeMenuOpen());
+    const next = !this.analyzeMenuOpen();
+    this.analyzeMenuOpen.set(next);
+    if (next) this.pickerOpen.set(false);
+  }
+
+  /** A click anywhere outside the toolbar menus closes them — both used to stay open until
+   *  their own button was clicked again, and could sit open on top of each other. */
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent): void {
+    if (!this.pickerOpen() && !this.analyzeMenuOpen()) return;
+    const target = event.target as Element | null;
+    if (target?.closest('.picker-wrapper')) return;
+    this.pickerOpen.set(false);
+    this.analyzeMenuOpen.set(false);
   }
 
   /** Route a chosen analysis kind to its existing handler, then close the menu. */

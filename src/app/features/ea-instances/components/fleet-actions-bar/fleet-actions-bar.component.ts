@@ -41,11 +41,12 @@ import {
   selector: 'app-fleet-actions-bar',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // None: Angular's Emulated encapsulation tags selectors with a scope
-  // attribute, but ::backdrop attaches to the browser's top-layer rendering
-  // surface (not a DOM child) and never receives that attribute — so the
-  // scrim silently vanishes.  All our selectors are class-prefixed
-  // (.modal-dialog, .modal, .action, …) so global leakage is contained.
+  // Encapsulation None (chosen for the dialog's ::backdrop rule) makes these
+  // styles GLOBAL, so every selector is scoped under the host tag: bare
+  // `.btn`, `.actions`, `.modal`, `.muted` and `code` used to restyle every
+  // page visited after this one (a `<td class="actions">` turned into a flex
+  // box).  The <dialog> stays a DOM descendant of the host in the top layer,
+  // so `app-fleet-actions-bar .modal-dialog::backdrop` still matches.
   encapsulation: ViewEncapsulation.None,
   imports: [FormsModule, DropdownMenuComponent],
   template: `
@@ -88,14 +89,18 @@ import {
       <dialog
         #dialog
         class="modal-dialog"
+        aria-labelledby="fleet-action-title"
         (close)="onDialogClose()"
         (cancel)="$event.preventDefault(); closeDialog()"
       >
         @let action = currentAction();
-        <div class="modal" role="dialog" aria-modal="true">
-          @if (action) {
+        <!-- Rendered only while open. The native <dialog> already is the modal dialog (showModal()
+             gives it the role and aria-modal); an always-present inner role=dialog read as a
+             second, hidden dialog on the page. -->
+        @if (action) {
+          <div class="modal">
             <header class="modal-head">
-              <h2>Fleet · {{ action.label }}</h2>
+              <h2 id="fleet-action-title">Fleet · {{ action.label }}</h2>
               <button type="button" class="close-btn" (click)="closeDialog()" aria-label="Close">
                 ×
               </button>
@@ -199,14 +204,14 @@ import {
                 {{ submitting() ? 'Queuing…' : action.confirmLabel }}
               </button>
             </footer>
-          }
-        </div>
+          </div>
+        }
       </dialog>
     </section>
   `,
   styles: [
     `
-      .bar {
+      app-fleet-actions-bar .bar {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -215,29 +220,29 @@ import {
         flex-direction: column;
         gap: var(--space-2);
       }
-      .bar-head {
+      app-fleet-actions-bar .bar-head {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: var(--space-3);
       }
-      .bar-head h3 {
+      app-fleet-actions-bar .bar-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .meta {
+      app-fleet-actions-bar .meta {
         font-size: var(--text-xs);
       }
-      .muted {
+      app-fleet-actions-bar .muted {
         color: var(--text-tertiary);
       }
-      .actions {
+      app-fleet-actions-bar .actions {
         display: flex;
         gap: var(--space-2);
         flex-wrap: wrap;
       }
-      .action {
+      app-fleet-actions-bar .action {
         padding: 6px 12px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--border);
@@ -247,26 +252,26 @@ import {
         font-weight: var(--font-medium);
         cursor: pointer;
       }
-      .action:hover:not(:disabled) {
+      app-fleet-actions-bar .action:hover:not(:disabled) {
         background: var(--bg-tertiary, rgba(0, 113, 227, 0.06));
       }
-      .action:disabled {
+      app-fleet-actions-bar .action:disabled {
         opacity: 0.55;
         cursor: not-allowed;
       }
       /* The menu trigger is projected into the dropdown's own role=button
          wrapper, so it is a span styled like its sibling buttons. */
-      .action-menu {
+      app-fleet-actions-bar .action-menu {
         display: inline-flex;
         align-items: center;
         gap: var(--space-1);
         line-height: 1.4;
       }
-      .action-menu .chevron {
+      app-fleet-actions-bar .action-menu .chevron {
         font-size: 10px;
         color: var(--text-tertiary);
       }
-      .action-menu.is-disabled {
+      app-fleet-actions-bar .action-menu.is-disabled {
         opacity: 0.55;
         pointer-events: none;
       }
@@ -278,7 +283,7 @@ import {
         anchored at top-left.  This block re-states centring explicitly so
         we're not at the mercy of which UA defaults we accidentally clobber.
       */
-      .modal-dialog {
+      app-fleet-actions-bar .modal-dialog {
         position: fixed;
         inset: 0;
         margin: auto;
@@ -292,10 +297,10 @@ import {
         overflow: visible;
         color: inherit;
       }
-      .modal-dialog::backdrop {
+      app-fleet-actions-bar .modal-dialog::backdrop {
         background: rgba(0, 0, 0, 0.45);
       }
-      .modal {
+      app-fleet-actions-bar .modal {
         background: var(--bg-primary);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.18));
@@ -307,72 +312,72 @@ import {
         flex-direction: column;
         gap: var(--space-3);
       }
-      .modal-head {
+      app-fleet-actions-bar .modal-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
       }
-      .modal-head h2 {
+      app-fleet-actions-bar .modal-head h2 {
         margin: 0;
         font-size: var(--text-lg);
         font-weight: var(--font-semibold);
       }
-      .close-btn {
+      app-fleet-actions-bar .close-btn {
         background: none;
         border: none;
         font-size: 24px;
         color: var(--text-secondary);
         cursor: pointer;
       }
-      .modal-target {
+      app-fleet-actions-bar .modal-target {
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-secondary);
       }
-      .modal-desc {
+      app-fleet-actions-bar .modal-desc {
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-primary);
       }
-      .warning {
+      app-fleet-actions-bar .warning {
         margin: 0;
         padding: 10px 12px;
         background: rgba(255, 59, 48, 0.08);
         border-left: 3px solid #ff3b30;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
-        color: #d70015;
+        color: var(--tone-red);
       }
-      .warning code {
+      app-fleet-actions-bar .warning code {
         background: rgba(0, 0, 0, 0.08);
         padding: 1px 4px;
         border-radius: 3px;
         font-family: var(--font-mono);
       }
-      code {
+      app-fleet-actions-bar code {
         background: rgba(0, 0, 0, 0.05);
         padding: 1px 4px;
         border-radius: 3px;
         font-family: var(--font-mono);
         font-size: var(--text-xs);
       }
-      .field {
+      app-fleet-actions-bar .field {
         display: flex;
         flex-direction: column;
         gap: 4px;
       }
-      .field.check {
+      app-fleet-actions-bar .field.check {
         flex-direction: row;
         align-items: center;
       }
-      .field > span {
+      app-fleet-actions-bar .field > span {
         font-size: var(--text-xs);
         color: var(--text-secondary);
         font-weight: var(--font-medium);
       }
-      .field input,
-      .field select,
-      .field textarea {
+      app-fleet-actions-bar .field input,
+      app-fleet-actions-bar .field select,
+      app-fleet-actions-bar .field textarea {
         padding: 6px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--border);
@@ -380,20 +385,20 @@ import {
         color: var(--text-primary);
         font-size: var(--text-sm);
       }
-      .field textarea {
+      app-fleet-actions-bar .field textarea {
         resize: vertical;
         min-height: 48px;
         font-family: inherit;
       }
-      .mono {
+      app-fleet-actions-bar .mono {
         font-family: var(--font-mono);
       }
-      .modal-foot {
+      app-fleet-actions-bar .modal-foot {
         display: flex;
         justify-content: flex-end;
         gap: var(--space-3);
       }
-      .btn {
+      app-fleet-actions-bar .btn {
         padding: 8px 18px;
         border-radius: var(--radius-sm);
         font-size: var(--text-sm);
@@ -401,31 +406,31 @@ import {
         cursor: pointer;
         border: 1px solid transparent;
       }
-      .btn[data-tone='warn'] {
+      app-fleet-actions-bar .btn[data-tone='warn'] {
         background: #ff9500;
         color: #fff;
         border-color: #ff9500;
       }
-      .btn[data-tone='bad'] {
+      app-fleet-actions-bar .btn[data-tone='bad'] {
         background: #ff3b30;
         color: #fff;
         border-color: #ff3b30;
       }
-      .btn[data-tone='ok'] {
+      app-fleet-actions-bar .btn[data-tone='ok'] {
         background: #34c759;
         color: #fff;
         border-color: #34c759;
       }
-      .btn[data-tone='info'] {
+      app-fleet-actions-bar .btn[data-tone='info'] {
         background: var(--accent);
         color: #fff;
         border-color: var(--accent);
       }
-      .btn:disabled {
+      app-fleet-actions-bar .btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
       }
-      .btn-secondary {
+      app-fleet-actions-bar .btn-secondary {
         background: var(--bg-primary);
         color: var(--text-primary);
         border: 1px solid var(--border);

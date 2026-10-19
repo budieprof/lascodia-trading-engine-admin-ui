@@ -12,7 +12,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
-import { TradeSignalDto } from '@core/api/api.types';
+import { OrderDto, TradeSignalDto } from '@core/api/api.types';
 import { AccountAttemptsComponent } from '../../components/account-attempts/account-attempts.component';
 import {
   SpotRecChartComponent,
@@ -131,8 +131,10 @@ import { NotificationService } from '@core/notifications/notification.service';
               <header class="section-head">
                 <h2>Chart — Entry / SL / TP overlay</h2>
                 <div class="section-sub muted">
+                  <!-- Formatted IN UTC: the pipe's default is the browser zone, so the
+                       line printed local time beside a "UTC" suffix (07:01 for 06:01Z). -->
                   {{ s.symbol }} · {{ tfLabel() }} · generated
-                  {{ s.generatedAt | date: 'MMM d, HH:mm' }} UTC · entry
+                  {{ s.generatedAt | date: 'MMM d, HH:mm' : 'UTC' }} UTC · entry
                   <span class="mono">{{ s.entryPrice | number: priceFormat(s) }}</span> · SL
                   <span class="mono">{{ s.stopLoss | number: priceFormat(s) }}</span> · TP
                   <span class="mono">{{ s.takeProfit | number: priceFormat(s) }}</span>
@@ -161,7 +163,11 @@ import { NotificationService } from '@core/notifications/notification.service';
           <app-error-state title="Could not load signal" [message]="e" (retry)="load()" />
         }
 
-        <app-account-attempts [signalId]="signalId()" [signal]="signal()" />
+        <app-account-attempts
+          [signalId]="signalId()"
+          [signal]="signal()"
+          (ordersLoaded)="orders.set($event)"
+        />
       } @else {
         <p class="empty muted">Invalid signal id — route is missing the numeric segment.</p>
       }
@@ -482,18 +488,56 @@ export class SignalDetailPageComponent {
     return 'H1';
   }
 
+  /** The signal's orders as the attempts panel loaded them; null = unknown. */
+  readonly orders = signal<OrderDto[] | null>(null);
+
   /**
    * Outcome label for the chart sub-line.  Distinguishes "the signal row
    * expired" (nobody acted on it) from "the signal aged out after its
    * order was placed" — the latter used to read as a plain "Expired"
    * next to a filled order, which contradicted the Orders panel.
+   *
+   * It reads the orders' own statuses: a linked order only proves an order
+   * was PLACED. Signal #9363 said "Executed — order #70842" in green while
+   * all five of its orders had been cancelled unfilled.
    */
   outcomeLabel(s: TradeSignalDto): { text: string; tone: 'ok' | 'warn' | 'neutral' } | null {
     if (s.status === 'Cancelled') {
       return { text: 'Cancelled', tone: 'warn' };
     }
+    const orders = this.orders();
+    if (orders && orders.length > 0) {
+      const n = orders.length;
+      const filled = orders.filter((o) => o.status === 'Filled' || o.status === 'PartialFill');
+      if (filled.length > 0) {
+        return {
+          text:
+            n === 1
+              ? `Filled — order #${orders[0].id}`
+              : `Filled on ${filled.length} of ${n} orders`,
+          tone: 'ok',
+        };
+      }
+      const working = orders.filter(
+        (o) => o.status === 'Pending' || o.status === 'Submitted' || o.status === 'Cancelling',
+      );
+      if (working.length > 0) {
+        return {
+          text: `Working — ${working.length} of ${n} orders not yet filled`,
+          tone: 'neutral',
+        };
+      }
+      return {
+        text:
+          n === 1
+            ? `Not filled — order #${orders[0].id} ${orders[0].status.toLowerCase()}`
+            : `Not filled — all ${n} orders closed unfilled`,
+        tone: 'warn',
+      };
+    }
     if (s.orderId !== null) {
-      return { text: `Executed — order #${s.orderId}`, tone: 'ok' };
+      // Orders not loaded (or the lookup failed): all that is known is that one was placed.
+      return { text: `Order #${s.orderId} placed`, tone: 'neutral' };
     }
     switch (s.status) {
       case 'Expired':

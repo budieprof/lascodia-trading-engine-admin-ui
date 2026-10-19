@@ -15,6 +15,7 @@ import { finalize } from 'rxjs';
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { EaConfigProfile } from '@core/api/api.types';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 
 /**
  * Named, reusable EA config profiles.
@@ -36,7 +37,7 @@ import type { EaConfigProfile } from '@core/api/api.types';
   selector: 'app-ea-config-profile-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule],
+  imports: [DatePipe, FormsModule, ConfirmDialogComponent],
   template: `
     <section class="panel" aria-label="EA config profiles">
       <header class="panel-head">
@@ -79,7 +80,16 @@ import type { EaConfigProfile } from '@core/api/api.types';
 
           <label class="field">
             <span class="field-label">Profile</span>
-            <select class="input" [(ngModel)]="selectedId" name="profile" [disabled]="busy()">
+            <!-- A signal, not a plain field: \`selected()\` is computed from it, and with a plain
+                 field the summary + JSON below kept showing the first profile while "Apply"
+                 sent whichever one the select now held. -->
+            <select
+              class="input"
+              [ngModel]="selectedId()"
+              (ngModelChange)="selectedId.set($event)"
+              name="profile"
+              [disabled]="busy()"
+            >
               @for (p of profiles(); track p.id) {
                 <option [ngValue]="p.id">{{ p.name }} · {{ p.fieldCount }} fields</option>
               }
@@ -134,12 +144,17 @@ import type { EaConfigProfile } from '@core/api/api.types';
               <button
                 type="button"
                 class="btn btn-primary"
-                (click)="apply()"
+                (click)="confirming.set('apply')"
                 [disabled]="busy() || !instanceId()"
               >
                 Apply to this instance
               </button>
-              <button type="button" class="btn btn-danger" (click)="remove()" [disabled]="busy()">
+              <button
+                type="button"
+                class="btn btn-danger"
+                (click)="confirming.set('delete')"
+                [disabled]="busy()"
+              >
                 Delete profile
               </button>
             </div>
@@ -189,6 +204,30 @@ import type { EaConfigProfile } from '@core/api/api.types';
           </button>
         </form>
       </div>
+
+      <!-- Both actions asked nothing: Apply is a live risk-limit change on the account. -->
+      <app-confirm-dialog
+        [open]="confirming() !== null"
+        [title]="
+          confirming() === 'apply'
+            ? 'Apply “' + (selected()?.name ?? '') + '” to this instance?'
+            : 'Delete profile “' + (selected()?.name ?? '') + '”?'
+        "
+        [message]="
+          confirming() === 'apply'
+            ? 'Pushes ' +
+              (selected()?.fieldCount ?? 0) +
+              ' settings to ' +
+              instanceId() +
+              ' — a live risk-limit change on its account, through the same guards as a manual config push.'
+            : 'Removes the saved profile. Instances it was applied to keep their current settings.'
+        "
+        [confirmLabel]="confirming() === 'apply' ? 'Apply profile' : 'Delete profile'"
+        [confirmVariant]="confirming() === 'apply' ? 'primary' : 'destructive'"
+        [loading]="busy()"
+        (confirm)="runConfirmed()"
+        (cancelled)="confirming.set(null)"
+      />
     </section>
   `,
   styles: [
@@ -618,11 +657,23 @@ export class EaConfigProfilePanelComponent {
   readonly loading = signal(false);
   readonly busy = signal(false);
 
-  selectedId: number | null = null;
+  readonly selectedId = signal<number | null>(null);
   captureName = '';
   captureDesc = '';
 
-  readonly selected = computed(() => this.profiles().find((p) => p.id === this.selectedId) ?? null);
+  readonly selected = computed(
+    () => this.profiles().find((p) => p.id === this.selectedId()) ?? null,
+  );
+
+  /** Which action is awaiting confirmation. */
+  readonly confirming = signal<'apply' | 'delete' | null>(null);
+
+  runConfirmed(): void {
+    const action = this.confirming();
+    this.confirming.set(null);
+    if (action === 'apply') this.apply();
+    else if (action === 'delete') this.remove();
+  }
 
   constructor() {
     this.reload();
@@ -645,14 +696,17 @@ export class EaConfigProfilePanelComponent {
         next: (res) => {
           const rows = res.data ?? [];
           this.profiles.set(rows);
-          if (this.selectedId == null && rows.length > 0) this.selectedId = rows[0].id;
+          const sel = this.selectedId();
+          if ((sel == null || !rows.some((r) => r.id === sel)) && rows.length > 0) {
+            this.selectedId.set(rows[0].id);
+          }
         },
         error: () => this.notify.error('Could not load config profiles'),
       });
   }
 
   apply(): void {
-    const id = this.selectedId;
+    const id = this.selectedId();
     const target = this.instanceId();
     if (id == null || !target) return;
     this.busy.set(true);
@@ -699,7 +753,7 @@ export class EaConfigProfilePanelComponent {
   }
 
   remove(): void {
-    const id = this.selectedId;
+    const id = this.selectedId();
     if (id == null) return;
     this.busy.set(true);
     this.svc
@@ -708,7 +762,7 @@ export class EaConfigProfilePanelComponent {
       .subscribe({
         next: (res) => {
           this.notify.success(res.message ?? 'Deleted');
-          this.selectedId = null;
+          this.selectedId.set(null);
           this.reload();
         },
         error: () => this.notify.error('Delete failed'),

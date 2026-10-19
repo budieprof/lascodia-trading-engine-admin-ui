@@ -227,15 +227,15 @@ const SEVERITY_OPTIONS: ReadonlyArray<{ value: SeverityFilter; label: string }> 
       }
       .sev[data-severity='INFO'] {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .sev[data-severity='WARN'] {
         background: rgba(255, 149, 0, 0.15);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .sev[data-severity='ERROR'] {
         background: rgba(255, 59, 48, 0.15);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .sev[data-severity='CRIT'] {
         background: #d70015;

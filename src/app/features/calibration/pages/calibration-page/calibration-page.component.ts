@@ -609,19 +609,23 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                           <span
                             class="dist-tick"
                             [style.left.%]="p.pct"
-                            [title]="p.label + ': ' + formatDistValue(p.value)"
+                            [title]="p.label + ': ' + tickValue(p)"
                           >
                             <span class="dist-tick-bar"></span>
                             <span class="dist-tick-label">{{ p.label }}</span>
-                            <span class="dist-tick-val mono">{{ formatDistValue(p.value) }}</span>
+                            <span class="dist-tick-val mono">{{ tickValue(p) }}</span>
                           </span>
                         }
                       </div>
                     </div>
                   } @else {
                     <p class="small muted dist-empty">
-                      No distribution — {{ entry.sampleCount | number }} sample(s) is below the
-                      minimum the engine needs for percentiles.
+                      No distribution —
+                      {{ entry.sampleCount | number }} sample{{
+                        entry.sampleCount === 1 ? '' : 's'
+                      }}
+                      {{ entry.sampleCount === 1 ? 'is' : 'are' }} below the minimum the engine
+                      needs for percentiles.
                     </p>
                   }
 
@@ -950,7 +954,7 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
         font-size: 10px;
         font-weight: var(--font-bold);
         padding: 1px 6px;
-        border-radius: var(--radius-pill);
+        border-radius: var(--radius-full);
         background: var(--bg-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -1247,15 +1251,39 @@ export class CalibrationPageComponent {
   readonly gatesLoading = signal(true);
   readonly defaultsLoading = signal(true);
 
+  // Minimums sum to less than the card so nothing is clipped: Detail / Source / Rejected were cut
+  // mid-word ("StrategyWork", "2026-10-19T") behind a sideways scroll. Strategy-level rejections
+  // (the backtest gate) happen before any signal exists — their id is null and reads "—", not blank.
   readonly rejectionColumns: ColDef<SignalRejectionEntryDto>[] = [
-    { headerName: 'Signal', field: 'tradeSignalId', width: 110 },
-    { headerName: 'Stage', field: 'stage', width: 160 },
-    { headerName: 'Reason', field: 'reason', flex: 1, minWidth: 220 },
-    { headerName: 'Detail', field: 'detail', flex: 2, minWidth: 320 },
-    { headerName: 'Strategy', field: 'strategyId', width: 110 },
-    { headerName: 'Symbol', field: 'symbol', width: 100 },
-    { headerName: 'Source', field: 'source', width: 160 },
-    { headerName: 'Rejected', field: 'rejectedAt', width: 180 },
+    {
+      headerName: 'Signal',
+      field: 'tradeSignalId',
+      width: 84,
+      minWidth: 80,
+      valueFormatter: (p) => (p.value != null ? `#${p.value}` : '—'),
+      tooltipValueGetter: (p) =>
+        p.value == null ? 'Rejected before a signal was created (strategy-level gate)' : null,
+    },
+    { headerName: 'Stage', field: 'stage', width: 130, minWidth: 120 },
+    { headerName: 'Reason', field: 'reason', flex: 1, minWidth: 180, tooltipField: 'reason' },
+    { headerName: 'Detail', field: 'detail', flex: 2, minWidth: 240, tooltipField: 'detail' },
+    {
+      // 100: at 92 the header still broke mid-word ("STRATEG Y").
+      headerName: 'Strategy',
+      field: 'strategyId',
+      width: 100,
+      minWidth: 100,
+      valueFormatter: (p) => (p.value != null ? `#${p.value}` : '—'),
+    },
+    { headerName: 'Symbol', field: 'symbol', width: 92, minWidth: 88 },
+    { headerName: 'Source', field: 'source', width: 130, minWidth: 110, tooltipField: 'source' },
+    {
+      headerName: 'Rejected (UTC)',
+      field: 'rejectedAt',
+      width: 172,
+      minWidth: 168,
+      valueFormatter: (p) => fmtRejectedAt(p.value as string | null),
+    },
   ];
 
   /** Why the last rejections fetch failed, or null. Drives the inline retry panel. */
@@ -1597,7 +1625,7 @@ export class CalibrationPageComponent {
 
   percentilePoints(
     entry: DefaultsCalibrationEntryDto,
-  ): Array<{ label: string; pct: number; value: number }> {
+  ): Array<{ label: string; pct: number; value: number; maxValue: number }> {
     if (!entry.distribution) return [];
     const d = entry.distribution;
     const raw = [
@@ -1606,21 +1634,30 @@ export class CalibrationPageComponent {
       { label: 'P50', value: d.p50 },
       { label: 'P75', value: d.p75 },
       { label: 'P90', value: d.p90 },
-    ].map((p) => ({ ...p, pct: this.markerPct(entry, p.value) }));
+    ].map((p) => ({ ...p, maxValue: p.value, pct: this.markerPct(entry, p.value) }));
 
     // Merge ticks that land within 9% of each other so labels never overlap.
     // Common pattern: P5/P25 collapsing to the same value at low-spread
-    // distributions (e.g. WalkForward:MinInSampleDays where p5=p25=67).
-    const merged: Array<{ label: string; pct: number; value: number }> = [];
+    // distributions (e.g. WalkForward:MinInSampleDays where p5=p25=67). Merged
+    // ticks keep the highest value too: "P75/P90 14.0" hid a P90 of 16.
+    const merged: Array<{ label: string; pct: number; value: number; maxValue: number }> = [];
     for (const p of raw) {
       const last = merged[merged.length - 1];
       if (last && Math.abs(last.pct - p.pct) < 9) {
         last.label = `${last.label}/${p.label}`;
+        last.maxValue = p.value;
       } else {
         merged.push({ ...p });
       }
     }
     return merged;
+  }
+
+  /** A tick's value, or "a–b" when merged percentiles differ. */
+  tickValue(p: { value: number; maxValue: number }): string {
+    const lo = this.formatDistValue(p.value);
+    const hi = this.formatDistValue(p.maxValue);
+    return lo === hi ? lo : `${lo}–${hi}`;
   }
 
   hasDistribution(entry: DefaultsCalibrationEntryDto): boolean {
@@ -1642,6 +1679,14 @@ export class CalibrationPageComponent {
     if (abs >= 1) return v.toFixed(2);
     return v.toFixed(3);
   }
+}
+
+const rejectedAtPipe = new DatePipe('en-US');
+
+/** "Oct 19, 2026 13:00:03" in UTC — the raw ISO string was clipped to "2026-10-19T". */
+function fmtRejectedAt(iso: string | null): string {
+  if (!iso) return '—';
+  return rejectedAtPipe.transform(iso, 'MMM d, y HH:mm:ss', 'UTC') ?? '—';
 }
 
 function emptyPaged<T>(): PagedData<T> {

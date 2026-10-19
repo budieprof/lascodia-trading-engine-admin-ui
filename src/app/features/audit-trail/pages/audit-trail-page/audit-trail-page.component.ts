@@ -24,6 +24,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 type DateRange = 'all' | '24h' | '7d' | '30d';
 
@@ -61,6 +62,7 @@ const NEGATIVE_OUTCOMES = new Set([
     FormsModule,
     DatePipe,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -180,7 +182,9 @@ const NEGATIVE_OUTCOMES = new Set([
           [ngModel]="decisionTypeFilter()"
           (ngModelChange)="onFilterChange('decisionType', $event)"
         >
-          <option value="">All decision types ({{ analyticsRows().length }})</option>
+          <!-- The count beside "All" was the sample size (2,000), not a number of types, and it
+               was clipped to "(200(" by the select's width. -->
+          <option value="">All decision types</option>
           @for (t of decisionTypeOptions(); track t.value) {
             <option [value]="t.value">{{ t.value }} ({{ t.count }})</option>
           }
@@ -230,23 +234,24 @@ const NEGATIVE_OUTCOMES = new Set([
       />
 
       @if (expandedEntry()) {
-        <div
-          class="detail-overlay"
-          role="presentation"
-          tabindex="-1"
-          (click)="expandedEntry.set(null)"
-          (keydown.escape)="expandedEntry.set(null)"
-        >
+        <!-- Escape + focus come from appModalA11y: the overlay's (keydown.escape) never fired
+             because focus stayed on the clicked row, outside the dialog. -->
+        <div class="detail-overlay" role="presentation" (click)="expandedEntry.set(null)">
           <div
             class="detail-panel"
             role="dialog"
             aria-modal="true"
+            aria-labelledby="audit-detail-title"
             tabindex="-1"
+            appModalA11y
+            (dismiss)="expandedEntry.set(null)"
             (click)="$event.stopPropagation()"
             (keydown)="$event.stopPropagation()"
           >
             <div class="detail-header">
-              <h3 class="detail-title">Decision Log #{{ expandedEntry()!.id }}</h3>
+              <h3 class="detail-title" id="audit-detail-title">
+                Decision Log #{{ expandedEntry()!.id }}
+              </h3>
               <button
                 type="button"
                 class="close-btn"
@@ -955,18 +960,22 @@ export class AuditTrailPageComponent {
       field: 'outcome',
       width: 120,
       cellRenderer: (params: { value: string }) => {
-        const outcomeMap: Record<string, { bg: string; color: string }> = {
-          Approved: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Executed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Skipped: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-          Passed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Failed: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Critical: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Detected: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
+        // Theme tones: the fixed light-theme hues (#0040DD, #D70015) were dark-on-dark here.
+        const tone: Record<string, string> = {
+          Approved: '--tone-green',
+          Rejected: '--tone-red',
+          Executed: '--tone-green',
+          Skipped: '--tone-grey',
+          Passed: '--tone-green',
+          Failed: '--tone-red',
+          Critical: '--tone-red',
+          Detected: '--tone-amber',
         };
-        const s = outcomeMap[params.value] ?? { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' };
-        return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
+        const t = tone[params.value] ?? '--tone-blue';
+        const text = String(params.value ?? '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;');
+        return `<span style="background:color-mix(in srgb, var(${t}) 16%, transparent);color:var(${t});padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${text}</span>`;
       },
     },
     {
@@ -985,7 +994,7 @@ export class AuditTrailPageComponent {
       width: 90,
       sortable: false,
       cellRenderer: () => {
-        return `<button data-action="expand" style="height:26px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:rgba(0,113,227,0.1);color:#0040DD">Details</button>`;
+        return `<button data-action="expand" style="height:26px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:color-mix(in srgb, var(--tone-blue) 16%, transparent);color:var(--tone-blue)">Details</button>`;
       },
       onCellClicked: (params: any) => {
         const action = (params.event?.target as HTMLElement)?.getAttribute('data-action');

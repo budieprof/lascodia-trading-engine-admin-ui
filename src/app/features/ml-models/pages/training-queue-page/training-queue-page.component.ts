@@ -1,10 +1,19 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
-import type { ActiveMLTrainingRunDto, AvailableArchitecturesDto } from '@core/api/api.types';
+import type { ActiveMLTrainingRunDto } from '@core/api/api.types';
+import { unwrapResponse } from '@core/api/api.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { NotificationService } from '@core/notifications/notification.service';
 
@@ -14,6 +23,8 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 /**
  * Live snapshot of every Queued/Running ML training run. Powered by
@@ -40,6 +51,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -48,14 +60,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         subtitle="Live snapshot of every Queued or Running training run"
       >
         <a routerLink="/ml-models" class="btn btn-secondary">← ML Models</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       @if (loading()) {
@@ -454,10 +459,9 @@ export class TrainingQueuePageComponent {
 
   protected readonly resource = createPolledResource(
     () =>
-      this.ml.listActiveTrainingRuns().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<ActiveMLTrainingRunDto[]>([])),
-      ),
+      // Errors propagate to resource.error(); swallowed into [] an engine
+      // failure read as "Nothing queued or running".
+      this.ml.listActiveTrainingRuns().pipe(map(unwrapResponse)),
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -500,11 +504,7 @@ export class TrainingQueuePageComponent {
   // operators rarely change the blocklist and the server-side value can also
   // change out of band (direct EngineConfig edit, another operator session).
   protected readonly archResource = createPolledResource(
-    () =>
-      this.ml.getAvailableArchitectures().pipe(
-        map((res) => res.data ?? null),
-        catchError(() => of<AvailableArchitecturesDto | null>(null)),
-      ),
+    () => this.ml.getAvailableArchitectures().pipe(map(unwrapResponse)),
     { intervalMs: 5 * 60_000 },
   );
   protected readonly blockedSet = signal<Set<string>>(new Set());
@@ -521,18 +521,27 @@ export class TrainingQueuePageComponent {
     return false;
   });
 
-  constructor() {
-    // Seed the editable blocklist from the server payload after the polled
-    // resource hydrates. queueMicrotask defers past the constructor so the
-    // resource's first fetch can resolve before we read it.
-    queueMicrotask(() => this.seedBlockedFromServer());
-  }
+  /** The server blocklist the editable set was last seeded from (sorted, joined). */
+  private seededFrom: string | null = null;
 
-  private seedBlockedFromServer(): void {
-    const server = this.archResource.value()?.blockedFromAutoPick;
-    if (server) this.blockedSet.set(new Set(server));
-    // If still loading, try again shortly. Cheap enough — fires at most a few times.
-    else if (this.archResource.loading()) setTimeout(() => this.seedBlockedFromServer(), 500);
+  constructor() {
+    // Seed the editable blocklist from the server, and follow it when it
+    // changes out of band (another operator, a direct EngineConfig edit) as
+    // long as there are no unsaved edits here. It used to seed once, so a
+    // later server change surfaced as a phantom "unsaved" diff whose Save
+    // would have silently reverted the other change.
+    effect(() => {
+      const server = this.archResource.value()?.blockedFromAutoPick;
+      if (!server) return;
+      untracked(() => {
+        const serverKey = [...server].sort().join('|');
+        const localKey = [...this.blockedSet()].sort().join('|');
+        if (this.seededFrom === null || localKey === this.seededFrom) {
+          this.blockedSet.set(new Set(server));
+        }
+        this.seededFrom = serverKey;
+      });
+    });
   }
 
   protected toggleBlocked(name: string): void {

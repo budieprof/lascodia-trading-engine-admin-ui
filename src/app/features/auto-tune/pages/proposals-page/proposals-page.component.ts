@@ -13,10 +13,12 @@ import { finalize, map } from 'rxjs';
 
 import { AutoTuneService } from '@core/services/auto-tune.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
+import { NotificationService } from '@core/notifications/notification.service';
 import type { AutoTuneProposalDto, AutoTuneProposalStatus } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -44,12 +46,14 @@ const SUMMARY_WINDOW = 200;
   selector: 'app-auto-tune-proposals-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  host: { '(document:keydown.escape)': 'cancel()' },
   imports: [
     DatePipe,
     DecimalPipe,
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    RefreshButtonComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -63,14 +67,11 @@ const SUMMARY_WINDOW = 200;
         subtitle="Worker-generated knob-change proposals. Review before applying to live config."
       >
         <a routerLink="/auto-tune/auto-apply" class="btn btn-secondary">Auto-Apply Config →</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refreshAll()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to the first-load flag, the old button never changed on a click. -->
+        <app-refresh-button
+          [refreshing]="resource.refreshing() || summaryResource.refreshing()"
+          (refresh)="refreshAll()"
+        />
       </app-page-header>
 
       <section class="controls">
@@ -644,6 +645,7 @@ const SUMMARY_WINDOW = 200;
 export class AutoTuneProposalsPageComponent {
   private readonly autoTune = inject(AutoTuneService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
 
   protected readonly STATUS_TABS = STATUS_TABS;
   protected readonly SUMMARY_WINDOW = SUMMARY_WINDOW;
@@ -790,26 +792,38 @@ export class AutoTuneProposalsPageComponent {
       )
       .subscribe({
         next: (res) => {
-          if (res.status) {
-            this.auditTrail
-              .create({
-                entityType: 'AutoTuneProposal',
-                entityId: p.proposal.id,
-                decisionType:
-                  p.kind === 'apply' ? 'AutoTuneProposalApplied' : 'AutoTuneProposalRejected',
-                outcome: p.kind === 'apply' ? 'Applied' : 'Rejected',
-                reason: reason || null,
-                contextJson: JSON.stringify({
-                  proposalKey: p.proposal.proposalKey,
-                  currentValue: p.proposal.currentValue,
-                  proposedValue: p.proposal.proposedValue,
-                  evidenceCount: p.proposal.evidenceCount,
-                }),
-                source: 'AdminUI',
-              })
-              .subscribe({ error: () => undefined });
+          // The engine refuses with HTTP 200 + status:false (already applied, stale knob…);
+          // that used to close the modal with no word at all.
+          if (!res.status) {
+            this.notifications.error(
+              res.message || `The engine refused to ${p.kind} proposal ${p.proposal.proposalKey}.`,
+            );
+            return;
           }
+          this.notifications.success(
+            p.kind === 'apply'
+              ? `Applied ${p.proposal.proposalKey}`
+              : `Rejected ${p.proposal.proposalKey}`,
+          );
+          this.auditTrail
+            .create({
+              entityType: 'AutoTuneProposal',
+              entityId: p.proposal.id,
+              decisionType:
+                p.kind === 'apply' ? 'AutoTuneProposalApplied' : 'AutoTuneProposalRejected',
+              outcome: p.kind === 'apply' ? 'Applied' : 'Rejected',
+              reason: reason || null,
+              contextJson: JSON.stringify({
+                proposalKey: p.proposal.proposalKey,
+                currentValue: p.proposal.currentValue,
+                proposedValue: p.proposal.proposedValue,
+                evidenceCount: p.proposal.evidenceCount,
+              }),
+              source: 'AdminUI',
+            })
+            .subscribe({ error: () => undefined });
         },
+        // Transport errors are toasted by the error interceptor.
         error: () => undefined,
       });
   }

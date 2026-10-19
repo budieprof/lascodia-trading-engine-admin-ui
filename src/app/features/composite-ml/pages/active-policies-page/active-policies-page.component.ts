@@ -2,10 +2,10 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
-import type { ActivePolicyDto } from '@core/api/api.types';
+import { unwrapResponse } from '@core/api/api.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { OptionsHealthCardComponent } from '../../components/options-health-card/options-health-card.component';
@@ -45,7 +45,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -127,10 +127,17 @@ type TierFilter = 'all' | 'live' | 'coldstart';
             </span>
           </header>
 
-          @if (filteredPolicies().length === 0) {
+          @if (policies().length === 0) {
+            <!-- Not a filter miss: the engine holds no active snapshot at all,
+                 and "adjust the filters" sent operators hunting for one. -->
+            <app-empty-state
+              title="No active CompositeML policies"
+              description="The engine has not activated any policy snapshot yet, so there is no lineage to walk or diff. Policies appear here after the CompositeML trainer activates its first snapshot."
+            />
+          } @else if (filteredPolicies().length === 0) {
             <app-empty-state
               title="No matching policies"
-              description="Adjust the filters or wait for the next activation cycle."
+              description="No active policy matches these filters. Clear the symbol or pick another tier or trainer."
             />
           } @else {
             <table class="policies-table">
@@ -227,6 +234,25 @@ type TierFilter = 'all' | 'live' | 'coldstart';
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -343,11 +369,11 @@ type TierFilter = 'all' | 'live' | 'coldstart';
       }
       .tier-pill.live {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .tier-pill.cold {
         background: rgba(175, 82, 222, 0.12);
-        color: #8e44ad;
+        color: var(--tone-purple);
       }
       .outcome {
         font-size: var(--text-xs);
@@ -400,10 +426,9 @@ export class ActivePoliciesPageComponent {
 
   protected readonly resource = createPolledResource(
     () =>
-      this.compositeMl.listActivePolicies().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of([] as ActivePolicyDto[])),
-      ),
+      // Errors propagate: swallowing them into [] made an engine failure read
+      // as "no policies" and left the error state below unreachable.
+      this.compositeMl.listActivePolicies().pipe(map(unwrapResponse)),
     // Activations arrive as pushes; the fallback stays slow because operators
     // don't make rapid-fire activations and the engine load is not worth it.
     {

@@ -5,7 +5,9 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -33,11 +35,14 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
  *      (account, instance) emission.  Multiple rows per same pair are
  *      possible when a transient gate fires repeatedly; every emission
  *      is surfaced so operators can spot intermittent vs persistent.
- *   2. The order lineage (`TradeSignalDto.orderId` → `/order/{id}`) —
- *      the engine has no per-signal order list, so the one linked order
- *      is fetched by id and rendered as the "accepted" outcome row.
- *      Without it a signal that filled cleanly showed "No rejection
- *      events" and nothing else, which read as "nobody touched it".
+ *   2. The orders the signal produced — one per account that took it. A
+ *      signal fans out across accounts, but `TradeSignalDto.orderId` links
+ *      only the FIRST order, and the panel used to show that one alone:
+ *      signal #9363 placed five orders (accounts 17, 23, 24, 26, 27) and
+ *      the page listed one. They are now listed with the `tradeSignalId`
+ *      order filter (engine OrderQueryFilter, 2026-10-19). Without any order
+ *      a signal that filled cleanly showed "No rejection events" and nothing
+ *      else.
  *
  * Single fetch per signal (no polling) — events are append-only and the
  * signal-detail view is short-lived; the retry button covers refresh.
@@ -83,10 +88,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           message="Engine returned an error fetching rejection events for this signal."
           (retry)="reload()"
         />
-      } @else if (rows().length === 0 && !order()) {
+      } @else if (rows().length === 0 && orders().length === 0) {
         <app-empty-state title="No account attempts recorded" [description]="emptyDescription()" />
       } @else {
-        @if (order(); as o) {
+        @for (o of orders(); track o.id) {
           <div class="outcome" [attr.data-status]="o.status">
             <div class="outcome-head">
               <span class="stage" data-stage="Broker">Order</span>
@@ -382,7 +387,14 @@ export class AccountAttemptsComponent {
   private readonly ordersService = inject(OrdersService);
 
   readonly rows = signal<SignalRejectionEventDto[]>([]);
-  readonly order = signal<OrderDto | null>(null);
+  /** Every order this signal produced, oldest first (one per account that took it). */
+  readonly orders = signal<OrderDto[]>([]);
+  /**
+   * Emits the signal's orders once loaded (null when the lookup failed), so
+   * the page's outcome line can say what actually happened to them rather
+   * than "Executed" for any signal with a linked order.
+   */
+  readonly ordersLoaded = output<OrderDto[] | null>();
   readonly loading = signal<boolean>(false);
   readonly error = signal<unknown | null>(null);
   readonly expanded = signal<number | null>(null);
@@ -391,7 +403,10 @@ export class AccountAttemptsComponent {
     const parts: string[] = [];
     const n = this.rows().length;
     if (n > 0) parts.push(`${n} rejection${n === 1 ? '' : 's'}`);
-    const picked = this.signal()?.accountsPickedUpCount ?? 0;
+    // The single-signal GET fills accountsPickedUpCount since 2026-10-19 (it
+    // was 0 before); the order list's distinct accounts still count when larger.
+    const accounts = new Set(this.orders().map((o) => o.tradingAccountId)).size;
+    const picked = Math.max(accounts, this.signal()?.accountsPickedUpCount ?? 0);
     if (picked > 0) parts.push(`${picked} account${picked === 1 ? '' : 's'} picked up`);
     return parts.join(' · ');
   });
@@ -404,7 +419,7 @@ export class AccountAttemptsComponent {
     return 'No EA rejected this signal and no account created an order from it — it was never polled, or expired before any account was eligible.';
   });
 
-  private lastOrderId: number | null = null;
+  private lastOrderSignalId: number | null | undefined = undefined;
 
   constructor() {
     // Fetch on signalId change.  Using effect() rather than the polling
@@ -420,17 +435,17 @@ export class AccountAttemptsComponent {
       this.fetchFor(id);
     });
     effect(() => {
-      const orderId = this.signal()?.orderId ?? null;
-      if (orderId === this.lastOrderId) return;
-      this.lastOrderId = orderId;
-      this.fetchOrder(orderId);
+      const id = this.signalId();
+      if (id === this.lastOrderSignalId) return;
+      this.lastOrderSignalId = id;
+      untracked(() => this.fetchOrders(id));
     });
   }
 
   reload(): void {
     const id = this.signalId();
     if (id && id > 0) this.fetchFor(id);
-    this.fetchOrder(this.signal()?.orderId ?? null);
+    this.fetchOrders(id);
   }
 
   toggle(id: number): void {
@@ -483,20 +498,41 @@ export class AccountAttemptsComponent {
   }
 
   /**
-   * The linked order is best-effort: a failed lookup leaves the rejection
-   * list intact rather than replacing it with an error state.
+   * The signal's orders are best-effort: a failed lookup leaves the rejection
+   * list intact rather than replacing it with an error state, and emits null
+   * so the page's outcome line says "unknown" instead of guessing.
+   *
+   * `filter.tradeSignalId` narrows the list server-side (engine
+   * OrderQueryFilter, 2026-10-19) — every order the signal produced, the
+   * linked one included, so the old extra fetch of `signal.orderId` by id is
+   * gone. One order per account that took it, so 50 is never the cap in
+   * practice; rows are still checked against the id in case an older engine
+   * ignores the member and answers with the newest orders.
    */
-  private fetchOrder(orderId: number | null): void {
-    if (orderId == null || orderId <= 0) {
-      this.order.set(null);
+  private fetchOrders(signalId: number | null): void {
+    if (signalId == null || signalId <= 0) {
+      this.orders.set([]);
       return;
     }
     this.ordersService
-      .getById(orderId)
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 50,
+        filter: { tradeSignalId: signalId },
+        sortBy: 'createdAt',
+        sortDirection: 'desc',
+      })
       .pipe(
-        map((res) => (res.status ? (res.data ?? null) : null)),
-        catchError(() => of<OrderDto | null>(null)),
+        map((res) => (res.status === false ? null : (res.data?.data ?? []))),
+        catchError(() => of<OrderDto[] | null>(null)),
       )
-      .subscribe((o) => this.order.set(o));
+      .subscribe((list) => {
+        if (this.signalId() !== signalId) return;
+        const orders = (list ?? [])
+          .filter((o) => o.tradeSignalId === signalId)
+          .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        this.orders.set(orders);
+        this.ordersLoaded.emit(list === null ? null : orders);
+      });
   }
 }

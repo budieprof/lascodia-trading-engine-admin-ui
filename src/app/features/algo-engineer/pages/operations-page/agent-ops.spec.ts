@@ -17,6 +17,7 @@ import {
   buildWorkOrder,
   extractPendingApprovals,
   formatAge,
+  formatAgo,
   isEngineerConversation,
   monitorWatchRow,
   runningWorkOrders,
@@ -134,6 +135,14 @@ describe('formatAge', () => {
   it('never renders a negative or nonsense age', () => {
     expect(formatAge(-5000)).toBe('just now');
     expect(formatAge(Number.NaN)).toBe('just now');
+  });
+});
+
+describe('formatAgo', () => {
+  it('never reads "just now ago"', () => {
+    expect(formatAgo(10_000)).toBe('just now');
+    expect(formatAgo(13 * 60_000)).toBe('13m ago');
+    expect(formatAgo(2 * 3_600_000 + 13 * 60_000)).toBe('2h 13m ago');
   });
 });
 

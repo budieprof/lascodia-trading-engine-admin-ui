@@ -1,21 +1,16 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
-import type { MLModelOverfitFlagDto } from '@core/api/api.types';
+import { unwrapResponse } from '@core/api/api.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { V6OrderBookCardComponent } from '../../components/v6-orderbook-card/v6-orderbook-card.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -40,6 +35,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     EmptyStateComponent,
     RelativeTimePipe,
     V6OrderBookCardComponent,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -48,14 +44,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         subtitle="Active models whose CV Sharpe is materially worse than live 7-day Sharpe"
       >
         <a routerLink="/ml-models" class="btn btn-secondary">← ML Models</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="controls">
@@ -362,10 +351,11 @@ export class OverfitWatchlistPageComponent {
 
   protected readonly resource = createPolledResource(
     () =>
-      this.ml.getOverfitWatchlist(this.ratioThreshold(), this.minResolvedSignals()).pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<MLModelOverfitFlagDto[]>([])),
-      ),
+      // Errors propagate to resource.error(); swallowed into [] an engine
+      // failure read as "No overfit flags — Healthy state".
+      this.ml
+        .getOverfitWatchlist(this.ratioThreshold(), this.minResolvedSignals())
+        .pipe(map(unwrapResponse)),
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -375,11 +365,13 @@ export class OverfitWatchlistPageComponent {
   );
 
   constructor() {
-    effect(() => {
-      this.ratioThreshold();
-      this.minResolvedSignals();
-      this.resource.refresh();
-    });
+    // Typed thresholds: one request once the operator pauses, and none at
+    // start-up (the resource's own first fetch covers that).
+    refetchOnChange(
+      () => [this.ratioThreshold(), this.minResolvedSignals()],
+      () => this.resource.refresh(),
+      400,
+    );
   }
 
   protected readonly flags = computed(() => this.resource.value() ?? []);

@@ -1,10 +1,12 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, finalize, map, of } from 'rxjs';
+import { finalize, map } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
+import { NotificationService } from '@core/notifications/notification.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type { LayerSkillSnapshotDto, SkillOverrideAction, Timeframe } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
@@ -13,6 +15,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 
 @Component({
@@ -29,6 +32,7 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -38,7 +42,7 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -146,9 +150,17 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
 
       @if (overrideTarget(); as target) {
         <div class="modal-overlay" (click)="closeOverride()">
-          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+          <div
+            class="modal"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="layer-skill-override-title"
+            appModalA11y
+            (dismiss)="closeOverride()"
+          >
             <header class="modal-head">
-              <h2>Override layer skill</h2>
+              <h2 id="layer-skill-override-title">Override layer skill</h2>
               <button type="button" class="close-btn" (click)="closeOverride()" aria-label="Close">
                 ×
               </button>
@@ -183,7 +195,12 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
             </label>
 
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="closeOverride()">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-autofocus
+                (click)="closeOverride()"
+              >
                 Cancel
               </button>
               <button
@@ -205,13 +222,10 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
 export class LayerSkillPageComponent {
   private readonly compositeMl = inject(CompositeMLService);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
 
   protected readonly resource = createPolledResource(
-    () =>
-      this.compositeMl.listLayerSkillSnapshots().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of([] as LayerSkillSnapshotDto[])),
-      ),
+    () => this.compositeMl.listLayerSkillSnapshots().pipe(map(unwrapResponse)),
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -272,32 +286,37 @@ export class LayerSkillPageComponent {
       .pipe(
         finalize(() => {
           this.submitting.set(false);
-          this.overrideTarget.set(null);
           this.resource.refresh();
         }),
       )
       .subscribe({
         next: (res) => {
-          if (res.status) {
-            this.auditTrail
-              .create({
-                entityType: 'CompositeMLLayerSkill',
-                entityId: target.id,
-                decisionType: 'LayerSkillOverride',
-                outcome: this.pickedAction,
-                reason: this.reasonText.trim(),
-                contextJson: JSON.stringify(payload),
-                source: 'AdminUI',
-              })
-              .subscribe({
-                error: () => {
-                  /* best-effort */
-                },
-              });
+          // A refused override keeps the dialog open with the engine's reason:
+          // it used to close as if it had worked.
+          if (!res.status) {
+            this.notifications.error(res.message ?? 'The engine refused the override.');
+            return;
           }
+          this.overrideTarget.set(null);
+          this.notifications.success('Override applied.');
+          this.auditTrail
+            .create({
+              entityType: 'CompositeMLLayerSkill',
+              entityId: target.id,
+              decisionType: 'LayerSkillOverride',
+              outcome: this.pickedAction,
+              reason: this.reasonText.trim(),
+              contextJson: JSON.stringify(payload),
+              source: 'AdminUI',
+            })
+            .subscribe({
+              error: () => {
+                /* best-effort */
+              },
+            });
         },
         error: () => {
-          /* error state handled via resource auto-retry */
+          this.notifications.error('Could not reach the engine — the override was not applied.');
         },
       });
   }
@@ -330,6 +349,25 @@ function scopeLabelFor(symbol: string | null, timeframe: Timeframe | null): stri
 
 function skillPageStyles(): string {
   return `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
     .page {
       padding: var(--space-2) 0;
       display: flex;
@@ -357,10 +395,10 @@ function skillPageStyles(): string {
       margin-right: 4px;
     }
     .kpi.warn {
-      color: #c93400;
+      color: var(--tone-amber);
     }
     .kpi.warn strong {
-      color: #c93400;
+      color: var(--tone-amber);
     }
     .card {
       background: var(--bg-secondary);
@@ -414,15 +452,15 @@ function skillPageStyles(): string {
     }
     .scope-pill[data-tier='global'] {
       background: rgba(0, 113, 227, 0.12);
-      color: #0040dd;
+      color: var(--tone-blue);
     }
     .scope-pill[data-tier='symbol'] {
       background: rgba(52, 199, 89, 0.12);
-      color: #248a3d;
+      color: var(--tone-green);
     }
     .scope-pill[data-tier='pair'] {
       background: rgba(175, 82, 222, 0.12);
-      color: #8e44ad;
+      color: var(--tone-purple);
     }
     .status-pill {
       font-size: var(--text-xs);
@@ -432,17 +470,17 @@ function skillPageStyles(): string {
     }
     .status-pill.active {
       background: rgba(52, 199, 89, 0.12);
-      color: #248a3d;
+      color: var(--tone-green);
     }
     .status-pill.suppressed {
       background: rgba(255, 149, 0, 0.12);
-      color: #c93400;
+      color: var(--tone-amber);
     }
     [data-sig='weak'] {
-      color: #c93400;
+      color: var(--tone-amber);
     }
     [data-sig='strong'] {
-      color: #d70015;
+      color: var(--tone-red);
       font-weight: var(--font-semibold);
     }
     .time {
@@ -537,10 +575,10 @@ function skillPageStyles(): string {
       background: var(--bg-secondary);
     }
     .action-fieldset strong.ok {
-      color: #248a3d;
+      color: var(--tone-green);
     }
     .action-fieldset strong.warn {
-      color: #c93400;
+      color: var(--tone-amber);
     }
     .reason-field {
       display: flex;

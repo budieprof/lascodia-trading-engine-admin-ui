@@ -254,12 +254,16 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
           title="Activity (last 14 days)"
           subtitle="Daily optimization-run starts"
           [options]="optActivityOptions()"
+          [emptyMessage]="activityEmpty()?.message ?? null"
+          [emptyHint]="activityEmpty()?.hint ?? null"
           height="240px"
         />
       </div>
 
-      <!-- 2-col tables: biggest lifts + per-strategy breakdown -->
-      <div class="op-board-row">
+      <!-- 2-col tables: biggest lifts + per-strategy breakdown. With no lifts to rank the left
+           panel is one sentence, so the per-strategy table takes the full width instead of
+           clipping its last two columns in a third of the page. -->
+      <div class="op-board-row" [class.lifts-empty]="topLifts().length === 0">
         <section class="op-board">
           <header class="op-board-head">
             <h3>Biggest health-score lifts</h3>
@@ -339,7 +343,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                     <th class="num">Completed</th>
                     <th class="num">Failed</th>
                     <th class="num">Abandoned</th>
-                    <th class="num">Avg iterations</th>
+                    <th class="num" title="Average iterations per run">Avg iter.</th>
                     <th class="num">Best lift</th>
                   </tr>
                 </thead>
@@ -746,6 +750,9 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         grid-template-columns: 1.5fr 1fr;
         gap: var(--space-3);
         align-items: start;
+      }
+      .op-board-row.lifts-empty {
+        grid-template-columns: 1fr;
       }
       @media (max-width: 1100px) {
         .op-board-row {
@@ -1161,12 +1168,14 @@ export class OptimizationsPageComponent implements OnInit {
   });
 
   optActivityOptions = computed<EChartsOption>(() => {
+    // UTC days on both sides: local midnight through toISOString() keyed east-of-UTC browsers one
+    // day back, so a run started today (UTC) fell outside every bucket.
     const buckets: Record<string, number> = {};
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     for (let i = 13; i >= 0; i--) {
       const d = new Date(today);
-      d.setDate(d.getDate() - i);
+      d.setUTCDate(d.getUTCDate() - i);
       buckets[d.toISOString().slice(0, 10)] = 0;
     }
     for (const r of this.optsSample()) {
@@ -1200,6 +1209,23 @@ export class OptimizationsPageComponent implements OnInit {
           barWidth: '60%',
         },
       ],
+    };
+  });
+
+  /** Why the activity chart is blank — an empty axis box read as "still loading". */
+  readonly activityEmpty = computed<{ message: string; hint: string | null } | null>(() => {
+    const opts = this.optActivityOptions();
+    if (Object.keys(opts).length > 0) return null;
+    const sample = this.optsSample();
+    if (sample.length === 0) return null;
+    let latest = 0;
+    for (const r of sample) {
+      const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+      if (Number.isFinite(t) && t > latest) latest = t;
+    }
+    return {
+      message: 'No runs started in the last 14 days',
+      hint: latest > 0 ? `Latest start: ${new Date(latest).toISOString().slice(0, 10)} UTC` : null,
     };
   });
 

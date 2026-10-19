@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, map, of } from 'rxjs';
@@ -13,6 +22,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ProgressBarComponent } from '@shared/components/ui/progress-bar/progress-bar.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 interface PickupsPage {
   rows: OrderDto[];
@@ -44,33 +54,29 @@ interface PickupsPage {
     ProgressBarComponent,
     RelativeTimePipe,
     MetricCardComponent,
+    RefreshButtonComponent,
   ],
   template: `
     <section class="panel" aria-label="Signals this account picked up">
       <header class="panel-head">
         <div class="panel-title">
           <h3>Picked-up signals</h3>
+          <!-- The engine total, not the rows on this page ("25 orders" above 10,406). -->
           <span class="muted small">
-            @if (rows().length > 0) {
-              {{ rows().length }} order{{ rows().length === 1 ? '' : 's' }}
+            @if (totalItemCount() > 0) {
+              {{ totalItemCount() | number }} order{{ totalItemCount() === 1 ? '' : 's' }}
             } @else {
               no orders
             }
           </span>
         </div>
-        <button
-          type="button"
-          class="btn btn-ghost"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-          title="Refresh now"
-        >
-          @if (resource.loading()) {
-            Refreshing…
-          } @else {
-            Refresh
-          }
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so a click that fetched unchanged rows showed nothing. -->
+        <app-refresh-button
+          variant="outline"
+          [refreshing]="resource.refreshing()"
+          (refresh)="resource.refresh()"
+        />
       </header>
 
       <ui-progress-bar [active]="resource.loading()" />
@@ -121,6 +127,15 @@ interface PickupsPage {
             dotColor="#AF52DE"
           />
         </div>
+        <!-- Total orders is the engine's count; the other tiles break down the newest
+             fetched orders. Filled 347 + Rejected/cancelled 153 beside Total 10,406 read
+             as if most orders had no outcome. -->
+        @if (metricsRows().length > 0 && metricsRows().length < mTotal()) {
+          <p class="muted small window-note">
+            Total orders counts every order; the other tiles cover the newest
+            {{ metricsRows().length | number }}.
+          </p>
+        }
       }
 
       @if (loading()) {
@@ -301,29 +316,6 @@ interface PickupsPage {
       .muted {
         color: var(--text-tertiary);
       }
-      .btn {
-        height: 28px;
-        padding: 0 12px;
-        border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        border: 1px solid transparent;
-        font-family: inherit;
-      }
-      .btn:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .btn-ghost {
-        background: transparent;
-        color: var(--text-secondary);
-        border-color: var(--border);
-      }
-      .btn-ghost:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
 
       /* Analysis KPI strip — fixed responsive columns so cards fill the width. */
       .kpi-grid {
@@ -343,6 +335,9 @@ interface PickupsPage {
       }
       .kpi-grid.loading {
         opacity: 0.55;
+      }
+      .window-note {
+        margin: var(--space-2, 8px) 0 0;
       }
 
       /* Pagination bar */
@@ -559,8 +554,29 @@ export class SignalPickupsPanelComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+      // NOT on creation: this initializer runs before the signal inputs are
+      // bound, so the first fetch saw allAccounts=false / no account and
+      // settled on the empty branch — "No account has created an order from a
+      // signal yet" over 10,000+ orders until a push or the 60 s sweep. The
+      // input effect in the constructor issues the first fetch instead.
+      runImmediately: false,
     },
   );
+
+  constructor() {
+    // Re-query whenever the account selection changes (the picker above the
+    // panel); nothing re-ran the fetch before, so switching accounts kept the
+    // previous account's rows for up to a minute.
+    effect(() => {
+      this.allAccounts();
+      this.tradingAccountId();
+      untracked(() => {
+        this.currentPage.set(1);
+        this.resource.refresh();
+        this.metricsResource.refresh();
+      });
+    });
+  }
 
   readonly rows = computed(() => this.resource.value()?.rows ?? []);
   readonly totalItemCount = computed(() => this.resource.value()?.total ?? 0);
@@ -592,7 +608,9 @@ export class SignalPickupsPanelComponent {
   }
 
   // ── Analysis metrics ─────────────────────────────────────────────────────
-  // Over ALL of the account's orders (wide cap), independent of the table page.
+  // Over the account's newest 500 orders (independent of the table page); the
+  // Total tile is the engine's full count, and the template says so when the
+  // two differ.
   protected readonly metricsResource = createPolledResource<{ rows: OrderDto[]; total: number }>(
     () => {
       const allMode = this.allAccounts();
@@ -620,9 +638,11 @@ export class SignalPickupsPanelComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+      // See `resource`: the constructor's input effect issues the first fetch.
+      runImmediately: false,
     },
   );
-  private readonly metricsRows = computed(() => this.metricsResource.value()?.rows ?? []);
+  protected readonly metricsRows = computed(() => this.metricsResource.value()?.rows ?? []);
   private countTones(tone: 'good' | 'bad' | 'neutral'): number {
     return this.metricsRows().filter((o) => this.statusTone(o.status) === tone).length;
   }

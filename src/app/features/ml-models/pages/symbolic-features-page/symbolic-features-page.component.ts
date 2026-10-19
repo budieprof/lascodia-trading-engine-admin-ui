@@ -1,18 +1,13 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, finalize, map, of } from 'rxjs';
+import { catchError, finalize, forkJoin, map, of } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
+import { NotificationService } from '@core/notifications/notification.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type {
   SymbolicFeatureDecaySnapshotDto,
   SymbolicFeatureDto,
@@ -26,8 +21,37 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
+import { SymbolicFeatureCountsApi } from '../../symbolic-feature-counts';
 
 type ActionKind = 'promote' | 'retire';
+
+const CENSUS_STATUSES: readonly SymbolicFeatureStatus[] = [
+  'Candidate',
+  'Promoted',
+  'Retired',
+  'Rejected',
+];
+
+/**
+ * Per-status totals for the KPI tiles. `capped` only on the fallback path (the counts endpoint
+ * failed): each status was then counted from a list query that stops at CENSUS_LIMIT rows.
+ */
+interface StatusCensus {
+  /** The symbol filter it was counted for (null = every pair). */
+  symbol: string | null;
+  counts: Record<SymbolicFeatureStatus, number>;
+  capped: boolean;
+}
+
+/** Features for one (status, symbol) query, tagged so a filter switch never shows the old list. */
+interface FeatureListResult {
+  queryKey: string;
+  rows: SymbolicFeatureDto[];
+}
 
 interface PendingAction {
   kind: ActionKind;
@@ -128,6 +152,8 @@ export function renderExpression(json: string): string | null {
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    RefreshButtonComponent,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -136,14 +162,10 @@ export function renderExpression(json: string): string | null {
         subtitle="Genetic-programming mined feature expressions; promote drives V8 pipeline pickup"
       >
         <a routerLink="/ml-models" class="btn btn-secondary">← ML Models</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <app-refresh-button
+          [refreshing]="resource.refreshing() || census.refreshing()"
+          (refresh)="resource.refresh(); census.refresh()"
+        />
       </app-page-header>
 
       <section class="controls">
@@ -172,8 +194,17 @@ export function renderExpression(json: string): string | null {
           />
         </div>
 
+        <!-- The list stops at CENSUS_LIMIT rows; "200 of 200 loaded" hid 561 more Rejected. -->
         <span class="result-count">
-          {{ filteredFeatures().length }} of {{ features().length }} loaded
+          @if (listTotal(); as total) {
+            @if (total > features().length) {
+              newest {{ features().length | number }} of {{ total | number }}
+            } @else {
+              {{ total | number }} loaded
+            }
+          } @else {
+            {{ features().length | number }} loaded
+          }
         </span>
       </section>
 
@@ -186,40 +217,48 @@ export function renderExpression(json: string): string | null {
           (retry)="resource.refresh()"
         />
       } @else {
-        <!-- Tiles read from an unfiltered census so a "Candidate" filter cannot
-             zero the Promoted / Retired counts. The census shares the page's
-             200-row cap, and the caption says so when the cap is hit. -->
+        <!-- Tiles read from a per-status census (the engine's exact counts) so a
+             "Candidate" filter cannot zero the Promoted / Retired counts. It used
+             to be ONE unfiltered 200-row query, so every tile counted only the
+             newest 200 features: "Candidates 29" beside a list of 71 candidates.
+             "200+" appears only if the counts endpoint fails and the page falls
+             back to capped list queries. -->
         <section class="kpis">
+          <!-- The exact count behind the filters; the list itself stops at CENSUS_LIMIT rows. -->
           <app-metric-card
             label="Matching filter"
-            [value]="filteredFeatures().length"
+            [value]="listTotal() ?? filteredFeatures().length"
             format="number"
             dotColor="#0071E3"
           />
           <app-metric-card
             label="Candidates"
             [value]="censusCount('Candidate')"
+            [displayValue]="censusLabel('Candidate')"
             format="number"
             dotColor="#FF9500"
           />
           <app-metric-card
             label="Promoted"
             [value]="censusCount('Promoted')"
+            [displayValue]="censusLabel('Promoted')"
             format="number"
-            [dotColor]="censusCount('Promoted') > 0 ? '#34C759' : '#8E8E93'"
+            [dotColor]="(censusCount('Promoted') ?? 0) > 0 ? '#34C759' : '#8E8E93'"
           />
           <app-metric-card
             label="Retired / Rejected"
-            [value]="censusCount('Retired') + censusCount('Rejected')"
+            [value]="retiredRejectedCount()"
+            [displayValue]="censusLabel('Retired', 'Rejected')"
             format="number"
             dotColor="#8E8E93"
           />
         </section>
         @if (censusCapped()) {
           <p class="muted small census-note">
-            Status counts cover the latest {{ CENSUS_LIMIT }} mined features{{
-              symbolFilter().trim() ? ' for ' + symbolFilter().trim().toUpperCase() : ''
-            }}; older rows are not counted.
+            Counts stop at {{ CENSUS_LIMIT }} per status{{
+              symbolQuery() ? ' for ' + symbolQuery() : ''
+            }}
+            — "{{ CENSUS_LIMIT }}+" means at least that many.
           </p>
         }
 
@@ -261,13 +300,15 @@ export function renderExpression(json: string): string | null {
                         {{ formula(f) ?? f.name }}
                       </div>
                     </td>
-                    <td>
+                    <!-- One line each: the pair wrapped as "GBPJPY ·" over "D1", and
+                         '1.0-3' printed 0.34 / 0.06 beside 0.257 / 0.163. -->
+                    <td class="nowrap">
                       <span class="symbol mono">{{ f.symbol }}</span>
-                      <span class="tf muted small"> · {{ f.timeframe }}</span>
+                      <span class="tf muted small">{{ f.timeframe }}</span>
                     </td>
-                    <td class="num mono">
-                      {{ f.trainingIc | number: '1.0-3' }}
-                      <span class="muted small">/ {{ f.validationIc | number: '1.0-3' }}</span>
+                    <td class="num mono nowrap">
+                      {{ f.trainingIc | number: '1.3-3' }}
+                      <span class="muted small">/ {{ f.validationIc | number: '1.3-3' }}</span>
                     </td>
                     <td class="num mono small">{{ f.nodeCount }} · {{ f.depth }}</td>
                     <td class="num mono">
@@ -389,9 +430,21 @@ export function renderExpression(json: string): string | null {
 
       @if (pending(); as p) {
         <div class="modal-overlay" (click)="cancel()">
-          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+          <!-- Promote/retire changes what the V8 pipeline loads: focus starts on
+               Cancel so Enter never confirms. -->
+          <div
+            class="modal"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="symbolic-action-title"
+            appModalA11y
+            (dismiss)="cancel()"
+          >
             <header class="modal-head">
-              <h2>{{ p.kind === 'promote' ? 'Promote feature' : 'Retire feature' }}</h2>
+              <h2 id="symbolic-action-title">
+                {{ p.kind === 'promote' ? 'Promote feature' : 'Retire feature' }}
+              </h2>
               <button type="button" class="close-btn" (click)="cancel()" aria-label="Close">
                 ×
               </button>
@@ -428,7 +481,9 @@ export function renderExpression(json: string): string | null {
               ></textarea>
             </label>
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="cancel()">Cancel</button>
+              <button type="button" class="btn btn-secondary" data-autofocus (click)="cancel()">
+                Cancel
+              </button>
               <button
                 type="button"
                 class="btn btn-primary"
@@ -618,6 +673,12 @@ export function renderExpression(json: string): string | null {
       }
       .symbol {
         font-weight: var(--font-semibold);
+      }
+      .tf {
+        margin-left: 4px;
+      }
+      .nowrap {
+        white-space: nowrap;
       }
       .status-pill {
         font-size: var(--text-xs);
@@ -830,7 +891,9 @@ export function renderExpression(json: string): string | null {
 })
 export class SymbolicFeaturesPageComponent {
   private readonly ml = inject(MLModelsService);
+  private readonly countsApi = inject(SymbolicFeatureCountsApi);
   private readonly auditTrail = inject(AuditTrailService);
+  private readonly notifications = inject(NotificationService);
 
   protected readonly STATUS_OPTIONS: readonly (SymbolicFeatureStatus | 'All')[] = [
     'All',
@@ -844,18 +907,29 @@ export class SymbolicFeaturesPageComponent {
   protected readonly symbolFilter = signal<string>('');
   protected readonly CENSUS_LIMIT = 200;
 
-  protected readonly resource = createPolledResource(
+  /**
+   * The symbol as the engine stores it. The engine matched it exactly until
+   * 2026-10-19 (a lower-case "eurusd" returned nothing); it is case-insensitive
+   * now, and the upper-case form still keys the cache and the scope note.
+   */
+  protected readonly symbolQuery = computed(() => this.symbolFilter().trim().toUpperCase() || null);
+  private readonly queryKey = computed(() => `${this.statusFilter()}|${this.symbolQuery() ?? ''}`);
+
+  protected readonly resource = createPolledResource<FeatureListResult>(
     () => {
       const status = this.statusFilter();
+      const queryKey = this.queryKey();
+      // Errors propagate to resource.error() — swallowed into [] they read as
+      // "No symbolic features match".
       return this.ml
         .listSymbolicFeatures({
           status: status === 'All' ? null : status,
-          symbol: this.symbolFilter().trim() || null,
+          symbol: this.symbolQuery(),
           limit: this.CENSUS_LIMIT,
         })
         .pipe(
-          map((res) => res.data ?? []),
-          catchError(() => of<SymbolicFeatureDto[]>([])),
+          map(unwrapResponse),
+          map((rows) => ({ queryKey, rows })),
         );
     },
     {
@@ -871,19 +945,28 @@ export class SymbolicFeaturesPageComponent {
    * be computed from the filtered list, so with the default "Candidate" filter
    * Promoted and Retired could only ever read 0. Follows the symbol filter so
    * the tiles still describe the pair the operator is looking at.
+   *
+   * One exact `GROUP BY Status` on the engine. If that call fails the tiles fall
+   * back to one capped list query per status (shown as "200+" at the cap)
+   * rather than going blank.
    */
-  protected readonly census = createPolledResource(
-    () =>
-      this.ml
-        .listSymbolicFeatures({
-          status: null,
-          symbol: this.symbolFilter().trim() || null,
-          limit: this.CENSUS_LIMIT,
-        })
-        .pipe(
-          map((res) => res.data ?? []),
-          catchError(() => of<SymbolicFeatureDto[]>([])),
+  protected readonly census = createPolledResource<StatusCensus>(
+    () => {
+      const symbol = this.symbolQuery();
+      return this.countsApi.counts(symbol).pipe(
+        map(unwrapResponse),
+        map(
+          (c): StatusCensus => ({
+            counts: Object.fromEntries(
+              CENSUS_STATUSES.map((s) => [s, c.byStatus?.[s] ?? 0]),
+            ) as Record<SymbolicFeatureStatus, number>,
+            symbol,
+            capped: false,
+          }),
         ),
+        catchError(() => this.cappedCensus(symbol)),
+      );
+    },
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -892,29 +975,88 @@ export class SymbolicFeaturesPageComponent {
     },
   );
 
-  constructor() {
-    effect(() => {
-      this.statusFilter();
-      this.symbolFilter();
-      this.resource.refresh();
-    });
-    effect(() => {
-      this.symbolFilter();
-      this.census.refresh();
-    });
+  /** The pre-counts-endpoint census: a status at CENSUS_LIMIT rows means "at least that many". */
+  private cappedCensus(symbol: string | null) {
+    return forkJoin(
+      CENSUS_STATUSES.map((status) =>
+        this.ml
+          .listSymbolicFeatures({ status, symbol, limit: this.CENSUS_LIMIT })
+          .pipe(map((res) => unwrapResponse(res).length)),
+      ),
+    ).pipe(
+      map(
+        (counts): StatusCensus => ({
+          counts: Object.fromEntries(CENSUS_STATUSES.map((s, i) => [s, counts[i]])) as Record<
+            SymbolicFeatureStatus,
+            number
+          >,
+          symbol,
+          capped: true,
+        }),
+      ),
+    );
   }
 
-  protected readonly features = computed(() => this.resource.value() ?? []);
+  constructor() {
+    // A status pill refetches at once; a typed symbol once the operator
+    // pauses. Neither fires at start-up — the resources' own first fetches
+    // cover that (the old effects cancelled and re-sent both on every load).
+    refetchOnChange(
+      () => this.statusFilter(),
+      () => this.resource.refresh(),
+    );
+    refetchOnChange(
+      () => this.symbolQuery(),
+      () => {
+        this.resource.refresh();
+        this.census.refresh();
+      },
+      350,
+    );
+  }
+
+  /** Rows for the current filters, or [] while they have not arrived yet. */
+  protected readonly features = computed(() => {
+    const v = this.resource.value();
+    return v && v.queryKey === this.queryKey() ? v.rows : [];
+  });
   protected readonly loading = computed(
-    () => this.resource.loading() && this.features().length === 0,
+    () =>
+      this.resource.loading() ||
+      (this.resource.value()?.queryKey !== this.queryKey() && !this.resource.error()),
   );
   protected readonly filteredFeatures = computed(() => this.features());
-  protected readonly censusCapped = computed(
-    () => (this.census.value()?.length ?? 0) >= this.CENSUS_LIMIT,
-  );
+  protected readonly censusCapped = computed(() => {
+    const c = this.census.value();
+    return !!c && c.capped && CENSUS_STATUSES.some((s) => c.counts[s] >= this.CENSUS_LIMIT);
+  });
+  /** Exact rows behind the current filters (status + symbol), from the census; null on the capped fallback. */
+  protected readonly listTotal = computed<number | null>(() => {
+    const c = this.census.value();
+    if (!c || c.capped || c.symbol !== this.symbolQuery()) return null;
+    const status = this.statusFilter();
+    return status === 'All'
+      ? CENSUS_STATUSES.reduce((sum, s) => sum + c.counts[s], 0)
+      : c.counts[status];
+  });
+  protected readonly retiredRejectedCount = computed(() => {
+    const c = this.census.value()?.counts;
+    return c ? c.Retired + c.Rejected : null;
+  });
 
-  protected censusCount(status: SymbolicFeatureStatus): number {
-    return (this.census.value() ?? []).filter((f) => f.status === status).length;
+  protected censusCount(status: SymbolicFeatureStatus): number | null {
+    return this.census.value()?.counts[status] ?? null;
+  }
+
+  /**
+   * "200+" when the fallback census hit the per-query cap for any counted status; null lets the
+   * card format the number (always, with the engine's exact counts).
+   */
+  protected censusLabel(...statuses: SymbolicFeatureStatus[]): string | null {
+    const c = this.census.value();
+    if (!c?.capped || !statuses.some((s) => c.counts[s] >= this.CENSUS_LIMIT)) return null;
+    const total = statuses.reduce((sum, s) => sum + c.counts[s], 0);
+    return `${total.toLocaleString('en-US')}+`;
   }
 
   private readonly formulaCache = new Map<number, string | null>();
@@ -1003,33 +1145,41 @@ export class SymbolicFeaturesPageComponent {
       .pipe(
         finalize(() => {
           this.submitting.set(false);
-          this.pending.set(null);
           this.resource.refresh();
+          this.census.refresh();
         }),
       )
       .subscribe({
         next: (res) => {
-          if (res.status) {
-            this.auditTrail
-              .create({
-                entityType: 'MLSymbolicFeature',
-                entityId: p.feature.id,
-                decisionType:
-                  p.kind === 'promote' ? 'SymbolicFeaturePromoted' : 'SymbolicFeatureRetired',
-                outcome: p.kind === 'promote' ? 'Promoted' : 'Retired',
-                reason: reason || null,
-                contextJson: JSON.stringify({ name: p.feature.name, symbol: p.feature.symbol }),
-                source: 'AdminUI',
-              })
-              .subscribe({
-                error: () => {
-                  /* best-effort */
-                },
-              });
+          // A refused action keeps the dialog open with the engine's reason;
+          // it used to close as if it had worked.
+          if (!res.status) {
+            this.notifications.error(res.message ?? `The engine refused the ${p.kind}.`);
+            return;
           }
+          this.pending.set(null);
+          this.notifications.success(
+            `Feature #${p.feature.id} ${p.kind === 'promote' ? 'promoted' : 'retired'}.`,
+          );
+          this.auditTrail
+            .create({
+              entityType: 'MLSymbolicFeature',
+              entityId: p.feature.id,
+              decisionType:
+                p.kind === 'promote' ? 'SymbolicFeaturePromoted' : 'SymbolicFeatureRetired',
+              outcome: p.kind === 'promote' ? 'Promoted' : 'Retired',
+              reason: reason || null,
+              contextJson: JSON.stringify({ name: p.feature.name, symbol: p.feature.symbol }),
+              source: 'AdminUI',
+            })
+            .subscribe({
+              error: () => {
+                /* best-effort */
+              },
+            });
         },
         error: () => {
-          /* polled-resource will retry on next interval */
+          this.notifications.error(`Could not reach the engine — the feature was not changed.`);
         },
       });
   }

@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, map, of, switchMap } from 'rxjs';
+import { toObservable, toSignal } from '@angular/core/rxjs-interop';
+import { catchError, combineLatest, map, of, startWith, switchMap } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
 import type { CompositeMLPolicySnapshotStatus, PolicyLineageDto } from '@core/api/api.types';
@@ -16,8 +16,12 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
 
 type LineageResult =
   | { state: 'loading' }
+  | { state: 'notFound'; message: string }
   | { state: 'error'; message: string }
   | { state: 'loaded'; data: PolicyLineageDto };
+
+/** The engine's "no such row" envelope code (HTTP 200, `status: false`). */
+const NOT_FOUND_CODE = '-14';
 
 @Component({
   selector: 'app-snapshot-detail-page',
@@ -45,13 +49,24 @@ type LineageResult =
         @case ('loading') {
           <app-card-skeleton [lines]="8" />
         }
+        @case ('notFound') {
+          <!-- A missing id is not a failure to retry: the same id never loads.
+               The way out is the policies list, where every link is a live id. -->
+          <app-empty-state
+            [title]="'Snapshot #' + (snapshotId() ?? '?') + ' does not exist'"
+            [description]="
+              errorMessage() +
+              '. Snapshot ids come from the Active Policies table and the Diff page; open one from there.'
+            "
+            actionLabel="← Back to Active Policies"
+            (actionClick)="goToPolicies()"
+          />
+        }
         @case ('error') {
-          <!-- A missing snapshot id is a dead end without a way back: retrying
-               the same id never helps, so the way out is the policies list. -->
           <section class="state-card">
             <app-error-state
               title="Could not load lineage"
-              [message]="result()!.state === 'error' ? errorMessage() : ''"
+              [message]="errorMessage()"
               (retry)="refresh()"
             />
             <a class="state-back" routerLink="/composite-ml">← Back to Active Policies</a>
@@ -166,6 +181,25 @@ type LineageResult =
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -204,7 +238,7 @@ type LineageResult =
         font-weight: var(--font-semibold);
         padding: 4px 10px;
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
         border-radius: var(--radius-full);
       }
       .timeline {
@@ -315,19 +349,19 @@ type LineageResult =
       }
       .status-pill[data-status='active'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .status-pill[data-status='retired'] {
         background: rgba(142, 142, 147, 0.16);
-        color: #636366;
+        color: var(--tone-grey);
       }
       .status-pill[data-status='candidate'] {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .status-pill[data-status='rejected'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .diff-action {
         font-size: var(--text-sm);
@@ -406,17 +440,19 @@ export class SnapshotDetailPageComponent {
     { initialValue: null },
   );
 
-  private readonly _refreshTick = signal(0);
+  private readonly refreshTick = signal(0);
 
+  /**
+   * Re-fetches on a new id AND on "Try again". The old retry bumped a signal
+   * read inside a paramMap-only switchMap (never re-run) and then re-navigated
+   * with a junk `?_r=` param that paramMap ignores — so it did nothing but
+   * dirty the URL. Each fetch starts from the loading state.
+   */
   protected readonly result = toSignal(
-    this.route.paramMap.pipe(
-      switchMap((p): ReturnType<typeof this.fetchFor> => {
-        // Trip when refresh signal changes too; switchMap re-fires on paramMap
-        // only, so we read _refreshTick inside.
-        this._refreshTick();
-        const id = parseId(p.get('id'));
-        return this.fetchFor(id);
-      }),
+    combineLatest([this.route.paramMap, toObservable(this.refreshTick)]).pipe(
+      switchMap(([p]) =>
+        this.fetchFor(parseId(p.get('id'))).pipe(startWith<LineageResult>({ state: 'loading' })),
+      ),
     ),
     { initialValue: { state: 'loading' } as LineageResult },
   );
@@ -428,7 +464,7 @@ export class SnapshotDetailPageComponent {
 
   protected readonly errorMessage = computed(() => {
     const r = this.result();
-    return r?.state === 'error' ? r.message : '';
+    return r?.state === 'error' || r?.state === 'notFound' ? r.message : '';
   });
 
   goToPolicies(): void {
@@ -436,15 +472,7 @@ export class SnapshotDetailPageComponent {
   }
 
   refresh(): void {
-    this._refreshTick.update((n) => n + 1);
-    // Re-trigger paramMap by re-navigating to the same URL with a noop
-    // queryParam toggle. Simpler: just reload current route.
-    this.router.navigate([], {
-      relativeTo: this.route,
-      queryParams: { _r: Date.now() },
-      queryParamsHandling: 'merge',
-      replaceUrl: true,
-    });
+    this.refreshTick.update((n) => n + 1);
   }
 
   protected statusKey(s: CompositeMLPolicySnapshotStatus): string {
@@ -461,14 +489,15 @@ export class SnapshotDetailPageComponent {
 
   private fetchFor(id: number | null) {
     if (id === null) {
-      return of<LineageResult>({ state: 'error', message: 'Invalid snapshot id' });
+      return of<LineageResult>({ state: 'notFound', message: 'That is not a valid snapshot id' });
     }
     return this.compositeMl.getPolicyLineage(id).pipe(
       map((res): LineageResult => {
-        if (!res.status || !res.data) {
-          return { state: 'error', message: res.message ?? 'Snapshot not found' };
-        }
-        return { state: 'loaded', data: res.data };
+        if (res.status && res.data) return { state: 'loaded', data: res.data };
+        const message = res.message ?? `Snapshot id ${id} not found`;
+        return res.responseCode === NOT_FOUND_CODE
+          ? { state: 'notFound', message }
+          : { state: 'error', message };
       }),
       catchError(() =>
         of<LineageResult>({

@@ -12,6 +12,19 @@ import { catchError, finalize, of } from 'rxjs';
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.types';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+
+/** A change the operator picked, held until they confirm it. */
+interface PendingChange {
+  body: { symbol?: string; instanceId: string };
+  title: string;
+  message: string;
+  confirmLabel: string;
+  successMsg: string;
+  /** Puts the control that asked back to the saved value if the operator cancels. */
+  revert?: () => void;
+  onOk?: () => void;
+}
 
 /**
  * Operator control for the single-source candle-stream guard.
@@ -24,13 +37,16 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
  *
  * A global default covers all symbols; per-symbol overrides win over it (useful
  * when a symbol only exists on a broker that isn't the global source). Changes
- * apply immediately and hot-reload within ~30s (EngineConfigCache TTL).
+ * hot-reload within ~30s (EngineConfigCache TTL).
+ *
+ * Every change asks first: picking the wrong source silently drops the candle feed of every other
+ * broker for that symbol, and the selects and ✕ used to write on the click itself.
  */
 @Component({
   selector: 'app-ea-candle-source-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule],
+  imports: [FormsModule, ConfirmDialogComponent],
   template: `
     <section class="csp-panel">
       <div class="csp-head">
@@ -56,15 +72,30 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
         <div class="csp-block">
           <label class="csp-block-label">Global default</label>
           <div class="csp-row">
+            <!-- Plain (change) rather than ngModel: a cancelled confirm has to put the select
+                 back, and ngModel never re-writes a value its binding did not change. -->
             <select
+              #globalSel
               class="csp-select"
-              [ngModel]="data()!.globalInstanceId ?? ''"
               [disabled]="saving()"
-              (ngModelChange)="setGlobal($event)"
+              (change)="askGlobal(globalSel)"
+              aria-label="Global candle source"
             >
-              <option value="">— Unmanaged (every instance streams — causes duplicates)</option>
+              <option value="" [selected]="!data()!.globalInstanceId">
+                — Unmanaged (every instance streams — causes duplicates)
+              </option>
+              @if (data()!.globalInstanceId && !inFleet(data()!.globalInstanceId)) {
+                <option [value]="data()!.globalInstanceId" selected>
+                  {{ data()!.globalInstanceId }} · not in the fleet list
+                </option>
+              }
               @for (inst of fleet(); track inst.instanceId) {
-                <option [value]="inst.instanceId">{{ instanceLabel(inst) }}</option>
+                <option
+                  [value]="inst.instanceId"
+                  [selected]="inst.instanceId === data()!.globalInstanceId"
+                >
+                  {{ instanceLabel(inst) }}
+                </option>
               }
             </select>
           </div>
@@ -86,21 +117,35 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
                 <div class="csp-override">
                   <span class="csp-sym mono">{{ ov.symbol }}</span>
                   <select
+                    #ovSel
                     class="csp-select csp-select-sm"
-                    [ngModel]="ov.instanceId"
                     [disabled]="saving()"
-                    (ngModelChange)="setOverride(ov.symbol, $event)"
+                    (change)="askOverride(ov.symbol, ov.instanceId, ovSel)"
+                    [attr.aria-label]="'Candle source for ' + ov.symbol"
                   >
+                    @if (!inFleet(ov.instanceId)) {
+                      <option [value]="ov.instanceId" selected>
+                        {{ ov.instanceId }} · not in the fleet list
+                      </option>
+                    }
                     @for (inst of fleet(); track inst.instanceId) {
-                      <option [value]="inst.instanceId">{{ instanceLabel(inst) }}</option>
+                      <option
+                        [value]="inst.instanceId"
+                        [selected]="inst.instanceId === ov.instanceId"
+                      >
+                        {{ instanceLabel(inst) }}
+                      </option>
                     }
                   </select>
                   <button
                     type="button"
                     class="btn btn-ghost"
                     [disabled]="saving()"
-                    (click)="setOverride(ov.symbol, '')"
-                    title="Remove override (symbol falls back to the global default)"
+                    (click)="askRemoveOverride(ov.symbol)"
+                    [title]="
+                      'Remove the ' + ov.symbol + ' override (falls back to the global default)'
+                    "
+                    [attr.aria-label]="'Remove the ' + ov.symbol + ' override'"
                   >
                     ✕
                   </button>
@@ -130,7 +175,7 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
               type="button"
               class="btn btn-secondary"
               [disabled]="saving() || !newSymbol.trim() || !newInstanceId"
-              (click)="addOverride()"
+              (click)="askAddOverride()"
             >
               Add override
             </button>
@@ -141,6 +186,15 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
           <span class="csp-desc muted small">Saving…</span>
         }
       }
+      <app-confirm-dialog
+        [open]="pending() !== null"
+        [title]="pending()?.title ?? ''"
+        [message]="pending()?.message ?? ''"
+        [confirmLabel]="pending()?.confirmLabel ?? 'Confirm'"
+        [loading]="saving()"
+        (confirm)="confirmPending()"
+        (cancelled)="cancelPending()"
+      />
     </section>
   `,
   styles: [
@@ -177,7 +231,7 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--bg-tertiary);
         color: var(--text-tertiary);
       }
       .csp-desc {
@@ -261,7 +315,7 @@ import type { CandleStreamInstance, CandleStreamSource } from '@core/api/api.typ
         color: var(--text-tertiary);
       }
       .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .small {
         font-size: 12px;
@@ -328,34 +382,110 @@ export class EACandleSourcePanelComponent implements OnInit {
       });
   }
 
-  protected setGlobal(instanceId: string): void {
-    this.apply(
-      { instanceId: instanceId || '' },
-      instanceId ? 'Global candle source set' : 'Global candle source cleared',
-    );
+  protected readonly pending = signal<PendingChange | null>(null);
+
+  protected inFleet(instanceId: string | null | undefined): boolean {
+    return !!instanceId && this.fleet().some((i) => i.instanceId === instanceId);
   }
 
-  protected setOverride(symbol: string, instanceId: string): void {
-    this.apply(
-      { symbol, instanceId: instanceId || '' },
-      instanceId ? `Override set for ${symbol}` : `Override removed for ${symbol}`,
-    );
+  private labelFor(instanceId: string | null | undefined): string {
+    if (!instanceId) return 'unmanaged (every instance streams)';
+    const inst = this.fleet().find((i) => i.instanceId === instanceId);
+    return inst ? this.instanceLabel(inst) : instanceId;
   }
 
-  protected addOverride(): void {
+  protected askGlobal(sel: HTMLSelectElement): void {
+    const current = this.data()?.globalInstanceId ?? '';
+    const next = sel.value;
+    if (next === current) return;
+    this.pending.set({
+      body: { instanceId: next },
+      title: next ? 'Change the global candle source?' : 'Stop managing the candle source?',
+      message: next
+        ? `${this.labelFor(next)} becomes the only instance whose candles are stored for every ` +
+          `symbol without an override. Candle writes from every other instance are ignored ` +
+          `within ~30 s.`
+        : 'Every instance will stream candles again; where two brokers carry the same symbol ' +
+          'their feeds collide into duplicate bars.',
+      confirmLabel: next ? 'Change source' : 'Stop managing',
+      successMsg: next ? 'Global candle source set' : 'Global candle source cleared',
+      revert: () => (sel.value = current),
+    });
+  }
+
+  protected askOverride(symbol: string, current: string, sel: HTMLSelectElement): void {
+    const next = sel.value;
+    if (next === current) return;
+    this.pending.set({
+      body: { symbol, instanceId: next },
+      title: `Change the ${symbol} candle source?`,
+      message:
+        `${symbol} candles will be stored only from ${this.labelFor(next)}; writes from ` +
+        `${this.labelFor(current)} and every other instance are ignored within ~30 s.`,
+      confirmLabel: 'Change source',
+      successMsg: `Override set for ${symbol}`,
+      revert: () => (sel.value = current),
+    });
+  }
+
+  protected askRemoveOverride(symbol: string): void {
+    const global = this.data()?.globalInstanceId ?? null;
+    this.pending.set({
+      body: { symbol, instanceId: '' },
+      title: `Remove the ${symbol} override?`,
+      message: `${symbol} falls back to the global default: ${this.labelFor(global)}.`,
+      confirmLabel: 'Remove override',
+      successMsg: `Override removed for ${symbol}`,
+    });
+  }
+
+  protected askAddOverride(): void {
     const symbol = this.newSymbol.trim().toUpperCase();
     const instanceId = this.newInstanceId;
     if (!symbol || !instanceId) return;
-    this.apply({ symbol, instanceId }, `Override added for ${symbol}`, () => {
-      this.newSymbol = '';
-      this.newInstanceId = '';
+    this.pending.set({
+      body: { symbol, instanceId },
+      title: `Add a ${symbol} candle-source override?`,
+      message:
+        `${symbol} candles will be stored only from ${this.labelFor(instanceId)}, whatever the ` +
+        `global default says. Takes effect within ~30 s.`,
+      confirmLabel: 'Add override',
+      successMsg: `Override added for ${symbol}`,
+      onOk: () => {
+        this.newSymbol = '';
+        this.newInstanceId = '';
+      },
     });
+  }
+
+  protected confirmPending(): void {
+    const p = this.pending();
+    if (!p) return;
+    this.apply(
+      p.body,
+      p.successMsg,
+      () => {
+        p.onOk?.();
+        this.pending.set(null);
+      },
+      () => {
+        p.revert?.();
+        this.pending.set(null);
+      },
+    );
+  }
+
+  protected cancelPending(): void {
+    if (this.saving()) return;
+    this.pending()?.revert?.();
+    this.pending.set(null);
   }
 
   private apply(
     body: { symbol?: string; instanceId: string },
     successMsg: string,
     onOk?: () => void,
+    onFail?: () => void,
   ): void {
     this.saving.set(true);
     this.admin
@@ -364,6 +494,7 @@ export class EACandleSourcePanelComponent implements OnInit {
         finalize(() => this.saving.set(false)),
         catchError((err) => {
           this.notify.error(err?.error?.message ?? 'Save failed.');
+          onFail?.();
           return of(null);
         }),
       )
@@ -375,6 +506,7 @@ export class EACandleSourcePanelComponent implements OnInit {
           this.load();
         } else {
           this.notify.error(res.message ?? 'Save failed.');
+          onFail?.();
         }
       });
   }

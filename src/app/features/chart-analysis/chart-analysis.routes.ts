@@ -36,6 +36,10 @@ export const CHART_ANALYSIS_ROUTES: Routes = [
   {
     matcher: chartAnalysisUrl,
     component: ChartAnalysisPageComponent,
+    // The parent is componentless, so this route inherited its "Charts" label; with a symbol in
+    // the URL that is a second crumb for a different URL — "Charts › Charts". The symbol is on
+    // the toolbar, and a crumb fixed at open would go stale on the first switch.
+    data: { breadcrumb: '' },
     resolve: { workspace: workspaceReady },
     // Settled once, when the page opens. A symbol switch changes the URL's symbol, and by default
     // ('paramsChange') that ran the resolver again — the active layout and the layout list re-read

@@ -26,6 +26,7 @@ import type {
 
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 type FeedKind = 'strategy' | 'opt' | 'bt' | 'ml';
 
@@ -51,7 +52,7 @@ interface FeedRow {
   selector: 'app-automation-monitor-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, MetricCardComponent, PageHeaderComponent],
+  imports: [DatePipe, MetricCardComponent, PageHeaderComponent, RefreshButtonComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -66,14 +67,7 @@ interface FeedRow {
         <button type="button" class="btn btn-secondary" (click)="togglePause()">
           {{ paused() ? 'Resume' : 'Pause' }}
         </button>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refreshNow()"
-          [disabled]="loading()"
-        >
-          Refresh
-        </button>
+        <app-refresh-button [refreshing]="loading()" (refresh)="refreshNow()" />
       </app-page-header>
 
       <section class="metrics" aria-label="In-flight counts">
@@ -140,7 +134,15 @@ interface FeedRow {
             <tbody>
               @for (row of feed(); track row.kind + ':' + row.id) {
                 <tr [class]="'row-' + row.kind">
-                  <td class="t mono">{{ row.ts | date: 'HH:mm:ss' }}</td>
+                  <!-- The feed spans days: a bare HH:mm:ss put yesterday's 23:05 under today's
+                       05:04 with nothing to say they were a day apart. -->
+                  <td class="t mono" [title]="row.ts">
+                    @if (isToday(row.ts)) {
+                      {{ row.ts | date: 'HH:mm:ss' }}
+                    } @else {
+                      {{ row.ts | date: 'MMM d HH:mm' }}
+                    }
+                  </td>
                   <td class="k">
                     <span [class]="'badge badge-' + row.kind">{{ kindLabel(row.kind) }}</span>
                   </td>
@@ -273,7 +275,8 @@ interface FeedRow {
         font-family: var(--font-mono, ui-monospace, Menlo, monospace);
       }
       .t {
-        width: 90px;
+        width: 110px;
+        white-space: nowrap;
       }
       .k {
         width: 90px;
@@ -311,21 +314,22 @@ interface FeedRow {
         font-weight: var(--font-medium);
         line-height: 1.4;
       }
+      /* Theme tones — the fixed light-theme hues (#1d4ed8, #6d28d9) were dark-on-dark. */
       .badge-strategy {
-        background: rgba(6, 182, 212, 0.15);
-        color: #0e7490;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
       .badge-opt {
-        background: rgba(34, 197, 94, 0.15);
-        color: #15803d;
+        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
+        color: var(--tone-green);
       }
       .badge-bt {
-        background: rgba(59, 130, 246, 0.15);
-        color: #1d4ed8;
+        background: color-mix(in srgb, var(--tone-grey) 18%, transparent);
+        color: var(--text-primary);
       }
       .badge-ml {
-        background: rgba(139, 92, 246, 0.15);
-        color: #6d28d9;
+        background: color-mix(in srgb, var(--tone-purple) 16%, transparent);
+        color: var(--tone-purple);
       }
       .pill {
         display: inline-block;
@@ -335,20 +339,20 @@ interface FeedRow {
         font-weight: var(--font-medium);
       }
       .pill-success {
-        background: rgba(34, 197, 94, 0.15);
-        color: #15803d;
+        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
+        color: var(--tone-green);
       }
       .pill-warn {
-        background: rgba(245, 158, 11, 0.15);
-        color: #b45309;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
       .pill-fail {
-        background: rgba(239, 68, 68, 0.15);
-        color: #b91c1c;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .pill-info {
-        background: rgba(59, 130, 246, 0.15);
-        color: #1d4ed8;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
       .pill-neutral {
         background: var(--bg-tertiary);
@@ -440,10 +444,12 @@ export class AutomationMonitorPageComponent {
     }
 
     for (const b of this.recentBts()) {
-      const ts = b.completedAt ?? b.startedAt ?? '';
+      // No `startedAt` on the wire: fall back to when the worker began executing (or queued it).
+      const ts = b.completedAt ?? b.executionStartedAt ?? b.queuedAt ?? '';
+      // WinRate is a fraction; MaxDrawdownPct is ALREADY a percentage (×100 showed 12.5% as 1250%).
       const detail =
         b.totalTrades != null
-          ? `${b.totalTrades} trade${b.totalTrades === 1 ? '' : 's'} · WR ${((b.winRate ?? 0) * 100).toFixed(1)}% · DD ${((b.maxDrawdownPct ?? 0) * 100).toFixed(1)}%`
+          ? `${b.totalTrades} trade${b.totalTrades === 1 ? '' : 's'} · WR ${((b.winRate ?? 0) * 100).toFixed(1)}% · DD ${(b.maxDrawdownPct ?? 0).toFixed(1)}%`
           : (b.errorMessage ?? '');
       rows.push({
         kind: 'bt',
@@ -543,6 +549,13 @@ export class AutomationMonitorPageComponent {
       .subscribe();
   }
 
+  /** Same calendar day as now, in the viewer's time zone. */
+  isToday(ts: string): boolean {
+    const t = parseTs(ts);
+    if (t === null) return false;
+    return new Date(t).toDateString() === new Date().toDateString();
+  }
+
   togglePause(): void {
     this.paused.update((p) => !p);
   }
@@ -588,7 +601,8 @@ export class AutomationMonitorPageComponent {
     return forkJoin({
       strategies: safe(this.strategies.list(pager('CreatedAt'))),
       opts: safe(this.feedback.listOptimizationRuns(pager('StartedAt'))),
-      bts: safe(this.backtests.list(pager('StartedAt'))),
+      // BacktestRun has no StartedAt column — the engine silently ignored that sort key.
+      bts: safe(this.backtests.list(pager('QueuedAt'))),
       mls: safe(this.mlModels.listTrainingRuns(pager('StartedAt'))),
     }).pipe(
       tap(({ strategies, opts, bts, mls }) => {

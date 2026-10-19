@@ -13,6 +13,9 @@ import { NotificationService } from '@core/notifications/notification.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 type EditState = { id: number; email: string; displayName: string };
 type RolesState = { id: number; username: string; selected: Set<number> };
@@ -21,7 +24,15 @@ type RolesState = { id: number; username: string; selected: Set<number> };
   selector: 'app-admin-users-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DatePipe, PageHeaderComponent, EmptyStateComponent],
+  imports: [
+    FormsModule,
+    DatePipe,
+    PageHeaderComponent,
+    EmptyStateComponent,
+    ErrorStateComponent,
+    ConfirmDialogComponent,
+    ModalA11yDirective,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -52,38 +63,55 @@ type RolesState = { id: number; username: string; selected: Set<number> };
       <section class="card">
         <header class="card-head">
           <h3>New user</h3>
-          <span class="muted">Username + email + at least one role.</span>
+          <span class="muted"
+            >Username, email and at least one role. Display name is optional.</span
+          >
         </header>
+        <!-- The fields are signals: canCreate() used to be a computed over plain properties, which
+             never re-ran, so "Create user" stayed disabled whatever was typed. -->
         <form class="form-grid" (ngSubmit)="createUser()">
           <label class="field">
             <span class="label">Username</span>
             <input
               class="input"
-              [(ngModel)]="newUsername"
+              [class.invalid]="usernameError()"
+              [ngModel]="newUsername()"
+              (ngModelChange)="newUsername.set($event)"
               name="username"
               placeholder="jdoe"
+              autocomplete="off"
               required
             />
+            @if (usernameError(); as err) {
+              <span class="field-error">{{ err }}</span>
+            }
           </label>
           <label class="field">
             <span class="label">Email</span>
             <input
               class="input"
               type="email"
-              [(ngModel)]="newEmail"
+              [class.invalid]="emailError()"
+              [ngModel]="newEmail()"
+              (ngModelChange)="newEmail.set($event)"
               name="email"
               placeholder="jdoe@lascodia.com"
+              autocomplete="off"
               required
             />
+            @if (emailError(); as err) {
+              <span class="field-error">{{ err }}</span>
+            }
           </label>
           <label class="field">
             <span class="label">Display name</span>
             <input
               class="input"
-              [(ngModel)]="newDisplayName"
+              [ngModel]="newDisplayName()"
+              (ngModelChange)="newDisplayName.set($event)"
               name="displayName"
               placeholder="Jane Doe"
-              required
+              maxlength="128"
             />
           </label>
           <fieldset class="roles-field">
@@ -106,6 +134,9 @@ type RolesState = { id: number; username: string; selected: Set<number> };
             }
           </fieldset>
           <div class="form-actions">
+            @if (createBlocker(); as why) {
+              <span class="muted small">{{ why }}</span>
+            }
             <button
               type="submit"
               class="btn btn-primary"
@@ -140,6 +171,13 @@ type RolesState = { id: number; username: string; selected: Set<number> };
 
         @if (loading() && users().length === 0) {
           <p class="muted small pad">Loading…</p>
+        } @else if (loadError() && users().length === 0) {
+          <!-- A failed read is not "no users": an empty roster reads as "nobody has access". -->
+          <app-error-state
+            title="Could not load admin users"
+            [message]="loadError()!"
+            (retry)="reload()"
+          />
         } @else if (users().length === 0) {
           <app-empty-state
             title="No users found"
@@ -197,11 +235,16 @@ type RolesState = { id: number; username: string; selected: Set<number> };
                       <button type="button" class="btn btn-ghost btn-xs" (click)="openRoles(u)">
                         Roles
                       </button>
+                      <!-- The engine refuses to deactivate a super admin; say so instead of
+                           offering a button that always fails. -->
                       <button
                         type="button"
                         class="btn btn-ghost btn-xs"
-                        [disabled]="busyId() === u.id"
-                        (click)="toggleActive(u)"
+                        [disabled]="busyId() === u.id || (u.isActive && u.isSuperAdmin)"
+                        [title]="
+                          u.isActive && u.isSuperAdmin ? 'A super admin cannot be deactivated' : ''
+                        "
+                        (click)="askAction(u, u.isActive ? 'deactivate' : 'activate')"
                       >
                         {{ u.isActive ? 'Deactivate' : 'Activate' }}
                       </button>
@@ -209,7 +252,7 @@ type RolesState = { id: number; username: string; selected: Set<number> };
                         type="button"
                         class="btn btn-ghost btn-xs"
                         [disabled]="busyId() === u.id"
-                        (click)="resetPassword(u)"
+                        (click)="askAction(u, 'reset')"
                       >
                         Reset password
                       </button>
@@ -223,12 +266,21 @@ type RolesState = { id: number; username: string; selected: Set<number> };
       </section>
     </div>
 
-    <!-- Edit profile panel -->
+    <!-- Edit profile panel. Escape + focus come from appModalA11y; before it, an open panel
+         ignored Escape and sat over the row's other buttons. -->
     @if (editState(); as ed) {
       <div class="overlay" (click)="editState.set(null)">
-        <div class="panel" (click)="$event.stopPropagation()">
+        <div
+          class="panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-user-edit-title"
+          appModalA11y
+          (dismiss)="editState.set(null)"
+          (click)="$event.stopPropagation()"
+        >
           <header class="panel-head">
-            <h3>Edit profile</h3>
+            <h3 id="admin-user-edit-title">Edit profile</h3>
             <button
               type="button"
               class="close-btn"
@@ -269,9 +321,17 @@ type RolesState = { id: number; username: string; selected: Set<number> };
     <!-- Manage roles panel -->
     @if (rolesState(); as rs) {
       <div class="overlay" (click)="rolesState.set(null)">
-        <div class="panel" (click)="$event.stopPropagation()">
+        <div
+          class="panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="admin-user-roles-title"
+          appModalA11y
+          (dismiss)="rolesState.set(null)"
+          (click)="$event.stopPropagation()"
+        >
           <header class="panel-head">
-            <h3>Manage roles · &#64;{{ rs.username }}</h3>
+            <h3 id="admin-user-roles-title">Manage roles · &#64;{{ rs.username }}</h3>
             <button
               type="button"
               class="close-btn"
@@ -312,6 +372,18 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         </div>
       </div>
     }
+
+    <!-- Deactivating locks a person out; a reset invalidates their current password at once. -->
+    <app-confirm-dialog
+      [open]="pendingAction() !== null"
+      [title]="actionTitle()"
+      [message]="actionMessage()"
+      [confirmLabel]="actionConfirmLabel()"
+      [confirmVariant]="pendingAction()?.kind === 'activate' ? 'primary' : 'destructive'"
+      [loading]="pendingAction() !== null && busyId() === pendingAction()!.user.id"
+      (confirm)="confirmAction()"
+      (cancelled)="pendingAction.set(null)"
+    />
   `,
   styles: [
     `
@@ -341,6 +413,11 @@ type RolesState = { id: number; username: string; selected: Set<number> };
       }
       .muted {
         color: var(--text-tertiary);
+      }
+      /* Header/toolbar captions sat at body size — larger than the 13px card title beside them. */
+      .card-head .muted,
+      .toolbar .muted {
+        font-size: var(--text-xs);
       }
       .small {
         font-size: var(--text-xs);
@@ -429,6 +506,13 @@ type RolesState = { id: number; username: string; selected: Set<number> };
       .input:focus {
         border-color: var(--accent);
       }
+      .input.invalid {
+        border-color: var(--tone-red);
+      }
+      .field-error {
+        font-size: var(--text-xs);
+        color: var(--tone-red);
+      }
       .roles-field {
         grid-column: 1 / -1;
         border: 1px solid var(--border);
@@ -459,7 +543,9 @@ type RolesState = { id: number; username: string; selected: Set<number> };
       .form-actions {
         grid-column: 1 / -1;
         display: flex;
+        align-items: center;
         justify-content: flex-end;
+        gap: var(--space-3);
       }
 
       /* Buttons */
@@ -694,6 +780,7 @@ export class AdminUsersPageComponent {
   readonly users = signal<AdminUserDto[]>([]);
   readonly roles = signal<RoleDto[]>([]);
   readonly loading = signal(false);
+  readonly loadError = signal<string | null>(null);
   readonly createPending = signal(false);
   readonly busyId = signal<number | null>(null);
   readonly search = signal('');
@@ -701,18 +788,80 @@ export class AdminUsersPageComponent {
   readonly lastCredential = signal<AdminUserCredentialDto | null>(null);
   readonly copied = signal(false);
 
-  // New-user form fields
-  newUsername = '';
-  newEmail = '';
-  newDisplayName = '';
+  // New-user form fields — signals, so canCreate() and the field errors re-evaluate as you type.
+  readonly newUsername = signal('');
+  readonly newEmail = signal('');
+  readonly newDisplayName = signal('');
   readonly newRoleIds = signal<Set<number>>(new Set());
 
+  /** Same rule as the engine's CreateAdminUserCommandValidator, shown before the round trip. */
+  readonly usernameError = computed<string | null>(() => {
+    const v = this.newUsername().trim();
+    if (!v) return null;
+    if (v.length > 64) return 'At most 64 characters.';
+    return /^[A-Za-z0-9._-]+$/.test(v) ? null : 'Letters, digits, dot, underscore and hyphen only.';
+  });
+  readonly emailError = computed<string | null>(() => {
+    const v = this.newEmail().trim();
+    if (!v) return null;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v) ? null : 'Not a valid email address.';
+  });
+  /** Why "Create user" is disabled, once the operator has started filling the form. */
+  readonly createBlocker = computed<string | null>(() => {
+    const started = !!(this.newUsername().trim() || this.newEmail().trim());
+    if (!started) return null;
+    if (!this.newUsername().trim()) return 'Enter a username.';
+    if (!this.newEmail().trim()) return 'Enter an email.';
+    if (this.usernameError() || this.emailError()) return null; // shown on the field
+    if (this.newRoleIds().size === 0) return 'Pick at least one role.';
+    return null;
+  });
   readonly canCreate = computed(
     () =>
-      this.newUsername.trim().length > 0 &&
-      this.newEmail.trim().length > 0 &&
-      this.newDisplayName.trim().length > 0,
+      this.newUsername().trim().length > 0 &&
+      this.newEmail().trim().length > 0 &&
+      !this.usernameError() &&
+      !this.emailError() &&
+      this.newRoleIds().size > 0,
   );
+
+  /** Deactivate / activate / password reset waiting on the confirmation dialog. */
+  readonly pendingAction = signal<{
+    user: AdminUserDto;
+    kind: 'deactivate' | 'activate' | 'reset';
+  } | null>(null);
+  readonly actionTitle = computed(() => {
+    const p = this.pendingAction();
+    if (!p) return '';
+    const who = `@${p.user.username}`;
+    return p.kind === 'reset'
+      ? `Reset the password for ${who}?`
+      : p.kind === 'deactivate'
+        ? `Deactivate ${who}?`
+        : `Activate ${who}?`;
+  });
+  readonly actionMessage = computed(() => {
+    switch (this.pendingAction()?.kind) {
+      case 'reset':
+        return 'Their current password stops working now. A one-time temporary password is shown once here — they must change it at next sign-in.';
+      case 'deactivate':
+        return 'They can no longer sign in to the console. Their roles and history are kept; Activate restores access.';
+      case 'activate':
+        return 'They can sign in again with their existing password and roles.';
+      default:
+        return '';
+    }
+  });
+  readonly actionConfirmLabel = computed(() => {
+    switch (this.pendingAction()?.kind) {
+      case 'reset':
+        return 'Reset password';
+      case 'deactivate':
+        return 'Deactivate';
+      default:
+        return 'Activate';
+    }
+  });
 
   // Panel state
   readonly editState = signal<EditState | null>(null);
@@ -735,13 +884,17 @@ export class AdminUsersPageComponent {
 
   reload(): void {
     this.loading.set(true);
-    this.service
-      .getUsers(this.search())
-      .pipe(catchError(() => of([] as AdminUserDto[])))
-      .subscribe((users) => {
+    this.service.getUsers(this.search()).subscribe({
+      next: (users) => {
         this.users.set(users);
+        this.loadError.set(null);
         this.loading.set(false);
-      });
+      },
+      error: (err) => {
+        this.loadError.set(err?.message ?? 'The engine could not be reached.');
+        this.loading.set(false);
+      },
+    });
   }
 
   onSearch(value: string): void {
@@ -765,9 +918,9 @@ export class AdminUsersPageComponent {
     this.createPending.set(true);
     this.service
       .createUser({
-        username: this.newUsername.trim(),
-        email: this.newEmail.trim(),
-        displayName: this.newDisplayName.trim(),
+        username: this.newUsername().trim(),
+        email: this.newEmail().trim(),
+        displayName: this.newDisplayName().trim(),
         roleIds: Array.from(this.newRoleIds()),
       })
       .subscribe({
@@ -776,9 +929,9 @@ export class AdminUsersPageComponent {
           this.notify.success(`User @${cred.username} created`);
           this.lastCredential.set(cred);
           this.copied.set(false);
-          this.newUsername = '';
-          this.newEmail = '';
-          this.newDisplayName = '';
+          this.newUsername.set('');
+          this.newEmail.set('');
+          this.newDisplayName.set('');
           this.newRoleIds.set(new Set());
           this.reload();
         },
@@ -859,16 +1012,29 @@ export class AdminUsersPageComponent {
   }
 
   // ── Active toggle + reset password ───────────────────────────────────────
+  askAction(u: AdminUserDto, kind: 'deactivate' | 'activate' | 'reset'): void {
+    this.pendingAction.set({ user: u, kind });
+  }
+
+  confirmAction(): void {
+    const p = this.pendingAction();
+    if (!p || this.busyId() === p.user.id) return;
+    if (p.kind === 'reset') this.resetPassword(p.user);
+    else this.toggleActive(p.user);
+  }
+
   toggleActive(u: AdminUserDto): void {
     this.busyId.set(u.id);
     this.service.setActive(u.id, !u.isActive).subscribe({
       next: (msg) => {
         this.busyId.set(null);
+        this.pendingAction.set(null);
         this.notify.success(msg || (u.isActive ? 'User deactivated' : 'User activated'));
         this.reload();
       },
       error: (err) => {
         this.busyId.set(null);
+        this.pendingAction.set(null);
         this.notify.error(err?.message ?? 'Failed to change status');
       },
     });
@@ -879,6 +1045,7 @@ export class AdminUsersPageComponent {
     this.service.resetPassword(u.id).subscribe({
       next: (cred) => {
         this.busyId.set(null);
+        this.pendingAction.set(null);
         this.notify.success(`Password reset for @${cred.username}`);
         this.lastCredential.set(cred);
         this.copied.set(false);
@@ -886,6 +1053,7 @@ export class AdminUsersPageComponent {
       },
       error: (err) => {
         this.busyId.set(null);
+        this.pendingAction.set(null);
         this.notify.error(err?.message ?? 'Failed to reset password');
       },
     });

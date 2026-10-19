@@ -69,6 +69,10 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
   selector: 'app-conversations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // A full-height page (LayoutComponent lays .content out as a column for it): the two panes
+  // take what the header leaves instead of `100vh − 250px`, which overshot by ~23px and
+  // scrolled the whole page under a list that scrolls on its own.
+  host: { class: 'fill-height' },
   imports: [
     DatePipe,
     DecimalPipe,
@@ -202,7 +206,16 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
               (input)="onSearch($event)"
             />
 
-            <div class="conv-kinds" role="group" aria-label="Filter by conversation type">
+            <!-- Thirteen chips in one hidden-scrollbar row: the fade says there are more, and
+                 a mouse wheel scrolls it (a vertical wheel could not reach "Assistant" on). -->
+            <div
+              class="conv-kinds"
+              role="group"
+              aria-label="Filter by conversation type"
+              [class.more-right]="!kindsAtEnd()"
+              (scroll)="onKindsScroll($event)"
+              (wheel)="onKindsWheel($event)"
+            >
               @for (k of kindFilters; track k.value) {
                 <button
                   type="button"
@@ -447,23 +460,33 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
   `,
   styles: [
     `
+      /* Full height, with the panes OUT of flow as the chart page's are. In flow, the list's rows
+         were the page's intrinsic height, and the shell's column (.content, then .layout) grew to
+         it: the page ran to ~3000px and the list never scrolled inside its pane. */
       :host {
         display: block;
+        position: relative;
+        height: 100%;
+        min-height: 580px;
       }
       .page {
+        position: absolute;
+        inset: 0;
         padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
       }
       .conv-count {
         white-space: nowrap;
         font-variant-numeric: tabular-nums;
       }
-      /* Header block (~100px) sits above the two panes; the panes still fill
-         the rest of the viewport so the thread scrolls inside, not the page. */
+      /* Header block (~100px) sits above the two panes; the panes fill the
+         rest of the page so the thread scrolls inside, not the page. */
       .conv-page {
         display: flex;
         gap: var(--space-4);
-        height: calc(100vh - 250px);
-        min-height: 480px;
+        flex: 1;
+        min-height: 0;
       }
       .conv-list {
         flex: none;
@@ -563,6 +586,9 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
       }
       .conv-kinds::-webkit-scrollbar {
         display: none;
+      }
+      .conv-kinds.more-right {
+        mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
       }
       .kind-chip {
         flex-shrink: 0;
@@ -1090,6 +1116,22 @@ export class ConversationsPageComponent {
 
   /** Conversation-type filter. '' = all. Values are the server Kind labels (see KindLabel). */
   protected readonly kindFilter = signal<string>('');
+  /** The chip row is scrolled to its right end (no fade then). */
+  protected readonly kindsAtEnd = signal(false);
+
+  protected onKindsScroll(ev: Event): void {
+    const el = ev.target as HTMLElement;
+    this.kindsAtEnd.set(el.scrollLeft + el.clientWidth >= el.scrollWidth - 2);
+  }
+
+  /** A vertical wheel scrolls the chip row sideways; a trackpad's own sideways swipe is left alone. */
+  protected onKindsWheel(ev: WheelEvent): void {
+    if (Math.abs(ev.deltaX) >= Math.abs(ev.deltaY)) return;
+    const el = ev.currentTarget as HTMLElement;
+    if (el.scrollWidth <= el.clientWidth) return;
+    el.scrollLeft += ev.deltaY;
+    ev.preventDefault();
+  }
   protected readonly kindFilters: ReadonlyArray<{ value: string; label: string }> = [
     { value: '', label: 'All' },
     { value: 'Spot', label: 'Spot' },

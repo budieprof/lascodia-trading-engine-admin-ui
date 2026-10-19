@@ -8,6 +8,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 import { OrderTicketComponent } from './order-ticket.component';
 import type { ManualTradePreview, TradeGate } from './manual-trading.types';
@@ -17,6 +18,8 @@ declareSignalIo(OrderTicketComponent, {
   inputs: ['symbol', 'precision', 'pipSize', 'quote', 'state'],
   outputs: ['closed', 'submitted', 'previewChange', 'stateChange'],
 });
+// The ticket's Escape arrives through the directive's `(dismiss)`, which JIT only wires once declared.
+declareSignalIo(ModalA11yDirective, { outputs: ['dismiss'] });
 
 const BASE = 'http://test/api/v1/lascodia-trading-engine';
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
@@ -234,6 +237,33 @@ describe('OrderTicketComponent (SP-I4)', () => {
       responseCode: '-11',
     });
     expect(notify.error).toHaveBeenCalledWith('Near-duplicate');
+  });
+
+  it('Escape closes it without sending anything; focus starts on Close, never on Submit', () => {
+    render({ accountId: 17, stop: 1.0971, target: 1.1061 });
+    answerPreview(preview()); // also runs the directive's initial-focus timer
+    const active = document.activeElement as HTMLElement;
+    expect(active.getAttribute('aria-label')).toBe('Close the ticket');
+    expect(active).not.toBe(byId('ticket-submit'));
+    const closed = vi.fn();
+    fixture.componentInstance.closed.subscribe(closed);
+    active.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(closed).toHaveBeenCalledTimes(1);
+    http.expectNone(`${BASE}/trade-signal/manual`);
+  });
+
+  it('does not close while a ticket is being sent: the engine’s answer must be seen', () => {
+    render({ accountId: 17, stop: 1.0971, target: 1.1061 });
+    answerPreview(preview());
+    const closed = vi.fn();
+    fixture.componentInstance.closed.subscribe(closed);
+    byId<HTMLButtonElement>('ticket-submit').click();
+    const req = http.expectOne(`${BASE}/trade-signal/manual`);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(closed).not.toHaveBeenCalled();
+    req.flush(ok({ mode: 'Paper', paperExecutionId: 1, preview: preview(), message: 'ok' }));
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(closed).toHaveBeenCalledTimes(1);
   });
 
   it('mirrors the brackets when the side flips', () => {

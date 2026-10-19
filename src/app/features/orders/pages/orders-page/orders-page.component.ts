@@ -19,7 +19,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, merge, of, throttleTime } from 'rxjs';
+import { catchError, forkJoin, merge, of, throttleTime } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import type { OrderDto, PagedData, PagerRequest } from '@core/api/api.types';
 
@@ -71,8 +71,9 @@ interface OrdersViewState {
 
       <!-- SP-12: orders are created by the EA from approved trade signals; an order typed in here was never placed. -->
       <p class="manual-note">
-        Orders reach the broker only through trade signals: the EA places an approved signal and creates its order.
-        To trade by hand, create a manual signal — it passes the same risk checks.
+        Orders reach the broker only through trade signals: the EA places an approved signal and
+        creates its order. To trade by hand, create a manual signal — it passes the same risk
+        checks.
       </p>
       @if (manualSignalOpen()) {
         <app-create-signal-dialog
@@ -151,7 +152,9 @@ interface OrdersViewState {
                     [attr.aria-selected]="filterStatus() === s"
                   >
                     {{ s === '' ? 'All' : s }}
-                    <span class="chip-count">{{ statusCount(s) }}</span>
+                    @if (statusCount(s) !== null) {
+                      <span class="chip-count">{{ statusCount(s) | number }}</span>
+                    }
                   </button>
                 }
               </div>
@@ -171,12 +174,19 @@ interface OrdersViewState {
                   </button>
                 }
               </div>
+              <!--
+                The mode filter was never sent to the engine, so Live / Paper
+                highlighted and changed nothing. It is sent as filter.isPaper,
+                which OrderQueryFilter honours since 2026-10-19; the chip totals
+                above follow it (baseFilter).
+              -->
               <div class="chip-group" role="tablist" aria-label="Filter by mode">
                 <button
                   type="button"
                   role="tab"
                   class="chip"
                   [class.active]="filterPaper() === null"
+                  [attr.aria-selected]="filterPaper() === null"
                   (click)="onFilterPaperChange(null)"
                 >
                   All modes
@@ -186,6 +196,7 @@ interface OrdersViewState {
                   role="tab"
                   class="chip"
                   [class.active]="filterPaper() === false"
+                  [attr.aria-selected]="filterPaper() === false"
                   (click)="onFilterPaperChange(false)"
                 >
                   Live
@@ -195,6 +206,7 @@ interface OrdersViewState {
                   role="tab"
                   class="chip"
                   [class.active]="filterPaper() === true"
+                  [attr.aria-selected]="filterPaper() === true"
                   (click)="onFilterPaperChange(true)"
                 >
                   Paper
@@ -366,7 +378,7 @@ interface OrdersViewState {
               <app-chart-card
                 class="span-4"
                 title="Daily Volume + Fill %"
-                subtitle="Last 30 days, order count and fill rate"
+                [subtitle]="dailyVolumeSubtitle()"
                 [options]="dailyVolumeWithFillChart()"
                 height="240px"
               />
@@ -700,16 +712,23 @@ interface OrdersViewState {
         flex-wrap: wrap;
         margin-bottom: var(--space-3);
       }
+      /* The eight status chips carry engine totals ("Cancelled 2,894"), so the
+         track is wider than an 820 px tablet's content column; it wraps inside
+         the column instead of pushing the page sideways. 17 px = half a
+         one-row track (28 + 2×3), so a single row still reads as a pill. */
       .chip-group {
         display: inline-flex;
+        flex-wrap: wrap;
+        max-width: 100%;
         gap: 2px;
         padding: 3px;
         background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
+        border-radius: 17px;
       }
       .chip {
         height: 28px;
         padding: 0 12px;
+        white-space: nowrap;
         border: none;
         background: transparent;
         color: var(--text-secondary);
@@ -1079,7 +1098,6 @@ interface OrdersViewState {
         color: var(--text-tertiary);
         font-size: var(--text-sm);
       }
-
     `,
   ],
 })
@@ -1135,8 +1153,9 @@ export class OrdersPageComponent {
         this.loadRecent();
       });
     });
-
-    this.loadRecent();
+    // (An effect always runs once on creation, so the initial load is the
+    // effect's — a second explicit loadRecent() here fetched the 500-order
+    // window twice on every page open.)
   }
 
   // Tab state
@@ -1244,9 +1263,53 @@ export class OrdersPageComponent {
   ];
   readonly sideChips: string[] = ['', 'Buy', 'Sell'];
 
-  statusCount(s: string): number {
-    if (s === '') return this.recentOrders().length;
-    return this.recentOrders().filter((o) => o.status === s).length;
+  /**
+   * Engine totals per status chip under the table's other filters (side,
+   * mode, account scope) — exactly what clicking the chip would list. The
+   * chips used to count the 500-order KPI window ("All 500") above a table
+   * reading "Showing 1–25 of 5,717". Null until the counts arrive (or when
+   * one failed), and the chip then shows no number rather than a wrong one.
+   */
+  private readonly statusTotals = signal<Record<string, number | null>>({});
+
+  statusCount(s: string): number | null {
+    return this.statusTotals()[s] ?? null;
+  }
+
+  /** The table's filter minus status: side, mode and the global account scope. */
+  private baseFilter(): Record<string, unknown> {
+    const filter: Record<string, unknown> = {};
+    if (this.filterSide()) filter['orderType'] = this.filterSide();
+    if (this.filterPaper() !== null) filter['isPaper'] = this.filterPaper();
+    // Global account scope — drops a tradingAccountIds list onto the
+    // filter so engine-side OrderQueryFilter narrows the result set
+    // to the operator's selected scope (or aggregate of live real
+    // accounts).  Same selector flips Positions, Drawdown, and the
+    // dashboard tiles in lockstep — see AccountScopeService.
+    const scopedIds = this.accountScope.accountIds();
+    if (scopedIds.length > 0) filter['tradingAccountIds'] = Array.from(scopedIds);
+    return filter;
+  }
+
+  /** One count-only query (a single row + the pager total) per status chip. */
+  private loadStatusTotals(): void {
+    const base = this.baseFilter();
+    const calls = Object.fromEntries(
+      this.statusChips.map((s) => [
+        s,
+        this.ordersService
+          .list({
+            currentPage: 1,
+            itemCountPerPage: 1,
+            filter: s ? { ...base, status: s } : base,
+          })
+          .pipe(
+            map((r) => (r?.status === false ? null : (r.data?.pager?.totalItemCount ?? null))),
+            catchError(() => of(null)),
+          ),
+      ]),
+    );
+    forkJoin(calls).subscribe((totals) => this.statusTotals.set(totals));
   }
 
   private loadRecent(): void {
@@ -1263,6 +1326,8 @@ export class OrdersPageComponent {
         const rows = res?.data?.data ?? [];
         this.recentOrders.set(rows);
       });
+    // Same triggers (scope change, order/position push) move the chip totals.
+    this.loadStatusTotals();
   }
 
   // AG Grid columns
@@ -1306,16 +1371,26 @@ export class OrdersPageComponent {
       },
     },
     {
-      headerName: 'Quantity',
+      // "Quantity" wrapped mid-word ("QUANTI / TY") in a 100px uppercase header.
+      headerName: 'Qty',
+      headerTooltip: 'Quantity (lots)',
       field: 'quantity',
-      width: 100,
+      width: 90,
       valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(2) : '-'),
     },
     {
       headerName: 'Price',
       field: 'price',
       width: 110,
-      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
+      // A market order carries no requested price — the engine stores 0, which
+      // printed as a price of 0.00000.
+      valueFormatter: (params) => {
+        if (params.value == null) return '-';
+        const v = Number(params.value);
+        const exec = params.data?.executionType as unknown;
+        if (v === 0 && (exec === 'Market' || exec === 0)) return 'Market';
+        return v.toFixed(5);
+      },
     },
     {
       headerName: 'SL',
@@ -1428,16 +1503,8 @@ export class OrdersPageComponent {
   ];
 
   fetchData = (params: PagerRequest) => {
-    const filter: Record<string, unknown> = {};
+    const filter = this.baseFilter();
     if (this.filterStatus()) filter['status'] = this.filterStatus();
-    if (this.filterSide()) filter['orderType'] = this.filterSide();
-    // Global account scope — drops a tradingAccountIds list onto the
-    // filter so engine-side OrderQueryFilter narrows the result set
-    // to the operator's selected scope (or aggregate of live real
-    // accounts).  Same selector flips Positions, Drawdown, and the
-    // dashboard tiles in lockstep — see AccountScopeService.
-    const scopedIds = this.accountScope.accountIds();
-    if (scopedIds.length > 0) filter['tradingAccountIds'] = Array.from(scopedIds);
 
     const requestParams: PagerRequest = {
       ...params,
@@ -1514,48 +1581,6 @@ export class OrdersPageComponent {
     };
   });
 
-  ordersOverTimeChart = computed<EChartsOption>(() => {
-    // Day buckets for the last 30 days. Pre-fill so the x-axis is regular
-    // even on dates with zero activity.
-    const days: string[] = [];
-    const buckets = new Map<string, number>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      d.setHours(0, 0, 0, 0);
-      const key = d.toISOString().slice(0, 10);
-      days.push(key);
-      buckets.set(key, 0);
-    }
-    for (const o of this.recentOrders()) {
-      const key = o.createdAt.slice(0, 10);
-      if (buckets.has(key)) buckets.set(key, (buckets.get(key) ?? 0) + 1);
-    }
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 40, right: 16, top: 16, bottom: 36 },
-      xAxis: {
-        type: 'category',
-        data: days.map((d) => d.slice(5)),
-        axisLabel: { fontSize: 10, color: '#8E8E93', rotate: 45, interval: 4 },
-        axisLine: { lineStyle: { color: '#3A3A3C' } },
-      },
-      yAxis: {
-        type: 'value',
-        axisLabel: { fontSize: 10, color: '#8E8E93' },
-        splitLine: { lineStyle: { color: 'rgba(142,142,147,0.15)' } },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: days.map((d) => buckets.get(d) ?? 0),
-          itemStyle: { color: '#0071E3', borderRadius: [4, 4, 0, 0] },
-          barWidth: '60%',
-        },
-      ],
-    };
-  });
-
   buySellChart = computed<EChartsOption>(() => {
     let buy = 0,
       sell = 0;
@@ -1579,79 +1604,6 @@ export class OrdersPageComponent {
             { value: buy, name: 'Buy', itemStyle: { color: '#34C759' } },
             { value: sell, name: 'Sell', itemStyle: { color: '#FF3B30' } },
           ],
-        },
-      ],
-    };
-  });
-
-  fillRateTrendChart = computed<EChartsOption>(() => {
-    // Day-by-day fill rate (filled / created). Days without orders surface
-    // as nulls so the line breaks rather than implying a 0% fill rate.
-    const days: string[] = [];
-    const created = new Map<string, number>();
-    const filled = new Map<string, number>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      d.setHours(0, 0, 0, 0);
-      const key = d.toISOString().slice(0, 10);
-      days.push(key);
-      created.set(key, 0);
-      filled.set(key, 0);
-    }
-    for (const o of this.recentOrders()) {
-      const key = o.createdAt.slice(0, 10);
-      if (created.has(key)) {
-        created.set(key, (created.get(key) ?? 0) + 1);
-        if (o.status === 'Filled') {
-          filled.set(key, (filled.get(key) ?? 0) + 1);
-        }
-      }
-    }
-    const values = days.map((d) => {
-      const c = created.get(d) ?? 0;
-      if (c === 0) return null;
-      return Math.round(((filled.get(d) ?? 0) / c) * 100);
-    });
-    return {
-      tooltip: { trigger: 'axis', formatter: '{b}<br/>Fill rate: {c}%' },
-      grid: { left: 40, right: 16, top: 16, bottom: 36 },
-      xAxis: {
-        type: 'category',
-        data: days.map((d) => d.slice(5)),
-        axisLabel: { fontSize: 10, color: '#8E8E93', rotate: 45, interval: 4 },
-        axisLine: { lineStyle: { color: '#3A3A3C' } },
-      },
-      yAxis: {
-        type: 'value',
-        min: 0,
-        max: 100,
-        axisLabel: { fontSize: 10, color: '#8E8E93', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(142,142,147,0.15)' } },
-      },
-      series: [
-        {
-          type: 'line',
-          data: values,
-          connectNulls: false,
-          smooth: true,
-          symbol: 'circle',
-          symbolSize: 4,
-          lineStyle: { color: '#5856D6', width: 2 },
-          itemStyle: { color: '#5856D6' },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(88,86,214,0.3)' },
-                { offset: 1, color: 'rgba(88,86,214,0.02)' },
-              ],
-            } as any,
-          },
         },
       ],
     };
@@ -1725,7 +1677,7 @@ export class OrdersPageComponent {
 
   readonly slippageSubtitle = computed(() => {
     const { values, excluded } = this.slippageSamples();
-    const base = `Filled price − order price, in pips · negative = filled better · ${values.length} fills`;
+    const base = `Adverse slippage in pips (buys filled − order, sells order − filled) · negative = filled better · ${values.length} fills`;
     return excluded > 0
       ? `${base} · ${excluded} beyond ±${SLIPPAGE_OUTLIER_PIPS} pips excluded as bad data`
       : base;
@@ -1974,21 +1926,26 @@ export class OrdersPageComponent {
   slippageHistogramChart = computed<EChartsOption>(() => {
     const slips = this.slippageSamples().values.map((s) => s.pips);
     if (slips.length === 0) return emptyChartTitle('No filled orders yet');
-    // Symmetric pip buckets centred on 0; the two tail buckets absorb the
-    // rest of the (already outlier-trimmed) range.
-    const edges = [-Infinity, -5, -2, -1, -0.5, 0, 0.5, 1, 2, 5, Infinity];
+    // Symmetric pip buckets around an EXACT-fill bucket; the two tail buckets
+    // absorb the rest of the (already outlier-trimmed) range. A fill at the
+    // requested price used to land in "0…0.5" and be painted red as adverse —
+    // ~300 of ~330 fills, i.e. the whole chart read "worse than expected".
+    const ZERO_PIPS = 0.05; // below a tenth of a pip is a fill at the price
+    const edges = [-Infinity, -5, -2, -1, -0.5, -ZERO_PIPS, ZERO_PIPS, 0.5, 1, 2, 5, Infinity];
     const labels = [
-      '< −5',
+      '<−5',
       '−5…−2',
       '−2…−1',
-      '−1…−0.5',
-      '−0.5…0',
-      '0…0.5',
-      '0.5…1',
+      '−1…−½',
+      '−½…0',
+      '0',
+      '0…½',
+      '½…1',
       '1…2',
       '2…5',
-      '> 5',
+      '>5',
     ];
+    const ZERO_BUCKET = 5;
     const counts = new Array(labels.length).fill(0) as number[];
     for (const slip of slips) {
       for (let i = 0; i < edges.length - 1; i++) {
@@ -1998,13 +1955,13 @@ export class OrdersPageComponent {
         }
       }
     }
-    // Colour the bars so green = better than expected (paid less), red = worse.
+    // Green = better than requested (paid less), red = worse, grey = at the price.
     const data = counts.map((value, i) => {
-      const isFavourable = i < 5; // first 5 buckets are negative slippage
+      const color = i < ZERO_BUCKET ? '#34C759' : i === ZERO_BUCKET ? '#8E8E93' : '#FF3B30';
       return {
         value,
         itemStyle: {
-          color: isFavourable ? '#34C759' : '#FF3B30',
+          color,
           borderRadius: [3, 3, 0, 0] as [number, number, number, number],
           opacity: value === 0 ? 0.25 : 1,
         },
@@ -2020,7 +1977,9 @@ export class OrdersPageComponent {
         nameGap: 4,
         nameTextStyle: { fontSize: 9, color: '#8E8E93' },
         data: labels,
-        axisLabel: { fontSize: 10, color: '#8E8E93', interval: 0 },
+        // Eleven labels in a half-width card: 9px and no overlap-hiding, so
+        // every bucket keeps its label (one used to vanish beside the bars).
+        axisLabel: { fontSize: 9, color: '#8E8E93', interval: 0, hideOverlap: false },
       },
       yAxis: {
         type: 'value',
@@ -2092,21 +2051,32 @@ export class OrdersPageComponent {
     };
   });
 
+  /**
+   * The chart reads the 500-order window, which can start well inside the
+   * 30 days it draws; the days before the window's oldest order then show no
+   * bars because they were never fetched, not because nothing traded.
+   */
+  readonly dailyVolumeSubtitle = computed(() => {
+    const base = 'Last 30 days (UTC), order count and fill rate';
+    const rows = this.recentOrders();
+    if (rows.length < 500) return base;
+    const oldest = rows.reduce((m, o) => (o.createdAt < m ? o.createdAt : m), rows[0].createdAt);
+    const days = lastUtcDays(30);
+    if (oldest.slice(0, 10) <= days[0]) return base;
+    return `${base} · window of the latest 500 orders starts ${oldest.slice(5, 10)}`;
+  });
+
   dailyVolumeWithFillChart = computed<EChartsOption>(() => {
     // Combo: bars = order count, line = fill rate %. Lets the operator spot
     // days where fill rate dropped despite high volume (broker stress).
-    const days: string[] = [];
-    const created = new Map<string, number>();
-    const filled = new Map<string, number>();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date();
-      d.setDate(d.getDate() - i);
-      d.setHours(0, 0, 0, 0);
-      const key = d.toISOString().slice(0, 10);
-      days.push(key);
-      created.set(key, 0);
-      filled.set(key, 0);
-    }
+    //
+    // UTC days on both sides: orders are keyed by createdAt's UTC date, and
+    // the axis used LOCAL midnight → toISOString(), which east of UTC is the
+    // previous UTC date — the axis ran a day behind and today's orders fell
+    // off its right edge.
+    const days = lastUtcDays(30);
+    const created = new Map<string, number>(days.map((d) => [d, 0]));
+    const filled = new Map<string, number>(days.map((d) => [d, 0]));
     for (const o of this.recentOrders()) {
       const key = o.createdAt.slice(0, 10);
       if (!created.has(key)) continue;
@@ -2161,7 +2131,9 @@ export class OrdersPageComponent {
             return c === 0 ? null : Math.round(((filled.get(d) ?? 0) / c) * 100);
           }),
           connectNulls: false,
-          smooth: true,
+          // Straight segments: the spline overshot the 0–100 % axis between
+          // sparse days and drew fill rates no day had.
+          smooth: false,
           symbol: 'circle',
           symbolSize: 4,
           lineStyle: { color: '#34C759', width: 2 },
@@ -2194,11 +2166,13 @@ export class OrdersPageComponent {
   onFilterSideChange(value: string): void {
     this.filterSide.set(value);
     this.reloadTable();
+    this.loadStatusTotals();
   }
 
   onFilterPaperChange(value: boolean | null): void {
     this.filterPaper.set(value);
     this.reloadTable();
+    this.loadStatusTotals();
   }
 
   clearFilters(): void {
@@ -2206,6 +2180,7 @@ export class OrdersPageComponent {
     this.filterSide.set('');
     this.filterPaper.set(null);
     this.reloadTable();
+    this.loadStatusTotals();
   }
 
   // ── Saved views ─────────────────────────────────────────────────────
@@ -2235,6 +2210,7 @@ export class OrdersPageComponent {
     this.filterStatus.set(view.state.status ?? '');
     this.filterSide.set(view.state.orderType ?? '');
     this.reloadTable();
+    this.loadStatusTotals();
   }
 
   removeSavedView(id: string, event: Event): void {
@@ -2404,9 +2380,29 @@ function pipSizeFor(symbol: string | null): number {
 }
 
 /** Signed fill slippage in pips; positive = filled worse than the order price. */
+/**
+ * ADVERSE slippage in pips: positive = filled worse than requested, negative =
+ * price improvement — for both sides. It was filled − order regardless of
+ * side, so a sell filled ABOVE its price (better) counted as adverse and a
+ * sell filled below it as improvement; two thirds of the window are sells.
+ */
 function slippagePips(o: OrderDto): number | null {
   if (o.status !== 'Filled' || o.filledPrice === null || !o.price) return null;
-  return (o.filledPrice - o.price) / pipSizeFor(o.symbol);
+  const raw = (o.filledPrice - o.price) / pipSizeFor(o.symbol);
+  const side = o.orderType as unknown;
+  const isBuy = side === 'Buy' || side === 0;
+  return isBuy ? raw : -raw;
+}
+
+/** The last `n` UTC calendar days as YYYY-MM-DD keys, oldest first, ending today (UTC). */
+function lastUtcDays(n: number): string[] {
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const days: string[] = [];
+  for (let i = n - 1; i >= 0; i--) {
+    days.push(new Date(today - i * 86_400_000).toISOString().slice(0, 10));
+  }
+  return days;
 }
 
 function escapeAttribute(s: string): string {

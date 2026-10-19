@@ -1,4 +1,6 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { catchError, EMPTY, exhaustMap, filter, timer } from 'rxjs';
 import { RouterLink } from '@angular/router';
 import { LucidePower } from '@lucide/angular';
 import { KillSwitchService } from '@core/services/kill-switch.service';
@@ -53,8 +55,11 @@ import { AuthService } from '@core/auth/auth.service';
   ],
 })
 export class KillSwitchBannerComponent implements OnInit {
+  private static readonly POLL_MS = 30_000;
+
   protected readonly service = inject(KillSwitchService);
   private readonly auth = inject(AuthService);
+  private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
     // `/admin/kill-switch/global` is gated by the Operator policy. Only fetch
@@ -71,10 +76,14 @@ export class KillSwitchBannerComponent implements OnInit {
     const mine = this.auth.roles();
     if (!mine.some((r) => r === 'Operator' || r === 'Admin')) return;
 
-    this.service.getGlobal().subscribe({
-      error: () => {
-        /* silent on error */
-      },
-    });
+    // Re-check on a cadence: no realtime event carries the switch, so a switch engaged by
+    // another operator (or the engine) used to stay invisible here until a full reload.
+    timer(0, KillSwitchBannerComponent.POLL_MS)
+      .pipe(
+        filter(() => typeof document === 'undefined' || document.visibilityState !== 'hidden'),
+        exhaustMap(() => this.service.getGlobal().pipe(catchError(() => EMPTY))),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe();
   }
 }

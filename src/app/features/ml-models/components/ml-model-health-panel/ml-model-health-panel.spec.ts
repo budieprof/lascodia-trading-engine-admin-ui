@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { estimateMccFromAccuracyAndF1 } from './ml-model-health-panel.component';
+import { estimateMccFromAccuracyAndF1, formatOosDeltaPp } from './ml-model-health-panel.component';
 
 describe('estimateMccFromAccuracyAndF1', () => {
   it('returns null when either input is missing', () => {
@@ -41,5 +41,21 @@ describe('estimateMccFromAccuracyAndF1', () => {
     const mcc = estimateMccFromAccuracyAndF1(0.95, 0.1)!;
     expect(mcc).not.toBeNull();
     expect(mcc).toBeLessThan(0.1);
+  });
+});
+
+describe('formatOosDeltaPp', () => {
+  it('shows a drop as a single negative sign', () => {
+    expect(formatOosDeltaPp(3.24)).toBe('−3.2 pp');
+  });
+
+  it('shows OOS beating validation as positive — never "+-"', () => {
+    // Model #918: validation 56.56%, walk-forward mean 65.20% → drop of −8.64 pp.
+    expect(formatOosDeltaPp(-8.64)).toBe('+8.6 pp');
+  });
+
+  it('renders a dash when there is no walk-forward figure, and an unsigned zero', () => {
+    expect(formatOosDeltaPp(null)).toBe('—');
+    expect(formatOosDeltaPp(0.01)).toBe('0.0 pp');
   });
 });

@@ -13,10 +13,16 @@ import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { catchError, forkJoin, map, of, timer } from 'rxjs';
 
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
-import { EAInstancesService } from '@core/services/ea-instances.service';
+import { EAAdminService } from '@core/services/ea-admin.service';
 import { TerminalsService } from '@core/services/terminals.service';
+import {
+  FLEET_STATUS_LABELS,
+  currentFleetIds,
+  fleetStatusOf,
+  type FleetStatus,
+} from '@features/ea-instances/current-fleet';
 import type {
-  EAInstanceDto,
+  EAFleetItem,
   TerminalDaemonDto,
   TerminalInstallDto,
   TerminalSessionDto,
@@ -30,6 +36,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
 import {
   type AccountModeClass,
+  type BrokerEa,
   type BrokerGroup,
   accountMode,
   ageSec,
@@ -123,7 +130,7 @@ interface HostInstall {
             [dotColor]="b.disconnectedEas > 0 ? '#FF3B30' : '#34C759'"
           />
           <app-metric-card
-            label="Balance"
+            label="Balance (active accounts)"
             [value]="b.totalBalance"
             format="currency"
             dotColor="#0071E3"
@@ -455,13 +462,15 @@ interface HostInstall {
                   </tr>
                 </thead>
                 <tbody>
-                  @for (ea of sortedEaInstances(); track ea.id) {
+                  @for (ea of sortedEaInstances(); track ea.instanceId) {
                     <tr>
                       <td class="mono ea-instance">
-                        <a [routerLink]="['/ea-instances', ea.id]" [title]="ea.instanceId">
+                        <a [routerLink]="['/ea-instances', ea.instanceId]" [title]="ea.instanceId">
                           {{ ea.instanceId }}
                         </a>
-                        @if (ea.isCoordinator) {
+                        <!-- The flag is never cleared when an EA goes quiet; only a live one
+                             coordinates (the engine's fleet-summary rule). -->
+                        @if (ea.isCoordinator && statusOf(ea) === 'Active') {
                           <span class="coord-tag">coordinator</span>
                         }
                       </td>
@@ -473,11 +482,11 @@ interface HostInstall {
                       <td>
                         <span
                           class="status-pill"
-                          [class.active]="ea.status === 'Active'"
-                          [class.idle]="ea.status === 'ShuttingDown'"
-                          [class.down]="ea.status === 'Disconnected'"
+                          [class.active]="statusOf(ea) === 'Active'"
+                          [class.idle]="statusOf(ea) === 'ShuttingDown'"
+                          [class.down]="statusOf(ea) === 'Disconnected'"
                         >
-                          {{ statusLabel(ea.status) }}
+                          {{ statusLabel(statusOf(ea)) }}
                         </span>
                       </td>
                       <td class="mono">{{ ea.eaVersion || '—' }}</td>
@@ -498,7 +507,11 @@ interface HostInstall {
                       </td>
                       <td
                         class="num mono nowrap"
-                        [class.loss]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! > 120"
+                        [class.loss]="
+                          statusOf(ea) !== 'Deregistered' &&
+                          heartbeatAgeSec(ea) !== null &&
+                          heartbeatAgeSec(ea)! > 120
+                        "
                       >
                         {{ heartbeatAgeSec(ea) === null ? '—' : formatAge(heartbeatAgeSec(ea)!) }}
                       </td>
@@ -690,7 +703,7 @@ interface HostInstall {
       .tag.demo,
       .mode-pill[data-mode='demo'] {
         background: rgba(0, 113, 227, 0.14);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .tag.contest,
       .mode-pill[data-mode='contest'] {
@@ -755,7 +768,7 @@ interface HostInstall {
       .pill.idle,
       .status-pill.idle {
         background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .pill.down,
       .status-pill.down,
@@ -772,7 +785,7 @@ interface HostInstall {
         padding: 1px 6px;
         border-radius: 999px;
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
 
       /* ── Hosts ──────────────────────────────────────────────── */
@@ -901,7 +914,7 @@ export class BrokerDetailPageComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly accountsService = inject(TradingAccountsService);
-  private readonly eaService = inject(EAInstancesService);
+  private readonly eaAdmin = inject(EAAdminService);
   private readonly terminals = inject(TerminalsService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -915,7 +928,14 @@ export class BrokerDetailPageComponent implements OnInit {
   readonly loaded = signal(false);
   readonly loadError = signal<string | null>(null);
   readonly accounts = signal<TradingAccountDto[]>([]);
-  readonly eaInstances = signal<EAInstanceDto[]>([]);
+  /** Every registered instance (all statuses) — `/ea/instances` returned Active rows only. */
+  private readonly fleet = signal<EAFleetItem[]>([]);
+  /** The current fleet (see `currentFleetIds`), the same cut the Brokers list shows. */
+  readonly eaInstances = computed<BrokerEa[]>(() => {
+    const active = new Map(this.accounts().map((a) => [a.id, a.isActive]));
+    const ids = currentFleetIds(this.fleet(), (id) => active.get(id) === true, Date.now());
+    return this.fleet().filter((ea) => ids.has(ea.instanceId));
+  });
   readonly daemons = signal<TerminalDaemonDto[] | null>(null);
   readonly sessions = signal<TerminalSessionDto[]>([]);
   readonly nowMs = signal(Date.now());
@@ -971,8 +991,15 @@ export class BrokerDetailPageComponent implements OnInit {
     return b.paperAccounts === b.accounts.length ? 'Engine simulation' : 'MetaTrader 5';
   });
 
+  // Versions of the LIVE EAs — a disconnected row reports whatever build it last ran.
   readonly eaVersions = computed(() =>
-    Array.from(new Set((this.broker()?.eaInstances ?? []).map((ea) => (ea.eaVersion ?? '').trim())))
+    Array.from(
+      new Set(
+        (this.broker()?.eaInstances ?? [])
+          .filter((ea) => ea.status === 'Active')
+          .map((ea) => (ea.eaVersion ?? '').trim()),
+      ),
+    )
       .filter((v) => v.length > 0)
       .sort(),
   );
@@ -1040,6 +1067,7 @@ export class BrokerDetailPageComponent implements OnInit {
   private readonly eaCountByAccount = computed(() => {
     const m = new Map<number, number>();
     for (const ea of this.eaInstances()) {
+      if (ea.status !== 'Active') continue;
       m.set(ea.tradingAccountId, (m.get(ea.tradingAccountId) ?? 0) + 1);
     }
     return m;
@@ -1061,7 +1089,7 @@ export class BrokerDetailPageComponent implements OnInit {
       accounts: this.accountsService
         .list({ currentPage: 1, itemCountPerPage: 200 })
         .pipe(catchError(() => of(null))),
-      eas: this.eaService.list().pipe(catchError(() => of(null))),
+      eas: this.eaAdmin.listFleet().pipe(catchError(() => of(null))),
       // Terminal endpoints are admin-scoped and optional: their failure
       // degrades the hosts card, never the page.
       daemons: this.terminals.listDaemons().pipe(catchError(() => of(null))),
@@ -1079,7 +1107,7 @@ export class BrokerDetailPageComponent implements OnInit {
             accounts?.message || 'The trading-account list did not load. Is the engine reachable?',
           );
         }
-        if (eas?.data) this.eaInstances.set(eas.data);
+        if (eas?.data) this.fleet.set(eas.data);
         this.daemons.set(daemons?.data ?? null);
         this.sessions.set(sessions?.data ?? []);
       });
@@ -1107,11 +1135,11 @@ export class BrokerDetailPageComponent implements OnInit {
     return s === null ? '—' : formatAge(s);
   }
 
-  heartbeatAgeSec(ea: EAInstanceDto): number | null {
+  heartbeatAgeSec(ea: BrokerEa): number | null {
     return ageSec(ea.lastHeartbeat, this.nowMs());
   }
 
-  eaSymbols(ea: EAInstanceDto): string[] {
+  eaSymbols(ea: BrokerEa): string[] {
     return eaSymbols(ea);
   }
 
@@ -1120,17 +1148,13 @@ export class BrokerDetailPageComponent implements OnInit {
   }
 
   /** Engine enum → words: "ShuttingDown" is not copy. */
-  statusLabel(status: string): string {
-    switch (status) {
-      case 'ShuttingDown':
-        return 'Shutting down';
-      case 'Disconnected':
-        return 'Disconnected';
-      case 'Active':
-        return 'Active';
-      default:
-        return status || '—';
-    }
+  statusLabel(status: FleetStatus): string {
+    return FLEET_STATUS_LABELS[status] ?? status ?? '—';
+  }
+
+  /** A long-silent ShuttingDown row is a finished deregistration (same rule as EA Instances). */
+  statusOf(ea: BrokerEa): FleetStatus {
+    return fleetStatusOf(ea, Date.now());
   }
 
   isRunning(status: string): boolean {

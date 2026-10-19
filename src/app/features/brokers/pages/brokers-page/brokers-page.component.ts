@@ -13,9 +13,14 @@ import { RouterLink } from '@angular/router';
 import { Subject, catchError, forkJoin, of, takeUntil, timer } from 'rxjs';
 
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
-import { EAInstancesService } from '@core/services/ea-instances.service';
-import { NotificationService } from '@core/notifications/notification.service';
-import type { EAInstanceDto, TradingAccountDto } from '@core/api/api.types';
+import { EAAdminService } from '@core/services/ea-admin.service';
+import type { EAFleetItem, TradingAccountDto } from '@core/api/api.types';
+import {
+  FLEET_STATUS_LABELS,
+  currentFleetIds,
+  fleetStatusOf,
+  type FleetStatus,
+} from '@features/ea-instances/current-fleet';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -23,6 +28,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 
 import {
   type AccountModeClass,
+  type BrokerEa,
   type BrokerGroup,
   accountMode,
   ageSec,
@@ -59,7 +65,9 @@ import {
         <button class="btn btn-secondary" (click)="loadAll()" [disabled]="loading()">
           {{ loading() ? 'Refreshing…' : '↻ Refresh' }}
         </button>
-        <button class="btn btn-primary" (click)="onAddBroker()">+ Add Broker</button>
+        <!-- A broker is added by provisioning its MT5 terminal (Terminals → Add broker terminal);
+             this used to raise a "coming soon" toast. -->
+        <a class="btn btn-primary" routerLink="/terminals">+ Add broker terminal</a>
       </app-page-header>
 
       <!-- ── KPI strip ─────────────────────────────────────────────── -->
@@ -124,8 +132,9 @@ import {
           <header class="section-head">
             <h3>Brokers</h3>
             <span class="muted">
-              grouped by broker server family · {{ inactiveAccountsCount() }} inactive account(s) ·
-              {{ disconnectedEaCount() }} disconnected EA(s) · refreshes every 15s
+              grouped by broker server family · money totals cover active accounts only ·
+              {{ inactiveAccountsCount() }} inactive account(s) · {{ disconnectedEaCount() }}
+              disconnected EA(s) · refreshes every 15s
             </span>
           </header>
           @if (brokers().length > 0) {
@@ -164,7 +173,17 @@ import {
                   <dl class="broker-stats">
                     <div>
                       <dt>Accounts</dt>
-                      <dd class="mono">{{ b.accounts.length }} ({{ b.activeAccounts }} active)</dd>
+                      <dd class="mono">
+                        {{ b.accounts.length }} ({{ b.activeAccounts }} active)
+                        @if (b.inactiveBalance > 0) {
+                          <small
+                            class="muted inactive-note"
+                            title="Last-synced balance on inactive accounts — not in the totals"
+                          >
+                            +{{ b.inactiveBalance | currency: 'USD' : 'symbol' : '1.0-0' }} inactive
+                          </small>
+                        }
+                      </dd>
                     </div>
                     <div>
                       <dt>Balance</dt>
@@ -383,11 +402,11 @@ import {
                       <td>
                         <span
                           class="status-pill"
-                          [class.active]="ea.status === 'Active'"
-                          [class.idle]="ea.status === 'ShuttingDown'"
-                          [class.down]="ea.status === 'Disconnected'"
+                          [class.active]="statusOf(ea) === 'Active'"
+                          [class.idle]="statusOf(ea) === 'ShuttingDown'"
+                          [class.down]="statusOf(ea) === 'Disconnected'"
                         >
-                          {{ statusLabel(ea.status) }}
+                          {{ statusLabel(statusOf(ea)) }}
                         </span>
                       </td>
                       <td>
@@ -407,7 +426,11 @@ import {
                       </td>
                       <td
                         class="num mono nowrap"
-                        [class.loss]="heartbeatAgeSec(ea) !== null && heartbeatAgeSec(ea)! > 120"
+                        [class.loss]="
+                          statusOf(ea) !== 'Deregistered' &&
+                          heartbeatAgeSec(ea) !== null &&
+                          heartbeatAgeSec(ea)! > 120
+                        "
                       >
                         {{ heartbeatAgeSec(ea) === null ? '—' : formatAge(heartbeatAgeSec(ea)!) }}
                       </td>
@@ -450,6 +473,11 @@ import {
         display: inline-flex;
         align-items: center;
         gap: var(--space-1);
+        text-decoration: none;
+      }
+      .inactive-note {
+        display: block;
+        font-size: 11px;
       }
       .btn:active {
         transform: scale(0.97);
@@ -592,7 +620,7 @@ import {
       .tag.demo,
       .mode-pill[data-mode='demo'] {
         background: rgba(0, 113, 227, 0.14);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .tag.contest,
       .mode-pill[data-mode='contest'] {
@@ -689,7 +717,7 @@ import {
       }
       .pill.idle {
         background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .pill.down {
         background: rgba(255, 59, 48, 0.14);
@@ -786,7 +814,7 @@ import {
       }
       .status-pill.idle {
         background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .status-pill.down,
       .status-pill.inactive {
@@ -831,8 +859,7 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
   protected readonly Math = Math;
 
   private readonly accountsService = inject(TradingAccountsService);
-  private readonly eaService = inject(EAInstancesService);
-  private readonly notifications = inject(NotificationService);
+  private readonly eaAdmin = inject(EAAdminService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly destroy$ = new Subject<void>();
 
@@ -845,8 +872,17 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
   );
 
   readonly accounts = signal<TradingAccountDto[]>([]);
-  readonly eaInstances = signal<EAInstanceDto[]>([]);
+  /** Every registered instance (all statuses), as the engine's fleet list returns it. */
+  private readonly fleet = signal<EAFleetItem[]>([]);
   readonly nowMs = signal(Date.now());
+
+  /** The current fleet: live instances plus the ones that dropped off recently or left an active
+   *  account without an EA. Recomputed on refresh, not on the 1 s age tick. */
+  readonly eaInstances = computed<BrokerEa[]>(() => {
+    const active = new Map(this.accounts().map((a) => [a.id, a.isActive]));
+    const ids = currentFleetIds(this.fleet(), (id) => active.get(id) === true, Date.now());
+    return this.fleet().filter((ea) => ids.has(ea.instanceId));
+  });
 
   brokerKeyOf(a: TradingAccountDto): string {
     return brokerKeyOf(a);
@@ -858,17 +894,20 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
   );
 
   // ── Page-wide aggregates ─────────────────────────────────────
+  // Active accounts only: an inactive account's snapshot is frozen at its last sync, and summing it
+  // put $1.06M of stale balance and the whole $35.5k "margin used" of two dead accounts on the strip.
+  private readonly liveAccounts = computed(() => this.accounts().filter((a) => a.isActive));
   readonly totalBalance = computed(() =>
-    this.accounts().reduce((acc, a) => acc + (a.balance ?? 0), 0),
+    this.liveAccounts().reduce((acc, a) => acc + (a.balance ?? 0), 0),
   );
   readonly totalEquity = computed(() =>
-    this.accounts().reduce((acc, a) => acc + (a.equity ?? 0), 0),
+    this.liveAccounts().reduce((acc, a) => acc + (a.equity ?? 0), 0),
   );
   readonly totalMarginUsed = computed(() =>
-    this.accounts().reduce((acc, a) => acc + (a.marginUsed ?? 0), 0),
+    this.liveAccounts().reduce((acc, a) => acc + (a.marginUsed ?? 0), 0),
   );
   readonly totalMarginAvailable = computed(() =>
-    this.accounts().reduce((acc, a) => acc + (a.marginAvailable ?? 0), 0),
+    this.liveAccounts().reduce((acc, a) => acc + (a.marginAvailable ?? 0), 0),
   );
   readonly overallMarginUtilizationPct = computed(() => {
     const eq = this.totalEquity();
@@ -933,7 +972,7 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
       accounts: this.accountsService
         .list({ currentPage: 1, itemCountPerPage: 200 })
         .pipe(catchError(() => of(null))),
-      eas: this.eaService.list().pipe(catchError(() => of(null))),
+      eas: this.eaAdmin.listFleet().pipe(catchError(() => of(null))),
     })
       .pipe(takeUntil(this.destroy$))
       .subscribe(({ accounts, eas }) => {
@@ -946,22 +985,18 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
             accounts?.message || 'The trading-account list did not load. Is the engine reachable?',
           );
         }
-        if (eas?.data) this.eaInstances.set(eas.data);
+        if (eas?.data) this.fleet.set(eas.data);
       });
   }
 
   /** Engine enum → words: "ShuttingDown" is not copy. */
-  statusLabel(status: string): string {
-    switch (status) {
-      case 'ShuttingDown':
-        return 'Shutting down';
-      case 'Disconnected':
-        return 'Disconnected';
-      case 'Active':
-        return 'Active';
-      default:
-        return status || '—';
-    }
+  statusLabel(status: FleetStatus): string {
+    return FLEET_STATUS_LABELS[status] ?? status ?? '—';
+  }
+
+  /** A long-silent ShuttingDown row is a finished deregistration (same rule as EA Instances). */
+  statusOf(ea: BrokerEa): FleetStatus {
+    return fleetStatusOf(ea, Date.now());
   }
 
   accountUtilPct(a: TradingAccountDto): number {
@@ -980,21 +1015,15 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
     return s === null ? '—' : formatAge(s);
   }
 
-  heartbeatAgeSec(ea: EAInstanceDto): number | null {
+  heartbeatAgeSec(ea: BrokerEa): number | null {
     return ageSec(ea.lastHeartbeat, this.nowMs());
   }
 
-  eaSymbols(ea: EAInstanceDto): string[] {
+  eaSymbols(ea: BrokerEa): string[] {
     return eaSymbols(ea);
   }
 
   formatAge(sec: number): string {
     return formatAge(sec);
-  }
-
-  onAddBroker(): void {
-    this.notifications.info(
-      'Add Broker dialog coming soon — engine ships no Broker resource yet; provision a TradingAccount with a brokerName in the Accounts page for now.',
-    );
   }
 }

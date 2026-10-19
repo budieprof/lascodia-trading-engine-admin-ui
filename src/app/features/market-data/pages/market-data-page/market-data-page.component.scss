@@ -7,8 +7,6 @@
 // addition rather than a four-property duplication. Keeps the
 // anyComponentStyle budget headroom for the per-card overrides below.
 .stats-table-card,
-.summary-card,
-.data-table-card,
 .activity-feed,
 .spread-board {
   background: var(--bg-secondary);
@@ -183,39 +181,6 @@
 // is local to this variant.
 .stats-table-card {
   margin-top: var(--space-3);
-}
-
-/* Candle History tab — denser layout */
-.charts-grid.three {
-  grid-template-columns: repeat(3, 1fr);
-  margin-bottom: var(--space-4);
-}
-@media (max-width: 1100px) {
-  .charts-grid.three {
-    grid-template-columns: 1fr;
-  }
-}
-
-.summary-row,
-.notable-row {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
-.notable-row {
-  grid-template-columns: 1fr;
-}
-@media (max-width: 1100px) {
-  .summary-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-// summary-card scaffolding from the consolidated rule above; profit/loss
-// colors picked up from the generic .board-table .profit/.loss rules.
-.data-table-card .board-head {
-  margin-bottom: 0;
 }
 
 /* Two-col charts row for spread chart + activity feed */
@@ -874,7 +839,9 @@
   max-height: 240px;
   overflow-y: auto;
 }
-@media (max-width: 1400px) {
+/* Viewport width, sidebar included: five-up wants ~1,400px of CONTENT, which a 1440px screen
+   with the sidebar open does not have (the spread chart was 200px wide). */
+@media (max-width: 1720px) {
   .analytics-row {
     /* insight panels (3-up) on top, charts (2-up) below */
     grid-template-columns: repeat(6, minmax(0, 1fr));
@@ -1369,16 +1336,15 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 280px;
-  overflow-y: auto;
 }
+/* All 24 bins, no inner scroll: in a 280px scroller the POC sat below the fold. */
 .vp-row {
   display: grid;
   grid-template-columns: 64px 1fr 56px;
   gap: 6px;
   align-items: center;
   font-size: 10.5px;
-  padding: 1px 0;
+  line-height: 13px;
 }
 .vp-row.in-va {
   background: rgba(0, 113, 227, 0.04);
@@ -1657,43 +1623,4 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
-}
-
-/* Candle-source banners (empty endpoint / opt-in sample data). */
-.sample-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-3);
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(0, 113, 227, 0.25);
-  background: rgba(0, 113, 227, 0.06);
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-}
-.sample-banner.warn {
-  border-color: rgba(255, 149, 0, 0.4);
-  background: rgba(255, 149, 0, 0.1);
-  color: #b25000;
-}
-.sample-banner code {
-  font-family: 'SF Mono', 'Fira Code', monospace;
-}
-.link-btn {
-  flex-shrink: 0;
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--bg-primary);
-  color: var(--text-primary);
-  font-size: var(--text-xs);
-  font-weight: var(--font-semibold);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.link-btn:hover {
-  background: var(--bg-tertiary);
 }

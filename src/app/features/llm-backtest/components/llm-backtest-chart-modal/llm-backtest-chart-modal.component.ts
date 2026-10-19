@@ -21,6 +21,7 @@ import {
   MarketAnalysisRecommendation,
   MultiSampleResult,
 } from '@core/services/llm-backtest.service';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /**
  * Modal-payload describing what to chart: one backtest point's first viable
@@ -57,11 +58,19 @@ const MAX_FORWARD_BARS = 80;
   selector: 'app-llm-backtest-chart-modal',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [CommonModule, NgxEchartsDirective, ModalA11yDirective],
   template: `
     @if (selection(); as sel) {
       <div class="modal-scrim" (click)="closed.emit()">
-        <div class="modal-card" (click)="$event.stopPropagation()">
+        <div
+          class="modal-card"
+          role="dialog"
+          aria-modal="true"
+          [attr.aria-label]="sel.symbol + ' ' + sel.timeframe + ' chart'"
+          appModalA11y
+          (dismiss)="closed.emit()"
+          (click)="$event.stopPropagation()"
+        >
           <div class="modal-header">
             <div>
               <h2>
@@ -71,8 +80,11 @@ const MAX_FORWARD_BARS = 80;
                 </span>
               </h2>
               <p class="modal-sub">
-                asOfUtc {{ sel.asOfUtc | date: 'medium' }}
-                @if (sel.outcome) {
+                asOfUtc {{ sel.asOfUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC
+                <!-- status can be null: the points API currently returns every
+                     outcome's fields as null (engine-side mapping bug), and
+                     null.startsWith() took the whole modal down. -->
+                @if (sel.outcome?.status) {
                   · outcome
                   <span
                     class="outcome-chip"

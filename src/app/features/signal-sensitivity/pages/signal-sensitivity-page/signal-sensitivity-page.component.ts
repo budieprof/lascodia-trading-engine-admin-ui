@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute } from '@angular/router';
 import { catchError, of } from 'rxjs';
 import { NgxEchartsDirective } from 'ngx-echarts';
@@ -33,6 +34,7 @@ import {
   Timeframe,
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { MartingaleSimulatorComponent } from '@features/signal-sensitivity/components/martingale-simulator.component';
 
 const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as const;
@@ -43,6 +45,23 @@ const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as c
 // with it. Single source of truth for the offset in both forms.
 const WAT_OFFSET_MINUTES = 60;
 const WAT_OFFSET_ISO = '+01:00';
+
+/**
+ * Operator-facing text for a failed call. HttpClient's own message is
+ * "Http failure response for <url>: 0 Unknown Error" — the URL and a status 0
+ * say nothing to the operator. Prefer the engine envelope's message, name an
+ * unreachable engine plainly, and fall back to the status.
+ */
+function describeError(err: unknown, fallback: string): string {
+  if (err instanceof HttpErrorResponse) {
+    const body = err.error as { message?: unknown } | null;
+    if (body && typeof body.message === 'string' && body.message) return body.message;
+    if (err.status === 0) return `${fallback} The engine could not be reached.`;
+    return `${fallback} (HTTP ${err.status}${err.statusText ? ' ' + err.statusText : ''})`;
+  }
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
 
 /** `days: 0` is the "Custom range" sentinel — the From/To pickers become live. */
 const CUSTOM_WINDOW_DAYS = 0;
@@ -76,6 +95,7 @@ const WINDOW_OPTIONS = [
     NgxEchartsDirective,
     PageHeaderComponent,
     MartingaleSimulatorComponent,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -113,9 +133,13 @@ const WINDOW_OPTIONS = [
               [max]="customToDate() || nowWatDateTime()"
             />
           </label>
-          <label class="field" [class.field--off]="!customWindowSelected()">
+          <!-- A <div>, not a <label>: a label with no "for" activates its FIRST labelable
+               descendant, which here was the "clear" button — clicking the word "To"
+               wiped the custom range. Same reason for every multi-control field below
+               (clicking "Direction" ticked Buy, "Symbols" removed the first chip). -->
+          <div class="field" [class.field--off]="!customWindowSelected()">
             <span>
-              To <small class="muted">(WAT)</small>
+              <label for="ss-custom-to">To <small class="muted">(WAT)</small></label>
               @if (customRangeActive()) {
                 <button
                   type="button"
@@ -128,6 +152,7 @@ const WINDOW_OPTIONS = [
               }
             </span>
             <input
+              id="ss-custom-to"
               type="datetime-local"
               [ngModel]="customToDate()"
               (ngModelChange)="customToDate.set($event)"
@@ -136,9 +161,11 @@ const WINDOW_OPTIONS = [
               [min]="customFromDate() || null"
               [max]="nowWatDateTime()"
             />
-          </label>
-          <label class="field field--wide">
-            <span>Symbols <small>(empty = all)</small></span>
+          </div>
+          <div class="field field--wide">
+            <span
+              ><label for="ss-symbol-input">Symbols <small>(empty = all)</small></label></span
+            >
             <div class="symbol-multiselect">
               <!-- Selected-chip tray -->
               @if (selectedSymbols().length > 0) {
@@ -162,6 +189,7 @@ const WINDOW_OPTIONS = [
                    suggestion list of every loaded CurrencyPair symbol.
                    Enter or comma commits the typed value. -->
               <input
+                id="ss-symbol-input"
                 type="text"
                 list="symbol-options"
                 [placeholder]="
@@ -181,9 +209,9 @@ const WINDOW_OPTIONS = [
                 }
               </datalist>
             </div>
-          </label>
-          <label class="field">
-            <span>Direction</span>
+          </div>
+          <div class="field" role="group" aria-labelledby="ss-direction-label">
+            <span id="ss-direction-label">Direction</span>
             <div class="source-chips">
               @for (d of directionsAvail; track d) {
                 <label class="chip-checkbox">
@@ -196,15 +224,19 @@ const WINDOW_OPTIONS = [
                 </label>
               }
             </div>
-          </label>
-          <label class="field">
-            <span>Data source</span>
-            <div class="source-toggle" role="group" aria-label="Data source">
+          </div>
+          <div class="field">
+            <span id="ss-datasource-label">Data source</span>
+            <!-- A segmented toggle: the lit segment is the current choice, so clicking it
+                 again changes nothing. aria-pressed says which one is on. -->
+            <div class="source-toggle" role="group" aria-labelledby="ss-datasource-label">
               <button
                 type="button"
                 class="ds-btn"
                 [class.ds-btn--active]="dataSource() === 'signals'"
+                [attr.aria-pressed]="dataSource() === 'signals'"
                 (click)="setDataSource('signals')"
+                title="Analyse trade signals (the default)"
               >
                 Trade Signals
               </button>
@@ -212,16 +244,17 @@ const WINDOW_OPTIONS = [
                 type="button"
                 class="ds-btn"
                 [class.ds-btn--active]="dataSource() === 'recs'"
+                [attr.aria-pressed]="dataSource() === 'recs'"
                 (click)="setDataSource('recs')"
                 title="Analyse parked recs — includes Rejected / Expired recs that never became signals"
               >
                 Parked Recs
               </button>
             </div>
-          </label>
+          </div>
           @if (dataSource() === 'signals') {
-            <label class="field field--wide">
-              <span>Sources</span>
+            <div class="field field--wide" role="group" aria-labelledby="ss-sources-label">
+              <span id="ss-sources-label">Sources</span>
               <div class="source-chips">
                 @for (s of sourcesAvail; track s) {
                   <label class="chip-checkbox">
@@ -234,10 +267,12 @@ const WINDOW_OPTIONS = [
                   </label>
                 }
               </div>
-            </label>
+            </div>
           } @else {
-            <label class="field field--wide">
-              <span>Rec states <em class="hint-inline">(empty = all)</em></span>
+            <div class="field field--wide" role="group" aria-labelledby="ss-recstates-label">
+              <span id="ss-recstates-label"
+                >Rec states <em class="hint-inline">(empty = all)</em></span
+              >
               <div class="source-chips">
                 @for (s of recStateOptions; track s) {
                   <label class="chip-checkbox">
@@ -250,7 +285,7 @@ const WINDOW_OPTIONS = [
                   </label>
                 }
               </div>
-            </label>
+            </div>
           }
         </div>
         <div class="filter-row">
@@ -1226,11 +1261,19 @@ const WINDOW_OPTIONS = [
 
       <!-- ── Per-symbol shrinkage auto-config dialog ────────────────────── -->
       @if (autoConfigPicks().length > 0) {
-        <div class="modal-scrim" role="dialog" aria-modal="true" (click)="cancelAutoConfig()">
-          <div class="modal-card autoconfig-card" (click)="$event.stopPropagation()">
+        <div class="modal-scrim" (click)="cancelAutoConfig()">
+          <div
+            class="modal-card autoconfig-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ss-autoconfig-title"
+            appModalA11y
+            (dismiss)="cancelAutoConfig()"
+            (click)="$event.stopPropagation()"
+          >
             <header class="modal-header">
               <div>
-                <h2>Apply per-symbol shrinkage overrides</h2>
+                <h2 id="ss-autoconfig-title">Apply per-symbol shrinkage overrides</h2>
                 <p class="modal-sub">
                   For each symbol below, the (TP×, SL×) cell with the highest realised P&amp;L is
                   picked from the heatmap. Confirm to write
@@ -1303,7 +1346,13 @@ const WINDOW_OPTIONS = [
               }
             </div>
             <footer class="autoconfig-footer">
-              <button type="button" class="btn-secondary" (click)="cancelAutoConfig()">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="cancelAutoConfig()"
+                [disabled]="autoConfigApplying()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -1325,8 +1374,16 @@ const WINDOW_OPTIONS = [
 
       <!-- ── Signal-chart modal ─────────────────────────────────────────── -->
       @if (selectedSignal(); as s) {
-        <div class="modal-scrim" (click)="closeSignalChart()" role="dialog" aria-modal="true">
-          <div class="modal-card" (click)="$event.stopPropagation()">
+        <div class="modal-scrim" (click)="closeSignalChart()">
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            [attr.aria-label]="'Signal #' + s.signalId + ' chart'"
+            appModalA11y
+            (dismiss)="closeSignalChart()"
+            (click)="$event.stopPropagation()"
+          >
             <header class="modal-header">
               <div>
                 <h2>
@@ -1504,7 +1561,10 @@ const WINDOW_OPTIONS = [
       .link-button:hover {
         text-decoration: none;
       }
-      .field input,
+      /* Text-like inputs only: the same padding + 100px min-width on a checkbox
+         stretched each Buy / Sell / source chip into a wide pill with the box
+         floating mid-pill and the label pushed to the far edge. */
+      .field input:not([type='checkbox']),
       .field select {
         padding: 0.45rem 0.6rem;
         background: var(--bg-primary);
@@ -1514,7 +1574,14 @@ const WINDOW_OPTIONS = [
         min-width: 100px;
         font-size: 0.9rem;
       }
-      .field input:focus,
+      .field input[type='checkbox'] {
+        margin: 0;
+        width: 14px;
+        height: 14px;
+        accent-color: var(--accent);
+        cursor: pointer;
+      }
+      .field input:not([type='checkbox']):focus,
       .field select:focus {
         outline: none;
         border-color: var(--accent);
@@ -3238,7 +3305,7 @@ export class SignalSensitivityPageComponent implements OnInit {
       })
       .pipe(
         catchError((err) => {
-          this.errorMessage.set(err?.message ?? 'Sensitivity query failed.');
+          this.errorMessage.set(describeError(err, 'Sensitivity query failed.'));
           return of(null);
         }),
       )
@@ -3299,6 +3366,8 @@ export class SignalSensitivityPageComponent implements OnInit {
 
   /** Close the dialog without writing. Picks stay accessible via a future re-open. */
   cancelAutoConfig() {
+    // Closing mid-write would hide the outcome of a live-config change.
+    if (this.autoConfigApplying()) return;
     this.autoConfigPicks.set([]);
     this.autoConfigExcluded.set(new Set());
     this.autoConfigMessage.set(null);
@@ -3330,7 +3399,7 @@ export class SignalSensitivityPageComponent implements OnInit {
       .applyPerSymbolShrinkage(payload)
       .pipe(
         catchError((err) => {
-          this.autoConfigMessage.set(err?.message ?? 'Apply failed.');
+          this.autoConfigMessage.set(describeError(err, 'Apply failed.'));
           return of(null);
         }),
       )
@@ -3440,7 +3509,7 @@ export class SignalSensitivityPageComponent implements OnInit {
       })
       .pipe(
         catchError((err) => {
-          this.chartError.set(err?.message ?? 'Failed to load candles.');
+          this.chartError.set(describeError(err, 'Failed to load candles.'));
           return of(null);
         }),
       )

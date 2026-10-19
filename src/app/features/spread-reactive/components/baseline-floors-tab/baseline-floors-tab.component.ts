@@ -17,6 +17,7 @@ import { SpreadReactiveService } from '@core/services/spread-reactive.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { ApiError } from '@core/api/api.types';
 import { SpreadBaselineFloor } from '@features/spread-reactive/spread-reactive.types';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 type FloorSourceFilter = 'all' | 'AutoCapture' | 'OperatorOverride';
 
@@ -41,7 +42,7 @@ interface OverrideDraft {
 @Component({
   selector: 'app-baseline-floors-tab',
   standalone: true,
-  imports: [DecimalPipe, FormsModule],
+  imports: [DecimalPipe, FormsModule, RefreshButtonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card">
@@ -52,9 +53,13 @@ interface OverrideDraft {
             >{{ rows().length }} row{{ rows().length === 1 ? '' : 's' }} — anchor for
             Elevated/Normal classification</span
           >
-          <button type="button" class="btn ghost" (click)="floors.refresh()">
-            {{ floors.loading() ? 'Refreshing…' : 'Refresh' }}
-          </button>
+          <!-- Bound to refreshing(), not loading(): loading() is true only until the
+               first paint, so a click that fetched unchanged rows showed nothing. -->
+          <app-refresh-button
+            variant="outline"
+            [refreshing]="floors.refreshing()"
+            (refresh)="floors.refresh()"
+          />
           <button type="button" class="btn primary" (click)="openCreate()">+ New override</button>
         </div>
       </div>
@@ -406,6 +411,8 @@ interface OverrideDraft {
         text-align: center;
         font-style: italic;
       }
+      /* Token colours: the fixed #555e66 / #0863c1 text was near-invisible on the
+         dark theme's grey pill. */
       .source-pill {
         padding: 2px 8px;
         border-radius: 8px;
@@ -413,16 +420,26 @@ interface OverrideDraft {
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.4px;
-        background: color-mix(in srgb, #9aa0a6 22%, transparent);
-        color: #555e66;
+        background: color-mix(in srgb, var(--text-tertiary) 22%, transparent);
+        color: var(--text-secondary);
       }
       .source-pill.override {
-        background: color-mix(in srgb, #0a84ff 22%, transparent);
-        color: #0863c1;
+        background: color-mix(in srgb, var(--accent) 22%, transparent);
+        color: var(--accent);
+      }
+      /* Twelve columns are wider than the card at 1440px, so the Override / Reset
+         buttons sat past the right edge of a horizontal scroll nobody noticed.
+         Pin the action column to the right edge of the scroller. */
+      .actions-cell,
+      .floors-table th:last-child {
+        position: sticky;
+        right: 0;
+        background: var(--bg-secondary);
       }
       .actions-cell {
         white-space: nowrap;
         text-align: right;
+        box-shadow: -10px 0 10px -10px rgba(0, 0, 0, 0.45);
       }
       .actions-cell .btn + .btn {
         margin-left: 6px;

@@ -48,6 +48,8 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
 import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
@@ -73,6 +75,8 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
+    ConfirmDialogComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
     CmeHistoricAnalyticsComponent,
     CmeExperimentTradesComponent,
@@ -83,9 +87,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         title="CME Microstructure"
         subtitle="Real futures tape + depth bridged to spot — gated on the real-vs-proxy experiment (ADR-0021/0022)"
       >
-        <button type="button" class="btn btn-secondary" [disabled]="loading()" (click)="load()">
-          Refresh
-        </button>
+        <app-refresh-button [refreshing]="loading()" (refresh)="load()" />
       </app-page-header>
 
       @if (loading() && !status()) {
@@ -275,7 +277,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
               type="button"
               class="btn btn-secondary"
               [disabled]="busy() || !seedRoot"
-              (click)="backAdjust()"
+              (click)="confirmBackAdjust.set(true)"
               title="Compute roll-gap offsets so a multi-quarter series is continuous"
             >
               Back-adjust rolls
@@ -517,11 +519,17 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                        without hovering. Losses hang below the zero line by construction. -->
                   <div class="plot">
                     <div class="yaxis muted small" aria-hidden="true">
-                      <span class="ytick" [style.top.%]="0">{{ panel.yMaxLabel }}</span>
+                      <!-- An end that IS zero is labelled by the zero tick alone: an all-loss
+                           panel drew "0" twice, one over the other, at its top. -->
+                      @if (panel.yMaxLabel) {
+                        <span class="ytick" [style.top.%]="0">{{ panel.yMaxLabel }}</span>
+                      }
                       <span class="ytick zero" [style.top.%]="(panel.zeroY / chartHeight) * 100">
                         0
                       </span>
-                      <span class="ytick" [style.top.%]="100">{{ panel.yMinLabel }}</span>
+                      @if (panel.yMinLabel) {
+                        <span class="ytick" [style.top.%]="100">{{ panel.yMinLabel }}</span>
+                      }
                     </div>
                     <svg
                       class="chart-svg"
@@ -608,11 +616,13 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                           >
                         }
                       </td>
-                      <td>
+                      <!-- These two may wrap: with every cell on one line the table ran past
+                           the card at 1440px and the Verdict column sat half outside it. -->
+                      <td class="wrap">
                         {{ r.createdAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
                         <span class="muted small">· {{ r.contract }}</span>
                       </td>
-                      <td class="muted small">
+                      <td class="muted small wrap">
                         {{ r.fromUtc | date: 'yyyy-MM-dd' : 'UTC' }} –
                         {{ r.toUtc | date: 'yyyy-MM-dd' : 'UTC' }}
                       </td>
@@ -772,6 +782,22 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
           }
         </section>
       }
+
+      <!-- Back-adjust is a Command: it overwrites the stored roll offsets of the whole chain, which
+           every continuous-series read (and so the experiment) goes through. One click used to run it. -->
+      <app-confirm-dialog
+        [open]="confirmBackAdjust()"
+        title="Back-adjust the rolls?"
+        [message]="
+          'Recomputes the roll-gap offset of every ' +
+          seedRoot +
+          ' contract from the derived bars around each roll and overwrites the stored offsets. A roll with no bars on both sides (none ingested, or pruned from the hot tier) keeps the gap stored for it.'
+        "
+        confirmLabel="Back-adjust"
+        [loading]="busy()"
+        (confirm)="confirmBackAdjust.set(false); backAdjust()"
+        (cancelled)="confirmBackAdjust.set(false)"
+      />
     </div>
   `,
   styles: [
@@ -973,6 +999,10 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
         text-align: left;
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
+      }
+      td.wrap {
+        white-space: normal;
+        min-width: 7em;
       }
       th {
         font-weight: var(--font-bold);
@@ -1208,6 +1238,8 @@ export class CmeMicrostructurePageComponent {
   protected readonly tradeRunId = signal<number | null>(null);
   protected readonly loading = signal(false);
   protected readonly busy = signal(false);
+  /** The back-adjust confirm is open. */
+  protected readonly confirmBackAdjust = signal(false);
   protected readonly loadError = signal<string | null>(null);
 
   /** Chart geometry. Fixed viewBox; the SVG scales to its container. */
@@ -1403,8 +1435,8 @@ export class CmeMicrostructurePageComponent {
       title,
       caption,
       zeroY,
-      yMaxLabel: max > 0 ? `+${usd(max)}` : '0',
-      yMinLabel: min < 0 ? `−${usd(Math.abs(min))}` : '0',
+      yMaxLabel: max > 0 ? `+${usd(max)}` : '',
+      yMinLabel: min < 0 ? `−${usd(Math.abs(min))}` : '',
       bars,
       xLabels: runs.map((r) => ({
         key: `${key}-x-${r.id}`,

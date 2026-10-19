@@ -19,6 +19,15 @@
   --loss: #ff3b30;
   --warning: #ff9500;
 
+  // Status text tones — readable ON a 12% tint of the same hue. The light values were hard-coded
+  // in status-badge and read at ~2.2-3:1 on the dark theme; dark overrides below.
+  --tone-green: #248a3d;
+  --tone-amber: #c93400;
+  --tone-red: #d70015;
+  --tone-blue: #0040dd;
+  --tone-grey: #636366;
+  --tone-purple: #8e44ad;
+
   // Border
   --border: rgba(0, 0, 0, 0.06);
 
@@ -38,6 +47,12 @@
   --space-8: 32px;
   --space-9: 36px;
   --space-10: 40px;
+
+  // Room a sticky bottom action bar must leave on its right for the floating assistant "Ask"
+  // pill (shared/components/assistant-dock .fab: ~100px wide at right: --space-5, z-index 90),
+  // which otherwise sits over the bar's last button (Save, on /spread-reactive). The pill
+  // collapses to a 48px circle under 560px.
+  --assistant-fab-clearance: 132px;
   --space-11: 44px;
   --space-12: 48px;
   --space-13: 52px;
@@ -74,6 +89,14 @@
 }
 
 [data-theme='dark'] {
+  // Status text tones (see :root)
+  --tone-green: #30d158;
+  --tone-amber: #ff9f0a;
+  --tone-red: #ff6961;
+  --tone-blue: #64d2ff;
+  --tone-grey: #a1a1a6;
+  --tone-purple: #bf5af2;
+
   // Background
   --bg-primary: #000000;
   --bg-secondary: #1c1c1e;

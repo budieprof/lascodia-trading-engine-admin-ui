@@ -45,6 +45,15 @@ export function formatAge(ms: number): string {
   return d < 3 ? `${d}d ${h % 24}h` : `${d}d`;
 }
 
+/**
+ * `formatAge` as a phrase after a verb — "just now" or "4m ago". Appending " ago" to
+ * formatAge directly read "updated just now ago".
+ */
+export function formatAgo(ms: number): string {
+  const age = formatAge(ms);
+  return age === 'just now' ? age : `${age} ago`;
+}
+
 /** How overdue an unanswered approval is. The thresholds are the operator's, not the agent's:
  *  the host stops blocking on a card after ~3 minutes, but the card stays open until answered. */
 export type ApprovalUrgency = 'fresh' | 'waiting' | 'stalled';

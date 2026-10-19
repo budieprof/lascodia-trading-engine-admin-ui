@@ -1,9 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  ElementRef,
   OnInit,
-  ViewChild,
   computed,
   inject,
   signal,
@@ -12,7 +10,10 @@ import { FormsModule, ReactiveFormsModule, FormBuilder, Validators } from '@angu
 import { DatePipe } from '@angular/common';
 import { catchError, forkJoin, map, of } from 'rxjs';
 
-import { KillSwitchService } from '@core/services/kill-switch.service';
+// The service normalises both engine shapes — the status object (since 2026-10-19) and the bare
+// engaged flag older engines answer, where reading `.enabled` off `true` once rendered an ENGAGED
+// switch as "Not engaged". Anything else is unknown (null), never "off".
+import { KillSwitchService, normaliseKillSwitch } from '@core/services/kill-switch.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -27,6 +28,7 @@ import { PresenceBadgeComponent } from '@shared/components/presence-badge/presen
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 interface StrategySwitch {
   strategy: StrategyDto;
@@ -51,6 +53,7 @@ const PAGE_SIZE = 25;
     ReactiveFormsModule,
     FormsModule,
     DatePipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -58,30 +61,37 @@ const PAGE_SIZE = 25;
         <app-presence-badge routeKey="kill-switches" />
       </app-page-header>
 
-      <section class="global-card" [class.engaged]="service.isGlobalEngaged()">
+      <section class="global-card" [class.engaged]="globalEngaged()">
         <div class="global-head">
           <div class="global-title">
-            <span class="indicator" [class.on]="service.isGlobalEngaged()"></span>
+            <span
+              class="indicator"
+              [class.on]="globalEngaged()"
+              [class.unknown]="globalStatus() === null"
+            ></span>
             <div>
               <h3>Global Kill Switch</h3>
               <p class="muted">
                 When engaged, no new signals are generated and no new orders are submitted. Existing
                 positions are untouched.
               </p>
+              @if (globalError(); as ge) {
+                <p class="global-error">{{ ge }}</p>
+              }
             </div>
           </div>
           <button
             type="button"
             class="btn"
-            [class.btn-destructive]="!service.isGlobalEngaged()"
-            [class.btn-primary]="service.isGlobalEngaged()"
+            [class.btn-destructive]="!globalEngaged()"
+            [class.btn-primary]="globalEngaged()"
             [disabled]="busyGlobal()"
             (click)="requestGlobalToggle()"
           >
-            {{ service.isGlobalEngaged() ? 'Disengage' : 'Engage Kill Switch' }}
+            {{ globalEngaged() ? 'Disengage' : 'Engage Kill Switch' }}
           </button>
         </div>
-        @if (service.global(); as g) {
+        @if (globalStatus(); as g) {
           <dl class="global-meta">
             <div>
               <dt>State</dt>
@@ -172,7 +182,7 @@ const PAGE_SIZE = 25;
             <table class="table">
               <thead>
                 <tr>
-                  @for (col of columns; track col.key) {
+                  @for (col of visibleColumns(); track col.key) {
                     <th [class.sorted]="sortKey() === col.key">
                       <button
                         type="button"
@@ -220,13 +230,23 @@ const PAGE_SIZE = 25;
                         </span>
                       }
                     </td>
-                    <td class="muted">
-                      {{
-                        row.status?.changedAt
-                          ? (row.status!.changedAt | date: 'MMM d, yyyy HH:mm')
-                          : '—'
-                      }}
-                    </td>
+                    @if (hasChangeTimes()) {
+                      <!-- Who and why next to when: for an engaged switch the reason is the
+                           first thing an operator needs ("why is this strategy halted?"). -->
+                      <td class="muted change-cell">
+                        @if (row.status?.changedAt; as at) {
+                          <span>{{ at | date: 'MMM d, yyyy HH:mm' }}</span>
+                          @if (row.status.changedBy; as by) {
+                            <span class="change-by">· {{ by }}</span>
+                          }
+                          @if (row.status.reason; as why) {
+                            <span class="change-reason" [title]="why">{{ why }}</span>
+                          }
+                        } @else {
+                          —
+                        }
+                      </td>
+                    }
                     <td class="actions">
                       <button
                         type="button"
@@ -243,6 +263,12 @@ const PAGE_SIZE = 25;
               </tbody>
             </table>
           </div>
+          @if (strategiesTotal() > rows().length) {
+            <p class="truncated-note">
+              Showing the first {{ rows().length }} of {{ strategiesTotal() }} strategies — the rest
+              are not loaded. Search narrows only the loaded rows.
+            </p>
+          }
           @if (pageCount() > 1) {
             <footer class="pager">
               <span class="muted">
@@ -273,19 +299,18 @@ const PAGE_SIZE = 25;
       </section>
 
       @if (dialogOpen()) {
-        <div
-          class="modal-backdrop"
-          role="presentation"
-          (click)="cancelDialog()"
-          (keydown)="onModalKey($event)"
-          tabindex="-1"
-        >
+        <!-- Escape + focus come from appModalA11y: focus used to stay on the row's Engage button
+             (the old microtask focus ran before the modal rendered), so Escape never reached the
+             modal's own key handler. Focus starts on Cancel — Enter must not engage by default. -->
+        <div class="modal-backdrop" role="presentation" (click)="cancelDialog()">
           <div
             class="modal-panel"
             role="dialog"
             aria-modal="true"
             [attr.aria-labelledby]="dialogTitleId"
             [attr.data-variant]="dialogVariant()"
+            appModalA11y
+            (dismiss)="cancelDialog()"
             (click)="$event.stopPropagation()"
           >
             <header class="modal-head">
@@ -307,7 +332,6 @@ const PAGE_SIZE = 25;
                 [attr.aria-invalid]="
                   reasonForm.controls.reason.invalid && reasonForm.controls.reason.touched
                 "
-                #reasonInput
               ></textarea>
               @if (reasonForm.controls.reason.invalid && reasonForm.controls.reason.touched) {
                 <span class="err">Reason is required (min 3 characters).</span>
@@ -322,6 +346,7 @@ const PAGE_SIZE = 25;
                   class="btn btn-ghost"
                   [disabled]="busyGlobal() || dialogBusy()"
                   (click)="cancelDialog()"
+                  data-autofocus
                 >
                   Cancel
                 </button>
@@ -404,6 +429,22 @@ const PAGE_SIZE = 25;
         background: var(--loss);
         box-shadow: 0 0 0 4px rgba(255, 59, 48, 0.12);
       }
+      /* State not read: neither the green of "off" nor the red of "engaged". */
+      .indicator.unknown {
+        background: var(--warning, #ff9500);
+      }
+      .global-error {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--warning, #c93400);
+      }
+      .truncated-note {
+        margin: 0;
+        padding: var(--space-2) var(--space-5);
+        border-top: 1px solid var(--border);
+        font-size: var(--text-xs);
+        color: var(--warning, #c93400);
+      }
       .global-meta {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -461,7 +502,7 @@ const PAGE_SIZE = 25;
         font-variant-numeric: tabular-nums;
       }
       .engaged-count {
-        color: #d70015;
+        color: var(--tone-red);
         font-weight: var(--font-semibold);
       }
       .card-tools {
@@ -577,6 +618,21 @@ const PAGE_SIZE = 25;
       .table th.sorted {
         color: var(--text-primary);
       }
+      .change-cell {
+        max-width: 280px;
+      }
+      .change-by {
+        margin-left: 4px;
+      }
+      .change-reason {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .table {
         width: 100%;
         border-collapse: collapse;
@@ -623,11 +679,11 @@ const PAGE_SIZE = 25;
       }
       .pill.on {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .pill.unknown {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .status-pill {
         display: inline-flex;
@@ -641,11 +697,11 @@ const PAGE_SIZE = 25;
       }
       .status-pill[data-status='Active'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .status-pill[data-status='Paused'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .actions {
         text-align: right;
@@ -846,6 +902,13 @@ export class KillSwitchesPageComponent implements OnInit {
   readonly loadError = signal<string | null>(null);
   readonly busyGlobal = signal(false);
   readonly busyStrategyIds = signal(new Set<number>());
+  /** Strategies the engine holds — more than `rows()` only when the 200-row fetch truncated. */
+  readonly strategiesTotal = signal(0);
+
+  /** Global switch as last read from the engine; null = not (yet) read. */
+  readonly globalStatus = signal<KillSwitchStatusDto | null>(null);
+  readonly globalError = signal<string | null>(null);
+  readonly globalEngaged = computed(() => this.globalStatus()?.enabled === true);
 
   // ── Filter state (search + status chips) ────────────────────────────
   readonly searchTerm = signal('');
@@ -870,6 +933,15 @@ export class KillSwitchesPageComponent implements OnInit {
     { key: 'switch', label: 'Kill switch' },
     { key: 'changed', label: 'Last change' },
   ];
+  /**
+   * "Last change" only when the engine reports change times — an older engine answers the bare
+   * flag, and a column of 29 dashes read as "never changed".
+   */
+  readonly hasChangeTimes = computed(() => this.rows().some((r) => !!r.status?.changedAt));
+  readonly visibleColumns = computed(() =>
+    this.hasChangeTimes() ? this.columns : this.columns.filter((c) => c.key !== 'changed'),
+  );
+
   readonly sortKey = signal<SortKey>('id');
   readonly sortDir = signal<'asc' | 'desc'>('asc');
   readonly sortLabel = computed(
@@ -947,12 +1019,17 @@ export class KillSwitchesPageComponent implements OnInit {
   );
   readonly pagedRows = computed(() => this.filteredRows().slice(this.pageStart(), this.pageEnd()));
 
-  /** Filter-specific empty copy: "nothing engaged" is good news and should read like it. */
+  /**
+   * Filter-specific empty copy. It speaks only of kill switches: "running normally" was shown over
+   * 28 Paused strategies, and a kill switch says nothing about whether a strategy runs.
+   */
   readonly emptyFilterMessage = computed(() => {
     const term = this.searchTerm().trim();
     if (this.statusFilter() === 'engaged' && !term) {
       const n = this.rows().length;
-      return `No kill switches engaged — all ${n} ${n === 1 ? 'strategy is' : 'strategies are'} running normally.`;
+      return n === 1
+        ? 'No per-strategy kill switch is engaged on the 1 strategy.'
+        : `No per-strategy kill switch is engaged on any of the ${n} strategies.`;
     }
     return 'No strategies match the current filter.';
   });
@@ -1006,23 +1083,12 @@ export class KillSwitchesPageComponent implements OnInit {
 
   /** Stable ID for the modal title — referenced by aria-labelledby. */
   readonly dialogTitleId = 'kill-switch-dialog-title';
-  @ViewChild('reasonInput') private reasonInput?: ElementRef<HTMLTextAreaElement>;
 
   /**
-   * Modal-level keyboard shortcuts.
-   *
-   *   Esc          → cancel (works from anywhere inside the modal,
-   *                  including the textarea).
-   *   ⌘/Ctrl+Enter → submit (lets operators confirm without leaving
-   *                  the textarea; raw Enter inserts a newline, which
-   *                  is the conventional textarea behaviour).
+   * ⌘/Ctrl+Enter submits from inside the reason box (raw Enter inserts a newline, the conventional
+   * textarea behaviour). Escape is appModalA11y's job.
    */
   onModalKey(ev: KeyboardEvent): void {
-    if (ev.key === 'Escape') {
-      ev.preventDefault();
-      this.cancelDialog();
-      return;
-    }
     if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
       ev.preventDefault();
       this.submitToggle();
@@ -1038,7 +1104,7 @@ export class KillSwitchesPageComponent implements OnInit {
   }
 
   requestGlobalToggle(): void {
-    this.pending.set({ scope: 'global', nextEnabled: !this.service.isGlobalEngaged() });
+    this.pending.set({ scope: 'global', nextEnabled: !this.globalEngaged() });
     this.openReasonDialog();
   }
 
@@ -1074,16 +1140,29 @@ export class KillSwitchesPageComponent implements OnInit {
             this.notifications.success(
               p.nextEnabled ? 'Global kill switch engaged' : 'Global kill switch disengaged',
             );
+            this.globalStatus.set(
+              normaliseKillSwitch(res.data) ?? {
+                enabled: payload.enabled,
+                reason: payload.reason ?? null,
+                changedAt: new Date().toISOString(),
+                changedBy: null,
+              },
+            );
+            this.globalError.set(null);
             this.logAudit('KillSwitch', 0, payload);
             this.closeDialog();
           } else {
             this.notifications.error(res.message ?? 'Failed to toggle kill switch');
             this.closeDialog();
           }
+          // Re-read through the engine's cache-backed GET: what it answers is what the signal
+          // pipeline sees, which is the state this card has to show.
+          this.loadGlobal();
         },
         error: () => {
           this.busyGlobal.set(false);
           this.closeDialog();
+          this.loadGlobal();
         },
       });
     } else if (p.strategyId != null) {
@@ -1105,7 +1184,7 @@ export class KillSwitchesPageComponent implements OnInit {
             this.logAudit('StrategyKillSwitch', strategyId, payload);
             this.updateRowStatus(
               strategyId,
-              res.data ?? {
+              normaliseKillSwitch(res.data) ?? {
                 enabled: payload.enabled,
                 reason: payload.reason ?? null,
                 changedAt: new Date().toISOString(),
@@ -1130,15 +1209,14 @@ export class KillSwitchesPageComponent implements OnInit {
   }
 
   cancelDialog(): void {
+    // Escape and the backdrop must not abandon a toggle that is already in flight.
+    if (this.busyGlobal() || this.dialogBusy()) return;
     this.closeDialog();
   }
 
   private openReasonDialog(): void {
     this.reasonForm.reset({ reason: '' });
     this.dialogOpen.set(true);
-    // Wait one tick for the modal to render, then focus the textarea so
-    // operators can start typing the reason immediately.
-    queueMicrotask(() => this.reasonInput?.nativeElement.focus());
   }
 
   private closeDialog(): void {
@@ -1153,14 +1231,31 @@ export class KillSwitchesPageComponent implements OnInit {
     );
   }
 
+  /**
+   * Global state, read on its own so a failure shows as "could not be read" rather than as a
+   * reassuring "Not engaged". The page keeps its own copy: the shared service only stores a truthy
+   * payload, so a `false` (disengaged) answer never replaced an earlier `true`.
+   */
+  private loadGlobal(): void {
+    this.service.getGlobal().subscribe({
+      next: (res) => {
+        const status = res.status === false ? null : normaliseKillSwitch(res.data);
+        this.globalStatus.set(status);
+        this.globalError.set(
+          status ? null : (res.message ?? 'The engine did not report the global switch state.'),
+        );
+      },
+      error: () => {
+        this.globalStatus.set(null);
+        this.globalError.set('Global switch state could not be read — the engine did not answer.');
+      },
+    });
+  }
+
   private loadAll(): void {
     this.loading.set(true);
     this.loadError.set(null);
-    this.service.getGlobal().subscribe({
-      error: () => {
-        /* allow UI to load even if global fails */
-      },
-    });
+    this.loadGlobal();
     this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe({
       next: (res) => {
         // A rejected envelope must not render as "No strategies found".
@@ -1170,6 +1265,7 @@ export class KillSwitchesPageComponent implements OnInit {
           return;
         }
         const strategies = res.data?.data ?? [];
+        this.strategiesTotal.set(res.data?.pager?.totalItemCount ?? strategies.length);
         if (strategies.length === 0) {
           this.rows.set([]);
           this.loading.set(false);
@@ -1178,7 +1274,7 @@ export class KillSwitchesPageComponent implements OnInit {
         forkJoin(
           strategies.map((s) =>
             this.service.getStrategy(s.id).pipe(
-              map((r) => r.data ?? null),
+              map((r) => (r.status === false ? null : normaliseKillSwitch(r.data))),
               catchError(() => of(null as KillSwitchStatusDto | null)),
             ),
           ),

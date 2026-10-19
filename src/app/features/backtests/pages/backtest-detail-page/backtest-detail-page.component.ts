@@ -466,7 +466,14 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
                 <h4>Buy &amp; hold</h4>
                 <dl class="bm-rows">
                   <div>
-                    <dt>Price return</dt>
+                    <!-- The Strategy report's "Buy & hold return" is converted to the account
+                         currency; this is the instrument's own price change. For a DE40 run on a
+                         USD account the two differ (+70.71% vs +83.87%) — the label says which. -->
+                    <dt
+                      title="The instrument's own price change over the window, in its quote currency. The Strategy report's Buy & hold return is in the account currency, so the two differ when those currencies differ."
+                    >
+                      Price return (instrument)
+                    </dt>
                     <dd
                       [class.pos]="bm.buyAndHold.pricePct > 0"
                       [class.neg]="bm.buyAndHold.pricePct < 0"
@@ -767,23 +774,25 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
               <span class="info-label">Final balance</span>
               <span class="info-value">{{ money(parsed()?.FinalBalance ?? bt.finalBalance) }}</span>
             </div>
+            <!-- UTC throughout, like the Strategy report above: in the browser's zone a window
+                 ending 2026-09-30T23:00Z printed "Oct 1, 2026". -->
             <div class="info-item">
-              <span class="info-label">Period</span>
+              <span class="info-label">Period (UTC)</span>
               <span class="info-value"
-                >{{ bt.fromDate | date: 'MMM d, yyyy' }} —
-                {{ bt.toDate | date: 'MMM d, yyyy' }}</span
+                >{{ bt.fromDate | date: 'MMM d, yyyy' : 'UTC' }} —
+                {{ bt.toDate | date: 'MMM d, yyyy' : 'UTC' }}</span
               >
             </div>
             <div class="info-item">
-              <span class="info-label">Started</span>
+              <span class="info-label">Started (UTC)</span>
               <span class="info-value">{{
-                bt.startedAt ? (bt.startedAt | date: 'MMM d, yyyy HH:mm') : '—'
+                startedAt() ? (startedAt() | date: 'MMM d, yyyy HH:mm' : 'UTC') : '—'
               }}</span>
             </div>
             <div class="info-item">
-              <span class="info-label">Completed</span>
+              <span class="info-label">Completed (UTC)</span>
               <span class="info-value">{{
-                bt.completedAt ? (bt.completedAt | date: 'MMM d, yyyy HH:mm') : '—'
+                bt.completedAt ? (bt.completedAt | date: 'MMM d, yyyy HH:mm' : 'UTC') : '—'
               }}</span>
             </div>
           </div>
@@ -904,10 +913,10 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         font-family: 'SF Mono', 'Fira Code', monospace;
       }
       .cost-value.gain {
-        color: var(--color-success, #34c759);
+        color: var(--profit);
       }
       .cost-value.loss {
-        color: var(--color-danger, #ff3b30);
+        color: var(--loss);
       }
       .info-grid {
         display: grid;
@@ -1044,10 +1053,10 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         font-size: var(--text-xs);
       }
       .trade-table td.gain {
-        color: var(--color-success, #34c759);
+        color: var(--profit);
       }
       .trade-table td.loss {
-        color: var(--color-danger, #ff3b30);
+        color: var(--loss);
       }
       .trade-row {
         cursor: pointer;
@@ -1199,10 +1208,16 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         line-height: 1.5;
         overflow-wrap: anywhere;
       }
+      /* The card's header is padded but its body was not — "Buy & hold" and every row sat flush
+         against the card's left border. */
+      .benchmarks {
+        padding-bottom: var(--space-4);
+      }
       .bm-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: var(--space-4);
+        gap: var(--space-4) var(--space-6, 32px);
+        padding: var(--space-4) var(--space-5) 0;
       }
       .bm-block h4 {
         margin: 0 0 var(--space-2);
@@ -1279,7 +1294,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         line-height: 1.5;
       }
       .bm-notes {
-        margin-top: var(--space-3);
+        margin: var(--space-3) var(--space-5) 0;
         padding-left: var(--space-4);
       }
     `,
@@ -1292,6 +1307,15 @@ export class BacktestDetailPageComponent implements OnInit {
 
   readonly id = signal<number | null>(null);
   readonly backtest = signal<BacktestRunDto | null>(null);
+  /**
+   * When the worker began executing the run. There is no `startedAt` on the wire (the typed DTO
+   * used to declare one, so "Started" always read "—"): the engine sends `executionStartedAt`,
+   * and `claimedAt` for a run claimed but not yet executing.
+   */
+  readonly startedAt = computed(() => {
+    const bt = this.backtest();
+    return bt?.executionStartedAt ?? bt?.claimedAt ?? null;
+  });
   readonly parsed = signal<BacktestResultData | null>(null);
   /** Set when the run is a script strategy's: its resultJson is a Strategy report (ADR-0027). */
   readonly scriptReport = signal<StrategyReport | null>(null);

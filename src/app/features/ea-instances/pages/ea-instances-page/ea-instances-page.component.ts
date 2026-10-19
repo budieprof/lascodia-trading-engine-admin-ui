@@ -5,15 +5,10 @@ import { RouterLink } from '@angular/router';
 import { catchError, map, of, switchMap } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
-import { EAInstancesService } from '@core/services/ea-instances.service';
+import { EAAdminService } from '@core/services/ea-admin.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
-import type {
-  CurrencyPairDto,
-  EAInstanceDto,
-  EAInstanceStatus,
-  TradingAccountDto,
-} from '@core/api/api.types';
+import type { CurrencyPairDto, EAFleetItem, TradingAccountDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -27,18 +22,32 @@ import { EATradingWindowPanelComponent } from '../../components/ea-trading-windo
 import { EAPendingSignalRevalPanelComponent } from '../../components/ea-pending-signal-reval-panel/ea-pending-signal-reval-panel.component';
 import { EASpreadPadMasterPanelComponent } from '../../components/ea-spread-pad-master-panel/ea-spread-pad-master-panel.component';
 import { EACandleSourcePanelComponent } from '../../components/ea-candle-source-panel/ea-candle-source-panel.component';
+import {
+  FLEET_STATUS_LABELS,
+  currentFleetIds,
+  fleetStatusOf,
+  type FleetStatus,
+} from '../../current-fleet';
 
-type StatusFilter = 'all' | EAInstanceStatus;
+/**
+ * 'current' (the default) = every live instance (Active, or ShuttingDown inside the liveness
+ * window), anything that dropped off in the last 24 h, and the newest instance of an active account
+ * that has no live EA. The fleet list keeps every registration ever made (57 rows for 5 live EAs),
+ * so 'all' would bury the live ones. 'Deregistered' is a ShuttingDown row long past its heartbeat
+ * (see fleetStatusOf) — the same split Fleet Health makes.
+ */
+type StatusFilter = 'current' | 'all' | FleetStatus;
 type ViewMode = 'cards' | 'table';
 type CoverageFilter = 'all' | 'covered' | 'uncovered';
 
 /** Tile dot for a count that carries no signal (zero) — grey, not green. */
 const NEUTRAL_DOT = '#8E8E93';
 
-const STATUS_LABELS: Record<EAInstanceStatus, string> = {
-  Active: 'Active',
-  ShuttingDown: 'Shutting down',
-  Disconnected: 'Disconnected',
+const STATUS_RANK: Record<FleetStatus, number> = {
+  Active: 0,
+  ShuttingDown: 1,
+  Disconnected: 2,
+  Deregistered: 3,
 };
 
 @Component({
@@ -98,8 +107,8 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
              status split is usually one-sided (a single-slice donut says
              nothing), so the counts are the chart.  Dots only colour a
              non-zero count that means something; zero stays neutral. -->
-        <div class="tiles tiles-5" aria-label="Fleet status">
-          <app-metric-card label="Instances" [value]="instances().length" format="number" />
+        <div class="tiles tiles-6" aria-label="Fleet status">
+          <app-metric-card label="Registered" [value]="instances().length" format="number" />
           <app-metric-card
             label="Active"
             [value]="activeCount()"
@@ -118,11 +127,22 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
             format="number"
             [dotColor]="dotFor(disconnectedCount(), '#FF3B30')"
           />
-          <app-metric-card label="Accounts" [value]="uniqueAccounts().size" format="number" />
+          <!-- Finished registrations, not a problem: grey whatever the count. -->
+          <app-metric-card
+            label="Deregistered"
+            [value]="deregisteredCount()"
+            format="number"
+            [dotColor]="neutralDot"
+          />
+          <app-metric-card label="Live accounts" [value]="uniqueAccounts().size" format="number" />
         </div>
 
         <div class="tiles tiles-4" aria-label="Symbol coverage">
-          <app-metric-card label="Owned symbols" [value]="totalOwnedSymbols()" format="number" />
+          <app-metric-card
+            label="Owned symbols (live)"
+            [value]="totalOwnedSymbols()"
+            format="number"
+          />
           <app-metric-card
             label="Unique symbols"
             [value]="uniqueOwnedSymbols().size"
@@ -143,7 +163,7 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
         </div>
 
         <app-chart-card
-          title="Symbols owned per EA"
+          title="Symbols owned per live EA"
           subtitle="How the {{ uniqueOwnedSymbols().size }} unique symbols are distributed"
           [options]="symbolsPerEAOptions()"
           height="260px"
@@ -163,10 +183,12 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
             [ngModel]="statusFilter()"
             (ngModelChange)="statusFilter.set($event)"
           >
-            <option value="all">All statuses</option>
+            <option value="current">Current ({{ currentCount() }})</option>
+            <option value="all">All registered ({{ instances().length }})</option>
             <option value="Active">Active ({{ activeCount() }})</option>
             <option value="ShuttingDown">Shutting down ({{ idleCount() }})</option>
             <option value="Disconnected">Disconnected ({{ disconnectedCount() }})</option>
+            <option value="Deregistered">Deregistered ({{ deregisteredCount() }})</option>
           </select>
           <div class="view-toggle" role="group" aria-label="View mode">
             <button
@@ -192,19 +214,19 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
             @for (i of filtered(); track i.instanceId) {
               <article
                 class="card clickable"
-                [attr.data-status]="i.status"
-                [routerLink]="['/ea-instances', i.id]"
+                [attr.data-status]="statusOf(i)"
+                [routerLink]="['/ea-instances', i.instanceId]"
                 role="link"
                 tabindex="0"
                 (keydown.enter)="$any($event.target).click()"
               >
                 <header class="head">
                   <div class="title">
-                    <span class="status-dot" [attr.data-status]="i.status"></span>
+                    <span class="status-dot" [attr.data-status]="statusOf(i)"></span>
                     <h4 [title]="i.instanceId">{{ i.instanceId }}</h4>
                   </div>
-                  <span class="pill" [attr.data-status]="i.status">{{
-                    statusLabel(i.status)
+                  <span class="pill" [attr.data-status]="statusOf(i)">{{
+                    statusLabel(statusOf(i))
                   }}</span>
                 </header>
                 <dl class="info">
@@ -238,7 +260,7 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
                     <dd
                       class="mono"
                       [class.warn]="syncTier(i) === 'stale'"
-                      [class.bad]="syncTier(i) === 'dead'"
+                      [class.stale-val]="syncTier(i) === 'dead'"
                       [title]="syncTitle(i)"
                     >
                       @if (accountOf(i); as a) {
@@ -308,14 +330,14 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
                 @for (i of filtered(); track i.instanceId) {
                   <tr
                     class="row-clickable"
-                    [routerLink]="['/ea-instances', i.id]"
+                    [routerLink]="['/ea-instances', i.instanceId]"
                     role="link"
                     tabindex="0"
                     (keydown.enter)="$any($event.target).click()"
                   >
                     <td>
-                      <span class="pill" [attr.data-status]="i.status">
-                        {{ statusLabel(i.status) }}
+                      <span class="pill" [attr.data-status]="statusOf(i)">
+                        {{ statusLabel(statusOf(i)) }}
                       </span>
                     </td>
                     <td class="mono name" [title]="i.instanceId">{{ i.instanceId }}</td>
@@ -323,7 +345,7 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
                     <td
                       class="num mono"
                       [class.warn]="syncTier(i) === 'stale'"
-                      [class.bad]="syncTier(i) === 'dead'"
+                      [class.stale-val]="syncTier(i) === 'dead'"
                       [title]="syncTitle(i)"
                     >
                       @if (accountOf(i); as a) {
@@ -496,20 +518,20 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
         gap: var(--space-2);
         align-items: start;
       }
-      .tiles-5 {
-        grid-template-columns: repeat(5, minmax(0, 1fr));
+      .tiles-6 {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
       }
       .tiles-4 {
         grid-template-columns: repeat(4, minmax(0, 1fr));
       }
       @media (max-width: 1100px) {
-        .tiles-5,
+        .tiles-6,
         .tiles-4 {
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
       }
       @media (max-width: 720px) {
-        .tiles-5,
+        .tiles-6,
         .tiles-4 {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
@@ -629,6 +651,9 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
       .card[data-status='Disconnected'] {
         border-left: 3px solid var(--loss);
       }
+      .card[data-status='Deregistered'] {
+        border-left: 3px solid var(--text-tertiary);
+      }
       .head {
         display: flex;
         justify-content: space-between;
@@ -679,15 +704,15 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
       }
       .pill[data-status='Active'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .pill[data-status='ShuttingDown'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .pill[data-status='Disconnected'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .info {
         display: grid;
@@ -719,10 +744,17 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
         color: var(--profit);
       }
       .info dd.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .info dd.bad {
         color: var(--loss);
+      }
+      /* Broker snapshot older than a minute: dimmed, never loss-red — a red equity read as a
+         losing account when the number was merely old. The title gives the sync time. */
+      .info dd.stale-val,
+      table.dense td.stale-val {
+        color: var(--text-tertiary);
+        text-decoration: underline dotted;
       }
       .chips {
         display: flex;
@@ -741,7 +773,7 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
          operator can spot orphaned symbols (owned but not in pair list). */
       .chip.chip-active {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
 
       /* Dense table view */
@@ -802,7 +834,7 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
         color: var(--loss);
       }
       table.dense td.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       table.dense td.good {
         color: var(--profit);
@@ -922,15 +954,20 @@ const STATUS_LABELS: Record<EAInstanceStatus, string> = {
   ],
 })
 export class EAInstancesPageComponent {
-  private readonly service = inject(EAInstancesService);
+  private readonly admin = inject(EAAdminService);
   private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly tradingAccountsService = inject(TradingAccountsService);
 
+  /**
+   * Every registered instance — Active, ShuttingDown and Disconnected. The page used `/ea/instances`,
+   * which returns Active rows only, so the "Shutting down" and "Disconnected" tiles could never be
+   * anything but 0 (48 Disconnected + 4 ShuttingDown existed) and a dead EA simply vanished.
+   */
   private readonly resource = createPolledResource(
     () =>
-      this.service.list().pipe(
+      this.admin.listFleet().pipe(
         map((r) => r.data ?? []),
-        catchError(() => of([] as EAInstanceDto[])),
+        catchError(() => of([] as EAFleetItem[])),
       ),
     {
       // Push-driven: the interval is only a fallback for a missed
@@ -1013,16 +1050,40 @@ export class EAInstancesPageComponent {
     return m;
   });
 
-  readonly instances = computed(() => this.resource.value() ?? []);
+  /**
+   * Stable order — live first, then by account and instance. The engine sorts by last heartbeat,
+   * which reshuffled the live cards on every poll.
+   */
+  readonly instances = computed(() =>
+    [...(this.resource.value() ?? [])].sort(
+      (a, b) =>
+        (STATUS_RANK[this.statusOf(a)] ?? 4) - (STATUS_RANK[this.statusOf(b)] ?? 4) ||
+        a.tradingAccountId - b.tradingAccountId ||
+        a.instanceId.localeCompare(b.instanceId),
+    ),
+  );
+  /** Instances with a live EA behind them — what symbol ownership and coverage are about. */
+  readonly liveInstances = computed(() => this.instances().filter((i) => i.status === 'Active'));
   readonly loading = computed(() => this.resource.loading() && this.resource.value() === null);
 
   readonly search = signal('');
-  readonly statusFilter = signal<StatusFilter>('all');
+  readonly statusFilter = signal<StatusFilter>('current');
+
+  /** See StatusFilter / currentFleetIds. */
+  private readonly currentSet = computed(() => {
+    const accounts = this.accountsById();
+    return currentFleetIds(
+      this.instances(),
+      (id) => accounts.get(id)?.isActive === true,
+      Date.now(),
+    );
+  });
+  readonly currentCount = computed(() => this.currentSet().size);
   readonly viewMode = signal<ViewMode>('cards');
   readonly coverageFilter = signal<CoverageFilter>('all');
 
   /** Split the engine's CSV `symbols` field into a clean array. */
-  protected symbolsOf(ea: EAInstanceDto): string[] {
+  protected symbolsOf(ea: EAFleetItem): string[] {
     if (!ea?.symbols) return [];
     return ea.symbols
       .split(',')
@@ -1033,8 +1094,10 @@ export class EAInstancesPageComponent {
   readonly filtered = computed(() => {
     const q = this.search().toLowerCase().trim();
     const st = this.statusFilter();
+    const current = this.currentSet();
     return this.instances().filter((i) => {
-      if (st !== 'all' && i.status !== st) return false;
+      if (st === 'current' && !current.has(i.instanceId)) return false;
+      if (st !== 'all' && st !== 'current' && this.statusOf(i) !== st) return false;
       if (!q) return true;
       if (i.instanceId.toLowerCase().includes(q)) return true;
       if (String(i.tradingAccountId).includes(q)) return true;
@@ -1046,20 +1109,35 @@ export class EAInstancesPageComponent {
   readonly activeCount = computed(
     () => this.instances().filter((i) => i.status === 'Active').length,
   );
+  /** Shutdowns still in flight (heartbeat inside the liveness window). */
   readonly idleCount = computed(
-    () => this.instances().filter((i) => i.status === 'ShuttingDown').length,
+    () => this.instances().filter((i) => this.statusOf(i) === 'ShuttingDown').length,
   );
   readonly disconnectedCount = computed(
     () => this.instances().filter((i) => i.status === 'Disconnected').length,
   );
+  readonly deregisteredCount = computed(
+    () => this.instances().filter((i) => this.statusOf(i) === 'Deregistered').length,
+  );
+  protected readonly neutralDot = NEUTRAL_DOT;
 
+  /**
+   * The engine's status, with a long-silent ShuttingDown row shown as "Deregistered": four such
+   * rows from May/June read as "Shutting down" with a warning dot on the default view.
+   */
+  protected statusOf(i: EAFleetItem): FleetStatus {
+    return fleetStatusOf(i, Date.now());
+  }
+
+  // Ownership is a property of a live EA: a Disconnected row keeps its old `symbols` CSV, but the
+  // engine has released those symbols (DATA_UNAVAILABLE), so counting them would inflate coverage.
   readonly totalOwnedSymbols = computed(() =>
-    this.instances().reduce((s, i) => s + this.symbolsOf(i).length, 0),
+    this.liveInstances().reduce((s, i) => s + this.symbolsOf(i).length, 0),
   );
 
   readonly uniqueOwnedSymbols = computed(() => {
     const set = new Set<string>();
-    for (const i of this.instances()) {
+    for (const i of this.liveInstances()) {
       for (const s of this.symbolsOf(i)) set.add(s);
     }
     return set;
@@ -1067,7 +1145,7 @@ export class EAInstancesPageComponent {
 
   readonly uniqueAccounts = computed(() => {
     const set = new Set<number>();
-    for (const i of this.instances()) set.add(i.tradingAccountId);
+    for (const i of this.liveInstances()) set.add(i.tradingAccountId);
     return set;
   });
 
@@ -1102,12 +1180,17 @@ export class EAInstancesPageComponent {
     return (this.coveredSymbols().size / active.size) * 100;
   });
 
-  // symbol -> first owning EA, for the coverage board.
+  // symbol -> owning EA for the coverage board: the live owner when there is one, else the most
+  // recent instance that held it (so an uncovered pair names who dropped it).
   private readonly symbolOwnerMap = computed(() => {
-    const map = new Map<string, EAInstanceDto>();
+    const map = new Map<string, EAFleetItem>();
+    const better = (a: EAFleetItem, b: EAFleetItem) =>
+      (STATUS_RANK[this.statusOf(a)] ?? 4) - (STATUS_RANK[this.statusOf(b)] ?? 4) ||
+      Date.parse(b.lastHeartbeat) - Date.parse(a.lastHeartbeat);
     for (const i of this.instances()) {
       for (const s of this.symbolsOf(i)) {
-        if (!map.has(s)) map.set(s, i);
+        const prev = map.get(s);
+        if (!prev || better(i, prev) < 0) map.set(s, i);
       }
     }
     return map;
@@ -1125,7 +1208,7 @@ export class EAInstancesPageComponent {
           symbol,
           isActive,
           ownerId: owner?.instanceId ?? null,
-          ownerStatus: owner?.status ?? null,
+          ownerStatus: owner ? this.statusOf(owner) : null,
           isCovered,
         };
       })
@@ -1177,15 +1260,15 @@ export class EAInstancesPageComponent {
     return pct >= 90 ? '#34C759' : pct >= 50 ? '#FF9500' : '#FF3B30';
   });
 
-  /** Human label for the engine's status enum — the raw value never reaches copy. */
-  protected statusLabel(status: EAInstanceStatus): string {
-    return STATUS_LABELS[status] ?? status;
+  /** Human label for the status — the raw engine enum never reaches copy. */
+  protected statusLabel(status: FleetStatus): string {
+    return FLEET_STATUS_LABELS[status] ?? status;
   }
 
   readonly symbolsPerEAOptions = computed<EChartsOption>(() => {
     // ECharts draws category rows bottom-up, so reverse once and share the
     // ordering between the axis, the bars and the tooltip lookup.
-    const rows = [...this.instances()]
+    const rows = [...this.liveInstances()]
       .map((i) => ({ id: i.instanceId, value: this.symbolsOf(i).length }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 12)
@@ -1254,26 +1337,30 @@ export class EAInstancesPageComponent {
       .join('-');
   }
 
-  heartbeatLabel(instance: EAInstanceDto): string {
+  heartbeatLabel(instance: EAFleetItem): string {
     if (!instance.lastHeartbeat) return '—';
     const elapsed = Date.now() - new Date(instance.lastHeartbeat).getTime();
     if (elapsed < 60_000) return `${Math.round(elapsed / 1000)}s ago`;
     if (elapsed < 3_600_000) return `${Math.round(elapsed / 60_000)}m ago`;
-    return `${Math.round(elapsed / 3_600_000)}h ago`;
+    if (elapsed < 48 * 3_600_000) return `${Math.round(elapsed / 3_600_000)}h ago`;
+    return `${Math.round(elapsed / 86_400_000)}d ago`;
   }
 
   // Heartbeat tier mirrors the engine's 60s DATA_UNAVAILABLE threshold — past
   // that, the EA's symbols are about to be released.
-  heartbeatTier(instance: EAInstanceDto): 'fresh' | 'stale' | 'dead' | 'unknown' {
-    if (!instance.lastHeartbeat) return 'unknown';
+  heartbeatTier(instance: EAFleetItem): 'fresh' | 'stale' | 'dead' | 'unknown' {
+    // A finished deregistration is expected to be silent — its months-old heartbeat is not an alarm.
+    if (!instance.lastHeartbeat || this.statusOf(instance) === 'Deregistered') return 'unknown';
     const elapsed = Date.now() - new Date(instance.lastHeartbeat).getTime();
     if (elapsed < 30_000) return 'fresh';
     if (elapsed < 60_000) return 'stale';
     return 'dead';
   }
 
-  uptimeLabel(instance: EAInstanceDto): string {
-    if (!instance.registeredAt) return '—';
+  uptimeLabel(instance: EAFleetItem): string {
+    // Time since registration is uptime only while the EA is alive; for a dead row it would claim
+    // weeks of uptime for an instance that stopped heartbeating long ago.
+    if (!instance.registeredAt || instance.status !== 'Active') return '—';
     const elapsed = Date.now() - new Date(instance.registeredAt).getTime();
     if (elapsed < 60_000) return `${Math.round(elapsed / 1000)}s`;
     if (elapsed < 3_600_000) return `${Math.round(elapsed / 60_000)}m`;
@@ -1286,12 +1373,12 @@ export class EAInstancesPageComponent {
    * Returns null until the first accounts fetch lands — the template
    * renders an em dash placeholder in that window.
    */
-  accountOf(instance: EAInstanceDto): TradingAccountDto | null {
+  accountOf(instance: EAFleetItem): TradingAccountDto | null {
     return this.accountsById().get(instance.tradingAccountId) ?? null;
   }
 
   /** Account currency code (e.g. "USD"). Falls back to the empty string. */
-  accountCurrency(instance: EAInstanceDto): string {
+  accountCurrency(instance: EAFleetItem): string {
     return this.accountOf(instance)?.currency ?? '';
   }
 
@@ -1302,7 +1389,7 @@ export class EAInstancesPageComponent {
    * snapshot worker pushes a sync every ~15s during market hours; past
    * 60s we treat it as stale.
    */
-  syncTier(instance: EAInstanceDto): 'fresh' | 'stale' | 'dead' | 'unknown' {
+  syncTier(instance: EAFleetItem): 'fresh' | 'stale' | 'dead' | 'unknown' {
     const a = this.accountOf(instance);
     if (!a?.lastSyncedAt) return 'unknown';
     const elapsed = Date.now() - new Date(a.lastSyncedAt).getTime();
@@ -1313,7 +1400,7 @@ export class EAInstancesPageComponent {
 
   /** Optional tooltip on the equity/balance row — surfaces the broker
    *  sync timestamp so operators can spot a stuck account snapshot. */
-  syncTitle(instance: EAInstanceDto): string {
+  syncTitle(instance: EAFleetItem): string {
     const a = this.accountOf(instance);
     if (!a?.lastSyncedAt) return 'No broker snapshot yet';
     return `Last broker sync: ${new Date(a.lastSyncedAt).toLocaleString()}`;

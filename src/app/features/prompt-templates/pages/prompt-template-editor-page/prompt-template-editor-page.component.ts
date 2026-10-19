@@ -28,6 +28,7 @@ import {
 import { AuthService } from '@core/auth/auth.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 interface EditorFormValue {
   systemPrompt: string;
@@ -61,6 +62,7 @@ interface EditorFormValue {
     ReactiveFormsModule,
     RouterLink,
     PageHeaderComponent,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -261,6 +263,8 @@ interface EditorFormValue {
             role="dialog"
             aria-modal="true"
             aria-labelledby="fork-title"
+            appModalA11y
+            (dismiss)="closeForkModal()"
             (click)="$event.stopPropagation()"
           >
             <div class="modal-header">
@@ -285,7 +289,7 @@ interface EditorFormValue {
                   [(ngModel)]="forkVersion"
                   [ngModelOptions]="{ standalone: true }"
                   maxlength="64"
-                  autofocus
+                  data-autofocus
                 />
               </label>
               <label class="field">
@@ -319,8 +323,16 @@ interface EditorFormValue {
       <!-- Promote modal ------------------------------------------------- -->
       @if (promoteOpen() && row(); as r) {
         <div class="modal-scrim" (click)="closePromoteModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Promote to active?</h2></div>
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="promote-title"
+            appModalA11y
+            (dismiss)="closePromoteModal()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="promote-title">Promote to active?</h2></div>
             <div class="modal-body">
               <p>
                 Promoting <strong class="mono">{{ r.name }} / {{ r.version }}</strong> will demote
@@ -333,7 +345,12 @@ interface EditorFormValue {
               </p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" (click)="closePromoteModal()">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="closePromoteModal()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -356,8 +373,16 @@ interface EditorFormValue {
       <!-- Archive modal -------------------------------------------------- -->
       @if (archiveOpen() && row(); as r) {
         <div class="modal-scrim" (click)="closeArchiveModal()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Archive draft?</h2></div>
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="archive-title"
+            appModalA11y
+            (dismiss)="closeArchiveModal()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header"><h2 id="archive-title">Archive draft?</h2></div>
             <div class="modal-body">
               <p>
                 Archiving <strong class="mono">{{ r.name }} / {{ r.version }}</strong>
@@ -366,7 +391,12 @@ interface EditorFormValue {
               </p>
             </div>
             <div class="modal-footer">
-              <button type="button" class="btn-secondary" (click)="closeArchiveModal()">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="closeArchiveModal()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -389,8 +419,18 @@ interface EditorFormValue {
       <!-- Diff picker modal --------------------------------------------- -->
       @if (diffPickerOpen()) {
         <div class="modal-scrim" (click)="closeDiffPicker()">
-          <div class="modal-card" (click)="$event.stopPropagation()">
-            <div class="modal-header"><h2>Diff against which version?</h2></div>
+          <div
+            class="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="diff-picker-title"
+            appModalA11y
+            (dismiss)="closeDiffPicker()"
+            (click)="$event.stopPropagation()"
+          >
+            <div class="modal-header">
+              <h2 id="diff-picker-title">Diff against which version?</h2>
+            </div>
             <div class="modal-body">
               @if (diffCandidates().length === 0) {
                 <p class="muted">
@@ -920,7 +960,9 @@ export class PromptTemplateEditorPageComponent implements OnInit {
     this.forkOpen.set(true);
   }
 
+  // Escape / backdrop route here too (appModalA11y): never hide a write in flight.
   closeForkModal(): void {
+    if (this.saving()) return;
     this.forkOpen.set(false);
   }
 
@@ -956,6 +998,7 @@ export class PromptTemplateEditorPageComponent implements OnInit {
   }
 
   closePromoteModal(): void {
+    if (this.saving()) return;
     this.promoteOpen.set(false);
   }
 
@@ -984,6 +1027,7 @@ export class PromptTemplateEditorPageComponent implements OnInit {
   }
 
   closeArchiveModal(): void {
+    if (this.saving()) return;
     this.archiveOpen.set(false);
   }
 

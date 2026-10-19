@@ -22,6 +22,16 @@ import {
 import { NotificationService } from '@core/notifications/notification.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
+import { ViabilityGatePendingChangesService } from '@features/viability-gates/viability-gates-pending.service';
+import type { PendingConfigChange } from '@features/viability-gates/viability-gates.types';
+
+import {
+  LlmSettingsSaveService,
+  isLlmRiskLoosening,
+  readLlmSaveOutcome,
+  type LlmSaveOutcome,
+} from '../../llm-settings-save';
 
 interface EditableEntry extends LlmConfigEntryDto {
   /** Mutable copy of `value` the operator is editing. Saved separately on submit. */
@@ -71,7 +81,7 @@ const DESCRIPTION_CLAMP_CHARS = 160;
   selector: 'app-llm-settings-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, DatePipe, FormsModule, PageHeaderComponent],
+  imports: [CommonModule, DatePipe, FormsModule, PageHeaderComponent, ConfirmDialogComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -85,8 +95,17 @@ const DESCRIPTION_CLAMP_CHARS = 160;
         @if (dirtyCount() > 0) {
           <span class="dirty-pill">{{ dirtyCount() }} unsaved</span>
         }
-        <button type="button" class="btn-save" [disabled]="dirtyCount() === 0" (click)="save()">
-          {{ dirtyCount() > 0 ? 'Save ' + dirtyCount() + ' change(s)' : 'No changes to save' }}
+        <button
+          type="button"
+          class="btn-save"
+          [disabled]="dirtyCount() === 0 || saving()"
+          (click)="openSaveConfirm()"
+        >
+          @if (saving()) {
+            Saving…
+          } @else {
+            {{ dirtyCount() > 0 ? 'Save ' + dirtyCount() + ' change(s)' : 'No changes to save' }}
+          }
         </button>
       </app-page-header>
 
@@ -153,7 +172,7 @@ const DESCRIPTION_CLAMP_CHARS = 160;
             <button
               type="button"
               class="btn-clear-all"
-              (click)="psoClearAll()"
+              (click)="psoConfirm.set({ symbol: null })"
               [disabled]="psoBusy() || psoRows().length === 0"
               title="Soft-delete every active per-symbol override and fall back to the global"
             >
@@ -179,7 +198,7 @@ const DESCRIPTION_CLAMP_CHARS = 160;
                   <th>Symbol</th>
                   <th>TP shrinkage</th>
                   <th>SL shrinkage</th>
-                  <th>Last updated</th>
+                  <th>Last updated (UTC)</th>
                   <th></th>
                 </tr>
               </thead>
@@ -205,14 +224,14 @@ const DESCRIPTION_CLAMP_CHARS = 160;
                       @if (isNeverUpdated(row.lastUpdatedAt)) {
                         <span class="muted">never</span>
                       } @else {
-                        {{ row.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' }}
+                        {{ row.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
                       }
                     </td>
                     <td>
                       <button
                         type="button"
                         class="btn-delete"
-                        (click)="psoDeleteSymbol(row.symbol)"
+                        (click)="psoConfirm.set({ symbol: row.symbol })"
                         [disabled]="psoSymbolBusy(row.symbol)"
                         [title]="'Delete override for ' + row.symbol"
                       >
@@ -234,6 +253,13 @@ const DESCRIPTION_CLAMP_CHARS = 160;
 
       @if (loading()) {
         <div class="note">Loading settings…</div>
+      } @else if (loadError(); as err) {
+        <!-- A failed read used to fall through to the "no rows yet — save a value to
+             create the first row" hint, inviting the operator to recreate live keys. -->
+        <div class="note error">
+          Could not load the LLM settings: {{ err }}
+          <button type="button" class="btn-refresh" (click)="reload()">Retry</button>
+        </div>
       } @else if (entries().length === 0) {
         <div class="note">
           No <code>Llm:</code> or <code>LlmStrategyProposal:</code> rows in EngineConfig yet. Save a
@@ -268,7 +294,7 @@ const DESCRIPTION_CLAMP_CHARS = 160;
                     <th>Value</th>
                     <th>Type</th>
                     <th>Reload</th>
-                    <th>Last updated</th>
+                    <th>Last updated (UTC)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -319,6 +345,18 @@ const DESCRIPTION_CLAMP_CHARS = 160;
                             [disabled]="isInert(e.key)"
                           />
                         }
+                        <!-- A loosening save held for cooling-off leaves the row on its old
+                             value; without this the next visit showed nothing pending. -->
+                        @for (p of pendingFor(e.key); track p.id) {
+                          <div class="queued-note">
+                            <strong>Queued (cooling-off):</strong>
+                            {{ p.oldValue ?? '—' }} → {{ p.newValue ?? '—' }} · takes effect
+                            {{ p.effectiveAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC
+                            @if (p.reason) {
+                              · “{{ p.reason }}”
+                            }
+                          </div>
+                        }
                         @if (e.description) {
                           <div
                             class="description"
@@ -345,7 +383,7 @@ const DESCRIPTION_CLAMP_CHARS = 160;
                         @if (isNeverUpdated(e.lastUpdatedAt)) {
                           <span class="muted">never</span>
                         } @else {
-                          {{ e.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' }}
+                          {{ e.lastUpdatedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }}
                         }
                       </td>
                     </tr>
@@ -356,6 +394,106 @@ const DESCRIPTION_CLAMP_CHARS = 160;
           </section>
         }
       }
+
+      <!-- Show exactly what is about to change before it does. Risk-loosening entries go
+           through the engine's governed path (2026-10-19): they need a reason and are held
+           for the cooling-off period unless break-glass is ticked; everything else is
+           written and hot-reloaded at once. -->
+      <app-confirm-dialog
+        [open]="confirmSave()"
+        title="Save LLM settings?"
+        [message]="
+          hasLoosening()
+            ? 'Risk-loosening changes need a reason and are held for the cooling-off period unless applied now (break-glass). The other changes are written to EngineConfig and hot-reloaded immediately:'
+            : 'These ' +
+              pendingChanges().length +
+              ' value(s) are written to EngineConfig and hot-reloaded immediately:'
+        "
+        [confirmLabel]="
+          hasLoosening() && !breakGlass() ? 'Save (hold loosening)' : 'Save and apply'
+        "
+        [loading]="saving()"
+        (confirm)="save()"
+        (cancelled)="closeSaveConfirm()"
+      >
+        <ul class="change-list">
+          @for (c of pendingChanges(); track c.key) {
+            <li>
+              <code>{{ c.key }}</code>
+              <span class="change-values">{{ c.from }} → {{ c.to }}</span>
+              @if (c.loosening) {
+                <span class="loosening">
+                  Risk-loosening —
+                  {{
+                    breakGlass()
+                      ? 'applied now (break-glass, flagged in the audit log)'
+                      : 'held for the cooling-off period'
+                  }}
+                </span>
+              }
+            </li>
+          }
+        </ul>
+        <div class="save-governance">
+          <label class="reason-label" for="llm-save-reason">
+            Reason
+            <span class="muted">
+              {{
+                hasLoosening()
+                  ? '(required — recorded on every audit row)'
+                  : '(optional — recorded on every audit row)'
+              }}
+            </span>
+          </label>
+          <textarea
+            id="llm-save-reason"
+            class="reason-input"
+            rows="2"
+            maxlength="1000"
+            [required]="hasLoosening()"
+            [attr.aria-invalid]="reasonMissing() ? 'true' : null"
+            [disabled]="saving()"
+            [ngModel]="saveReason()"
+            (ngModelChange)="saveReason.set($event)"
+          ></textarea>
+          @if (hasLoosening()) {
+            <label class="break-glass">
+              <input
+                type="checkbox"
+                [disabled]="saving()"
+                [ngModel]="breakGlass()"
+                (ngModelChange)="breakGlass.set($event)"
+              />
+              Apply the loosening now (break-glass) — skips the cooling-off period
+            </label>
+          }
+          @if (saveError(); as err) {
+            <p class="save-error" role="alert">{{ err }}</p>
+          }
+        </div>
+      </app-confirm-dialog>
+
+      <app-confirm-dialog
+        [open]="psoConfirm() !== null"
+        [title]="
+          psoConfirm()?.symbol
+            ? 'Delete the ' + psoConfirm()?.symbol + ' override?'
+            : 'Clear every per-symbol override?'
+        "
+        [message]="
+          psoConfirm()?.symbol
+            ? psoConfirm()?.symbol +
+              ' falls back to the global TP / SL shrinkage on its next signal.'
+            : 'Soft-deletes all ' +
+              psoRows().length +
+              ' active override(s); every symbol falls back to the global TP / SL shrinkage. They can be restored via SQL.'
+        "
+        [confirmLabel]="psoConfirm()?.symbol ? 'Delete' : 'Clear all'"
+        confirmVariant="destructive"
+        [loading]="psoBusy()"
+        (confirm)="confirmPso()"
+        (cancelled)="psoConfirm.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -365,6 +503,76 @@ const DESCRIPTION_CLAMP_CHARS = 160;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .change-list {
+        margin: var(--space-3) 0 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        max-height: 40vh;
+        overflow-y: auto;
+        font-size: var(--text-sm);
+      }
+      .change-list code {
+        font-size: var(--text-xs);
+        word-break: break-all;
+      }
+      .change-values {
+        display: block;
+        color: var(--text-primary);
+        font-family: ui-monospace, SFMono-Regular, monospace;
+        font-size: var(--text-xs);
+        word-break: break-all;
+      }
+      .loosening {
+        display: block;
+        color: var(--warning);
+        font-size: var(--text-xs);
+      }
+      .save-governance {
+        margin-top: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .reason-label {
+        font-weight: var(--font-medium);
+        color: var(--text-primary);
+      }
+      .reason-input {
+        width: 100%;
+        box-sizing: border-box;
+        resize: vertical;
+        padding: var(--space-2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-sm);
+      }
+      .reason-input[aria-invalid='true'] {
+        border-color: var(--loss);
+      }
+      .break-glass {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+        color: var(--warning);
+        cursor: pointer;
+      }
+      .save-error {
+        margin: 0;
+        color: var(--loss);
+        font-size: var(--text-xs);
+      }
+      .queued-note {
+        margin-top: 4px;
+        color: var(--warning);
+        font-size: var(--text-xs);
       }
       .btn-refresh,
       .btn-save,
@@ -739,11 +947,31 @@ const DESCRIPTION_CLAMP_CHARS = 160;
 })
 export class LlmSettingsPageComponent implements OnInit {
   private readonly llm = inject(LlmService);
+  private readonly saver = inject(LlmSettingsSaveService);
+  private readonly pendingSvc = inject(ViabilityGatePendingChangesService);
   private readonly notifications = inject(NotificationService);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly entries = signal<EditableEntry[]>([]);
   readonly loading = signal(true);
+  readonly loadError = signal<string | null>(null);
+  readonly saving = signal(false);
+  readonly confirmSave = signal(false);
+
+  // ── Governed save (reason / break-glass) ────────────────────────────
+  readonly saveReason = signal('');
+  readonly breakGlass = signal(false);
+  /** Why the last attempt in the open dialog did not go through (engine refusal or missing reason). */
+  readonly saveError = signal<string | null>(null);
+  /**
+   * The engine refused for want of a reason although the local mirror flagged nothing — it
+   * classifies more than this page knows. From then on the dialog treats the save as loosening.
+   */
+  private readonly reasonDemanded = signal(false);
+  /** Cooling-off queue entries for the keys on this page (empty when none or unreadable). */
+  private readonly pendingQueue = signal<PendingConfigChange[]>([]);
+  /** Per-symbol override delete awaiting confirmation; `symbol: null` = clear all. */
+  readonly psoConfirm = signal<{ symbol: string | null } | null>(null);
   readonly testing = signal(false);
   readonly testResult = signal<TestLlmProviderResult | null>(null);
 
@@ -756,6 +984,26 @@ export class LlmSettingsPageComponent implements OnInit {
   readonly psoBusy = computed(() => this.psoClearing() || this.psoBusySymbols().size > 0);
 
   readonly dirtyCount = computed(() => this.entries().filter((e) => e.isDirty).length);
+
+  /** The rows Save would write, as the confirm dialog lists them (secrets never echoed). */
+  readonly pendingChanges = computed(() =>
+    this.entries()
+      .filter((e) => e.isDirty)
+      .map((e) => ({
+        key: e.key,
+        from: e.isSecret ? '(secret)' : e.value === '' ? '(empty)' : e.value,
+        to: e.isSecret ? '(new secret)' : e.editedValue === '' ? '(empty)' : e.editedValue,
+        loosening: !e.isSecret && isLlmRiskLoosening(e.key, e.value, e.editedValue),
+      })),
+  );
+
+  /** The save carries a risk-loosening change: a reason is required and it is held unless break-glass. */
+  readonly hasLoosening = computed(
+    () => this.reasonDemanded() || this.pendingChanges().some((c) => c.loosening),
+  );
+  readonly reasonMissing = computed(
+    () => this.saveError() !== null && this.hasLoosening() && !this.saveReason().trim(),
+  );
 
   readonly groupedEntries = computed(() => {
     const buckets = new Map<string, EditableEntry[]>();
@@ -819,8 +1067,15 @@ export class LlmSettingsPageComponent implements OnInit {
       });
   }
 
+  /** Run the delete the operator just confirmed in the dialog. */
+  confirmPso(): void {
+    const target = this.psoConfirm();
+    if (!target) return;
+    if (target.symbol) this.psoDeleteSymbol(target.symbol);
+    else this.psoClearAll();
+  }
+
   psoDeleteSymbol(symbol: string): void {
-    if (!confirm(`Delete the per-symbol shrinkage override for ${symbol}?`)) return;
     this.psoMarkBusy(symbol, true);
     this.llm
       .clearPerSymbolShrinkage({ symbols: [symbol] })
@@ -833,6 +1088,7 @@ export class LlmSettingsPageComponent implements OnInit {
       )
       .subscribe((res) => {
         this.psoMarkBusy(symbol, false);
+        this.psoConfirm.set(null);
         if (res === null) return;
         if (!res.status) {
           this.notifications.error(res.message ?? `Delete failed for ${symbol}.`);
@@ -844,16 +1100,7 @@ export class LlmSettingsPageComponent implements OnInit {
   }
 
   psoClearAll(): void {
-    const count = this.psoRows().length;
-    if (count === 0) return;
-    if (
-      !confirm(
-        `Soft-delete every active per-symbol shrinkage override (${count} symbol${
-          count === 1 ? '' : 's'
-        })? They can be restored via SQL.`,
-      )
-    )
-      return;
+    if (this.psoRows().length === 0) return;
     this.psoClearing.set(true);
     this.llm
       .clearPerSymbolShrinkage({})
@@ -866,6 +1113,7 @@ export class LlmSettingsPageComponent implements OnInit {
       )
       .subscribe((res) => {
         this.psoClearing.set(false);
+        this.psoConfirm.set(null);
         if (res === null) return;
         if (!res.status) {
           this.notifications.error(res.message ?? 'Clear-all failed.');
@@ -889,15 +1137,25 @@ export class LlmSettingsPageComponent implements OnInit {
 
   reload(): void {
     this.loading.set(true);
+    this.loadError.set(null);
+    this.reloadPendingQueue();
     this.llm
       .getSettings()
       .pipe(
-        catchError(() => of(null)),
+        catchError((err) => {
+          this.loadError.set(err?.error?.message ?? err?.message ?? 'Request failed.');
+          return of(null);
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.loading.set(false);
-        const rows = res?.data ?? [];
+        if (res && !res.status) {
+          this.loadError.set(res.message ?? 'The engine refused the settings query.');
+          return;
+        }
+        if (!res) return;
+        const rows = res.data ?? [];
         this.entries.set(
           rows.map((r) => ({
             ...r,
@@ -915,51 +1173,125 @@ export class LlmSettingsPageComponent implements OnInit {
     this.entries.set([...this.entries()]);
   }
 
+  openSaveConfirm(): void {
+    this.saveReason.set('');
+    this.breakGlass.set(false);
+    this.saveError.set(null);
+    this.reasonDemanded.set(false);
+    this.confirmSave.set(true);
+  }
+
+  closeSaveConfirm(): void {
+    if (this.saving()) return;
+    this.confirmSave.set(false);
+  }
+
   save(): void {
     const dirty = this.entries().filter((e) => e.isDirty);
-    if (dirty.length === 0) return;
+    if (dirty.length === 0 || this.saving()) return;
+    const reason = this.saveReason().trim();
+    const loosening = this.hasLoosening();
+    if (loosening && !reason) {
+      this.saveError.set(
+        'A reason is required: this save loosens a risk-sensitive setting, and the engine refuses it without one.',
+      );
+      return;
+    }
+    this.saveError.set(null);
+    this.saving.set(true);
     // Two-step: write EngineConfig rows, then hot-reload the live LlmOptions
     // singleton so the new values take effect WITHOUT an engine restart.
     // Every service that captured LlmOptions by reference (SignalShrinkagePolicy,
     // the viability gate's high-conf bypass threshold, etc.) sees the change
     // on its next read. If the reload call itself fails (network blip, etc.)
     // the operator gets a graceful warning — the rows are still written, just
-    // not yet live, so a manual reload (or restart) recovers.
-    this.llm
-      .updateSettings(dirty.map((e) => ({ key: e.key, value: e.editedValue })))
+    // not yet live, so a manual reload (or restart) recovers. Nothing to
+    // hot-reload when the engine applied nothing (refused, or all held).
+    this.saver
+      .save({
+        entries: dirty.map((e) => ({ key: e.key, value: e.editedValue })),
+        reason: reason || undefined,
+        immediate: loosening && this.breakGlass() ? true : undefined,
+      })
       .pipe(
         switchMap((writeRes) => {
-          if (!writeRes?.status) return of({ writeRes, reloadRes: null });
+          const outcome = readLlmSaveOutcome(writeRes);
+          if (outcome.applied === 0) return of({ outcome, reloadRes: null });
           return this.llm.reloadSettings().pipe(
             catchError(() => of(null)),
-            switchMap((reloadRes) => of({ writeRes, reloadRes })),
+            switchMap((reloadRes) => of({ outcome, reloadRes })),
           );
         }),
         catchError((err) => {
-          this.notifications.error?.(`Save failed: ${err?.message ?? err}`);
+          // A transport failure: the engine may or may not have written. Say so, and re-read.
+          const detail =
+            err?.error?.message ??
+            (err?.status === 0 ? 'the engine could not be reached' : (err?.message ?? err));
+          this.saving.set(false);
+          this.saveError.set(`Save failed: ${detail}. Reload to see what the engine has.`);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((bundle) => {
+        this.saving.set(false);
         if (!bundle) return;
-        const { writeRes, reloadRes } = bundle;
-        if (writeRes?.status) {
-          const wrote = writeRes.data ?? 0;
-          if (reloadRes?.status) {
-            this.notifications.success?.(
-              `Saved ${wrote} setting(s) and reloaded live config — active now.`,
-            );
-          } else {
-            this.notifications.success?.(
-              `Saved ${wrote} setting(s). Hot-reload failed — engine restart required to activate.`,
-            );
-          }
-          this.reload();
-        } else if (writeRes) {
-          this.notifications.error?.(writeRes.message ?? 'Save refused.');
-        }
+        this.reportSave(bundle.outcome, bundle.reloadRes?.status === true);
       });
+  }
+
+  /** Say what the engine did — applied, held for cooling-off, refused — never "Saved" for all three. */
+  private reportSave(o: LlmSaveOutcome, reloaded: boolean): void {
+    // Refused outright: nothing was written. Keep the dialog (and the operator's edits) open.
+    if (!o.ok && o.applied === 0 && o.failed === 0) {
+      if (o.needsReason) this.reasonDemanded.set(true);
+      this.saveError.set(o.message);
+      return;
+    }
+    this.confirmSave.set(false);
+    const parts: string[] = [];
+    if (o.applied > 0) {
+      parts.push(
+        reloaded
+          ? `Applied ${o.applied} setting(s) — live now.`
+          : `Applied ${o.applied} setting(s); hot-reload failed — an engine restart activates them.`,
+      );
+    }
+    if (o.held > 0) {
+      parts.push(
+        `${o.held} risk-loosening change(s) held for the cooling-off period — not live yet (see the row).`,
+      );
+    }
+    if (o.failed > 0) parts.push(`${o.failed} risk-loosening change(s) failed: ${o.message}`);
+    if (parts.length === 0) parts.push(o.message);
+    const text = parts.join(' ');
+    if (o.failed > 0) this.notifications.error(text);
+    else if (o.held > 0 || !reloaded) this.notifications.warning(text);
+    else this.notifications.success(text);
+    this.reload();
+  }
+
+  private reloadPendingQueue(): void {
+    this.pendingSvc
+      .listPending()
+      .pipe(
+        catchError(() => of([] as PendingConfigChange[])),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((rows) =>
+        this.pendingQueue.set(
+          (rows ?? []).filter((p) => {
+            const k = p.key?.toLowerCase() ?? '';
+            return k.startsWith('llm:') || k.startsWith('llmstrategyproposal:');
+          }),
+        ),
+      );
+  }
+
+  /** Queued (cooling-off) changes for one key. */
+  pendingFor(key: string): PendingConfigChange[] {
+    const k = key.toLowerCase();
+    return this.pendingQueue().filter((p) => p.key?.toLowerCase() === k);
   }
 
   typeLabel(t: ConfigDataType): string {
@@ -974,7 +1306,12 @@ export class LlmSettingsPageComponent implements OnInit {
       .testProviders()
       .pipe(
         catchError((err) => {
-          this.notifications.error?.(`Connectivity test failed: ${err?.message ?? err}`);
+          // HttpClient's message ("Http failure response for …: 0 Unknown Error") names
+          // a URL, not the problem; status 0 means the request never reached the engine.
+          const detail =
+            err?.error?.message ??
+            (err?.status === 0 ? 'the engine could not be reached' : (err?.message ?? err));
+          this.notifications.error?.(`Connectivity test failed: ${detail}`);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),

@@ -29,13 +29,14 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 import { OpsApprovalsComponent } from './ops-approvals.component';
 import { OpsRunningComponent } from './ops-running.component';
 import {
   auditKindLabel,
   buildWorkOrder,
-  formatAge,
+  formatAgo,
   isEngineerConversation,
   runningWorkOrders,
   startOfLocalDay,
@@ -114,6 +115,7 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
     ErrorStateComponent,
     OpsApprovalsComponent,
     OpsRunningComponent,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -126,14 +128,9 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
             {{ label }}
           }
         </span>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             and an unchanged board is a structural no-op, so the old button never moved. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       @if (firstLoad()) {
@@ -316,27 +313,6 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
         margin-right: var(--space-2);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-secondary {
-        background: transparent;
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-      }
-      .btn-secondary:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
       }
       .block {
         display: flex;
@@ -606,7 +582,7 @@ export class AlgoEngineerOperationsPageComponent {
   /** "updated 12s ago" — from the page's own clock, so it ages between refetches. */
   protected readonly updatedLabel = computed(() => {
     const t = this.resource.lastUpdated();
-    return t === null ? '' : `updated ${formatAge(this.now() - t)} ago`;
+    return t === null ? '' : `updated ${formatAgo(this.now() - t)}`;
   });
 
   constructor() {

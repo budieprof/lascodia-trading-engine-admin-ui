@@ -15,6 +15,7 @@ import { catchError, of } from 'rxjs';
 import { AnalysisMonitorsService } from '@core/services/analysis-monitors.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { AnalysisMonitorDto } from '@core/api/api.types';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import type {
   MonitorAction,
   MonitorMetric,
@@ -53,16 +54,26 @@ interface ConditionRow {
   selector: 'app-monitor-builder',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DatePipe],
+  imports: [FormsModule, DatePipe, ModalA11yDirective],
   template: `
-    <div class="backdrop" (click)="closed.emit()">
-      <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+    <!-- appModalA11y: Escape closes it wherever focus is, focus starts on the first field and Tab
+         stays inside; closing is held while the monitor is being armed. -->
+    <div class="backdrop" (click)="close()">
+      <div
+        class="modal"
+        (click)="$event.stopPropagation()"
+        role="dialog"
+        aria-modal="true"
+        [attr.aria-label]="seed() ? 'Duplicate monitor' : 'New monitor'"
+        appModalA11y
+        (dismiss)="close()"
+      >
         <header class="head">
           <div class="title">
             <strong>{{ seed() ? 'Duplicate monitor' : 'New monitor' }}</strong>
             <span class="muted">· {{ subjectLabel() }}</span>
           </div>
-          <button type="button" class="x" (click)="closed.emit()" aria-label="Close">×</button>
+          <button type="button" class="x" (click)="close()" aria-label="Close">×</button>
         </header>
 
         <div class="body">
@@ -72,7 +83,11 @@ interface ConditionRow {
             <div class="row">
               <label class="field">
                 <span>Subject</span>
-                <select [(ngModel)]="subjectKind" (ngModelChange)="onSubjectChanged()">
+                <select
+                  [(ngModel)]="subjectKind"
+                  (ngModelChange)="onSubjectChanged()"
+                  data-autofocus
+                >
                   @for (k of catalogue()?.subjectKinds ?? defaultKinds; track k) {
                     <option [value]="k">{{ k }}</option>
                   }
@@ -122,6 +137,12 @@ interface ConditionRow {
 
             @if (metricsLoading()) {
               <p class="muted">Loading what can be asked about {{ subjectLabel() }}…</p>
+            } @else if (needsRef() && !subjectRef().trim()) {
+              <!-- Nothing is asked for until the subject names something: "no metrics are
+                   available for Symbol" read as if the registry had none. -->
+              <p class="muted">
+                Enter the {{ refLabel().toLowerCase() }} above to see what can be asked about it.
+              </p>
             } @else if (availableMetrics().length === 0) {
               <p class="muted">
                 No metrics are available for {{ subjectLabel() }}. Pick a different subject, or
@@ -402,7 +423,7 @@ interface ConditionRow {
             <p class="err">{{ e }}</p>
           }
           <div class="spacer"></div>
-          <button type="button" class="btn btn-secondary" (click)="closed.emit()">Cancel</button>
+          <button type="button" class="btn btn-secondary" (click)="close()">Cancel</button>
           <button
             type="button"
             class="btn btn-primary"
@@ -417,6 +438,28 @@ interface ConditionRow {
   `,
   styles: [
     `
+      /* Buttons: the global .btn / .btn-primary only add press feedback and a gradient, so on
+         their own these rendered as bare text ("Cancel  Arm monitor"). */
+      .btn {
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        padding: 7px 14px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background-color: var(--bg-tertiary);
+        color: var(--text-primary);
+        cursor: pointer;
+      }
+      .btn-primary {
+        background-color: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
       .backdrop {
         position: fixed;
         inset: 0;
@@ -427,9 +470,11 @@ interface ConditionRow {
         z-index: 60;
         padding: 24px;
       }
+      /* Theme tokens: --surface / --text are not defined app-wide, so these fell back to a white
+         sheet with dark text in the dark theme. */
       .modal {
-        background: var(--surface, #fff);
-        color: var(--text, #111);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
         border-radius: 10px;
         width: min(920px, 100%);
         max-height: 90vh;
@@ -443,11 +488,11 @@ interface ConditionRow {
         align-items: center;
         gap: 10px;
         padding: 14px 18px;
-        border-bottom: 1px solid var(--border, #e3e6e8);
+        border-bottom: 1px solid var(--border);
       }
       .foot {
         border-bottom: none;
-        border-top: 1px solid var(--border, #e3e6e8);
+        border-top: 1px solid var(--border);
       }
       .foot .spacer {
         flex: 1;
@@ -464,7 +509,7 @@ interface ConditionRow {
         font-size: 22px;
         line-height: 1;
         cursor: pointer;
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
       }
       .x.sm {
         font-size: 16px;
@@ -475,7 +520,7 @@ interface ConditionRow {
       }
       .block {
         padding: 14px 0;
-        border-bottom: 1px solid var(--border, #eef1f2);
+        border-bottom: 1px solid var(--border);
       }
       .block:last-child {
         border-bottom: none;
@@ -521,16 +566,16 @@ interface ConditionRow {
         min-width: 90px;
       }
       .field > span {
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
       }
       input,
       select,
       textarea {
         font: inherit;
         padding: 6px 8px;
-        border: 1px solid var(--border, #ccd2d6);
+        border: 1px solid var(--border);
         border-radius: 5px;
-        background: var(--surface, #fff);
+        background: var(--bg-primary);
         color: inherit;
       }
       textarea.code {
@@ -559,11 +604,11 @@ interface ConditionRow {
       }
       .reading {
         font-size: 11px;
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
         font-family: ui-monospace, Menlo, monospace;
       }
       .reading.stale {
-        color: var(--warn, #a8761a);
+        color: var(--warning);
       }
       .actions {
         display: flex;
@@ -583,14 +628,14 @@ interface ConditionRow {
       .check em {
         font-style: normal;
         font-size: 11.5px;
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
       }
       .tier2 {
         margin-top: 12px;
-        border: 1px solid var(--danger-border, #e5c2c2);
+        border: 1px solid color-mix(in srgb, var(--loss) 35%, transparent);
         border-radius: 6px;
         padding: 10px 12px;
-        background: var(--danger-bg, #fdf5f5);
+        background: color-mix(in srgb, var(--loss) 10%, transparent);
       }
       .tier2 summary {
         cursor: pointer;
@@ -599,20 +644,20 @@ interface ConditionRow {
       }
       .tier2-warn {
         font-size: 12px;
-        color: var(--danger, #97302a);
+        color: var(--loss);
         margin: 8px 0;
       }
       .verdict {
-        border-left: 3px solid var(--ok, #2c7a5b);
+        border-left: 3px solid var(--profit);
         padding: 10px 12px;
-        background: var(--surface-2, #f6f8f8);
+        background: var(--bg-primary);
         border-radius: 0 5px 5px 0;
       }
       .verdict.bad {
-        border-left-color: var(--danger, #a3352b);
+        border-left-color: var(--loss);
       }
       .verdict.warn {
-        border-left-color: var(--warn, #a8761a);
+        border-left-color: var(--warning);
       }
       .verdict .lead {
         margin: 0 0 6px;
@@ -622,15 +667,15 @@ interface ConditionRow {
       .explain {
         margin: 0 0 6px;
         font-size: 12.5px;
-        color: var(--text-muted, #556);
+        color: var(--text-secondary);
       }
       .err {
-        color: var(--danger, #a3352b);
+        color: var(--loss);
         font-size: 12px;
         margin: 3px 0;
       }
       .warn-line {
-        color: var(--warn, #8a6212);
+        color: var(--warning);
         font-size: 12px;
         margin: 3px 0;
       }
@@ -649,14 +694,14 @@ interface ConditionRow {
       }
       .fires time {
         font-family: ui-monospace, Menlo, monospace;
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
         white-space: nowrap;
       }
       .fires .note {
-        color: var(--text-muted, #556);
+        color: var(--text-secondary);
       }
       .muted {
-        color: var(--text-muted, #667);
+        color: var(--text-secondary);
         font-size: 12.5px;
       }
       .muted.sm {
@@ -678,6 +723,11 @@ export class MonitorBuilderComponent {
 
   readonly closed = output<void>();
   readonly created = output<AnalysisMonitorDto>();
+
+  /** ×, Cancel, the backdrop or Escape — never while the monitor is being armed (its answer lands here). */
+  protected close(): void {
+    if (!this.saving()) this.closed.emit();
+  }
 
   protected readonly defaultKinds = [
     'Symbol',

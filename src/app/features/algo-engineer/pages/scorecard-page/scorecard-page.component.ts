@@ -11,6 +11,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /** Change scorecard (ADR-0020 §F) — the algo-engineer agent's shipped changes, predicted vs realised. */
@@ -25,6 +26,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    RefreshButtonComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -33,14 +35,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         title="Algo-Engineer — Change Scorecard"
         subtitle="Each change the agent proposed/shipped, graded against its own forecast (ADR-0020)"
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             and an unchanged scorecard is a structural no-op, so the old button never moved. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       @if (loading()) {
@@ -161,27 +158,6 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         .kpis {
           grid-template-columns: repeat(3, minmax(0, 1fr));
         }
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-secondary {
-        background: transparent;
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-      }
-      .btn-secondary:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
       }
       .card {
         background: var(--bg-secondary);

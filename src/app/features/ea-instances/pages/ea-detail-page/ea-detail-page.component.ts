@@ -19,11 +19,14 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type {
   EABreakevenExitConfig,
   EAFillMode,
+  EAFleetItem,
   EAInstanceDetail,
   EAInstanceDto,
   UpdateEAConfigRequest,
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -42,6 +45,18 @@ import { EAPositionsPanelComponent } from '../../components/ea-positions-panel/e
 import { EAPendingOrdersPanelComponent } from '../../components/ea-pending-orders-panel/ea-pending-orders-panel.component';
 import { EALogsPanelComponent } from '../../components/ea-logs-panel/ea-logs-panel.component';
 import { EARejectionsPanelComponent } from '../../components/ea-rejections-panel/ea-rejections-panel.component';
+import { FLEET_STATUS_LABELS, fleetStatusOf } from '../../current-fleet';
+
+/**
+ * The instance this page shows. `id` is the numeric row id, known only for Active instances (the
+ * engine's live list carries it; the admin fleet list — the only source that includes Disconnected
+ * and ShuttingDown instances — does not). Every admin endpoint is keyed by `instanceId`, so the page
+ * works without it; only the audit entries' numeric entityId falls back.
+ */
+type EAView = Omit<EAInstanceDto, 'id'> & { id: number | null };
+
+/** Fleet rows carry `id` from the 2026-10-19 engine on (`EAFleetItem.id`); older engines omit it. */
+type FleetRow = EAFleetItem & { id?: number | null };
 
 interface ConfigForm {
   // Per-instance safety
@@ -81,12 +96,16 @@ interface ConfigForm {
     EAPendingOrdersPanelComponent,
     EALogsPanelComponent,
     EARejectionsPanelComponent,
+    ModalA11yDirective,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
       <app-page-header
         [title]="ea() ? 'EA · ' + ea()!.instanceId : 'EA Detail'"
-        [subtitle]="ea() ? 'Trading account #' + ea()!.tradingAccountId : 'Loading…'"
+        [subtitle]="
+          ea() ? 'Trading account #' + ea()!.tradingAccountId : loading() ? 'Loading…' : ''
+        "
       >
         @if (ea(); as eaSnap) {
           <span slot="title-after" class="version-pill mono" [title]="'EA binary version'"
@@ -107,18 +126,9 @@ interface ConfigForm {
             Refresh symbol specs
           </button>
         }
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refreshAll()"
-          [disabled]="anyLoading()"
-        >
-          @if (anyLoading()) {
-            Refreshing…
-          } @else {
-            Refresh
-          }
-        </button>
+        <!-- Shared button: it owns the "my click is in flight" state. Bound to the resources'
+             first-load flag, the old one never changed on a click (the review saw no effect). -->
+        <app-refresh-button [refreshing]="anyRefreshing()" (refresh)="refreshAll()" />
       </app-page-header>
 
       <!--
@@ -133,24 +143,35 @@ interface ConfigForm {
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
-      } @else if (resource.error()) {
+      } @else if (loadFailed()) {
         <app-error-state
           title="Could not load EA instances"
           message="Engine returned an error fetching the instance list."
-          (retry)="resource.refresh()"
+          (retry)="refreshAll()"
         />
       } @else if (!ea()) {
-        <app-empty-state
-          title="EA instance not found"
-          description="No active EA instance matches the supplied id. The instance may have deregistered or the id is wrong."
-        />
+        <app-empty-state title="EA instance not found" [description]="notFoundMessage()" />
       } @else {
+        @if (ea()!.status !== 'Active') {
+          <!-- A Disconnected / ShuttingDown / Deregistered instance is shown as a record, not as
+               a live EA: commands queued below wait for a heartbeat that may never come. -->
+          <p class="inactive-banner" role="status">
+            <strong>{{ fleetStatusLabel() }}</strong>
+            — last heartbeat {{ ea()!.lastHeartbeat | relativeTime }}. Commands queued from this
+            page wait until this instance polls again; if it was replaced by a newer registration
+            they will never run.
+          </p>
+        }
         <section class="overview-grid">
           <dl class="kv">
             <dt>Status</dt>
             <dd>
-              <span class="status-pill" [attr.data-status]="ea()!.status">{{ ea()!.status }}</span>
-              @if (ea()!.isCoordinator) {
+              <span class="status-pill" [attr.data-status]="ea()!.status">{{
+                fleetStatusLabel()
+              }}</span>
+              <!-- The engine never clears the flag when an EA goes quiet: only a live one
+                   coordinates (the rule Fleet Health and the engine's fleet summary use). -->
+              @if (ea()!.isCoordinator && ea()!.status === 'Active') {
                 <span class="coord-pill">coordinator</span>
               }
             </dd>
@@ -973,7 +994,7 @@ interface ConfigForm {
 
         <!-- Logs (Phase-9) + Audit timeline (Phase-2A) side-by-side on
              wide screens; collapse to stacked below the min-cell width. -->
-        <div class="ea-logs-audit-grid">
+        <div class="ea-logs-audit-grid" id="ea-logs">
           <app-ea-logs-panel [instanceId]="ea()!.instanceId" />
           <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
         </div>
@@ -982,7 +1003,14 @@ interface ConfigForm {
 
       @if (askingRefresh()) {
         <div class="modal-overlay" (click)="cancelRefresh()">
-          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+          <div
+            class="modal"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            appModalA11y
+            (dismiss)="cancelRefresh()"
+          >
             <header class="modal-head">
               <h2>Refresh symbol specs</h2>
               <button type="button" class="close-btn" (click)="cancelRefresh()" aria-label="Close">
@@ -999,7 +1027,12 @@ interface ConfigForm {
               after a contract-spec change.
             </p>
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="cancelRefresh()">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="cancelRefresh()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -1017,7 +1050,14 @@ interface ConfigForm {
 
       @if (tradingActionOpen()) {
         <div class="modal-overlay" (click)="cancelTradingAction()">
-          <div class="modal" (click)="$event.stopPropagation()" role="dialog" aria-modal="true">
+          <div
+            class="modal"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            appModalA11y
+            (dismiss)="cancelTradingAction()"
+          >
             <header class="modal-head">
               <h2>{{ tradingIntent() === 'disable' ? 'Disable trading' : 'Enable trading' }}</h2>
               <button
@@ -1051,7 +1091,12 @@ interface ConfigForm {
               ></textarea>
             </label>
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="cancelTradingAction()">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="cancelTradingAction()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -1082,6 +1127,8 @@ interface ConfigForm {
             (click)="$event.stopPropagation()"
             role="dialog"
             aria-modal="true"
+            appModalA11y
+            (dismiss)="cancelConfig()"
           >
             <header class="modal-head">
               <h2>Push EA safety config</h2>
@@ -1167,7 +1214,12 @@ interface ConfigForm {
             </fieldset>
 
             <footer class="modal-foot">
-              <button type="button" class="btn btn-secondary" (click)="cancelConfig()">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="cancelConfig()"
+                data-autofocus
+              >
                 Cancel
               </button>
               <button
@@ -1191,6 +1243,19 @@ interface ConfigForm {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .inactive-banner {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid rgba(255, 149, 0, 0.35);
+        border-left: 3px solid var(--warning, #ff9500);
+        border-radius: var(--radius-md);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .inactive-banner strong {
+        color: var(--text-primary);
       }
       .overview-grid {
         display: grid;
@@ -1228,7 +1293,7 @@ interface ConfigForm {
         font-size: var(--text-xs);
       }
       .stale {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .status-pill {
         font-size: var(--text-xs);
@@ -1238,28 +1303,28 @@ interface ConfigForm {
         text-transform: uppercase;
         letter-spacing: 0.04em;
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .status-pill[data-status='Active'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .status-pill[data-status='Inactive'],
       .status-pill[data-status='Stale'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .status-pill[data-status='Disconnected'],
       .status-pill[data-status='Failed'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .coord-pill {
         font-size: var(--text-xs);
         padding: 2px 6px;
         border-radius: var(--radius-sm);
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
         margin-left: 6px;
       }
       /* ── Page-header version pill ────────────────────────────────────
@@ -1521,15 +1586,15 @@ interface ConfigForm {
       }
       .tc-pill.ok {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .tc-pill.warn {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .tc-pill.bad {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .tc-pill.muted {
         background: rgba(0, 0, 0, 0.06);
@@ -1581,11 +1646,11 @@ interface ConfigForm {
       }
       .fm-pill.ok {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .fm-pill.warn {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .fm-pill.muted {
         background: rgba(0, 0, 0, 0.06);
@@ -1668,10 +1733,10 @@ interface ConfigForm {
         min-height: 1.2em;
       }
       .fm-status .ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .fm-status .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .fm-buttons {
         display: flex;
@@ -1716,7 +1781,7 @@ interface ConfigForm {
       }
       .be-pill.warn {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .be-pill.muted {
         background: rgba(0, 0, 0, 0.06);
@@ -1792,10 +1857,10 @@ interface ConfigForm {
         min-height: 1.2em;
       }
       .be-status .ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .be-status .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .be-buttons {
         display: flex;
@@ -1844,7 +1909,7 @@ interface ConfigForm {
       }
       .dpt-pill.on {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
         text-transform: none;
         letter-spacing: 0;
       }
@@ -1899,10 +1964,10 @@ interface ConfigForm {
         min-height: 1.2em;
       }
       .dpt-status .ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .dpt-status .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .dpt-buttons {
         display: flex;
@@ -1918,14 +1983,14 @@ interface ConfigForm {
         cursor: pointer;
       }
       .action-btn.ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .action-btn.ok:hover:not(:disabled) {
         background: #34c759;
         color: #fff;
       }
       .action-btn.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .action-btn.warn:hover:not(:disabled) {
         background: #c93400;
@@ -2060,35 +2125,101 @@ export class EaDetailPageComponent {
   private readonly notify = inject(NotificationService);
   private readonly route = inject(ActivatedRoute);
 
-  protected readonly id = toSignal(
-    this.route.paramMap.pipe(map((p) => Number(p.get('id')) || null)),
-    { initialValue: null },
+  /**
+   * The route key is either the numeric row id (the list and broker pages link by it, and old
+   * bookmarks carry it) or the `instanceId` — the engine's notification feed links
+   * `/ea-instances/{InstanceId}` for every "EA disconnected" / "EA error" item. The page used to
+   * parse it with Number(), so every one of those links landed on "not found".
+   */
+  protected readonly routeKey = toSignal(
+    this.route.paramMap.pipe(map((p) => (p.get('id') ?? '').trim())),
+    { initialValue: '' },
   );
+  private readonly numericId = computed(() => {
+    const key = this.routeKey();
+    return /^\d+$/.test(key) ? Number(key) : null;
+  });
+  /** Numeric row id when known (every instance on a current engine), else what the route carried. */
+  protected readonly id = computed(
+    () => this.ea()?.id ?? this.detailResource.value()?.id ?? this.numericId(),
+  );
+
+  /** `/ea-instances/:id/logs` — the notification feed's EA-error link — scrolls to the logs. */
+  private readonly focusLogs = this.route.snapshot.data['focus'] === 'logs';
+  private logsFocused = false;
 
   private readonly pageContext = inject(PageContextService);
 
   constructor() {
     this.pageContext.publish(() => ({
-      headline: `EA instance #${this.id() ?? '?'} detail`,
+      headline: `EA instance ${this.ea()?.instanceId ?? '#' + (this.routeKey() || '?')} detail`,
       record: { kind: 'eaInstance', id: this.id() ?? 0 },
     }));
+    effect(() => {
+      if (!this.focusLogs || this.logsFocused || !this.ea()) return;
+      this.logsFocused = true;
+      // After this render pass: the logs panel is inside the @else branch that just appeared.
+      setTimeout(() =>
+        document.getElementById('ea-logs')?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+      );
+    });
   }
 
+  /** Live instances (`/ea/instances`, Active only). */
   protected readonly resource = createPolledResource(
-    () =>
-      this.service.list().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<EAInstanceDto[]>([])),
-      ),
+    () => this.service.list().pipe(map((res) => res.data ?? [])),
     { intervalMs: 15_000 },
   );
 
-  protected readonly ea = computed(() => {
-    const list = this.resource.value() ?? [];
-    const want = this.id();
-    if (want === null) return null;
-    return list.find((x) => x.id === want) ?? null;
+  /**
+   * Every registered instance, including Disconnected and ShuttingDown — `/ea/instances` returns
+   * Active only, so an instance that dropped off (exactly the one an operator opens from a
+   * "disconnected" alert) could never be shown.
+   */
+  private readonly fleetResource = createPolledResource(
+    () => this.admin.listFleet().pipe(map((res) => (res.data ?? []) as FleetRow[])),
+    { intervalMs: 15_000 },
+  );
+
+  protected readonly ea = computed<EAView | null>(() => {
+    const key = this.routeKey();
+    if (!key) return null;
+    const num = this.numericId();
+    const live = this.resource.value() ?? [];
+    const fromLive =
+      num !== null ? live.find((x) => x.id === num) : live.find((x) => x.instanceId === key);
+    if (fromLive) return fromLive;
+    const fleet = this.fleetResource.value() ?? [];
+    const row =
+      num !== null ? fleet.find((x) => x.id === num) : fleet.find((x) => x.instanceId === key);
+    return row ? { ...row, id: row.id ?? null } : null;
   });
+
+  protected readonly notFoundMessage = computed(() => {
+    const num = this.numericId();
+    if (num !== null) {
+      // An engine from 2026-10-19 on reports `id` on every fleet row, so a numeric miss is a
+      // real miss; an older one reports it for live instances only.
+      const fleetHasIds = (this.fleetResource.value() ?? []).some((x) => x.id != null);
+      return fleetHasIds
+        ? `No registered EA instance has id #${num}. It may have been deleted.`
+        : `No live EA instance has id #${num}. Disconnected and shut-down instances are not ` +
+            `addressable by row id on this engine version (its fleet list does not report it) — ` +
+            `open them from the EA Instances list, which links by instance id.`;
+    }
+    return `No registered EA instance is named "${this.routeKey()}". It may have been deleted.`;
+  });
+
+  /** "Deregistered" for a long-silent ShuttingDown row (see fleetStatusOf); never the raw enum. */
+  protected readonly fleetStatusLabel = computed(() => {
+    const ea = this.ea();
+    return ea ? FLEET_STATUS_LABELS[fleetStatusOf(ea, Date.now())] : '';
+  });
+
+  /** Both lists failed and nothing resolved — an engine problem, not a missing instance. */
+  protected readonly loadFailed = computed(
+    () => !this.ea() && !!this.resource.error() && !!this.fleetResource.error(),
+  );
 
   /**
    * Phase-1 admin detail poll.  The list-based `ea()` carries everything
@@ -2182,11 +2313,13 @@ export class EaDetailPageComponent {
    */
   protected onCommandQueued(_actionKey: string): void {
     this.resource.refresh();
+    this.fleetResource.refresh();
     this.detailResource.refresh();
   }
 
+  /** Skeleton until the instance resolves, or until both lists have answered without it. */
   protected readonly loading = computed(
-    () => this.resource.loading() && (this.resource.value() ?? null) === null,
+    () => !this.ea() && (this.resource.loading() || this.fleetResource.loading()),
   );
 
   /**
@@ -2200,12 +2333,26 @@ export class EaDetailPageComponent {
    * alive" signal.
    */
   protected readonly anyLoading = computed(
-    () => this.resource.loading() || this.detailResource.loading(),
+    () =>
+      this.resource.loading() ||
+      this.resource.refreshing() ||
+      this.fleetResource.refreshing() ||
+      this.detailResource.loading() ||
+      this.detailResource.refreshing(),
   );
 
-  /** Manual refresh — kick both resources at once instead of just the list. */
+  /** Any of the page's fetches in flight — what the Refresh button waits on. */
+  protected readonly anyRefreshing = computed(
+    () =>
+      this.resource.refreshing() ||
+      this.fleetResource.refreshing() ||
+      this.detailResource.refreshing(),
+  );
+
+  /** Manual refresh — kick every resource at once instead of just the list. */
   protected refreshAll(): void {
     this.resource.refresh();
+    this.fleetResource.refresh();
     this.detailResource.refresh();
   }
 
@@ -2326,7 +2473,7 @@ export class EaDetailPageComponent {
             this.auditTrail
               .create({
                 entityType: 'EAInstance',
-                entityId: ea.id,
+                entityId: ea.id ?? 0,
                 decisionType: 'EARefreshSymbolSpecs',
                 outcome: 'Queued',
                 reason: null,
@@ -2409,7 +2556,7 @@ export class EaDetailPageComponent {
             this.auditTrail
               .create({
                 entityType: 'EAInstance',
-                entityId: ea.id,
+                entityId: ea.id ?? 0,
                 decisionType: intent === 'disable' ? 'EAForceSafetyStop' : 'EAClearSafetyStop',
                 outcome: 'Queued',
                 reason,
@@ -2467,7 +2614,7 @@ export class EaDetailPageComponent {
             this.auditTrail
               .create({
                 entityType: 'EAInstance',
-                entityId: ea.id,
+                entityId: ea.id ?? 0,
                 decisionType: 'EAUpdateConfig',
                 outcome: 'Queued',
                 reason: null,
@@ -2561,7 +2708,7 @@ export class EaDetailPageComponent {
         this.auditTrail
           .create({
             entityType: 'EAInstance',
-            entityId: ea.id,
+            entityId: ea.id ?? 0,
             decisionType: 'EAUpdateFillMode',
             outcome: 'Saved',
             reason: null,
@@ -2701,7 +2848,7 @@ export class EaDetailPageComponent {
         this.auditTrail
           .create({
             entityType: 'EAInstance',
-            entityId: ea.id,
+            entityId: ea.id ?? 0,
             decisionType: 'EAUpdateSpreadPad',
             outcome: 'Saved',
             reason: null,
@@ -2827,7 +2974,7 @@ export class EaDetailPageComponent {
         this.auditTrail
           .create({
             entityType: 'EAInstance',
-            entityId: ea.id,
+            entityId: ea.id ?? 0,
             decisionType: 'EAUpdateBreakevenExit',
             outcome: 'Saved',
             reason: null,
@@ -2974,7 +3121,7 @@ export class EaDetailPageComponent {
         this.auditTrail
           .create({
             entityType: 'EAInstance',
-            entityId: ea.id,
+            entityId: ea.id ?? 0,
             decisionType: 'EAUpdateConfig',
             outcome: 'Queued',
             reason: null,

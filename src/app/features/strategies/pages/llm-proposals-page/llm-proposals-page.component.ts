@@ -23,6 +23,7 @@ import { createPolledResource } from '@core/polling/polled-resource';
 
 import { parseProposalEnvelope } from './proposal-envelope';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -55,6 +56,7 @@ const STATUS_LABELS: Record<string, string> = {
     FormsModule,
     RouterLink,
     PageHeaderComponent,
+    RefreshButtonComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -68,14 +70,8 @@ const STATUS_LABELS: Record<string, string> = {
         subtitle="LLM-generated Pine strategy candidates. Inspect the script before promoting to a Paused strategy."
       >
         <a routerLink="/strategies" class="btn btn-secondary">← Strategies</a>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to the first-load flag, the old button never changed on a click. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
         <button
           type="button"
           class="btn btn-primary"
@@ -270,14 +266,18 @@ const STATUS_LABELS: Record<string, string> = {
               </div>
               <div>
                 <dt>Next scheduled</dt>
+                <!-- A disabled worker schedules nothing: "Sep 30 (overdue)" read as a stalled run
+                     three weeks after the kill-switch was engaged. -->
                 <dd>
                   {{
-                    st.nextScheduledRunAt
-                      ? (st.nextScheduledRunAt | date: 'MMM d, HH:mm') +
-                        ' (' +
-                        formatNextRun(st.nextScheduledRunAt) +
-                        ')'
-                      : '—'
+                    !st.workerEnabled
+                      ? 'not scheduled — worker disabled'
+                      : st.nextScheduledRunAt
+                        ? (st.nextScheduledRunAt | date: 'MMM d, HH:mm') +
+                          ' (' +
+                          formatNextRun(st.nextScheduledRunAt) +
+                          ')'
+                        : '—'
                   }}
                 </dd>
               </div>
@@ -746,7 +746,7 @@ const STATUS_LABELS: Record<string, string> = {
         border-right: none;
       }
       .run-result-grid dd.gain {
-        color: var(--color-success, #34c759);
+        color: var(--profit);
       }
       .run-result-grid dd.muted {
         color: var(--text-tertiary);

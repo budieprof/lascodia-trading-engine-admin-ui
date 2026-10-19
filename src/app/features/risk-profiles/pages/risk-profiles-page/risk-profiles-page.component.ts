@@ -10,14 +10,19 @@ import {
 } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators, FormsModule } from '@angular/forms';
-import { map, Observable } from 'rxjs';
+import { catchError, map, Observable, of } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
 
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { PositionsService } from '@core/services/positions.service';
-import { ConfigService } from '@core/services/config.service';
+import { TradingAccountsService } from '@core/services/trading-accounts.service';
+import {
+  ConfigService,
+  isQueuedForCoolingOff,
+  type ConfigUpsertResponse,
+} from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
   CreateRiskProfileRequest,
@@ -27,6 +32,7 @@ import type {
   PositionDto,
   RiskProfileDto,
   StrategyDto,
+  TradingAccountDto,
   UpdateRiskProfileRequest,
   UpsertConfigRequest,
 } from '@core/api/api.types';
@@ -611,8 +617,8 @@ import {
                   @for (p of profilesSample(); track p.id) {
                     <tr>
                       <td class="mono">{{ p.name }}</td>
-                      <td class="num mono">{{ p.maxRiskPerTradePct.toFixed(1) }}%</td>
-                      <td class="num mono">{{ p.maxSymbolExposurePct.toFixed(1) }}%</td>
+                      <td class="num mono">{{ fmtPct(p.maxRiskPerTradePct) }}</td>
+                      <td class="num mono">{{ fmtPct(p.maxSymbolExposurePct) }}</td>
                       <td>
                         <span class="rp-pill" [class.on]="p.requireStopLoss">
                           {{ p.requireStopLoss ? '✓' : '—' }}
@@ -671,16 +677,16 @@ import {
               dotColor="#8E8E93"
             />
             <app-metric-card
-              label="Strategies bound"
-              [value]="monitorKpis().strategiesBound"
+              label="Active accounts on a profile"
+              [value]="monitorKpis().accountsBound"
               format="number"
-              dotColor="#34C759"
+              [dotColor]="monitorKpis().accountsUnbound > 0 ? '#FF9500' : '#34C759'"
             />
             <app-metric-card
-              label="Strategies orphaned"
-              [value]="monitorKpis().strategiesOrphaned"
+              label="Strategies with own profile"
+              [value]="monitorKpis().strategiesBound"
               format="number"
-              [dotColor]="monitorKpis().strategiesOrphaned > 0 ? '#FF9500' : '#34C759'"
+              dotColor="#8E8E93"
             />
             <app-metric-card
               label="Open positions"
@@ -713,13 +719,17 @@ import {
           <div class="rp-charts">
             <app-chart-card
               title="Open positions by symbol"
-              subtitle="Total open lots aggregated per symbol — concentration risk view"
+              [subtitle]="
+                monitorPositions().length === 0
+                  ? 'No open positions across the fleet right now'
+                  : 'Total open lots aggregated per symbol — concentration risk view'
+              "
               [options]="positionsBySymbolOptions()"
               height="280px"
             />
             <app-chart-card
-              title="Strategy → profile binding"
-              subtitle="How many strategies use each risk profile"
+              title="Account → profile binding"
+              subtitle="Which profile governs each active account — the profile every trade on it is sized and checked against"
               [options]="profileBindingDonutOptions()"
               height="280px"
             />
@@ -730,8 +740,8 @@ import {
             <header class="rp-matrix-head">
               <h3>Profile utilization</h3>
               <span class="muted">
-                Strategy + position counts per profile · "Used" highlights profiles with bound
-                strategies
+                Active accounts and strategies per profile · "Used" = governs at least one active
+                account or strategy
               </span>
             </header>
             @if (profileUtilization().length > 0) {
@@ -739,6 +749,7 @@ import {
                 <thead>
                   <tr>
                     <th>Profile</th>
+                    <th class="num">Accounts</th>
                     <th class="num">Strategies</th>
                     <th class="num">Active</th>
                     <th class="num">Open positions*</th>
@@ -757,6 +768,7 @@ import {
                           <span class="rp-pill default" style="margin-left:6px">Default</span>
                         }
                       </td>
+                      <td class="num mono" [title]="row.accountIds">{{ row.accounts }}</td>
                       <td class="num mono">{{ row.strategies }}</td>
                       <td class="num mono">{{ row.activeStrategies }}</td>
                       <td class="num mono">{{ row.openPositions }}</td>
@@ -764,8 +776,8 @@ import {
                       <td class="num mono">{{ fmtPct(row.maxDailyDrawdownPct) }}</td>
                       <td class="num mono">{{ fmtPct(row.maxTotalDrawdownPct) }}</td>
                       <td>
-                        <span class="rp-pill" [class.on]="row.strategies > 0">
-                          {{ row.strategies > 0 ? 'Used' : 'Unused' }}
+                        <span class="rp-pill" [class.on]="row.used">
+                          {{ row.used ? 'Used' : 'Unused' }}
                         </span>
                       </td>
                     </tr>
@@ -789,8 +801,9 @@ import {
             <header class="rp-matrix-head">
               <h3>Strategy assignment</h3>
               <span class="muted">
-                {{ boundAssignmentRows().length }} bound ·
-                {{ orphanAssignmentRows().length }} orphaned (no profile)
+                {{ boundAssignmentRows().length }} with their own profile ·
+                {{ orphanAssignmentRows().length }} inheriting · precedence account → strategy →
+                default
               </span>
             </header>
             @if (assignmentRows().length > 0) {
@@ -819,18 +832,20 @@ import {
                           [attr.aria-expanded]="showOrphans()"
                         >
                           {{ showOrphans() ? '▾' : '▸' }}
-                          {{ orphanAssignmentRows().length }} orphaned strateg{{
+                          {{ orphanAssignmentRows().length }} strateg{{
                             orphanAssignmentRows().length === 1 ? 'y' : 'ies'
                           }}
+                          without their own profile
                         </button>
                         <span class="muted">{{ orphanStatusSummary() }}</span>
                       </td>
-                      <td><span class="rp-pill warn">Orphan</span></td>
-                      <td class="num mono">—</td>
-                      <td class="num mono">—</td>
-                      <td class="num mono">—</td>
-                      <td class="num mono">—</td>
-                      <td><span class="rp-pill warn">Unguarded</span></td>
+                      <!-- Not "Orphan · Unguarded": a strategy without a profile trades under
+                           the account's profile (or the default) — precedence account →
+                           strategy → default — so it is never unguarded. -->
+                      <td colspan="5" class="muted">
+                        Inherit the trading account's profile ({{ inheritedProfileSummary() }})
+                      </td>
+                      <td><span class="rp-pill">Inherits</span></td>
                     </tr>
                     @if (showOrphans()) {
                       @for (row of orphanAssignmentRows(); track row.strategyId) {
@@ -846,7 +861,9 @@ import {
                               {{ row.status }}
                             </span>
                           </td>
-                          <td colspan="6" class="muted">No risk profile bound</td>
+                          <td colspan="6" class="muted">
+                            No own profile — the trading account's profile applies
+                          </td>
                         </tr>
                       }
                     }
@@ -1350,15 +1367,15 @@ import {
       }
       .rp-pill.on {
         background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .rp-pill.warn {
         background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .rp-pill.default {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .muted {
         color: var(--text-tertiary);
@@ -1471,6 +1488,7 @@ export class RiskProfilesPageComponent implements OnInit {
   private readonly service = inject(RiskProfilesService);
   private readonly strategiesService = inject(StrategiesService);
   private readonly positionsService = inject(PositionsService);
+  private readonly accountsService = inject(TradingAccountsService);
   private readonly configService = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
@@ -1702,15 +1720,51 @@ export class RiskProfilesPageComponent implements OnInit {
   // Risk Monitor tab — lazy-loaded fleet snapshots.
   readonly monitorStrategies = signal<StrategyDto[]>([]);
   readonly monitorPositions = signal<PositionDto[]>([]);
+  /**
+   * Trading accounts. The account's profile is AUTHORITATIVE (engine resolution precedence account
+   * → strategy → default) and every live account carries one, so a monitor that counted only
+   * strategy bindings reported "Profiles in use 0 · 29 strategies orphaned · Unguarded" while
+   * profile #4 was sizing every trade on five live accounts.
+   */
+  readonly monitorAccounts = signal<TradingAccountDto[]>([]);
   private monitorLoaded = false;
+
+  private readonly activeAccounts = computed(() =>
+    this.monitorAccounts().filter((a) => a.isActive),
+  );
+  private readonly defaultProfile = computed(
+    () => this.profilesSample().find((p) => p.isDefault) ?? null,
+  );
+  /** Profile id governing each active account (null account binding → the default profile). */
+  private readonly accountProfileIds = computed(() =>
+    this.activeAccounts().map((a) => a.riskProfileId ?? this.defaultProfile()?.id ?? null),
+  );
+
+  /** "#4 on accounts 17, 23, 24 · default on 25" — what an unbound strategy actually trades under. */
+  readonly inheritedProfileSummary = computed(() => {
+    const names = new Map(this.profilesSample().map((p) => [p.id, p.name ?? `#${p.id}`]));
+    const byProfile = new Map<string, number[]>();
+    for (const a of this.activeAccounts()) {
+      const label =
+        a.riskProfileId != null
+          ? (names.get(a.riskProfileId) ?? `#${a.riskProfileId}`)
+          : `default (${this.defaultProfile()?.name ?? 'none set'})`;
+      byProfile.set(label, [...(byProfile.get(label) ?? []), a.id]);
+    }
+    if (byProfile.size === 0) return 'no active accounts';
+    return [...byProfile.entries()]
+      .map(([label, ids]) => `${label} on #${ids.join(', #')}`)
+      .join(' · ');
+  });
 
   monitorKpis = computed(() => {
     const profiles = this.profilesSample();
     const strategies = this.monitorStrategies();
     const positions = this.monitorPositions();
-    const profileIdsBound = new Set(
+    const profileIdsBound = new Set<number>(
       strategies.filter((s) => s.riskProfileId != null).map((s) => s.riskProfileId as number),
     );
+    for (const id of this.accountProfileIds()) if (id != null) profileIdsBound.add(id);
     let longPositions = 0;
     let shortPositions = 0;
     let totalUnrealized = 0;
@@ -1719,11 +1773,13 @@ export class RiskProfilesPageComponent implements OnInit {
       else if (String(p.direction) === 'Short') shortPositions++;
       totalUnrealized += p.unrealizedPnL ?? 0;
     }
+    const accountsBound = this.activeAccounts().filter((a) => a.riskProfileId != null).length;
     return {
       profilesInUse: profileIdsBound.size,
       profilesUnused: Math.max(0, profiles.length - profileIdsBound.size),
+      accountsBound,
+      accountsUnbound: this.activeAccounts().length - accountsBound,
       strategiesBound: strategies.filter((s) => s.riskProfileId != null).length,
-      strategiesOrphaned: strategies.filter((s) => s.riskProfileId == null).length,
       openPositions: positions.length,
       longPositions,
       shortPositions,
@@ -1775,13 +1831,13 @@ export class RiskProfilesPageComponent implements OnInit {
 
   profileBindingDonutOptions = computed<EChartsOption>(() => {
     const profiles = this.profilesSample();
-    const strategies = this.monitorStrategies();
-    if (profiles.length === 0) return {};
+    const accounts = this.activeAccounts();
+    if (profiles.length === 0 || accounts.length === 0) return {};
     const counts: Record<number, number> = {};
     let orphans = 0;
-    for (const s of strategies) {
-      if (s.riskProfileId == null) orphans++;
-      else counts[s.riskProfileId] = (counts[s.riskProfileId] ?? 0) + 1;
+    for (const a of accounts) {
+      if (a.riskProfileId == null) orphans++;
+      else counts[a.riskProfileId] = (counts[a.riskProfileId] ?? 0) + 1;
     }
     const palette = ['#0071E3', '#34C759', '#FF9500', '#AF52DE', '#5AC8FA', '#FF2D55', '#30D158'];
     const data: { name: string; value: number; itemStyle: { color: string } }[] = profiles.map(
@@ -1792,7 +1848,12 @@ export class RiskProfilesPageComponent implements OnInit {
       }),
     );
     if (orphans > 0) {
-      data.push({ name: 'Orphan', value: orphans, itemStyle: { color: '#8E8E93' } });
+      // No account binding: the strategy's own profile, else the default, decides per trade.
+      data.push({
+        name: 'No account profile (strategy / default)',
+        value: orphans,
+        itemStyle: { color: '#8E8E93' },
+      });
     }
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
@@ -1813,12 +1874,18 @@ export class RiskProfilesPageComponent implements OnInit {
   profileUtilization = computed(() => {
     const strategies = this.monitorStrategies();
     const openPositionsTotal = this.monitorPositions().length;
+    const accounts = this.activeAccounts();
     return this.profilesSample().map((p) => {
       const bound = strategies.filter((s) => s.riskProfileId === p.id);
+      const onAccounts = accounts.filter((a) => a.riskProfileId === p.id);
       return {
         id: p.id,
         name: p.name ?? `#${p.id}`,
         isDefault: p.isDefault,
+        accounts: onAccounts.length,
+        accountIds:
+          onAccounts.length > 0 ? `Accounts #${onAccounts.map((a) => a.id).join(', #')}` : '',
+        used: onAccounts.length > 0 || bound.length > 0,
         strategies: bound.length,
         activeStrategies: bound.filter((s) => String(s.status) === 'Active').length,
         openPositions: openPositionsTotal, // fleet-wide until positions carry strategyId
@@ -2016,20 +2083,21 @@ export class RiskProfilesPageComponent implements OnInit {
       // and still governs the ones that matter.
       immediate: reason.length > 0,
     };
+    const submitted = row.editValue;
     this.configService.upsert(request).subscribe({
       next: (res) => {
-        row.saving = false;
-        if (res.status) {
-          // Break-glass may still queue for cooling-off — trust the returned
-          // value if present, else optimistically adopt the edited value.
-          row.value = res.data?.value ?? row.editValue;
-          row.editValue = row.value;
-          row.exists = true;
-          this.notifications.success(res.message ?? `"${row.label}" applied`);
-        } else {
+        if (!res.status) {
+          row.saving = false;
           this.notifications.error(res.message ?? `Failed to update "${row.label}"`);
+          this.globalRows.set([...this.globalRows()]);
+          return;
         }
-        this.globalRows.set([...this.globalRows()]);
+        this.readBackGlobalRow(row, submitted, res).subscribe((applied) => {
+          row.saving = false;
+          if (applied) this.notifications.success(res.message ?? `"${row.label}" applied`);
+          else this.notifications.info(res.message ?? `"${row.label}" queued for cooling-off`);
+          this.globalRows.set([...this.globalRows()]);
+        });
       },
       error: () => {
         row.saving = false;
@@ -2046,6 +2114,7 @@ export class RiskProfilesPageComponent implements OnInit {
     const reason = this.globalReason().trim();
     let remaining = dirty.length;
     let failures = 0;
+    let queued = 0;
     let firstError: string | null = null;
     for (const row of dirty) {
       row.saving = true;
@@ -2057,22 +2126,27 @@ export class RiskProfilesPageComponent implements OnInit {
         // Opt-in break-glass — see the note on the single-row save.
         immediate: reason.length > 0,
       };
+      const submitted = row.editValue;
       this.configService.upsert(request).subscribe({
         next: (res) => {
-          row.saving = false;
-          if (res.status) {
-            row.value = String(res.data?.value ?? row.editValue);
-            row.editValue = row.value;
-            row.exists = true;
-          } else {
+          const done = () => {
+            row.saving = false;
+            remaining--;
+            this.globalRows.set([...this.globalRows()]);
+            if (remaining === 0) this.finishGlobalBulk(dirty.length, failures, firstError, queued);
+          };
+          if (!res.status) {
             failures++;
             // Keep the server's explanation. A bare "1 failed" gives the operator nothing to act
             // on — the reason a governed config write is refused IS the useful part.
             firstError ??= res.message ?? null;
+            done();
+            return;
           }
-          remaining--;
-          this.globalRows.set([...this.globalRows()]);
-          if (remaining === 0) this.finishGlobalBulk(dirty.length, failures, firstError);
+          this.readBackGlobalRow(row, submitted, res).subscribe((applied) => {
+            if (!applied) queued++;
+            done();
+          });
         },
         error: (e: { message?: string }) => {
           row.saving = false;
@@ -2086,14 +2160,59 @@ export class RiskProfilesPageComponent implements OnInit {
     }
   }
 
-  private finishGlobalBulk(total: number, failures: number, firstError?: string | null): void {
+  private finishGlobalBulk(
+    total: number,
+    failures: number,
+    firstError?: string | null,
+    queued = 0,
+  ): void {
     this.globalBulkSaving.set(false);
+    const q = queued > 0 ? ` · ${queued} queued for cooling-off` : '';
     if (failures === 0) {
-      this.notifications.success(`Saved ${total} option${total === 1 ? '' : 's'}`);
+      const text = `Saved ${total - queued} of ${total} option${total === 1 ? '' : 's'}${q}`;
+      if (queued > 0) this.notifications.info(text);
+      else this.notifications.success(`Saved ${total} option${total === 1 ? '' : 's'}`);
     } else {
       const why = firstError ? ` — ${firstError}` : '';
-      this.notifications.error(`Saved ${total - failures} of ${total} · ${failures} failed${why}`);
+      this.notifications.error(
+        `Saved ${total - failures - queued} of ${total}${q} · ${failures} failed${why}`,
+      );
     }
+  }
+
+  /**
+   * After a successful upsert, read the key back. The upsert answers a row id (`ResponseData<long>`),
+   * not the value, and a governed change can be queued for cooling-off instead of applied — the row
+   * used to show the draft as live either way. Emits whether the change was applied: the engine's
+   * own `outcome` decides when it reports one (since 2026-10-19), else whether the engine now holds
+   * `submitted`. The row always shows the live value.
+   */
+  private readBackGlobalRow(
+    row: GlobalOptionRow,
+    submitted: string,
+    res: ConfigUpsertResponse,
+  ): Observable<boolean> {
+    const queued = isQueuedForCoolingOff(res);
+    const told = queued ? false : res.outcome ? true : null;
+    return this.configService.getByKey(row.key).pipe(
+      map((fresh) => {
+        const v = fresh.data?.value ?? null;
+        if (v !== null) {
+          row.value = v;
+          row.exists = true;
+        }
+        row.editValue = row.value;
+        return told ?? v === submitted;
+      }),
+      catchError(() => {
+        if (queued) return of(false);
+        // Not re-readable: fall back to the envelope having said yes.
+        row.value = submitted;
+        row.editValue = submitted;
+        row.exists = true;
+        return of(true);
+      }),
+    );
   }
 
   ngOnInit(): void {
@@ -2118,6 +2237,13 @@ export class RiskProfilesPageComponent implements OnInit {
       next: (res) => {
         this.monitorStrategies.set(res?.data?.data ?? []);
       },
+      error: () => {
+        this.monitorLoaded = false;
+      },
+    });
+
+    this.accountsService.list({ currentPage: 1, itemCountPerPage: 500 }).subscribe({
+      next: (res) => this.monitorAccounts.set(res?.data?.data ?? []),
       error: () => {
         this.monitorLoaded = false;
       },
@@ -2171,88 +2297,119 @@ export class RiskProfilesPageComponent implements OnInit {
     reason: [''],
   });
 
+  /**
+   * Every column has to fit the card at 1440px. The shared table sizes columns to fit but never
+   * below their minWidth (88 by default), and 14 columns at 88 + a 240px name ran ~270px past the
+   * card: Min RR and Default sat off to the right behind a scrollbar-less grid, names were still
+   * cut mid-word and "Risk/Trd" (no space to break at) wrapped as "RISK/TR D". Long names now wrap
+   * onto a second line, the flag columns are as narrow as their content, and the header breaks
+   * between words.
+   */
   readonly columns: ColDef<RiskProfileDto>[] = [
-    { headerName: 'Name', field: 'name', flex: 1, minWidth: 160 },
+    {
+      headerName: 'Name',
+      field: 'name',
+      flex: 1,
+      minWidth: 170,
+      tooltipField: 'name',
+      wrapText: true,
+      autoHeight: true,
+      cellStyle: { lineHeight: '1.35', paddingTop: '8px', paddingBottom: '8px' },
+    },
     {
       headerName: 'Max Lot',
       field: 'maxLotSizePerTrade',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
     },
     {
       headerName: 'Max Pos',
       field: 'maxOpenPositions',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtCount(p.value as number | null),
     },
     {
       headerName: 'Daily Trd',
       field: 'maxDailyTrades',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtCount(p.value as number | null),
     },
     {
-      headerName: 'Risk/Trd',
+      headerName: 'Risk / trade',
       field: 'maxRiskPerTradePct',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Daily DD',
       field: 'maxDailyDrawdownPct',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Total DD',
       field: 'maxTotalDrawdownPct',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Sym exp.',
       field: 'maxSymbolExposurePct',
-      width: 100,
+      width: 90,
+      minWidth: 84,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Recov. mult.',
       field: 'recoveryLotSizeMultiplier',
-      width: 110,
+      width: 80,
+      minWidth: 76,
       valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(2)}×` : '-'),
     },
     {
       headerName: 'SL',
       field: 'requireStopLoss',
-      width: 70,
+      width: 56,
+      minWidth: 52,
+      headerTooltip: 'Stop loss required',
       cellRenderer: (p: { value: unknown }) =>
         p.value
-          ? `<span style="color:#248A3D;font-weight:700">✓</span>`
+          ? `<span style="color:var(--tone-green);font-weight:700">✓</span>`
           : `<span style="color:#8E8E93">—</span>`,
     },
     {
       headerName: 'TP',
       field: 'requireTakeProfit',
-      width: 70,
+      width: 56,
+      minWidth: 52,
+      headerTooltip: 'Take profit required',
       cellRenderer: (p: { value: unknown }) =>
         p.value
-          ? `<span style="color:#248A3D;font-weight:700">✓</span>`
+          ? `<span style="color:var(--tone-green);font-weight:700">✓</span>`
           : `<span style="color:#8E8E93">—</span>`,
     },
     {
       headerName: 'Min RR',
       field: 'minRiskRewardRatio',
-      width: 90,
+      width: 76,
+      minWidth: 72,
       valueFormatter: (p) =>
         p.value != null && (p.value as number) > 0 ? (p.value as number).toFixed(2) : '—',
     },
     {
       headerName: 'Default',
       field: 'isDefault',
-      width: 100,
+      width: 90,
+      minWidth: 88,
       cellRenderer: (p: { value: unknown }) =>
         p.value
-          ? `<span style="background:rgba(0,113,227,0.12);color:#0040DD;padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">Default</span>`
+          ? `<span style="background:rgba(0,113,227,0.12);color:var(--tone-blue);padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600">Default</span>`
           : '',
     },
   ];

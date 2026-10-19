@@ -12,22 +12,30 @@
       <button
         type="button"
         class="symbol-button"
-        (click)="symbolMenuOpen.set(!symbolMenuOpen())"
+        (click)="toggleSymbolMenu($event)"
         [attr.aria-expanded]="symbolMenuOpen()"
       >
         <app-chart-icon name="search" [size]="18" />
         <span class="symbol-name">{{ symbol() }}</span>
       </button>
       @if (symbolMenuOpen()) {
-        <div class="menu symbol-menu">
+        <!-- appModalA11y: focus goes to the search box, Escape closes it; a click outside closes it too
+             (closeRailFlyout). It used to stay open over the chart until a symbol was picked. -->
+        <div
+          class="menu symbol-menu"
+          appModalA11y
+          [appModalA11yTrap]="false"
+          (dismiss)="symbolMenuOpen.set(false)"
+          (click)="$event.stopPropagation()"
+        >
           <input
             type="text"
             class="menu-search"
             placeholder="Search symbol…"
+            aria-label="Search symbol"
             [ngModel]="symbolQuery()"
             (ngModelChange)="symbolQuery.set($event)"
             (keydown.enter)="pickFirstSymbol()"
-            (keydown.escape)="symbolMenuOpen.set(false)"
             autocomplete="off"
           />
           <ul class="menu-list">
@@ -73,7 +81,7 @@
               [value]="intervalDraft()"
               (input)="intervalDraft.set($any($event.target).value); intervalError.set(null)"
               (keydown.enter)="submitInterval()"
-              (keydown.escape)="openMenu.set(null)"
+              (keydown.escape)="openMenu.set(null); $event.preventDefault()"
             />
           </label>
           @if (intervalError(); as err) {
@@ -220,7 +228,10 @@
             }
           }
           @if (style() === 'pnf') {
-            <label class="tb-menu-field" title="Boxes a close must move against a column to start the next one">
+            <label
+              class="tb-menu-field"
+              title="Boxes a close must move against a column to start the next one"
+            >
               Reversal
               <input
                 type="number"
@@ -676,7 +687,9 @@
         </span>
       }
       @case ('error') {
-        <span class="status sync-warn" title="The engine refused the last drawing write; it is retried"
+        <span
+          class="status sync-warn"
+          title="The engine refused the last drawing write; it is retried"
           ><app-chart-icon name="warning" [size]="16" /> not saved</span
         >
       }
@@ -756,9 +769,10 @@
       <button
         type="button"
         class="tb-btn tb-text tb-layout-name"
-        (click)="layoutMenuOpen.set(!layoutMenuOpen()); $event.stopPropagation()"
+        (click)="toggleLayoutMenu($event)"
+        [title]="currentLayoutName()"
       >
-        {{ currentLayoutName() }}
+        <span>{{ currentLayoutName() }}</span>
         <app-chart-icon name="caret" [size]="18" />
       </button>
       @if (workspace.statusText(); as st) {
@@ -1127,7 +1141,9 @@
                 role="button"
                 tabindex="-1"
                 [class.on]="favoriteTools.has(t.kind)"
-                [attr.aria-label]="(favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'"
+                [attr.aria-label]="
+                  (favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'
+                "
                 [title]="favoriteTools.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'"
                 (click)="toggleFavoriteTool(t.kind, $event)"
                 >{{ favoriteTools.has(t.kind) ? '★' : '☆' }}</span
@@ -1176,10 +1192,46 @@
       >
         <app-chart-icon name="calendar" [size]="28" />
       </button>
-      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'notes'" (click)="openPanel('notes')" title="Notes and ideas" data-testid="notes-button"><app-chart-icon name="pencil" [size]="28" /></button>
-      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'depth'" (click)="openPanel('depth')" title="Broker depth (DOM)" data-testid="depth-button"><app-chart-icon name="layers" [size]="28" /></button>
-      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'sentiment'" (click)="openPanel('sentiment')" title="Sentiment: news pressure and COT positioning" data-testid="sentiment-button"><app-chart-icon name="delta" [size]="28" /></button>
-      <button type="button" class="strip-btn" [class.active]="chartPanels.open() === 'account'" (click)="openPanel('account')" title="Account: positions, orders, signals, paper trades" data-testid="account-button"><app-chart-icon name="trades" [size]="28" /></button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="chartPanels.open() === 'notes'"
+        (click)="openPanel('notes')"
+        title="Notes and ideas"
+        data-testid="notes-button"
+      >
+        <app-chart-icon name="pencil" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="chartPanels.open() === 'depth'"
+        (click)="openPanel('depth')"
+        title="Broker depth (DOM)"
+        data-testid="depth-button"
+      >
+        <app-chart-icon name="layers" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="chartPanels.open() === 'sentiment'"
+        (click)="openPanel('sentiment')"
+        title="Sentiment: news pressure and COT positioning"
+        data-testid="sentiment-button"
+      >
+        <app-chart-icon name="delta" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="chartPanels.open() === 'account'"
+        (click)="openPanel('account')"
+        title="Account: positions, orders, signals, paper trades"
+        data-testid="account-button"
+      >
+        <app-chart-icon name="trades" [size]="28" />
+      </button>
       <button
         type="button"
         class="strip-btn"
@@ -1701,11 +1753,18 @@
                   >
                     <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
                     <div class="muted news-meta">
-                      {{ a.sourceName }} · {{ a.publishedAtUtc | zonedDate: timezone() : 'dateTime' }}
+                      {{ a.sourceName }} ·
+                      {{ a.publishedAtUtc | zonedDate: timezone() : 'dateTime' }}
                       @for (f of a | articleFlags: calendarCurrencies(); track f.currency) {
                         <span
                           style="margin-left: 4px; white-space: nowrap"
-                          [style.color]="f.direction === 'Bullish' ? '#089981' : f.direction === 'Bearish' ? '#f23645' : null"
+                          [style.color]="
+                            f.direction === 'Bullish'
+                              ? '#089981'
+                              : f.direction === 'Bearish'
+                                ? '#f23645'
+                                : null
+                          "
                           [title]="f.title"
                           >{{ f.flag || f.currency }} {{ f.arrow }}</span
                         >
@@ -1732,7 +1791,14 @@
         @if (chartPanels.open(); as panel) {
           @if (sidePane() === 'none') {
             <aside class="side-pane">
-              <app-chart-panels-dock [panel]="panel" [symbol]="symbol()" [timeframe]="resolutionLabel(resolution())" [digits]="precision()" [timeZone]="timezone()" (symbolSelected)="selectSymbol($event)" />
+              <app-chart-panels-dock
+                [panel]="panel"
+                [symbol]="symbol()"
+                [timeframe]="resolutionLabel(resolution())"
+                [digits]="precision()"
+                [timeZone]="timezone()"
+                (symbolSelected)="selectSymbol($event)"
+              />
             </aside>
           }
         }
@@ -1828,7 +1894,9 @@
             <!-- Its own studies and Pine indicators (CC-I5). -->
             <select
               class="panel-select"
-              (change)="panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''"
+              (change)="
+                panelAdd(panel.id, $any($event.target).value); $any($event.target).value = ''
+              "
               aria-label="Add a study or a script to this chart"
             >
               <option value="">+ Study</option>
@@ -2287,18 +2355,28 @@
             type="button"
             [class.on]="dockMode() === 'max'"
             (click)="setDockMode('max')"
-            [title]="(dockMode() === 'max' ? 'Restore' : 'Maximise — a strip of the chart stays in view') + ' (Ctrl/⌘+Shift+M)'"
+            [title]="
+              (dockMode() === 'max' ? 'Restore' : 'Maximise — a strip of the chart stays in view') +
+              ' (Ctrl/⌘+Shift+M)'
+            "
             [attr.aria-label]="dockMode() === 'max' ? 'Restore the panel' : 'Maximise the panel'"
             data-testid="dock-max"
           >
-            <app-chart-icon [name]="dockMode() === 'max' ? 'panel-restore' : 'panel-max'" [size]="20" />
+            <app-chart-icon
+              [name]="dockMode() === 'max' ? 'panel-restore' : 'panel-max'"
+              [size]="20"
+            />
           </button>
           <span class="dock-sep" aria-hidden="true"></span>
           <button
             type="button"
             [class.on]="isFullscreen()"
             (click)="toggleFullscreen()"
-            [title]="isFullscreen() ? 'Exit full screen (Esc)' : 'Full screen — the chart page fills the screen'"
+            [title]="
+              isFullscreen()
+                ? 'Exit full screen (Esc)'
+                : 'Full screen — the chart page fills the screen'
+            "
             [attr.aria-label]="isFullscreen() ? 'Exit full screen' : 'Full screen'"
           >
             <app-chart-icon name="fullscreen" [size]="20" />

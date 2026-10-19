@@ -24,6 +24,7 @@ import {
 } from '@core/services/prompt-template.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
 /** Direction-of-good helper rows for the headline-metrics delta table. */
@@ -47,6 +48,7 @@ interface DeltaRow {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    ModalA11yDirective,
     CurrencyPipe,
     DatePipe,
     DecimalPipe,
@@ -104,17 +106,21 @@ interface DeltaRow {
               <dd>{{ r.left.modelTier === 0 ? 'Spot' : 'Macro' }}</dd>
               <dt>Total points</dt>
               <dd>{{ r.left.totalPoints | number }}</dd>
-              <dt>Completed</dt>
+              <dt>Completed (UTC)</dt>
               <dd>{{ r.left.completedPoints | number }}</dd>
               <dt>Actual cost</dt>
               <dd>{{ r.left.actualCostUsd | currency: 'USD' }}</dd>
               <dt>Cache hit</dt>
               <dd>{{ r.left.cacheHitRatio | percent: '1.0-1' }}</dd>
-              <dt>Started</dt>
-              <dd>{{ r.left.startedAt ? (r.left.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}</dd>
-              <dt>Completed</dt>
+              <dt>Started (UTC)</dt>
               <dd>
-                {{ r.left.completedAt ? (r.left.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+                {{ r.left.startedAt ? (r.left.startedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—' }}
+              </dd>
+              <dt>Completed (UTC)</dt>
+              <dd>
+                {{
+                  r.left.completedAt ? (r.left.completedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—'
+                }}
               </dd>
             </dl>
           </div>
@@ -140,19 +146,25 @@ interface DeltaRow {
               <dd>{{ r.right.modelTier === 0 ? 'Spot' : 'Macro' }}</dd>
               <dt>Total points</dt>
               <dd>{{ r.right.totalPoints | number }}</dd>
-              <dt>Completed</dt>
+              <dt>Completed (UTC)</dt>
               <dd>{{ r.right.completedPoints | number }}</dd>
               <dt>Actual cost</dt>
               <dd>{{ r.right.actualCostUsd | currency: 'USD' }}</dd>
               <dt>Cache hit</dt>
               <dd>{{ r.right.cacheHitRatio | percent: '1.0-1' }}</dd>
-              <dt>Started</dt>
+              <dt>Started (UTC)</dt>
               <dd>
-                {{ r.right.startedAt ? (r.right.startedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+                {{
+                  r.right.startedAt ? (r.right.startedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') : '—'
+                }}
               </dd>
-              <dt>Completed</dt>
+              <dt>Completed (UTC)</dt>
               <dd>
-                {{ r.right.completedAt ? (r.right.completedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+                {{
+                  r.right.completedAt
+                    ? (r.right.completedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC')
+                    : '—'
+                }}
               </dd>
             </dl>
           </div>
@@ -286,8 +298,16 @@ interface DeltaRow {
 
       @if (showPromoteModal()) {
         <div class="modal-backdrop" (click)="cancelPromote()">
-          <div class="modal" (click)="$event.stopPropagation()">
-            <h3>Confirm promotion</h3>
+          <div
+            class="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bt-promote-title"
+            appModalA11y
+            (dismiss)="cancelPromote()"
+            (click)="$event.stopPropagation()"
+          >
+            <h3 id="bt-promote-title">Confirm promotion</h3>
             <p>
               Promote
               <strong>{{ candidateTemplate()!.name }} {{ candidateTemplate()!.version }}</strong>
@@ -300,9 +320,11 @@ interface DeltaRow {
             </p>
             <div class="modal-actions">
               <button
+                type="button"
                 class="btn-secondary"
                 (click)="cancelPromote()"
                 [disabled]="promoteInFlight()"
+                data-autofocus
               >
                 Cancel
               </button>
@@ -714,6 +736,8 @@ export class LlmBacktestComparePageComponent implements OnInit {
     this.showPromoteModal.set(true);
   }
   cancelPromote(): void {
+    // Escape / backdrop must not hide a promotion that is already in flight.
+    if (this.promoteInFlight()) return;
     this.showPromoteModal.set(false);
   }
   confirmPromote(): void {
@@ -807,7 +831,7 @@ export class LlmBacktestComparePageComponent implements OnInit {
         format: 'count',
       },
       {
-        metric: 'Bypassed',
+        metric: 'Bypassed gate hits',
         left: l?.bypassedCount ?? null,
         right: c?.bypassedCount ?? null,
         delta: d.bypassedCountDelta,

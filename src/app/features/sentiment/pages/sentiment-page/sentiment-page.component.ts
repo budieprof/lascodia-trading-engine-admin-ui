@@ -262,6 +262,11 @@ const DEFAULT_TIMEFRAME: Timeframe = 'H1';
               </span>
               <span class="muted">in current regime</span>
             </span>
+            <!-- The engine writes a snapshot about every 30 s, so these 60 cover minutes, not
+                 days — said here, since every chart below is drawn from the same window. -->
+            @if (regimeWindowLabel(); as w) {
+              <span class="muted">{{ w }}</span>
+            }
           </div>
 
           <!-- 6-card KPI strip — regime stats for the primary symbol -->
@@ -896,7 +901,8 @@ export class SentimentPageComponent {
     const sorted = [...cards].sort((a, b) => b.score - a.score);
     return {
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      grid: { top: 10, right: 30, bottom: 30, left: 80 },
+      // Room above the plot for the neutral line's label.
+      grid: { top: 24, right: 30, bottom: 30, left: 80 },
       xAxis: {
         type: 'value',
         min: 0,
@@ -934,9 +940,11 @@ export class SentimentPageComponent {
             silent: true,
             symbol: 'none',
             lineStyle: { color: '#8E8E93', type: 'dashed' },
+            // 'end' sits the label upright above the line; 'insideEndTop' turned it on its
+            // side along a vertical line, across the top bar ("Neutr(50)" over AUDUSD).
             label: {
               show: true,
-              position: 'insideEndTop',
+              position: 'end',
               formatter: 'Neutral (50)',
               fontSize: 10,
               color: '#8E8E93',
@@ -984,6 +992,20 @@ export class SentimentPageComponent {
   });
 
   // ── Regime-tab roll-ups ─────────────────────────────────────────────
+  /** "last 60 snapshots · 13:20–13:50 UTC" — the window every regime chart is drawn from. */
+  readonly regimeWindowLabel = computed(() => {
+    const snaps = this.regimeResource.value() ?? [];
+    if (snaps.length === 0) return null;
+    const times = snaps.map((s) => new Date(s.detectedAt).getTime()).filter(Number.isFinite);
+    if (times.length === 0) return null;
+    const first = Math.min(...times);
+    const last = Math.max(...times);
+    const sameDay =
+      new Date(first).toISOString().slice(0, 10) === new Date(last).toISOString().slice(0, 10);
+    const fmt = (t: number) => utcLabel(t, !sameDay);
+    return `last ${snaps.length} snapshots · ${fmt(first)}–${fmt(last)} UTC`;
+  });
+
   readonly regimeStats = computed(() => {
     const snaps = this.regimeResource.value() ?? [];
     if (snaps.length === 0) {
@@ -1118,9 +1140,7 @@ export class SentimentPageComponent {
       grid: { top: 10, right: 20, bottom: 30, left: 50 },
       xAxis: {
         type: 'category',
-        data: snaps.map((s) =>
-          new Date(s.detectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        ),
+        data: snaps.map((s) => snapshotLabel(s.detectedAt, snaps)),
         axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
       },
       yAxis: {
@@ -1164,9 +1184,7 @@ export class SentimentPageComponent {
       grid: { top: 10, right: 20, bottom: 30, left: 60 },
       xAxis: {
         type: 'category',
-        data: snaps.map((s) =>
-          new Date(s.detectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        ),
+        data: snaps.map((s) => snapshotLabel(s.detectedAt, snaps)),
         axisLabel: { fontSize: 9, color: '#6E6E73', rotate: 35 },
       },
       yAxis: { type: 'value', axisLabel: { fontSize: 10, color: '#6E6E73' } },
@@ -1247,13 +1265,12 @@ export class SentimentPageComponent {
       (a, b) => new Date(a.detectedAt).getTime() - new Date(b.detectedAt).getTime(),
     );
     if (snaps.length === 0) return emptyChart('No regime snapshots yet');
-    const labels = snaps.map((s) =>
-      new Date(s.detectedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    );
+    const labels = snaps.map((s) => snapshotLabel(s.detectedAt, snaps));
     return {
       tooltip: { trigger: 'axis' },
       legend: { data: ['ADX', 'ATR'], bottom: 0 },
-      grid: { left: 50, right: 50, top: 20, bottom: 40 },
+      // top leaves room for the axis names ("ADX", "ATR"), which were cut off at 20.
+      grid: { left: 50, right: 60, top: 36, bottom: 40 },
       xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
       yAxis: [
         { type: 'value', name: 'ADX', position: 'left' },
@@ -1305,7 +1322,13 @@ export class SentimentPageComponent {
     }));
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {d}%' },
-      legend: { bottom: 0 },
+      // Shares in the legend, not as slice labels: a single 100% slice put its label over the
+      // ring's own edge.
+      legend: {
+        bottom: 0,
+        formatter: (name: string) =>
+          `${name} ${Math.round(((counts.get(name) ?? 0) / snaps.length) * 100)}%`,
+      },
       series: [
         {
           type: 'pie',
@@ -1313,12 +1336,34 @@ export class SentimentPageComponent {
           center: ['50%', '45%'],
           avoidLabelOverlap: true,
           itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
-          label: { show: true, formatter: '{b}\n{d}%', fontSize: 12 },
+          label: { show: false },
           data,
         },
       ],
     };
   });
+}
+
+/** "13:42" — or "Oct 19 13:42" when the window crosses a day. UTC, like the window label. */
+function utcLabel(t: number, withDate: boolean): string {
+  const d = new Date(t);
+  const hm = `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  if (!withDate) return hm;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })} ${hm}`;
+}
+
+/**
+ * An x-axis label for a regime snapshot. Snapshots land about every 30 s, so a date-only label
+ * repeated "Oct 19" sixty times; the time is the part that differs.
+ */
+function snapshotLabel(detectedAt: string, snaps: readonly { detectedAt: string }[]): string {
+  const first = snaps.length ? new Date(snaps[0].detectedAt).getTime() : NaN;
+  const last = snaps.length ? new Date(snaps[snaps.length - 1].detectedAt).getTime() : NaN;
+  const sameDay =
+    Number.isFinite(first) &&
+    Number.isFinite(last) &&
+    new Date(first).toISOString().slice(0, 10) === new Date(last).toISOString().slice(0, 10);
+  return utcLabel(new Date(detectedAt).getTime(), !sameDay);
 }
 
 function buildCard(

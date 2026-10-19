@@ -397,9 +397,10 @@ export type StrategyLifecycleStage =
 
 export type Timeframe = 'M1' | 'M5' | 'M15' | 'H1' | 'H4' | 'D1';
 
-export type MLModelStatus = 'Training' | 'Active' | 'Superseded' | 'Failed';
+export type MLModelStatus = 'Training' | 'Candidate' | 'Active' | 'Superseded' | 'Failed';
 
-export type RunStatus = 'Queued' | 'Running' | 'Completed' | 'Failed';
+/** `Cancelled` is most of the recent optimisation/backtest runs (3,945 of the latest 5,000). */
+export type RunStatus = 'Queued' | 'Running' | 'Completed' | 'Failed' | 'Cancelled';
 
 export type TriggerType =
   | 'Scheduled'
@@ -434,7 +435,16 @@ export type AlertType =
   | 'ConfigurationDrift'
   | 'BrokerReconciliation'
   | 'MLMonitoringStale'
-  | 'SymbolicFeatureLifecycle';
+  | 'SymbolicFeatureLifecycle'
+  // Engine Domain/Enums/AlertType.cs 16-23 — /alerts cast for them until these were added.
+  | 'IntermediateRewardCalibrationDrift'
+  | 'AutoTuneProposalAvailable'
+  | 'RoleBuildSkew'
+  | 'AgentApprovalRequired'
+  | 'ScriptAlert'
+  | 'ScriptPositionsOrphaned'
+  | 'ChartAlert'
+  | 'ScriptParityDrift';
 
 export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 
@@ -543,6 +553,9 @@ export interface PositionDto {
   unrealizedPnL: number;
   realizedPnL: number;
   stopLoss: number | null;
+  /** The stop the position opened with — its 1R. `stopLoss` is the CURRENT stop, which a trail
+   *  or break-even move changes (R measured against it read +66R instead of +1.84R). */
+  initialStopLoss?: number | null;
   takeProfit: number | null;
   status: PositionStatus;
   isPaper: boolean;
@@ -801,6 +814,8 @@ export interface CurrencyPairDto {
   maxLotSize: number;
   lotStep: number;
   isActive: boolean;
+  /** Engine `AssetClass` (FxMajor, FxMinor, FxExotic, Index, …) — drives pip/point conventions. */
+  assetClass?: string | null;
 }
 
 export interface AlertDto {
@@ -1295,8 +1310,23 @@ export interface BacktestRunDto {
   status: RunStatus;
   resultJson: string | null;
   errorMessage: string | null;
-  startedAt: string;
+  /** Why validation refused the run (engine `ValidationFailureCode`), with its details JSON. */
+  failureCode: string | null;
+  failureDetailsJson: string | null;
+  /** What queued it (engine `ValidationQueueSource`). */
+  queueSource: string | null;
+  // Lifecycle timestamps (UTC). There is no `startedAt` on the wire — the type used to declare
+  // one, so every "Started" column read blank. The worker began executing at
+  // `executionStartedAt` (falling back to `claimedAt` for older rows).
+  createdAt: string;
+  queuedAt: string;
+  availableAt: string;
+  claimedAt: string | null;
+  claimedByWorkerId: string | null;
+  executionStartedAt: string | null;
+  lastAttemptAt: string | null;
   completedAt: string | null;
+  retryCount: number;
   // Denormalized result metrics — present once the run completes successfully.
   // Engine populates these from the result JSON during BacktestWorker so the
   // dashboard can sort/filter without parsing JSON per row.
@@ -1305,8 +1335,13 @@ export interface BacktestRunDto {
   profitFactor: number | null;
   maxDrawdownPct: number | null;
   sharpeRatio: number | null;
+  sortinoRatio: number | null;
+  largestLoss: number | null;
   finalBalance: number | null;
   totalReturn: number | null;
+  /** Set when the run was pinned to a market other than the strategy's own. */
+  symbolOverride: string | null;
+  timeframeOverride: Timeframe | null;
 }
 
 export interface WalkForwardRunDto {
@@ -2250,6 +2285,8 @@ export interface ApplyProfileResult {
 
 /** Returned by GET /admin/ea — one row per registered EA instance. */
 export interface EAFleetItem {
+  /** Numeric EAInstance id (engine since 2026-10-19; absent from older engines). */
+  id?: number;
   instanceId: string;
   tradingAccountId: number;
   symbols: string;
@@ -2297,6 +2334,8 @@ export interface SetCandleStreamSourceRequest {
 
 /** Returned by GET /admin/ea/{instanceId} — single-instance detail incl. state envelope. */
 export interface EAInstanceDetail {
+  /** Numeric EAInstance id (engine since 2026-10-19; absent from older engines). */
+  id?: number;
   instanceId: string;
   tradingAccountId: number;
   symbols: string;
@@ -2911,8 +2950,11 @@ export interface FleetRestartRequest {
 export interface DeadLetterDto {
   id: number;
   eventType: string | null;
+  /** The integration-event handler that failed (on the wire; the mapper used to drop it). */
+  handlerName: string | null;
   payloadJson: string | null;
   errorMessage: string | null;
+  stackTrace: string | null;
   attemptCount: number;
   isResolved: boolean;
   createdAt: string;
@@ -5543,6 +5585,12 @@ export interface AnalyserComparisonRowDto {
   avgCounterfactualRawPnL: number | null;
   counterfactualWins: number;
   counterfactualLosses: number;
+  /** Derived engine-side (`PopulateDerivedBenchmarkFields`): Buy + Sell decisions. */
+  actionableCount: number;
+  /** Share of decisions that were Hold, as a percentage. */
+  holdPct: number;
+  /** False when the row cannot serve as a benchmark (too few actionable decisions). */
+  isValidBenchmark: boolean;
 }
 
 /** Per-model breakdown row for the synthetic side. One row per MLModel that

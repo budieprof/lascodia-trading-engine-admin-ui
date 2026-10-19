@@ -234,8 +234,15 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
                 </dd>
               </div>
               <div class="item">
-                <dt>Lots</dt>
-                <dd class="mono">{{ p.openLots | number: '1.2-2' }}</dd>
+                <!-- A full close zeroes openLots on the virtual SL/TP path; a closed
+                     position shows the size that traded. -->
+                <dt>{{ p.status === 'Closed' ? 'Lots traded' : 'Lots' }}</dt>
+                <dd class="mono">
+                  {{
+                    (p.status === 'Closed' ? (p.tradedLots ?? p.openLots) : p.openLots)
+                      | number: '1.2-2'
+                  }}
+                </dd>
               </div>
               <div class="item">
                 <dt>Avg Entry</dt>
@@ -251,23 +258,34 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
               </div>
               <div class="item">
                 <dt>Unrealized P&amp;L</dt>
+                <!-- Nothing is unrealised on a closed position; 0.00 read as a measurement. -->
                 <dd
                   class="mono pnl"
-                  [class.profit]="p.unrealizedPnL > 0"
-                  [class.loss]="p.unrealizedPnL < 0"
+                  [class.profit]="p.status !== 'Closed' && p.unrealizedPnL > 0"
+                  [class.loss]="p.status !== 'Closed' && p.unrealizedPnL < 0"
                 >
-                  {{ signedMoney(p.unrealizedPnL) }}
+                  {{ p.status === 'Closed' ? '—' : signedMoney(p.unrealizedPnL) }}
                 </dd>
               </div>
               <div class="item">
                 <dt>Realized P&amp;L</dt>
-                <dd
-                  class="mono pnl"
-                  [class.profit]="p.realizedPnL > 0"
-                  [class.loss]="p.realizedPnL < 0"
-                >
-                  {{ signedMoney(p.realizedPnL) }}
-                </dd>
+                @if (p.pnlUnreconciledAt) {
+                  <!-- realizedPnL 0 here means UNKNOWN (not recovered from deal history). -->
+                  <dd
+                    class="mono pnl"
+                    title="Realised P&L could not be recovered from broker deal history — value unknown, not zero"
+                  >
+                    unknown
+                  </dd>
+                } @else {
+                  <dd
+                    class="mono pnl"
+                    [class.profit]="p.realizedPnL > 0"
+                    [class.loss]="p.realizedPnL < 0"
+                  >
+                    {{ signedMoney(p.realizedPnL) }}
+                  </dd>
+                }
               </div>
               <div class="item">
                 <dt>Stop Loss</dt>

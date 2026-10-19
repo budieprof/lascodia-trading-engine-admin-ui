@@ -18,6 +18,11 @@ import type { HttpErrorResponse } from '@angular/common/http';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption, LineSeriesOption } from 'echarts';
 import { Subject, takeUntil, timer, catchError, of } from 'rxjs';
+import {
+  TF_TO_RESOLUTION,
+  FALLBACK_RESOLUTION,
+} from '@shared/components/trading-chart/chart-analysis-link';
+import type { TvResolution } from '@features/chart-analysis/datafeed/resolution';
 
 /** Emitted when a tile's candle fetch fails; the page aggregates these. */
 export interface TileLoadError {
@@ -57,13 +62,18 @@ import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candl
  * per symbol, ~1 Hz) — until 2026-10-09 every tile polled `live-price` every 3 seconds, 400 requests a minute for
  * a 20-tile wall (SP-I6). Candles re-read every 60s keep the forming bar honest.
  *
- * Click anywhere on the tile body opens the full chart at this pair via
- * the deep-link hand-off ({@link DEEP_LINK_KEY}); the X button stops
- * propagation and removes the tile instead.
+ * Click anywhere on the tile body opens the full chart (/chart-analysis) at this pair and timeframe;
+ * the X button stops propagation and removes the tile instead.
  */
-const DEEP_LINK_KEY = 'tradingChart.deepLink.v1';
 
 type TileSize = 'sm' | 'md' | 'lg' | 'xl';
+
+/** The wall's timeframes (M30 and W1 beyond the trading chart's pills) as chart resolutions. */
+const TILE_RESOLUTION: Readonly<Record<string, TvResolution>> = {
+  ...TF_TO_RESOLUTION,
+  M30: '30',
+  W1: '1W',
+};
 
 /**
  * Brief "I just changed" flash on the bid / ask / spread numbers. The
@@ -90,6 +100,7 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
       class="tile"
       [attr.data-size]="size()"
       (click)="openInChart()"
+      (keydown.enter)="openInChart()"
       role="button"
       tabindex="0"
     >
@@ -112,7 +123,12 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
           </span>
         }
         @if (changePct(); as pct) {
-          <span class="change" [class.up]="pct > 0" [class.down]="pct < 0">
+          <span
+            class="change"
+            [class.up]="pct > 0"
+            [class.down]="pct < 0"
+            [title]="'Change over the ' + candles().length + ' bars shown'"
+          >
             {{ pct > 0 ? '+' : '' }}{{ pct.toFixed(2) }}%
           </span>
         }
@@ -566,6 +582,14 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
   readonly showOrders = input<boolean>(false);
   /** The live quote, pushed by the page from the price stream; null until one arrives. */
   readonly quote = input<LivePriceDto | null>(null);
+  /**
+   * One pip in price units and the quote's digits, from the engine's pair catalogue (null until
+   * it loads). Without them every non-JPY symbol was priced as 5-digit FX: XAU/USD's 0.32 spread
+   * read "3200.0p", USD/NGN's "12168.0p", and DE40 showed "25244.60000".
+   */
+  readonly pipSize = input<number | null>(null);
+  readonly digits = input<number | null>(null);
+  private readonly dp = computed(() => this.digits() ?? (this.symbol().includes('JPY') ? 3 : 5));
 
   @Output() readonly remove = new EventEmitter<void>();
   /** Operator clicked the tile's ⚡ — parent opens the LLM analysis modal. */
@@ -796,7 +820,7 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     // Read the live price inside the computed so the chart redraws on
     // every pushed tick.
     const lp = this.livePrice();
-    const dp = this.symbol().includes('JPY') ? 3 : 5;
+    const dp = this.dp();
     const haveLive = !!lp && Number.isFinite(lp.bid) && Number.isFinite(lp.ask);
 
     // Explicit y-range derived from the candles plus a 5 % padding
@@ -890,12 +914,22 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     // crucial for FX pairs where bid/ask collapse to one pixel.
     const bidLineData = haveLive ? xs.map(() => lp!.bid) : [];
     const askLineData = haveLive ? xs.map(() => lp!.ask) : [];
+    const bidLabel = haveLive ? `BID ${lp!.bid.toFixed(dp)}` : '';
+    const askLabel = haveLive ? `ASK ${lp!.ask.toFixed(dp)}` : '';
+    // The pills sit in the grid's right margin, so it is sized to the longer one: ~5.5 px a
+    // character of 9 px bold, plus the pill's padding and its gap from the plot. A fixed 64 px cut
+    // the last digit off every five-decimal FX ask ("ASK 0.6976").
+    const pillChars = Math.max(bidLabel.length, askLabel.length);
 
     return {
       animation: false,
-      // Reserve right-side space for the BID/ASK pill labels so they
-      // don't clip against the tile edge.
-      grid: { left: 4, right: 64, top: 8, bottom: 4, containLabel: false },
+      grid: {
+        left: 4,
+        right: Math.max(64, Math.ceil(18 + pillChars * 5.5)),
+        top: 8,
+        bottom: 4,
+        containLabel: false,
+      },
       xAxis: {
         type: 'category',
         data: labels,
@@ -973,7 +1007,7 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
           lineStyle: { color: '#1d8a3e', width: 1, type: 'solid', opacity: 0.9 },
           endLabel: {
             show: haveLive,
-            formatter: haveLive ? `BID ${lp!.bid.toFixed(dp)}` : '',
+            formatter: bidLabel,
             backgroundColor: '#1d8a3e',
             color: '#fff',
             padding: [2, 6],
@@ -997,7 +1031,7 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
           lineStyle: { color: '#c93631', width: 1, type: 'solid', opacity: 0.9 },
           endLabel: {
             show: haveLive,
-            formatter: haveLive ? `ASK ${lp!.ask.toFixed(dp)}` : '',
+            formatter: askLabel,
             backgroundColor: '#c93631',
             color: '#fff',
             padding: [2, 6],
@@ -1047,14 +1081,9 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
     return s;
   }
 
-  /**
-   * Render a price with the dynamic precision of the symbol. JPY pairs
-   * have 3 decimals; non-JPY FX pairs have 5. Default 5.
-   */
+  /** A price at the symbol's own precision (catalogue digits; JPY 3 / else 5 until it loads). */
   protected formatPrice(p: number): string {
-    const sym = this.symbol();
-    const dp = sym.includes('JPY') ? 3 : 5;
-    return p.toFixed(dp);
+    return p.toFixed(this.dp());
   }
 
   /**
@@ -1079,10 +1108,11 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
    * Computing from `ask - bid` directly is identical math but resilient
    * to any future API change that re-interprets the `spread` field.
    *
-   * Pip size: JPY-quoted pairs use 0.01; everything else uses 0.0001.
+   * Pip size: the catalogue's (the engine rule — ten points for FX, the point for an index or a
+   * metal); the JPY 0.01 / else 0.0001 guess only until the catalogue has loaded.
    */
   protected formatSpreadPips(p: LivePriceDto): string {
-    const pip = this.symbol().includes('JPY') ? 0.01 : 0.0001;
+    const pip = this.pipSize() ?? (this.symbol().includes('JPY') ? 0.01 : 0.0001);
     const pips = (p.ask - p.bid) / pip;
     return pips.toFixed(1);
   }
@@ -1110,16 +1140,20 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
    * while the full chart slides in from the right. Default fade-in-up
    * stays in effect for every other navigation.
    */
+  /**
+   * Open the pair on the full chart — /chart-analysis, whose watchlists these tiles are. It used to
+   * hand the pair to the Market Data page's embedded chart, a different chart from the one the
+   * page's subtitle and its watchlist source point to.
+   */
   openInChart(): void {
     try {
-      localStorage.setItem(
-        DEEP_LINK_KEY,
-        JSON.stringify({ symbol: this.symbol(), timeframe: this.timeframe() }),
-      );
       sessionStorage.setItem('lascodia.viewTransition.next', 'slide-left');
     } catch {
       /* best-effort */
     }
-    this.router.navigateByUrl('/market-data');
+    const tf = TILE_RESOLUTION[this.timeframe()] ?? FALLBACK_RESOLUTION;
+    void this.router.navigate(['/chart-analysis', this.symbol().replace(/\//g, '').toUpperCase()], {
+      queryParams: { tf },
+    });
   }
 }

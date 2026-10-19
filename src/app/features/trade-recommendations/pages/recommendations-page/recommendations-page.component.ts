@@ -126,8 +126,14 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
             <span class="kpi-value mono">
               <span class="profit">{{ s.wins }}</span> / <span class="loss">{{ s.losses }}</span>
             </span>
-            <span class="kpi-sub muted"
-              >{{ s.openPositions }} open · {{ s.closedPositions }} closed</span
+            <!-- Won + lost need not add up to closed: say how many closes were
+                 neither (breakeven, or P&L the engine could not recover). -->
+            <span class="kpi-sub wrap muted"
+              >{{ s.openPositions }} open · {{ s.closedPositions }} closed{{
+                s.closedPositions - s.wins - s.losses > 0
+                  ? ' · ' + (s.closedPositions - s.wins - s.losses) + ' neither'
+                  : ''
+              }}</span
             >
           </div>
           <div

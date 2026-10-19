@@ -51,6 +51,10 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+// A sub-line whose tail carries meaning ("· 6 neither") wraps instead of being cut.
+.kpi-sub.wrap {
+  white-space: normal;
+}
 
 // Filters
 .filters {

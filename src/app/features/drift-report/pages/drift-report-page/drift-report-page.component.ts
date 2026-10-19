@@ -60,6 +60,8 @@ const DAY_MS = 24 * 3600 * 1000;
 
 /** One date format for the whole page; timestamps are rendered in UTC. */
 const DATE_FMT = 'd MMM yyyy, HH:mm:ss';
+/** The narrow "Most-recent firings" board drops the year, which clipped the seconds off every row. */
+const RECENT_FMT = 'd MMM, HH:mm:ss';
 
 const numberFmt = new Intl.NumberFormat('en-US');
 const fmt = (n: number): string => numberFmt.format(n);
@@ -74,8 +76,56 @@ function isRealSymbol(symbol: string | null): boolean {
   return !!symbol && symbol.toLowerCase() !== 'unknown' && symbol !== FLEET_WIDE_SYMBOL;
 }
 
-function detectorLabel(detector: string | null): string {
-  return detector || NO_DETECTOR_LABEL;
+/**
+ * The detector names the engine's drift workers write as `ConditionJson.DetectorType`. The engine's `detectorType`
+ * filter is a substring test on that key and on the `Detector` / `detector` / `worker` keys other producers use, so
+ * the Detector filter offers these plus every other name seen in the sample (worker names included); it used to offer
+ * "Adwin" / "MultiScale" (never emitted — the workers write "AdwinDrift" / "MultiSignal") and miss "FeaturePSI", the
+ * detector behind half the alerts.
+ */
+const KNOWN_DETECTOR_TYPES = ['AdwinDrift', 'CUSUM', 'DriftMonitor', 'FeaturePSI', 'MultiSignal'];
+
+/** The "By detector" chart keeps this many bars; the rest are summed into one "Other" bar. */
+const DETECTOR_CHART_BARS = 10;
+
+const detectorCache = new WeakMap<DriftAlertDto, string>();
+
+function firstString(o: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim() !== '') return v.trim();
+  }
+  return null;
+}
+
+/**
+ * Who raised an alert. The engine reports `detectorType` from the payload's `DetectorType` / `Detector` / `detector` /
+ * `worker` keys (since 2026-10-19 — before that only `DetectorType`, which left ~300 alerts unattributed). Two gaps
+ * remain, read here: a few FeaturePSI alerts write camel-case `detectorType`, which the engine's key list misses, and
+ * the degradation-mode / training-failure / resource-guard producers name no source at all — only a `reason`.
+ */
+function alertDetector(a: DriftAlertDto): string {
+  const hit = detectorCache.get(a);
+  if (hit !== undefined) return hit;
+  let label = a.detectorType || null;
+  if (!label && a.conditionJson) {
+    try {
+      const root: unknown = JSON.parse(a.conditionJson);
+      if (root && typeof root === 'object' && !Array.isArray(root)) {
+        const o = root as Record<string, unknown>;
+        label = firstString(o, ['detectorType']);
+        if (!label) {
+          const reason = firstString(o, ['reason', 'Reason']);
+          if (reason) label = `Reason: ${reason}`;
+        }
+      }
+    } catch {
+      // A malformed payload has no detector to read.
+    }
+  }
+  label ??= NO_DETECTOR_LABEL;
+  detectorCache.set(a, label);
+  return label;
 }
 
 /**
@@ -238,7 +288,9 @@ function emptySeverityCounts(): SeverityCounts {
                 @for (a of recentFirings(); track a.id) {
                   <tr (click)="selectRow(a)">
                     <td class="mono">{{ symbolLabel(a.symbol) }}</td>
-                    <td class="mono">{{ detectorLabel(a.detectorType) }}</td>
+                    <td class="mono detector-cell" [title]="detectorLabel(a)">
+                      {{ detectorLabel(a) }}
+                    </td>
                     <td>
                       <span
                         class="severity-pill"
@@ -249,7 +301,7 @@ function emptySeverityCounts(): SeverityCounts {
                       </span>
                     </td>
                     <td class="mono">
-                      {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: dateFmt : 'UTC') : '—' }}
+                      {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: recentFmt : 'UTC') : '—' }}
                     </td>
                   </tr>
                 }
@@ -282,11 +334,9 @@ function emptySeverityCounts(): SeverityCounts {
             <span class="filter-label">Detector</span>
             <select [(ngModel)]="filterDetector" (ngModelChange)="reload()">
               <option value="">All</option>
-              <option value="DriftAgreement">DriftAgreement</option>
-              <option value="CUSUM">CUSUM</option>
-              <option value="Adwin">Adwin</option>
-              <option value="CovariateShift">CovariateShift</option>
-              <option value="MultiScale">MultiScale</option>
+              @for (d of detectorOptions(); track d) {
+                <option [value]="d">{{ d }}</option>
+              }
             </select>
           </label>
           <label class="filter">
@@ -337,7 +387,7 @@ function emptySeverityCounts(): SeverityCounts {
           <dl class="detail-grid">
             <div>
               <dt>Detector</dt>
-              <dd>{{ detectorLabel(alert.detectorType) }}</dd>
+              <dd>{{ detectorLabel(alert) }}</dd>
             </div>
             <div>
               <dt>Alert type</dt>
@@ -643,6 +693,10 @@ function emptySeverityCounts(): SeverityCounts {
       .dr-board-table .mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
       }
+      /* Worker-named detectors ("MLTrainingRunHealthWorker") are long; the full name is in the title. */
+      .dr-board-table td.detector-cell {
+        max-width: 200px;
+      }
       .dr-board-table .bad {
         color: var(--loss);
       }
@@ -671,10 +725,11 @@ export class DriftReportPageComponent {
   @ViewChild('table') table?: DataTableComponent<DriftAlertDto>;
 
   readonly dateFmt = DATE_FMT;
+  readonly recentFmt = RECENT_FMT;
   readonly sampleCap = SAMPLE_CAP;
   readonly fmt = fmt;
   readonly symbolLabel = symbolLabel;
-  readonly detectorLabel = detectorLabel;
+  readonly detectorLabel = alertDetector;
 
   filterSymbol = '';
   filterDetector = '';
@@ -692,6 +747,15 @@ export class DriftReportPageComponent {
   readonly driftSample = signal<DriftAlertDto[]>([]);
   readonly sampleTotal = signal(0);
   readonly sampleCapped = computed(() => this.sampleTotal() > SAMPLE_CAP);
+
+  /** The Detector filter's choices: the engine's DetectorType names, any other seen, and the current pick. */
+  readonly detectorOptions = computed(() => {
+    this.reloadTick();
+    const names = new Set(KNOWN_DETECTOR_TYPES);
+    for (const a of this.driftSample()) if (a.detectorType) names.add(a.detectorType);
+    if (this.filterDetector) names.add(this.filterDetector);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  });
 
   driftStats = computed(() => {
     const all = this.driftSample();
@@ -744,7 +808,12 @@ export class DriftReportPageComponent {
         trigger: 'item',
         formatter: (p: any) => `${p.seriesName}: ${fmt(p.value)} (${share(p.value).toFixed(1)}%)`,
       },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      // The legend carries every count, so no segment depends on its inside label being readable.
+      legend: {
+        bottom: 0,
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+        formatter: (name: string) => `${name} ${fmt(counts[name as AlertSeverity] ?? 0)}`,
+      },
       grid: { top: 24, right: 16, bottom: 44, left: 16 },
       xAxis: { type: 'value', max: total, show: false },
       yAxis: { type: 'category', data: ['Alerts'], show: false },
@@ -760,9 +829,13 @@ export class DriftReportPageComponent {
           position: 'inside' as const,
           fontSize: 10,
           color: '#fff',
-          // Thin segments cannot fit a label; the tooltip and legend still cover them.
-          formatter: (p: any) =>
-            share(p.value) >= 8 ? `${fmt(p.value)} · ${share(p.value).toFixed(0)}%` : '',
+          // The bar is ~260 px wide: "53 · 10%" needs about a fifth of it, a bare "10%" a tenth.
+          // Two ~10% segments side by side used to print their labels over each other.
+          formatter: (p: any) => {
+            const s = share(p.value);
+            if (s >= 20) return `${fmt(p.value)} · ${s.toFixed(0)}%`;
+            return s >= 10 ? `${s.toFixed(0)}%` : '';
+          },
         },
       })),
     };
@@ -819,13 +892,21 @@ export class DriftReportPageComponent {
   byDetectorOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const a of this.driftSample()) {
-      const k = detectorLabel(a.detectorType);
+      const k = alertDetector(a);
       counts[k] = (counts[k] ?? 0) + 1;
     }
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    let entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     if (entries.length === 0) return {};
+    // Twenty-odd sources do not fit 240 px; the long tail is one bar (the table below lists every one).
+    if (entries.length > DETECTOR_CHART_BARS) {
+      const tail = entries.slice(DETECTOR_CHART_BARS - 1);
+      entries = [
+        ...entries.slice(0, DETECTOR_CHART_BARS - 1),
+        [`Other (${tail.length})`, tail.reduce((s, [, v]) => s + v, 0)],
+      ];
+    }
     return {
-      grid: { top: 10, right: 40, bottom: 30, left: 140 },
+      grid: { top: 10, right: 40, bottom: 30, left: 170 },
       xAxis: {
         type: 'value',
         axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
@@ -834,7 +915,13 @@ export class DriftReportPageComponent {
       yAxis: {
         type: 'category',
         data: entries.map(([k]) => k).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73', hideOverlap: true },
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          hideOverlap: true,
+          width: 160,
+          overflow: 'truncate',
+        },
       },
       series: [
         {
@@ -843,7 +930,8 @@ export class DriftReportPageComponent {
             .map(([k, v]) => ({
               value: v,
               itemStyle: {
-                color: k === NO_DETECTOR_LABEL ? SENTINEL_COLOR : '#AF52DE',
+                color:
+                  k === NO_DETECTOR_LABEL || k.startsWith('Other (') ? SENTINEL_COLOR : '#AF52DE',
                 borderRadius: [0, 4, 4, 0],
               },
             }))
@@ -871,7 +959,7 @@ export class DriftReportPageComponent {
     };
     const groups: Record<string, Row> = {};
     for (const a of this.driftSample()) {
-      const k = detectorLabel(a.detectorType);
+      const k = alertDetector(a);
       groups[k] ??= {
         detector: k,
         total: 0,
@@ -962,8 +1050,10 @@ export class DriftReportPageComponent {
       {
         headerName: 'Detector',
         field: 'detectorType',
-        width: 160,
-        valueFormatter: (p) => (p.value as string | null) || 'Not recorded',
+        width: 240,
+        // Same attribution as the boards above (the engine's detector, else the payload's reason).
+        valueFormatter: (p) => (p.data ? alertDetector(p.data) : NO_DETECTOR_LABEL),
+        tooltipValueGetter: (p) => (p.data ? alertDetector(p.data) : null),
       },
       {
         headerName: 'Severity',
@@ -998,6 +1088,9 @@ export class DriftReportPageComponent {
         valueFormatter: (p) => this.formatDate(p.value as string | null),
       });
     }
+    // The last column takes the remaining width — fixed widths left a dead strip at the right edge.
+    const last = cols[cols.length - 1];
+    cols[cols.length - 1] = { ...last, width: undefined, flex: 1, minWidth: last.width };
     return cols;
   });
 

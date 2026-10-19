@@ -11,7 +11,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, map, of } from 'rxjs';
+import { forkJoin, map } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -26,6 +26,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 /**
  * Operator-facing alert triage console. Same dense layout as the
@@ -136,6 +137,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -143,14 +145,9 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         title="Alert Triage"
         subtitle="Work queue for active alerts across the engine. Snooze locally; escalate in the Ops runbook."
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <!-- Bound to refreshing(): the old button watched loading(), which is only true before
+             the first paint, so a click changed nothing on screen. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <!-- The alert a notification links to (?focus=), pinned whatever the filters (SP-04). -->
@@ -315,9 +312,18 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         </div>
       </section>
 
+      @if (activeBeforeWindow() > 0) {
+        <p class="window-note">
+          {{ activeBeforeWindow() }} more active
+          {{ activeBeforeWindow() === 1 ? 'alert' : 'alerts' }} last fired before the
+          {{ windowLabel() }} and {{ activeBeforeWindow() === 1 ? 'is' : 'are' }} not in this queue
+          — widen the window to see {{ activeBeforeWindow() === 1 ? 'it' : 'them' }}.
+        </p>
+      }
+
       @if (loading()) {
         <app-card-skeleton [lines]="8" />
-      } @else if (resource.error()) {
+      } @else if (resource.error() && resource.value() === null) {
         <app-error-state
           title="Could not load alerts"
           message="Engine returned an error. The alert-list endpoint may be unhealthy — check System Health."
@@ -326,7 +332,10 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
       } @else {
         <!-- KPI strip — always rendered. Colour only where it means
              something: severity dots light up when the count is above zero
-             and are neutral at zero. -->
+             and are neutral at zero. The tiles count ACTIVE alerts of every
+             severity (window, type and symbol filters apply; the severity
+             filter does not) — under the default Critical + High filter the
+             Medium tile used to read 0 whatever was open. -->
         <div class="kpi-strip">
           <app-metric-card
             label="Active total"
@@ -347,8 +356,8 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
             [dotColor]="severityCount('High') > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
-            label="Medium"
-            [value]="severityCount('Medium')"
+            label="Medium / Info"
+            [value]="severityCount('Medium') + severityCount('Info')"
             format="number"
             dotColor="#8E8E93"
           />
@@ -392,7 +401,7 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
                 {{ allFilteredRows().length }} matching alert{{
                   allFilteredRows().length === 1 ? '' : 's'
                 }}
-                · last {{ windowHours() }}h
+                · {{ windowLabel() }}
               </span>
             </header>
             <div class="insights-grid">
@@ -897,6 +906,11 @@ const SEVERITY_ORDER: Record<AlertSeverity, number> = {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .window-note {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
 
       /* Not sticky. Pinned at top:8px it slid over the KPI tiles the moment
@@ -1667,21 +1681,41 @@ export class AlertTriagePageComponent {
 
   // Refresh once a minute by default — alerts churn slower than positions or
   // signals; faster cadence would be wasted round-trips.
+  //
+  // Two reads, merged by id:
+  //  - EVERY active alert. The old single read took 500 rows of an unfiltered list the engine
+  //    sorts by IsActive alone; with 652 active alerts it returned an arbitrary 500 of them and
+  //    no inactive ones, so the queue silently missed open alerts.
+  //  - the newest 500 inactive (auto-resolved / paused) by id, for the "Auto-resolved" status
+  //    option and the activity curve.
+  // No catchError: a failed read must reach the error state, not render as "Nothing to triage".
   protected readonly resource = createPolledResource(
     () =>
-      this.service
-        .list({
+      forkJoin({
+        active: this.service.list({
+          currentPage: 1,
+          itemCountPerPage: 5000,
+          filter: { isActive: true },
+          sortBy: 'id',
+          sortDirection: 'desc',
+        }),
+        inactive: this.service.list({
           currentPage: 1,
           itemCountPerPage: 500,
-          // We want both active AND auto-resolved within the window so the
-          // "Auto-resolved" status option works and the activity histogram
-          // shows a meaningful curve, not just the current snapshot.
-          filter: {},
-        })
-        .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<AlertDto[]>([])),
-        ),
+          filter: { isActive: false },
+          sortBy: 'id',
+          sortDirection: 'desc',
+        }),
+      }).pipe(
+        map(({ active, inactive }) => {
+          if (!active.status) throw new Error(active.message ?? 'alert/list refused');
+          const byId = new Map<number, AlertDto>();
+          for (const a of [...(active.data?.data ?? []), ...(inactive.data?.data ?? [])]) {
+            byId.set(a.id, a);
+          }
+          return [...byId.values()];
+        }),
+      ),
     { intervalMs: 60_000 },
   );
 
@@ -1744,10 +1778,8 @@ export class AlertTriagePageComponent {
         this.openGroups.set(next);
       });
     });
-    effect(() => {
-      this.windowHours();
-      this.resource.refresh();
-    });
+    // (The window is applied client-side, so changing it no longer refetches — the old effect
+    // also fired on start-up and cancelled the page's first request.)
     // Any filter change restarts the flat view on page 1 — otherwise a
     // narrower result set can leave the operator on a page past the end.
     effect(() => {
@@ -1950,12 +1982,38 @@ export class AlertTriagePageComponent {
 
   // ── KPI metrics ────────────────────────────────────────────────────
 
-  protected readonly activeCount = computed(
-    () => this.allFilteredRows().filter((a) => a.isActive).length,
-  );
+  /** Active alerts in the window matching type + symbol — every severity (see the KPI strip). */
+  private readonly kpiRows = computed(() => {
+    const type = this.typeFilter().toLowerCase();
+    const sym = this.symbolFilter().trim().toUpperCase();
+    return this.windowRows().filter((a) => {
+      if (!a.isActive) return false;
+      if (type && !a.alertType.toLowerCase().includes(type)) return false;
+      if (sym && !(a.symbol ?? '').toUpperCase().includes(sym)) return false;
+      return true;
+    });
+  });
+  protected readonly activeCount = computed(() => this.kpiRows().length);
   protected severityCount(sev: AlertSeverity): number {
-    return this.allFilteredRows().filter((a) => a.severity === sev).length;
+    return this.kpiRows().filter((a) => a.severity === sev).length;
   }
+
+  /** Active alerts whose last trigger is older than the window — open, but not in the queue. */
+  protected readonly activeBeforeWindow = computed(() => {
+    const cutoffMs = Date.now() - this.windowHours() * 60 * 60 * 1000;
+    return (this.resource.value() ?? []).filter((a) => {
+      if (!a.isActive || !a.lastTriggeredAt) return false;
+      return new Date(a.lastTriggeredAt).getTime() < cutoffMs;
+    }).length;
+  });
+
+  /** "last 6h" / "last 7 days" — the presets are hours, which read badly past a day. */
+  protected readonly windowLabel = computed(() => {
+    const h = this.windowHours();
+    if (h < 48) return `last ${h}h`;
+    const days = Math.round(h / 24);
+    return `last ${days} day${days === 1 ? '' : 's'}`;
+  });
   /** Real instruments only — system-wide (null-symbol) alerts are not a symbol. */
   protected readonly distinctSymbols = computed(
     () =>

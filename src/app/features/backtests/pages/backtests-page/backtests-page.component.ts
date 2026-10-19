@@ -9,7 +9,7 @@ import {
   OnInit,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { formatDate } from '@angular/common';
+import { DecimalPipe, formatDate } from '@angular/common';
 import { Observable, map } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -31,6 +31,14 @@ import {
   CreateBacktestRequest,
 } from '@core/api/api.types';
 import { FormsModule } from '@angular/forms';
+import { analyticsSampleSize, newestRowsRequest } from '../../analytics-sample';
+
+type SampleState = 'loading' | 'ready' | 'error';
+
+/** A run that closed no trade has no win rate, profit factor or Sharpe — the engine stores 0.0 for all three. */
+function hasTrades(r: { totalTrades: number | null }): boolean {
+  return r.totalTrades != null && r.totalTrades > 0;
+}
 
 @Component({
   selector: 'app-backtests-page',
@@ -42,6 +50,7 @@ import { FormsModule } from '@angular/forms';
     TabsComponent,
     ChartCardComponent,
     FormsModule,
+    DecimalPipe,
   ],
   template: `
     <div class="page">
@@ -122,199 +131,221 @@ import { FormsModule } from '@angular/forms';
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab" />
 
       @if (activeTab() === 'backtests') {
-        <!-- 8-card KPI strip -->
-        <div class="bt-kpis">
-          <div class="bt-kpi">
-            <span class="kpi-label">Total runs</span>
-            <span class="kpi-value">{{ btStats().total }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Completed</span>
-            <span class="kpi-value good">{{ btStats().completed }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Failed</span>
-            <span
-              class="kpi-value"
-              [class.bad]="btStats().failed > 0"
-              [class.good]="btStats().failed === 0"
-            >
-              {{ btStats().failed }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg total return</span>
-            <span
-              class="kpi-value"
-              [class.good]="btStats().avgReturn !== null && btStats().avgReturn! > 0"
-              [class.bad]="btStats().avgReturn !== null && btStats().avgReturn! < 0"
-            >
-              {{ signedPct(btStats().avgReturn) }}
-            </span>
-            @if (btStats().wipedOut > 0) {
+        @if (btSampleState() !== 'ready') {
+          <p class="sample-note" [class.sample-note-error]="btSampleState() === 'error'">
+            {{
+              btSampleState() === 'error'
+                ? 'The run analytics could not be loaded — the table below still pages through every run.'
+                : 'Loading run analytics…'
+            }}
+          </p>
+        } @else {
+          @if (btSampleTotal() > btSample().length) {
+            <p class="sample-note">
+              Tiles, charts and leaderboards cover the newest {{ btSample().length | number }} of
+              {{ btSampleTotal() | number }} runs; the table below pages through all of them.
+            </p>
+          }
+          <!-- 8-card KPI strip -->
+          <div class="bt-kpis">
+            <div class="bt-kpi">
+              <span class="kpi-label">Total runs</span>
+              <span class="kpi-value">{{ btSampleTotal() | number }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Completed</span>
+              <span class="kpi-value good">{{ btStats().completed }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Failed</span>
               <span
-                class="kpi-note"
-                title="Runs whose simulated balance went to or below zero. They are counted in the totals but excluded from every average and from the histogram, because one wiped-out run swamps hundreds of real ones."
+                class="kpi-value"
+                [class.bad]="btStats().failed > 0"
+                [class.good]="btStats().failed === 0"
               >
-                {{ btStats().wipedOut }} wiped-out run{{ btStats().wipedOut === 1 ? '' : 's' }}
-                excluded
+                {{ btStats().failed }}
               </span>
-            }
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Avg total return</span>
+              <span
+                class="kpi-value"
+                [class.good]="btStats().avgReturn !== null && btStats().avgReturn! > 0"
+                [class.bad]="btStats().avgReturn !== null && btStats().avgReturn! < 0"
+              >
+                {{ signedPct(btStats().avgReturn) }}
+              </span>
+              @if (btStats().wipedOut > 0) {
+                <span
+                  class="kpi-note"
+                  title="Runs whose simulated balance went to or below zero. They are counted in the totals but excluded from every average and from the histogram, because one wiped-out run swamps hundreds of real ones."
+                >
+                  {{ btStats().wipedOut }} wiped-out run{{ btStats().wipedOut === 1 ? '' : 's' }}
+                  excluded
+                </span>
+              }
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Best return</span>
+              <span
+                class="kpi-value"
+                [class.good]="btStats().bestReturn !== null && btStats().bestReturn! > 0"
+                [class.bad]="btStats().bestReturn !== null && btStats().bestReturn! < 0"
+              >
+                {{ signedPct(btStats().bestReturn) }}
+              </span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label" title="Over runs that closed at least one trade"
+                >Avg win rate</span
+              >
+              <span class="kpi-value">
+                {{
+                  btStats().avgWinRate !== null
+                    ? (btStats().avgWinRate! * 100).toFixed(1) + '%'
+                    : '—'
+                }}
+              </span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Avg trades</span>
+              <span class="kpi-value">{{
+                btStats().avgTrades !== null ? btStats().avgTrades : '—'
+              }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Symbols × strategies</span>
+              <span class="kpi-value"
+                >{{ btStats().symbolCount }} × {{ btStats().strategyCount }}</span
+              >
+            </div>
           </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Best return</span>
-            <span
-              class="kpi-value"
-              [class.good]="btStats().bestReturn !== null && btStats().bestReturn! > 0"
-              [class.bad]="btStats().bestReturn !== null && btStats().bestReturn! < 0"
-            >
-              {{ signedPct(btStats().bestReturn) }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg win rate</span>
-            <span class="kpi-value">
-              {{
-                btStats().avgWinRate !== null ? (btStats().avgWinRate! * 100).toFixed(1) + '%' : '—'
-              }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg trades</span>
-            <span class="kpi-value">{{
-              btStats().avgTrades !== null ? btStats().avgTrades : '—'
-            }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Symbols × strategies</span>
-            <span class="kpi-value"
-              >{{ btStats().symbolCount }} × {{ btStats().strategyCount }}</span
-            >
-          </div>
-        </div>
 
-        <!-- 3-col chart row -->
-        <div class="bt-charts">
-          <app-chart-card
-            title="Status distribution"
-            subtitle="Completed · Failed · Running · Pending"
-            [options]="btStatusDonutOptions()"
-            height="240px"
-          />
-          <app-chart-card
-            title="Return distribution"
-            [subtitle]="btReturnHistogram().subtitle"
-            [options]="btReturnHistogram().options"
-            height="240px"
-          />
-          <app-chart-card
-            title="Runs by symbol"
-            subtitle="Top 12 symbols by run count"
-            [options]="btBySymbolOptions()"
-            height="240px"
-          />
-        </div>
+          <!-- 3-col chart row -->
+          <div class="bt-charts">
+            <app-chart-card
+              title="Status distribution"
+              subtitle="Completed · Failed · Running · Pending"
+              [options]="btStatusDonutOptions()"
+              height="240px"
+            />
+            <app-chart-card
+              title="Return distribution"
+              [subtitle]="btReturnHistogram().subtitle"
+              [options]="btReturnHistogram().options"
+              height="240px"
+            />
+            <app-chart-card
+              title="Runs by symbol"
+              subtitle="Top 12 symbols by run count"
+              [options]="btBySymbolOptions()"
+              height="240px"
+            />
+          </div>
 
-        <!-- 2-col tables: top performers + per-symbol -->
-        <div class="bt-board-row">
-          <section class="bt-board">
-            <header class="bt-board-head">
-              <h3>Top performers</h3>
-              <span class="muted">Highest total return across completed runs</span>
-            </header>
-            @if (btTopReturns().length > 0) {
-              <table class="bt-board-table">
-                <thead>
-                  <tr>
-                    <th>Run</th>
-                    <th>Strategy</th>
-                    <th>Symbol</th>
-                    <th class="num">Return</th>
-                    <th class="num">PF</th>
-                    <th class="num">Sharpe</th>
-                    <th class="num">Max DD</th>
-                    <th class="num">Trades</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (r of btTopReturns(); track r.id) {
-                    <tr (click)="onBacktestClick(r)">
-                      <td class="mono">#{{ r.id }}</td>
-                      <td class="mono">#{{ r.strategyId }}</td>
-                      <td class="mono">{{ r.symbol }}</td>
-                      <td
-                        class="num mono"
-                        [class.profit]="(r.totalReturn ?? 0) > 0"
-                        [class.loss]="(r.totalReturn ?? 0) < 0"
-                      >
-                        {{ signedPct(r.totalReturn) }}
-                      </td>
-                      <td class="num mono">{{ fmtProfitFactor(r.profitFactor) }}</td>
-                      <td class="num mono">
-                        {{ r.sharpeRatio !== null ? r.sharpeRatio.toFixed(2) : '—' }}
-                      </td>
-                      <td class="num mono loss">
-                        {{ r.maxDrawdownPct !== null ? r.maxDrawdownPct.toFixed(2) + '%' : '—' }}
-                      </td>
-                      <td class="num mono">{{ r.totalTrades ?? '—' }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            } @else {
-              <p class="muted" style="padding: var(--space-4)">
-                No completed runs with measurable returns yet.
-              </p>
-            }
-          </section>
-
-          <section class="bt-board">
-            <header class="bt-board-head">
-              <h3>Per-symbol breakdown</h3>
-              <span class="muted">Avg metrics grouped by symbol</span>
-            </header>
-            @if (btPerSymbol().length > 0) {
-              <table class="bt-board-table">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th class="num">Runs</th>
-                    <th class="num">Avg return</th>
-                    <th class="num">Best return</th>
-                    <th class="num">Avg Sharpe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of btPerSymbol(); track row.symbol) {
+          <!-- 2-col tables: top performers + per-symbol -->
+          <div class="bt-board-row">
+            <section class="bt-board">
+              <header class="bt-board-head">
+                <h3>Top performers</h3>
+                <span class="muted">Highest total return across completed runs</span>
+              </header>
+              @if (btTopReturns().length > 0) {
+                <table class="bt-board-table">
+                  <thead>
                     <tr>
-                      <td class="mono">{{ row.symbol }}</td>
-                      <td class="num mono">{{ row.runs }}</td>
-                      <td
-                        class="num mono"
-                        [class.profit]="row.avgReturn !== null && row.avgReturn > 0"
-                        [class.loss]="row.avgReturn !== null && row.avgReturn < 0"
-                      >
-                        {{ signedPct(row.avgReturn) }}
-                      </td>
-                      <td
-                        class="num mono"
-                        [class.profit]="row.bestReturn !== null && row.bestReturn > 0"
-                        [class.loss]="row.bestReturn !== null && row.bestReturn < 0"
-                      >
-                        {{ signedPct(row.bestReturn) }}
-                      </td>
-                      <td class="num mono">
-                        {{ row.avgSharpe !== null ? row.avgSharpe.toFixed(2) : '—' }}
-                      </td>
+                      <th>Run</th>
+                      <th>Strategy</th>
+                      <th>Symbol</th>
+                      <th class="num">Return</th>
+                      <th class="num">PF</th>
+                      <th class="num">Sharpe</th>
+                      <th class="num">Max DD</th>
+                      <th class="num">Trades</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            }
-          </section>
-        </div>
+                  </thead>
+                  <tbody>
+                    @for (r of btTopReturns(); track r.id) {
+                      <tr (click)="onBacktestClick(r)">
+                        <td class="mono">#{{ r.id }}</td>
+                        <td class="mono">#{{ r.strategyId }}</td>
+                        <td class="mono">{{ r.symbol }}</td>
+                        <td
+                          class="num mono"
+                          [class.profit]="(r.totalReturn ?? 0) > 0"
+                          [class.loss]="(r.totalReturn ?? 0) < 0"
+                        >
+                          {{ signedPct(r.totalReturn) }}
+                        </td>
+                        <td class="num mono">{{ fmtProfitFactor(r.profitFactor) }}</td>
+                        <td class="num mono">
+                          {{ r.sharpeRatio !== null ? r.sharpeRatio.toFixed(2) : '—' }}
+                        </td>
+                        <td class="num mono loss">
+                          {{ r.maxDrawdownPct !== null ? r.maxDrawdownPct.toFixed(2) + '%' : '—' }}
+                        </td>
+                        <td class="num mono">{{ r.totalTrades ?? '—' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <p class="muted" style="padding: var(--space-4)">
+                  No completed runs with measurable returns yet.
+                </p>
+              }
+            </section>
 
-        <section class="bt-board">
+            <section class="bt-board">
+              <header class="bt-board-head">
+                <h3>Per-symbol breakdown</h3>
+                <span class="muted">Avg metrics grouped by symbol</span>
+              </header>
+              @if (btPerSymbol().length > 0) {
+                <div class="bt-board-scroll">
+                  <table class="bt-board-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th class="num">Runs</th>
+                        <th class="num">Avg return</th>
+                        <th class="num">Best return</th>
+                        <th class="num">Avg Sharpe</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of btPerSymbol(); track row.symbol) {
+                        <tr>
+                          <td class="mono">{{ row.symbol }}</td>
+                          <td class="num mono">{{ row.runs }}</td>
+                          <td
+                            class="num mono"
+                            [class.profit]="row.avgReturn !== null && row.avgReturn > 0"
+                            [class.loss]="row.avgReturn !== null && row.avgReturn < 0"
+                          >
+                            {{ signedPct(row.avgReturn) }}
+                          </td>
+                          <td
+                            class="num mono"
+                            [class.profit]="row.bestReturn !== null && row.bestReturn > 0"
+                            [class.loss]="row.bestReturn !== null && row.bestReturn < 0"
+                          >
+                            {{ signedPct(row.bestReturn) }}
+                          </td>
+                          <td class="num mono">
+                            {{ row.avgSharpe !== null ? row.avgSharpe.toFixed(2) : '—' }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </section>
+          </div>
+        }
+
+        <section class="bt-board bt-runs">
           <header class="bt-board-head">
             <h3>All backtest runs</h3>
             <span class="muted">Server-paged — click any row for the detail page</span>
@@ -327,189 +358,209 @@ import { FormsModule } from '@angular/forms';
           />
         </section>
       } @else {
-        <!-- Walk-Forward analytics -->
-        <div class="bt-kpis">
-          <div class="bt-kpi">
-            <span class="kpi-label">Total runs</span>
-            <span class="kpi-value">{{ wfStats().total }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Completed</span>
-            <span class="kpi-value good">{{ wfStats().completed }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Failed</span>
-            <span
-              class="kpi-value"
-              [class.bad]="wfStats().failed > 0"
-              [class.good]="wfStats().failed === 0"
-            >
-              {{ wfStats().failed }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span
-              class="kpi-label"
-              title="Mean out-of-sample Sharpe ratio across each run's windows"
-              >Avg OOS Sharpe</span
-            >
-            <span
-              class="kpi-value"
-              [class.good]="wfStats().avgOosScore !== null && wfStats().avgOosScore! > 0"
-              [class.bad]="wfStats().avgOosScore !== null && wfStats().avgOosScore! < 0"
-            >
-              {{ signedRatio(wfStats().avgOosScore) }}
-            </span>
-            @if (wfStats().corrupt > 0) {
+        <!-- Walk-Forward analytics. Zeros while the sample was still downloading read as "no runs"
+             beside a table of 2,973 — the tiles wait for the sample instead. -->
+        @if (wfSampleState() !== 'ready') {
+          <p class="sample-note" [class.sample-note-error]="wfSampleState() === 'error'">
+            {{
+              wfSampleState() === 'error'
+                ? 'The walk-forward analytics could not be loaded — the table below still pages through every run.'
+                : 'Loading walk-forward analytics…'
+            }}
+          </p>
+        } @else {
+          @if (wfSampleTotal() > wfSample().length) {
+            <p class="sample-note">
+              Tiles, charts and leaderboards cover the newest {{ wfSample().length | number }} of
+              {{ wfSampleTotal() | number }} runs — a full sample would be too large to fetch. The
+              table below pages through all of them.
+            </p>
+          }
+          <div class="bt-kpis">
+            <div class="bt-kpi">
+              <span class="kpi-label">Total runs</span>
+              <span class="kpi-value">{{ wfSampleTotal() | number }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Completed</span>
+              <span class="kpi-value good">{{ wfStats().completed }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Failed</span>
               <span
-                class="kpi-note"
-                title="Runs whose OOS Sharpe or consistency is not a real number (non-finite, a Sharpe beyond ±100, or a negative deviation). They are counted in the totals but excluded from every average, the histogram and the leaderboards."
+                class="kpi-value"
+                [class.bad]="wfStats().failed > 0"
+                [class.good]="wfStats().failed === 0"
               >
-                {{ wfStats().corrupt }} corrupt run{{ wfStats().corrupt === 1 ? '' : 's' }}
-                excluded
+                {{ wfStats().failed }}
               </span>
-            }
+            </div>
+            <div class="bt-kpi">
+              <span
+                class="kpi-label"
+                title="Mean out-of-sample Sharpe ratio across each run's windows"
+                >Avg OOS Sharpe</span
+              >
+              <span
+                class="kpi-value"
+                [class.good]="wfStats().avgOosScore !== null && wfStats().avgOosScore! > 0"
+                [class.bad]="wfStats().avgOosScore !== null && wfStats().avgOosScore! < 0"
+              >
+                {{ signedRatio(wfStats().avgOosScore) }}
+              </span>
+              @if (wfStats().corrupt > 0) {
+                <span
+                  class="kpi-note"
+                  title="Runs whose OOS Sharpe or consistency is not a real number (non-finite, a Sharpe beyond ±100, or a negative deviation). They are counted in the totals but excluded from every average, the histogram and the leaderboards."
+                >
+                  {{ wfStats().corrupt }} corrupt run{{ wfStats().corrupt === 1 ? '' : 's' }}
+                  excluded
+                </span>
+              }
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Best OOS Sharpe</span>
+              <span
+                class="kpi-value"
+                [class.good]="wfStats().bestOosScore !== null && wfStats().bestOosScore! > 0"
+                [class.bad]="wfStats().bestOosScore !== null && wfStats().bestOosScore! < 0"
+              >
+                {{ signedRatio(wfStats().bestOosScore) }}
+              </span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Avg consistency</span>
+              <span class="kpi-value">
+                {{ wfStats().avgConsistency !== null ? wfStats().avgConsistency!.toFixed(3) : '—' }}
+              </span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Avg IS days</span>
+              <span class="kpi-value">{{ wfStats().avgIsDays }}</span>
+            </div>
+            <div class="bt-kpi">
+              <span class="kpi-label">Avg OOS days</span>
+              <span class="kpi-value">{{ wfStats().avgOosDays }}</span>
+            </div>
           </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Best OOS Sharpe</span>
-            <span
-              class="kpi-value"
-              [class.good]="wfStats().bestOosScore !== null && wfStats().bestOosScore! > 0"
-              [class.bad]="wfStats().bestOosScore !== null && wfStats().bestOosScore! < 0"
-            >
-              {{ signedRatio(wfStats().bestOosScore) }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg consistency</span>
-            <span class="kpi-value">
-              {{ wfStats().avgConsistency !== null ? wfStats().avgConsistency!.toFixed(3) : '—' }}
-            </span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg IS days</span>
-            <span class="kpi-value">{{ wfStats().avgIsDays }}</span>
-          </div>
-          <div class="bt-kpi">
-            <span class="kpi-label">Avg OOS days</span>
-            <span class="kpi-value">{{ wfStats().avgOosDays }}</span>
-          </div>
-        </div>
 
-        <div class="bt-charts">
-          <app-chart-card
-            title="Status distribution"
-            subtitle="Completed · Failed · Running · Pending"
-            [options]="wfStatusDonutOptions()"
-            height="240px"
-          />
-          <app-chart-card
-            title="OOS score distribution"
-            [subtitle]="wfOosHistogram().subtitle"
-            [options]="wfOosHistogram().options"
-            height="240px"
-          />
-          <app-chart-card
-            title="Runs by symbol"
-            subtitle="Top 12 symbols by run count"
-            [options]="wfBySymbolOptions()"
-            height="240px"
-          />
-        </div>
+          <div class="bt-charts">
+            <app-chart-card
+              title="Status distribution"
+              subtitle="Completed · Failed · Running · Pending"
+              [options]="wfStatusDonutOptions()"
+              height="240px"
+            />
+            <app-chart-card
+              title="OOS score distribution"
+              [subtitle]="wfOosHistogram().subtitle"
+              [options]="wfOosHistogram().options"
+              height="240px"
+            />
+            <app-chart-card
+              title="Runs by symbol"
+              subtitle="Top 12 symbols by run count"
+              [options]="wfBySymbolOptions()"
+              height="240px"
+            />
+          </div>
 
-        <div class="bt-board-row">
-          <section class="bt-board">
-            <header class="bt-board-head">
-              <h3>Top performers</h3>
-              <span class="muted">Highest avg OOS score across completed runs</span>
-            </header>
-            @if (wfTopOos().length > 0) {
-              <table class="bt-board-table">
-                <thead>
-                  <tr>
-                    <th>Run</th>
-                    <th>Strategy</th>
-                    <th>Symbol</th>
-                    <th class="num">Avg OOS</th>
-                    <th class="num">Consistency</th>
-                    <th class="num">IS days</th>
-                    <th class="num">OOS days</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (r of wfTopOos(); track r.id) {
-                    <tr (click)="onWalkForwardClick(r)">
-                      <td class="mono">#{{ r.id }}</td>
-                      <td class="mono">#{{ r.strategyId }}</td>
-                      <td class="mono">{{ r.symbol }}</td>
-                      <td
-                        class="num mono"
-                        [class.profit]="(r.averageOutOfSampleScore ?? 0) > 0"
-                        [class.loss]="(r.averageOutOfSampleScore ?? 0) < 0"
-                      >
-                        {{ signedRatio(r.averageOutOfSampleScore) }}
-                      </td>
-                      <td class="num mono">
-                        {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
-                      </td>
-                      <td class="num mono">{{ r.inSampleDays }}</td>
-                      <td class="num mono">{{ r.outOfSampleDays }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            } @else {
-              <p class="muted" style="padding: var(--space-4)">
-                No completed runs with OOS scores yet.
-              </p>
-            }
-          </section>
-
-          <section class="bt-board">
-            <header class="bt-board-head">
-              <h3>Per-symbol breakdown</h3>
-              <span class="muted">Avg metrics grouped by symbol</span>
-            </header>
-            @if (wfPerSymbol().length > 0) {
-              <table class="bt-board-table">
-                <thead>
-                  <tr>
-                    <th>Symbol</th>
-                    <th class="num">Runs</th>
-                    <th class="num">Avg OOS</th>
-                    <th class="num">Best OOS</th>
-                    <th class="num">Avg consist.</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of wfPerSymbol(); track row.symbol) {
+          <div class="bt-board-row">
+            <section class="bt-board">
+              <header class="bt-board-head">
+                <h3>Top performers</h3>
+                <span class="muted">Highest avg OOS score across completed runs</span>
+              </header>
+              @if (wfTopOos().length > 0) {
+                <table class="bt-board-table">
+                  <thead>
                     <tr>
-                      <td class="mono">{{ row.symbol }}</td>
-                      <td class="num mono">{{ row.runs }}</td>
-                      <td
-                        class="num mono"
-                        [class.profit]="row.avgOos !== null && row.avgOos > 0"
-                        [class.loss]="row.avgOos !== null && row.avgOos < 0"
-                      >
-                        {{ signedRatio(row.avgOos) }}
-                      </td>
-                      <td
-                        class="num mono"
-                        [class.profit]="row.bestOos !== null && row.bestOos > 0"
-                        [class.loss]="row.bestOos !== null && row.bestOos < 0"
-                      >
-                        {{ signedRatio(row.bestOos) }}
-                      </td>
-                      <td class="num mono">
-                        {{ row.avgConsistency !== null ? row.avgConsistency.toFixed(3) : '—' }}
-                      </td>
+                      <th>Run</th>
+                      <th>Strategy</th>
+                      <th>Symbol</th>
+                      <th class="num">Avg OOS</th>
+                      <th class="num">Consistency</th>
+                      <th class="num">IS days</th>
+                      <th class="num">OOS days</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            }
-          </section>
-        </div>
+                  </thead>
+                  <tbody>
+                    @for (r of wfTopOos(); track r.id) {
+                      <tr (click)="onWalkForwardClick(r)">
+                        <td class="mono">#{{ r.id }}</td>
+                        <td class="mono">#{{ r.strategyId }}</td>
+                        <td class="mono">{{ r.symbol }}</td>
+                        <td
+                          class="num mono"
+                          [class.profit]="(r.averageOutOfSampleScore ?? 0) > 0"
+                          [class.loss]="(r.averageOutOfSampleScore ?? 0) < 0"
+                        >
+                          {{ signedRatio(r.averageOutOfSampleScore) }}
+                        </td>
+                        <td class="num mono">
+                          {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
+                        </td>
+                        <td class="num mono">{{ r.inSampleDays }}</td>
+                        <td class="num mono">{{ r.outOfSampleDays }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <p class="muted" style="padding: var(--space-4)">
+                  No completed runs with OOS scores yet.
+                </p>
+              }
+            </section>
+
+            <section class="bt-board">
+              <header class="bt-board-head">
+                <h3>Per-symbol breakdown</h3>
+                <span class="muted">Avg metrics grouped by symbol</span>
+              </header>
+              @if (wfPerSymbol().length > 0) {
+                <div class="bt-board-scroll">
+                  <table class="bt-board-table">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th class="num">Runs</th>
+                        <th class="num">Avg OOS</th>
+                        <th class="num">Best OOS</th>
+                        <th class="num">Avg consist.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (row of wfPerSymbol(); track row.symbol) {
+                        <tr>
+                          <td class="mono">{{ row.symbol }}</td>
+                          <td class="num mono">{{ row.runs }}</td>
+                          <td
+                            class="num mono"
+                            [class.profit]="row.avgOos !== null && row.avgOos > 0"
+                            [class.loss]="row.avgOos !== null && row.avgOos < 0"
+                          >
+                            {{ signedRatio(row.avgOos) }}
+                          </td>
+                          <td
+                            class="num mono"
+                            [class.profit]="row.bestOos !== null && row.bestOos > 0"
+                            [class.loss]="row.bestOos !== null && row.bestOos < 0"
+                          >
+                            {{ signedRatio(row.bestOos) }}
+                          </td>
+                          <td class="num mono">
+                            {{ row.avgConsistency !== null ? row.avgConsistency.toFixed(3) : '—' }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
+            </section>
+          </div>
+        }
 
         <section class="bt-board">
           <header class="bt-board-head">
@@ -706,6 +757,12 @@ import { FormsModule } from '@angular/forms';
         border-radius: var(--radius-md);
         overflow: hidden;
       }
+      /* Twelve columns in a ~1,110px card: at the grid's 18px cell padding the single-word
+         headers still broke mid-word ("STRATEG Y", "TRADE S", "SHARP E") at their minimums.
+         12px leaves every header and value on its line without widening the minimums. */
+      .bt-runs ::ng-deep .ag-theme-alpine {
+        --ag-cell-horizontal-padding: 12px;
+      }
       .bt-board-head {
         display: flex;
         align-items: baseline;
@@ -764,6 +821,25 @@ import { FormsModule } from '@angular/forms';
         color: var(--profit);
       }
       .bt-board-table .loss {
+        color: var(--loss);
+      }
+      /* The per-symbol table (25+ rows) scrolls inside roughly the height of the eight-row
+         leaderboard beside it — at full height it left a ~600px black hole under that card. */
+      .bt-board-scroll {
+        max-height: 312px;
+        overflow-y: auto;
+      }
+      .bt-board-scroll thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .sample-note {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .sample-note-error {
         color: var(--loss);
       }
       .muted {
@@ -852,9 +928,14 @@ export class BacktestsPageComponent implements OnInit {
     });
   }
 
-  // ── Analytics samples (probe-and-fetch, capped at 5000) ─────────────
+  // ── Analytics samples (probe-and-fetch, sized by analyticsSampleSize) ─────
   readonly btSample = signal<BacktestRunDto[]>([]);
   readonly wfSample = signal<WalkForwardRunDto[]>([]);
+  /** The list's true size from the probe — "Total runs" is this, not the sample's length. */
+  readonly btSampleTotal = signal(0);
+  readonly wfSampleTotal = signal(0);
+  readonly btSampleState = signal<SampleState>('loading');
+  readonly wfSampleState = signal<SampleState>('loading');
   private wfLoaded = false;
 
   constructor() {
@@ -952,7 +1033,8 @@ export class BacktestsPageComponent implements OnInit {
         returnCount++;
         if (r.totalReturn > bestReturn) bestReturn = r.totalReturn;
       }
-      if (r.winRate != null) {
+      // A no-trade run's 0.0 win rate is "not measured", not 0% — it dragged the average down.
+      if (r.winRate != null && hasTrades(r)) {
         winRateSum += r.winRate;
         winRateCount++;
       }
@@ -1183,7 +1265,7 @@ export class BacktestsPageComponent implements OnInit {
         g._retCount++;
         if (g.bestReturn == null || r.totalReturn > g.bestReturn) g.bestReturn = r.totalReturn;
       }
-      if (r.sharpeRatio != null) {
+      if (r.sharpeRatio != null && hasTrades(r)) {
         g._shSum += r.sharpeRatio;
         g._shCount++;
       }
@@ -1426,40 +1508,57 @@ export class BacktestsPageComponent implements OnInit {
   });
 
   private loadBtAnalyticsSample(): void {
-    this.backtestsService.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).subscribe({
+    this.btSampleState.set('loading');
+    this.backtestsService.list(newestRowsRequest(1)).subscribe({
       next: (probe) => {
         const total = probe?.data?.pager?.totalItemCount ?? 0;
+        this.btSampleTotal.set(total);
         if (total === 0) {
           this.btSample.set([]);
+          this.btSampleState.set('ready');
           return;
         }
-        this.backtestsService
-          .list({ currentPage: 1, itemCountPerPage: Math.min(total, 5000), filter: null })
-          .subscribe({
-            next: (full) => this.btSample.set(full?.data?.data ?? []),
-          });
+        const size = analyticsSampleSize(total, probe?.data?.data?.[0]);
+        this.backtestsService.list(newestRowsRequest(size)).subscribe({
+          next: (full) => {
+            this.btSample.set(full?.data?.data ?? []);
+            this.btSampleState.set('ready');
+          },
+          error: () => this.btSampleState.set('error'),
+        });
       },
+      error: () => this.btSampleState.set('error'),
     });
   }
 
   private loadWfAnalyticsSample(): void {
     if (this.wfLoaded) return;
     this.wfLoaded = true;
-    this.walkForwardService.list({ currentPage: 1, itemCountPerPage: 1, filter: null }).subscribe({
+    this.wfSampleState.set('loading');
+    const failed = () => {
+      this.wfLoaded = false;
+      this.wfSampleState.set('error');
+    };
+    this.walkForwardService.list(newestRowsRequest(1)).subscribe({
       next: (probe) => {
         const total = probe?.data?.pager?.totalItemCount ?? 0;
+        this.wfSampleTotal.set(total);
         if (total === 0) {
           this.wfSample.set([]);
+          this.wfSampleState.set('ready');
           return;
         }
-        this.walkForwardService
-          .list({ currentPage: 1, itemCountPerPage: Math.min(total, 5000), filter: null })
-          .subscribe({
-            next: (full) => this.wfSample.set(full?.data?.data ?? []),
-            error: () => (this.wfLoaded = false),
-          });
+        // The probe row's size bounds the download (walk-forward rows once carried ~64 KB each).
+        const size = analyticsSampleSize(total, probe?.data?.data?.[0]);
+        this.walkForwardService.list(newestRowsRequest(size)).subscribe({
+          next: (full) => {
+            this.wfSample.set(full?.data?.data ?? []);
+            this.wfSampleState.set('ready');
+          },
+          error: failed,
+        });
       },
-      error: () => (this.wfLoaded = false),
+      error: failed,
     });
   }
 
@@ -1474,77 +1573,101 @@ export class BacktestsPageComponent implements OnInit {
     }).format(v);
   }
 
-  /** One date format for the whole page: "Sep 5, 2026 14:07". */
+  /**
+   * One date format for the whole page: "Sep 5, 2026 14:07", in UTC like the run's detail page —
+   * the list printed browser time, so a run "Completed Oct 18 23:05" opened as "22:05 (UTC)".
+   */
   private fmtDate(v: string | null | undefined): string {
     if (!v) return '—';
     try {
-      return formatDate(v, 'MMM d, yyyy HH:mm', 'en-US');
+      return formatDate(v, 'MMM d, yyyy HH:mm', 'en-US', 'UTC');
     } catch {
       return '—';
     }
   }
 
-  // Column widths are sized so the uppercase header fits without an ellipsis
-  // (STRATEGY / TRADES / SHARPE / CONSISTENCY were all truncated at 90–120px).
+  // Thirteen columns at the table's 88px default minimum overflowed the ~1,110px card: the grid
+  // scrolled sideways, "Final" printed "$10,000.0(" and "Completed" sat off the edge, and
+  // STRATEGY wrapped mid-word. Symbol and timeframe now share one column, and every column carries
+  // its own minimum (sized to its header and widest value) so sizeColumnsToFit lands inside the card.
   backtestColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'strategyId', headerName: 'Strategy', width: 105 },
-    { field: 'symbol', headerName: 'Symbol', width: 100 },
-    { field: 'timeframe', headerName: 'TF', width: 70 },
+    { field: 'id', headerName: 'ID', width: 70, minWidth: 64 },
+    { field: 'strategyId', headerName: 'Strategy', width: 100, minWidth: 96 },
+    {
+      field: 'symbol',
+      headerName: 'Market',
+      width: 125,
+      minWidth: 112,
+      valueFormatter: (p: any) =>
+        p.data ? `${p.data.symbol ?? '—'} · ${p.data.timeframe ?? '—'}` : (p.value ?? '—'),
+    },
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 118,
+      minWidth: 110,
       cellRenderer: StatusPillCellComponent,
       cellRendererParams: { label: 'Run status' },
     },
     {
       field: 'totalTrades',
       headerName: 'Trades',
-      width: 95,
+      width: 80,
+      minWidth: 76,
       valueFormatter: (p: any) => (p.value != null ? p.value : '—'),
     },
+    // Win rate, PF and Sharpe of a run that closed no trade are not measured (the engine stores
+    // 0.0): they read "—", not "0.0%" / "0.00".
     {
       field: 'winRate',
       headerName: 'Win %',
-      width: 90,
-      valueFormatter: (p: any) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
+      width: 76,
+      minWidth: 70,
+      valueFormatter: (p: any) =>
+        p.value != null && (!p.data || hasTrades(p.data)) ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       field: 'profitFactor',
       headerName: 'PF',
-      width: 80,
-      valueFormatter: (p: any) => this.fmtProfitFactor(p.value),
+      width: 66,
+      minWidth: 60,
+      valueFormatter: (p: any) =>
+        !p.data || hasTrades(p.data) ? this.fmtProfitFactor(p.value) : '—',
     },
     {
       field: 'sharpeRatio',
       headerName: 'Sharpe',
-      width: 95,
-      valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(2) : '—'),
+      width: 80,
+      minWidth: 76,
+      valueFormatter: (p: any) =>
+        p.value != null && (!p.data || hasTrades(p.data)) ? p.value.toFixed(2) : '—',
     },
     {
       field: 'maxDrawdownPct',
       headerName: 'Max DD',
-      width: 100,
+      width: 84,
+      minWidth: 80,
       valueFormatter: (p: any) => (p.value != null ? `${p.value.toFixed(2)}%` : '—'),
     },
     {
       field: 'totalReturn',
       headerName: 'Return',
-      width: 110,
+      width: 92,
+      minWidth: 88,
       valueFormatter: (p: any) => this.signedPct(p.value),
     },
     {
       field: 'finalBalance',
       headerName: 'Final',
-      width: 120,
+      width: 130,
+      minWidth: 124,
       valueFormatter: (p: any) => this.fmtMoney(p.value),
     },
     {
       field: 'completedAt',
-      headerName: 'Completed',
+      headerName: 'Completed (UTC)',
       flex: 1,
-      minWidth: 150,
+      minWidth: 136,
       valueFormatter: (p: any) => this.fmtDate(p.value),
     },
   ];
@@ -1578,7 +1701,7 @@ export class BacktestsPageComponent implements OnInit {
     },
     {
       field: 'startedAt',
-      headerName: 'Started',
+      headerName: 'Started (UTC)',
       flex: 1,
       minWidth: 150,
       valueFormatter: (p: any) => this.fmtDate(p.value),

@@ -1,12 +1,7 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  OnInit,
-  computed,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { Subscription } from 'rxjs';
 import { DatePipe, DecimalPipe } from '@angular/common';
 
 import { MLModelsService } from '@core/services/ml-models.service';
@@ -61,24 +56,29 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
               }
             </div>
             <div class="title-actions">
+              <!-- Activation puts this model in front of live signals and
+                   deactivates the serving one, so it asks first (it fired on a
+                   single click). Rollback acts on whichever model is serving the
+                   pair, so it is offered only on that model's own page. -->
               @if (!m.isActive) {
                 <button
                   type="button"
                   class="btn btn-primary"
-                  (click)="onActivate()"
+                  (click)="showActivate.set(true)"
                   [disabled]="busy()"
                 >
                   Activate
                 </button>
+              } @else {
+                <button
+                  type="button"
+                  class="btn btn-warning"
+                  (click)="showRollback.set(true)"
+                  [disabled]="busy()"
+                >
+                  Rollback to Prior
+                </button>
               }
-              <button
-                type="button"
-                class="btn btn-warning"
-                (click)="showRollback.set(true)"
-                [disabled]="busy()"
-              >
-                Rollback to Prior
-              </button>
             </div>
           </div>
 
@@ -113,7 +113,7 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
             <dl class="grid">
               <div class="item">
                 <dt>Symbol</dt>
-                <dd>{{ m.symbol ?? '-' }}</dd>
+                <dd>{{ m.symbol ?? '—' }}</dd>
               </div>
               <div class="item">
                 <dt>Timeframe</dt>
@@ -121,7 +121,7 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
               </div>
               <div class="item">
                 <dt>Version</dt>
-                <dd class="mono">{{ m.modelVersion ?? '-' }}</dd>
+                <dd class="mono">{{ m.modelVersion ?? '—' }}</dd>
               </div>
               <div class="item">
                 <dt>Status</dt>
@@ -336,171 +336,182 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
             @if (trainingRunsLoading()) {
               <app-card-skeleton [lines]="4" />
             } @else if (trainingRuns().length > 0) {
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>Run</th>
-                    <th>Status</th>
-                    <th>Started</th>
-                    <th>Duration</th>
-                    <th class="num">Dir Acc</th>
-                    <th class="num">Mag RMSE</th>
-                    <th class="num">Samples</th>
-                    <th>Model</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (run of trainingRuns(); track run.id) {
-                    <tr
-                      [class.row-current]="run.mlModelId === m.id"
-                      [class.row-clickable]="true"
-                      [class.row-expanded]="expandedRunId() === run.id"
-                      (click)="toggleRun(run.id)"
-                      [attr.aria-expanded]="expandedRunId() === run.id"
-                    >
-                      <td class="mono">
-                        <span
-                          class="caret"
-                          [class.caret-open]="expandedRunId() === run.id"
-                          aria-hidden="true"
-                        >
-                          ›
-                        </span>
-                        #{{ run.id }}
-                      </td>
-                      <td>
-                        <app-status-badge [status]="run.status" type="default" />
-                      </td>
-                      <td>{{ run.startedAt | date: 'MMM d, HH:mm' }}</td>
-                      <td class="mono">{{ runDuration(run) }}</td>
-                      <td class="num mono">
-                        {{
-                          run.directionAccuracy !== null
-                            ? (run.directionAccuracy * 100 | number: '1.2-2') + '%'
-                            : '—'
-                        }}
-                      </td>
-                      <td class="num mono">
-                        {{
-                          run.magnitudeRMSE !== null ? (run.magnitudeRMSE | number: '1.4-4') : '—'
-                        }}
-                      </td>
-                      <td class="num mono">{{ run.totalSamples | number }}</td>
-                      <td class="mono">
-                        @if (run.mlModelId; as mid) {
-                          @if (mid === m.id) {
-                            <span class="self-tag">this model</span>
-                          } @else {
-                            <a [routerLink]="['/ml-models', mid]" (click)="$event.stopPropagation()"
-                              >#{{ mid }}</a
-                            >
-                          }
-                        } @else {
-                          —
-                        }
-                      </td>
+              <!-- Scrolls inside the card: .card clips overflow, so at tablet width the
+                   right-hand columns were cut off with no way to reach them. -->
+              <div class="table-scroll">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th>Run</th>
+                      <th>Status</th>
+                      <th>Started</th>
+                      <th>Duration</th>
+                      <th class="num">Dir Acc</th>
+                      <th class="num">Mag RMSE</th>
+                      <th class="num">Samples</th>
+                      <th>Model</th>
                     </tr>
-                    @if (expandedRunId() === run.id) {
-                      <tr class="row-detail">
-                        <td colspan="8">
-                          @if (diagnosticsLoading()) {
-                            <app-card-skeleton [lines]="3" />
-                          } @else if (diagnostics(); as d) {
-                            <div class="diag-grid">
-                              @if (run.errorMessage) {
-                                <div class="diag-item diag-error">
-                                  <dt>Error message</dt>
-                                  <dd class="mono">{{ run.errorMessage }}</dd>
-                                </div>
-                              }
-                              <div class="diag-item">
-                                <dt>Architecture</dt>
-                                <dd class="mono">{{ d.learnerArchitecture }}</dd>
-                              </div>
-                              <div class="diag-item">
-                                <dt>Trigger</dt>
-                                <dd>{{ d.triggerType }}</dd>
-                              </div>
-                              <div class="diag-item">
-                                <dt>Priority</dt>
-                                <dd class="mono">{{ d.priority }}</dd>
-                              </div>
-                              <div class="diag-item">
-                                <dt>Attempts</dt>
-                                <dd class="mono" [class.muted]="d.attemptCount === 0">
-                                  {{ attemptsLabel(d.attemptCount) }}
-                                </dd>
-                              </div>
-                              @if (d.f1Score !== null) {
-                                <div class="diag-item">
-                                  <dt>F1</dt>
-                                  <dd class="mono">{{ d.f1Score | number: '1.3-3' }}</dd>
-                                </div>
-                              }
-                              @if (d.brierScore !== null) {
-                                <div class="diag-item">
-                                  <dt>Brier</dt>
-                                  <dd class="mono">{{ d.brierScore | number: '1.4-4' }}</dd>
-                                </div>
-                              }
-                              @if (d.sharpeRatio !== null) {
-                                <div class="diag-item">
-                                  <dt>Sharpe</dt>
-                                  <dd class="mono">{{ d.sharpeRatio | number: '1.2-2' }}</dd>
-                                </div>
-                              }
-                              @if (d.expectedValue !== null) {
-                                <div class="diag-item">
-                                  <dt>Expected Value</dt>
-                                  <dd class="mono">{{ d.expectedValue | number: '1.4-4' }}</dd>
-                                </div>
-                              }
-                              @if (d.abstentionRate !== null) {
-                                <div class="diag-item">
-                                  <dt>Abstention</dt>
-                                  <dd class="mono">
-                                    {{ (d.abstentionRate * 100 | number: '1.1-1') + '%' }}
-                                  </dd>
-                                </div>
-                              }
-                              @if (d.labelImbalanceRatio !== null) {
-                                <div class="diag-item">
-                                  <dt>Label imbalance</dt>
-                                  <dd class="mono">
-                                    {{ d.labelImbalanceRatio | number: '1.2-2' }}
-                                  </dd>
-                                </div>
-                              }
-                              @if (d.datasetHash) {
-                                <div class="diag-item">
-                                  <dt>Dataset hash</dt>
-                                  <dd class="mono trunc">{{ d.datasetHash }}</dd>
-                                </div>
-                              }
-                              @if (trainingFlagSummary(d); as flags) {
-                                <div class="diag-item diag-wide">
-                                  <dt>Flags</dt>
-                                  <dd>{{ flags }}</dd>
-                                </div>
-                              }
-                              @if (d.hyperparamConfigJson) {
-                                <div class="diag-item diag-wide">
-                                  <dt>Hyperparameters</dt>
-                                  <dd>
-                                    <pre class="json">{{ prettyJson(d.hyperparamConfigJson) }}</pre>
-                                  </dd>
-                                </div>
-                              }
-                            </div>
+                  </thead>
+                  <tbody>
+                    @for (run of trainingRuns(); track run.id) {
+                      <tr
+                        [class.row-current]="run.mlModelId === m.id"
+                        [class.row-clickable]="true"
+                        [class.row-expanded]="expandedRunId() === run.id"
+                        (click)="toggleRun(run.id)"
+                        (keydown.enter)="toggleRun(run.id)"
+                        (keydown.space)="$event.preventDefault(); toggleRun(run.id)"
+                        tabindex="0"
+                        [attr.aria-expanded]="expandedRunId() === run.id"
+                      >
+                        <td class="mono nowrap">
+                          <span
+                            class="caret"
+                            [class.caret-open]="expandedRunId() === run.id"
+                            aria-hidden="true"
+                          >
+                            ›
+                          </span>
+                          #{{ run.id }}
+                        </td>
+                        <td>
+                          <app-status-badge [status]="run.status" type="default" />
+                        </td>
+                        <td class="nowrap">{{ run.startedAt | date: 'MMM d, HH:mm' }}</td>
+                        <td class="mono">{{ runDuration(run) }}</td>
+                        <td class="num mono">
+                          {{
+                            run.directionAccuracy !== null
+                              ? (run.directionAccuracy * 100 | number: '1.2-2') + '%'
+                              : '—'
+                          }}
+                        </td>
+                        <td class="num mono">
+                          {{
+                            run.magnitudeRMSE !== null ? (run.magnitudeRMSE | number: '1.4-4') : '—'
+                          }}
+                        </td>
+                        <td class="num mono">{{ run.totalSamples | number }}</td>
+                        <td class="mono">
+                          @if (run.mlModelId; as mid) {
+                            @if (mid === m.id) {
+                              <span class="self-tag">this model</span>
+                            } @else {
+                              <a
+                                [routerLink]="['/ml-models', mid]"
+                                (click)="$event.stopPropagation()"
+                                >#{{ mid }}</a
+                              >
+                            }
                           } @else {
-                            <p class="muted">Diagnostics unavailable for this run.</p>
+                            —
                           }
                         </td>
                       </tr>
+                      @if (expandedRunId() === run.id) {
+                        <tr class="row-detail">
+                          <td colspan="8">
+                            @if (diagnosticsLoading()) {
+                              <app-card-skeleton [lines]="3" />
+                            } @else if (diagnostics(); as d) {
+                              <div class="diag-grid">
+                                @if (run.errorMessage) {
+                                  <div class="diag-item diag-error">
+                                    <dt>Error message</dt>
+                                    <dd class="mono">{{ run.errorMessage }}</dd>
+                                  </div>
+                                }
+                                <div class="diag-item">
+                                  <dt>Architecture</dt>
+                                  <dd class="mono">{{ d.learnerArchitecture }}</dd>
+                                </div>
+                                <div class="diag-item">
+                                  <dt>Trigger</dt>
+                                  <dd>{{ d.triggerType }}</dd>
+                                </div>
+                                <div class="diag-item">
+                                  <dt>Priority</dt>
+                                  <dd class="mono">{{ d.priority }}</dd>
+                                </div>
+                                <div class="diag-item">
+                                  <dt>Attempts</dt>
+                                  <dd class="mono" [class.muted]="d.attemptCount === 0">
+                                    {{ attemptsLabel(d.attemptCount) }}
+                                  </dd>
+                                </div>
+                                @if (d.f1Score !== null) {
+                                  <div class="diag-item">
+                                    <dt>F1</dt>
+                                    <dd class="mono">{{ d.f1Score | number: '1.3-3' }}</dd>
+                                  </div>
+                                }
+                                @if (d.brierScore !== null) {
+                                  <div class="diag-item">
+                                    <dt>Brier</dt>
+                                    <dd class="mono">{{ d.brierScore | number: '1.4-4' }}</dd>
+                                  </div>
+                                }
+                                @if (d.sharpeRatio !== null) {
+                                  <div class="diag-item">
+                                    <dt>Sharpe</dt>
+                                    <dd class="mono">{{ d.sharpeRatio | number: '1.2-2' }}</dd>
+                                  </div>
+                                }
+                                @if (d.expectedValue !== null) {
+                                  <div class="diag-item">
+                                    <dt>Expected Value</dt>
+                                    <dd class="mono">{{ d.expectedValue | number: '1.4-4' }}</dd>
+                                  </div>
+                                }
+                                @if (d.abstentionRate !== null) {
+                                  <div class="diag-item">
+                                    <dt>Abstention</dt>
+                                    <dd class="mono">
+                                      {{ (d.abstentionRate * 100 | number: '1.1-1') + '%' }}
+                                    </dd>
+                                  </div>
+                                }
+                                @if (d.labelImbalanceRatio !== null) {
+                                  <div class="diag-item">
+                                    <dt>Label imbalance</dt>
+                                    <dd class="mono">
+                                      {{ d.labelImbalanceRatio | number: '1.2-2' }}
+                                    </dd>
+                                  </div>
+                                }
+                                @if (d.datasetHash) {
+                                  <div class="diag-item">
+                                    <dt>Dataset hash</dt>
+                                    <dd class="mono trunc">{{ d.datasetHash }}</dd>
+                                  </div>
+                                }
+                                @if (trainingFlagSummary(d); as flags) {
+                                  <div class="diag-item diag-wide">
+                                    <dt>Flags</dt>
+                                    <dd>{{ flags }}</dd>
+                                  </div>
+                                }
+                                @if (d.hyperparamConfigJson) {
+                                  <div class="diag-item diag-wide">
+                                    <dt>Hyperparameters</dt>
+                                    <dd>
+                                      <pre class="json">{{
+                                        prettyJson(d.hyperparamConfigJson)
+                                      }}</pre>
+                                    </dd>
+                                  </div>
+                                }
+                              </div>
+                            } @else {
+                              <p class="muted">Diagnostics unavailable for this run.</p>
+                            }
+                          </td>
+                        </tr>
+                      }
                     }
-                  }
-                </tbody>
-              </table>
+                  </tbody>
+                </table>
+              </div>
             } @else {
               <app-empty-state
                 title="No training runs found"
@@ -515,7 +526,8 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
             <header class="card-head">
               <h3>Feature Importance</h3>
               <span class="card-sub">
-                {{ m.symbol ?? 'all symbols' }} · {{ m.timeframe }} · cross-architecture consensus
+                {{ m.symbol ?? 'all symbols' }} · {{ m.timeframe }} ·
+                {{ featureImportanceSource() }}
               </span>
             </header>
             @if (featureImportanceLoading()) {
@@ -576,18 +588,32 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
                     MRMR ranking.
                   </span>
                 </div>
+                <!-- MRMR scores are relevance minus redundancy and go negative for
+                     most features; the one-sided track clamped those to empty
+                     grey bars (24 of 25 on #918) that read as "no data". Same
+                     diverging treatment as the consensus bars. The list is in
+                     MRMR selection order, which is greedy — not sorted by score. -->
                 <div class="fi-bars">
                   @for (f of fi.mrmrFallback; track f.featureName) {
                     <div class="fi-row" [title]="mrmrTooltip(f)">
                       <div class="fi-name mono">{{ f.featureName }}</div>
-                      <div class="fi-bar-track">
-                        <div
-                          class="fi-bar-fill"
-                          [style.width.%]="(Math.max(f.mrmrScore, 0) / mrmrFallbackMax()) * 100"
-                        ></div>
+                      <div class="fi-bar-track diverging">
+                        <span class="fi-zero" aria-hidden="true"></span>
+                        @if (f.mrmrScore !== 0) {
+                          <div
+                            class="fi-bar-fill"
+                            [class.neg]="f.mrmrScore < 0"
+                            [style.width.%]="mrmrHalfWidth(f.mrmrScore)"
+                            [style.left.%]="f.mrmrScore < 0 ? 50 - mrmrHalfWidth(f.mrmrScore) : 50"
+                          ></div>
+                        }
                       </div>
-                      <div class="fi-value mono">{{ f.mrmrScore | number: '1.4-4' }}</div>
-                      <div class="fi-agree mono">#{{ f.mrmrRank + 1 }}</div>
+                      <div class="fi-value mono" [class.muted]="f.mrmrScore === 0">
+                        {{ f.mrmrScore | number: '1.4-4' }}
+                      </div>
+                      <div class="fi-agree mono" title="MRMR selection order">
+                        #{{ f.mrmrRank + 1 }}
+                      </div>
                     </div>
                   }
                 </div>
@@ -608,58 +634,67 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
           <section class="card">
             <header class="card-head">
               <h3>Drift Alerts</h3>
-              <span class="card-sub">{{ m.symbol ?? 'all symbols' }}</span>
+              <span class="card-sub">
+                {{ m.symbol ?? 'all symbols' }} · every timeframe
+                @if (driftAlertTotal() > driftAlerts().length) {
+                  · latest {{ driftAlerts().length }} of {{ driftAlertTotal() | number }}
+                }
+              </span>
             </header>
             @if (driftAlertsLoading()) {
               <app-card-skeleton [lines]="3" />
             } @else if (groupedDriftAlerts().length > 0) {
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Severity</th>
-                    <!-- The engine rarely records a detector; a column of dashes says nothing. -->
-                    @if (hasDetectorInfo()) {
-                      <th>Detector</th>
-                    }
-                    <th>Last Triggered</th>
-                    <th class="num">Count</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (a of groupedDriftAlerts(); track a.key) {
+              <!-- Scrolls inside the card: .card clips overflow, so at tablet width the
+                   right-hand columns were cut off with no way to reach them. -->
+              <div class="table-scroll">
+                <table class="table">
+                  <thead>
                     <tr>
-                      <td>{{ a.alertType }}</td>
-                      <td>
-                        <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
-                      </td>
+                      <th>Type</th>
+                      <th>Severity</th>
+                      <!-- The engine rarely records a detector; a column of dashes says nothing. -->
                       @if (hasDetectorInfo()) {
-                        <td class="mono">{{ a.detectorType ?? '—' }}</td>
+                        <th>Detector</th>
                       }
-                      <td>
-                        {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: 'MMM d, HH:mm') : '—' }}
-                      </td>
-                      <td class="num mono">{{ a.count }}</td>
-                      <td>
-                        @if (a.activeCount > 0) {
-                          <!-- Rows are grouped; the Count column already carries
-                               the multiplicity, so the pill just says "Active". -->
-                          <span
-                            class="pill pill-active"
-                            [title]="a.activeCount + ' of ' + a.count + ' still active'"
-                            >Active</span
-                          >
-                        } @else if (a.autoResolvedCount > 0) {
-                          <span class="pill pill-resolved">Auto-resolved</span>
-                        } @else {
-                          <span class="pill">Inactive</span>
-                        }
-                      </td>
+                      <th>Last Triggered</th>
+                      <th class="num">Count</th>
+                      <th>Status</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    @for (a of groupedDriftAlerts(); track a.key) {
+                      <tr>
+                        <td>{{ a.alertType }}</td>
+                        <td>
+                          <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
+                        </td>
+                        @if (hasDetectorInfo()) {
+                          <td class="mono">{{ a.detectorType ?? '—' }}</td>
+                        }
+                        <td>
+                          {{ a.lastTriggeredAt ? (a.lastTriggeredAt | date: 'MMM d, HH:mm') : '—' }}
+                        </td>
+                        <td class="num mono">{{ a.count }}</td>
+                        <td>
+                          @if (a.activeCount > 0) {
+                            <!-- Rows are grouped; the Count column already carries
+                                 the multiplicity, so the pill just says "Active". -->
+                            <span
+                              class="pill pill-active"
+                              [title]="a.activeCount + ' of ' + a.count + ' still active'"
+                              >Active</span
+                            >
+                          } @else if (a.autoResolvedCount > 0) {
+                            <span class="pill pill-resolved">Auto-resolved</span>
+                          } @else {
+                            <span class="pill">Inactive</span>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
             } @else {
               <app-empty-state
                 title="No drift alerts"
@@ -673,11 +708,14 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
           <section class="card">
             <header class="card-head"><h3>Related</h3></header>
             <div class="related">
-              <button type="button" class="related-link" (click)="goBack()">
-                Back to model registry <span aria-hidden="true">&rarr;</span>
-              </button>
+              <a class="related-link" routerLink="/ml-models"
+                >Model registry <span aria-hidden="true">&rarr;</span></a
+              >
               <a class="related-link" [routerLink]="['/drift-report']"
                 >Drift report <span aria-hidden="true">&rarr;</span></a
+              >
+              <a class="related-link" routerLink="/ml-models/training-queue"
+                >Training queue <span aria-hidden="true">&rarr;</span></a
               >
             </div>
           </section>
@@ -690,6 +728,24 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
           (retry)="goBack()"
         />
       }
+
+      <app-confirm-dialog
+        [open]="showActivate()"
+        title="Activate this model?"
+        [message]="
+          'Model #' +
+          (model()?.id ?? '—') +
+          ' will start serving live predictions for ' +
+          (model()?.symbol ?? '—') +
+          ' / ' +
+          (model()?.timeframe ?? '—') +
+          '. The model serving that pair now will be deactivated.'
+        "
+        confirmLabel="Activate"
+        [loading]="busy()"
+        (confirm)="onActivate()"
+        (cancelled)="showActivate.set(false)"
+      />
 
       <app-confirm-dialog
         [open]="showRollback()"
@@ -838,17 +894,21 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: var(--text-xs);
       }
+      /* Links in one left-aligned row. The registry link was a default-styled
+         <button> stretched across the card with its label centred, sitting
+         above a left-aligned anchor. */
       .related {
         padding: var(--space-4) var(--space-5);
         display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
+        flex-wrap: wrap;
+        gap: var(--space-3) var(--space-6);
       }
       .related-link {
         color: var(--accent);
         cursor: pointer;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
+        text-decoration: none;
       }
       .related-link:hover {
         text-decoration: underline;
@@ -956,6 +1016,20 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
       }
+      /* The engine's AlertSeverity is Info | Medium | High | Critical; only
+         Critical and Info had a colour, so a High drift alert rendered as a
+         neutral grey pill. */
+      .pill[data-sev='High'] {
+        background: rgba(255, 149, 0, 0.14);
+        color: var(--warning);
+      }
+      .pill[data-sev='Medium'] {
+        background: rgba(255, 204, 0, 0.14);
+        color: #b38f00;
+      }
+      :host-context([data-theme='dark']) .pill[data-sev='Medium'] {
+        color: #ffd60a;
+      }
       .pill[data-sev='Warning'] {
         background: rgba(255, 149, 0, 0.12);
         color: #c93400;
@@ -972,8 +1046,18 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
         background: rgba(52, 199, 89, 0.12);
         color: #248a3d;
       }
+      .table-scroll {
+        overflow-x: auto;
+      }
+      .table td.nowrap {
+        white-space: nowrap;
+      }
       .row-clickable {
         cursor: pointer;
+      }
+      .row-clickable:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: -2px;
       }
       .row-clickable:hover {
         background: var(--bg-tertiary);
@@ -1203,7 +1287,7 @@ import { MLModelHealthPanelComponent } from '../../components/ml-model-health-pa
     `,
   ],
 })
-export class MLModelDetailPageComponent implements OnInit {
+export class MLModelDetailPageComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly service = inject(MLModelsService);
@@ -1214,10 +1298,13 @@ export class MLModelDetailPageComponent implements OnInit {
   readonly busy = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly showRollback = signal(false);
+  readonly showActivate = signal(false);
 
   readonly trainingRuns = signal<MLTrainingRunDto[]>([]);
   readonly trainingRunsLoading = signal(false);
   readonly driftAlerts = signal<DriftAlertDto[]>([]);
+  /** Server total for the symbol — the card shows the latest page only. */
+  readonly driftAlertTotal = signal(0);
   readonly driftAlertsLoading = signal(false);
 
   readonly expandedRunId = signal<number | null>(null);
@@ -1274,15 +1361,25 @@ export class MLModelDetailPageComponent implements OnInit {
     this.groupedDriftAlerts().some((a) => !!a.detectorType),
   );
 
+  /** Largest |MRMR score| in the fallback list — the diverging bars' full half-width. */
   readonly mrmrFallbackMax = computed(() => {
     const fb = this.featureImportance()?.mrmrFallback ?? [];
     if (fb.length === 0) return 1;
-    return Math.max(...fb.map((f) => Math.max(f.mrmrScore, 0)), 1e-9);
+    return Math.max(...fb.map((f) => Math.abs(f.mrmrScore)), 1e-9);
   });
 
-  // Exposed for templates so we don't need a `Math` pipe — Angular's strict
-  // template checker can't see globals.
-  readonly Math = Math;
+  /** Half-track width (0–50%) for an MRMR diverging bar; the zero line sits at 50%. */
+  mrmrHalfWidth(value: number): number {
+    return Math.min(50, (Math.abs(value) / this.mrmrFallbackMax()) * 50);
+  }
+
+  /** What the Feature Importance card is actually showing — the subtitle claimed "consensus" for both. */
+  readonly featureImportanceSource = computed(() => {
+    const fi = this.featureImportance();
+    if (fi && fi.features.length === 0 && fi.mrmrFallback.length > 0) return 'MRMR ranking';
+    return 'cross-architecture consensus';
+  });
+
   // Cache so re-expanding the same row doesn't re-fetch.
   private readonly diagCache = new Map<number, MLTrainingRunDiagnosticsDto>();
 
@@ -1358,14 +1455,40 @@ export class MLModelDetailPageComponent implements OnInit {
 
   readonly failureMessage = computed(() => this.linkedTrainingRun()?.errorMessage ?? null);
 
-  ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (!id || Number.isNaN(id)) {
-      this.loading.set(false);
-      this.errorMessage.set('Invalid model id');
-      return;
-    }
-    this.load(id);
+  /** Side-car fetches for the model on screen; cancelled when the route moves to another id. */
+  private sideLoads = new Subscription();
+
+  constructor() {
+    // Follow the route, not a one-off snapshot: /ml-models/:id reuses this
+    // component, so the "#920" link in Recent Training Runs (and the redirect
+    // after a rollback) changed the URL while the page kept showing the old
+    // model.
+    this.route.paramMap.pipe(takeUntilDestroyed()).subscribe((params) => {
+      const id = Number(params.get('id'));
+      this.resetForModel();
+      if (!id || Number.isNaN(id)) {
+        this.loading.set(false);
+        this.model.set(null);
+        this.errorMessage.set('Invalid model id');
+        return;
+      }
+      this.load(id);
+    });
+  }
+
+  /** Clear everything that belongs to the previous model before loading another. */
+  private resetForModel(): void {
+    this.sideLoads.unsubscribe();
+    this.sideLoads = new Subscription();
+    this.expandedRunId.set(null);
+    this.diagnostics.set(null);
+    this.producingDiagnostics.set(null);
+    this.trainingRuns.set([]);
+    this.driftAlerts.set([]);
+    this.driftAlertTotal.set(0);
+    this.featureImportance.set(null);
+    this.showActivate.set(false);
+    this.showRollback.set(false);
   }
 
   goBack(): void {
@@ -1379,14 +1502,20 @@ export class MLModelDetailPageComponent implements OnInit {
     this.service.activate(m.id).subscribe({
       next: (res) => {
         this.busy.set(false);
+        this.showActivate.set(false);
         if (res.status) {
           this.notifications.success(`Model ${m.symbol} ${m.timeframe} activated`);
+          this.resetForModel();
           this.load(m.id);
         } else {
           this.notifications.error(res.message ?? 'Activation failed');
         }
       },
-      error: () => this.busy.set(false),
+      error: () => {
+        this.busy.set(false);
+        this.showActivate.set(false);
+        this.notifications.error('Could not reach the engine — the model was not activated.');
+      },
     });
   }
 
@@ -1416,6 +1545,7 @@ export class MLModelDetailPageComponent implements OnInit {
       error: () => {
         this.busy.set(false);
         this.showRollback.set(false);
+        this.notifications.error('Could not reach the engine — nothing was rolled back.');
       },
     });
   }
@@ -1488,7 +1618,7 @@ export class MLModelDetailPageComponent implements OnInit {
 
   private load(id: number): void {
     this.loading.set(true);
-    this.service.getById(id).subscribe({
+    const sub = this.service.getById(id).subscribe({
       next: (res) => {
         this.loading.set(false);
         if (res.data) {
@@ -1512,11 +1642,12 @@ export class MLModelDetailPageComponent implements OnInit {
         this.errorMessage.set('Failed to load model');
       },
     });
+    this.sideLoads.add(sub);
   }
 
   private loadTrainingRuns(m: MLModelDto): void {
     this.trainingRunsLoading.set(true);
-    this.service
+    const sub = this.service
       .listTrainingRuns({
         currentPage: 1,
         itemCountPerPage: 10,
@@ -1533,6 +1664,7 @@ export class MLModelDetailPageComponent implements OnInit {
           this.trainingRuns.set([]);
         },
       });
+    this.sideLoads.add(sub);
   }
 
   // Auto-fetch the diagnostics for the training run that PRODUCED this
@@ -1553,7 +1685,7 @@ export class MLModelDetailPageComponent implements OnInit {
       return;
     }
     this.producingDiagnosticsLoading.set(true);
-    this.service.getTrainingRunDiagnostics(producing.id).subscribe({
+    const sub = this.service.getTrainingRunDiagnostics(producing.id).subscribe({
       next: (res) => {
         this.producingDiagnosticsLoading.set(false);
         if (res.data) {
@@ -1563,11 +1695,12 @@ export class MLModelDetailPageComponent implements OnInit {
       },
       error: () => this.producingDiagnosticsLoading.set(false),
     });
+    this.sideLoads.add(sub);
   }
 
   private loadFeatureImportance(id: number): void {
     this.featureImportanceLoading.set(true);
-    this.service.getFeatureImportance(id).subscribe({
+    const sub = this.service.getFeatureImportance(id).subscribe({
       next: (res) => {
         this.featureImportanceLoading.set(false);
         this.featureImportance.set(res.data ?? null);
@@ -1577,6 +1710,7 @@ export class MLModelDetailPageComponent implements OnInit {
         this.featureImportance.set(null);
       },
     });
+    this.sideLoads.add(sub);
   }
 
   featureTooltip(f: {
@@ -1615,7 +1749,7 @@ export class MLModelDetailPageComponent implements OnInit {
       return;
     }
     this.driftAlertsLoading.set(true);
-    this.service
+    const sub = this.service
       .listDriftReport({
         currentPage: 1,
         itemCountPerPage: 10,
@@ -1624,12 +1758,15 @@ export class MLModelDetailPageComponent implements OnInit {
       .subscribe({
         next: (res) => {
           this.driftAlertsLoading.set(false);
-          this.driftAlerts.set(res.data?.data ?? []);
+          const rows = res.data?.data ?? [];
+          this.driftAlerts.set(rows);
+          this.driftAlertTotal.set(res.data?.pager?.totalItemCount ?? rows.length);
         },
         error: () => {
           this.driftAlertsLoading.set(false);
           this.driftAlerts.set([]);
         },
       });
+    this.sideLoads.add(sub);
   }
 }

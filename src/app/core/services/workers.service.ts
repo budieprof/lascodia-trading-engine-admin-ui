@@ -49,7 +49,10 @@ function enrichSnapshot(s: WorkerHealthSnapshot): WorkerHealthDto {
   // sub-minute pollers don't flap when the snapshot lags by a couple of cycles.
   const intervalSec = Math.max(1, s.configuredIntervalSeconds || 0);
   const staleThreshold = Math.max(intervalSec * 3, 300);
-  const isStale = staleSeconds !== null && staleSeconds > staleThreshold;
+  // A finished one-shot worker (isCompleted) never succeeds again by design — it is done, not
+  // stale. Without this /worker-health flagged MLInferenceWarmupWorker and the screening
+  // backfill as stale forever.
+  const isStale = !s.isCompleted && staleSeconds !== null && staleSeconds > staleThreshold;
 
   let status: WorkerHealthStatus;
   if (s.consecutiveFailures > 0) {

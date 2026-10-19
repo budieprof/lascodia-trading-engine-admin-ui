@@ -1,23 +1,18 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type {
   CatalogueDriftSummaryDto,
   CatalogueDriftSummaryRowDto,
   Timeframe,
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
@@ -28,6 +23,12 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
 
 type WindowDays = 1 | 7 | 30;
 type SortMode = 'layer' | 'drop' | 'recent';
+
+/** A summary tagged with the window it was fetched for, so a pill switch never shows the old window. */
+interface DriftSummaryResult {
+  windowDays: WindowDays;
+  summary: CatalogueDriftSummaryDto;
+}
 
 const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
   compareWindowDays: 7,
@@ -59,7 +60,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="resource.loading()"
+        [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
 
@@ -237,6 +238,25 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -317,10 +337,10 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         margin-right: 4px;
       }
       .kpi.warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .kpi.warn strong {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .kpi.muted {
         color: var(--text-tertiary);
@@ -361,7 +381,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         background: rgba(255, 59, 48, 0.06);
       }
       .drift-table tr.drop-alert td:first-child {
-        border-left: 3px solid #d70015;
+        border-left: 3px solid var(--tone-red);
         padding-left: 8px;
       }
       .mono {
@@ -381,15 +401,15 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       }
       .scope-pill[data-tier='global'] {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .scope-pill[data-tier='symbol'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .scope-pill[data-tier='pair'] {
         background: rgba(175, 82, 222, 0.12);
-        color: #8e44ad;
+        color: var(--tone-purple);
       }
       .warm-pill {
         font-size: var(--text-xs);
@@ -399,13 +419,13 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       }
       .warm-pill.warm {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       /* Cold is a warning state, amber everywhere in CompositeML (cold-start
          page uses the same pair) — it was blue here and read as "info". */
       .warm-pill.cold {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .alert-pill {
         font-size: var(--text-xs);
@@ -413,15 +433,15 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         padding: 2px 8px;
         border-radius: var(--radius-full);
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
         text-transform: uppercase;
         letter-spacing: 0.04em;
       }
       .positive {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .negative {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .time {
         color: var(--text-secondary);
@@ -448,12 +468,16 @@ export class DriftSummaryPageComponent {
   protected readonly symbolFilter = signal('');
   protected readonly sortMode = signal<SortMode>('drop');
 
-  protected readonly resource = createPolledResource(
-    () =>
-      this.compositeMl.getCatalogueDriftSummary({ compareWindowDays: this.windowDays() }).pipe(
-        map((res) => res.data ?? EMPTY_SUMMARY),
-        catchError(() => of(EMPTY_SUMMARY)),
-      ),
+  protected readonly resource = createPolledResource<DriftSummaryResult>(
+    () => {
+      const windowDays = this.windowDays();
+      // Errors propagate to resource.error(); they used to become an empty
+      // summary that read as "no drift entries".
+      return this.compositeMl.getCatalogueDriftSummary({ compareWindowDays: windowDays }).pipe(
+        map(unwrapResponse),
+        map((summary) => ({ windowDays, summary })),
+      );
+    },
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -463,15 +487,23 @@ export class DriftSummaryPageComponent {
   );
 
   constructor() {
-    effect(() => {
-      this.windowDays();
-      this.resource.refresh();
-    });
+    refetchOnChange(
+      () => this.windowDays(),
+      () => this.resource.refresh(),
+    );
   }
 
-  protected readonly summary = computed(() => this.resource.value() ?? EMPTY_SUMMARY);
+  /** The loaded summary, or null while the picked window has not arrived yet. */
+  private readonly current = computed(() => {
+    const v = this.resource.value();
+    return v && v.windowDays === this.windowDays() ? v.summary : null;
+  });
+  protected readonly summary = computed(() => this.current() ?? EMPTY_SUMMARY);
+  /** First paint, or a window switch still in flight — never the previous window's rows. */
   protected readonly loading = computed(
-    () => this.resource.loading() && this.summary().rows.length === 0,
+    () =>
+      this.resource.loading() ||
+      (this.current() === null && this.resource.value() !== null && !this.resource.error()),
   );
 
   protected readonly dropAlertCount = computed(

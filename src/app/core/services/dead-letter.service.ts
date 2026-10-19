@@ -32,8 +32,10 @@ function toDeadLetterDto(row: DeadLetterWireRow): DeadLetterDto {
   return {
     id: row.id,
     eventType: row.eventType ?? null,
+    handlerName: row.handlerName ?? null,
     payloadJson: row.payloadJson ?? row.eventPayload ?? null,
     errorMessage: row.errorMessage ?? null,
+    stackTrace: row.stackTrace ?? null,
     attemptCount: row.attemptCount ?? row.attempts ?? 0,
     isResolved: row.isResolved ?? false,
     createdAt: row.createdAt ?? row.deadLetteredAt ?? '',

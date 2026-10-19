@@ -198,13 +198,13 @@ interface ReviewRow extends PromotionReviewSnapshotDto {
       }
       h3 {
         margin: 0;
-        font-size: var(--font-md);
+        font-size: var(--text-base);
       }
       .muted {
         color: var(--text-secondary);
       }
       .small {
-        font-size: var(--font-sm);
+        font-size: var(--text-sm);
       }
 
       .reviews {
@@ -252,9 +252,9 @@ interface ReviewRow extends PromotionReviewSnapshotDto {
       .verdict {
         font-weight: var(--font-semibold);
         padding: 2px 8px;
-        border-radius: var(--radius-pill);
+        border-radius: var(--radius-full);
         background: var(--bg-tertiary, var(--bg-secondary));
-        font-size: var(--font-sm);
+        font-size: var(--text-sm);
       }
       .verdict[data-verdict='Confirm'] {
         background: rgba(34, 197, 94, 0.15);
@@ -283,20 +283,20 @@ interface ReviewRow extends PromotionReviewSnapshotDto {
       }
       .thesis h4 {
         margin: var(--space-3) 0 var(--space-2);
-        font-size: var(--font-sm);
+        font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
       .thesis ul {
         margin: 0;
         padding-left: var(--space-4);
-        font-size: var(--font-sm);
+        font-size: var(--text-sm);
       }
       .thesis li {
         margin-bottom: var(--space-1);
       }
       .thesis p {
         margin: 0 0 var(--space-2);
-        font-size: var(--font-sm);
+        font-size: var(--text-sm);
       }
     `,
   ],

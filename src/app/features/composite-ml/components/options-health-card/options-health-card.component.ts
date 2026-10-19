@@ -50,6 +50,25 @@ import { createPolledResource } from '@core/polling/polled-resource';
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .card {
         background: rgba(0, 113, 227, 0.04);
         border: 1px solid var(--accent);
@@ -74,7 +93,7 @@ import { createPolledResource } from '@core/polling/polled-resource';
         color: var(--accent);
       }
       .card.has-warnings .icon {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .head-text {
         display: flex;
@@ -116,11 +135,11 @@ import { createPolledResource } from '@core/polling/polled-resource';
       }
       [data-severity='Information'] .pill {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       [data-severity='Warning'] .pill {
         background: rgba(255, 149, 0, 0.16);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .check {
         font-family: var(--font-mono);

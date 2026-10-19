@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { NewsIntelService } from '@core/services/news-intel.service';
 import type { NewsArticleAnalysis, NewsArticleView } from '@features/news-intel/news-intel.types';
 
@@ -24,9 +25,8 @@ import type { NewsArticleAnalysis, NewsArticleView } from '@features/news-intel/
 @Component({
   selector: 'app-news-analysis-modal',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, RouterLink],
+  imports: [DatePipe, DecimalPipe, RouterLink, ModalA11yDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { '(document:keydown.escape)': 'closed.emit()' },
   template: `
     <div class="na-backdrop" (click)="closed.emit()"></div>
     <section
@@ -34,6 +34,8 @@ import type { NewsArticleAnalysis, NewsArticleView } from '@features/news-intel/
       role="dialog"
       aria-modal="true"
       [attr.aria-label]="'AI analysis: ' + article().title"
+      appModalA11y
+      (dismiss)="closed.emit()"
     >
       <header class="na-head">
         <div>

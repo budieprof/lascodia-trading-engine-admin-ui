@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import type { TradingAccountDto } from '@core/api/api.types';
 import { AccountScopeService } from './account-scope.service';
 
 /**
@@ -37,8 +38,13 @@ import { AccountScopeService } from './account-scope.service';
           that option exists.
         -->
         <select class="scope-select" (change)="onChange($any($event.target).value)">
+          <!--
+            "real" in the scope model means NOT engine-paper; it says nothing about the
+            broker. Four demo accounts and one real one used to read "All real (5)", i.e.
+            real money, so the label names the broker account types it actually spans.
+          -->
           <option [value]="AGG_REAL" [selected]="selected() === AGG_REAL">
-            All real ({{ realCount() }} · aggregated)
+            {{ aggregateLabel() }}
           </option>
           @if (paperCount() > 0) {
             <option [value]="AGG_ALL" [selected]="selected() === AGG_ALL">
@@ -47,8 +53,8 @@ import { AccountScopeService } from './account-scope.service';
           }
           @for (acc of live(); track acc.id) {
             <option [value]="acc.id" [selected]="selected() === String(acc.id)">
-              {{ acc.accountName ?? acc.accountId }}{{ acc.isPaper ? ' · paper' : '' }} ·
-              {{ acc.currency }}
+              {{ acc.accountName ?? acc.accountId }}{{ acc.isPaper ? ' · paper' : ''
+              }}{{ brokerTypeTag(acc) }} · {{ acc.currency }}
             </option>
           }
         </select>
@@ -60,8 +66,9 @@ import { AccountScopeService } from './account-scope.service';
       >
         <span class="scope-label">Account:</span>
         <span class="scope-value">
-          {{ live()[0].accountName ?? live()[0].accountId
-          }}{{ live()[0].isPaper ? ' · paper' : '' }} · {{ live()[0].currency }}
+          {{ live()[0].accountName ?? live()[0].accountId }}{{ live()[0].isPaper ? ' · paper' : ''
+          }}{{ brokerTypeTag(live()[0]) }} ·
+          {{ live()[0].currency }}
         </span>
       </span>
     }
@@ -156,10 +163,36 @@ export class AccountScopePillComponent {
    * with nothing selected.
    */
   protected readonly selected = this.scope.effectiveSelected;
-  protected readonly realCount = computed(() => this.scope.liveRealAccounts().length);
   protected readonly paperCount = computed(
     () => this.scope.liveAccounts().length - this.scope.liveRealAccounts().length,
   );
+  /**
+   * The non-paper aggregate, named by the broker account types it spans: "All real (1)" only
+   * when every account in it is a broker Real account, otherwise "All accounts (5 · 1 real,
+   * 4 demo)".
+   */
+  protected readonly aggregateLabel = computed(() => {
+    const accounts = this.scope.liveRealAccounts();
+    const counts = new Map<string, number>();
+    for (const a of accounts) {
+      const t = (a.accountType ?? 'Real').toLowerCase();
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    if (counts.size === 0 || (counts.size === 1 && counts.has('real'))) {
+      return `All real (${accounts.length} · aggregated)`;
+    }
+    const parts = ['real', 'demo', 'contest']
+      .filter((t) => counts.has(t))
+      .map((t) => `${counts.get(t)} ${t}`);
+    return `All accounts (${accounts.length} · ${parts.join(', ')})`;
+  });
+
+  /** " · demo" / " · contest" for a non-Real broker account; nothing for a Real one. */
+  protected brokerTypeTag(acc: TradingAccountDto): string {
+    return acc.accountType && acc.accountType !== 'Real'
+      ? ` · ${acc.accountType.toLowerCase()}`
+      : '';
+  }
 
   protected onChange(raw: string): void {
     // Sentinel strings pass through verbatim; numeric ids parse.

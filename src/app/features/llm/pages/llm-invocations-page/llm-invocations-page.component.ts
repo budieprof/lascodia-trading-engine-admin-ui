@@ -62,6 +62,12 @@ import type { EChartsOption } from 'echarts';
         <button type="button" class="btn-refresh" (click)="reload()">↻ Refresh</button>
       </app-page-header>
 
+      @if (summaryError(); as err) {
+        <!-- Without this a failed summary call rendered as a quiet "0 calls / $0.00". -->
+        <div class="note error">
+          Could not load the invocation summary — the tiles below are not live. {{ err }}
+        </div>
+      }
       <!-- ── KPI strip ──────────────────────────────────────────────── -->
       <div class="kpi-strip">
         <app-metric-card
@@ -104,6 +110,7 @@ import type { EChartsOption } from 'echarts';
         </div>
         <app-metric-card
           label="Failure rate"
+          dotColor="#FF3B30"
           [value]="failureRate()"
           format="percent"
           [colorByValue]="true"
@@ -208,6 +215,8 @@ import type { EChartsOption } from 'echarts';
         </header>
         @if (loading()) {
           <div class="note">Loading invocations…</div>
+        } @else if (listError(); as err) {
+          <div class="note error">Could not load invocations: {{ err }}</div>
         } @else if (invocations().length === 0) {
           <div class="note">
             No invocations in the last {{ windowLabel() }} match the current filter. The engine logs
@@ -806,6 +815,11 @@ export class LlmInvocationsPageComponent implements OnInit {
   readonly currentPage = signal(1);
   readonly pageSize = 50;
   readonly loading = signal(true);
+  readonly listError = signal<string | null>(null);
+  readonly summaryError = signal<string | null>(null);
+  /** Latest list / summary request — an older, slower answer must not overwrite it. */
+  private listSeq = 0;
+  private summarySeq = 0;
 
   // ── Row-detail drawer ─────────────────────────────────────────────
   /** Non-null while the drawer should be open; flips the native dialog. */
@@ -919,13 +933,21 @@ export class LlmInvocationsPageComponent implements OnInit {
   }
 
   reloadSummary(): void {
+    const seq = ++this.summarySeq;
+    this.summaryError.set(null);
     this.llm
       .invocationsSummary(this.windowHours(), 10)
       .pipe(
-        catchError(() => of(null)),
+        catchError((err) => {
+          if (seq === this.summarySeq)
+            this.summaryError.set(err?.error?.message ?? err?.message ?? 'Request failed.');
+          return of(null);
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
+        if (seq !== this.summarySeq) return;
+        if (res && !res.status) this.summaryError.set(res.message ?? 'The engine refused it.');
         this.summary.set(res?.data ?? null);
       });
   }
@@ -941,7 +963,9 @@ export class LlmInvocationsPageComponent implements OnInit {
   }
 
   private reloadList(): void {
+    const seq = ++this.listSeq;
     this.loading.set(true);
+    this.listError.set(null);
     this.llm
       .listInvocations({
         currentPage: this.currentPage(),
@@ -957,11 +981,18 @@ export class LlmInvocationsPageComponent implements OnInit {
         },
       })
       .pipe(
-        catchError(() => of(null)),
+        catchError((err) => {
+          if (seq === this.listSeq)
+            this.listError.set(err?.error?.message ?? err?.message ?? 'Request failed.');
+          return of(null);
+        }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
+        // Filters and paging each fire a request; only the newest may land.
+        if (seq !== this.listSeq) return;
         this.loading.set(false);
+        if (res && !res.status) this.listError.set(res.message ?? 'The engine refused the query.');
         const data = res?.data;
         this.invocations.set(data?.data ?? []);
         this.totalRows.set(data?.pager?.totalItemCount ?? 0);

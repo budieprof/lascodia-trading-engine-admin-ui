@@ -7,12 +7,24 @@ import {
   signal,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { RouterLink, RouterLinkActive } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map, startWith } from 'rxjs';
 import { ThemeService } from '@core/theme/theme.service';
 import { AuthService, type Role } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { LogoComponent } from '@shared/components/logo/logo.component';
+
+/**
+ * Force emoji presentation on a single-code-point icon. ⚙ ⏸ 🛡 🎛 👁 … default to TEXT
+ * presentation unless followed by U+FE0F, and rendered as tiny monochrome glyphs (Strategy
+ * Settings read as a dot) beside full-colour neighbours. Harmless on code points that are
+ * emoji by default; multi-code-point icons already carry their selector.
+ */
+function asEmoji(icon: string): string {
+  return [...icon].length === 1 ? `${icon}️` : icon;
+}
 
 interface NavItem {
   label: string;
@@ -77,10 +89,14 @@ interface NavGroup {
             <div class="nav-divider" role="separator"></div>
           }
           @for (item of group.items; track item.route) {
+            <!--
+              Not routerLinkActive: its prefix match lit two items at once (Positions AND Position
+              Deltas on /positions/deltas). Only the longest nav route the URL sits under is active.
+            -->
             <a
               [routerLink]="item.route"
-              routerLinkActive="active"
-              ariaCurrentWhenActive="page"
+              [class.active]="activeRoute() === item.route"
+              [attr.aria-current]="activeRoute() === item.route ? 'page' : null"
               class="nav-item"
               [attr.aria-label]="collapsed() ? item.label : null"
               (mouseenter)="onItemEnter(item.route, item.label, $event)"
@@ -98,22 +114,24 @@ interface NavGroup {
       </nav>
 
       <div class="sidebar-footer">
-        <a
-          class="footer-btn"
-          [href]="swaggerUrl"
-          target="_blank"
-          rel="noopener noreferrer"
-          [attr.aria-label]="'Open API Swagger UI in a new tab'"
-          (mouseenter)="showTip('API Swagger', $event)"
-          (mouseleave)="hideTip()"
-          (focus)="showTip('API Swagger', $event)"
-          (blur)="hideTip()"
-        >
-          <span class="nav-icon" aria-hidden="true">⌘</span>
-          @if (!collapsed()) {
-            <span class="nav-label">API Swagger</span>
-          }
-        </a>
+        @if (swaggerUrl; as swagger) {
+          <a
+            class="footer-btn"
+            [href]="swagger"
+            target="_blank"
+            rel="noopener noreferrer"
+            [attr.aria-label]="'Open API Swagger UI in a new tab'"
+            (mouseenter)="showTip('API Swagger', $event)"
+            (mouseleave)="hideTip()"
+            (focus)="showTip('API Swagger', $event)"
+            (blur)="hideTip()"
+          >
+            <span class="nav-icon" aria-hidden="true">⌘</span>
+            @if (!collapsed()) {
+              <span class="nav-label">API Swagger</span>
+            }
+          </a>
+        }
         <button
           type="button"
           class="footer-btn"
@@ -146,7 +164,8 @@ interface NavGroup {
           (focus)="showTip(collapsed() ? 'Expand sidebar' : 'Collapse sidebar', $event)"
           (blur)="hideTip()"
         >
-          <span class="nav-icon" aria-hidden="true">{{ collapsed() ? '▸' : '◂' }}</span>
+          <!-- ▸ / ◂ are SMALL triangles: at 14px they rendered as a dot. -->
+          <span class="nav-icon" aria-hidden="true">{{ collapsed() ? '»' : '«' }}</span>
           @if (!collapsed()) {
             <span class="nav-label">Collapse</span>
           }
@@ -612,7 +631,45 @@ export class SidebarComponent {
     },
   ];
 
-  readonly swaggerUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl.replace(/\/$/, '')}/swagger`;
+  /**
+   * Swagger is served by the engine itself, never through Caddy. A release bakes apiBaseUrl ""
+   * (same-origin), and "/swagger" then hit Caddy's SPA catch-all: the link reopened the console.
+   * Same-origin, it can only resolve on the host itself (the engine's direct port, as in the
+   * Caddyfile); through the tunnel there is nothing to link to, so the button is not shown.
+   */
+  private readonly router = inject(Router);
+  private readonly url = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects),
+      startWith(this.router.url),
+    ),
+    { initialValue: this.router.url },
+  );
+
+  /**
+   * The nav route the current page belongs to: the LONGEST item route the URL equals or sits
+   * under (segment boundary), so /positions/deltas lights Position Deltas alone while
+   * /strategies/1213 still lights Strategies.
+   */
+  readonly activeRoute = computed<string | null>(() => {
+    const path = (this.url() ?? '').split(/[?#]/)[0];
+    let best: string | null = null;
+    for (const g of this.visibleGroups()) {
+      for (const item of g.items) {
+        const r = item.route;
+        if ((path === r || path.startsWith(r + '/')) && (!best || r.length > best.length)) best = r;
+      }
+    }
+    return best;
+  });
+
+  readonly swaggerUrl: string | null = (() => {
+    const base = inject(RUNTIME_CONFIG).apiBaseUrl.replace(/\/$/, '');
+    if (base) return `${base}/swagger`;
+    const host = typeof location === 'undefined' ? '' : location.hostname;
+    return host === 'localhost' || host === '127.0.0.1' ? 'http://localhost:5081/swagger' : null;
+  })();
 
   /**
    * Filters the nav groups down to what the current user is allowed to see.
@@ -623,11 +680,13 @@ export class SidebarComponent {
     const groups = this.navGroups
       .map((g) => ({
         ...g,
-        items: g.items.filter(
-          (item) =>
-            (!item.policy || this.auth.hasPolicy(item.policy)) &&
-            (!item.permission || this.auth.hasPermission(item.permission)),
-        ),
+        items: g.items
+          .filter(
+            (item) =>
+              (!item.policy || this.auth.hasPolicy(item.policy)) &&
+              (!item.permission || this.auth.hasPermission(item.permission)),
+          )
+          .map((item) => ({ ...item, icon: asEmoji(item.icon) })),
       }))
       .filter((g) => g.items.length > 0);
     return groups;

@@ -24,6 +24,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 
@@ -185,6 +186,7 @@ function emptyChart(text: string): EChartsOption {
     DatePipe,
     DecimalPipe,
     CurrencyPipe,
+    ModalA11yDirective,
   ],
   template: `
     <div class="page">
@@ -200,14 +202,36 @@ function emptyChart(text: string): EChartsOption {
         so one halted account among six reads as a fleet in "Reduced". Surface it
         on every tab, with the route to act on it.
       -->
+      <!-- Active and inactive accounts are told apart: an inactive account does not trade at all,
+           so counting its stale halt among "not trading normally" made 8 of 5 live accounts. -->
       @if (restrictedAccounts().length > 0 && activeTab() !== 'accounts') {
         <button class="restricted-banner" (click)="activeTab.set('accounts')">
-          <span class="rb-count">{{ restrictedAccounts().length }}</span>
-          account(s) not trading normally:
-          @for (a of restrictedAccounts(); track a.tradingAccountId) {
-            <span class="rb-acct">
-              {{ a.accountName }}
-              <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{ a.recoveryMode }}</span>
+          @if (restrictedActive().length > 0) {
+            <span class="rb-count">{{ restrictedActive().length }}</span>
+            active account(s) not trading normally:
+            @for (a of restrictedActive(); track a.tradingAccountId) {
+              <span class="rb-acct">
+                {{ a.accountName }} <span class="rb-id">#{{ a.tradingAccountId }}</span>
+                <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{
+                  a.recoveryMode
+                }}</span>
+              </span>
+            }
+          }
+          @if (restrictedInactive().length > 0) {
+            <span class="rb-inactive">
+              @if (restrictedActive().length > 0) {
+                ·
+              }
+              {{ restrictedInactive().length }} inactive account(s) still hold a restriction:
+              @for (a of restrictedInactive(); track a.tradingAccountId) {
+                <span class="rb-acct">
+                  {{ a.accountName }} <span class="rb-id">#{{ a.tradingAccountId }}</span>
+                  <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{
+                    a.recoveryMode
+                  }}</span>
+                </span>
+              }
             </span>
           }
           <span class="rb-go">Review →</span>
@@ -313,8 +337,9 @@ function emptyChart(text: string): EChartsOption {
                     <td class="num">
                       @if (a.isRestricted) {
                         <button
+                          type="button"
                           class="release-btn"
-                          (click)="releaseToNormal(a)"
+                          (click)="askRelease(a)"
                           [disabled]="releasing() === a.tradingAccountId"
                         >
                           {{
@@ -450,10 +475,10 @@ function emptyChart(text: string): EChartsOption {
                 [dotColor]="modeTransitions().length > 5 ? '#FF9500' : '#34C759'"
               />
               <app-metric-card
-                label="Accounts restricted"
-                [value]="restrictedAccounts().length"
+                label="Active accounts restricted"
+                [value]="restrictedActive().length"
                 format="number"
-                [dotColor]="restrictedAccounts().length > 0 ? '#FF3B30' : '#34C759'"
+                [dotColor]="restrictedActive().length > 0 ? '#FF3B30' : '#34C759'"
               />
             </div>
 
@@ -724,19 +749,15 @@ function emptyChart(text: string): EChartsOption {
         />
 
         @if (annotationDrawerOpen()) {
-          <div
-            class="annot-overlay"
-            role="presentation"
-            tabindex="-1"
-            (click)="closeAnnotationDrawer()"
-            (keydown.escape)="closeAnnotationDrawer()"
-          >
+          <div class="annot-overlay" role="presentation" (click)="closeAnnotationDrawer()">
             <form
               class="annot-dialog"
               role="dialog"
               aria-modal="true"
               aria-label="Add drawdown note"
               tabindex="-1"
+              appModalA11y
+              (dismiss)="closeAnnotationDrawer()"
               (click)="$event.stopPropagation()"
               (keydown)="$event.stopPropagation()"
               (ngSubmit)="submitAnnotation()"
@@ -773,6 +794,51 @@ function emptyChart(text: string): EChartsOption {
           </div>
         }
       }
+
+      @if (releaseTarget(); as t) {
+        <!-- Release asks in-page: it was a window.prompt, which an automated session dismisses
+             unseen and which cannot show what is being discarded. -->
+        <div class="annot-overlay" role="presentation" (click)="cancelRelease()">
+          <div
+            class="annot-dialog release-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dd-release-title"
+            appModalA11y
+            (dismiss)="cancelRelease()"
+            (click)="$event.stopPropagation()"
+          >
+            <h4 id="dd-release-title">
+              Release {{ t.accountName }} #{{ t.tradingAccountId }} from {{ t.recoveryMode }}?
+            </h4>
+            <p class="release-copy">
+              Rebases the drawdown anchor to current equity ({{
+                t.currentEquity !== null ? (t.currentEquity | number: '1.2-2') : 'unknown'
+              }}; drawdown now
+              {{ t.drawdownPct !== null ? (t.drawdownPct | number: '1.2-2') + '%' : 'unknown' }}),
+              so the account trades at full size again. The all-time high-water mark is kept, so
+              historical drawdown stays reportable.
+            </p>
+            <label class="field">
+              <span class="lbl">Reason (required, stored on the audit snapshot)</span>
+              <textarea [(ngModel)]="releaseReasonText" rows="3" maxlength="500"></textarea>
+            </label>
+            <div class="annot-actions">
+              <button type="button" class="btn btn-ghost" (click)="cancelRelease()" data-autofocus>
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                [disabled]="!releaseReasonText.trim()"
+                (click)="confirmRelease()"
+              >
+                Release to Normal
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
   `,
   styles: [
@@ -782,6 +848,28 @@ function emptyChart(text: string): EChartsOption {
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
+      }
+      .annot-dialog.release-dialog {
+        max-width: 480px;
+      }
+      .release-copy {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .rb-id {
+        color: var(--text-tertiary);
+        font-size: 0.9em;
+      }
+      /* Its own flex row: the banner's gap only spaces direct children, so the inactive
+         accounts ran together ("HaltedStandard #22"). */
+      .rb-inactive {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        color: var(--text-tertiary);
       }
       .scope-row {
         display: flex;
@@ -858,15 +946,15 @@ function emptyChart(text: string): EChartsOption {
       }
       .recovery-badge.normal {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .recovery-badge.reduced {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .recovery-badge.halted {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .equity-comparison {
         display: flex;
@@ -1128,7 +1216,7 @@ function emptyChart(text: string): EChartsOption {
       }
       .mode-badge[data-mode='Normal'] {
         background: rgba(52, 199, 89, 0.18);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .mode-badge[data-mode='Reduced'] {
         background: rgba(255, 149, 0, 0.2);
@@ -1231,7 +1319,7 @@ function emptyChart(text: string): EChartsOption {
         text-overflow: ellipsis;
       }
       .trans-table .warn {
-        color: #c93400;
+        color: var(--tone-amber);
         font-weight: var(--font-semibold);
       }
       .trans-table .bad {
@@ -1247,15 +1335,15 @@ function emptyChart(text: string): EChartsOption {
       }
       .mode-pill[data-mode='Normal'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .mode-pill[data-mode='Reduced'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .mode-pill[data-mode='Halted'] {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .empty {
         display: block;
@@ -1469,6 +1557,10 @@ export class DrawdownPageComponent {
 
   /** Accounts whose sizing is restricted or whose trading is stopped. */
   readonly restrictedAccounts = computed(() => this.allAccounts().filter((a) => a.isRestricted));
+  readonly restrictedActive = computed(() => this.restrictedAccounts().filter((a) => a.isActive));
+  readonly restrictedInactive = computed(() =>
+    this.restrictedAccounts().filter((a) => !a.isActive),
+  );
 
   private readonly accountNames = computed(() => {
     const m = new Map<number, string>();
@@ -1495,24 +1587,33 @@ export class DrawdownPageComponent {
    * unexplained rebase is indistinguishable from a bug. A cancelled or blank prompt
    * aborts rather than sending a placeholder.
    */
-  releaseToNormal(account: AccountRecoveryStateDto): void {
-    const reason = window.prompt(
-      `Release ${account.accountName} (#${account.tradingAccountId}) from ${account.recoveryMode} back to Normal?\n\n` +
-        `This rebases the drawdown anchor to current equity. The all-time high-water mark is kept, ` +
-        `so historical drawdown stays reportable.\n\nReason (required, stored on the audit snapshot):`,
-      '',
-    );
-    if (reason === null) return;
-    if (reason.trim().length === 0) {
-      this.releaseError.set('A reason is required — nothing was changed.');
-      return;
-    }
+  readonly releaseTarget = signal<AccountRecoveryStateDto | null>(null);
+  /** Bound to the release dialog's reason box. */
+  releaseReasonText = '';
 
+  askRelease(account: AccountRecoveryStateDto): void {
+    this.releaseReasonText = '';
+    this.releaseTarget.set(account);
+  }
+
+  cancelRelease(): void {
+    this.releaseTarget.set(null);
+  }
+
+  confirmRelease(): void {
+    const account = this.releaseTarget();
+    const reason = this.releaseReasonText.trim();
+    if (!account || !reason) return;
+    this.releaseTarget.set(null);
+    this.releaseToNormal(account, reason);
+  }
+
+  private releaseToNormal(account: AccountRecoveryStateDto, reason: string): void {
     this.releaseError.set(null);
     this.releaseNote.set(null);
     this.releasing.set(account.tradingAccountId);
 
-    this.service.rebaseAnchor(account.tradingAccountId, reason.trim(), 0).subscribe({
+    this.service.rebaseAnchor(account.tradingAccountId, reason, 0).subscribe({
       next: (res) => {
         this.releasing.set(null);
         const result = res.data;
@@ -1755,7 +1856,7 @@ export class DrawdownPageComponent {
           min: 0,
           max,
           radius: '95%',
-          center: ['50%', '58%'],
+          center: ['50%', '55%'],
           progress: { show: true, width: 12, itemStyle: { color: MODE_COLOR[mode] } },
           axisLine: {
             lineStyle: {
@@ -1772,7 +1873,8 @@ export class DrawdownPageComponent {
           axisLabel: { show: false },
           pointer: { show: true, width: 4, length: '58%', itemStyle: { color: MODE_COLOR[mode] } },
           anchor: { show: true, size: 8, itemStyle: { color: MODE_COLOR[mode] } },
-          title: { show: true, offsetCenter: [0, '86%'], fontSize: 11 },
+          // 72%, not 86%: at 86% the caption sat on the card's bottom edge and was clipped.
+          title: { show: true, offsetCenter: [0, '72%'], fontSize: 11 },
           detail: {
             valueAnimation: true,
             fontSize: 22,

@@ -11,14 +11,16 @@ import { PositionSlChangeLog, SlAuditQuery } from '@features/sl-audit/sl-audit.t
  */
 export interface PagedEnvelope<T> {
   data: T[];
+  // camelCase on the wire: the PascalCase this used to declare was always undefined, so the
+  // SL-audit pager read 0 rows / page 1 of 1 over a 300k-row feed.
   pager: {
-    TotalItemCount: number;
-    CurrentPage: number;
-    ItemCountPerPage: number;
+    totalItemCount: number;
+    currentPage: number;
+    itemCountPerPage: number;
     /** May be present depending on the engine's serializer settings. */
-    PageNo?: number;
+    pageNo?: number;
     /** Computed property — may or may not be serialized. */
-    PageSize?: number;
+    pageSize?: number;
   };
 }
 

@@ -43,13 +43,6 @@ $pane-gap: 4px;
   flex-wrap: wrap;
 }
 
-.divider {
-  width: 1px;
-  align-self: stretch;
-  background: var(--border, #e6e9ef);
-  margin: 2px 2px;
-}
-
 .spacer {
   flex: 1 1 auto;
 }
@@ -65,8 +58,7 @@ $pane-gap: 4px;
 
 // ── Symbol picker ──────────────────────────────────────────────────────────
 
-.symbol-picker,
-.indicator-picker {
+.symbol-picker {
   position: relative;
 }
 
@@ -111,10 +103,6 @@ $pane-gap: 4px;
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   overflow: hidden;
-}
-
-.indicator-menu {
-  min-width: 300px;
 }
 
 .menu-search {
@@ -188,16 +176,6 @@ $pane-gap: 4px;
   }
 }
 
-.style-select {
-  padding: 5px 8px;
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-}
-
 // ── Chart surface ──────────────────────────────────────────────────────────
 
 .chart-body {
@@ -238,15 +216,6 @@ $pane-gap: 4px;
   // Bounded by `inset`, so this genuinely scrolls instead of growing.
   overflow-y: auto;
   scrollbar-width: thin;
-}
-
-.rail-group {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 4px;
-  margin-top: 4px;
-  border-top: 1px solid var(--border, #e6e9ef);
 }
 
 .rail-tool {
@@ -383,134 +352,6 @@ $pane-gap: 4px;
   &.active {
     background: var(--accent-soft, rgba(41, 98, 255, 0.12));
     color: var(--accent, #2962ff);
-  }
-}
-
-// ── Volume-profile type picker ─────────────────────────────────────────────
-
-.vp-split {
-  position: relative;
-  display: inline-flex;
-
-  .vp-caret {
-    padding-inline: 4px;
-    margin-left: -2px;
-  }
-}
-
-.vp-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 50;
-  min-width: 220px;
-  padding: 6px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-}
-
-.vp-menu-item {
-  display: block;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 13px;
-  text-align: left;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-  }
-
-  &.active {
-    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-    color: var(--accent, #2962ff);
-  }
-}
-
-.vp-menu-note {
-  padding: 6px 8px 2px;
-  font-size: 11px;
-  color: var(--text-muted, #787b86);
-  border-top: 1px solid var(--border, #e6e9ef);
-  margin-top: 4px;
-}
-
-// ── Selected-drawing inspector ─────────────────────────────────────────────
-
-.draw-inspector {
-  position: absolute;
-  top: 8px;
-  right: 76px;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
-  font-size: 12px;
-
-  .inspector-title {
-    font-weight: 600;
-    margin-right: 2px;
-  }
-
-  input[type='color'] {
-    width: 24px;
-    height: 22px;
-    padding: 0;
-    border: 1px solid var(--border, #e6e9ef);
-    border-radius: 4px;
-    background: transparent;
-  }
-
-  select,
-  input[type='number'],
-  input[type='text'] {
-    padding: 2px 4px;
-    border: 1px solid var(--border, #e6e9ef);
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-  }
-
-  .width-input {
-    width: 44px;
-  }
-
-  .text-input {
-    width: 110px;
-  }
-
-  button {
-    border: 1px solid transparent;
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-muted, #787b86);
-    cursor: pointer;
-    font-size: 12px;
-    padding: 3px 5px;
-
-    &:hover {
-      background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-      color: inherit;
-    }
-
-    &.active {
-      background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-      color: var(--accent, #2962ff);
-    }
   }
 }
 
@@ -776,52 +617,7 @@ $pane-gap: 4px;
   }
 }
 
-// ── Watchlist ──────────────────────────────────────────────────────────────
-
-.watch-row {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 8px;
-  align-items: baseline;
-  width: 100%;
-  padding: 5px 10px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  text-align: left;
-  cursor: pointer;
-  font-variant-numeric: tabular-nums;
-
-  &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-  }
-}
-
-.watch-symbol {
-  font-weight: 600;
-}
-
-.watch-change {
-  min-width: 48px;
-  text-align: right;
-
-  &.up {
-    color: #26a69a;
-  }
-
-  &.down {
-    color: #ef5350;
-  }
-}
-
 // ── Split view ─────────────────────────────────────────────────────────────
-
-.split-picker {
-  display: flex;
-  gap: 2px;
-}
 
 .chart-grid {
   position: absolute;
@@ -905,25 +701,6 @@ $pane-gap: 4px;
 .sync-warn {
   color: #ffa726;
   font-weight: 600;
-}
-
-.box-size {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  color: var(--text-muted, #787b86);
-
-  input {
-    width: 54px;
-    padding: 3px 4px;
-    border: 1px solid var(--border, #e6e9ef);
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-  }
 }
 
 .market-status {
@@ -1049,16 +826,6 @@ $pane-gap: 4px;
 .news-meta {
   font-size: 11px;
   margin-top: 2px;
-}
-
-// Pine runs in the studies bar.
-.pine-tag {
-  font-size: 10px;
-  padding: 1px 5px;
-  margin-right: 4px;
-  border-radius: 4px;
-  background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-  color: var(--accent, #2962ff);
 }
 
 .script-error {
@@ -1365,14 +1132,17 @@ $pane-gap: 4px;
 
 // ── Watchlist dock (right) ──
 // Docked like TradingView's: it takes width from the chart rather than
-// floating over it, and its left edge drags to resize.
+// floating over it, and its left edge drags to resize. Never more than 40% of the chart body
+// ($dock-w): at 820px (tablet) a 380px dock left the chart a 115px strip under its own legend.
+$dock-w: min(var(--dock-width, 380px), 40%);
+
 .watch-dock {
   position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   z-index: 20;
-  width: var(--dock-width, 380px);
+  width: $dock-w;
   background: var(--surface, #fff);
 
   app-watchlist-panel {
@@ -1461,7 +1231,6 @@ $pane-gap: 4px;
   border-radius: 4px;
 }
 
-
 .muted {
   color: var(--tv-muted);
 }
@@ -1522,13 +1291,6 @@ $pane-gap: 4px;
     opacity: 0.35;
     cursor: default;
   }
-}
-
-.tb-layout-name {
-  padding: 0 4px 0 8px;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .layout-status {
@@ -1919,7 +1681,7 @@ $strip-width: 46px;
 }
 
 .chart-grid.with-dock {
-  right: calc(var(--dock-width, 380px) + #{$strip-width + 2 * $pane-gap});
+  right: calc(#{$dock-w} + #{$strip-width + 2 * $pane-gap});
 }
 
 // The Technicals view takes the chart's place, and its insets, while open.
@@ -1932,17 +1694,20 @@ $strip-width: 46px;
   z-index: 21;
 
   &.with-dock {
-    right: calc(var(--dock-width, 380px) + #{$strip-width + 2 * $pane-gap});
+    right: calc(#{$dock-w} + #{$strip-width + 2 * $pane-gap});
   }
 }
 
 // ── Narrow toolbar ─────────────────────────────────────────────────────────
-// TradingView's narrow layout. The full toolbar needs ~920px inside its padding (the width a
-// container query measures): below that the labelled buttons (Indicators, Alert, Replay) keep only
-// their icons, and below ~770px the history and view buttons (undo, redo, zoom, fullscreen,
-// snapshot) move into the ⋯ menu. The toolbar is the container, so its own width decides — the
-// sidebar takes 0, 72 or 260px of the window. Its buttons never shrink: squeezed below their size,
-// "Indicators" and "Replay" ran over the buttons beside them.
+// TradingView's narrow layout. The full toolbar needs ~1180px inside its padding (the width a
+// container query measures; ~1040px of buttons, the rest the layout's name and save status):
+// below that the labelled buttons (Indicators, Alert, Analyse, Trade, Replay) keep only their
+// icons, and below ~910px the history and view buttons (undo, redo, zoom, fullscreen, snapshot)
+// move into the ⋯ menu. The toolbar is the container, so its own width decides — the sidebar takes
+// 0, 72 or 260px of the window. Its buttons never shrink: squeezed below their size, "Indicators"
+// and "Replay" ran over the buttons beside them. (The thresholds were 929 / 799px, set before
+// Analyse, Trade and the overlays button: at 1440px with the sidebar open the name read "U..",
+// and from ~1075px down the right-hand buttons ran past the toolbar.)
 .toolbar {
   container: toolbar / inline-size;
 }
@@ -1962,11 +1727,21 @@ $strip-width: 46px;
 
 .tb-layout-name {
   flex: 0 1 auto;
-  min-width: 48px;
+  min-width: 64px;
+  max-width: 180px;
+  // A flex button cannot ellipsize its own text: the name is a span that shrinks. Centred and
+  // clipped, "Unnamed" lost its first letters ("nnamed") instead of its last.
+  > span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 .toolbar .status,
 .layout-status {
+  // A long status ("Offline, retrying…") gives way before the layout's name does.
+  flex-shrink: 4;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1976,7 +1751,7 @@ $strip-width: 46px;
   display: none;
 }
 
-@container toolbar (max-width: 929px) {
+@container toolbar (max-width: 1179px) {
   .tb-label {
     display: none;
   }
@@ -1986,7 +1761,7 @@ $strip-width: 46px;
   }
 }
 
-@container toolbar (max-width: 799px) {
+@container toolbar (max-width: 909px) {
   .tb-wide {
     display: none;
   }

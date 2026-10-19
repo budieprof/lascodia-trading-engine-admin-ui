@@ -1,14 +1,17 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, of } from 'rxjs';
+import { Subscription, catchError, of } from 'rxjs';
 
 import { ViabilityGatesService } from '@core/services/viability-gates.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { ViabilityGatePendingChangesService } from '../../viability-gates-pending.service';
 import {
   GateThresholdKind,
   GhostOutcomeConfig,
+  PendingConfigChange,
   UpdateGhostOutcomeConfigRequest,
   UpdateViabilityGateThresholdItem,
   VIABILITY_GATE_MODES,
@@ -33,7 +36,14 @@ import {
 @Component({
   selector: 'app-viability-gates-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, DecimalPipe, PageHeaderComponent, ErrorStateComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    DecimalPipe,
+    PageHeaderComponent,
+    ErrorStateComponent,
+    RefreshButtonComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="page">
@@ -54,7 +64,10 @@ import {
             Run ghost-outcome cycle
           }
         </button>
-        <button class="btn btn-ghost" type="button" (click)="reload()">Reload</button>
+        <!-- The plain button changed nothing on screen: the grid deliberately stays up
+             during a refresh and an unchanged config re-renders identically. The shared
+             button stays busy until the re-read lands. -->
+        <app-refresh-button label="Reload" [refreshing]="loading()" (refresh)="reload()" />
       </app-page-header>
 
       @if (ghostResultMessage(); as msg) {
@@ -227,9 +240,12 @@ import {
         </section>
       }
 
-      @if (loading()) {
+      <!-- The grid stays up while a refresh runs (after every save, ghost cycle and
+           Reload). Swapping it for a "Loading…" row collapsed a ~9,700px page, threw
+           the operator back to the top and wiped every other card's unsaved edits. -->
+      @if (loading() && gates().length === 0) {
         <div class="state-row muted">Loading gate config…</div>
-      } @else if (error()) {
+      } @else if (error() && gates().length === 0) {
         <app-error-state
           title="Could not load the viability gates"
           [message]="error()"
@@ -238,8 +254,16 @@ import {
       } @else if (gates().length === 0) {
         <div class="state-row muted">No gates returned by the engine.</div>
       } @else {
+        @if (error(); as e) {
+          <div class="state-row error">
+            Refresh failed — the cards show the last values loaded. {{ e }}
+          </div>
+        }
+        <!-- Two windows, said separately: the engine bounds Rejected / Advisory to the
+             trailing 24h but counts ghost outcomes over every signal it ever resolved.
+             The old single line claimed 24h for both. -->
         <p class="window-note muted">
-          Firing and ghost stats cover the trailing 24h — window starts
+          <strong>Rejected / Advisory</strong> count the trailing 24h — window starts
           {{ windowStartUtc() }} UTC.
           @if (windowStaleHours(); as h) {
             <span class="window-stale">
@@ -247,6 +271,8 @@ import {
               counts may be stale.
             </span>
           }
+          <strong>Ghost</strong> outcomes are cumulative — every rejected or advisory signal the
+          ghost-outcome worker has resolved for the gate, not just the last 24h.
         </p>
 
         <div class="gate-grid">
@@ -262,25 +288,53 @@ import {
                 }}</span>
               </header>
 
+              <!-- Queued loosening changes: the badge above is what the gate IS until
+                   these take effect, so say they exist and when they land. -->
+              @for (p of pendingFor(gate); track p.id) {
+                <div class="pending-row" role="status">
+                  <strong>Queued (cooling-off):</strong>
+                  {{ pendingLabel(gate, p.key) }} {{ p.oldValue ?? '—' }} →
+                  {{ p.newValue ?? '—' }} · takes effect {{ formatUtc(p.effectiveAt) }} UTC
+                  @if (p.reason) {
+                    · <span class="muted">“{{ p.reason }}”</span>
+                  }
+                </div>
+              }
+
               <!-- Stats strip ------------------------------------------------ -->
               <!-- Fixed three-column strip so every label stays on one line
                    and the values share a baseline. Zero is neutral; green /
                    red only once a ghost outcome actually exists. -->
               <div class="stats">
                 <div class="stat">
-                  <span class="stat-label" title="Signals this gate rejected in the window">
+                  <span class="stat-label" title="Signals this gate rejected in the trailing 24h">
                     Rejected 24h
                   </span>
                   <span class="stat-value">{{ gate.stats.todayRejectionCount }}</span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label" title="Signals flagged in Advisory mode">
+                  <span
+                    class="stat-label"
+                    title="Signals flagged in Advisory mode in the trailing 24h"
+                  >
                     Advisory 24h
                   </span>
                   <span class="stat-value">{{ gate.stats.todayAdvisoryCount }}</span>
                 </div>
                 <div class="stat">
-                  <span class="stat-label" title="Rejected signals that went on to hit TP">
+                  <span
+                    class="stat-label"
+                    title="Every ghost outcome resolved for this gate (all time), including unresolvable ones"
+                  >
+                    Ghosts resolved
+                  </span>
+                  <span class="stat-value">{{ gate.stats.ghostResolvedCount }}</span>
+                </div>
+                <div class="stat">
+                  <span
+                    class="stat-label"
+                    title="Rejected signals that went on to hit TP (all time)"
+                  >
                     Ghost wins
                   </span>
                   <span class="stat-value" [class.pos]="gate.stats.ghostWouldHaveWon > 0">
@@ -307,6 +361,17 @@ import {
                   </span>
                   <span class="stat-value">{{ gate.stats.ghostWouldHaveExpired }}</span>
                 </div>
+                @if (gate.stats.ghostUnresolvable > 0) {
+                  <div class="stat">
+                    <span
+                      class="stat-label"
+                      title="Resolved as Unresolvable — no candles to walk the signal forward on (all time)"
+                    >
+                      Unresolvable
+                    </span>
+                    <span class="stat-value">{{ gate.stats.ghostUnresolvable }}</span>
+                  </div>
+                }
                 @if (gate.stats.avgWinPips !== null) {
                   <div class="stat">
                     <span class="stat-label">Avg win</span>
@@ -340,7 +405,7 @@ import {
                   </select>
                 </label>
 
-                @if (draftMode(gate.name) !== gate.mode) {
+                @if (showsReasonField(gate.name)) {
                   <label class="field">
                     <span class="field-label">Change reason</span>
                     <input
@@ -348,11 +413,16 @@ import {
                       type="text"
                       [ngModel]="draftReason(gate.name)"
                       (ngModelChange)="setDraftReason(gate.name, $event)"
-                      placeholder="Why is this gate's mode changing?"
+                      [placeholder]="
+                        blockFlagLoosening(gate.name)
+                          ? 'Why is this direction being unblocked?'
+                          : 'Why is this gate’s mode changing?'
+                      "
                     />
                     <span class="field-help muted">
-                      Loosening (Enforce → Advisory / Off) requires a reason and is queued for the
-                      24h cooling-off period unless applied immediately.
+                      Loosening (Enforce → Advisory / Off, or lifting a direction block) requires a
+                      reason and is queued for the 24h cooling-off period unless applied
+                      immediately.
                     </span>
                   </label>
                   <label class="field checkbox-field">
@@ -482,6 +552,21 @@ import {
       .window-note {
         margin: 0 0 var(--space-4);
       }
+      .window-note strong {
+        color: var(--text-primary);
+        font-weight: var(--font-semibold);
+      }
+      .pending-row {
+        font-size: var(--text-xs);
+        padding: var(--space-2) var(--space-3);
+        border-radius: 6px;
+        border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+        background: color-mix(in srgb, var(--warning) 10%, transparent);
+        color: var(--text-primary);
+      }
+      .pending-row strong {
+        color: var(--warning);
+      }
       .ghost-config {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -500,7 +585,7 @@ import {
       }
       .ghost-head h2 {
         margin: 0 0 var(--space-1);
-        font-size: var(--text-md);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .ghost-head .muted {
@@ -545,7 +630,7 @@ import {
       }
       .gate-head h2 {
         margin: 0 0 var(--space-1);
-        font-size: var(--text-md);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .gate-head .muted {
@@ -596,7 +681,7 @@ import {
         text-overflow: ellipsis;
       }
       .stat-value {
-        font-size: var(--text-md);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
@@ -719,11 +804,16 @@ import {
 })
 export class ViabilityGatesPageComponent {
   private readonly svc = inject(ViabilityGatesService);
+  private readonly pendingSvc = inject(ViabilityGatePendingChangesService);
 
   readonly modes = VIABILITY_GATE_MODES;
 
+  /** Cooling-off queue entries for `ViabilityGates:*` keys (empty when none or unreadable). */
+  private readonly pending = signal<PendingConfigChange[]>([]);
+
   readonly loading = signal<boolean>(true);
   readonly error = signal<string | null>(null);
+  private listSub: Subscription | null = null;
   readonly savingGate = signal<string | null>(null);
   readonly savedGate = signal<string | null>(null);
   private readonly saveErrors = signal<Record<string, string>>({});
@@ -859,6 +949,21 @@ export class ViabilityGatesPageComponent {
     const draft = this.ghostConfigDraft();
     if (!server || !draft) return;
 
+    // An emptied number input binds null, and null in the PUT body means "leave
+    // unchanged" to the engine — the save used to report "Saved." for a field it never
+    // wrote. Range-check here too so the operator sees which field is wrong.
+    for (const [key, [min, max, label]] of Object.entries(GHOST_FIELD_RANGES)) {
+      const v = draft[key as keyof typeof GHOST_FIELD_RANGES];
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        this.ghostConfigSaveError.set(`${label} needs a value.`);
+        return;
+      }
+      if (v < min || v > max) {
+        this.ghostConfigSaveError.set(`${label} must be between ${min} and ${max}.`);
+        return;
+      }
+    }
+
     const body: UpdateGhostOutcomeConfigRequest = {};
     if (draft.enabled !== server.enabled) body.enabled = draft.enabled;
     if (draft.pollIntervalSeconds !== server.pollIntervalSeconds)
@@ -923,7 +1028,7 @@ export class ViabilityGatesPageComponent {
         this.ghostError.set(false);
         this.ghostResultMessage.set(
           resolved === 0
-            ? 'Ghost-outcome cycle ran — no unresolved candidates this pass (most likely the worker already picked them up in its last 5-min poll).'
+            ? 'Ghost-outcome cycle ran — no unresolved candidates this pass (most likely the worker already picked them up in its last poll).'
             : `Ghost-outcome cycle resolved ${resolved} signal(s). Stats refreshed below.`,
         );
         this.ghostRunning.set(false);
@@ -931,11 +1036,21 @@ export class ViabilityGatesPageComponent {
       });
   }
 
-  reload(): void {
+  /**
+   * Re-read every gate. Unsaved edits on other cards survive it — a save on one
+   * card used to rebuild every draft from the server and silently discard the
+   * rest. `savedGate` names the card whose draft should be replaced by the
+   * server's (just-written) values.
+   */
+  reload(savedGate?: string): void {
+    // A newer re-read (Reload, a save, a ghost cycle) supersedes one in flight, so an
+    // older reply can never land last and paint pre-save values.
+    this.listSub?.unsubscribe();
     this.loading.set(true);
     this.error.set(null);
-    this.savedGate.set(null);
-    this.svc
+    if (!savedGate) this.savedGate.set(null);
+    this.reloadPending();
+    this.listSub = this.svc
       .list()
       .pipe(
         catchError((err) => {
@@ -946,12 +1061,50 @@ export class ViabilityGatesPageComponent {
       .subscribe((res) => {
         this.loading.set(false);
         if (!res) return;
+        // Carry dirty drafts over BEFORE the server snapshot is replaced — dirtiness
+        // is measured against the snapshot the operator edited from.
+        const keep = new Set(
+          this.serverGates()
+            .map((g) => g.name)
+            .filter((n) => n !== savedGate && this.isDirty(n)),
+        );
+        const prev = this.drafts();
+        const next = this.buildDrafts(res.gates);
+        for (const n of keep) if (prev[n] && next[n]) next[n] = prev[n];
         this.serverGates.set(res.gates);
         this.windowStartUtc.set(this.formatWindowStart(res.statsWindowStartUtc));
         const startMs = new Date(res.statsWindowStartUtc).getTime();
         this.windowStartMs.set(Number.isNaN(startMs) ? null : startMs);
-        this.drafts.set(this.buildDrafts(res.gates));
+        this.drafts.set(next);
       });
+  }
+
+  private reloadPending(): void {
+    this.pendingSvc
+      .listPending()
+      .pipe(catchError(() => of([] as PendingConfigChange[])))
+      .subscribe((rows) =>
+        this.pending.set(
+          (rows ?? []).filter((p) => p.key?.toLowerCase().startsWith('viabilitygates:')),
+        ),
+      );
+  }
+
+  /** Queued changes whose key belongs to this gate (its mode key or one of its knobs). */
+  pendingFor(gate: ViabilityGate): PendingConfigChange[] {
+    const keys = new Set(
+      [gate.modeKey, ...gate.thresholds.map((t) => t.key)].map((k) => k.toLowerCase()),
+    );
+    return this.pending().filter((p) => keys.has(p.key.toLowerCase()));
+  }
+
+  pendingLabel(gate: ViabilityGate, key: string): string {
+    if (key.toLowerCase() === gate.modeKey.toLowerCase()) return 'Mode';
+    return gate.thresholds.find((t) => t.key.toLowerCase() === key.toLowerCase())?.label ?? key;
+  }
+
+  formatUtc(iso: string): string {
+    return this.formatWindowStart(iso);
   }
 
   saveError(name: string): string | null {
@@ -993,6 +1146,29 @@ export class ViabilityGatesPageComponent {
     if (!gate || !draft || draft.mode === gate.mode) return false;
     const rank: Record<ViabilityGateMode, number> = { Enforce: 0, Advisory: 1, Off: 2 };
     return rank[draft.mode] > rank[gate.mode];
+  }
+
+  /**
+   * True when the draft lifts a DirectionBias block (`BlockBuy` / `BlockSell`
+   * non-zero → 0): it re-opens a whole trade direction, which the engine's
+   * RiskSensitiveConfigCatalog classes as loosening (2026-10-19).
+   */
+  blockFlagLoosening(name: string): boolean {
+    const gate = this.serverGates().find((g) => g.name === name);
+    const draft = this.drafts()[name];
+    if (!gate || !draft) return false;
+    return gate.thresholds.some(
+      (t) =>
+        BLOCK_FLAG_KEYS.has(t.key.toLowerCase()) && t.value !== 0 && draft.thresholds[t.key] === 0,
+    );
+  }
+
+  /** The reason / break-glass fields show for a mode change or a lifted direction block. */
+  showsReasonField(name: string): boolean {
+    const gate = this.serverGates().find((g) => g.name === name);
+    const draft = this.drafts()[name];
+    if (!gate || !draft) return false;
+    return draft.mode !== gate.mode || this.blockFlagLoosening(name);
   }
 
   draftMode(name: string): ViabilityGateMode {
@@ -1072,15 +1248,19 @@ export class ViabilityGatesPageComponent {
       reason?: string;
       immediate?: boolean;
     } = {};
-    if (draft.mode !== gate.mode) {
-      body.mode = draft.mode;
+    if (draft.mode !== gate.mode) body.mode = draft.mode;
+    // Reason / break-glass travel with any governed change: a mode change, or a
+    // DirectionBias block flag lifted (the engine classes that as loosening since
+    // 2026-10-19 and refuses it without a reason — the fields used to exist only
+    // for mode changes, so an unblock could not be saved from here at all).
+    if (this.showsReasonField(name)) {
       const reason = (draft.reason ?? '').trim();
       if (reason) body.reason = reason;
       if (draft.immediate) body.immediate = true;
-      if (this.modeChangeLoosening(name) && !reason) {
+      if ((this.modeChangeLoosening(name) || this.blockFlagLoosening(name)) && !reason) {
         this.setSaveError(
           name,
-          'A change reason is required when loosening a gate (Enforce → Advisory / Off) — it is queued for the 24h cooling-off period unless applied immediately.',
+          'A change reason is required for a loosening change (Enforce → Advisory / Off, or lifting a direction block) — it is queued for the 24h cooling-off period unless applied immediately.',
         );
         return;
       }
@@ -1089,7 +1269,13 @@ export class ViabilityGatesPageComponent {
     const changes: UpdateViabilityGateThresholdItem[] = [];
     for (const t of gate.thresholds) {
       const v = draft.thresholds[t.key];
-      if (typeof v === 'number' && v !== t.value) {
+      // An emptied input binds null: it counts as a change (the card says "Unsaved
+      // changes") but used to be skipped here, so Save reported "Saved." for nothing.
+      if (typeof v !== 'number' || !Number.isFinite(v)) {
+        this.setSaveError(name, `${t.label} needs a value.`);
+        return;
+      }
+      if (v !== t.value) {
         if (v < t.minValue || v > t.maxValue) {
           this.setSaveError(name, `${t.label} must be between ${t.minValue} and ${t.maxValue}.`);
           return;
@@ -1126,9 +1312,9 @@ export class ViabilityGatesPageComponent {
         } else {
           this.savedGate.set(name);
         }
-        // Refresh from server so stats counts and any server-side clamping
-        // surface immediately, instead of waiting for a manual reload.
-        this.reload();
+        // Refresh from server so stats counts, any server-side clamping and the
+        // cooling-off queue surface immediately, instead of waiting for a manual reload.
+        this.reload(name);
       });
   }
 
@@ -1213,6 +1399,21 @@ export class ViabilityGatesPageComponent {
     return d.toISOString().replace('T', ' ').slice(0, 16);
   }
 }
+
+/** DirectionBias block flags (lower-cased EngineConfig keys); lifting one is a governed loosening. */
+const BLOCK_FLAG_KEYS: ReadonlySet<string> = new Set([
+  'viabilitygates:directionbias:blockbuy',
+  'viabilitygates:directionbias:blocksell',
+]);
+
+/** Ghost-outcome knobs: [min, max, label] — the same ranges the form shows under each field. */
+const GHOST_FIELD_RANGES = {
+  pollIntervalSeconds: [5, 3600, 'Poll interval'],
+  walkWindowHours: [1, 168, 'Walk window'],
+  lookbackHours: [1, 720, 'Lookback'],
+  maxSignalsPerCycle: [1, 5000, 'Max per cycle'],
+  minSignalAgeSeconds: [0, 3600, 'Min signal age'],
+} as const satisfies Record<string, readonly [number, number, string]>;
 
 interface GateDraft {
   mode: ViabilityGateMode;

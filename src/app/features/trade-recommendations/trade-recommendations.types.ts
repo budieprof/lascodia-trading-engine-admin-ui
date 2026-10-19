@@ -420,6 +420,79 @@ export function recOutcomeView(outcome: string): {
   }
 }
 
+const TRIGGER_OPS: Record<string, string> = {
+  above: 'above',
+  below: 'below',
+  gt: '>',
+  gte: '≥',
+  ge: '≥',
+  lt: '<',
+  lte: '≤',
+  le: '≤',
+  eq: '=',
+  equals: '=',
+  ne: '≠',
+  neq: '≠',
+  notequals: '≠',
+  crossesup: 'crosses above',
+  crossesdown: 'crosses below',
+  between: 'between',
+  outside: 'outside',
+  in: 'in',
+  notin: 'not in',
+};
+
+/**
+ * A watch trigger as one readable line. Analysts write it either as prose or as
+ * the monitor spec DSL (`{ v, all | any | not | conditions: [...] }` with leaves
+ * `{ metric, op, value | ref | values, subject?, agg?, windowMinutes?, offsetPips? }`);
+ * the detail page interpolated the DSL object straight into the template and
+ * printed "trigger [object Object]". Unknown shapes fall back to compact JSON
+ * rather than inventing a reading.
+ */
+export function recTriggerText(trigger: unknown): string {
+  if (trigger == null) return '';
+  if (typeof trigger === 'string') return trigger;
+  if (typeof trigger === 'number' || typeof trigger === 'boolean') return String(trigger);
+  return describeTriggerNode(trigger, true);
+}
+
+function describeTriggerNode(node: unknown, top: boolean): string {
+  if (node == null || typeof node !== 'object') return String(node ?? '');
+  if (Array.isArray(node)) return node.map((n) => describeTriggerNode(n, false)).join(' and ');
+  const o = node as Record<string, unknown>;
+  const group = (items: unknown, joiner: string) => {
+    const parts = (Array.isArray(items) ? items : [items]).map((n) =>
+      describeTriggerNode(n, false),
+    );
+    const text = parts.join(joiner);
+    return top || parts.length < 2 ? text : `(${text})`;
+  };
+  if (o['all'] != null) return group(o['all'], ' and ');
+  if (o['conditions'] != null) return group(o['conditions'], ' and ');
+  if (o['any'] != null) return group(o['any'], ' or ');
+  if (o['not'] != null) return `not ${describeTriggerNode(o['not'], false)}`;
+  if (typeof o['metric'] === 'string' && typeof o['op'] === 'string') {
+    const op = TRIGGER_OPS[o['op'].toLowerCase()] ?? o['op'];
+    const agg = typeof o['agg'] === 'string' ? `${o['agg']} ` : '';
+    const subject = typeof o['subject'] === 'string' ? `${o['subject']} ` : '';
+    const win = typeof o['windowMinutes'] === 'number' ? ` over ${o['windowMinutes']}m` : '';
+    let rhs: string;
+    if (Array.isArray(o['values'])) rhs = (o['values'] as unknown[]).map(String).join(' – ');
+    else if (Array.isArray(o['value'])) rhs = (o['value'] as unknown[]).map(String).join(' – ');
+    else if (o['value'] != null) rhs = String(o['value']);
+    else if (o['ref'] != null)
+      rhs = typeof o['ref'] === 'string' ? o['ref'] : JSON.stringify(o['ref']);
+    else rhs = '';
+    const offset =
+      typeof o['offsetPips'] === 'number' && o['offsetPips'] !== 0
+        ? ` ${o['offsetPips'] > 0 ? '+' : '−'} ${Math.abs(o['offsetPips'])}p`
+        : '';
+    return `${subject}${agg}${o['metric']}${win} ${op} ${rhs}${offset}`.replace(/\s+/g, ' ').trim();
+  }
+  return JSON.stringify(node);
+}
+
 /** "[GateCode] detail" → { code, detail }; anything else → detail only. */
 export function recSplitReason(reason: string | null | undefined): {
   code: string | null;

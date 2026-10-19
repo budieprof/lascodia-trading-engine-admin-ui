@@ -401,13 +401,15 @@ interface WindowDerived extends WindowResult {
                   @for (w of windows(); track w.WindowIndex) {
                     <tr>
                       <td class="mono">{{ w.WindowIndex + 1 }}</td>
+                      <!-- Both ends carry their year (UTC): an anchored in-sample window
+                           "Sep 30 — Jul 4, 2025" started in 2024, not 2025. -->
                       <td>
-                        {{ w.InSampleFrom | date: 'MMM d' }} —
-                        {{ w.InSampleTo | date: 'MMM d, yyyy' }}
+                        {{ w.InSampleFrom | date: 'MMM d, y' : 'UTC' }} —
+                        {{ w.InSampleTo | date: 'MMM d, y' : 'UTC' }}
                       </td>
                       <td>
-                        {{ w.OutOfSampleFrom | date: 'MMM d' }} —
-                        {{ w.OutOfSampleTo | date: 'MMM d, yyyy' }}
+                        {{ w.OutOfSampleFrom | date: 'MMM d, y' : 'UTC' }} —
+                        {{ w.OutOfSampleTo | date: 'MMM d, y' : 'UTC' }}
                       </td>
                       <td
                         class="num mono"
@@ -469,19 +471,23 @@ interface WindowDerived extends WindowResult {
               <dd class="mono">{{ r.initialBalance | currency: 'USD' : 'symbol' : '1.2-2' }}</dd>
             </div>
             <div class="cfg-item">
-              <dt>Period</dt>
+              <dt>Period (UTC)</dt>
               <dd>
-                {{ r.fromDate | date: 'MMM d, yyyy' }} —
-                {{ r.toDate | date: 'MMM d, yyyy' }}
+                {{ r.fromDate | date: 'MMM d, yyyy' : 'UTC' }} —
+                {{ r.toDate | date: 'MMM d, yyyy' : 'UTC' }}
               </dd>
             </div>
             <div class="cfg-item">
-              <dt>Started</dt>
-              <dd>{{ r.startedAt | date: 'medium' }}</dd>
+              <dt>Started (UTC)</dt>
+              <dd>
+                {{ r.startedAt ? (r.startedAt | date: 'MMM d, yyyy HH:mm:ss' : 'UTC') : '—' }}
+              </dd>
             </div>
             <div class="cfg-item">
-              <dt>Completed</dt>
-              <dd>{{ r.completedAt ? (r.completedAt | date: 'medium') : '—' }}</dd>
+              <dt>Completed (UTC)</dt>
+              <dd>
+                {{ r.completedAt ? (r.completedAt | date: 'MMM d, yyyy HH:mm:ss' : 'UTC') : '—' }}
+              </dd>
             </div>
             <div class="cfg-item">
               <dt>IS / OOS Days</dt>
@@ -643,10 +649,10 @@ interface WindowDerived extends WindowResult {
         font-size: var(--text-xs);
       }
       .windows td.gain {
-        color: var(--color-success, #34c759);
+        color: var(--profit);
       }
       .windows td.loss {
-        color: var(--color-danger, #ff3b30);
+        color: var(--loss);
       }
       .link {
         color: var(--accent);
@@ -780,10 +786,10 @@ interface WindowDerived extends WindowResult {
         font-size: var(--text-xs);
       }
       .trade-table td.gain {
-        color: var(--color-success, #34c759);
+        color: var(--profit);
       }
       .trade-table td.loss {
-        color: var(--color-danger, #ff3b30);
+        color: var(--loss);
       }
       .trade-row {
         cursor: pointer;

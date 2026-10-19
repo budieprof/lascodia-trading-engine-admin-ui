@@ -1,15 +1,16 @@
 import {
   ChangeDetectionStrategy,
   Component,
-  HostListener,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { SignalRejectionsService } from '@core/services/signal-rejections.service';
 import type { SignalRejectionEventDto, SignalRejectionStage } from '@core/api/api.types';
@@ -20,6 +21,8 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 interface StageCount {
@@ -65,6 +68,8 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    RefreshButtonComponent,
+    ModalA11yDirective,
     RelativeTimePipe,
   ],
   template: `
@@ -73,14 +78,9 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
         title="Signal rejections"
         subtitle="Fleet-wide rejection log — every reason an EA, the engine, or a broker declined a signal"
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="resource.refresh()"
-          [disabled]="resource.loading()"
-        >
-          {{ resource.loading() ? 'Loading…' : 'Refresh' }}
-        </button>
+        <!-- Bound to refreshing(), not loading(): loading() is true only until the first paint,
+             so a click on the old button changed nothing on screen. -->
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
       <section class="filter-bar">
@@ -325,7 +325,16 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
            equity etc. directly instead of having to read a JSON blob. -->
       @if (selectedRow(); as sel) {
         <div class="drawer-backdrop" (click)="closeDrawer()"></div>
-        <aside class="drawer" role="dialog" aria-label="Rejection detail">
+        <!-- appModalA11y: focus moves into the drawer and back to the row on close; Escape
+             dismisses only the topmost dialog (the old document listener had neither). -->
+        <aside
+          class="drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Rejection detail"
+          appModalA11y
+          (dismiss)="closeDrawer()"
+        >
           <header class="drawer-header">
             <div class="drawer-title-row">
               <span class="stage-pill" [attr.data-stage]="sel.stage">{{ sel.stage }}</span>
@@ -804,8 +813,14 @@ export class RejectionsDashboardPageComponent {
           createdFrom: fromIso,
         })
         .pipe(
-          map((res) => res.data?.data ?? []),
-          catchError(() => of<SignalRejectionEventDto[]>([])),
+          // No catchError: swallowing a failure into [] rendered an engine
+          // error as "No rejections in this window" and the template's error
+          // state could never show. An envelope refusal is an error too.
+          map((res) => {
+            if (res?.status === false)
+              throw new Error(res.message ?? 'signal-rejection list failed');
+            return res.data?.data ?? [];
+          }),
         );
     },
     {
@@ -813,8 +828,21 @@ export class RejectionsDashboardPageComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['tradeSignalCreated', 'orderCreated', 'orderFilled'],
+      // The window effect below issues the first fetch.
+      runImmediately: false,
     },
   );
+
+  constructor() {
+    // The window is the one SERVER-side filter (createdFrom), and nothing
+    // re-ran the fetch when it changed: 1h / 6h / 7d — and the empty state's
+    // "Try last 7 days" — lit the button and kept the previous window's rows
+    // until the 60 s sweep. The other filters narrow the fetched rows client-side.
+    effect(() => {
+      this.windowHours();
+      untracked(() => this.resource.refresh());
+    });
+  }
 
   readonly rows = computed(() => this.resource.value() ?? []);
   readonly loading = computed(
@@ -929,11 +957,6 @@ export class RejectionsDashboardPageComponent {
 
   closeDrawer(): void {
     this.selectedRow.set(null);
-  }
-
-  @HostListener('document:keydown.escape')
-  onEscape(): void {
-    if (this.selectedRow()) this.closeDrawer();
   }
 
   /**

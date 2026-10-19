@@ -22,6 +22,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
 type StatusFilter = 'all' | WorkerHealthStatus;
 type SortMode = 'category' | 'p95' | 'errors' | 'backlog';
@@ -46,6 +47,7 @@ const CARD_GRID_CAP = 12;
     FormsModule,
     DecimalPipe,
     RelativeTimePipe,
+    RefreshButtonComponent,
   ],
   template: `
     <div class="page">
@@ -53,14 +55,7 @@ const CARD_GRID_CAP = 12;
         title="Worker Health"
         subtitle="Real-time snapshot of every background worker"
       >
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refresh()"
-          [disabled]="resource.loading()"
-        >
-          Refresh
-        </button>
+        <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="refresh()" />
       </app-page-header>
 
       @if (loading()) {
@@ -105,11 +100,14 @@ const CARD_GRID_CAP = 12;
             format="number"
             [dotColor]="staleCount() > 0 ? '#AF52DE' : '#34C759'"
           />
+          <!-- Median, not mean: one hourly 13-minute sweep dragged the mean P95 to ~17 s while
+               the typical worker cycles in under 100 ms. -->
           <app-metric-card
-            label="Avg P95 (ms)"
-            [value]="fleetStats().avgP95"
+            label="Median P95 (ms)"
+            [value]="fleetStats().medianP95"
             format="number"
-            [dotColor]="fleetStats().avgP95 > 1000 ? '#FF9500' : '#34C759'"
+            [dotColor]="fleetStats().medianP95 > 1000 ? '#FF9500' : '#34C759'"
+            [attr.title]="'Mean of all P95s: ' + fleetStats().avgP95 + ' ms'"
           />
           <app-metric-card
             label="Max P99 (ms)"
@@ -128,6 +126,7 @@ const CARD_GRID_CAP = 12;
             [value]="fleetStats().totalBacklog"
             format="number"
             [dotColor]="fleetStats().totalBacklog > 100 ? '#FF9500' : '#34C759'"
+            [attr.title]="'Sum of the backlog depth every worker reports: items waiting, not items processed. On an engine older than 2026-10-19, SpreadProfileWorker also adds the ticks it processed (millions), which then dominate the total.'"
           />
         </div>
 
@@ -150,7 +149,7 @@ const CARD_GRID_CAP = 12;
             [subtitle]="
               'Average P95 per category, slowest ' +
               topCategoryLimit +
-              ' shown — hover a bar for the value'
+              ' shown · log scale — hover a bar for the value'
             "
             [options]="cycleByCategoryOptions()"
             height="300px"
@@ -283,6 +282,7 @@ const CARD_GRID_CAP = 12;
             <button
               type="button"
               [class.active]="viewMode() === 'cards'"
+              [attr.aria-pressed]="viewMode() === 'cards'"
               (click)="viewMode.set('cards')"
             >
               Cards
@@ -290,14 +290,27 @@ const CARD_GRID_CAP = 12;
             <button
               type="button"
               [class.active]="viewMode() === 'table'"
+              [attr.aria-pressed]="viewMode() === 'table'"
               (click)="viewMode.set('table')"
             >
               Dense
             </button>
           </div>
           <div class="expand-controls" role="group" aria-label="Expand categories">
-            <button type="button" class="link-btn" (click)="expandProblems()">
-              Expand problems
+            <!-- Disabled with a reason when nothing is failed, degraded or stale — it used to be
+                 a live link that silently did nothing on a healthy fleet. -->
+            <button
+              type="button"
+              class="link-btn"
+              [disabled]="problemGroupCount() === 0"
+              [title]="
+                problemGroupCount() === 0
+                  ? 'No category has a failed, degraded or stale worker'
+                  : 'Expand the ' + problemGroupCount() + ' categories with problems'
+              "
+              (click)="expandProblems()"
+            >
+              Expand problems{{ problemGroupCount() > 0 ? ' (' + problemGroupCount() + ')' : '' }}
             </button>
             <button type="button" class="link-btn" (click)="expandAll()">Expand all</button>
             <button type="button" class="link-btn" (click)="collapseAll()">Collapse all</button>
@@ -731,7 +744,7 @@ const CARD_GRID_CAP = 12;
       }
       table.mini td.warn,
       table.mini td .warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       table.mini .empty {
         display: block;
@@ -787,12 +800,12 @@ const CARD_GRID_CAP = 12;
         font-variant-numeric: tabular-nums;
       }
       .agg-pill.bad-pill {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .agg-pill.warn-pill {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
 
       /* Dense table mode — many workers per screen, bounded so categories
@@ -852,7 +865,7 @@ const CARD_GRID_CAP = 12;
         color: var(--loss);
       }
       table.dense .warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .categories {
         display: grid;
@@ -935,8 +948,12 @@ const CARD_GRID_CAP = 12;
         color: var(--accent);
         cursor: pointer;
       }
-      .link-btn:hover {
+      .link-btn:hover:not(:disabled) {
         text-decoration: underline;
+      }
+      .link-btn:disabled {
+        color: var(--text-tertiary);
+        cursor: default;
       }
       .expand-controls .link-btn + .link-btn::before {
         content: '·';
@@ -944,8 +961,8 @@ const CARD_GRID_CAP = 12;
         color: var(--text-tertiary);
       }
       .pill-stale {
-        background: rgba(175, 82, 222, 0.12);
-        color: #8a2be2;
+        background: color-mix(in srgb, var(--tone-purple) 16%, transparent);
+        color: var(--tone-purple);
       }
       .toolbar {
         display: flex;
@@ -1063,17 +1080,22 @@ const CARD_GRID_CAP = 12;
         background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
+      /* Theme tones: the light-theme hues read as dark-on-dark in the dark theme. */
       .pill[data-status='Healthy'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
+        color: var(--tone-green);
       }
       .pill[data-status='Degraded'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
+        color: var(--tone-amber);
       }
       .pill[data-status='Failed'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
+      }
+      .pill[data-status='Idle'] {
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
       .metrics-grid {
         display: grid;
@@ -1110,7 +1132,7 @@ const CARD_GRID_CAP = 12;
       }
       .metrics-grid dd.warn,
       .metrics-grid dd .warn {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .err-rate {
         opacity: 0.7;
@@ -1217,6 +1239,13 @@ export class WorkerHealthPageComponent {
     this.expanded.set(new Set());
     this.userToggled.set(true);
   }
+
+  /** Categories holding a failed, degraded or stale worker — what "Expand problems" opens. */
+  readonly problemGroupCount = computed(
+    () =>
+      this.groupedByCategory().filter((g) => g.failedCount + g.degradedCount + g.staleCount > 0)
+        .length,
+  );
 
   expandProblems(): void {
     const init = new Set(
@@ -1337,10 +1366,18 @@ export class WorkerHealthPageComponent {
   readonly fleetStats = computed(() => {
     const ws = this.workers();
     if (ws.length === 0) {
-      return { avgP95: 0, maxP99: 0, errorsLastHour: 0, totalBacklog: 0 };
+      return { avgP95: 0, medianP95: 0, maxP99: 0, errorsLastHour: 0, totalBacklog: 0 };
     }
     const p95s = ws.map((w) => w.cycleDurationP95Ms).filter((v) => Number.isFinite(v));
     const avgP95 = p95s.length > 0 ? p95s.reduce((a, b) => a + b, 0) / p95s.length : 0;
+    const sorted = [...p95s].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianP95 =
+      sorted.length === 0
+        ? 0
+        : sorted.length % 2 === 0
+          ? (sorted[mid - 1] + sorted[mid]) / 2
+          : sorted[mid];
     const maxP99 = ws.reduce(
       (m, w) =>
         Number.isFinite(w.cycleDurationP99Ms) && w.cycleDurationP99Ms > m
@@ -1350,6 +1387,7 @@ export class WorkerHealthPageComponent {
     );
     return {
       avgP95: Math.round(avgP95),
+      medianP95: Math.round(medianP95),
       maxP99: Math.round(maxP99),
       errorsLastHour: ws.reduce((s, w) => s + (w.errorsLastHour ?? 0), 0),
       totalBacklog: ws.reduce((s, w) => s + (w.backlogDepth ?? 0), 0),
@@ -1486,8 +1524,10 @@ export class WorkerHealthPageComponent {
     // Slowest categories only; the long tail of sub-100 ms categories is what
     // piled forty "NN ms" labels into a 40 px strip. The value is on hover;
     // bar length and colour band carry the reading.
+    // A log axis cannot place 0 (or anything under 1 ms), so those categories are left out.
     const rows = Object.entries(groups)
       .map(([cat, g]) => ({ cat, avg: g.count > 0 ? g.sum / g.count : 0 }))
+      .filter((r) => r.avg >= 1)
       .sort((a, b) => b.avg - a.avg)
       .slice(0, TOP_CATEGORIES);
     if (rows.length === 0) return {};
@@ -1500,12 +1540,24 @@ export class WorkerHealthPageComponent {
           return `${p.name}<br/>Avg P95: ${Math.round(p.value).toLocaleString()} ms`;
         },
       },
-      grid: { top: 10, right: 24, bottom: 30, left: 130 },
+      // Log scale: on a linear axis one 13-minute sweep turned every other bar into a hairline.
+      // right: 40 keeps the "ms" axis name inside the card.
+      grid: { top: 10, right: 40, bottom: 30, left: 130 },
       xAxis: {
-        type: 'value',
+        type: 'log',
+        logBase: 10,
+        min: 1,
         name: 'ms',
         nameTextStyle: { fontSize: 10, color: '#6E6E73' },
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
+        // Compact decades ("1k", "1M"): the full "1,000,000" labels ran into each other in the
+        // narrow card ("1 10 10(10(10…").
+        axisLabel: {
+          fontSize: 10,
+          color: '#6E6E73',
+          hideOverlap: true,
+          formatter: (v: number) =>
+            v >= 1e6 ? `${v / 1e6}M` : v >= 1e3 ? `${v / 1e3}k` : String(v),
+        },
         splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
       },
       yAxis: {

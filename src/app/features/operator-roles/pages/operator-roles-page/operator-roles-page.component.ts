@@ -13,6 +13,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 // Canonical roles the engine will accept, mirroring `OperatorRoleNames`.
@@ -72,6 +73,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
     ChartCardComponent,
     EmptyStateComponent,
     ErrorStateComponent,
+    ConfirmDialogComponent,
     DatePipe,
     RelativeTimePipe,
   ],
@@ -159,7 +161,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
             Changes affect future logins. Force a logout for immediate effect.
           </span>
         </header>
-        <form class="grant-form" (ngSubmit)="grant()">
+        <form class="grant-form" (ngSubmit)="askGrant()">
           <label class="field">
             <span class="label">Trading Account ID</span>
             <input
@@ -289,7 +291,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                             type="button"
                             class="btn btn-ghost btn-xs"
                             [disabled]="revokePending()"
-                            (click)="revoke(row.tradingAccountId, role)"
+                            (click)="askRevoke(row.tradingAccountId, role)"
                           >
                             Revoke {{ role }}
                           </button>
@@ -337,6 +339,18 @@ const DAY_MS = 24 * 60 * 60 * 1000;
           }
         </section>
       </div>
+
+      <!-- Grant and revoke change who can do what on a live trading account; both ask first. -->
+      <app-confirm-dialog
+        [open]="pendingChange() !== null"
+        [title]="changeTitle()"
+        [message]="changeMessage()"
+        [confirmLabel]="pendingChange()?.kind === 'revoke' ? 'Revoke' : 'Grant'"
+        [confirmVariant]="pendingChange()?.kind === 'revoke' ? 'destructive' : 'primary'"
+        [loading]="grantPending() || revokePending()"
+        (confirm)="confirmChange()"
+        (cancelled)="pendingChange.set(null)"
+      />
     </div>
   `,
   styles: [
@@ -707,6 +721,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
       .muted {
         color: var(--text-tertiary);
       }
+      /* Header/toolbar captions sat at body size — larger than the 13px card title beside them. */
+      .card-head .muted,
+      .toolbar .muted {
+        font-size: var(--text-xs);
+      }
       .small {
         font-size: var(--text-xs);
       }
@@ -761,6 +780,28 @@ export class OperatorRolesPageComponent {
   readonly loadError = signal<string | null>(null);
   readonly grantPending = signal(false);
   readonly revokePending = signal(false);
+
+  /** The grant or revoke waiting on the confirmation dialog. */
+  readonly pendingChange = signal<{
+    kind: 'grant' | 'revoke';
+    tradingAccountId: number;
+    role: string;
+  } | null>(null);
+  readonly changeTitle = computed(() => {
+    const c = this.pendingChange();
+    if (!c) return '';
+    return c.kind === 'revoke'
+      ? `Revoke ${c.role} from account #${c.tradingAccountId}?`
+      : `Grant ${c.role} to account #${c.tradingAccountId}?`;
+  });
+  readonly changeMessage = computed(() => {
+    const c = this.pendingChange();
+    if (!c) return '';
+    const what = ROLE_DESCRIPTIONS[c.role]?.summary ?? '';
+    return c.kind === 'revoke'
+      ? `The account loses ${c.role} at its next login. ${what} Force a logout for immediate effect.`
+      : `The account gains ${c.role} at its next login. ${what}`;
+  });
 
   /** Null (rendered "-") until the first successful load, so a failure never reads as 0. */
   tile(n: number): number | null {
@@ -1028,12 +1069,33 @@ export class OperatorRolesPageComponent {
     });
   }
 
+  askGrant(): void {
+    if (!this.grantAccountId || !this.grantRole) return;
+    this.pendingChange.set({
+      kind: 'grant',
+      tradingAccountId: this.grantAccountId,
+      role: this.grantRole,
+    });
+  }
+
+  askRevoke(tradingAccountId: number, role: string): void {
+    this.pendingChange.set({ kind: 'revoke', tradingAccountId, role });
+  }
+
+  confirmChange(): void {
+    const c = this.pendingChange();
+    if (!c || this.grantPending() || this.revokePending()) return;
+    if (c.kind === 'revoke') this.revoke(c.tradingAccountId, c.role);
+    else this.grant();
+  }
+
   grant(): void {
     if (!this.grantAccountId || !this.grantRole) return;
     this.grantPending.set(true);
     this.service.grant(this.grantAccountId, this.grantRole).subscribe({
       next: (res) => {
         this.grantPending.set(false);
+        this.pendingChange.set(null);
         if (res?.status) {
           this.notify.success(`Granted ${this.grantRole} to account ${this.grantAccountId}`);
           this.grantAccountId = null;
@@ -1044,6 +1106,7 @@ export class OperatorRolesPageComponent {
       },
       error: () => {
         this.grantPending.set(false);
+        this.pendingChange.set(null);
         this.notify.error('Grant failed');
       },
     });
@@ -1054,6 +1117,7 @@ export class OperatorRolesPageComponent {
     this.service.revoke(tradingAccountId, role).subscribe({
       next: (res) => {
         this.revokePending.set(false);
+        this.pendingChange.set(null);
         if (res?.status) {
           this.notify.success(`Revoked ${role} from account ${tradingAccountId}`);
           this.reload();
@@ -1063,6 +1127,7 @@ export class OperatorRolesPageComponent {
       },
       error: () => {
         this.revokePending.set(false);
+        this.pendingChange.set(null);
         this.notify.error('Revoke failed');
       },
     });

@@ -58,18 +58,34 @@ const REFRESH_MS = 15_000;
       <div class="as-counters">
         <a class="as-counter" routerLink="/positions" title="Open positions in the account scope">
           <span class="as-n">{{ s.openPositions }}</span> positions
-          <span class="as-pnl" [class.up]="s.unrealizedPnl > 0" [class.down]="s.unrealizedPnl < 0">{{
-            s.unrealizedPnl | number: '1.2-2'
-          }}</span>
+          <span
+            class="as-pnl"
+            [class.up]="s.unrealizedPnl > 0"
+            [class.down]="s.unrealizedPnl < 0"
+            >{{ s.unrealizedPnl | number: '1.2-2' }}</span
+          >
         </a>
-        <a class="as-counter" routerLink="/orders" title="Pending, submitted or partly filled orders in the account scope">
+        <a
+          class="as-counter"
+          routerLink="/orders"
+          title="Pending, submitted or partly filled orders in the account scope"
+        >
           <span class="as-n">{{ s.workingOrders }}</span> working orders
         </a>
-        <a class="as-counter" routerLink="/trade-signals" title="Pending or approved signals not yet expired — every account">
-          <span class="as-n">{{ s.liveSignals }}</span> live signals <small class="muted">engine-wide</small>
+        <a
+          class="as-counter"
+          routerLink="/trade-signals"
+          title="Pending or approved signals not yet expired — every account"
+        >
+          <span class="as-n">{{ s.liveSignals }}</span> live signals
+          <small class="muted">engine-wide</small>
         </a>
-        <span class="as-counter" title="Open simulated paper trades — they belong to strategies, not accounts">
-          <span class="as-n">{{ s.openPaperTrades }}</span> paper trades <small class="muted">engine-wide</small>
+        <span
+          class="as-counter"
+          title="Open simulated paper trades — they belong to strategies, not accounts"
+        >
+          <span class="as-n">{{ s.openPaperTrades }}</span> paper trades
+          <small class="muted">engine-wide</small>
         </span>
       </div>
 
@@ -85,12 +101,23 @@ const REFRESH_MS = 15_000;
       @for (p of s.positionsOnSymbol; track p.id) {
         <div class="as-row">
           <span class="as-kind">Position</span>
-          <span [class.up]="p.direction === 'Long'" [class.down]="p.direction === 'Short'">{{ p.direction }}</span>
-          {{ p.lots | number: '1.2-2' }} &#64; {{ p.entryPrice | number: '1.' + digits() + '-' + digits() }}
-          <span class="muted">SL {{ p.stopLoss === null ? '—' : (p.stopLoss | number: '1.' + digits() + '-' + digits()) }}</span>
-          <span class="as-pnl" [class.up]="p.unrealizedPnl > 0" [class.down]="p.unrealizedPnl < 0">{{
-            p.unrealizedPnl | number: '1.2-2'
+          <span [class.up]="p.direction === 'Long'" [class.down]="p.direction === 'Short'">{{
+            p.direction
           }}</span>
+          {{ p.lots | number: '1.2-2' }} &#64;
+          {{ p.entryPrice | number: '1.' + digits() + '-' + digits() }}
+          <span class="muted"
+            >SL
+            {{
+              p.stopLoss === null ? '—' : (p.stopLoss | number: '1.' + digits() + '-' + digits())
+            }}</span
+          >
+          <span
+            class="as-pnl"
+            [class.up]="p.unrealizedPnl > 0"
+            [class.down]="p.unrealizedPnl < 0"
+            >{{ p.unrealizedPnl | number: '1.2-2' }}</span
+          >
         </div>
       }
       @for (o of s.ordersOnSymbol; track o.id) {
@@ -104,19 +131,35 @@ const REFRESH_MS = 15_000;
         </a>
       }
       @for (sg of s.signalsOnSymbol; track sg.id) {
-        <div class="as-row" [title]="sg.isManual ? 'Manual signal' : 'From ' + (sg.strategyName ?? 'strategy #' + sg.strategyId)">
+        <div
+          class="as-row"
+          [title]="
+            sg.isManual
+              ? 'Manual signal'
+              : 'From ' + (sg.strategyName ?? 'strategy #' + sg.strategyId)
+          "
+        >
           <span class="as-kind">Signal</span>
-          <span [class.up]="sg.direction === 'Buy'" [class.down]="sg.direction === 'Sell'">{{ sg.direction }}</span>
+          <span [class.up]="sg.direction === 'Buy'" [class.down]="sg.direction === 'Sell'">{{
+            sg.direction
+          }}</span>
           &#64; {{ sg.entryPrice | number: '1.' + digits() + '-' + digits() }}
-          <span class="muted">{{ sg.status }} · until {{ sg.expiresAt | zonedDate: timeZone() : 'time' }}</span>
-          <span class="muted as-src">{{ sg.isManual ? 'manual' : (sg.strategyName ?? '#' + sg.strategyId) }}</span>
+          <span class="muted"
+            >{{ sg.status }} · until {{ sg.expiresAt | zonedDate: timeZone() : 'time' }}</span
+          >
+          <span class="muted as-src">{{
+            sg.isManual ? 'manual' : (sg.strategyName ?? '#' + sg.strategyId)
+          }}</span>
         </div>
       }
       @for (pt of s.paperTradesOnSymbol; track pt.id) {
         <div class="as-row">
           <span class="as-kind">Paper</span>
-          <span [class.up]="pt.direction === 'Buy'" [class.down]="pt.direction === 'Sell'">{{ pt.direction }}</span>
-          {{ pt.lots | number: '1.2-2' }} &#64; {{ pt.fillPrice | number: '1.' + digits() + '-' + digits() }}
+          <span [class.up]="pt.direction === 'Buy'" [class.down]="pt.direction === 'Sell'">{{
+            pt.direction
+          }}</span>
+          {{ pt.lots | number: '1.2-2' }} &#64;
+          {{ pt.fillPrice | number: '1.' + digits() + '-' + digits() }}
           <span class="muted as-src">{{ pt.strategyName ?? '#' + pt.strategyId }}</span>
         </div>
       }
@@ -234,9 +277,27 @@ export class AccountStripComponent {
   readonly strip = signal<AccountStrip | null>(null);
   readonly error = signal<string | null>(null);
 
+  /**
+   * "Real" in the scope model means not engine-paper, not a broker Real account: four demo
+   * accounts and one real one read "All real accounts (5)". Named like the header's scope pill —
+   * by the broker account types the aggregate actually spans.
+   */
   readonly scopeLabel = computed(() => {
     const n = this.scope.accountIds().length;
-    if (this.scope.isAggregateReal()) return `All real accounts (${n})`;
+    if (this.scope.isAggregateReal()) {
+      const counts = new Map<string, number>();
+      for (const a of this.scope.liveRealAccounts()) {
+        const t = (a.accountType ?? 'Real').toLowerCase();
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+      if (counts.size === 0 || (counts.size === 1 && counts.has('real'))) {
+        return `All real accounts (${n})`;
+      }
+      const parts = ['real', 'demo', 'contest']
+        .filter((t) => counts.has(t))
+        .map((t) => `${counts.get(t)} ${t}`);
+      return `All accounts (${n} · ${parts.join(', ')})`;
+    }
     return n === 1 ? 'One account' : `All accounts (${n})`;
   });
   private seq = 0;
@@ -265,7 +326,10 @@ export class AccountStripComponent {
       this.realtime.on('positionLifecycleEvent'),
       this.realtime.on('tradeSignalCreated'),
     )
-      .pipe(throttleTime(1_000, undefined, { leading: true, trailing: true }), takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        throttleTime(1_000, undefined, { leading: true, trailing: true }),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => void this.read(this.symbol()));
     this.destroyRef.onDestroy(() => this.seq++);
   }
@@ -273,13 +337,20 @@ export class AccountStripComponent {
   private async read(symbol: string): Promise<void> {
     const n = ++this.seq;
     try {
-      const s = await firstValueFrom(this.api.accountStrip(symbol, untracked(() => this.scope.accountIds())));
+      const s = await firstValueFrom(
+        this.api.accountStrip(
+          symbol,
+          untracked(() => this.scope.accountIds()),
+        ),
+      );
       if (n !== this.seq) return;
       this.strip.set(s);
       this.error.set(null);
     } catch (e) {
       if (n !== this.seq) return;
-      this.error.set(e instanceof Error && e.message ? e.message : 'The account strip could not be loaded.');
+      this.error.set(
+        e instanceof Error && e.message ? e.message : 'The account strip could not be loaded.',
+      );
     }
   }
 }

@@ -28,6 +28,8 @@ interface TimelineStep {
   current: boolean;
   /** A reached step that is a negative outcome (cancelled / rejected / expired). */
   failed: boolean;
+  /** Never reached, and never will be: the order already ended. */
+  skipped?: boolean;
 }
 
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -138,8 +140,9 @@ import {
           @if (handEntered()) {
             <div class="exec-note warn" role="status" data-testid="order-hand-entered">
               <span>
-                This order was entered by hand: it has no trade signal and no broker ticket, so no EA will place it.
-                The EA trades approved signals only. Cancel or delete it, and create a manual signal instead.
+                This order was entered by hand: it has no trade signal and no broker ticket, so no
+                EA will place it. The EA trades approved signals only. Cancel or delete it, and
+                create a manual signal instead.
               </span>
               <button type="button" class="btn btn-primary" (click)="manualSignalOpen.set(true)">
                 New manual signal from this order
@@ -148,7 +151,9 @@ import {
           } @else if (order()!.tradeSignalId) {
             <div class="exec-note" role="status">
               Waiting for the EA: it places this order from
-              <a [routerLink]="['/trade-signals', order()!.tradeSignalId]">signal #{{ order()!.tradeSignalId }}</a>
+              <a [routerLink]="['/trade-signals', order()!.tradeSignalId]"
+                >signal #{{ order()!.tradeSignalId }}</a
+              >
               and reports the fill.
             </div>
           }
@@ -412,7 +417,9 @@ import {
                 <div class="rejection-card">
                   <div class="rejection-icon">!</div>
                   <div class="rejection-content">
-                    <span class="rejection-title">Rejection Reason</span>
+                    <!-- The engine stores every terminal reason in rejectionReason;
+                         a cancelled order's reason is not a rejection. -->
+                    <span class="rejection-title">{{ reasonTitle() }}</span>
                     <span class="rejection-text">{{ order()!.rejectionReason }}</span>
                   </div>
                 </div>
@@ -481,7 +488,12 @@ import {
                         <!-- A reached step with no timestamp is "not recorded", never
                              "Pending" — a rejected order is not pending anything. -->
                         <span class="timeline-time">{{
-                          step.timestamp ?? (step.active ? 'Time not recorded' : 'Pending')
+                          step.timestamp ??
+                            (step.active
+                              ? 'Time not recorded'
+                              : step.skipped
+                                ? 'Not reached'
+                                : 'Pending')
                         }}</span>
                         @if (step.description) {
                           <span class="timeline-desc">{{ step.description }}</span>
@@ -719,10 +731,31 @@ export class OrderDetailPageComponent implements OnInit {
     return String(o.executionType);
   });
 
+  reasonTitle = computed(() => {
+    switch (this.statusLabel()) {
+      case 'Cancelled':
+      case 'Cancelling':
+        return 'Cancellation reason';
+      case 'Expired':
+        return 'Expiry reason';
+      case 'Rejected':
+        return 'Rejection reason';
+      default:
+        return 'Engine note';
+    }
+  });
+
+  /**
+   * Signed adverse slippage in price units: positive = filled worse than
+   * requested (higher for a buy, lower for a sell), negative = price
+   * improvement. It was Math.abs'd, so the "profit" tint for an improvement
+   * could never show and every non-zero slip was painted as a loss.
+   */
   slippage = computed(() => {
     const o = this.order();
     if (!o || o.filledPrice == null) return 0;
-    return Math.abs(o.filledPrice - o.price);
+    const diff = o.filledPrice - o.price;
+    return this.isBuy() ? diff : -diff;
   });
 
   timelineSteps = computed(() => {
@@ -740,13 +773,26 @@ export class OrderDetailPageComponent implements OnInit {
       failed: false,
     };
 
+    // A broker ticket proves the order reached the broker, whatever happened
+    // next. Keyed on status alone, a cancelled working limit order (ticket
+    // 3363371669) showed "Submitted — Pending" with an empty dot, as if it
+    // had never left the engine. The EA creates the order row as it places
+    // it, so createdAt stands in for the submit time.
+    const ended = ['Cancelled', 'Rejected', 'Expired'].includes(status);
+    const reachedBroker =
+      !!o.brokerOrderId || ['Submitted', 'PartialFill', 'Filled', 'Cancelling'].includes(status);
     const submitted: TimelineStep = {
       label: 'Submitted',
-      timestamp: ['Submitted', 'PartialFill', 'Filled'].includes(status) ? fmt(o.createdAt) : null,
-      description: 'Order submitted to broker for execution',
-      active: ['Submitted', 'PartialFill', 'Filled'].includes(status),
+      timestamp: reachedBroker ? fmt(o.createdAt) : null,
+      description: o.brokerOrderId
+        ? `Placed with the broker as ticket #${o.brokerOrderId}`
+        : ended
+          ? 'Never reached the broker'
+          : 'Order submitted to broker for execution',
+      active: reachedBroker,
       current: status === 'Submitted',
       failed: false,
+      skipped: !reachedBroker && ended,
     };
 
     const terminal = this.getTerminalStep(status, o, fmt);
@@ -854,7 +900,7 @@ export class OrderDetailPageComponent implements OnInit {
         return {
           label: 'Cancelled',
           timestamp: null,
-          description: 'Order was cancelled',
+          description: o.rejectionReason ?? 'Order was cancelled',
           active: true,
           current: false,
           failed: true,

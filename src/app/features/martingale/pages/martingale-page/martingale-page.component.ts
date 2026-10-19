@@ -16,6 +16,37 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+
+/**
+ * One question put to the operator before a write. Every risk-bearing change on this page goes
+ * through it — the fleet-wide mode switch used to fire straight from the Off / Shadow click, and the
+ * rest asked through window.prompt / confirm / alert, which an automated session dismisses unseen
+ * and an operator cannot read back once answered.
+ */
+interface MartingaleAsk {
+  title: string;
+  lines: string[];
+  /** Show the fleet-wide open-chain summary (mode switches). */
+  showChains?: boolean;
+  /** Present = a reason box; `reasonRequired` makes it mandatory (the server's rule). */
+  reasonLabel?: string;
+  reasonRequired?: boolean;
+  /** Present = a checkbox that must be ticked (server-side acknowledgements). */
+  ackLabel?: string;
+  confirmLabel: string;
+  danger?: boolean;
+  run: (reason: string | null, ack: boolean) => void;
+  /** Undo whatever the trigger already did on screen (a switch that flipped itself). */
+  onCancel?: () => void;
+}
+
+/** Fleet-wide open chains, read when a mode switch is asked. */
+interface ModeChainSummary {
+  count: number;
+  outstanding: number;
+  lines: string[];
+}
 
 /**
  * Operator control for the per-symbol recovery ladder.
@@ -36,6 +67,7 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
     CardSkeletonComponent,
     EmptyStateComponent,
     ToggleComponent,
+    ModalA11yDirective,
   ],
   template: `
     <app-page-header
@@ -75,7 +107,9 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
                 and recover against real fills, so the ladder can be judged before it is trusted.
               }
               @case ('Off') {
-                Ladders compute nothing. Chain state and sizing are both untouched.
+                <!-- Not "chain state untouched": the close handler advances open chains in every
+                     mode (engine need filed), so only the sizing claim is made here. -->
+                Ladders size nothing — every order goes out at base size.
               }
             }
           </span>
@@ -115,6 +149,14 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
 
     @if (error(); as e) {
       <div class="banner err" role="alert">{{ e }}</div>
+    }
+    @if (notice(); as n) {
+      <div class="banner info" role="status">
+        <span class="notice-text">{{ n }}</span>
+        <button type="button" class="notice-close" (click)="notice.set(null)" aria-label="Dismiss">
+          ✕
+        </button>
+      </div>
     }
 
     @if (loading()) {
@@ -479,6 +521,80 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
     } @else {
       <app-empty-state title="Select an account to view its ladders." />
     }
+
+    @if (ask(); as a) {
+      <div class="ask-backdrop" role="presentation" (click)="cancelAsk()">
+        <div
+          class="ask"
+          [class.danger]="a.danger"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mtg-ask-title"
+          appModalA11y
+          (dismiss)="cancelAsk()"
+          (click)="$event.stopPropagation()"
+        >
+          <h3 id="mtg-ask-title">{{ a.title }}</h3>
+          @for (line of a.lines; track $index) {
+            <p>{{ line }}</p>
+          }
+          @if (a.showChains) {
+            <div class="ask-chains">
+              @if (modeChains() === null) {
+                <span class="muted">Reading open chains…</span>
+              } @else if (modeChains() === 'unavailable') {
+                <span class="warn">Open chains could not be read — check the internals page.</span>
+              } @else if (modeChainSummary(); as c) {
+                @if (c.count === 0) {
+                  <span>No open chains fleet-wide — nothing is mid-recovery.</span>
+                } @else {
+                  <strong>
+                    {{ c.count }} open chain{{ c.count === 1 ? '' : 's' }} fleet-wide, owing
+                    {{ c.outstanding | number: '1.2-2' }}:
+                  </strong>
+                  <ul>
+                    @for (l of c.lines; track $index) {
+                      <li>{{ l }}</li>
+                    }
+                  </ul>
+                }
+              }
+            </div>
+          }
+          @if (a.reasonLabel) {
+            <label class="ask-field">
+              <span>{{ a.reasonLabel }}</span>
+              <textarea rows="2" [(ngModel)]="askReason" [disabled]="askBusy()"></textarea>
+            </label>
+          }
+          @if (a.ackLabel) {
+            <label class="ask-ack">
+              <input type="checkbox" [(ngModel)]="askAck" [disabled]="askBusy()" />
+              <span>{{ a.ackLabel }}</span>
+            </label>
+          }
+          <div class="ask-actions">
+            <button
+              type="button"
+              class="ghost"
+              (click)="cancelAsk()"
+              [disabled]="askBusy()"
+              data-autofocus
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              [class.danger-btn]="a.danger"
+              [disabled]="askBusy() || !askReady(a)"
+              (click)="confirmAsk(a)"
+            >
+              {{ a.confirmLabel }}
+            </button>
+          </div>
+        </div>
+      </div>
+    }
   `,
   styles: [
     `
@@ -624,6 +740,109 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
         color: #ff3b30;
         border: 1px solid color-mix(in srgb, #ff3b30 35%, transparent);
       }
+      .banner.info {
+        display: flex;
+        align-items: flex-start;
+        gap: var(--space-3);
+        background: color-mix(in srgb, #0a84ff 10%, transparent);
+        color: var(--text-primary);
+        border: 1px solid color-mix(in srgb, #0a84ff 35%, transparent);
+      }
+      .notice-text {
+        flex: 1;
+        white-space: pre-line;
+      }
+      .notice-close {
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        cursor: pointer;
+        padding: 0 4px;
+      }
+
+      /* Confirmation dialog (see MartingaleAsk). */
+      .ask-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-4);
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(2px);
+      }
+      .ask {
+        width: min(540px, 100%);
+        max-height: 90vh;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-5);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-top: 3px solid #0a84ff;
+        border-radius: 12px;
+        box-shadow: var(--shadow-lg);
+      }
+      .ask.danger {
+        border-top-color: #ff3b30;
+      }
+      .ask h3 {
+        margin: 0;
+        font-size: 1rem;
+      }
+      .ask p {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--text-secondary);
+      }
+      .ask-chains {
+        font-size: 12px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+      }
+      .ask-chains ul {
+        margin: 4px 0 0;
+        padding-left: 18px;
+      }
+      .ask-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      .ask-field textarea {
+        resize: vertical;
+        padding: 6px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font: inherit;
+      }
+      .ask-ack {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--text-primary);
+      }
+      .ask-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-2);
+      }
+      .ask-actions .danger-btn {
+        background: #ff3b30;
+        border-color: #ff3b30;
+        color: #fff;
+      }
 
       .gate {
         border: 1px solid var(--border);
@@ -659,7 +878,7 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
       }
       .pill.on {
         background: color-mix(in srgb, #34c759 18%, transparent);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .pill.danger-pill {
         background: color-mix(in srgb, #ff3b30 16%, transparent);
@@ -726,7 +945,8 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
         margin-top: var(--space-3);
       }
       .pactions button,
-      .edit-actions button {
+      .edit-actions button,
+      .ask-actions button {
         padding: 6px 14px;
         border-radius: 8px;
         border: 1px solid var(--border);
@@ -744,11 +964,13 @@ import { ToggleComponent } from '@shared/components/ui/toggle/toggle.component';
         background: var(--bg-tertiary);
       }
       .pactions button.ghost,
-      .edit-actions button.ghost {
+      .edit-actions button.ghost,
+      .ask-actions button.ghost {
         background: transparent;
         color: var(--text-secondary);
       }
-      .pactions button:disabled {
+      .pactions button:disabled,
+      .ask-actions button:disabled {
         opacity: 0.55;
         cursor: default;
       }
@@ -908,6 +1130,49 @@ export class MartingalePageComponent {
   readonly savingProfile = signal(false);
   readonly savingMode = signal(false);
   readonly editing = signal<string | null>(null);
+  /** Outcome of the last fleet-wide action, shown in-page (it used to be a window.alert). */
+  readonly notice = signal<string | null>(null);
+
+  // ── Confirmation dialog ───────────────────────────────────────────────────
+  readonly ask = signal<MartingaleAsk | null>(null);
+  /** Bound to the dialog's reason box / acknowledgement; reset per question. */
+  askReason = '';
+  askAck = false;
+  /** Open chains fleet-wide while a mode switch is being asked; null = still reading. */
+  readonly modeChains = signal<ModeChainSummary | 'unavailable' | null>(null);
+  readonly modeChainSummary = computed(() => {
+    const c = this.modeChains();
+    return c && c !== 'unavailable' ? c : null;
+  });
+  /** A dialog's write is in flight — Cancel / Escape must not abandon it. */
+  readonly askBusy = computed(() => this.savingMode() || this.savingProfile() || this.saving());
+
+  private openAsk(a: MartingaleAsk): void {
+    this.askReason = '';
+    this.askAck = false;
+    this.ask.set(a);
+  }
+
+  askReady(a: MartingaleAsk): boolean {
+    if (a.reasonRequired && !this.askReason.trim()) return false;
+    if (a.ackLabel && !this.askAck) return false;
+    return true;
+  }
+
+  confirmAsk(a: MartingaleAsk): void {
+    if (!this.askReady(a)) return;
+    const reason = this.askReason.trim() || null;
+    const ack = this.askAck;
+    this.ask.set(null);
+    a.run(reason, ack);
+  }
+
+  cancelAsk(): void {
+    if (this.askBusy()) return;
+    const a = this.ask();
+    this.ask.set(null);
+    a?.onCancel?.();
+  }
   /** See the @for track comment in the template — forces switch re-creation. */
   readonly rowRev = signal(0);
 
@@ -999,38 +1264,88 @@ export class MartingalePageComponent {
   // ── Fleet-wide mode ───────────────────────────────────────────────────────
 
   changeMode(mode: MartingaleMode): void {
-    // Going Live is the moment a size-escalating scheme starts placing real orders, across every
-    // account at once. The server demands a reason and an explicit acknowledgement; both are
-    // collected here rather than sent as placeholders.
-    let reason: string | null = null;
-    let ack = false;
-
+    // Every switch asks. It is fleet-wide — every account at once — and it lands mid-chain: what
+    // happens to the open chains is the thing the operator has to weigh, so they are listed.
+    // Going Live additionally needs the server's reason + explicit acknowledgement.
+    const from = this.view()?.mode ?? null;
+    const lines: string[] = [];
     if (mode === 'Live') {
-      ack = window.confirm(
-        'Put martingale ladders LIVE?\n\n' +
-          'Every enabled (account, symbol) pair will start sizing recovery rungs with real ' +
-          'orders — a loss escalates the next position instead of being logged.\n\n' +
-          'This is fleet-wide and takes effect within a minute. Continue?',
+      lines.push(
+        'Every enabled (account, symbol) pair starts sizing recovery rungs with real orders — a ' +
+          'loss escalates the next position instead of being logged.',
       );
-      if (!ack) return;
-
-      reason = window.prompt('Reason for going Live (required):');
-      if (!reason || !reason.trim()) return;
+      if (from === 'Shadow') {
+        lines.push(
+          'Open chains keep the depth and deficit they built up in Shadow; their next rung is ' +
+            'sized with real money.',
+        );
+      }
+    } else if (mode === 'Shadow') {
+      lines.push(
+        from === 'Live'
+          ? 'Rungs stop being applied — the next position on every laddered symbol goes out at ' +
+              'base size, so open deficits stop being recovered by size. Chains keep advancing ' +
+              'against real fills and their rungs are logged.'
+          : 'Rungs are computed and logged against real fills but never applied to an order.',
+      );
+    } else {
+      lines.push(
+        'Sizing returns to base on every laddered symbol. Open chains are not cleared — their ' +
+          'deficits stay on the books (closes are still recorded against them), and the next ' +
+          'rung is sized from them when the mode leaves Off.',
+      );
     }
+    lines.push('Fleet-wide: every account, effective within a minute.');
 
+    this.modeChains.set(null);
+    this.martingale.getOverview({ status: 'Open', maxChains: 50 }).subscribe({
+      next: (o) => {
+        const open = o.chains.filter((c) => c.status === 'Open');
+        this.modeChains.set({
+          count: o.totals.openChains,
+          outstanding: o.totals.outstandingDeficit,
+          lines: open.map(
+            (c) =>
+              `${c.symbol} · ${c.accountName} #${c.tradingAccountId} — depth ${c.depth}/` +
+              `${c.maxDepth}, owing ${c.deficitAmount.toFixed(2)}`,
+          ),
+        });
+      },
+      error: () => this.modeChains.set('unavailable'),
+    });
+
+    this.openAsk({
+      title: `Switch martingale to ${mode}?`,
+      lines,
+      showChains: true,
+      reasonLabel:
+        mode === 'Live' ? 'Reason (required, audit trail)' : 'Reason (optional, audit trail)',
+      reasonRequired: mode === 'Live',
+      ackLabel:
+        mode === 'Live'
+          ? 'I understand ladders will place real, size-escalating orders on every enabled pair.'
+          : undefined,
+      confirmLabel: mode === 'Live' ? 'Go Live' : `Switch to ${mode}`,
+      danger: mode === 'Live',
+      run: (reason, ack) => this.applyMode(mode, reason, mode === 'Live' && ack),
+    });
+  }
+
+  private applyMode(mode: MartingaleMode, reason: string | null, ack: boolean): void {
     this.savingMode.set(true);
     this.error.set(null);
+    this.notice.set(null);
     this.martingale.setMode({ mode, reason, acknowledgeLiveTrading: ack }).subscribe({
       next: (r) => {
         this.savingMode.set(false);
         // Report the blast radius the server measured, rather than leaving the operator to guess
         // how many ladders a fleet-wide switch just touched.
-        if (r.activeLadderCount > 0) {
-          window.alert(
-            `Mode ${r.previousMode} → ${r.newMode}.\n\n` +
-              `${r.activeLadderCount} active ladder(s) affected:\n${r.activeLadders.join('\n')}`,
-          );
-        }
+        this.notice.set(
+          `Mode ${r.previousMode} → ${r.newMode}. ` +
+            (r.activeLadderCount > 0
+              ? `${r.activeLadderCount} active ladder(s) affected: ${r.activeLadders.join(', ')}.`
+              : 'No active ladders were affected.'),
+        );
         this.load();
       },
       error: (e: { message?: string }) => {
@@ -1072,38 +1387,52 @@ export class MartingalePageComponent {
     // Keep the projection honest if the operator typed without blurring.
     this.draftDepth.set(Number(this.pf.maxDepth) || 0);
 
-    let reason: string | null = null;
-    if (this.pf.enabled) {
-      const shared = v.accountsSharingProfile.length;
-      reason = window.prompt(
-        `Allow martingale on "${v.riskProfileName}"?\n\n` +
-          (shared > 0
-            ? `This profile is shared with ${shared} other account(s): #${v.accountsSharingProfile.join(', #')}. ` +
-              `Ladders become reachable for all of them (each still needs its own per-symbol opt-in).\n\n`
-            : '') +
-          `Worst case at depth ${this.pf.maxDepth}: ${this.projectedWorstCase().toFixed(1)}% of equity.\n\n` +
-          `Reason (required):`,
+    const shared = v.accountsSharingProfile.length;
+    const lines = [
+      `Depth cap ${this.pf.maxDepth} · target ${this.pf.targetProfitR}R · max stake ` +
+        `${this.pf.maxStakePctEquity}% · chain age cap ${this.pf.maxChainAgeHours}h. Worst case at ` +
+        `depth ${this.pf.maxDepth}: ${this.projectedWorstCase().toFixed(1)}% of equity.`,
+    ];
+    if (shared > 0) {
+      lines.push(
+        `This profile is shared with ${shared} other account(s): #` +
+          `${v.accountsSharingProfile.join(', #')}. The change applies to all of them` +
+          (this.pf.enabled ? ' (each still needs its own per-symbol opt-in).' : '.'),
       );
-      if (!reason || !reason.trim()) return;
     }
-
     // AbandonAtCap = false removes the only bound on a chain's loss. The server demands an
     // explicit acknowledgement rather than trusting a dialog, so the intent lands in the audit
     // trail instead of only in the browser that clicked OK.
-    let ack = false;
     if (!this.pf.abandonAtCap) {
-      ack = window.confirm(
-        'Disabling "Abandon at depth cap" makes the worst-case loss UNBOUNDED — a chain will keep ' +
-          'escalating past the depth cap until the equity floor or a halt stops it.\n\n' +
-          'This is recorded in the audit trail. Continue?',
+      lines.push(
+        'Abandon at depth cap is OFF: the worst-case loss is UNBOUNDED — a chain keeps escalating ' +
+          'past the depth cap until the equity floor or a halt stops it.',
       );
-      if (!ack) return;
     }
 
+    this.openAsk({
+      title: this.pf.enabled
+        ? `Allow martingale on "${v.riskProfileName}"?`
+        : `Save martingale defaults for "${v.riskProfileName}"?`,
+      lines,
+      reasonLabel: this.pf.enabled
+        ? 'Reason (required, audit trail)'
+        : 'Reason (optional, audit trail)',
+      reasonRequired: this.pf.enabled,
+      ackLabel: this.pf.abandonAtCap
+        ? undefined
+        : 'I understand the worst-case loss is unbounded; record that in the audit trail.',
+      confirmLabel: 'Save profile defaults',
+      danger: this.pf.enabled && !this.pf.abandonAtCap,
+      run: (reason, ack) => this.writeProfile(v.riskProfileId!, reason, ack),
+    });
+  }
+
+  private writeProfile(riskProfileId: number, reason: string | null, ack: boolean): void {
     this.savingProfile.set(true);
     this.error.set(null);
     this.martingale
-      .setProfile(v.riskProfileId, {
+      .setProfile(riskProfileId, {
         enabled: this.pf.enabled,
         targetProfitR: Number(this.pf.targetProfitR),
         maxDepth: Number(this.pf.maxDepth),
@@ -1218,24 +1547,47 @@ export class MartingalePageComponent {
     const id = this.accountId();
     if (id == null) return;
 
-    // Enabling requires a reason on the server — it is a risk-loosening change and goes through
-    // the same config-governance audit as any other. Prompting here keeps that honest rather than
-    // sending a placeholder.
-    let reason: string | null = null;
+    // Both directions ask. Enabling requires a reason on the server — it is a risk-loosening change
+    // and goes through the same config-governance audit as any other. Disabling mid-chain leaves
+    // the deficit on the books, which the operator should see before choosing it.
+    const lines: string[] = [];
     if (enabled) {
-      reason = window.prompt(
-        `Enable a martingale recovery ladder for ${symbol.symbol} on account #${id}?\n\n` +
-          `Worst case if every rung to depth ${symbol.effectiveMaxDepth} loses: ` +
-          `${symbol.worstCaseDrawdownPct.toFixed(1)}% of equity.\n\n` +
-          `Reason (required):`,
+      lines.push(
+        `Worst case if every rung to depth ${symbol.effectiveMaxDepth} loses: ` +
+          `${symbol.worstCaseDrawdownPct.toFixed(1)}% of equity.`,
       );
-      if (!reason || !reason.trim()) {
-        // Prompt dismissed: the switch already flipped itself on; snap it back.
-        this.rowRev.update((n) => n + 1);
-        return;
+    } else {
+      lines.push(`New positions on ${symbol.symbol} go out at base size.`);
+      if (symbol.hasOpenChain) {
+        lines.push(
+          `Its open chain (depth ${symbol.chainDepth}, owing ` +
+            `${symbol.chainDeficitAmount.toFixed(2)}) is NOT cleared — the deficit stays visible ` +
+            `and is picked up again if the ladder is re-enabled. Reset it on the internals page ` +
+            `to write it off.`,
+        );
       }
     }
+    this.openAsk({
+      title: enabled
+        ? `Enable a recovery ladder for ${symbol.symbol} on account #${id}?`
+        : `Disable the ${symbol.symbol} ladder on account #${id}?`,
+      lines,
+      reasonLabel: enabled ? 'Reason (required, audit trail)' : undefined,
+      reasonRequired: enabled,
+      confirmLabel: enabled ? 'Enable ladder' : 'Disable ladder',
+      danger: enabled,
+      run: (reason) => this.writeToggle(id, symbol, enabled, reason),
+      // The switch flipped itself on click; re-create the row so it re-reads the model.
+      onCancel: () => this.rowRev.update((n) => n + 1),
+    });
+  }
 
+  private writeToggle(
+    id: number,
+    symbol: MartingaleSymbolDto,
+    enabled: boolean,
+    reason: string | null,
+  ): void {
     this.saving.set(true);
     this.error.set(null);
     // The PUT is a full replace, so every override has to be re-sent or the toggle silently

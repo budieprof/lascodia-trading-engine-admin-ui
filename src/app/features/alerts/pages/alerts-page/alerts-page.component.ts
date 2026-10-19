@@ -10,7 +10,7 @@ import { FormBuilder, ReactiveFormsModule, Validators, FormsModule } from '@angu
 import { catchError, forkJoin, of } from 'rxjs';
 
 import { AlertsService } from '@core/services/alerts.service';
-import { ConfigService } from '@core/services/config.service';
+import { ConfigService, isQueuedForCoolingOff } from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type {
   AlertChannel,
@@ -28,10 +28,16 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import type { EChartsOption } from 'echarts';
 
+/**
+ * Every member of the engine's AlertType enum (Domain/Enums/AlertType.cs). Without the last eight,
+ * opening an AgentApprovalRequired or RoleBuildSkew rule showed an empty type select.
+ */
 const ALERT_TYPES: AlertType[] = [
   'PriceLevel',
   'DrawdownBreached',
@@ -49,6 +55,14 @@ const ALERT_TYPES: AlertType[] = [
   'BrokerReconciliation',
   'MLMonitoringStale',
   'SymbolicFeatureLifecycle',
+  'IntermediateRewardCalibrationDrift',
+  'AutoTuneProposalAvailable',
+  'RoleBuildSkew',
+  'AgentApprovalRequired',
+  'ScriptAlert',
+  'ScriptPositionsOrphaned',
+  'ChartAlert',
+  'ScriptParityDrift',
 ];
 
 const SEVERITIES: AlertSeverity[] = ['Info', 'Medium', 'High', 'Critical'];
@@ -156,8 +170,10 @@ const CHANNEL_DEFS: ChannelDef[] = [
     TabsComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    ErrorStateComponent,
     ChartCardComponent,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -177,9 +193,21 @@ const CHANNEL_DEFS: ChannelDef[] = [
               <span class="kpi-label">Active</span>
               <span class="kpi-value good">{{ ruleStats().active }}</span>
             </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Paused</span>
-              <span class="kpi-value muted-val">{{ ruleStats().paused }}</span>
+            <!-- Inactive rows are almost all incidents the engine raised and then auto-resolved
+                 (AutoResolvedAt set) — they used to be counted as "Paused" (1,376 of them). -->
+            <div
+              class="alerts-kpi"
+              [title]="
+                ruleStats().resolved +
+                ' auto-resolved by the engine · ' +
+                ruleStats().paused +
+                ' paused by an operator'
+              "
+            >
+              <span class="kpi-label">Resolved / paused</span>
+              <span class="kpi-value muted-val">
+                {{ ruleStats().resolved }} / {{ ruleStats().paused }}
+              </span>
             </div>
             <div class="alerts-kpi">
               <span class="kpi-label">Critical</span>
@@ -272,7 +300,8 @@ const CHANNEL_DEFS: ChannelDef[] = [
             >
               <option value="all">All statuses</option>
               <option value="active">Active only</option>
-              <option value="paused">Paused only</option>
+              <option value="resolved">Auto-resolved</option>
+              <option value="paused">Paused by an operator</option>
             </select>
             <select
               class="input"
@@ -291,6 +320,13 @@ const CHANNEL_DEFS: ChannelDef[] = [
 
           @if (alertsLoading()) {
             <app-card-skeleton [lines]="6" />
+          } @else if (alertsError()) {
+            <!-- A failed read is not "No alert rules — create one". -->
+            <app-error-state
+              title="Could not load alert rules"
+              [message]="alertsError()!"
+              (retry)="loadAlerts()"
+            />
           } @else if (filteredAlerts().length > 0) {
             <div class="rules-grid">
               @for (a of pagedAlerts(); track a.id) {
@@ -302,7 +338,17 @@ const CHANNEL_DEFS: ChannelDef[] = [
                     </div>
                     <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
                     @if (!a.isActive) {
-                      <span class="pill pill-paused">Paused</span>
+                      @if (a.autoResolvedAt) {
+                        <span
+                          class="pill pill-paused"
+                          [title]="
+                            'Auto-resolved by the engine ' + (a.autoResolvedAt | relativeTime)
+                          "
+                          >Resolved</span
+                        >
+                      } @else {
+                        <span class="pill pill-paused">Paused</span>
+                      }
                     }
                   </header>
 
@@ -347,9 +393,17 @@ const CHANNEL_DEFS: ChannelDef[] = [
 
                   <footer class="rule-actions">
                     <button class="btn btn-ghost" (click)="openEditRule(a)">Edit</button>
-                    <button class="btn btn-ghost" (click)="toggleActive(a)" [disabled]="busy()">
-                      {{ a.isActive ? 'Pause' : 'Resume' }}
-                    </button>
+                    <!-- An auto-resolved incident is closed, not paused: there is nothing to resume
+                         (the engine raises a fresh one if the condition returns). -->
+                    @if (a.isActive || !a.autoResolvedAt) {
+                      <button
+                        class="btn btn-ghost"
+                        (click)="askToggleActive(a)"
+                        [disabled]="busy()"
+                      >
+                        {{ a.isActive ? 'Pause' : 'Resume' }}
+                      </button>
+                    }
                     <button
                       class="btn btn-destructive"
                       (click)="askDeleteRule(a)"
@@ -569,33 +623,37 @@ const CHANNEL_DEFS: ChannelDef[] = [
 
                   <!-- Inline completeness indicator: required-fields fill % +
                        optional pending-changes badge. Lets the operator see
-                       at a glance whether a save will go through. -->
-                  <div class="ch-fillrow">
-                    <div class="ch-fill">
-                      <div class="ch-fill-track">
-                        <div
-                          class="ch-fill-bar"
-                          [style.width.%]="channelCompleteness(def).pct"
-                          [class.full]="channelCompleteness(def).pct === 100"
-                        ></div>
+                       at a glance whether a save will go through. Not for a
+                       channel with nothing to set up (In app read "0 / 0
+                       required" under a full green bar, and "Timeout 0s"). -->
+                  @if (def.fields.length > 0) {
+                    <div class="ch-fillrow">
+                      <div class="ch-fill">
+                        <div class="ch-fill-track">
+                          <div
+                            class="ch-fill-bar"
+                            [style.width.%]="channelCompleteness(def).pct"
+                            [class.full]="channelCompleteness(def).pct === 100"
+                          ></div>
+                        </div>
+                        <span class="ch-fill-label">
+                          {{ channelCompleteness(def).filled }} /
+                          {{ channelCompleteness(def).requiredCount }} required
+                        </span>
                       </div>
-                      <span class="ch-fill-label">
-                        {{ channelCompleteness(def).filled }} /
-                        {{ channelCompleteness(def).requiredCount }} required
+                      @if (isChannelDirty(def)) {
+                        <span class="ch-dirty">Unsaved changes</span>
+                      }
+                      <span class="ch-timeout">
+                        Timeout
+                        {{
+                          fmtDuration(
+                            $safeNavigationMigration(channelStatus(def.channel)?.timeoutSeconds)
+                          )
+                        }}
                       </span>
                     </div>
-                    @if (isChannelDirty(def)) {
-                      <span class="ch-dirty">Unsaved changes</span>
-                    }
-                    <span class="ch-timeout">
-                      Timeout
-                      {{
-                        fmtDuration(
-                          $safeNavigationMigration(channelStatus(def.channel)?.timeoutSeconds)
-                        )
-                      }}
-                    </span>
-                  </div>
+                  }
 
                   <div class="channel-fields">
                     @for (f of def.fields; track f.key) {
@@ -672,11 +730,22 @@ const CHANNEL_DEFS: ChannelDef[] = [
       </ui-tabs>
 
       <!-- ── Rule editor modal ──────────────────────────────────────── -->
+      <!-- Escape + focus come from appModalA11y; the modal used to ignore Escape entirely. -->
       @if (editingRule(); as draft) {
         <div class="modal-backdrop" (click)="cancelRule()">
-          <div class="modal" (click)="$event.stopPropagation()">
+          <div
+            class="modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="alert-rule-modal-title"
+            appModalA11y
+            (dismiss)="cancelRule()"
+            (click)="$event.stopPropagation()"
+          >
             <header class="modal-head">
-              <h3>{{ draft.id ? 'Edit alert rule' : 'New alert rule' }}</h3>
+              <h3 id="alert-rule-modal-title">
+                {{ draft.id ? 'Edit alert rule' : 'New alert rule' }}
+              </h3>
               <button class="btn-close" (click)="cancelRule()" aria-label="Close">×</button>
             </header>
 
@@ -685,7 +754,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
                 <label class="field">
                   <span class="field-label">Alert type<span class="req">*</span></span>
                   <select class="input" formControlName="alertType">
-                    @for (t of alertTypes; track t) {
+                    @for (t of alertTypeOptions(); track t) {
                       <option [value]="t">{{ t }}</option>
                     }
                   </select>
@@ -754,6 +823,18 @@ const CHANNEL_DEFS: ChannelDef[] = [
           </div>
         </div>
       }
+
+      <!-- Pausing a rule or switching a channel off silences alerts; both ask first. -->
+      <app-confirm-dialog
+        [open]="pendingConfirm() !== null"
+        [title]="pendingConfirm()?.title ?? ''"
+        [message]="pendingConfirm()?.message ?? ''"
+        [confirmLabel]="pendingConfirm()?.confirmLabel ?? 'Confirm'"
+        confirmVariant="destructive"
+        [loading]="busy() || togglingChannel() !== null"
+        (confirm)="runPendingConfirm()"
+        (cancelled)="pendingConfirm.set(null)"
+      />
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
@@ -1597,10 +1678,28 @@ export class AlertsPageComponent {
   // ── Rules state ──────────────────────────────────────────────────────
   readonly alerts = signal<AlertDto[]>([]);
   readonly alertsLoading = signal(true);
+  readonly alertsError = signal<string | null>(null);
   readonly busy = signal(false);
 
   readonly search = signal('');
-  readonly statusFilter = signal<'all' | 'active' | 'paused'>('all');
+  readonly statusFilter = signal<'all' | 'active' | 'resolved' | 'paused'>('all');
+
+  /** Types offered by the editor: the engine's enum plus anything present in the data. */
+  readonly alertTypeOptions = computed<string[]>(() => {
+    const set = new Set<string>(ALERT_TYPES);
+    for (const a of this.alerts()) set.add(a.alertType);
+    const draftType = this.editingRule()?.alertType;
+    if (draftType) set.add(draftType);
+    return [...set];
+  });
+
+  /** A silencing action (pause a rule, switch a channel off) waiting on the confirm dialog. */
+  readonly pendingConfirm = signal<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    run: () => void;
+  } | null>(null);
   readonly severityFilter = signal<'all' | AlertSeverity>('all');
 
   readonly editingRule = signal<Partial<AlertDto> | null>(null);
@@ -1626,7 +1725,8 @@ export class AlertsPageComponent {
     // below to drop the user back to page 1.
     return this.alerts().filter((a) => {
       if (st === 'active' && !a.isActive) return false;
-      if (st === 'paused' && a.isActive) return false;
+      if (st === 'resolved' && (a.isActive || !a.autoResolvedAt)) return false;
+      if (st === 'paused' && (a.isActive || !!a.autoResolvedAt)) return false;
       if (sev !== 'all' && a.severity !== sev) return false;
       if (q) {
         const hay = `${a.symbol ?? ''} ${a.deduplicationKey ?? ''}`.toLowerCase();
@@ -1686,6 +1786,7 @@ export class AlertsPageComponent {
     const all = this.alerts();
     const symbols = new Set<string>();
     let active = 0;
+    let resolved = 0;
     let critical = 0;
     let high = 0;
     let mediumOrInfo = 0;
@@ -1693,6 +1794,7 @@ export class AlertsPageComponent {
     const oneHourAgo = Date.now() - 60 * 60 * 1000;
     for (const a of all) {
       if (a.isActive) active++;
+      else if (a.autoResolvedAt) resolved++;
       if (a.symbol) symbols.add(a.symbol);
       if (a.severity === 'Critical') critical++;
       else if (a.severity === 'High') high++;
@@ -1703,7 +1805,10 @@ export class AlertsPageComponent {
     }
     return {
       active,
-      paused: all.length - active,
+      /** Inactive because the engine auto-resolved the incident. */
+      resolved,
+      /** Inactive with no auto-resolve stamp — switched off by an operator. */
+      paused: all.length - active - resolved,
       critical,
       high,
       mediumOrInfo,
@@ -1973,6 +2078,22 @@ export class AlertsPageComponent {
     const current = this.channelStatus(channel);
     if (current?.isEnabled === requested) return;
 
+    // Switching a channel OFF silences every alert on it for every operator — ask first.
+    // The checkbox flips back until the operator confirms.
+    if (!requested) {
+      target.checked = true;
+      this.pendingConfirm.set({
+        title: `Switch the ${channel} channel off?`,
+        message: `No alert is delivered through ${channel} until it is switched back on — for every operator. Credentials are kept.`,
+        confirmLabel: 'Switch off',
+        run: () => this.setChannelEnabled(channel, false),
+      });
+      return;
+    }
+    this.setChannelEnabled(channel, true);
+  }
+
+  private setChannelEnabled(channel: AlertChannel, requested: boolean): void {
     this.togglingChannel.set(channel);
 
     // Optimistic update so the toggle's visual state reflects the click
@@ -1986,6 +2107,7 @@ export class AlertsPageComponent {
     this.alertsService.setChannelEnabled({ channel, isEnabled: requested }).subscribe({
       next: (res) => {
         this.togglingChannel.set(null);
+        this.pendingConfirm.set(null);
         if (res?.status && res.data) {
           this.channelStatuses.set(
             this.channelStatuses().map((s) =>
@@ -2007,6 +2129,7 @@ export class AlertsPageComponent {
       },
       error: () => {
         this.togglingChannel.set(null);
+        this.pendingConfirm.set(null);
         this.channelStatuses.set(
           this.channelStatuses().map((s) =>
             s.channel === channel ? { ...s, isEnabled: !requested } : s,
@@ -2171,6 +2294,27 @@ export class AlertsPageComponent {
     });
   }
 
+  /** Pause asks first (it silences the rule); Resume is one click. */
+  askToggleActive(a: AlertDto): void {
+    if (!a.isActive) {
+      this.toggleActive(a);
+      return;
+    }
+    this.pendingConfirm.set({
+      title: `Pause ${a.alertType}${a.symbol ? ' · ' + a.symbol : ''}?`,
+      message:
+        'The engine stops evaluating this rule and sends no further notifications for it until it is resumed.',
+      confirmLabel: 'Pause rule',
+      run: () => this.toggleActive(a),
+    });
+  }
+
+  runPendingConfirm(): void {
+    const p = this.pendingConfirm();
+    if (!p || this.busy() || this.togglingChannel() !== null) return;
+    p.run();
+  }
+
   toggleActive(a: AlertDto): void {
     this.busy.set(true);
     this.alertsService
@@ -2186,6 +2330,7 @@ export class AlertsPageComponent {
       .subscribe({
         next: (res) => {
           this.busy.set(false);
+          this.pendingConfirm.set(null);
           if (res.status) {
             this.notifications.success(a.isActive ? 'Rule paused' : 'Rule resumed');
             this.loadAlerts();
@@ -2193,7 +2338,10 @@ export class AlertsPageComponent {
             this.notifications.error(res.message ?? 'Failed to toggle');
           }
         },
-        error: () => this.busy.set(false),
+        error: () => {
+          this.busy.set(false);
+          this.pendingConfirm.set(null);
+        },
       });
   }
 
@@ -2224,28 +2372,36 @@ export class AlertsPageComponent {
     });
   }
 
-  private loadAlerts(): void {
+  loadAlerts(): void {
     this.alertsLoading.set(true);
+    this.alertsError.set(null);
+    const failed = (msg?: string | null) => {
+      this.alertsError.set(msg || 'The engine did not return the alert list.');
+      this.alertsLoading.set(false);
+    };
     // Probe-and-fetch: a 1-row request first reveals the true server total
     // via pager.totalItemCount, then we fetch exactly that many rows so the
     // KPI strip + analytics charts reflect every rule in the database
     // instead of the artificial 200-row cap. Pagination is purely a client-
-    // side slice over this full set.
+    // side slice over this full set. A failure used to become [] and render
+    // "No alert rules — create one".
     this.alertsService
       .list({ currentPage: 1, itemCountPerPage: 1 })
       .pipe(catchError(() => of(null)))
       .subscribe((probe) => {
-        const total = probe?.data?.pager?.totalItemCount ?? 0;
+        if (!probe?.status) return failed(probe?.message);
+        const total = probe.data?.pager?.totalItemCount ?? 0;
         if (total === 0) {
           this.alerts.set([]);
           this.alertsLoading.set(false);
           return;
         }
         this.alertsService
-          .list({ currentPage: 1, itemCountPerPage: total })
+          .list({ currentPage: 1, itemCountPerPage: total, sortBy: 'id', sortDirection: 'desc' })
           .pipe(catchError(() => of(null)))
           .subscribe((full) => {
-            this.alerts.set(full?.data?.data ?? []);
+            if (!full?.status) return failed(full?.message);
+            this.alerts.set(sortAlerts(full.data?.data ?? []));
             this.alertsLoading.set(false);
           });
       });
@@ -2319,15 +2475,34 @@ export class AlertsPageComponent {
       }),
     );
     forkJoin(ops).subscribe({
-      next: () => {
+      next: (results) => {
         this.busy.set(false);
-        this.notifications.success(`${def.title} saved — changes apply on next worker cycle`);
-        // Adopt the saved drafts as the new baseline + drop *all* dirty
-        // entries (including the optional-blank ones we silently skipped, so
-        // the form stops flagging them dirty). Then refetch masked status.
+        // HTTP 200 does not mean applied: a row can be refused (status false) or queued for the
+        // cooling-off period. Saying "saved" for those left the form claiming a change the engine
+        // never made.
+        const refused = results.filter((r) => !r.status);
+        if (refused.length > 0) {
+          this.notifications.error(
+            `${def.title}: ${refused.length} of ${results.length} change(s) refused — ` +
+              (refused[0].message ?? 'the engine did not accept them'),
+          );
+          return;
+        }
+        const queued = results.filter((r) => isQueuedForCoolingOff(r));
+        if (queued.length > 0) {
+          this.notifications.info(queued[0].message ?? `${def.title}: queued for cooling-off`);
+        } else {
+          this.notifications.success(`${def.title} saved — changes apply on next worker cycle`);
+        }
+        // Adopt the APPLIED drafts as the new baseline (a queued one is not live until its
+        // cooling-off elapses, so its field keeps the live value) + drop *all* dirty entries
+        // (including the optional-blank ones we silently skipped, so the form stops flagging
+        // them dirty). Then refetch masked status.
         this.configValues.update((cv) => {
           const next = { ...cv };
-          for (const f of dirty) next[f.key] = drafts[f.key] ?? '';
+          dirty.forEach((f, i) => {
+            if (!isQueuedForCoolingOff(results[i])) next[f.key] = drafts[f.key] ?? '';
+          });
           return next;
         });
         this.draftValues.update((d) => {
@@ -2421,6 +2596,20 @@ function writeTestHistory(entries: TestHistoryEntry[]): void {
   } catch {
     /* best-effort */
   }
+}
+
+/**
+ * Active first, then the most recently fired, then the newest id. The engine sorts the list by
+ * IsActive alone, so the order inside each group was whatever Postgres returned.
+ */
+function sortAlerts(rows: AlertDto[]): AlertDto[] {
+  return [...rows].sort((a, b) => {
+    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+    const ta = a.lastTriggeredAt ?? '';
+    const tb = b.lastTriggeredAt ?? '';
+    if (ta !== tb) return ta === '' ? 1 : tb === '' ? -1 : tb.localeCompare(ta);
+    return b.id - a.id;
+  });
 }
 
 function buildConfigMap(rows: EngineConfigDto[]): Record<string, string> {

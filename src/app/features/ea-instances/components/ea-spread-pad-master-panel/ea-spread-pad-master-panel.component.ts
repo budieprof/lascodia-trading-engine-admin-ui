@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { catchError, finalize, of, switchMap } from 'rxjs';
+import { catchError, finalize, of } from 'rxjs';
 
 import { SpreadReactiveService } from '@core/services/spread-reactive.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
@@ -129,16 +129,18 @@ import type { SpreadReactiveConfig } from '@features/spread-reactive/spread-reac
         padding: var(--card-padding);
         height: 100%;
       }
+      /* Same full-row heading as the re-validation panel beside it (see its note). */
       .spm-info {
         display: flex;
         flex-direction: column;
         gap: 4px;
-        min-width: 240px;
-        max-width: 32ch;
+        flex: 1 1 100%;
+        min-width: 0;
       }
       .spm-headline {
         display: flex;
         align-items: center;
+        flex-wrap: wrap;
         gap: var(--space-2);
       }
       .spm-label {
@@ -153,13 +155,14 @@ import type { SpreadReactiveConfig } from '@features/spread-reactive/spread-reac
         font-weight: var(--font-semibold);
         text-transform: uppercase;
         letter-spacing: 0.04em;
+        white-space: nowrap;
       }
       .spm-pill.warn {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .spm-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
+        background: var(--bg-tertiary);
         color: var(--text-tertiary);
       }
       .spm-desc {
@@ -169,9 +172,8 @@ import type { SpreadReactiveConfig } from '@features/spread-reactive/spread-reac
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
-        flex-grow: 1;
-        min-width: 280px;
-        max-width: 520px;
+        flex: 1 1 280px;
+        min-width: 0;
       }
       .spm-section {
         display: flex;
@@ -198,10 +200,10 @@ import type { SpreadReactiveConfig } from '@features/spread-reactive/spread-reac
         min-height: 1.2em;
       }
       .spm-status .ok {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .spm-status .bad {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .spm-buttons {
         display: flex;

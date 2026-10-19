@@ -144,21 +144,30 @@ localhost rather than a blank page.
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
 Playwright + Chromium, screenshots it, and reports console/network errors.
 
-**Its token-minting auth step is broken** — the hardcoded HS256 dev secret has drifted from the
-running engine, so every request 401s and the app bounces to `/login`, which reads as "the whole
-page is broken". Use the login form's passwordless **Developer** tab instead:
+**Signing in.** The login form's passwordless **Developer** tab is gone from releases, and the
+engine's dev-token endpoint (`POST /auth/token`) now answers 404 unless explicitly opted in from a
+loopback caller (engine f1245cae) — on 2026-10-19 it was found minting a ~1-year Admin JWT for
+anyone reaching the public tunnel. Caddy also refuses that path. For automation, mint a JWT from the
+engine's `JWT_SECRET_KEY` (`.env`) carrying the five identity claims (`passportId`, `firstName`,
+`lastName`, `email`, `mobileNo`), `adminUserId: "1"`, `is_superadmin: "true"` and the MS role claim
+`["SuperAdmin","Admin","Operator"]`, inject it into `sessionStorage['lascodia.auth.token']`, and seed
+`lascodia.auth.perms` with `data.permissions` from `GET /admin/auth/me` (permission-gated routes
+redirect before that call answers). `tools/visual-review/README.md` has the details.
 
-```js
-await page.goto(BASE + '/login', { waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: /Developer/i }).click();
-await page.getByRole('button', { name: /Sign In/i }).click();
-await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20000 });
-```
+**Never let a driver write to the live engine.** Both :8080 and a local build talk to the LIVE
+engine. Every script in `tools/visual-review/` aborts non-GET engine calls except the read-POSTs in
+`read-posts.js`; copy that `context.route` block into any new driver before its first click — an
+unblocked crawl once sent real Telegram test alerts by clicking a "Send test" button it took for a tab.
+
+**Full review tooling** (`tools/visual-review/`): `crawl.js` (every route + tab, both themes, any
+width), `interact.js` (clicks every safe button, records dialogs that ignore Escape, one-click
+writes, dead buttons), `modals.js`, `login-shot.js`, and `serve-dist.js` (serves a production build
+on :4300 with the Caddy routing, so a fix can be crawled before it is published).
 
 `require('playwright')` resolves from the **script's** location, not the cwd — keep the driver
-inside the repo. Verify against `http://localhost:8080` to test a published release, or `:4200`
-for work in progress. A 401 on `/auth/whoami` before sign-in is the normal cold-session probe, not
-a regression.
+inside the repo. Verify against `http://localhost:8080` to test a published release, or `:4300`
+(`serve-dist.js`) for work in progress. A 401 on `/auth/whoami` before sign-in is the normal
+cold-session probe, not a regression.
 
 ## Directory map
 
@@ -256,6 +265,22 @@ so a new built-in needs no console change.
 - **Component SCSS has a hard 28 kB error budget** (`anyComponentStyle` in `angular.json`, raised
   from 24 kB). Three components already exceed the 16 kB warning; `market-data-page` is the worst
   at ~26 kB and the honest fix is splitting the page, not raising the budget again.
+- **Every dialog, drawer and menu uses `appModalA11y`** (`shared/directives/modal-a11y.directive.ts`):
+  focus moves in, Escape closes the topmost one, Tab is trapped (`[appModalA11yTrap]="false"` for
+  menus), focus returns to the trigger. Element-level `(keydown.escape)` never fired — focus stayed on
+  the trigger — and `autofocus` does nothing on inserted nodes. A confirmation of a consequential
+  action puts `data-autofocus` on the SAFE button. The 2026-10-19 review found Escape closed 1 of 7.
+- **A consequential write never fires from one click.** Engine-config toggles, modes, pins,
+  resolve/discard, activate: confirm first (`app-confirm-dialog`). Read the envelope, not the
+  transport: `PUT /config` answers HTTP 200 for applied, `QueuedForCoolingOff` and refused alike —
+  use `ConfigUpsertResponse.outcome` / `isQueuedForCoolingOff()`.
+- **Component styles stay scoped.** Two ea-instances components leaked `.btn`, `.actions` and `code`
+  rules to every page after a visit. No `ViewEncapsulation.None` / global selectors from a feature.
+- **Refresh buttons give feedback:** `app-refresh-button` bound to the resource's in-flight flag;
+  `resource.loading()` is only the first paint. Refetch-on-input effects use `refetchOnChange`
+  (`core/polling`) — a plain effect fires on start-up and cancels the page's first request.
+- **"Real" in the account scope means not engine-paper**, not a broker Real account — four of the five
+  live accounts are broker Demo. Label by `accountType` (see the header pill).
 - **Backtest metric units:** `TotalReturn` and `MaxDrawdownPct` are already percentages,
   `WinRate` is a fraction. Don't rescale client-side.
 - `eslint` must keep ignoring `storybook-static/` and `.tmp-workflows/` — they are build output and

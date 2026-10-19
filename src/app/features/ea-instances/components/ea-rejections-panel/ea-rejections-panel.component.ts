@@ -1,8 +1,17 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map, of } from 'rxjs';
 
 import { SignalRejectionsService } from '@core/services/signal-rejections.service';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -639,29 +648,32 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
       }
       .stage-pill[data-stage='Local'] {
         background: rgba(255, 149, 0, 0.16);
-        color: #b86200;
+        color: var(--tone-amber);
       }
       .stage-pill[data-stage='Engine'] {
         background: rgba(0, 113, 227, 0.14);
-        color: #0058b8;
+        color: var(--tone-blue);
       }
       .stage-pill[data-stage='Broker'] {
         background: rgba(255, 59, 48, 0.16);
-        color: #c4290a;
+        color: var(--tone-red);
       }
 
       .mono {
         font-family: var(--font-mono, ui-monospace, monospace);
       }
+      /* One line: break-all split it anywhere ("EngineTie / r2.RiskCh / ecker") once the reason
+         column had taken the row. */
       .substage {
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
         color: var(--text-primary);
-        word-break: break-all;
+        white-space: nowrap;
       }
       .time {
         color: var(--text-tertiary);
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
       .signal {
         color: var(--text-secondary);
@@ -690,11 +702,18 @@ const STAGE_OPTIONS: ReadonlyArray<{ value: StageFilter; label: string }> = [
         color: var(--text-tertiary);
         cursor: default;
       }
+      /* The remaining width, never more: a nowrap cell with no width let one long reason widen
+         the table past the card, squeezing Time into "11 / days / ago" and running the reason
+         out under the edge. width:100% + max-width:0 is what lets a table cell ellipsize;
+         the full text is in the tooltip and the expanded row. */
       .reason {
         color: var(--text-primary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+        width: 100%;
+        max-width: 0;
+        min-width: 160px;
       }
 
       /* ── Metadata expansion (shared) ─────────────────────────── */
@@ -839,11 +858,12 @@ export class EARejectionsPanelComponent {
           itemCountPerPage: this.pageSize(),
         })
         .pipe(
+          // No catchError: an engine failure must reach `resource.error()` (the template's error
+          // state) instead of rendering as "No rejections …".
           map((res) => ({
             rows: res.data?.data ?? [],
             total: res.data?.pager?.totalItemCount ?? 0,
           })),
-          catchError(() => of({ rows: [] as SignalRejectionEventDto[], total: 0 })),
         );
     },
     {
@@ -851,8 +871,23 @@ export class EARejectionsPanelComponent {
       // push or a reconnect gap.
       intervalMs: 30_000,
       refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
+      // The first fetch is the scope effect's, below: run from the field initializer it read the
+      // inputs before the parent bound them, took the empty branch, and nothing re-ran it — the
+      // signals page said "No rejections across any account in the last 30 days" over 4 events.
+      runImmediately: false,
     },
   );
+
+  /** Scope inputs (instance / account / all-accounts) → page 1 and a fresh fetch. */
+  private readonly scopeEffect = effect(() => {
+    this.instanceId();
+    this.tradingAccountId();
+    this.allAccounts();
+    untracked(() => {
+      this.currentPage.set(1);
+      this.resource.refresh();
+    });
+  });
 
   readonly rows = computed(() => this.resource.value()?.rows ?? []);
   readonly totalItemCount = computed(() => this.resource.value()?.total ?? 0);

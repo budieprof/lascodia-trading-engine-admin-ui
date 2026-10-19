@@ -79,7 +79,9 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <span class="status-dot ok" title="Engine is running"></span>
             <span class="value">running</span>
             <span class="muted small">
-              · {{ st.activeStrategies }} active · {{ st.openPositions }} open
+              · {{ st.activeStrategies }} active
+              {{ st.activeStrategies === 1 ? 'strategy' : 'strategies' }} ·
+              {{ st.openPositions }} open {{ st.openPositions === 1 ? 'position' : 'positions' }}
             </span>
             @if (st.paperMode === 'true') {
               <span class="paper-pill">paper</span>
@@ -260,6 +262,8 @@ export class FooterVersionPillComponent {
   protected readonly apiBaseUrl = computed(() => this.runtime.apiBaseUrl);
   protected readonly apiBaseLabel = computed(() => {
     const url = this.runtime.apiBaseUrl;
+    // Releases bake apiBaseUrl "" (same-origin through Caddy) — that rendered as a bare "API".
+    if (!url) return 'same origin';
     try {
       const u = new URL(url);
       return u.host;

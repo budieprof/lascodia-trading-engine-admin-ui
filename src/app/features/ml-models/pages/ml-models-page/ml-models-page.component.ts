@@ -58,6 +58,7 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 /** Analytics samples are capped so a 30k-run fleet does not land in the browser. */
 const ANALYTICS_SAMPLE_CAP = 5000;
@@ -106,6 +107,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
     EmptyStateComponent,
     FormFieldComponent,
     FormFieldControlDirective,
+    ModalA11yDirective,
     DatePipe,
     DecimalPipe,
   ],
@@ -182,7 +184,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
             <div class="ml-charts">
               <app-chart-card
                 title="Status distribution"
-                subtitle="Active · Training · Superseded · Failed"
+                subtitle="Active · Training · Candidate · Superseded · Failed"
                 [options]="statusDonutOptions()"
                 height="240px"
               />
@@ -380,6 +382,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                     <option value="">All</option>
                     <option value="Training">Training</option>
                     <option value="Active">Active</option>
+                    <option value="Candidate">Candidate</option>
                     <option value="Superseded">Superseded</option>
                     <option value="Failed">Failed</option>
                   </select>
@@ -422,32 +425,48 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 (ngModelChange)="onMonitorModelChange($event)"
               >
                 <option [ngValue]="null">-- Choose a model --</option>
-                @for (m of monitorModels(); track m.id) {
-                  <option [ngValue]="m.id">
-                    {{ m.symbol }} / {{ m.timeframe }} v{{ m.modelVersion }} (ID: {{ m.id }})
-                  </option>
+                <!-- Serving models first: the list used to be the 100 most
+                     recently trained only, which left out most of the fleet's
+                     active models (trained months ago). -->
+                @if (monitorServing().length > 0) {
+                  <optgroup label="Serving now">
+                    @for (m of monitorServing(); track m.id) {
+                      <option [ngValue]="m.id">
+                        {{ m.symbol }} / {{ m.timeframe }} v{{ m.modelVersion }} (ID: {{ m.id }})
+                      </option>
+                    }
+                  </optgroup>
                 }
+                <optgroup label="Recently trained">
+                  @for (m of monitorRecent(); track m.id) {
+                    <option [ngValue]="m.id">
+                      {{ m.symbol }} / {{ m.timeframe }} v{{ m.modelVersion }} (ID: {{ m.id }})
+                    </option>
+                  }
+                </optgroup>
               </select>
             </div>
 
             @if (monitorModel(); as m) {
               <!-- 8-card KPI strip — full model snapshot -->
               <div class="ml-kpis">
+                <!-- Validation metrics only. "Precision (est.)" was accuracy × 0.95
+                     — a made-up number — and missing values rendered as 0. -->
                 <app-metric-card
                   label="Direction accuracy"
-                  [value]="(m.directionAccuracy ?? 0) * 100"
+                  [value]="m.directionAccuracy !== null ? m.directionAccuracy * 100 : null"
                   format="percent"
                   dotColor="#0071E3"
                 />
                 <app-metric-card
-                  label="Precision (est.)"
-                  [value]="(m.directionAccuracy ?? 0) * 0.95 * 100"
-                  format="percent"
+                  label="F1 score"
+                  [value]="m.f1Score"
+                  format="number"
                   dotColor="#5AC8FA"
                 />
                 <app-metric-card
                   label="Magnitude RMSE"
-                  [value]="m.magnitudeRMSE ?? 0"
+                  [value]="m.magnitudeRMSE"
                   format="number"
                   dotColor="#34C759"
                 />
@@ -473,7 +492,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 />
                 <app-metric-card
                   label="Coin-flip lift"
-                  [value]="((m.directionAccuracy ?? 0) - 0.5) * 100"
+                  [value]="m.directionAccuracy !== null ? (m.directionAccuracy - 0.5) * 100 : null"
                   format="percent"
                   [dotColor]="(m.directionAccuracy ?? 0) > 0.5 ? '#34C759' : '#FF3B30'"
                   [colorByValue]="true"
@@ -532,32 +551,29 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 </div>
               </section>
 
-              <div class="charts-grid">
-                <app-chart-card
-                  title="Accuracy Over Time"
-                  subtitle="Rolling accuracy with 50% threshold"
-                  [options]="accuracyOverTimeOptions"
-                  height="300px"
-                />
-                <app-chart-card
-                  title="Accuracy by Regime"
-                  subtitle="Performance across market regimes"
-                  [options]="accuracyByRegimeOptions"
-                  height="300px"
-                />
-                <app-chart-card
-                  title="Confidence Calibration"
-                  subtitle="Predicted confidence vs actual accuracy"
-                  [options]="confidenceCalibrationOptions"
-                  height="300px"
-                />
-                <app-chart-card
-                  title="Prediction Outcomes"
-                  subtitle="Chronological prediction results"
-                  [options]="predictionOutcomesOptions"
-                  height="300px"
-                />
-              </div>
+              <!-- These four charts were fabricated client-side — Math.random()
+                   accuracy and outcomes, hard-coded regime and calibration
+                   numbers — and redrawn differently on every model pick. The
+                   engine does not serve live per-model series yet (see the
+                   G6 review's engine needs), so the panel says so instead. -->
+              <section class="ml-board monitor-gap">
+                <header class="ml-board-head">
+                  <h3>Live prediction performance</h3>
+                  <span class="muted">Not served by the engine yet</span>
+                </header>
+                <p class="monitor-gap-text">
+                  Accuracy over time, accuracy by regime, confidence calibration and the
+                  prediction-outcome tape need per-model aggregates of the engine's prediction log,
+                  which no endpoint exposes yet — so nothing is charted here rather than a guess.
+                  The tiles above are this model's validation metrics; its walk-forward and
+                  lifecycle record are on the model page.
+                </p>
+                <div class="monitor-gap-actions">
+                  <button type="button" class="btn btn-secondary" (click)="onModelSelect(m)">
+                    Open model #{{ m.id }} →
+                  </button>
+                </div>
+              </section>
 
               <!-- Confusion-style outcome panel + comparison vs sibling models -->
               <div class="ml-charts">
@@ -720,12 +736,18 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                   }}
                 </span>
               </div>
-              <div class="ml-kpi">
-                <span class="ml-kpi-label">Avg duration</span>
+              <!-- Median, not mean: StartedAt is the queue time, so three runs
+                   that sat queued for ~3 months before completing made the mean
+                   "65h 0m" while the typical completed run takes ~2 minutes. -->
+              <div
+                class="ml-kpi"
+                title="Median wall time of completed runs, queue time included (started → completed)"
+              >
+                <span class="ml-kpi-label">Median duration</span>
                 <span class="ml-kpi-value">
                   {{
-                    trainingStats().avgDurationMs !== null
-                      ? formatDuration(trainingStats().avgDurationMs!)
+                    trainingStats().medianDurationMs !== null
+                      ? formatDuration(trainingStats().medianDurationMs!)
                       : '—'
                   }}
                 </span>
@@ -1180,7 +1202,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 role="presentation"
                 tabindex="-1"
                 (click)="showTrainingModal.set(false)"
-                (keydown.escape)="showTrainingModal.set(false)"
               >
                 <form
                   class="modal"
@@ -1188,6 +1209,8 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                   aria-modal="true"
                   aria-label="Trigger training run"
                   tabindex="-1"
+                  appModalA11y
+                  (dismiss)="showTrainingModal.set(false)"
                   [formGroup]="trainingForm"
                   (ngSubmit)="submitTraining()"
                   (click)="$event.stopPropagation()"
@@ -1213,6 +1236,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                     >
                       <input
                         appFormFieldControl
+                        data-autofocus
                         formControlName="symbol"
                         type="text"
                         placeholder="e.g. EURUSD"
@@ -1858,7 +1882,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 role="presentation"
                 tabindex="-1"
                 (click)="showShadowModal.set(false)"
-                (keydown.escape)="showShadowModal.set(false)"
               >
                 <form
                   class="modal"
@@ -1866,6 +1889,8 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                   aria-modal="true"
                   aria-label="Start shadow evaluation"
                   tabindex="-1"
+                  appModalA11y
+                  (dismiss)="showShadowModal.set(false)"
                   [formGroup]="shadowForm"
                   (ngSubmit)="submitShadow()"
                   (click)="$event.stopPropagation()"
@@ -1890,6 +1915,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                     >
                       <input
                         appFormFieldControl
+                        data-autofocus
                         formControlName="championModelId"
                         type="number"
                         min="1"
@@ -2364,6 +2390,17 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
         gap: var(--space-4);
+      }
+      .monitor-gap-text {
+        margin: 0;
+        padding: var(--space-4);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.5;
+        max-width: 80ch;
+      }
+      .monitor-gap-actions {
+        padding: 0 var(--space-4) var(--space-4);
       }
 
       .mt-6 {
@@ -3497,6 +3534,7 @@ export class MlModelsPageComponent implements OnInit {
         total: 0,
         active: 0,
         training: 0,
+        candidate: 0,
         superseded: 0,
         failed: 0,
         avgAccuracy: null as number | null,
@@ -3507,6 +3545,7 @@ export class MlModelsPageComponent implements OnInit {
     }
     let active = 0;
     let training = 0;
+    let candidate = 0;
     let superseded = 0;
     let failed = 0;
     let accSum = 0;
@@ -3521,6 +3560,8 @@ export class MlModelsPageComponent implements OnInit {
       const status = String(m.status);
       if (status === 'Active') active++;
       else if (status === 'Training') training++;
+      // The engine's MLModelStatus has a Candidate the console's type omits.
+      else if (status === 'Candidate') candidate++;
       else if (status === 'Superseded') superseded++;
       else if (status === 'Failed') failed++;
       if (m.directionAccuracy != null) {
@@ -3534,6 +3575,7 @@ export class MlModelsPageComponent implements OnInit {
       total: all.length,
       active,
       training,
+      candidate,
       superseded,
       failed,
       avgAccuracy: accCount > 0 ? +((accSum / accCount) * 100).toFixed(2) : null,
@@ -3559,6 +3601,7 @@ export class MlModelsPageComponent implements OnInit {
           data: [
             { value: s.active, name: 'Active', itemStyle: { color: '#34C759' } },
             { value: s.training, name: 'Training', itemStyle: { color: '#5AC8FA' } },
+            { value: s.candidate, name: 'Candidate', itemStyle: { color: '#AF52DE' } },
             { value: s.superseded, name: 'Superseded', itemStyle: { color: '#8E8E93' } },
             { value: s.failed, name: 'Failed', itemStyle: { color: '#FF3B30' } },
           ].filter((d) => d.value > 0),
@@ -3740,7 +3783,7 @@ export class MlModelsPageComponent implements OnInit {
         inFlight: 0,
         successRate: null as number | null,
         avgAccuracy: null as number | null,
-        avgDurationMs: null as number | null,
+        medianDurationMs: null as number | null,
       };
     }
     let completed = 0;
@@ -3749,8 +3792,7 @@ export class MlModelsPageComponent implements OnInit {
     let inFlight = 0;
     let accSum = 0;
     let accCount = 0;
-    let durSum = 0;
-    let durCount = 0;
+    const durations: number[] = [];
     for (const r of all) {
       const status = String(r.status);
       // "In flight" means a worker still owes an outcome — Queued or Running.
@@ -3765,8 +3807,7 @@ export class MlModelsPageComponent implements OnInit {
         accCount++;
       }
       if (status === 'Completed' && r.completedAt && r.startedAt) {
-        durSum += new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime();
-        durCount++;
+        durations.push(new Date(r.completedAt).getTime() - new Date(r.startedAt).getTime());
       }
     }
     return {
@@ -3780,7 +3821,7 @@ export class MlModelsPageComponent implements OnInit {
       successRate:
         completed + failed > 0 ? +((completed / (completed + failed)) * 100).toFixed(1) : null,
       avgAccuracy: accCount > 0 ? +((accSum / accCount) * 100).toFixed(2) : null,
-      avgDurationMs: durCount > 0 ? Math.round(durSum / durCount) : null,
+      medianDurationMs: durations.length > 0 ? Math.round(median(durations)) : null,
     };
   });
 
@@ -4630,6 +4671,18 @@ export class MlModelsPageComponent implements OnInit {
 
   // ── Monitor state ──
   monitorModels = signal<MLModelDto[]>([]);
+  private readonly monitorActiveModels = signal<MLModelDto[]>([]);
+  /** Serving models, by pair. */
+  readonly monitorServing = computed(() =>
+    [...this.monitorActiveModels()].sort((a, b) =>
+      `${a.symbol}/${a.timeframe}`.localeCompare(`${b.symbol}/${b.timeframe}`),
+    ),
+  );
+  /** The newest 100, minus those already listed as serving. */
+  readonly monitorRecent = computed(() => {
+    const serving = new Set(this.monitorActiveModels().map((m) => m.id));
+    return this.monitorModels().filter((m) => !serving.has(m.id));
+  });
   selectedModelId = signal<number | null>(null);
   monitorModel = signal<MLModelDto | null>(null);
 
@@ -4930,59 +4983,78 @@ export class MlModelsPageComponent implements OnInit {
   //  REGISTRY COLUMNS
   // ══════════════════════════════════════════════════════════════
 
+  // Column minimums are sized to their header word and pill: with the old
+  // widths summing past the card, sizeColumnsToFit squeezed every column to the
+  // shared 88px floor — "TIMEFRA / ME", "ACCURAC / Y %", a clipped "Superseded"
+  // pill. Version (flex) absorbs the slack; a narrower card scrolls instead.
+  // Grid pills colour through the theme's --tone-* tokens: the light-theme hexes they replace
+  // (#0040DD blue, #636366 grey, #D70015 red) were ~2-3:1 on the dark background.
   registryColumns: ColDef<MLModelDto>[] = [
-    { headerName: 'Symbol', field: 'symbol', width: 110, minWidth: 100 },
-    { headerName: 'Timeframe', field: 'timeframe', width: 100 },
+    { headerName: 'Symbol', field: 'symbol', width: 100, minWidth: 96 },
+    { headerName: 'TF', headerTooltip: 'Timeframe', field: 'timeframe', width: 64, minWidth: 64 },
     // Versions look like "EURUSD_H1_20260905…" — 90px showed "EURUSD_H".
     {
       headerName: 'Version',
       field: 'modelVersion',
       flex: 1,
-      minWidth: 180,
+      minWidth: 192,
       tooltipField: 'modelVersion',
     },
     {
       headerName: 'Status',
       field: 'status',
-      width: 110,
+      width: 124,
+      minWidth: 124,
       cellRenderer: (params: { value: string }) => {
         const colorMap: Record<string, { bg: string; color: string }> = {
-          Training: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Active: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Superseded: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-          Failed: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
+          Training: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
+          // The engine's MLModelStatus also has Candidate; unmapped statuses
+          // used to fall back to the Failed red.
+          Candidate: { bg: 'rgba(175,82,222,0.14)', color: 'var(--tone-purple)' },
+          Active: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          Superseded: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
+          Failed: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
         };
-        const s = colorMap[params.value] ?? colorMap['Failed'];
-        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
+        const s = colorMap[params.value] ?? {
+          bg: 'rgba(142,142,147,0.12)',
+          color: 'var(--tone-grey)',
+        };
+        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${params.value}</span>`;
       },
     },
     {
       headerName: 'Architecture',
       field: 'learnerArchitecture',
-      width: 150,
+      width: 128,
+      minWidth: 120,
       valueFormatter: (p: { value: string | null }) => p.value ?? '—',
       cellStyle: { fontFamily: "'SF Mono', 'Menlo', monospace", fontSize: '12px' },
     },
     {
-      headerName: 'Accuracy %',
+      headerName: 'Accuracy',
+      headerTooltip: 'Direction accuracy on the validation split',
       field: 'directionAccuracy',
-      width: 110,
+      // 104: at 96 the header still broke mid-word ("ACCURAC Y").
+      width: 104,
+      minWidth: 104,
       valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '-',
+        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       headerName: 'Mag. RMSE',
       field: 'magnitudeRMSE',
-      width: 110,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(4) : '-'),
+      width: 100,
+      minWidth: 96,
+      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(4) : '—'),
     },
-    { headerName: 'Samples', field: 'trainingSamples', width: 110 },
+    { headerName: 'Samples', field: 'trainingSamples', width: 92, minWidth: 92 },
     {
       headerName: 'Active',
       field: 'isActive',
-      width: 80,
+      width: 84,
+      minWidth: 84,
       cellRenderer: (params: { value: boolean }) => {
-        const color = params.value ? '#248A3D' : '#636366';
+        const color = params.value ? 'var(--tone-green)' : 'var(--tone-grey)';
         const bg = params.value ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
         const label = params.value ? 'Yes' : 'No';
         return `<span style="color:${color};background:${bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
@@ -4991,7 +5063,8 @@ export class MlModelsPageComponent implements OnInit {
     {
       headerName: 'Trained At',
       field: 'trainedAt',
-      width: 140,
+      width: 128,
+      minWidth: 124,
       valueFormatter: this.formatGridDate,
     },
   ];
@@ -5002,52 +5075,54 @@ export class MlModelsPageComponent implements OnInit {
 
   trainingColumns: ColDef<MLTrainingRunDto>[] = [
     { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 100 },
-    { headerName: 'Timeframe', field: 'timeframe', width: 100 },
+    { headerName: 'TF', headerTooltip: 'Timeframe', field: 'timeframe', width: 64, minWidth: 64 },
     {
       headerName: 'Status',
       field: 'status',
-      width: 110,
+      width: 120,
+      minWidth: 120,
       cellRenderer: (params: { value: string }) => {
         const colorMap: Record<string, { bg: string; color: string }> = {
-          Queued: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-          Running: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Completed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Failed: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
+          Queued: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
+          Running: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
+          Completed: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          Failed: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
           // Cancelled is an operator action, not a failure — grey, not red.
-          Cancelled: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+          Cancelled: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
         };
         const s = colorMap[params.value] ?? colorMap['Queued'];
-        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
+        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${params.value}</span>`;
       },
     },
     {
       headerName: 'Trigger',
       field: 'triggerType',
       width: 150,
+      minWidth: 150,
       cellRenderer: (params: { value: string | null }) => {
         const value = params.value ?? '—';
         // Operator-initiated runs get the prominent purple highlight to make them
         // easy to spot against the wall of automated retrains.
         const colorMap: Record<string, { bg: string; color: string; label?: string }> = {
-          Manual: { bg: 'rgba(175,82,222,0.14)', color: '#8944AB' },
-          Scheduled: { bg: 'rgba(0,113,227,0.10)', color: '#0040DD' },
+          Manual: { bg: 'rgba(175,82,222,0.14)', color: 'var(--tone-purple)' },
+          Scheduled: { bg: 'rgba(0,113,227,0.10)', color: 'var(--tone-blue)' },
           AutoDegrading: {
             bg: 'rgba(255,149,0,0.12)',
-            color: '#C93400',
+            color: 'var(--tone-amber)',
             label: 'Auto · Degrading',
           },
           AutoDeferred: {
             bg: 'rgba(52,199,89,0.10)',
-            color: '#248A3D',
+            color: 'var(--tone-green)',
             label: 'Auto · Deferred',
           },
           SymbolicCatalogueShift: {
             bg: 'rgba(0,113,227,0.10)',
-            color: '#0040DD',
+            color: 'var(--tone-blue)',
             label: 'Symbolic shift',
           },
         };
-        const s = colorMap[value] ?? { bg: 'rgba(142,142,147,0.12)', color: '#636366' };
+        const s = colorMap[value] ?? { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' };
         const label = s.label ?? value;
         return `<span title="${value}" style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${label}</span>`;
       },
@@ -5055,27 +5130,31 @@ export class MlModelsPageComponent implements OnInit {
     {
       headerName: 'Architecture',
       field: 'learnerArchitecture',
-      width: 150,
+      width: 136,
+      minWidth: 130,
       valueFormatter: (p: { value: string | null }) => p.value ?? '—',
       cellStyle: { fontFamily: "'SF Mono', 'Menlo', monospace", fontSize: '12px' },
     },
     {
       headerName: 'Accuracy',
       field: 'directionAccuracy',
-      width: 100,
+      width: 104,
+      minWidth: 104,
       valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '-',
+        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       headerName: 'Mag. RMSE',
       field: 'magnitudeRMSE',
       width: 100,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(4) : '-'),
+      minWidth: 96,
+      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(4) : '—'),
     },
     {
       headerName: 'Started',
       field: 'startedAt',
-      width: 140,
+      width: 128,
+      minWidth: 124,
       valueFormatter: this.formatGridDate,
     },
   ];
@@ -5085,37 +5164,43 @@ export class MlModelsPageComponent implements OnInit {
   // ══════════════════════════════════════════════════════════════
 
   shadowColumns: ColDef<ShadowEvaluationDto>[] = [
-    { headerName: 'Champion', field: 'championModelId', width: 110 },
-    { headerName: 'Challenger', field: 'challengerModelId', width: 110 },
-    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 100 },
-    { headerName: 'TF', field: 'timeframe', width: 80 },
+    { headerName: 'Champion', field: 'championModelId', width: 108, minWidth: 108 },
+    { headerName: 'Challenger', field: 'challengerModelId', width: 118, minWidth: 118 },
+    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 96 },
+    { headerName: 'TF', field: 'timeframe', width: 64, minWidth: 64 },
     {
       headerName: 'Status',
       field: 'status',
       width: 120,
+      minWidth: 120,
       cellRenderer: (params: { value: string }) => {
         const colorMap: Record<string, { bg: string; color: string }> = {
-          Running: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Completed: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Promoted: { bg: 'rgba(175,82,222,0.12)', color: '#8944AB' },
-          Rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Processing: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
+          Running: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
+          Completed: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          Promoted: { bg: 'rgba(175,82,222,0.12)', color: 'var(--tone-purple)' },
+          Rejected: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
+          Processing: { bg: 'rgba(255,149,0,0.12)', color: 'var(--tone-amber)' },
         };
-        const s = colorMap[params.value] ?? { bg: 'rgba(142,142,147,0.12)', color: '#636366' };
-        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;
+        const s = colorMap[params.value] ?? {
+          bg: 'rgba(142,142,147,0.12)',
+          color: 'var(--tone-grey)',
+        };
+        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${params.value}</span>`;
       },
     },
     {
       headerName: 'Decision',
       field: 'promotionDecision',
-      width: 150,
+      // "Flagged for review" is the widest pill; 150px clipped it.
+      width: 166,
+      minWidth: 166,
       cellRenderer: (params: { value: string | null }) => {
         const meta = decisionMeta(params.value);
         const palette: Record<string, { bg: string; color: string }> = {
-          promoted: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          flagged: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
-          rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          pending: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+          promoted: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          flagged: { bg: 'rgba(255,149,0,0.12)', color: 'var(--tone-amber)' },
+          rejected: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
+          pending: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
         };
         const s = palette[meta.key];
         return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${meta.label}</span>`;
@@ -5124,30 +5209,36 @@ export class MlModelsPageComponent implements OnInit {
     {
       headerName: 'Trades',
       colId: 'trades',
-      width: 100,
+      width: 92,
+      minWidth: 92,
       valueGetter: (p) =>
         p.data ? `${p.data.completedTrades ?? 0} / ${p.data.requiredTrades ?? 0}` : '',
       cellStyle: { fontVariantNumeric: 'tabular-nums' },
     },
     {
-      headerName: 'Champion Acc',
+      headerName: 'Champ. acc',
+      headerTooltip: 'Champion direction accuracy',
       field: 'championDirectionAccuracy',
-      width: 120,
+      width: 108,
+      minWidth: 108,
       // 0 on a completed evaluation means "never recorded", not 0.0%.
       valueFormatter: (p: { value: number | null }) =>
         p.value != null && p.value > 0 ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
-      headerName: 'Challenger Acc',
+      headerName: 'Chall. acc',
+      headerTooltip: 'Challenger direction accuracy',
       field: 'challengerDirectionAccuracy',
-      width: 120,
+      width: 108,
+      minWidth: 108,
       valueFormatter: (p: { value: number | null }) =>
         p.value != null && p.value > 0 ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       headerName: 'Started',
       field: 'startedAt',
-      width: 140,
+      width: 128,
+      minWidth: 124,
       valueFormatter: this.formatGridDate,
     },
   ];
@@ -5579,11 +5670,6 @@ export class MlModelsPageComponent implements OnInit {
 
   // ── Monitor Charts ──
 
-  accuracyOverTimeOptions: EChartsOption = this.buildAccuracyOverTimeChart();
-  accuracyByRegimeOptions: EChartsOption = this.buildAccuracyByRegimeChart();
-  confidenceCalibrationOptions: EChartsOption = this.buildConfidenceCalibrationChart();
-  predictionOutcomesOptions: EChartsOption = this.buildPredictionOutcomesChart();
-
   // ── Shadow Charts ──
 
   headToHeadOptions: EChartsOption = this.buildHeadToHeadChart();
@@ -5719,6 +5805,15 @@ export class MlModelsPageComponent implements OnInit {
         }
       },
     });
+    // The serving models, whatever their age — the newest-100 page above
+    // missed most of them.
+    this.mlModelsService
+      .list({ currentPage: 1, itemCountPerPage: 200, filter: { isActive: true } })
+      .subscribe({
+        next: (res) => {
+          if (res.data) this.monitorActiveModels.set(res.data.data);
+        },
+      });
   }
 
   onMonitorModelChange(id: number | null): void {
@@ -5731,10 +5826,6 @@ export class MlModelsPageComponent implements OnInit {
       next: (res) => {
         if (res.data) {
           this.monitorModel.set(res.data);
-          this.accuracyOverTimeOptions = this.buildAccuracyOverTimeChart();
-          this.accuracyByRegimeOptions = this.buildAccuracyByRegimeChart();
-          this.confidenceCalibrationOptions = this.buildConfidenceCalibrationChart();
-          this.predictionOutcomesOptions = this.buildPredictionOutcomesChart();
         }
       },
       error: () => this.notifications.error('Failed to load model details'),
@@ -5961,233 +6052,31 @@ export class MlModelsPageComponent implements OnInit {
   //  CHART BUILDERS
   // ══════════════════════════════════════════════════════════════
 
-  private buildAccuracyOverTimeChart(): EChartsOption {
-    const days = 30;
-    const labels = this.generateDates(days);
-    const data: number[] = [];
-    let val = 68;
-    for (let i = 0; i < days; i++) {
-      val += (Math.random() - 0.48) * 5;
-      val = Math.max(55, Math.min(82, val));
-      data.push(parseFloat(val.toFixed(1)));
-    }
-    return {
-      grid: { top: 20, right: 20, bottom: 30, left: 50 },
-      tooltip: { trigger: 'axis', formatter: '{b}<br/>Accuracy: {c}%' },
-      xAxis: {
-        type: 'category',
-        data: labels,
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
-      },
-      yAxis: {
-        type: 'value',
-        min: 40,
-        max: 90,
-        axisLabel: { fontSize: 11, color: '#6E6E73', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      series: [
-        {
-          name: 'Accuracy',
-          type: 'line',
-          smooth: true,
-          symbol: 'none',
-          data,
-          lineStyle: { color: '#0071E3', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(0,113,227,0.15)' },
-                { offset: 1, color: 'rgba(0,113,227,0)' },
-              ],
-            } as any,
-          },
-        },
-        {
-          name: 'Threshold',
-          type: 'line',
-          symbol: 'none',
-          data: Array(days).fill(50),
-          lineStyle: { color: '#FF3B30', width: 1, type: 'dashed' },
-          itemStyle: { color: '#FF3B30' },
-        },
-      ],
-    };
-  }
-
-  private buildAccuracyByRegimeChart(): EChartsOption {
-    return {
-      grid: { top: 20, right: 20, bottom: 40, left: 50 },
-      tooltip: { trigger: 'axis' },
-      xAxis: {
-        type: 'category',
-        data: ['Trending', 'Ranging', 'High Volatility'],
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
-      },
-      yAxis: {
-        type: 'value',
-        min: 0,
-        max: 100,
-        axisLabel: { fontSize: 11, color: '#6E6E73', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      series: [
-        {
-          name: 'Accuracy',
-          type: 'bar',
-          data: [
-            { value: 74, itemStyle: { color: '#0071E3' } },
-            { value: 62, itemStyle: { color: '#34C759' } },
-            { value: 58, itemStyle: { color: '#FF9500' } },
-          ],
-          barWidth: 40,
-          itemStyle: { borderRadius: [4, 4, 0, 0] },
-          label: {
-            show: true,
-            position: 'top',
-            formatter: '{c}%',
-            fontSize: 12,
-            color: '#6E6E73',
-          },
-        },
-      ],
-    };
-  }
-
-  private buildConfidenceCalibrationChart(): EChartsOption {
-    const bins = [
-      '0-10',
-      '10-20',
-      '20-30',
-      '30-40',
-      '40-50',
-      '50-60',
-      '60-70',
-      '70-80',
-      '80-90',
-      '90-100',
-    ];
-    const predictedMidpoints = [5, 15, 25, 35, 45, 55, 65, 75, 85, 95];
-    const actualAccuracy = [8, 18, 22, 38, 42, 52, 60, 71, 80, 88];
-    return {
-      grid: { top: 20, right: 20, bottom: 40, left: 50 },
-      tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const p = Array.isArray(params) ? params : [params];
-          let tip = `${p[0].name}%<br/>`;
-          p.forEach((item: any) => {
-            tip += `${item.seriesName}: ${item.value}%<br/>`;
-          });
-          return tip;
-        },
-      },
-      xAxis: {
-        type: 'category',
-        data: bins,
-        name: 'Predicted Confidence',
-        nameLocation: 'center',
-        nameGap: 28,
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
-      },
-      yAxis: {
-        type: 'value',
-        min: 0,
-        max: 100,
-        name: 'Actual Accuracy',
-        nameLocation: 'center',
-        nameGap: 36,
-        axisLabel: { fontSize: 11, color: '#6E6E73', formatter: '{value}%' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      series: [
-        {
-          name: 'Model',
-          type: 'line',
-          smooth: true,
-          data: actualAccuracy,
-          lineStyle: { color: '#0071E3', width: 2 },
-          itemStyle: { color: '#0071E3' },
-          symbolSize: 6,
-        },
-        {
-          name: 'Perfect',
-          type: 'line',
-          symbol: 'none',
-          data: predictedMidpoints,
-          lineStyle: { color: '#8E8E93', width: 1, type: 'dashed' },
-          itemStyle: { color: '#8E8E93' },
-        },
-      ],
-    };
-  }
-
-  private buildPredictionOutcomesChart(): EChartsOption {
-    const points: Array<[number, number, number]> = [];
-    for (let i = 0; i < 60; i++) {
-      const correct = Math.random() > 0.35 ? 1 : 0;
-      points.push([i, correct ? 1 : 0, correct]);
-    }
-    return {
-      grid: { top: 20, right: 20, bottom: 30, left: 50 },
-      tooltip: {
-        trigger: 'item',
-        formatter: (params: any) =>
-          `Prediction #${params.data[0] + 1}: ${params.data[2] === 1 ? 'Correct' : 'Incorrect'}`,
-      },
-      xAxis: {
-        type: 'value',
-        name: 'Prediction #',
-        nameLocation: 'center',
-        nameGap: 24,
-        min: 0,
-        max: 60,
-        axisLabel: { fontSize: 11, color: '#6E6E73' },
-        axisLine: { lineStyle: { color: 'rgba(0,0,0,0.06)' } },
-        splitLine: { show: false },
-      },
-      yAxis: {
-        type: 'value',
-        min: -0.5,
-        max: 1.5,
-        axisLabel: {
-          fontSize: 11,
-          color: '#6E6E73',
-          formatter: (val: number) => (val === 1 ? 'Correct' : val === 0 ? 'Incorrect' : ''),
-        },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-        interval: 1,
-      },
-      series: [
-        {
-          type: 'scatter',
-          symbolSize: 10,
-          data: points,
-          itemStyle: {
-            color: (params: any) => (params.data[2] === 1 ? '#34C759' : '#FF3B30'),
-          },
-        },
-      ],
-    };
-  }
-
   private buildHeadToHeadChart(shadow?: ShadowEvaluationDto): EChartsOption {
     if (!shadow) return emptyChart('Select a shadow evaluation');
-    const champAcc = (shadow.championDirectionAccuracy ?? 0) * 100;
-    const challAcc = (shadow.challengerDirectionAccuracy ?? 0) * 100;
-    const champCorr = (shadow.championMagnitudeCorrelation ?? 0) * 100;
-    const challCorr = (shadow.challengerMagnitudeCorrelation ?? 0) * 100;
+    // A metric the arbiter never recorded is null (or 0 for accuracy), not a
+    // score: plotted as-is it drew 0% accuracy and a perfect "100%" Brier for
+    // every one of the 558 metric-less evaluations.
+    const recorded = (v: number | null | undefined): v is number => v != null && v > 0;
+    const pct = (v: number | null | undefined) => (recorded(v) ? +(v * 100).toFixed(2) : null);
+    const brierScore = (v: number | null | undefined) =>
+      recorded(v) ? +(Math.max(0, 1 - v) * 100).toFixed(2) : null;
+    const hasAny = [
+      shadow.championDirectionAccuracy,
+      shadow.challengerDirectionAccuracy,
+      shadow.championMagnitudeCorrelation,
+      shadow.challengerMagnitudeCorrelation,
+      shadow.championBrierScore,
+      shadow.challengerBrierScore,
+    ].some(recorded);
+    if (!hasAny) return emptyChart('No champion or challenger metrics were recorded');
+    const champAcc = pct(shadow.championDirectionAccuracy);
+    const challAcc = pct(shadow.challengerDirectionAccuracy);
+    const champCorr = pct(shadow.championMagnitudeCorrelation);
+    const challCorr = pct(shadow.challengerMagnitudeCorrelation);
     // Brier is a loss: lower is better. Convert to a score so higher is better on the chart.
-    const champBrier = Math.max(0, 1 - (shadow.championBrierScore ?? 0)) * 100;
-    const challBrier = Math.max(0, 1 - (shadow.challengerBrierScore ?? 0)) * 100;
+    const champBrier = brierScore(shadow.championBrierScore);
+    const challBrier = brierScore(shadow.challengerBrierScore);
     return {
       grid: { top: 30, right: 40, bottom: 40, left: 40 },
       legend: {
@@ -6211,7 +6100,7 @@ export class MlModelsPageComponent implements OnInit {
         {
           name: 'Champion',
           type: 'bar',
-          data: [+champAcc.toFixed(2), +champCorr.toFixed(2), +champBrier.toFixed(2)],
+          data: [champAcc, champCorr, champBrier],
           itemStyle: { color: '#0071E3', borderRadius: [4, 4, 0, 0] },
           barGap: '20%',
           label: { show: true, position: 'top', formatter: '{c}%', fontSize: 10, color: '#6E6E73' },
@@ -6219,7 +6108,7 @@ export class MlModelsPageComponent implements OnInit {
         {
           name: 'Challenger',
           type: 'bar',
-          data: [+challAcc.toFixed(2), +challCorr.toFixed(2), +challBrier.toFixed(2)],
+          data: [challAcc, challCorr, challBrier],
           itemStyle: { color: '#34C759', borderRadius: [4, 4, 0, 0] },
           label: { show: true, position: 'top', formatter: '{c}%', fontSize: 10, color: '#6E6E73' },
         },
@@ -6238,8 +6127,10 @@ export class MlModelsPageComponent implements OnInit {
         subtext: `Decision: ${decisionMeta(shadow.promotionDecision).label}`,
         left: 'center',
         top: 10,
-        textStyle: { fontSize: 14, color: '#1D1D1F' },
-        subtextStyle: { fontSize: 11, color: '#6E6E73' },
+        // No hard-coded near-black: it vanished on the dark theme. The chart
+        // theme supplies the title colour.
+        textStyle: { fontSize: 14 },
+        subtextStyle: { fontSize: 11, color: '#8E8E93' },
       },
       tooltip: { trigger: 'item' },
       series: [
@@ -6248,30 +6139,15 @@ export class MlModelsPageComponent implements OnInit {
           radius: ['60%', '80%'],
           center: ['50%', '60%'],
           avoidLabelOverlap: true,
-          itemStyle: { borderRadius: 4, borderColor: '#fff', borderWidth: 2 },
+          itemStyle: { borderRadius: 4 },
           label: { show: false },
           data: [
             { value: completed, name: 'Completed', itemStyle: { color: '#34C759' } },
-            { value: remaining, name: 'Remaining', itemStyle: { color: '#E5E5EA' } },
+            { value: remaining, name: 'Remaining', itemStyle: { color: 'rgba(142,142,147,0.35)' } },
           ],
         },
       ],
     };
-  }
-
-  // ══════════════════════════════════════════════════════════════
-  //  HELPERS
-  // ══════════════════════════════════════════════════════════════
-
-  private generateDates(days: number): string[] {
-    const dates: string[] = [];
-    const now = new Date();
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      dates.push(`${d.getMonth() + 1}/${d.getDate()}`);
-    }
-    return dates;
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -6307,11 +6183,11 @@ export class MlModelsPageComponent implements OnInit {
       width: 140,
       cellRenderer: (params: { value: string }) => {
         const palette: Record<string, { bg: string; color: string }> = {
-          Running: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Completed: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-          ChampionWon: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          ChallengerWon: { bg: 'rgba(175,82,222,0.12)', color: '#8944AB' },
-          Inconclusive: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
+          Running: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
+          Completed: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
+          ChampionWon: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
+          ChallengerWon: { bg: 'rgba(175,82,222,0.12)', color: 'var(--tone-purple)' },
+          Inconclusive: { bg: 'rgba(255,149,0,0.12)', color: 'var(--tone-amber)' },
         };
         const s = palette[params.value] ?? palette['Running'];
         return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${params.value}</span>`;

@@ -29,7 +29,6 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
-import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { DirectionCellComponent } from '@shared/components/data-table/cell-renderers/direction-cell.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
@@ -116,26 +115,29 @@ import {
           format="number"
           dotColor="#5AC8FA"
         />
+        <!-- A share of lots, not a lot count: the tile said "(lots)" over a percentage. -->
         <app-metric-card
-          label="Long exposure (lots)"
+          label="Long share of lots"
           [value]="longShortRatioPct()"
           format="percent"
           dotColor="#34C759"
         />
+        <!-- These three read the closed window (latest 500 closed in scope), like
+             the Closed tab's "Closed (window)" — not all history. -->
         <app-metric-card
-          label="Win rate"
+          label="Win rate (window)"
           [value]="winRatePct()"
           format="percent"
           dotColor="#34C759"
         />
         <app-metric-card
-          label="Profit factor"
+          label="Profit factor (window)"
           [value]="profitFactor()"
           format="number"
           dotColor="#AF52DE"
         />
         <app-metric-card
-          label="Avg hold (h)"
+          label="Avg hold (h, window)"
           [value]="avgHoldHours()"
           format="number"
           dotColor="#FF9500"
@@ -168,6 +170,8 @@ import {
               [columnDefs]="openColumnDefs"
               [fetchData]="fetchOpenPositions"
               [searchable]="true"
+              emptyTitle="No open positions"
+              emptyDescription="Nothing is open in the selected account scope."
               (rowClick)="onRowClick($event)"
             />
           }
@@ -275,6 +279,18 @@ import {
                     title="Closed at exactly 0.00 — counted as neither a win nor a loss"
                   >
                     Breakeven <span class="chip-count">{{ closedFlatCount() }}</span>
+                  </button>
+                }
+                @if (closedUnknownCount() > 0) {
+                  <button
+                    type="button"
+                    role="tab"
+                    class="chip"
+                    [class.active]="closedFilter() === 'unknown'"
+                    (click)="closedFilter.set('unknown')"
+                    title="The engine could not recover realised P&L from broker deal history — left out of win rate and profit factor"
+                  >
+                    P&amp;L unknown <span class="chip-count">{{ closedUnknownCount() }}</span>
                   </button>
                 }
                 <button
@@ -547,7 +563,7 @@ import {
                           [class.profit]="s.profitFactor !== null && s.profitFactor >= 1.5"
                           [class.loss]="s.profitFactor !== null && s.profitFactor < 1"
                         >
-                          {{ s.profitFactor !== null ? s.profitFactor.toFixed(2) : '—' }}
+                          {{ pfLabel(s.profitFactor) }}
                         </td>
                         <td
                           class="num mono"
@@ -1036,18 +1052,26 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
   // Win rate over the closed-positions window. Null when no closed trades
   // yet so the metric card shows "—" instead of "0%" which would imply a
-  // catastrophic 0% win rate rather than "no data".
+  // catastrophic 0% win rate rather than "no data". Trades whose realised
+  // P&L is unknown (pnlUnreconciledAt) are left out of the denominator — their
+  // 0.00 is not a non-win.
   readonly winRatePct = computed(() => {
-    const closed = this.closedPositions();
+    const closed = this.closedPositions().filter(pnlKnown);
     if (closed.length === 0) return null;
     const wins = closed.filter((p) => p.realizedPnL > 0).length;
     return (wins / closed.length) * 100;
   });
 
+  /** Per-symbol profit factor: "—" without trades, "∞" with no losing trade. */
+  pfLabel(v: number | null): string {
+    if (v === null) return '—';
+    return Number.isFinite(v) ? v.toFixed(2) : '∞';
+  }
+
   // Sum(wins) / Sum(|losses|). >1 means net profitable. Capped at 99 when
   // there are no losses so the card stays readable.
   readonly profitFactor = computed(() => {
-    const closed = this.closedPositions();
+    const closed = this.closedPositions().filter(pnlKnown);
     if (closed.length === 0) return null;
     const grossWin = closed.filter((p) => p.realizedPnL > 0).reduce((s, p) => s + p.realizedPnL, 0);
     const grossLoss = Math.abs(
@@ -1208,6 +1232,11 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       width: 70,
       valueGetter: (p: any) => (p.data as PositionDto).realizedPnL,
       cellRenderer: (params: any) => {
+        // Unknown realised P&L is neither a win nor "Flat" — it read "Flat"
+        // beside a 33-pip move and an "n/a" Realized cell.
+        if (!pnlKnown(params.data as PositionDto)) {
+          return `<span title="Realised P&L could not be recovered from broker deal history" style="background:rgba(255,149,0,0.12);color:#C93400;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600">?</span>`;
+        }
         const v = params.value as number;
         const isWin = v > 0;
         const isFlat = v === 0;
@@ -1315,10 +1344,14 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   ];
 
   // ── Filters ────────────────────────────────────────────────────────
-  readonly closedFilter = signal<'all' | 'wins' | 'losses' | 'flat' | 'today'>('all');
+  readonly closedFilter = signal<'all' | 'wins' | 'losses' | 'flat' | 'unknown' | 'today'>('all');
   /** Closed at exactly 0.00 — the remainder that made "Wins + Losses ≠ Closed". */
   readonly closedFlatCount = computed(
-    () => this.closedPositions().filter((p) => p.realizedPnL === 0).length,
+    () => this.closedPositions().filter((p) => pnlKnown(p) && p.realizedPnL === 0).length,
+  );
+  /** Realised P&L unknown (unreconciled) — used to be counted as breakeven. */
+  readonly closedUnknownCount = computed(
+    () => this.closedPositions().filter((p) => !pnlKnown(p)).length,
   );
 
   readonly closedWinsCount = computed(
@@ -1485,7 +1518,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   // Expectancy: average P&L per trade. > 0 means the system is net profitable
   // even with a sub-50% win rate (asymmetric reward/risk).
   readonly closedExpectancy = computed(() => {
-    const closed = this.closedPositions();
+    const closed = this.closedPositions().filter(pnlKnown);
     if (closed.length === 0) return null;
     return closed.reduce((s, p) => s + p.realizedPnL, 0) / closed.length;
   });
@@ -1561,21 +1594,24 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     let cum = 0;
     let peak = 0;
     let maxDD = 0;
-    const cumulative: number[] = [];
-    const peakSeries: number[] = [];
-    const drawdownSeries: number[] = [];
-    const xs: string[] = [];
+    // [closedAt ms, value] pairs for a TIME axis. These were category axes, one
+    // slot per trade, so a burst of trades on one day took more width than a
+    // quiet fortnight — and the drawdown chart's dates did not line up with the
+    // equity chart's beside it.
+    const cumulative: [number, number][] = [];
+    const peakSeries: [number, number][] = [];
+    const drawdownSeries: [number, number][] = [];
     for (const p of closed) {
       cum += p.realizedPnL;
       if (cum > peak) peak = cum;
       const dd = peak - cum;
       if (dd > maxDD) maxDD = dd;
-      cumulative.push(+cum.toFixed(2));
-      peakSeries.push(+peak.toFixed(2));
-      drawdownSeries.push(+(-dd).toFixed(2));
-      xs.push((p.closedAt ?? '').slice(5, 16).replace('T', ' '));
+      const t = new Date(p.closedAt!).getTime();
+      cumulative.push([t, +cum.toFixed(2)]);
+      peakSeries.push([t, +peak.toFixed(2)]);
+      drawdownSeries.push([t, +(-dd).toFixed(2)]);
     }
-    return { xs, cumulative, peakSeries, drawdownSeries, maxDD };
+    return { count: closed.length, cumulative, peakSeries, drawdownSeries, maxDD };
   });
 
   readonly maxDrawdownAmount = computed(() => {
@@ -1623,25 +1659,23 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   // ── Analytics-tab charts ─────────────────────────────────────────
 
   readonly equityCurveChart = computed<EChartsOption>(() => {
-    const { xs, cumulative, peakSeries } = this.drawdownSeries();
-    if (xs.length === 0) return this.emptyChartOption('No closed trades');
-    const last = cumulative[cumulative.length - 1] ?? 0;
+    const { count, cumulative, peakSeries } = this.drawdownSeries();
+    if (count === 0) return this.emptyChartOption('No closed trades');
+    const last = cumulative[cumulative.length - 1]?.[1] ?? 0;
     const lineColor = last >= 0 ? '#34C759' : '#FF3B30';
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => usd(tooltipNumber(v)) },
       legend: { bottom: 0, textStyle: { fontSize: 10 } },
       grid: { top: 8, right: 16, bottom: 32, left: 50 },
-      xAxis: {
-        type: 'category',
-        data: xs,
-        axisLabel: { fontSize: 9, color: '#8E8E93', hideOverlap: true },
-      },
+      xAxis: TIME_AXIS,
       yAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
       series: [
         {
           name: 'Equity',
           type: 'line',
-          smooth: true,
+          // Realised equity moves in trade-sized steps; the spline drew dips
+          // and recoveries between closes that no account had.
+          step: 'end',
           symbol: 'none',
           data: cumulative,
           lineStyle: { color: lineColor, width: 2 },
@@ -1672,21 +1706,18 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   });
 
   readonly drawdownChart = computed<EChartsOption>(() => {
-    const { xs, drawdownSeries: dd } = this.drawdownSeries();
-    if (xs.length === 0) return this.emptyChartOption('No closed trades');
+    const { count, drawdownSeries: dd } = this.drawdownSeries();
+    if (count === 0) return this.emptyChartOption('No closed trades');
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => usd(tooltipNumber(v)) },
       grid: { top: 8, right: 12, bottom: 32, left: 44 },
-      xAxis: {
-        type: 'category',
-        data: xs,
-        axisLabel: { fontSize: 9, color: '#8E8E93', hideOverlap: true },
-      },
+      xAxis: TIME_AXIS,
       yAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
       series: [
         {
+          name: 'Drawdown',
           type: 'line',
-          smooth: true,
+          step: 'end',
           symbol: 'none',
           data: dd,
           lineStyle: { color: '#FF3B30', width: 1.5 },
@@ -1714,12 +1745,16 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       if (!p.symbol) continue;
       map.set(p.symbol, (map.get(p.symbol) ?? 0) + p.realizedPnL);
     }
+    // The ten biggest contributors by MAGNITUDE, then best → worst. Taking the
+    // top ten by value kept the ten best symbols and dropped every big loser
+    // (EURUSD, the window's −$129k, was not on the chart).
     const sorted = Array.from(map.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 10);
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .slice(0, 10)
+      .sort((a, b) => b[1] - a[1]);
     if (sorted.length === 0) return this.emptyChartOption('No closed trades');
     return {
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis', valueFormatter: (v) => usd(tooltipNumber(v)) },
       grid: { top: 8, right: 16, bottom: 24, left: 70 },
       xAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
       yAxis: {
@@ -1749,32 +1784,40 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const shortTrades = closed.filter((p) => p.direction === 'Short');
     const longPnl = longTrades.reduce((s, p) => s + p.realizedPnL, 0);
     const shortPnl = shortTrades.reduce((s, p) => s + p.realizedPnL, 0);
+    // One bar per side on a dollar axis, trade counts in the labels. Trade
+    // counts and dollars used to share one value axis (stacked), so the
+    // "Trades" row was a few hundred units against a ±$100k scale — invisible.
+    const rows = [
+      { side: 'Long', pnl: longPnl, n: longTrades.length },
+      { side: 'Short', pnl: shortPnl, n: shortTrades.length },
+    ];
     return {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, textStyle: { fontSize: 10 } },
-      grid: { top: 8, right: 16, bottom: 28, left: 70 },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const r = rows[1 - (params[0]?.dataIndex ?? 0)];
+          return r ? `${r.side}<br/>Net P&L: ${usd(r.pnl)}<br/>Trades: ${r.n}` : '';
+        },
+      },
+      grid: { top: 8, right: 16, bottom: 24, left: 8, containLabel: true },
       xAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
       yAxis: {
         type: 'category',
-        data: ['Trades', 'Net P&L'],
+        data: rows.map((r) => `${r.side} · ${r.n} trades`).reverse(),
         axisLabel: { fontSize: 10, color: '#8E8E93' },
       },
       series: [
         {
-          name: 'Long',
+          name: 'Net P&L',
           type: 'bar',
-          stack: 'g',
-          itemStyle: { color: '#34C759' },
-          data: [longTrades.length, +longPnl.toFixed(2)],
-          barMaxWidth: 20,
-        },
-        {
-          name: 'Short',
-          type: 'bar',
-          stack: 'g',
-          itemStyle: { color: '#FF3B30' },
-          data: [shortTrades.length, +shortPnl.toFixed(2)],
-          barMaxWidth: 20,
+          data: rows
+            .map((r) => ({
+              value: +r.pnl.toFixed(2),
+              itemStyle: { color: r.pnl >= 0 ? '#34C759' : '#FF3B30' },
+            }))
+            .reverse(),
+          barMaxWidth: 22,
         },
       ],
     };
@@ -1825,7 +1868,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   readonly analyticsPerSymbol = computed(() => {
     const map = new Map<string, { symbol: string; pnls: number[] }>();
     for (const p of this.closedPositions()) {
-      if (!p.symbol) continue;
+      // P&L statistics: a trade whose realised P&L is unknown has none to add.
+      if (!p.symbol || !pnlKnown(p)) continue;
       let s = map.get(p.symbol);
       if (!s) {
         s = { symbol: p.symbol, pnls: [] };
@@ -1833,40 +1877,50 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       }
       s.pnls.push(p.realizedPnL);
     }
-    return Array.from(map.values())
-      .map((s) => {
-        const wins = s.pnls.filter((v) => v > 0);
-        const losses = s.pnls.filter((v) => v < 0);
-        const grossWin = wins.reduce((a, b) => a + b, 0);
-        const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
-        const netPnL = s.pnls.reduce((a, b) => a + b, 0);
-        // Per-symbol drawdown: walk the trade sequence, track peak/trough.
-        let cum = 0;
-        let peak = 0;
-        let maxDD = 0;
-        for (const v of s.pnls) {
-          cum += v;
-          if (cum > peak) peak = cum;
-          const dd = peak - cum;
-          if (dd > maxDD) maxDD = dd;
-        }
-        return {
-          symbol: s.symbol,
-          trades: s.pnls.length,
-          wins: wins.length,
-          losses: losses.length,
-          winRatePct: s.pnls.length > 0 ? (wins.length / s.pnls.length) * 100 : 0,
-          netPnL,
-          avgWin: wins.length > 0 ? grossWin / wins.length : null,
-          avgLoss: losses.length > 0 ? -grossLoss / losses.length : null,
-          profitFactor:
-            grossLoss === 0 ? (grossWin > 0 ? 99 : null) : +(grossWin / grossLoss).toFixed(2),
-          expectancy: s.pnls.length > 0 ? netPnL / s.pnls.length : 0,
-          maxDD: -maxDD,
-        };
-      })
-      .sort((a, b) => b.netPnL - a.netPnL)
-      .slice(0, 12);
+    return (
+      Array.from(map.values())
+        .map((s) => {
+          const wins = s.pnls.filter((v) => v > 0);
+          const losses = s.pnls.filter((v) => v < 0);
+          const grossWin = wins.reduce((a, b) => a + b, 0);
+          const grossLoss = Math.abs(losses.reduce((a, b) => a + b, 0));
+          const netPnL = s.pnls.reduce((a, b) => a + b, 0);
+          // Per-symbol drawdown: walk the trade sequence, track peak/trough.
+          let cum = 0;
+          let peak = 0;
+          let maxDD = 0;
+          for (const v of s.pnls) {
+            cum += v;
+            if (cum > peak) peak = cum;
+            const dd = peak - cum;
+            if (dd > maxDD) maxDD = dd;
+          }
+          return {
+            symbol: s.symbol,
+            trades: s.pnls.length,
+            wins: wins.length,
+            losses: losses.length,
+            winRatePct: s.pnls.length > 0 ? (wins.length / s.pnls.length) * 100 : 0,
+            netPnL,
+            avgWin: wins.length > 0 ? grossWin / wins.length : null,
+            avgLoss: losses.length > 0 ? -grossLoss / losses.length : null,
+            // No losing trade → unbounded; rendered "∞". A 99 sentinel read as a real
+            // profit factor (EURAUD "99.00" on three wins).
+            profitFactor:
+              grossLoss === 0
+                ? grossWin > 0
+                  ? Number.POSITIVE_INFINITY
+                  : null
+                : +(grossWin / grossLoss).toFixed(2),
+            expectancy: s.pnls.length > 0 ? netPnL / s.pnls.length : 0,
+            maxDD: -maxDD,
+          };
+        })
+        // Every symbol, best to worst. It kept the 12 BEST by net P&L, so the
+        // table "sorted by net P&L" silently dropped the biggest losers — EURUSD
+        // (−$129k of the window's −$139k) never appeared.
+        .sort((a, b) => b.netPnL - a.netPnL)
+    );
   });
 
   // ── Closed-tab cumulative sparkline ──────────────────────────────
@@ -1889,8 +1943,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       const dd = peak - cum;
       if (dd > maxDrawdown) maxDrawdown = dd;
     }
-    const sign = (v: number) => (v >= 0 ? '+' : '');
-    return `${n} trades · ending ${sign(cum)}${cum.toFixed(2)} · peak ${peak.toFixed(2)} · max DD -${maxDrawdown.toFixed(2)}`;
+    return `${n} trades · ending ${usd(cum)} · peak ${usd(peak)} · max DD ${usd(-maxDrawdown)}`;
   });
 
   readonly cumulativeSparklineChart = computed<EChartsOption>(() => {
@@ -1906,29 +1959,23 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     // a rendering bug.
     let cum = 0;
     let peak = 0;
-    const xLabels: string[] = [];
-    const cumValues: number[] = [];
-    const peakValues: number[] = [];
+    // [closedAt ms, value] on a time axis. The category axis (one slot per
+    // trade) labelled only 08-04 / 08-26 / 09-02 across a window that runs to
+    // mid-October, because 16 trades on one day took 16 slots.
+    const cumValues: [number, number][] = [];
+    const peakValues: [number, number][] = [];
     const tooltipMeta: {
       idx: number;
       closedAt: string;
       symbol: string | null;
       realized: number;
     }[] = [];
-    // Show each date only on the FIRST trade of that calendar day. Every
-    // subsequent trade on the same day gets an empty label, which ECharts
-    // simply renders as an unlabelled tick — far more readable than 194
-    // overlapping "2026-06-18" stamps fighting for space. The tooltip
-    // still carries the full timestamp for every individual trade.
-    let lastDayLabel: string | null = null;
     closed.forEach((p, idx) => {
       cum += p.realizedPnL;
       if (cum > peak) peak = cum;
-      cumValues.push(+cum.toFixed(2));
-      peakValues.push(+peak.toFixed(2));
-      const day = p.closedAt!.slice(0, 10);
-      xLabels.push(day === lastDayLabel ? '' : day);
-      lastDayLabel = day;
+      const t = new Date(p.closedAt!).getTime();
+      cumValues.push([t, +cum.toFixed(2)]);
+      peakValues.push([t, +peak.toFixed(2)]);
       tooltipMeta.push({
         idx: idx + 1,
         closedAt: p.closedAt!.replace('T', ' ').slice(0, 19),
@@ -1936,7 +1983,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         realized: p.realizedPnL,
       });
     });
-    const last = cumValues[cumValues.length - 1] ?? 0;
+    const last = cumValues[cumValues.length - 1]?.[1] ?? 0;
     const lineColor = last >= 0 ? '#34C759' : '#FF3B30';
 
     const opt: EChartsOption = {
@@ -1957,8 +2004,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
             `<div style="font-weight:600;margin-bottom:4px">Trade #${meta.idx} · ${sym}</div>`,
             `<div style="color:#8e8e93;font-size:11px">${meta.closedAt}</div>`,
             `<div style="margin-top:6px">Realized: <strong style="color:${meta.realized >= 0 ? '#15803d' : '#b91c1c'}">${sign(meta.realized)}${meta.realized.toFixed(2)}</strong></div>`,
-            `<div>Cumulative: <strong>${sign(cumValues[idx])}${cumValues[idx].toFixed(2)}</strong></div>`,
-            `<div style="color:#8e8e93">Peak: ${peakValues[idx].toFixed(2)} · DD ${(cumValues[idx] - peakValues[idx]).toFixed(2)}</div>`,
+            `<div>Cumulative: <strong>${sign(cumValues[idx][1])}${cumValues[idx][1].toFixed(2)}</strong></div>`,
+            `<div style="color:#8e8e93">Peak: ${peakValues[idx][1].toFixed(2)} · DD ${(cumValues[idx][1] - peakValues[idx][1]).toFixed(2)}</div>`,
           ].join('');
         },
       },
@@ -1970,10 +2017,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       // bottom band as needed for the dense date labels.
       grid: { top: 16, right: 24, bottom: 24, left: 12, containLabel: true },
       xAxis: {
-        type: 'category',
-        data: xLabels,
-        boundaryGap: false,
-        axisLabel: { fontSize: 10, color: '#8E8E93', hideOverlap: true },
+        ...TIME_AXIS,
+        axisLabel: { fontSize: 10, color: '#8E8E93', hideOverlap: true, formatter: '{dd} {MMM}' },
         axisLine: { lineStyle: { color: 'rgba(0,0,0,0.08)' } },
         axisTick: { show: false },
       },
@@ -2071,7 +2116,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       s.trades++;
       if (p.realizedPnL > 0) s.wins++;
       else if (p.realizedPnL < 0) s.losses++;
-      s.pnls.push(p.realizedPnL);
+      if (pnlKnown(p)) s.pnls.push(p.realizedPnL);
       if (p.openedAt && p.closedAt) {
         const ms = new Date(p.closedAt).getTime() - new Date(p.openedAt).getTime();
         if (ms >= 0) s.holdsMs.push(ms);
@@ -2090,8 +2135,10 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
           trades: s.trades,
           wins: s.wins,
           losses: s.losses,
-          flat: s.trades - s.wins - s.losses,
-          winRatePct: s.trades > 0 ? (s.wins / s.trades) * 100 : 0,
+          // Breakeven = known closes at 0.00; unknown-P&L closes count in
+          // `trades` but in neither this nor the win-rate denominator.
+          flat: s.pnls.length - s.wins - s.losses,
+          winRatePct: s.pnls.length > 0 ? (s.wins / s.pnls.length) * 100 : 0,
           netPnL,
           avgPnL,
           best,
@@ -2240,7 +2287,8 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     const f = this.closedFilter();
     if (f === 'wins') rows = rows.filter((p) => p.realizedPnL > 0);
     else if (f === 'losses') rows = rows.filter((p) => p.realizedPnL < 0);
-    else if (f === 'flat') rows = rows.filter((p) => p.realizedPnL === 0);
+    else if (f === 'flat') rows = rows.filter((p) => pnlKnown(p) && p.realizedPnL === 0);
+    else if (f === 'unknown') rows = rows.filter((p) => !pnlKnown(p));
     else if (f === 'today') {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -2275,7 +2323,9 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
     for (let i = 0; i < binCount; i++) {
       const lo = min + i * binSize;
-      binLabels.push(`$${lo.toFixed(0)}`);
+      // "-$13,571", not "$-13571".
+      const abs = Math.abs(lo).toLocaleString('en-US', { maximumFractionDigits: 0 });
+      binLabels.push(`${lo < 0 ? '-' : ''}$${abs}`);
     }
 
     pnls.forEach((v) => {
@@ -2438,36 +2488,28 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 
     if (rValues.length === 0) return this.emptyChartOption('No SL data for R-calc');
 
-    const min = Math.min(...rValues);
-    const max = Math.max(...rValues);
-    const binCount = 10;
-    const binSize = (max - min) / binCount || 1;
-    const bins = Array(binCount).fill(0);
-    const labels: string[] = [];
-
-    for (let i = 0; i < binCount; i++) {
-      const lo = min + i * binSize;
-      labels.push(`${lo.toFixed(1)}R`);
+    // Fixed R buckets with open tails. Ten equal bins between min and max put
+    // ~95 % of trades into the first bar whenever one exit was measured against
+    // a stop moved to within a pip of entry (+66R) — "−1.3R … 59.4R".
+    const edges = [-Infinity, -2, -1, -0.5, 0, 0.5, 1, 2, 3, Infinity];
+    const labels = ['<−2R', '−2…−1', '−1…−½', '−½…0', '0…½', '½…1', '1…2', '2…3', '>3R'];
+    const bins = new Array(labels.length).fill(0) as number[];
+    for (const v of rValues) {
+      const i = edges.findIndex((lo, k) => v >= lo && v < edges[k + 1]);
+      if (i >= 0) bins[i]++;
     }
-
-    rValues.forEach((v) => {
-      let idx = Math.floor((v - min) / binSize);
-      if (idx >= binCount) idx = binCount - 1;
-      if (idx < 0) idx = 0;
-      bins[idx]++;
-    });
 
     return {
       tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 10 } },
+      xAxis: { type: 'category', data: labels, axisLabel: { fontSize: 9, interval: 0 } },
       yAxis: { type: 'value', name: 'Count', nameGap: 14, minInterval: 1 },
       series: [
         {
           type: 'bar',
-          data: bins.map((val, i) => {
-            const midVal = min + (i + 0.5) * binSize;
-            return { value: val, itemStyle: { color: midVal >= 0 ? '#34C759' : '#FF3B30' } };
-          }),
+          data: bins.map((val, i) => ({
+            value: val,
+            itemStyle: { color: i < 4 ? '#FF3B30' : '#34C759' },
+          })),
           barWidth: '80%',
         },
       ],
@@ -2566,6 +2608,31 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
 // ── Module-level pure helpers ───────────────────────────────────────
 // Pulled out of the class so AG Grid valueGetters can call them without
 // binding `this`.
+
+/**
+ * False when the engine gave up recovering this close's realised P&L from
+ * broker deal history: its `realizedPnL` 0.00 then means UNKNOWN, so it is
+ * neither a win, a loss nor breakeven, and stays out of rate/ratio statistics.
+ */
+function pnlKnown(p: PositionDto): boolean {
+  return !p.pnlUnreconciledAt;
+}
+
+function usd(v: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(v);
+}
+
+/** A tooltip value as a number — a [time, value] point passes its value. */
+function tooltipNumber(v: unknown): number {
+  return Number(Array.isArray(v) ? v[v.length - 1] : v);
+}
+
+/** Shared time x-axis for the P&L-over-time charts (data as [ms, value] pairs). */
+const TIME_AXIS = {
+  type: 'time' as const,
+  axisLabel: { fontSize: 9, color: '#8E8E93', hideOverlap: true },
+  splitLine: { show: false },
+};
 
 function pipSizeFor(symbol: string | null): number {
   if (!symbol) return 0.0001;
@@ -2669,9 +2736,22 @@ function pnlPct(p: PositionDto | null | undefined): number | null {
  * R-multiple for an open position: (currentPrice − entry) / (entry − stopLoss),
  * direction-aware. Null when SL is not set or risk is zero.
  */
+/**
+ * The stop that defines 1R: the one the position OPENED with. The engine sends
+ * `initialStopLoss` (not yet in the shared PositionDto type — see G1 shared
+ * needs); `stopLoss` is where the stop sits NOW, after trailing, breakeven and
+ * spread bumps, and measuring R against it made position 6547 (53-pip win,
+ * 28.8-pip initial risk = +1.84R) read +66.19R off a stop 0.8 pips from entry.
+ */
+function riskStop(p: PositionDto): number | null {
+  const initial = (p as PositionDto & { initialStopLoss?: number | null }).initialStopLoss;
+  return initial ?? p.stopLoss;
+}
+
 function rMultiple(p: PositionDto | null | undefined): number | null {
-  if (!p || p.stopLoss === null || p.currentPrice === null) return null;
-  const risk = Math.abs(p.averageEntryPrice - p.stopLoss);
+  const stop = p ? riskStop(p) : null;
+  if (!p || stop === null || p.currentPrice === null) return null;
+  const risk = Math.abs(p.averageEntryPrice - stop);
   if (risk === 0) return null;
   const moveDir =
     p.direction === 'Long'
@@ -2695,8 +2775,9 @@ function rMultiple(p: PositionDto | null | undefined): number | null {
  * standard, unit-safe R and matches the live geometry the engine trades.
  */
 function rMultipleClosed(p: PositionDto | null | undefined): number | null {
-  if (!p || p.stopLoss === null || p.currentPrice === null) return null;
-  const risk = Math.abs(p.averageEntryPrice - p.stopLoss);
+  const stop = p ? riskStop(p) : null;
+  if (!p || stop === null || p.currentPrice === null) return null;
+  const risk = Math.abs(p.averageEntryPrice - stop);
   if (risk === 0) return null;
   const move =
     p.direction === 'Long'

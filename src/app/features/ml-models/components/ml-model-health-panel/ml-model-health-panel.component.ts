@@ -9,7 +9,7 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { catchError, of } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
@@ -25,7 +25,7 @@ interface QualityWarning {
   selector: 'app-ml-model-health-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, DecimalPipe],
+  imports: [DatePipe],
   template: `
     <section class="card" aria-label="Model health">
       <header class="card-header">
@@ -160,13 +160,18 @@ interface QualityWarning {
               <dt>Std dev across folds</dt>
               <dd class="num">{{ num(model().walkForwardStdDev, 4) }}</dd>
 
-              <dt>OOS drop from validation</dt>
-              <dd class="num" [class.bad]="oosDropPp() !== null && oosDropPp()! > 8">
-                {{
-                  oosDropPp() === null
-                    ? '—'
-                    : (oosDropPp()! >= 0 ? '−' : '+') + (oosDropPp() | number: '1.1-1') + ' pp'
-                }}
+              <!-- Signed as OOS minus validation. The sign used to be prepended to
+                   an already-signed number, so a model whose folds beat its
+                   validation accuracy read "+-8.6 pp". -->
+              <dt title="Mean walk-forward (out-of-sample) accuracy minus validation accuracy">
+                OOS vs validation
+              </dt>
+              <dd
+                class="num"
+                [class.bad]="oosDropPp() !== null && oosDropPp()! > 8"
+                [class.good]="oosDropPp() !== null && oosDropPp()! < 0"
+              >
+                {{ formatOosDelta(oosDropPp()) }}
               </dd>
             </dl>
           }
@@ -470,6 +475,8 @@ export class MLModelHealthPanelComponent {
   readonly lifecycleLoading = signal(false);
   readonly lifecycleError = signal<string | null>(null);
 
+  protected readonly formatOosDelta = formatOosDeltaPp;
+
   /** Validation accuracy − walk-forward mean accuracy, in percentage points. */
   readonly oosDropPp = computed(() => {
     const m = this.model();
@@ -612,6 +619,19 @@ export class MLModelHealthPanelComponent {
         }
       });
   }
+}
+
+/**
+ * `OOS − validation` in signed percentage points, from a drop measured the other way round
+ * (validation − OOS, positive = OOS worse): a 3.2 pp drop reads "−3.2 pp", folds that beat
+ * validation read "+8.6 pp". Exported for testability.
+ */
+export function formatOosDeltaPp(dropPp: number | null): string {
+  if (dropPp === null || !Number.isFinite(dropPp)) return '—';
+  const delta = -dropPp;
+  const magnitude = Math.abs(delta).toFixed(1);
+  if (magnitude === '0.0') return '0.0 pp';
+  return `${delta < 0 ? '−' : '+'}${magnitude} pp`;
 }
 
 /**

@@ -429,7 +429,7 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       .badge.tone-ok,
       .badge[data-badge='live'] {
         background: rgba(52, 199, 89, 0.15);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .badge.tone-muted {
         background: rgba(0, 0, 0, 0.06);
@@ -437,11 +437,11 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       }
       .badge[data-badge='next-job'] {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .badge[data-badge='restart'] {
         background: rgba(255, 149, 0, 0.15);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .hint,
       .empty {

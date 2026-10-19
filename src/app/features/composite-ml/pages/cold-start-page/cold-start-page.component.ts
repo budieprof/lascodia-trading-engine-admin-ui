@@ -1,16 +1,10 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  effect,
-  inject,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { catchError, map, of } from 'rxjs';
+import { map, of, tap } from 'rxjs';
 
 import { CompositeMLService } from '@core/services/composite-ml.service';
+import { unwrapResponse } from '@core/api/api.service';
 import type {
   ColdStartFloorRowDto,
   ColdStartReportDto,
@@ -18,6 +12,7 @@ import type {
   Timeframe,
 } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
+import { refetchOnChange } from '@core/polling/refetch-on-change';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -35,6 +30,25 @@ const EMPTY_REPORT: ColdStartReportDto = {
   asOfUtc: '',
   floors: [],
 };
+
+/** A report tagged with the scope it was fetched for, so a scope switch never shows another scope's floors. */
+interface ScopedReport {
+  scopeKey: string;
+  report: ColdStartReportDto;
+}
+
+/**
+ * The global report takes ~3 s on the engine (it counts every ledger row behind each floor), and
+ * every CompositeML tab switch destroys and re-creates this page. Reports younger than this are
+ * reused for a revisit's first paint instead of being fetched again; the poll, pushes and the
+ * Refresh button always go to the engine.
+ */
+const REPORT_REUSE_MS = 60_000;
+const reportCache = new Map<string, { result: ScopedReport; fetchedAt: number }>();
+
+function scopeKeyOf(symbol: string | null, timeframe: Timeframe | null): string {
+  return `${symbol ?? ''}|${timeframe ?? ''}`;
+}
 
 @Component({
   selector: 'app-cold-start-page',
@@ -60,7 +74,7 @@ const EMPTY_REPORT: ColdStartReportDto = {
       />
       <app-composite-ml-nav
         [showRefresh]="true"
-        [refreshing]="reportResource.loading() || donorResource.loading()"
+        [refreshing]="reportResource.refreshing() || donorResource.refreshing()"
         (refresh)="reportResource.refresh(); donorResource.refresh()"
       />
 
@@ -175,8 +189,7 @@ const EMPTY_REPORT: ColdStartReportDto = {
             <table class="floors-table">
               <thead>
                 <tr>
-                  <th>Layer key</th>
-                  <th>Description</th>
+                  <th>Layer</th>
                   <th class="num">Observed / threshold</th>
                   <th>State</th>
                   <th class="num">Still needed</th>
@@ -187,8 +200,12 @@ const EMPTY_REPORT: ColdStartReportDto = {
               <tbody>
                 @for (floor of floors(); track floor.layerKey) {
                   <tr [class.cold]="!floor.isWarm" [class.outcome-cold]="isOutcomeCold(floor)">
-                    <td class="mono key-cell">{{ floor.layerKey }}</td>
-                    <td class="desc" [title]="floor.description">{{ floor.description }}</td>
+                    <!-- Key and description share the elastic column: as two
+                         columns the description was clipped to ~14 characters. -->
+                    <td class="layer-cell">
+                      <span class="mono key">{{ floor.layerKey }}</span>
+                      <span class="desc" [title]="floor.description">{{ floor.description }}</span>
+                    </td>
                     <td class="num mono nowrap">
                       <span [class.below]="floor.observed < floor.threshold">
                         {{ floor.observed | number: '1.0-0' }}
@@ -351,6 +368,25 @@ const EMPTY_REPORT: ColdStartReportDto = {
   `,
   styles: [
     `
+      /* Pill/text tones. The light-theme hexes these replace (#0040dd blue at
+         ~2.2:1, #c93400 amber, #d70015 red ~3:1) were used on the dark theme
+         too, where they were barely readable; dark gets the system tints. */
+      :host {
+        --tone-green: #248a3d;
+        --tone-amber: #c93400;
+        --tone-red: #d70015;
+        --tone-blue: #0040dd;
+        --tone-grey: #636366;
+        --tone-purple: #8e44ad;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-green: #30d158;
+        --tone-amber: #ff9f0a;
+        --tone-red: #ff6961;
+        --tone-blue: #64d2ff;
+        --tone-grey: #a1a1a6;
+        --tone-purple: #bf5af2;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -457,23 +493,20 @@ const EMPTY_REPORT: ColdStartReportDto = {
         table-layout: fixed;
         min-width: 960px;
       }
-      .floors-table th:nth-child(1) {
-        width: 20%;
+      .floors-table th:nth-child(2) {
+        width: 140px;
       }
       .floors-table th:nth-child(3) {
-        width: 150px;
+        width: 76px;
       }
       .floors-table th:nth-child(4) {
-        width: 80px;
+        width: 96px;
       }
       .floors-table th:nth-child(5) {
-        width: 100px;
+        width: 230px;
       }
       .floors-table th:nth-child(6) {
-        width: 240px;
-      }
-      .floors-table th:nth-child(7) {
-        width: 160px;
+        width: 170px;
       }
       .floors-table,
       .donors-table {
@@ -481,9 +514,17 @@ const EMPTY_REPORT: ColdStartReportDto = {
         border-collapse: collapse;
         font-size: var(--text-sm);
       }
-      .key-cell {
-        overflow-wrap: anywhere;
+      .layer-cell {
         line-height: 1.35;
+      }
+      .layer-cell .key {
+        display: block;
+        overflow-wrap: anywhere;
+      }
+      .layer-cell .desc {
+        display: block;
+        margin-top: 2px;
+        font-size: var(--text-xs);
       }
       .nowrap {
         white-space: nowrap;
@@ -513,20 +554,20 @@ const EMPTY_REPORT: ColdStartReportDto = {
         font-variant-numeric: tabular-nums;
       }
       .floors-table tr.cold .desc {
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
       }
       .floors-table tr.outcome-cold {
         background: rgba(255, 59, 48, 0.04);
       }
       .floors-table tr.outcome-cold td:first-child {
-        border-left: 3px solid #d70015;
+        border-left: 3px solid var(--tone-red);
         padding-left: 8px;
       }
       .donors-table tr.no-donor {
         opacity: 0.65;
       }
       .below {
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .mono {
         font-family: var(--font-mono);
@@ -538,7 +579,7 @@ const EMPTY_REPORT: ColdStartReportDto = {
         font-size: var(--text-xs);
       }
       .desc {
-        color: var(--text-primary);
+        color: var(--text-secondary);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -551,11 +592,11 @@ const EMPTY_REPORT: ColdStartReportDto = {
       }
       .state-pill.warm {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .state-pill.cold {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .outcome-cell {
         display: inline-flex;
@@ -563,10 +604,10 @@ const EMPTY_REPORT: ColdStartReportDto = {
         gap: 4px;
       }
       .positive {
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .negative {
-        color: #d70015;
+        color: var(--tone-red);
       }
       .warm-tag,
       .cold-tag {
@@ -579,11 +620,11 @@ const EMPTY_REPORT: ColdStartReportDto = {
       }
       .warm-tag {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .cold-tag {
         background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
+        color: var(--tone-red);
       }
       .detail {
         overflow: hidden;
@@ -600,23 +641,23 @@ const EMPTY_REPORT: ColdStartReportDto = {
       }
       .bucket-pill[data-bucket='exact_match'] {
         background: rgba(52, 199, 89, 0.16);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .bucket-pill[data-bucket='high'] {
         background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
+        color: var(--tone-green);
       }
       .bucket-pill[data-bucket='medium'] {
         background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
+        color: var(--tone-blue);
       }
       .bucket-pill[data-bucket='low'] {
         background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
+        color: var(--tone-amber);
       }
       .bucket-pill[data-bucket='none'] {
         background: rgba(142, 142, 147, 0.16);
-        color: #636366;
+        color: var(--tone-grey);
       }
     `,
   ],
@@ -638,14 +679,28 @@ export class ColdStartPageComponent {
 
   // Cold-start report depends on scope. Donor selection is engine-wide
   // (no scope filter) so it polls independently.
-  protected readonly reportResource = createPolledResource(
-    () =>
-      this.compositeMl
-        .getColdStartReport({ symbol: this.appliedSymbol(), timeframe: this.appliedTimeframe() })
-        .pipe(
-          map((res) => res.data ?? EMPTY_REPORT),
-          catchError(() => of(EMPTY_REPORT)),
-        ),
+  /** Only this instance's first fetch may be answered from {@link reportCache}. */
+  private firstReportFetch = true;
+
+  protected readonly reportResource = createPolledResource<ScopedReport>(
+    () => {
+      const symbol = this.appliedSymbol();
+      const timeframe = this.appliedTimeframe();
+      const scopeKey = scopeKeyOf(symbol, timeframe);
+      const reuse = this.firstReportFetch;
+      this.firstReportFetch = false;
+      const cached = reportCache.get(scopeKey);
+      if (reuse && cached && Date.now() - cached.fetchedAt < REPORT_REUSE_MS) {
+        return of(cached.result);
+      }
+      // Errors propagate to reportResource.error(): they used to become an
+      // empty report, i.e. "No catalogue floors registered".
+      return this.compositeMl.getColdStartReport({ symbol, timeframe }).pipe(
+        map(unwrapResponse),
+        map((report) => ({ scopeKey, report })),
+        tap((result) => reportCache.set(scopeKey, { result, fetchedAt: Date.now() })),
+      );
+    },
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -655,11 +710,7 @@ export class ColdStartPageComponent {
   );
 
   protected readonly donorResource = createPolledResource(
-    () =>
-      this.compositeMl.getDonorSelection().pipe(
-        map((res) => res.data ?? []),
-        catchError(() => of<CompositeMLDonorSelectionDto[]>([])),
-      ),
+    () => this.compositeMl.getDonorSelection().pipe(map(unwrapResponse)),
     {
       // Push-driven: the interval is only a fallback for a missed
       // push or a reconnect gap.
@@ -668,18 +719,37 @@ export class ColdStartPageComponent {
     },
   );
 
+  private readonly appliedScopeKey = computed(() =>
+    scopeKeyOf(this.appliedSymbol(), this.appliedTimeframe()),
+  );
+
   constructor() {
-    effect(() => {
-      this.appliedSymbol();
-      this.appliedTimeframe();
-      this.reportResource.refresh();
-    });
+    // Refetch when the applied scope changes — debounced, because typing a
+    // symbol applies it per keystroke ("E", "EU", "EUR"…).
+    refetchOnChange(
+      () => this.appliedScopeKey(),
+      () => this.reportResource.refresh(),
+      300,
+    );
   }
 
-  protected readonly report = computed(() => this.reportResource.value() ?? EMPTY_REPORT);
+  /** The report for the applied scope, or null while it has not arrived yet. */
+  private readonly currentReport = computed(() => {
+    const v = this.reportResource.value();
+    return v && v.scopeKey === this.appliedScopeKey() ? v.report : null;
+  });
+  protected readonly report = computed(() => this.currentReport() ?? EMPTY_REPORT);
   protected readonly floors = computed(() => this.report().floors);
+  /**
+   * First paint, or a scope switch still in flight. The old check
+   * (`loading() && floors empty`) went false the moment the previous scope's
+   * floors were on screen, so they stayed up under the new scope's label for
+   * the whole ~3 s request.
+   */
   protected readonly loadingFloors = computed(
-    () => this.reportResource.loading() && this.floors().length === 0,
+    () =>
+      this.reportResource.loading() ||
+      (this.currentReport() === null && !this.reportResource.error()),
   );
 
   protected readonly warmCount = computed(() => this.floors().filter((f) => f.isWarm).length);
@@ -708,7 +778,9 @@ export class ColdStartPageComponent {
     return `${s} · ${tf}`;
   });
 
-  protected setScope(symbol: string | null, timeframe: Timeframe | null): void {
+  protected setScope(rawSymbol: string | null, timeframe: Timeframe | null): void {
+    // Symbols are upper-case on the engine; "eurusd" used to be sent verbatim.
+    const symbol = rawSymbol?.trim().toUpperCase() || null;
     this.appliedSymbol.set(symbol);
     this.appliedTimeframe.set(timeframe);
     // Keep the picker inputs in sync so the active tab + radio reflect state.
@@ -727,7 +799,7 @@ export class ColdStartPageComponent {
    * is reached by clicking the "Global" segmented-tab.
    */
   protected applyIfBothSet(): void {
-    const symbol = this.symbolInput()?.trim() || null;
+    const symbol = this.symbolInput()?.trim().toUpperCase() || null;
     const tf = this.timeframeInput() ?? null;
     if (symbol && tf) {
       this.appliedSymbol.set(symbol);

@@ -182,9 +182,9 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
               <div class="field">
                 <label for="pt-engine">Analysis engine</label>
                 <select id="pt-engine" [(ngModel)]="d.analysisEngine" name="analysisEngine">
-                  <option value="Assistant">
-                    Assistant — full assistant analysis, one card per idea, each watched
-                  </option>
+                  <!-- Short labels: the long one was cut off inside the closed select; the
+                       paragraph below explains the engines. -->
+                  <option value="Assistant">Assistant — a card per idea, each watched</option>
                   <option value="Classic">Classic — JSON view + a single plan</option>
                 </select>
                 <p class="muted small">
@@ -821,8 +821,10 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
          product. An earlier pass invented token names (--surface, --accent-fg) that do not
          exist in the design system, so every colour silently fell back to a hardcoded hex
          and the page drifted away from the rest of the console. */
+      /* The shell already pads the content area; a second 24/32px inset put this page 32px in
+         from every sibling's left edge. */
       .page {
-        padding: var(--space-6) var(--space-8);
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-4);

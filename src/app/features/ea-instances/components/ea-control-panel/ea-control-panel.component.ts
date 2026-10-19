@@ -34,9 +34,11 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
   selector: 'app-ea-control-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // None: ::backdrop on a top-layer <dialog> isn't reachable through
-  // Angular's Emulated encapsulation scope attribute.  All selectors are
-  // class-prefixed so global leakage is contained.
+  // Encapsulation None (chosen for the dialog's ::backdrop rule) makes these
+  // styles GLOBAL, so every selector is scoped under the host tag: bare
+  // `.panel`, `.btn`, `.modal`, `.field` and `.muted` used to restyle every
+  // page visited after an EA detail page.  The <dialog> stays a DOM descendant
+  // of the host in the top layer, so `::backdrop` still matches.
   encapsulation: ViewEncapsulation.None,
   imports: [FormsModule],
   template: `
@@ -94,14 +96,17 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
       <dialog
         #dialog
         class="modal-dialog"
+        aria-labelledby="ea-control-action-title"
         (close)="onDialogClose()"
         (cancel)="$event.preventDefault(); closeDialog()"
       >
         @let action = currentAction();
-        <div class="modal" role="dialog" aria-modal="true">
-          @if (action) {
+        <!-- Rendered only while open: the native <dialog> already is the modal dialog, and an
+             always-present inner role=dialog read as a second, hidden dialog on the page. -->
+        @if (action) {
+          <div class="modal">
             <header class="modal-head">
-              <h2>{{ action.label }}</h2>
+              <h2 id="ea-control-action-title">{{ action.label }}</h2>
               <button type="button" class="close-btn" (click)="closeDialog()" aria-label="Close">
                 ×
               </button>
@@ -230,14 +235,14 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
                 {{ submitting() ? 'Queuing…' : action.confirmLabel }}
               </button>
             </footer>
-          }
-        </div>
+          </div>
+        }
       </dialog>
     </section>
   `,
   styles: [
     `
-      .panel {
+      app-ea-control-panel .panel {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -246,30 +251,30 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         flex-direction: column;
         gap: var(--space-3);
       }
-      .panel-head {
+      app-ea-control-panel .panel-head {
         display: flex;
         align-items: baseline;
         justify-content: space-between;
         gap: var(--space-3);
         flex-wrap: wrap;
       }
-      .panel-head h3 {
+      app-ea-control-panel .panel-head h3 {
         margin: 0;
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
-      .meta {
+      app-ea-control-panel .meta {
         font-size: var(--text-xs);
       }
-      .muted {
+      app-ea-control-panel .muted {
         color: var(--text-tertiary);
       }
-      .group {
+      app-ea-control-panel .group {
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
       }
-      .group-title {
+      app-ea-control-panel .group-title {
         margin: 0;
         font-size: var(--text-xs);
         color: var(--text-tertiary);
@@ -277,12 +282,12 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         letter-spacing: 0.06em;
         font-weight: var(--font-semibold);
       }
-      .cards {
+      app-ea-control-panel .cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: var(--space-2);
       }
-      .action {
+      app-ea-control-panel .action {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
@@ -297,39 +302,39 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         font-size: var(--text-sm);
         transition: background 0.12s ease;
       }
-      .action:hover:not(:disabled) {
+      app-ea-control-panel .action:hover:not(:disabled) {
         background: var(--bg-tertiary, rgba(0, 113, 227, 0.04));
       }
-      .action[data-tone='warn'] {
+      app-ea-control-panel .action[data-tone='warn'] {
         border-left-color: #ff9500;
       }
-      .action[data-tone='warn']:hover:not(:disabled) {
+      app-ea-control-panel .action[data-tone='warn']:hover:not(:disabled) {
         background: rgba(255, 149, 0, 0.06);
       }
-      .action[data-tone='bad'] {
+      app-ea-control-panel .action[data-tone='bad'] {
         border-left-color: #ff3b30;
       }
-      .action[data-tone='bad']:hover:not(:disabled) {
+      app-ea-control-panel .action[data-tone='bad']:hover:not(:disabled) {
         background: rgba(255, 59, 48, 0.06);
       }
-      .action[data-tone='ok'] {
+      app-ea-control-panel .action[data-tone='ok'] {
         border-left-color: #34c759;
       }
-      .action[data-tone='ok']:hover:not(:disabled) {
+      app-ea-control-panel .action[data-tone='ok']:hover:not(:disabled) {
         background: rgba(52, 199, 89, 0.06);
       }
-      .action[data-tone='info'] {
+      app-ea-control-panel .action[data-tone='info'] {
         border-left-color: #0071e3;
       }
-      .action:disabled {
+      app-ea-control-panel .action:disabled {
         opacity: 0.55;
         cursor: not-allowed;
       }
-      .action-label {
+      app-ea-control-panel .action-label {
         font-weight: var(--font-semibold);
         color: var(--text-primary);
       }
-      .action-hint {
+      app-ea-control-panel .action-hint {
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
@@ -340,7 +345,7 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         constraints that kept the dialog content-sized.  Re-state the
         sizing on the dialog itself so it can't anchor at top-left.
       */
-      .modal-dialog {
+      app-ea-control-panel .modal-dialog {
         position: fixed;
         inset: 0;
         margin: auto;
@@ -354,10 +359,10 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         overflow: visible;
         color: inherit;
       }
-      .modal-dialog::backdrop {
+      app-ea-control-panel .modal-dialog::backdrop {
         background: rgba(0, 0, 0, 0.45);
       }
-      .modal {
+      app-ea-control-panel .modal {
         background: var(--bg-primary);
         border-radius: var(--radius-lg);
         box-shadow: var(--shadow-lg, 0 10px 30px rgba(0, 0, 0, 0.18));
@@ -369,29 +374,29 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         flex-direction: column;
         gap: var(--space-3);
       }
-      .modal-head {
+      app-ea-control-panel .modal-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
       }
-      .modal-head h2 {
+      app-ea-control-panel .modal-head h2 {
         margin: 0;
         font-size: var(--text-lg);
         font-weight: var(--font-semibold);
       }
-      .close-btn {
+      app-ea-control-panel .close-btn {
         background: none;
         border: none;
         font-size: 24px;
         color: var(--text-secondary);
         cursor: pointer;
       }
-      .modal-target {
+      app-ea-control-panel .modal-target {
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-secondary);
       }
-      .modal-desc {
+      app-ea-control-panel .modal-desc {
         margin: 0;
         font-size: var(--text-sm);
         color: var(--text-primary);
@@ -399,38 +404,38 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
            instead of collapsing three paragraphs into one run of text. */
         white-space: pre-line;
       }
-      .warning {
+      app-ea-control-panel .warning {
         margin: 0;
         padding: 10px 12px;
         background: rgba(255, 59, 48, 0.08);
         border-left: 3px solid #ff3b30;
         border-radius: var(--radius-sm);
         font-size: var(--text-xs);
-        color: #d70015;
+        color: var(--tone-red);
       }
-      .warning code {
+      app-ea-control-panel .warning code {
         background: rgba(0, 0, 0, 0.08);
         padding: 1px 4px;
         border-radius: 3px;
         font-family: var(--font-mono);
       }
-      .field {
+      app-ea-control-panel .field {
         display: flex;
         flex-direction: column;
         gap: 4px;
       }
-      .field.check {
+      app-ea-control-panel .field.check {
         flex-direction: row;
         align-items: center;
       }
-      .field > span {
+      app-ea-control-panel .field > span {
         font-size: var(--text-xs);
         color: var(--text-secondary);
         font-weight: var(--font-medium);
       }
-      .field input,
-      .field select,
-      .field textarea {
+      app-ea-control-panel .field input,
+      app-ea-control-panel .field select,
+      app-ea-control-panel .field textarea {
         padding: 6px 10px;
         border-radius: var(--radius-sm);
         border: 1px solid var(--border);
@@ -438,17 +443,17 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         color: var(--text-primary);
         font-size: var(--text-sm);
       }
-      .field textarea {
+      app-ea-control-panel .field textarea {
         resize: vertical;
         min-height: 48px;
         font-family: inherit;
       }
-      .mono {
+      app-ea-control-panel .mono {
         font-family: var(--font-mono);
       }
       /* Stays visible while a long description scrolls: pulled out to the
          dialog edges so its background covers the content passing under. */
-      .modal-foot {
+      app-ea-control-panel .modal-foot {
         position: sticky;
         bottom: calc(-1 * var(--space-5));
         margin: var(--space-2) calc(-1 * var(--space-5)) calc(-1 * var(--space-5));
@@ -460,7 +465,7 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         justify-content: flex-end;
         gap: var(--space-3);
       }
-      .btn {
+      app-ea-control-panel .btn {
         padding: 8px 18px;
         border-radius: var(--radius-sm);
         font-size: var(--text-sm);
@@ -468,31 +473,31 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
         cursor: pointer;
         border: 1px solid transparent;
       }
-      .btn[data-tone='warn'] {
+      app-ea-control-panel .btn[data-tone='warn'] {
         background: #ff9500;
         color: #fff;
         border-color: #ff9500;
       }
-      .btn[data-tone='bad'] {
+      app-ea-control-panel .btn[data-tone='bad'] {
         background: #ff3b30;
         color: #fff;
         border-color: #ff3b30;
       }
-      .btn[data-tone='ok'] {
+      app-ea-control-panel .btn[data-tone='ok'] {
         background: #34c759;
         color: #fff;
         border-color: #34c759;
       }
-      .btn[data-tone='info'] {
+      app-ea-control-panel .btn[data-tone='info'] {
         background: var(--accent);
         color: #fff;
         border-color: var(--accent);
       }
-      .btn:disabled {
+      app-ea-control-panel .btn:disabled {
         opacity: 0.55;
         cursor: not-allowed;
       }
-      .btn-secondary {
+      app-ea-control-panel .btn-secondary {
         background: var(--bg-primary);
         color: var(--text-primary);
         border: 1px solid var(--border);

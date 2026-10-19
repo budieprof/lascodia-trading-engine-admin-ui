@@ -5,11 +5,12 @@ import {
   effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { map } from 'rxjs';
 
 import { PositionsService, type EventExposureDto } from '@core/services/positions.service';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -195,6 +196,26 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
   `,
   styles: [
     `
+      /* No global .btn-secondary exists (styles.scss only adds the press feel), so
+         "← Positions" rendered as bare text. Same pill as Signal exits. */
+      .btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        display: inline-flex;
+        align-items: center;
+        text-decoration: none;
+      }
+      .btn-secondary {
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        background: var(--bg-tertiary);
+      }
       .filter-row {
         display: flex;
         gap: 1rem;
@@ -314,6 +335,10 @@ export class EventExposurePageComponent {
       // push or a reconnect gap.
       intervalMs: 60_000,
       refreshOn: ['positionOpened', 'positionClosed', 'positionLifecycleEvent', 'orderFilled'],
+      // The effect below runs once on creation and issues the first fetch;
+      // running immediately as well sent the request twice on every open, the
+      // first aborted by the effect's refresh() (the crawl's "FAILED" entry).
+      runImmediately: false,
     },
   );
 
@@ -332,7 +357,7 @@ export class EventExposurePageComponent {
     effect(() => {
       this.lookaheadHours();
       this.includeMedium();
-      this.resource.refresh();
+      untracked(() => this.resource.refresh());
     });
   }
 

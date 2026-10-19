@@ -6,14 +6,22 @@ import {
   OnInit,
   ViewChild,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
-import { DatePipe, DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe, formatDate } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
+import { catchError, forkJoin, map, of, switchMap } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
-import { ConfigService } from '@core/services/config.service';
+import {
+  ConfigService,
+  isQueuedForCoolingOff,
+  type ConfigUpsertResponse,
+} from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { ConfigDataType, EngineConfigDto, UpsertConfigRequest } from '@core/api/api.types';
 
@@ -21,6 +29,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 interface ConfigEntry extends EngineConfigDto {
   editValue: string;
@@ -44,10 +53,31 @@ type SortMode = 'key' | 'updated-desc' | 'updated-asc';
 
 const ALL_CATEGORY = '__all__';
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** Soft render cap for the "All" view when no search query narrows it.
- *  77 categories × dozens-to-thousands of keys would otherwise materialise
- *  ~5,700 input fields into the DOM on first paint. */
+/** Rows rendered per step. It used to apply only to "All keys" without a search, so a search for
+ *  "ml" or the MLKelly category (1,118 keys) still put thousands of inputs into the DOM. Every
+ *  view now renders this many and offers "Show more". */
 const ALL_RENDER_CAP = 250;
+
+/** Outcome of one save — the engine's own `outcome` when it reports one, else read back. */
+type SaveOutcome = 'applied' | 'unchanged' | 'queued' | 'failed';
+
+interface SaveResult {
+  config: ConfigEntry;
+  outcome: SaveOutcome;
+  message: string | null | undefined;
+  /** When a queued change takes effect (engine `effectiveAt`). */
+  effectiveAt?: string | null;
+  /** Applied immediately past the cooling-off; the audit row is flagged. */
+  breakGlass?: boolean;
+}
+
+/** The engine's machine-readable outcome (since 2026-10-19); null when it did not send one. */
+function reportedOutcome(res: ConfigUpsertResponse): SaveOutcome | null {
+  if (isQueuedForCoolingOff(res)) return 'queued';
+  if (res.outcome === 'Applied') return 'applied';
+  if (res.outcome === 'Unchanged') return 'unchanged';
+  return null;
+}
 /** Same locale as the `| number` pipe, so "5,795 keys" reads the same in
  *  the strip, the subtitle and the search placeholder. */
 const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -63,6 +93,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
     DatePipe,
     DecimalPipe,
     RelativeTimePipe,
+    ModalA11yDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -408,14 +439,79 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
                 </table>
                 @if (renderCapped()) {
                   <div class="capped-footer">
-                    Showing first {{ ALL_RENDER_CAP | number }} of
-                    {{ filteredEntries().length | number }} keys. Refine the search or pick a
-                    category to see more.
+                    Showing {{ visibleEntries().length | number }} of
+                    {{ scopedCount() | number }} keys ·
+                    <button type="button" class="link-inline" (click)="showMore()">
+                      Show {{ ALL_RENDER_CAP | number }} more
+                    </button>
+                    · or refine the search / pick a category.
                   </div>
                 }
               </div>
             }
           </main>
+        </div>
+      }
+
+      @if (review(); as rv) {
+        <!-- Every save is reviewed first. Enter / Save / ⌘S used to write straight to the engine
+             with no reason, so a risk-loosening key could not be changed at all (the engine
+             demands a reason) and a cooling-off queueing was reported as "updated". -->
+        <div class="review-backdrop" role="presentation" (click)="cancelReview()">
+          <div
+            class="review"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cfg-review-title"
+            appModalA11y
+            (dismiss)="cancelReview()"
+            (click)="$event.stopPropagation()"
+          >
+            <h3 id="cfg-review-title">
+              Save {{ rv.length | number }} change{{ rv.length === 1 ? '' : 's' }}?
+            </h3>
+            <ul class="review-list">
+              @for (c of rv; track c.id) {
+                <li>
+                  <code class="review-key">{{ c.key }}</code>
+                  <span class="review-vals">
+                    <span class="review-old" [title]="c.value ?? ''">{{ c.value ?? '∅' }}</span>
+                    →
+                    <span class="review-new" [title]="c.editValue">{{ c.editValue }}</span>
+                    @if (!c.isHotReloadable) {
+                      <span class="badge badge--neutral">restart required</span>
+                    }
+                  </span>
+                </li>
+              }
+            </ul>
+            <p class="review-note">
+              Risk-loosening keys need a reason and are held for the cooling-off period
+              (Governance:CoolingOffHours) unless applied immediately. The engine decides which keys
+              that is.
+            </p>
+            <label class="review-field">
+              <span>Reason (audit trail — required for risk-loosening changes)</span>
+              <textarea rows="2" maxlength="1000" [(ngModel)]="reviewReason"></textarea>
+            </label>
+            <label class="review-ack">
+              <input type="checkbox" [(ngModel)]="reviewImmediate" />
+              <span>Apply immediately — break-glass: skips the cooling-off (needs a reason)</span>
+            </label>
+            <div class="review-actions">
+              <button type="button" class="reset-btn wide" (click)="cancelReview()" data-autofocus>
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="save-btn primary"
+                [disabled]="reviewImmediate && !reviewReason.trim()"
+                (click)="confirmReview()"
+              >
+                Save {{ rv.length | number }}
+              </button>
+            </div>
+          </div>
         </div>
       }
     </div>
@@ -648,6 +744,10 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
           grid-template-columns: 1fr;
           height: auto;
         }
+        /* Stacked, the 164-row category list pushed the keys ~5,000px down a 24,782px page. */
+        .sidebar {
+          max-height: 300px;
+        }
       }
 
       /* ── Sidebar ─────────────────────────────────────────────── */
@@ -856,28 +956,31 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
         box-shadow: inset 3px 0 0 0 var(--accent, #0071e3);
       }
 
+      /* The columns must add up to the ~840px keys panel at 1440px: once "Updated" stopped
+         wrapping (it read "about 2 / months / ago"), the old minimums summed to ~940px and the
+         Save button sat cut off past the panel edge. */
       .col-key {
-        min-width: 240px;
+        min-width: 200px;
         max-width: 380px;
       }
       /* A declared share of the row: without it the auto table layout gave
          the value column whatever the key column left over, and long
          values were cut off at the cell edge. */
       .col-value {
-        width: 34%;
-        min-width: 240px;
+        width: 30%;
+        min-width: 220px;
       }
       .col-type {
-        width: 80px;
+        width: 72px;
       }
       .col-reload {
-        width: 70px;
+        width: 64px;
       }
       .col-updated {
-        width: 120px;
+        width: 140px;
       }
       .col-actions {
-        width: 110px;
+        width: 104px;
         text-align: right;
         white-space: nowrap;
       }
@@ -1005,6 +1108,123 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
         font-size: var(--text-xs);
         color: var(--text-secondary);
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .link-inline {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--accent);
+        font: inherit;
+        cursor: pointer;
+      }
+      .review-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1100;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: var(--space-4);
+        background: rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(2px);
+      }
+      .review {
+        width: min(640px, 100%);
+        max-height: 88vh;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        padding: var(--space-5);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-lg);
+      }
+      .review h3 {
+        margin: 0;
+        font-size: var(--text-base);
+      }
+      .review-list {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        max-height: 240px;
+        overflow: auto;
+        font-size: var(--text-xs);
+      }
+      .review-list li {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+      }
+      .review-key {
+        word-break: break-all;
+      }
+      .review-vals {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+      }
+      .review-old,
+      .review-new {
+        font-family: var(--font-mono, monospace);
+        max-width: 40%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .review-old {
+        color: var(--text-tertiary);
+        text-decoration: line-through;
+      }
+      .review-new {
+        color: var(--text-primary);
+        font-weight: var(--font-semibold);
+      }
+      .review-note {
+        margin: 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .review-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .review-field textarea {
+        resize: vertical;
+        padding: 6px 8px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font: inherit;
+      }
+      .review-ack {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: var(--text-sm);
+      }
+      .review-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: var(--space-2);
+      }
+      .reset-btn.wide {
+        width: auto;
+        padding: 0 12px;
       }
       .save-btn.small {
         height: 24px;
@@ -1075,6 +1295,7 @@ const COUNT_FORMAT = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 }
 export class ConfigPageComponent implements OnInit {
   private readonly configService = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
+  private readonly route = inject(ActivatedRoute);
 
   protected readonly allCategory = ALL_CATEGORY;
   protected readonly ALL_RENDER_CAP = ALL_RENDER_CAP;
@@ -1096,6 +1317,10 @@ export class ConfigPageComponent implements OnInit {
   @ViewChild('searchInput') searchInput?: ElementRef<HTMLInputElement>;
 
   ngOnInit(): void {
+    // Deep links (/system-health/worker-override-knobs → "Open in Engine Config") pass the key as
+    // ?search=; it was ignored, so they landed on the unfiltered 6,000-key list.
+    const q = this.route.snapshot.queryParamMap.get('search');
+    if (q) this.search.set(q);
     this.loadConfigs();
   }
 
@@ -1280,20 +1505,31 @@ export class ConfigPageComponent implements OnInit {
     };
     const scoped = cat === ALL_CATEGORY ? allFiltered : allFiltered.filter((e) => e.prefix === cat);
     const sorted = [...scoped].sort(sortFn);
-    if (cat === ALL_CATEGORY && !this.search().trim() && sorted.length > ALL_RENDER_CAP) {
-      return sorted.slice(0, ALL_RENDER_CAP);
-    }
-    return sorted;
+    return sorted.length > this.renderLimit() ? sorted.slice(0, this.renderLimit()) : sorted;
   });
 
-  readonly renderCapped = computed(() => {
+  /** Keys in the current category under the current filters — what "Show more" pages through. */
+  readonly scopedCount = computed(() => {
     const cat = this.selectedCategory();
-    return (
-      cat === ALL_CATEGORY &&
-      !this.search().trim() &&
-      this.filteredEntries().length > ALL_RENDER_CAP
-    );
+    const all = this.filteredEntries();
+    return cat === ALL_CATEGORY ? all.length : all.filter((e) => e.prefix === cat).length;
   });
+
+  /** How many rows to render; resets to one step whenever the view changes. */
+  readonly renderLimit = signal(ALL_RENDER_CAP);
+  private readonly resetRenderLimit = effect(() => {
+    this.selectedCategory();
+    this.search();
+    this.dataTypeFilter();
+    this.hotReloadFilter();
+    untracked(() => this.renderLimit.set(ALL_RENDER_CAP));
+  });
+
+  showMore(): void {
+    this.renderLimit.update((n) => n + ALL_RENDER_CAP);
+  }
+
+  readonly renderCapped = computed(() => this.scopedCount() > this.visibleEntries().length);
 
   readonly selectedCategoryTitle = computed(() => {
     const cat = this.selectedCategory();
@@ -1445,93 +1681,165 @@ export class ConfigPageComponent implements OnInit {
     this.entries.set([...this.entries()]);
   }
 
+  // ── Save review (confirm + reason) ─────────────────────────────
+  /** Entries awaiting the operator's confirmation; null = no review open. */
+  readonly review = signal<ConfigEntry[] | null>(null);
+  reviewReason = '';
+  reviewImmediate = false;
+
+  private openReview(configs: ConfigEntry[]): void {
+    if (configs.length === 0) return;
+    this.reviewReason = '';
+    this.reviewImmediate = false;
+    this.review.set(configs);
+  }
+
+  cancelReview(): void {
+    this.review.set(null);
+  }
+
+  confirmReview(): void {
+    const configs = this.review();
+    const reason = this.reviewReason.trim();
+    const immediate = this.reviewImmediate;
+    if (!configs || (immediate && !reason)) return;
+    this.review.set(null);
+    this.persist(configs, reason || null, immediate);
+  }
+
   saveConfig(config: ConfigEntry): void {
     if (!config.dirty || config.saving) return;
-    config.saving = true;
-    this.entries.set([...this.entries()]);
-
-    const request: UpsertConfigRequest = {
-      key: config.key ?? '',
-      value: config.editValue,
-      description: config.description,
-      dataType: config.dataType,
-      isHotReloadable: config.isHotReloadable,
-    };
-
-    this.configService.upsert(request).subscribe({
-      next: (res) => {
-        config.saving = false;
-        if (res.status && res.data) {
-          config.value = res.data.value;
-          config.editValue = res.data.value ?? '';
-          config.lastUpdatedAt = res.data.lastUpdatedAt;
-          config.dirty = false;
-          this.notifications.success(`Config "${config.key}" updated`);
-        } else {
-          this.notifications.error(res.message ?? `Failed to update "${config.key}"`);
-        }
-        this.entries.set([...this.entries()]);
-      },
-      error: () => {
-        config.saving = false;
-        this.entries.set([...this.entries()]);
-        this.notifications.error(`Failed to update "${config.key}"`);
-      },
-    });
+    this.openReview([config]);
   }
 
   saveAllDirty(): void {
-    const dirty = this.entries().filter((e) => e.dirty);
-    if (dirty.length === 0) return;
-    this.bulkSaving.set(true);
-    let remaining = dirty.length;
-    let failures = 0;
-
-    for (const config of dirty) {
-      config.saving = true;
-      const request: UpsertConfigRequest = {
-        key: config.key ?? '',
-        value: config.editValue,
-        description: config.description,
-        dataType: config.dataType,
-        isHotReloadable: config.isHotReloadable,
-      };
-      this.configService.upsert(request).subscribe({
-        next: (res) => {
-          config.saving = false;
-          if (res.status && res.data) {
-            config.value = res.data.value;
-            config.editValue = res.data.value ?? '';
-            config.lastUpdatedAt = res.data.lastUpdatedAt;
-            config.dirty = false;
-          } else {
-            failures++;
-          }
-          remaining--;
-          this.entries.set([...this.entries()]);
-          if (remaining === 0) this.finishBulkSave(dirty.length, failures);
-        },
-        error: () => {
-          config.saving = false;
-          failures++;
-          remaining--;
-          this.entries.set([...this.entries()]);
-          if (remaining === 0) this.finishBulkSave(dirty.length, failures);
-        },
-      });
-    }
+    this.openReview(this.entries().filter((e) => e.dirty && !e.saving));
   }
 
-  private finishBulkSave(total: number, failures: number): void {
-    this.bulkSaving.set(false);
-    if (failures === 0) {
-      this.notifications.success(
-        `Saved ${COUNT_FORMAT.format(total)} configuration${total === 1 ? '' : 's'}`,
-      );
-    } else {
-      this.notifications.error(
-        `Saved ${COUNT_FORMAT.format(total - failures)} of ${COUNT_FORMAT.format(total)} · ${COUNT_FORMAT.format(failures)} failed`,
-      );
+  /**
+   * Writes each change, then READS THE KEY BACK. The upsert answers `ResponseData<long>` (a row
+   * id), not the DTO the typings claim, so the old code set the value to `undefined` — the input
+   * went blank after every successful save — and a change the engine had only queued for
+   * cooling-off was shown as applied. The engine's own `outcome` (Applied / Unchanged /
+   * QueuedForCoolingOff) decides what happened; the read-back fills the row with the live value,
+   * and decides the outcome only for an older engine that does not report one.
+   */
+  private persist(configs: ConfigEntry[], reason: string | null, immediate: boolean): void {
+    this.bulkSaving.set(configs.length > 1);
+    for (const c of configs) c.saving = true;
+    this.entries.set([...this.entries()]);
+
+    forkJoin(
+      configs.map((config) => {
+        const submitted = config.editValue;
+        const request: UpsertConfigRequest = {
+          key: config.key ?? '',
+          value: submitted,
+          description: config.description,
+          dataType: config.dataType,
+          isHotReloadable: config.isHotReloadable,
+          reason,
+          immediate,
+        };
+        return this.configService.upsert(request).pipe(
+          switchMap((res) => {
+            if (!res.status) {
+              return of<SaveResult>({ config, outcome: 'failed', message: res.message });
+            }
+            const told = reportedOutcome(res);
+            const base = {
+              config,
+              message: res.message,
+              effectiveAt: res.effectiveAt ?? null,
+              breakGlass: res.breakGlass === true,
+            };
+            return this.configService.getByKey(config.key ?? '').pipe(
+              map((fresh): SaveResult => {
+                const dto = fresh.data;
+                if (dto) {
+                  config.value = dto.value;
+                  config.lastUpdatedAt = dto.lastUpdatedAt;
+                }
+                const held = (dto?.value ?? null) === submitted;
+                return { ...base, outcome: told ?? (held ? 'applied' : 'queued') };
+              }),
+              // Written but not re-readable: trust the envelope.
+              catchError(() => {
+                const outcome = told ?? 'applied';
+                if (outcome === 'applied') config.value = submitted;
+                return of<SaveResult>({ ...base, outcome });
+              }),
+            );
+          }),
+          catchError((err: { error?: { message?: string } }) =>
+            of<SaveResult>({ config, outcome: 'failed', message: err?.error?.message ?? null }),
+          ),
+        );
+      }),
+    ).subscribe((results) => {
+      for (const r of results) {
+        r.config.saving = false;
+        if (r.outcome !== 'failed') {
+          // Applied / unchanged: the row now holds the live value. Queued: the live value is
+          // unchanged until the cooling-off elapses — show it, not the draft.
+          r.config.editValue = r.config.value ?? '';
+          r.config.dirty = false;
+        }
+      }
+      this.entries.set([...this.entries()]);
+      this.bulkSaving.set(false);
+      this.reportSave(results);
+    });
+  }
+
+  private reportSave(results: SaveResult[]): void {
+    const applied = results.filter((r) => r.outcome === 'applied');
+    const unchanged = results.filter((r) => r.outcome === 'unchanged');
+    const queued = results.filter((r) => r.outcome === 'queued');
+    const failed = results.filter((r) => r.outcome === 'failed');
+    if (results.length === 1) {
+      const r = results[0];
+      const key = r.config.key ?? '';
+      if (r.outcome === 'applied') {
+        this.notifications.success(
+          r.breakGlass
+            ? `Config "${key}" applied immediately (break-glass, audit-flagged)`
+            : `Config "${key}" updated`,
+        );
+      } else if (r.outcome === 'unchanged') {
+        this.notifications.info(`"${key}" already holds that value — nothing changed`);
+      } else if (r.outcome === 'queued') {
+        this.notifications.info(
+          r.effectiveAt
+            ? `"${key}" queued for cooling-off — takes effect ${this.fmtWhen(r.effectiveAt)}`
+            : (r.message ?? `"${key}" was queued, not applied yet.`),
+        );
+      } else {
+        this.notifications.error(r.message ?? `Failed to update "${key}"`);
+      }
+      return;
+    }
+    const parts = [`${COUNT_FORMAT.format(applied.length)} applied`];
+    if (unchanged.length > 0) parts.push(`${COUNT_FORMAT.format(unchanged.length)} unchanged`);
+    if (queued.length > 0) {
+      const when = queued.map((r) => r.effectiveAt).find((t): t is string => !!t);
+      const at = when ? ` (from ${this.fmtWhen(when)})` : '';
+      parts.push(`${COUNT_FORMAT.format(queued.length)} queued for cooling-off${at}`);
+    }
+    if (failed.length > 0) parts.push(`${COUNT_FORMAT.format(failed.length)} failed`);
+    const first = failed[0]?.message ? ` — ${failed[0].config.key}: ${failed[0].message}` : '';
+    const text = parts.join(' · ') + first;
+    if (failed.length > 0) this.notifications.error(text);
+    else if (queued.length > 0) this.notifications.info(text);
+    else this.notifications.success(text);
+  }
+
+  /** Local time with the zone named — a cooling-off ends hours away, often on another day. */
+  private fmtWhen(iso: string): string {
+    try {
+      return formatDate(iso, 'MMM d, HH:mm z', 'en-US');
+    } catch {
+      return iso;
     }
   }
 
@@ -1544,7 +1852,7 @@ export class ConfigPageComponent implements OnInit {
     if (ev.key === 'Enter' && !ev.shiftKey && !(ev.target instanceof HTMLTextAreaElement)) {
       ev.preventDefault();
       if (config.dirty) this.saveConfig(config);
-    } else if (ev.key === 'Escape') {
+    } else if (ev.key === 'Escape' && !this.review()) {
       ev.preventDefault();
       this.resetConfig(config);
       (ev.target as HTMLElement).blur();
@@ -1565,10 +1873,10 @@ export class ConfigPageComponent implements OnInit {
       target instanceof HTMLSelectElement ||
       (target?.isContentEditable ?? false);
 
-    // Save-all: Cmd/Ctrl + S
+    // Save-all: Cmd/Ctrl + S (opens the review; never writes on its own)
     if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
       ev.preventDefault();
-      if (this.dirtyCount() > 0 && !this.bulkSaving()) this.saveAllDirty();
+      if (this.dirtyCount() > 0 && !this.bulkSaving() && !this.review()) this.saveAllDirty();
       return;
     }
 

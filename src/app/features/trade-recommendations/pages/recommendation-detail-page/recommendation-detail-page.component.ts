@@ -42,6 +42,7 @@ import {
   recPips,
   recPrettyJson,
   recSplitReason,
+  recTriggerText,
 } from '../../trade-recommendations.types';
 
 /** The `recommend` tool's arguments as the analyst wrote them. Every field is optional. */
@@ -53,7 +54,8 @@ interface RecommendArgs {
   invalidationPrice?: number;
   conviction?: string;
   orderType?: string;
-  watch?: { trigger?: string; confirmOn?: string; expiresInHours?: number; [k: string]: unknown };
+  /** `trigger` is prose OR the monitor spec DSL object — render it with recTriggerText. */
+  watch?: { trigger?: unknown; confirmOn?: string; expiresInHours?: number; [k: string]: unknown };
   oco?: string | boolean | Record<string, unknown>;
   [k: string]: unknown;
 }
@@ -132,7 +134,11 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
             </a>
           }
         }
-        <button class="btn" type="button" (click)="back()">← Recommendations</button>
+        <!-- back() returns to wherever the operator came from (a conversation,
+             a monitor…), so the label says Back rather than promising the list. -->
+        <button class="btn" type="button" (click)="back()" title="Back to the previous page">
+          ← Back
+        </button>
       </app-page-header>
 
       <app-confirm-dialog
@@ -359,7 +365,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
                     <dt>Watch</dt>
                     <dd>
                       @if (w.trigger) {
-                        <div><span class="muted">trigger</span> {{ w.trigger }}</div>
+                        <div><span class="muted">trigger</span> {{ triggerText(w.trigger) }}</div>
                       }
                       @if (w.confirmOn) {
                         <div><span class="muted">confirm on</span> {{ w.confirmOn }}</div>
@@ -739,6 +745,11 @@ export class RecommendationDetailPageComponent {
   private sub: Subscription | null = null;
 
   readonly card = computed(() => this.detail()?.card ?? null);
+
+  /** A watch trigger as text — the DSL object printed "[object Object]". */
+  triggerText(trigger: unknown): string {
+    return recTriggerText(trigger);
+  }
   readonly outcome = computed(() => recOutcomeView(this.card()?.outcome ?? ''));
   readonly sourceLabel = computed(() => {
     const c = this.card();

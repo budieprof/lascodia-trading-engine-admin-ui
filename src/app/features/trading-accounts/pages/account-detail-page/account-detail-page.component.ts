@@ -104,7 +104,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             [value]="a.equity"
             format="currency"
             [dotColor]="a.equity === a.balance ? accent : a.equity > a.balance ? good : bad"
-            [delta]="a.equity - a.balance"
+            [delta]="a.equity !== a.balance ? a.equity - a.balance : undefined"
           />
           <app-metric-card
             label="Floating P&L"
@@ -481,7 +481,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 <tbody>
                   @for (ea of linkedEas(); track ea.instanceId) {
                     <tr>
-                      <td class="mono ea-instance">{{ ea.instanceId }}</td>
+                      <td class="mono ea-instance" [title]="ea.instanceId">{{ ea.instanceId }}</td>
                       <td>
                         <span
                           class="status-pill"
@@ -919,16 +919,21 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         font-variant-numeric: tabular-nums;
       }
       .grid-table .ea-instance {
-        max-width: 320px;
+        max-width: 220px;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
 
+      /* An auto-width table cell shrinks a wrapping flex row to ONE chip, so
+         a 22-symbol EA stacked its chips into a 450px-tall row; give the row
+         a width to wrap within. */
       .symbol-chips {
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
+        min-width: 240px;
+        max-width: 340px;
       }
       .symbol-chip {
         font-family: 'SF Mono', 'Fira Code', monospace;

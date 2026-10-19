@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 
 import { ObservabilityService } from '@core/services/observability.service';
 import { EAAdminService } from '@core/services/ea-admin.service';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { createPolledResource } from '@core/polling/polled-resource';
 import type {
   EAFleetItem,
@@ -28,7 +29,12 @@ interface EaStats {
   total: number;
   active: number;
   disconnected: number;
+  /** Disconnected with a heartbeat in the last 24 h — a live terminal that dropped, not history. */
+  disconnectedRecent: number;
+  /** ShuttingDown with a heartbeat inside the liveness window — a shutdown actually in flight. */
   shuttingDown: number;
+  /** ShuttingDown and silent since: deregistered cleanly, finished. */
+  deregistered: number;
   idleOverStale: number;
   coordinatorsLive: number;
   accounts: number;
@@ -75,9 +81,11 @@ interface EaStats {
         @if (loading() && !initialLoading()) {
           <span class="refreshing" role="status">Refreshing…</span>
         }
-        <a class="btn-secondary" [href]="metricsHref()" target="_blank" rel="noopener"
-          >Open /metrics ↗</a
-        >
+        <!-- /metrics is served by the engine itself, never through Caddy: through the tunnel
+             there is nothing to link to (the old host:5081 link was dead off this machine). -->
+        @if (metricsHref(); as href) {
+          <a class="btn-secondary" [href]="href" target="_blank" rel="noopener">Open /metrics ↗</a>
+        }
       </app-page-header>
 
       @if (initialLoading()) {
@@ -87,9 +95,9 @@ interface EaStats {
         <section class="summary-grid">
           <!--
             Every number on this card is derived from the SAME instance list the table renders,
-            so the tile and the table can never disagree. The engine's fleet summary omitted the
-            ShuttingDown instances (51 vs 55) and counted coordinators whose last heartbeat was
-            months old; those numbers are kept off this card.
+            so the tile and the table can never disagree. The engine's fleet summary leaves out
+            deregistered instances, so its total is not this card's; its coordinator count is
+            live-only since 2026-10-19, the same rule as "Coordinators (live)" here.
           -->
           @if (eaStats(); as s) {
             <article class="kpi-card" [attr.data-tone]="eaTone(s)">
@@ -106,11 +114,29 @@ interface EaStats {
               <dl class="kpi-grid">
                 <dt>Idle &gt;{{ staleMinutes() }}m</dt>
                 <dd [class.warn]="s.idleOverStale > 0">{{ s.idleOverStale }}</dd>
-                <dt>Disconnected</dt>
-                <dd [class.bad]="s.disconnected > 0">{{ s.disconnected }}</dd>
-                <dt>Shutting down</dt>
+                <!-- Red only for a recent drop: 48 Disconnected rows are mostly retired instance ids
+                     from restarts months ago, and a permanently red card stops meaning anything. -->
+                <dt title="Every instance the engine marked Disconnected, retired ids included">
+                  Disconnected
+                </dt>
+                <dd [class.bad]="s.disconnectedRecent > 0">{{ s.disconnected }}</dd>
+                <dt title="Disconnected with a last heartbeat inside the past 24 hours">
+                  · dropped in 24h
+                </dt>
+                <dd [class.bad]="s.disconnectedRecent > 0">{{ s.disconnectedRecent }}</dd>
+                <dt title="Deregistered and still heartbeating inside the liveness window">
+                  Shutting down
+                </dt>
                 <dd [class.warn]="s.shuttingDown > 0">{{ s.shuttingDown }}</dd>
-                <dt title="Coordinator flag set AND heartbeat inside the liveness window">
+                <dt
+                  title="Deregistered cleanly (OnDeinit) and silent since. The engine keeps them as ShuttingDown for good — they are finished, not in flight."
+                >
+                  Deregistered
+                </dt>
+                <dd class="muted">{{ s.deregistered }}</dd>
+                <dt
+                  title="Coordinator flag set on an Active instance whose heartbeat is inside the liveness window — the engine's rule for its fleet summary"
+                >
                   Coordinators (live)
                 </dt>
                 <dd>{{ s.coordinatorsLive }}</dd>
@@ -193,7 +219,11 @@ interface EaStats {
               <dl class="kpi-grid">
                 <dt>Open positions</dt>
                 <dd>{{ e.openPositions | number }}</dd>
-                <dt>Working orders</dt>
+                <dt
+                  title="Every order not yet terminal — Pending, Submitted, PartiallyFilled AND Cancelling. Engine Overview's 'Pending orders' counts Pending only."
+                >
+                  Working orders
+                </dt>
                 <dd>{{ e.workingOrders | number }}</dd>
                 <dt>Active accounts</dt>
                 <dd>{{ e.activeAccounts | number }}</dd>
@@ -272,7 +302,7 @@ interface EaStats {
                     <th>Last heartbeat</th>
                     <th
                       class="ctr"
-                      title="Coordinator flag, shown only while the heartbeat is live"
+                      title="Coordinator flag, shown only on an Active instance with a live heartbeat"
                     >
                       Coord
                     </th>
@@ -311,12 +341,12 @@ interface EaStats {
                         </span>
                       </td>
                       <td class="ctr">
-                        @if (i.isCoordinator && isLive(i)) {
+                        @if (isLiveCoordinator(i)) {
                           ✓
                         } @else if (i.isCoordinator) {
                           <span
                             class="muted"
-                            title="Coordinator flag is set but the heartbeat is outside the liveness window"
+                            title="Coordinator flag is set but the instance is not Active with a live heartbeat — the flag is not cleared when an EA goes quiet"
                             >stale</span
                           >
                         }
@@ -381,9 +411,9 @@ interface EaStats {
                                 <h5>Latency</h5>
                                 <dl class="kv-compact">
                                   <dt>HTTP P95</dt>
-                                  <dd>{{ d.highlights?.latencyP95Ms ?? '—' }} ms</dd>
+                                  <dd>{{ withUnit(d.highlights?.latencyP95Ms, 'ms') }}</dd>
                                   <dt>HTTP P99</dt>
-                                  <dd>{{ d.highlights?.latencyP99Ms ?? '—' }} ms</dd>
+                                  <dd>{{ withUnit(d.highlights?.latencyP99Ms, 'ms') }}</dd>
                                   <dt>HTTP success</dt>
                                   <dd>
                                     {{
@@ -400,7 +430,7 @@ interface EaStats {
                                     }}
                                   </dd>
                                   <dt>Last tick age</dt>
-                                  <dd>{{ d.highlights?.lastTickAgeSec ?? '—' }} s</dd>
+                                  <dd>{{ withUnit(d.highlights?.lastTickAgeSec, 's') }}</dd>
                                 </dl>
                               </div>
                               <div>
@@ -417,10 +447,20 @@ interface EaStats {
                                   <dd>{{ d.highlights?.pendingCommandAcks ?? '—' }}</dd>
                                   <dt>Daily P&L</dt>
                                   <dd [class.bad]="(d.highlights?.dailyPnL ?? 0) < 0">
-                                    {{ d.highlights?.dailyPnL ?? '—' }}
+                                    {{
+                                      isNum(d.highlights?.dailyPnL)
+                                        ? (d.highlights!.dailyPnL | number: '1.2-2')
+                                        : '—'
+                                    }}
                                   </dd>
                                   <dt>GVar usage</dt>
-                                  <dd>{{ d.highlights?.gvarTotal ?? '—' }} / 4096</dd>
+                                  <dd>
+                                    {{
+                                      isNum(d.highlights?.gvarTotal)
+                                        ? d.highlights!.gvarTotal + ' / 4096'
+                                        : '—'
+                                    }}
+                                  </dd>
                                 </dl>
                               </div>
                             </div>
@@ -613,15 +653,15 @@ interface EaStats {
         font-variant-numeric: tabular-nums;
       }
 
-      /* ── Status colors (shared) ───────────────────────────────── */
+      /* ── Status colors (shared) — theme tones, readable in both themes ── */
       .ok {
-        color: #1d8a3e;
+        color: var(--tone-green);
       }
       .warn {
-        color: #cb8a17;
+        color: var(--tone-amber);
       }
       .bad {
-        color: #c93631;
+        color: var(--tone-red);
       }
       .muted {
         color: var(--text-secondary);
@@ -815,18 +855,17 @@ interface EaStats {
         color: var(--text-secondary);
       }
       .status-pill[data-status='Active'] {
-        background: color-mix(in srgb, #1d8a3e 18%, transparent);
-        color: #1d8a3e;
+        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
+        color: var(--tone-green);
       }
       .status-pill[data-status='Disconnected'] {
-        background: color-mix(in srgb, #c93631 18%, transparent);
-        color: #c93631;
+        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
+        color: var(--tone-red);
       }
       .status-pill[data-status='ShuttingDown'] {
-        background: color-mix(in srgb, #cb8a17 22%, transparent);
-        color: #b07412;
+        background: color-mix(in srgb, var(--tone-amber) 18%, transparent);
+        color: var(--tone-amber);
       }
-      .status-pill[data-status='ShutdownStale'],
       .status-pill[data-status='Deregistered'] {
         background: color-mix(in srgb, #888 18%, transparent);
         color: var(--text-secondary);
@@ -910,6 +949,7 @@ interface EaStats {
 export class FleetHealthPageComponent {
   private readonly observ = inject(ObservabilityService);
   private readonly eaAdmin = inject(EAAdminService);
+  private readonly runtimeConfig = inject(RUNTIME_CONFIG);
 
   // ── Polled resources ─────────────────────────────────────────────
   protected readonly fleetResource = createPolledResource(
@@ -957,8 +997,17 @@ export class FleetHealthPageComponent {
   }
 
   /**
+   * The engine's rule (ObservabilityQueries, 2026-10-19): the flag on an Active instance with a
+   * live heartbeat. The flag itself is never cleared when an EA goes quiet.
+   */
+  protected isLiveCoordinator(i: EAFleetItem): boolean {
+    return i.isCoordinator && i.status === 'Active' && this.isLive(i);
+  }
+
+  /**
    * One source of truth for the EA card: the same list the table renders. The engine's summary
-   * dropped ShuttingDown from its total and counted coordinators regardless of heartbeat age.
+   * leaves deregistered rows out of its total (and, before 2026-10-19, counted coordinators
+   * regardless of heartbeat age).
    */
   protected readonly eaStats = computed<EaStats | null>(() => {
     if (this.instancesResource.value() === null) return null;
@@ -967,7 +1016,10 @@ export class FleetHealthPageComponent {
     const versions = new Set<string>();
     let active = 0;
     let disconnected = 0;
+    let disconnectedRecent = 0;
+    const dayAgo = Date.now() - 24 * 60 * 60_000;
     let shuttingDown = 0;
+    let deregistered = 0;
     let idleOverStale = 0;
     let coordinatorsLive = 0;
     for (const i of xs) {
@@ -977,15 +1029,22 @@ export class FleetHealthPageComponent {
       if (i.status === 'Active') {
         active++;
         if (!live) idleOverStale++;
-      } else if (i.status === 'Disconnected') disconnected++;
-      else if (i.status === 'ShuttingDown') shuttingDown++;
-      if (i.isCoordinator && live) coordinatorsLive++;
+      } else if (i.status === 'Disconnected') {
+        disconnected++;
+        if (Date.parse(i.lastHeartbeat) >= dayAgo) disconnectedRecent++;
+      } else if (i.status === 'ShuttingDown') {
+        if (live) shuttingDown++;
+        else deregistered++;
+      }
+      if (this.isLiveCoordinator(i)) coordinatorsLive++;
     }
     return {
       total: xs.length,
       active,
       disconnected,
+      disconnectedRecent,
       shuttingDown,
+      deregistered,
       idleOverStale,
       coordinatorsLive,
       accounts: accounts.size,
@@ -994,15 +1053,18 @@ export class FleetHealthPageComponent {
   });
 
   /**
-   * A ShuttingDown row whose heartbeat is months old is not shutting down — the terminal died
-   * mid-shutdown and the engine never aged it. Label it so instead of pretending it is in flight.
+   * ShuttingDown is what the engine sets on a clean deregister (EA OnDeinit) — and it never moves
+   * on from there (EAHealthMonitorWorker only ages Active rows). A ShuttingDown row with no
+   * heartbeat inside the window is therefore a finished, deregistered instance, not one stuck
+   * mid-shutdown: label it that way instead of "Shutdown (stale)".
    */
   protected displayStatus(i: EAFleetItem): { key: string; label: string; hint: string } {
     if (i.status === 'ShuttingDown' && !this.isLive(i)) {
+      const at = i.deregisteredAt ?? i.lastHeartbeat;
       return {
-        key: 'ShutdownStale',
-        label: 'Shutdown (stale)',
-        hint: `Reported ShuttingDown but no heartbeat for more than ${this.staleMinutes()} minutes`,
+        key: 'Deregistered',
+        label: 'Deregistered',
+        hint: `Deregistered cleanly ${at ? 'at ' + at.slice(0, 16).replace('T', ' ') + ' UTC' : ''} and silent since — the engine keeps the ShuttingDown status for good.`,
       };
     }
     if (i.status === 'ShuttingDown') return { key: i.status, label: 'Shutting down', hint: '' };
@@ -1037,7 +1099,8 @@ export class FleetHealthPageComponent {
     { label: 'All', value: 'All' },
     { label: 'Active', value: 'Active' },
     { label: 'Disconnected', value: 'Disconnected' },
-    { label: 'Shutting down', value: 'ShuttingDown' },
+    // Engine status ShuttingDown — in practice instances that deregistered cleanly and stopped.
+    { label: 'Shut down', value: 'ShuttingDown' },
   ];
 
   protected statusCount(value: 'All' | 'Active' | 'Disconnected' | 'ShuttingDown'): number {
@@ -1082,12 +1145,29 @@ export class FleetHealthPageComponent {
   protected readonly detailLoading = signal<boolean>(false);
   protected readonly detailErr = signal<string | null>(null);
 
-  // The /metrics link on the page header — same origin as the engine
-  // API.  Hardcoded for now; could be derived from ApiService if the
-  // engine URL ever moves off the default.
-  protected readonly metricsHref = signal<string>(
-    `${location.protocol}//${location.hostname}:5081/metrics`,
+  /**
+   * The engine's Prometheus endpoint. It is served by the engine, not Caddy: a release bakes
+   * apiBaseUrl "" (same origin) and "/metrics" would hit the SPA catch-all, and the old
+   * `${hostname}:5081` link was unreachable through the tunnel. On this machine it is
+   * localhost:5081; anywhere else there is nothing to link to, so the button is hidden.
+   */
+  protected readonly metricsHref = signal<string | null>(
+    (() => {
+      const base = this.runtimeConfig.apiBaseUrl.replace(/\/$/, '');
+      if (base) return `${base}/metrics`;
+      const host = typeof location === 'undefined' ? '' : location.hostname;
+      return host === 'localhost' || host === '127.0.0.1' ? 'http://localhost:5081/metrics' : null;
+    })(),
   );
+
+  protected isNum(v: number | null | undefined): v is number {
+    return v !== null && v !== undefined && Number.isFinite(v);
+  }
+
+  /** "12 ms" / "—" — the old template printed "— ms" when the EA had not reported a value. */
+  protected withUnit(v: number | null | undefined, unit: string): string {
+    return v == null || !Number.isFinite(v) ? '—' : `${v} ${unit}`;
+  }
 
   protected expand(instanceId: string): void {
     if (this.expanded() === instanceId) {
@@ -1126,12 +1206,13 @@ export class FleetHealthPageComponent {
     return tier === 'fast' ? 'fast' : tier === 'warn' ? 'slow' : 'very slow';
   }
   /**
-   * EA-card tone. Bad when anything is disconnected, warn when stale-idle
-   * or stuck shutting down, neutral when nothing is active at all (an
-   * empty fleet is not "healthy"), ok otherwise.
+   * EA-card tone. Bad when an instance dropped in the last 24 h, warn when stale-idle or a
+   * shutdown is in flight, neutral when nothing is active at all (an empty fleet is not
+   * "healthy"), ok otherwise. Long-retired Disconnected ids and cleanly deregistered instances
+   * are history, not a reason to paint the card red forever.
    */
   protected eaTone(s: EaStats): 'ok' | 'warn' | 'bad' | 'neutral' {
-    if (s.disconnected > 0) return 'bad';
+    if (s.disconnectedRecent > 0) return 'bad';
     if (s.idleOverStale > 0 || s.shuttingDown > 0) return 'warn';
     if (s.active === 0) return 'neutral';
     return 'ok';

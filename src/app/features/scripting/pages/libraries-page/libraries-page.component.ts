@@ -62,6 +62,13 @@ export function isBuiltin(lib: Pick<ScriptLibraryDto, 'publisher'>): boolean {
   return lib.publisher.toLowerCase() === BUILTIN_PUBLISHER;
 }
 
+/** False for the epoch placeholder (1970-01-01) the engine stamps on built-in libraries. */
+export function hasRealTimestamp(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && t > Date.UTC(2000, 0, 1);
+}
+
 interface LibraryDraft {
   /** Set when publishing a new version of an existing library (name fixed). */
   baseId: number | null;
@@ -181,8 +188,12 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
               @if (lib.description) {
                 <span class="lib-desc">{{ lib.description }}</span>
               }
-              @if (lib.updatedAt) {
+              <!-- Built-in libraries ship with the engine and carry the Unix epoch as their
+                   timestamp, which read "almost 57 years ago". -->
+              @if (lib.updatedAt && !isBuiltin(lib) && hasRealTimestamp(lib.updatedAt)) {
                 <span class="muted small">{{ lib.updatedAt | relativeTime }}</span>
+              } @else if (isBuiltin(lib)) {
+                <span class="muted small">Ships with the engine</span>
               }
             </button>
           }
@@ -842,6 +853,7 @@ export class LibrariesPageComponent implements OnInit, HasUnsavedChanges {
   readonly deleteError = signal<string | null>(null);
 
   readonly isBuiltin = isBuiltin;
+  readonly hasRealTimestamp = hasRealTimestamp;
   readonly importLine = importLine;
 
   readonly suggestedName = computed(

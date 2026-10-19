@@ -92,8 +92,14 @@ interface CoverageResult {
       @if (running()) {
         <app-card-skeleton [lines]="6" />
       } @else if (results().length === 0) {
+        <!-- The form opens filled in (three majors, H1), so "enter a symbol" told the operator
+             to do what was already done. -->
         <app-empty-state
-          title="Enter a symbol and pick at least one timeframe"
+          [title]="
+            canRun()
+              ? 'Press Probe to check coverage'
+              : 'Enter a symbol and pick at least one timeframe'
+          "
           description="Each (symbol, timeframe) combination fires one independent coverage probe. Date window is optional — omit for total-history coverage."
         />
       } @else {
@@ -213,11 +219,13 @@ interface CoverageResult {
         flex-direction: column;
         gap: var(--space-4);
       }
+      /* Wraps instead of a fixed 4-column grid: the pills and the two datetime inputs have a
+         wide intrinsic width, so at 820 px (tablet) the grid ran 270 px past the viewport. */
       .controls {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr auto;
+        display: flex;
+        flex-wrap: wrap;
         gap: var(--space-3);
-        align-items: end;
+        align-items: flex-end;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -227,6 +235,14 @@ interface CoverageResult {
         display: flex;
         flex-direction: column;
         gap: 4px;
+        flex: 1 1 220px;
+        min-width: 0;
+      }
+      .field.tf {
+        flex: 0 0 auto;
+      }
+      .field.date-pair {
+        flex: 1.4 1 400px;
       }
       .field span {
         font-size: var(--text-xs);
@@ -266,14 +282,38 @@ interface CoverageResult {
       }
       .date-pair .date-row {
         display: flex;
+        flex-wrap: wrap;
         gap: 6px;
         align-items: center;
       }
       .date-pair input {
-        flex: 1;
+        flex: 1 1 170px;
+        min-width: 0;
       }
       .arrow {
         color: var(--text-tertiary);
+      }
+      /* The header's "← Market Data" / "… →" / Refresh: without a local rule .btn-secondary is
+         only the global press feedback, so they rendered as bare text beside the title. */
+      .btn-secondary {
+        display: inline-flex;
+        align-items: center;
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        text-decoration: none;
+        cursor: pointer;
+      }
+      .btn-secondary:hover:not(:disabled) {
+        background: var(--bg-tertiary);
+      }
+      .btn-secondary:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
       }
       .btn-primary {
         padding: 8px 18px;

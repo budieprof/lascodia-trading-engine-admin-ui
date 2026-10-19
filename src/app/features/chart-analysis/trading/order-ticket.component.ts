@@ -16,6 +16,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
+import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
 import type { LiveQuote } from '../overlays/trade-layer';
 import { ManualTradingService } from './manual-trading.service';
@@ -53,14 +54,19 @@ const PREVIEW_REFRESH_MS = 10_000;
   selector: 'app-order-ticket',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe],
+  imports: [DecimalPipe, ModalA11yDirective],
   template: `
+    <!-- Non-modal (the chart stays usable: its brackets are dragged there), so Tab is not trapped; Escape
+         closes it without sending anything, and focus starts on the close button — never on Submit. -->
     <section
       class="ticket"
       role="dialog"
       aria-modal="false"
       aria-label="Order ticket"
       data-testid="order-ticket"
+      appModalA11y
+      [appModalA11yTrap]="false"
+      (dismiss)="close()"
     >
       <header class="ticket-head">
         <strong>{{ symbol() }}</strong>
@@ -68,8 +74,9 @@ const PREVIEW_REFRESH_MS = 10_000;
         <button
           type="button"
           class="ticket-x"
-          (click)="closed.emit()"
+          (click)="close()"
           aria-label="Close the ticket"
+          data-autofocus
         >
           ×
         </button>
@@ -651,6 +658,11 @@ export class OrderTicketComponent {
     const price =
       raw === '' || !Number.isFinite(v) || v <= 0 ? null : roundPrice(v, this.precision());
     this.state.update((s) => ({ ...s, [field]: price }));
+  }
+
+  /** × or Escape. Never mid-submit: the engine's answer (sent / refused, and why) must reach the operator. */
+  close(): void {
+    if (!this.submitting()) this.closed.emit();
   }
 
   /** Paper submits at once; Live asks once more, naming the account and the size. */

@@ -4,7 +4,6 @@ import {
   inject,
   signal,
   computed,
-  effect,
   OnInit,
   OnDestroy,
 } from '@angular/core';
@@ -147,22 +146,32 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
           <table class="logs-table">
             <thead>
               <tr>
-                <th class="col-time">Time</th>
+                <th
+                  class="col-time"
+                  title="Your browser's local time; hover a time for the UTC stamp"
+                >
+                  Time
+                </th>
                 <th class="col-level">Level</th>
                 <th class="col-cat">Category</th>
                 <th>Message</th>
               </tr>
             </thead>
             <tbody>
-              @for (e of pageData()!.entries; track $index) {
+              <!-- Rows are keyed by the entry, not its index: with Live on, new entries arrive at
+                   the top every 5 s, and an index-keyed expansion jumped to a different entry. -->
+              @for (r of rows(); track r.key) {
+                @let e = r.entry;
                 <tr
                   class="log-row"
                   [class.has-exception]="!!e.exception"
-                  [class.expanded]="expandedIndex() === $index"
+                  [class.expanded]="expandedKey() === r.key"
                   [class]="'lvl-' + e.level.toLowerCase()"
-                  (click)="toggleRow($index, e)"
+                  (click)="toggleRow(r.key)"
                 >
-                  <td class="col-time mono">{{ e.timestamp | date: 'HH:mm:ss.SSS' }}</td>
+                  <td class="col-time mono" [title]="e.timestamp">
+                    {{ e.timestamp | date: 'HH:mm:ss.SSS' }}
+                  </td>
                   <td class="col-level">
                     <span class="level-chip" [class]="'lvl-chip-' + e.level.toLowerCase()">
                       {{ e.level }}
@@ -176,7 +185,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
                     }
                   </td>
                 </tr>
-                @if (expandedIndex() === $index) {
+                @if (expandedKey() === r.key) {
                   <tr class="exp-row">
                     <td colspan="4">
                       <dl class="exp-dl">
@@ -316,10 +325,10 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
         margin-left: auto;
       }
       .meta-item.error {
-        color: #b91c1c;
+        color: var(--tone-red);
       }
       .meta-item.warn {
-        color: #b45309;
+        color: var(--tone-amber);
       }
       .meta-item strong {
         color: var(--text-primary);
@@ -411,17 +420,18 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
       .lvl-chip-debug {
         background: rgba(142, 142, 147, 0.16);
       }
+      /* Theme tones — #b91c1c / #b45309 were dark-on-dark in the dark theme. */
       .lvl-chip-information {
-        background: rgba(0, 113, 227, 0.14);
-        color: #0071e3;
+        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
+        color: var(--tone-blue);
       }
       .lvl-chip-warning {
-        background: rgba(255, 149, 0, 0.18);
-        color: #b45309;
+        background: color-mix(in srgb, var(--tone-amber) 18%, transparent);
+        color: var(--tone-amber);
       }
       .lvl-chip-error {
-        background: rgba(255, 59, 48, 0.18);
-        color: #b91c1c;
+        background: color-mix(in srgb, var(--tone-red) 18%, transparent);
+        color: var(--tone-red);
       }
       .lvl-chip-critical {
         background: #b91c1c;
@@ -438,8 +448,8 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
         padding: 1px 5px;
         font-size: 9px;
         font-weight: var(--font-semibold);
-        background: rgba(255, 59, 48, 0.18);
-        color: #b91c1c;
+        background: color-mix(in srgb, var(--tone-red) 18%, transparent);
+        color: var(--tone-red);
         border-radius: 3px;
         vertical-align: middle;
       }
@@ -488,7 +498,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
         border-radius: var(--radius-sm);
         font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
         font-size: 11px;
-        color: #b91c1c;
+        color: var(--tone-red);
         white-space: pre-wrap;
         word-break: break-word;
         max-height: 300px;
@@ -539,7 +549,8 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
   loading = signal<boolean>(false);
   errorMessage = signal<string | null>(null);
   lastFetchedAt = signal<Date | null>(null);
-  expandedIndex = signal<number | null>(null);
+  /** Identity of the expanded entry — see entryKey(). */
+  expandedKey = signal<string | null>(null);
   autoRefresh = signal<boolean>(true);
 
   private filterChangeDebounce: ReturnType<typeof setTimeout> | null = null;
@@ -552,6 +563,8 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
     timer(5000, 5000)
       .pipe(takeUntil(this.destroy$))
       .subscribe(() => {
+        // Not while the tab is hidden: a backgrounded console kept pulling 200 entries every 5 s.
+        if (document.visibilityState === 'hidden') return;
         if (this.autoRefresh() && !this.loading()) this.fetchNow();
       });
   }
@@ -607,9 +620,25 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
     this.autoRefresh.set(!this.autoRefresh());
   }
 
-  toggleRow(index: number, _entry: EngineLogEntryDto) {
-    this.expandedIndex.set(this.expandedIndex() === index ? null : index);
+  toggleRow(key: string) {
+    this.expandedKey.set(this.expandedKey() === key ? null : key);
   }
+
+  /**
+   * Entries with an identity that survives refreshes. The buffer has no id, so timestamp + event
+   * id + category + message head stand in, and a repeat counter separates identical lines
+   * logged in the same tick. (The position in the list is NOT part of it — that shifts by
+   * however many entries arrived since the last fetch.)
+   */
+  readonly rows = computed<{ key: string; entry: EngineLogEntryDto }[]>(() => {
+    const seen = new Map<string, number>();
+    return (this.pageData()?.entries ?? []).map((entry) => {
+      const base = `${entry.timestamp}|${entry.eventId}|${entry.category}|${entry.message.slice(0, 80)}`;
+      const n = seen.get(base) ?? 0;
+      seen.set(base, n + 1);
+      return { key: n === 0 ? base : `${base}#${n}`, entry };
+    });
+  });
 
   /** Last two namespace segments; the cell's title carries the full name. */
   shortCategory(category: string): string {
