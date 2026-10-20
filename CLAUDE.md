@@ -158,6 +158,14 @@ localhost rather than a blank page.
 - **Permission keys are generated.** `docs/permission-catalog.json` is a copy of the engine's;
   `npm run permissions:generate` writes `core/auth/permissions.generated.ts` (`permissions:check`
   fails when stale). A key the console uses that leaves the catalog breaks the typecheck — on purpose.
+- **Catalog v2: tiers are deprecated, specific keys gate.** The engine moved its sensitive endpoints
+  off `access.*` onto specific keys (`EndpointPermissionMoveTests.Moves` in the engine; engine-wide
+  writes are `platform.*`, honoured only in House and for staff). Gate a page on its read's key and an
+  action on its write's key (e.g. Kill Switches page `engine.killswitch`, Disengage
+  `engine.killswitch.release`). Put `<app-mfa-hint [permission]>` beside an action whose key is
+  `stepUp`; role editors show the flags with `<app-permission-flags>`. A page whose save can answer
+  `-202-approval` must not report it as a failure. `core/auth/legacy-role-permissions.ts` mirrors the
+  engine's `DefaultRoles` (trading-account sessions only) — update it with them.
 - **Never touch `localStorage` directly.** Use `appStorage` (`core/storage/app-storage.ts`): every
   `lascodia.*` / `tradingChart.*` key is stored per person and organisation
   (`lascodia.u<id>.t<tenant>.…`). A static spec fails on direct use. Global on purpose: the theme and
