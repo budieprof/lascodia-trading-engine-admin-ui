@@ -599,7 +599,8 @@ export const routes: Routes = [
         loadChildren: () => import('@features/iam/iam.routes').then((m) => m.IAM_ROUTES),
       },
       {
-        // Organisation console (multi-tenancy Phase 7, c7-tenant): terminals and their credentials.
+        // Organisation console (multi-tenancy Phase 7, c7-tenant): terminals, settings, risk and kill
+        // switches, strategy subscriptions, alert channels, LLM usage and key.
         path: 'organisation',
         canActivate: [canAccessPath('organisation')],
         data: { breadcrumb: 'Organisation' },

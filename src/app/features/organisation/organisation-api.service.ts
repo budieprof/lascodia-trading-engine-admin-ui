@@ -14,6 +14,7 @@ import type {
   EffectiveConfig,
   EnrollmentToken,
   EnrollmentTokenCreated,
+  LlmUsageReport,
   MachineCredential,
   OverrideScopeType,
   OverrideWriteResult,
@@ -25,6 +26,7 @@ import type {
   StrategyOwnership,
   StrategySubscriptions,
   StrategySummary,
+  TenantLlmKey,
 } from './organisation.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
@@ -322,5 +324,29 @@ export class OrganisationApiService {
   /** A new webhook signing secret (shown once); the old one stops at once, the deprecated header too. */
   rotateWebhookSecret(): Observable<AlertChannelSaveResult> {
     return this.post('/alerts/channels/webhook/rotate-secret');
+  }
+
+  // ── LLM usage and the organisation's own key (engine r6-llm; llm.usage.read / llm.keys.manage) ──
+
+  /** This month so far: calls, tokens, cost, the budget and the provider of each tier. */
+  llmUsage(): Observable<LlmUsageReport> {
+    return this.get('/llm/usage');
+  }
+
+  /** The organisation's stored provider keys (provider and hint only). */
+  tenantLlmKeys(): Observable<TenantLlmKey[]> {
+    return this.get<unknown>('/llm/tenant-key').pipe(map((d) => rows<TenantLlmKey>(d)));
+  }
+
+  /** Stores or replaces the key for one provider (step-up). Write-only: never read back. */
+  storeTenantLlmKey(provider: string, apiKey: string): Observable<TenantLlmKey> {
+    return settled(
+      this.api.put<ResponseData<TenantLlmKey>>('/llm/tenant-key', { provider, apiKey }, SILENT),
+    );
+  }
+
+  /** Removes the key for one provider; calls that need it are refused from then on. */
+  removeTenantLlmKey(provider: string): Observable<boolean> {
+    return this.del(`/llm/tenant-key/${encodeURIComponent(provider)}`);
   }
 }

@@ -346,6 +346,89 @@ export interface AlertChannelTestResult {
   reason: string | null;
 }
 
+// ── LLM usage and the organisation's own provider key (engine r6-llm: /llm/usage, /llm/tenant-key) ──
+
+/** Calls, tokens and cost of a set of LLM calls. */
+export interface LlmUsageFigures {
+  calls: number;
+  failedCalls: number;
+  refusedCalls: number;
+  tokensInput: number;
+  tokensOutput: number;
+  tokensCacheRead: number;
+  tokensCacheWrite: number;
+  /** What was billed (USD) — the figure the budgets count. */
+  costUsd: number;
+  /** The API-list-price equivalent (USD); above `costUsd` only for subscription calls. */
+  notionalCostUsd: number;
+  platformPaidCostUsd: number;
+  ownKeyCostUsd: number;
+}
+
+export interface LlmUsageDay extends LlmUsageFigures {
+  /** `YYYY-MM-DD` (UTC). */
+  day: string;
+}
+
+export interface LlmUsageModel extends LlmUsageFigures {
+  provider: string;
+  model: string;
+  /** `Platform`, `OwnKey`, or `Unknown` for calls metered before the payer was recorded. */
+  paidBy: string;
+}
+
+/** The organisation's LLM budget and its spend right now. */
+export interface LlmBudgetStatus {
+  /** Per UTC day (USD); null = no daily cap. */
+  dailyCapUsd: number | null;
+  /** Per UTC month (USD); null = no monthly cap. */
+  monthlyCapUsd: number | null;
+  /** Calls stop once spend reaches this share of a cap. */
+  thresholdFraction: number;
+  spentTodayUsd: number;
+  spentThisMonthUsd: number;
+  assistantExemptFromDaily: boolean;
+  /** New calls are refused right now. */
+  blocked: boolean;
+  reason: string | null;
+  reasonCode: string | null;
+  dailyResetsAtUtc: string;
+  monthlyResetsAtUtc: string;
+}
+
+/** The provider, model and payer a tier runs on, and whether its calls can be made. */
+export interface LlmTierStatus {
+  provider: string;
+  model: string;
+  paidBy: string;
+  ready: boolean;
+  problem: string | null;
+}
+
+/** `GET /llm/usage` (default: this month so far). */
+export interface LlmUsageReport {
+  tenantId: number;
+  from: string;
+  to: string;
+  /** When the newest day was last added up; null = no calls. */
+  asOfUtc: string | null;
+  totals: LlmUsageFigures;
+  days: LlmUsageDay[];
+  byModel: LlmUsageModel[];
+  budget: LlmBudgetStatus | null;
+  deepTier: LlmTierStatus | null;
+  quickTier: LlmTierStatus | null;
+}
+
+/** A stored provider key as the console sees it: never the key, only its last four characters. */
+export interface TenantLlmKey {
+  provider: string;
+  /** `…a1b2` */
+  hint: string;
+  updatedAtUtc: string;
+  updatedBy: string | null;
+}
+
 /** The organisation's accounts as the pages name them (from the account list the console already keeps). */
 export interface AccountRef {
   id: number;

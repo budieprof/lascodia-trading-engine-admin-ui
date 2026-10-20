@@ -160,6 +160,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Risk & kill switches', route: '/organisation/risk', icon: '⛔' },
       { label: 'Strategy subscriptions', route: '/organisation/strategies', icon: '📡' },
       { label: 'Alert channels', route: '/organisation/alerts', icon: '🔔' },
+      { label: 'LLM usage & key', route: '/organisation/llm', icon: '🧠' },
     ],
   },
   {

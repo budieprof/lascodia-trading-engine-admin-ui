@@ -12,12 +12,14 @@ const PAGES: AccessPath[] = [
   'organisation/risk',
   'organisation/strategies',
   'organisation/alerts',
+  'organisation/llm',
 ];
 
 /**
  * The organisation console (multi-tenancy Phase 7, c7-tenant): what an organisation administers of
- * its own — terminals and their credentials, settings. Every page is gated by its read's key through the
- * route table; actions by their write's key.
+ * its own — terminals and their credentials, settings, risk and kill switches, strategy subscriptions,
+ * alert channels, LLM usage and key. Every page is gated by its read's key through the route table;
+ * actions by their write's key.
  */
 export const ORGANISATION_ROUTES: Routes = [
   {
@@ -62,5 +64,11 @@ export const ORGANISATION_ROUTES: Routes = [
     canActivate: [canAccessPath('organisation/alerts')],
     data: { breadcrumb: 'Alert channels' },
     loadComponent: () => import('./pages/alerts-page.component').then((m) => m.AlertsPageComponent),
+  },
+  {
+    path: 'llm',
+    canActivate: [canAccessPath('organisation/llm')],
+    data: { breadcrumb: 'LLM usage & key' },
+    loadComponent: () => import('./pages/llm-page.component').then((m) => m.LlmPageComponent),
   },
 ];
