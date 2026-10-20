@@ -139,20 +139,55 @@ localhost rather than a blank page.
 - When an engine change crosses the wire, re-run the engine repo's
   `integration-tests/contract-test`.
 
+## Sign-in, organisations and permissions (multi-tenancy W3)
+
+- **Two sign-in modes, one flag.** `config.json` → `featureFlags.bffAuth` (only `true` or
+  `{ "enabled": true }` turns it on; `core/auth/auth-mode.ts`). Off (default): today's Admin /
+  Operator forms, JWT in `sessionStorage`, bearer header. On: one "Sign in" button to the engine's
+  BFF (`/bff/login` → Keycloak), the session from `GET /bff/session` in an app initializer, cookie-only
+  calls with `X-CSRF-Token` on unsafe methods (`csrf.interceptor.ts`; a `-403-csrf` re-reads the
+  session and retries once), SignalR on a single-use `?ticket=` (WebSockets, negotiation skipped —
+  `realtime/hub-auth.ts`), sign-out via `POST /bff/logout` → Keycloak, idle sign-out ON from the
+  session's `idleTimeoutSeconds` (judged across tabs). `AuthService` is the one surface for both.
+- **Gate by permission key, never by role.** `core/auth/route-access.ts` is the ONE table the route
+  guards (`canAccessPath('orders')`) and the sidebar read — a new page gets an entry there (its read
+  endpoint's key, from the engine's endpoint map), a sub-page adds to its parent. In templates use
+  `*lscCan="'iam.grants.manage'"`; in code `auth.hasPermission(Permission.X)`. A session without
+  permissions sees nothing privileged — there is no "roleless = full access" fallback any more, so a
+  component spec that shows privileged controls must provide them (`core/testing/auth-test-double.ts`).
+- **Permission keys are generated.** `docs/permission-catalog.json` is a copy of the engine's;
+  `npm run permissions:generate` writes `core/auth/permissions.generated.ts` (`permissions:check`
+  fails when stale). A key the console uses that leaves the catalog breaks the typecheck — on purpose.
+- **Never touch `localStorage` directly.** Use `appStorage` (`core/storage/app-storage.ts`): every
+  `lascodia.*` / `tradingChart.*` key is stored per person and organisation
+  (`lascodia.u<id>.t<tenant>.…`). A static spec fails on direct use. Global on purpose: the theme and
+  the idle stamp.
+- **Switching organisation reloads the console** (`AuthService.switchTenant`): nothing of the previous
+  organisation may survive in memory. Step-up (`-401-stepup`) sends the person to
+  `/bff/login?acr=mfa` and offers to finish the refused action on return (one click, never automatic);
+  a two-person action answers 202 `-202-approval` and is announced as sent for approval.
+- **New screens:** `/iam/*` (members, invitations, roles, grants + "why can they?", teams, account
+  groups, security policy, SSO + SCIM tokens, approvals, access review), `/account/sessions`,
+  `/account/tokens`, `/platform/*` (organisations, elevated access, impersonation + banner),
+  `/invite/:token`. Engine DTOs are mapped in `features/iam/iam-adapters.ts` only.
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
 Playwright + Chromium, screenshots it, and reports console/network errors.
 
-**Signing in.** The login form's passwordless **Developer** tab is gone from releases, and the
+**Signing in.** The login form's passwordless **Developer** tab is gone (both auth modes), and the
 engine's dev-token endpoint (`POST /auth/token`) now answers 404 unless explicitly opted in from a
 loopback caller (engine f1245cae) — on 2026-10-19 it was found minting a ~1-year Admin JWT for
-anyone reaching the public tunnel. Caddy also refuses that path. For automation, mint a JWT from the
-engine's `JWT_SECRET_KEY` (`.env`) carrying the five identity claims (`passportId`, `firstName`,
-`lastName`, `email`, `mobileNo`), `adminUserId: "1"`, `is_superadmin: "true"` and the MS role claim
-`["SuperAdmin","Admin","Operator"]`, inject it into `sessionStorage['lascodia.auth.token']`, and seed
-`lascodia.auth.perms` with `data.permissions` from `GET /admin/auth/me` (permission-gated routes
-redirect before that call answers). `tools/visual-review/README.md` has the details.
+anyone reaching the public tunnel. Caddy also refuses that path. With `bffAuth` OFF, for automation
+mint a JWT from the engine's `JWT_SECRET_KEY` (`.env`) carrying the five identity claims (`passportId`,
+`firstName`, `lastName`, `email`, `mobileNo`), `adminUserId: "1"`, `is_superadmin: "true"` and the MS
+role claim `["SuperAdmin","Admin","Operator"]`, inject it into `sessionStorage['lascodia.auth.token']`,
+and seed `lascodia.auth.perms` with `data.permissions` from `GET /admin/auth/me` (a restored admin
+token without cached permissions now loads them before the first route, but seeding saves the round
+trip). `tools/visual-review/README.md` has the details. With `bffAuth` ON there is no token to inject:
+the session is the HttpOnly `__Host-lascodia-session` cookie from a real Keycloak sign-in at
+`/bff/login` — drive the sign-in, or crawl a `serve-dist.js` build whose `config.json` keeps the flag off.
 
 **Never let a driver write to the live engine.** Both :8080 and a local build talk to the LIVE
 engine. Every script in `tools/visual-review/` aborts non-GET engine calls except the read-POSTs in
@@ -173,15 +208,17 @@ cold-session probe, not a regression.
 
 ```
 src/app/
-  core/       api (envelope, optimistic updates), auth, config, realtime, polling, stores,
-              feature-flags, scope (account scoping), assistant, keyboard, theme, observability
+  core/       api (envelope, optimistic updates), auth (sign-in, BFF session, permissions,
+              route table, step-up), storage (per-person localStorage), config, realtime, polling,
+              stores, feature-flags, scope (account scoping), assistant, keyboard, theme, observability
   shared/     DataTable, ChartCard, StatusBadge, trading-chart, form-field, command palette
-  features/   one folder per feature (65) — orders, positions, ea-instances, market-data,
-              martingale, spot-sweep, llm-backtest, analysis-monitors, …
+  features/   one folder per feature (68) — orders, positions, ea-instances, market-data,
+              martingale, spot-sweep, llm-backtest, analysis-monitors, …; iam (organisation
+              administration), platform (platform console), invite (/invite/:token)
   layout/     sidebar, header, breadcrumbs, shell
 public/       config.json (runtime config + feature flags), icons, manifest
-scripts/      release.sh (deploy), generate-icons.mjs, bundle-stats.mjs
-docs/         TUNNEL.md (tunnel/proxy runbook), specs and plans
+scripts/      release.sh (deploy), generate-icons.mjs, bundle-stats.mjs, generate-permissions.mjs
+docs/         TUNNEL.md (tunnel/proxy runbook), permission-catalog.json (copy of the engine's), specs
 ```
 
 Path aliases: `@core/*`, `@shared/*`, `@features/*`, `@env/*` — set in `tsconfig.json` and mirrored

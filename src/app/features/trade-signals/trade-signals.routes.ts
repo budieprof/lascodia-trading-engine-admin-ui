@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { canAccessPath } from '@core/auth/can-access.guard';
 import { SignalsPageComponent } from './pages/signals-page/signals-page.component';
 import { SignalDetailPageComponent } from './pages/signal-detail-page/signal-detail-page.component';
 
@@ -6,6 +7,7 @@ export const TRADE_SIGNALS_ROUTES: Routes = [
   { path: '', component: SignalsPageComponent },
   {
     path: 'feedback',
+    canActivate: [canAccessPath('trade-signals/feedback')],
     data: { breadcrumb: 'Signal Exits' },
     loadComponent: () =>
       import('./pages/signal-feedback-page/signal-feedback-page.component').then(
@@ -17,6 +19,7 @@ export const TRADE_SIGNALS_ROUTES: Routes = [
   // try to load a signal with that id.
   {
     path: 'internals',
+    canActivate: [canAccessPath('trade-signals/internals')],
     data: { breadcrumb: 'Internals' },
     loadComponent: () =>
       import('./pages/signal-internals-page/signal-internals-page.component').then(

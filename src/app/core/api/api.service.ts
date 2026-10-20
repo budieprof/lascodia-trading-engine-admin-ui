@@ -63,7 +63,7 @@ export class ApiService {
   async getBlob(path: string): Promise<Blob | null> {
     try {
       return await firstValueFrom(
-        this.http.get(`${this.baseUrl}${path}`, { responseType: 'blob' }),
+        this.http.get(`${this.baseUrl}${path}`, { responseType: 'blob', withCredentials: true }),
       );
     } catch {
       return null;

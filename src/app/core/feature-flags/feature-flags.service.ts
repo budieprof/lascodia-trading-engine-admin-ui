@@ -6,7 +6,11 @@ import { RUNTIME_CONFIG, type RuntimeConfig } from '@core/config/runtime-config'
 /**
  * Shape of a flag rule loaded from `config.json`. Each flag can be:
  *   - A plain boolean (global on/off).
- *   - An object with `{ enabled, roles, percent }` for role gating + gradual rollout.
+ *   - An object with `{ enabled, permissions, roles, percent }` for permission / role gating +
+ *     gradual rollout. Every knob that is set must pass.
+ *
+ * `bffAuth` is read separately (`core/auth/auth-mode.ts`): it decides HOW a person signs in, so it
+ * cannot depend on who they are.
  *
  * Percent rollout uses a stable hash of the current `tradingAccountId` so the
  * same operator either always sees the flag or always doesn't — no flicker
@@ -16,7 +20,16 @@ export type FeatureFlagRule =
   | boolean
   | {
       enabled?: boolean;
-      /** Any-of — if set, the caller must carry at least one of these roles. */
+      /**
+       * Any-of — if set, the caller must hold at least one of these permission keys in the
+       * active organisation. Prefer this to `roles`: with `bffAuth` on a session carries
+       * permissions, not roles.
+       */
+      permissions?: string[];
+      /**
+       * Any-of — if set, the caller's legacy token must carry at least one of these roles.
+       * Legacy sign-in only (a BFF session has no roles, so a role rule never matches there).
+       */
       roles?: string[];
       /** Rollout percentage (0–100). When set, hashes the current account id. */
       percent?: number;
@@ -56,6 +69,10 @@ export class FeatureFlagsService {
     if (typeof rule === 'boolean') return rule;
 
     if (rule.enabled === false) return false;
+
+    if (rule.permissions && rule.permissions.length > 0) {
+      if (!this.auth.hasAnyPermission(rule.permissions)) return false;
+    }
 
     if (rule.roles && rule.roles.length > 0) {
       const mine = this.auth.roles();

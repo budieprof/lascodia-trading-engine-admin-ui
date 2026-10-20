@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { canAccessPath } from '@core/auth/can-access.guard';
 
 /**
  * Analyser Comparison — the A/B view between the LLM `market_analysis.spot`
@@ -18,6 +19,7 @@ export const ANALYSER_COMPARISON_ROUTES: Routes = [
   },
   {
     path: 'audit',
+    canActivate: [canAccessPath('analyser-comparison/audit')],
     data: { breadcrumb: 'Look-ahead Audit' },
     loadComponent: () =>
       import('./pages/look-ahead-audit-page/look-ahead-audit-page.component').then(

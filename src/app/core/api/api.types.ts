@@ -41,6 +41,10 @@ export class ApiError extends Error {
   get isNotFound(): boolean {
     return this.code === ResponseCode.NotFound;
   }
+  /** A two-person action waiting for a second approver (contract C3.3) — accepted, not refused. */
+  get isApprovalPending(): boolean {
+    return this.code === '-202-approval';
+  }
 }
 
 export interface Pager {

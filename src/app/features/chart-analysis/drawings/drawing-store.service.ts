@@ -18,6 +18,7 @@ import {
   writeSyncState,
   type OutboxEntry,
 } from './drawing-sync';
+import { appStorage } from '@core/storage/app-storage';
 
 const STORAGE_KEY = 'lascodia.chart.drawings.v1';
 const UNDO_DEPTH = 50;
@@ -817,7 +818,7 @@ export class DrawingStore {
     // Wrapped because storage throws outright in some contexts (private windows, blocked site data) rather than
     // merely being empty — and losing the chart because a drawing could not be saved would be absurd.
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(list.filter((d) => !isTransient(d))));
+      appStorage.setItem(STORAGE_KEY, JSON.stringify(list.filter((d) => !isTransient(d))));
     } catch {
       /* drawings stay in memory for this session */
     }
@@ -825,7 +826,7 @@ export class DrawingStore {
 
   private restore(): Drawing[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = appStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];

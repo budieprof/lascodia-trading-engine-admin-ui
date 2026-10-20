@@ -26,11 +26,12 @@ export class AppComponent {
   private readonly theme = inject(ThemeService);
 
   constructor() {
-    // If a cookie-backed session is already established, ask the engine who
-    // we are so `isAuthenticated` flips without a user action. No-op for
-    // legacy bearer-token sessions (they restore from sessionStorage in the
-    // AuthService constructor).
-    if (!this.auth.isAuthenticated()) {
+    // Legacy sign-in: if a cookie-backed session is already established, ask
+    // the engine who we are so `isAuthenticated` flips without a user action.
+    // No-op for legacy bearer-token sessions (they restore from sessionStorage
+    // in the AuthService constructor). With `bffAuth` on the app initializer
+    // has already asked `/bff/session`.
+    if (this.auth.mode === 'legacy' && !this.auth.isAuthenticated()) {
       this.auth.probeCookieSession().subscribe();
     }
 

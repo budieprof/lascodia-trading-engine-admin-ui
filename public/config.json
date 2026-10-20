@@ -1,13 +1,14 @@
 {
   "apiBaseUrl": "http://localhost:5081",
   "featureFlags": {
+    "bffAuth": false,
     "chart-annotations": {
       "enabled": true,
-      "roles": ["Admin", "Operator", "Trader"]
+      "permissions": ["access.trader"]
     },
     "pine-chart-lab": {
       "enabled": false,
-      "roles": ["Admin"]
+      "permissions": ["access.admin"]
     }
   }
 }

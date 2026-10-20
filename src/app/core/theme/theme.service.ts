@@ -1,4 +1,5 @@
 import { Injectable, effect, signal } from '@angular/core';
+import { appStorage } from '@core/storage/app-storage';
 
 export type Theme = 'light' | 'dark';
 
@@ -23,7 +24,7 @@ export class ThemeService {
       const current = this._theme();
       document.documentElement.setAttribute('data-theme', current);
       try {
-        localStorage.setItem(STORAGE_KEY, current);
+        appStorage.setItem(STORAGE_KEY, current);
       } catch {
         /* storage unavailable */
       }
@@ -40,7 +41,7 @@ export class ThemeService {
 
   private getInitialTheme(): Theme {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
+      const stored = appStorage.getItem(STORAGE_KEY);
       if (stored === 'light' || stored === 'dark') return stored;
     } catch {
       /* storage unavailable */

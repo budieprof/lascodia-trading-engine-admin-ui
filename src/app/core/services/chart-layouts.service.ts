@@ -98,7 +98,12 @@ export class ChartLayoutsService {
     const json = JSON.stringify(body);
     if (new Blob([json]).size > KEEPALIVE_MAX_BYTES) return false;
     const token = this.auth.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // BFF sign-in: no token, the session cookie rides `credentials` and an unsafe request
+      // needs the session's CSRF token (it bypasses HttpClient, so no interceptor adds it).
+      ...this.auth.csrfHeaders(),
+    };
     if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
     void fetch(`${this.baseUrl}${path}`, {
       method,

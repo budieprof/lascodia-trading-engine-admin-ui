@@ -1,4 +1,5 @@
 import type { ChartWorkspaceState } from './workspace-state';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Sizes that belong to the SCREEN, not to the layout: a laptop and a large monitor must not overwrite each other's
@@ -78,7 +79,7 @@ export function withDeviceSizes(state: ChartWorkspaceState, sizes: DeviceSizes |
 
 function readAll(): Record<string, DeviceSizes> {
   try {
-    const raw = JSON.parse(localStorage.getItem(DEVICE_SIZES_KEY) ?? 'null') as unknown;
+    const raw = JSON.parse(appStorage.getItem(DEVICE_SIZES_KEY) ?? 'null') as unknown;
     return raw && typeof raw === 'object' ? (raw as Record<string, DeviceSizes>) : {};
   } catch {
     return {};
@@ -87,7 +88,7 @@ function readAll(): Record<string, DeviceSizes> {
 
 function writeAll(all: Record<string, DeviceSizes>): void {
   try {
-    localStorage.setItem(DEVICE_SIZES_KEY, JSON.stringify(all));
+    appStorage.setItem(DEVICE_SIZES_KEY, JSON.stringify(all));
   } catch {
     // Storage refused: sizes just aren't remembered on this device.
   }

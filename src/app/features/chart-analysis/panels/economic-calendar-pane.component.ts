@@ -32,6 +32,7 @@ import {
   upsertEvent,
 } from './economic-calendar';
 import { ZonedDatePipe, zoneLabel } from './zoned-time';
+import { appStorage } from '@core/storage/app-storage';
 
 /** Currencies the pane offers to add beside the pair's two. */
 const EXTRA_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'CNY'];
@@ -587,7 +588,7 @@ export class EconomicCalendarPaneComponent {
     const clean = [...new Set(next.map((c) => c.toUpperCase()))].slice(0, 6);
     this.extras.set(clean);
     try {
-      localStorage.setItem(EXTRAS_KEY, JSON.stringify(clean));
+      appStorage.setItem(EXTRAS_KEY, JSON.stringify(clean));
     } catch {
       // Per-viewer convenience only.
     }
@@ -595,7 +596,7 @@ export class EconomicCalendarPaneComponent {
 
   private loadExtras(): string[] {
     try {
-      const v = JSON.parse(localStorage.getItem(EXTRAS_KEY) ?? '[]') as unknown;
+      const v = JSON.parse(appStorage.getItem(EXTRAS_KEY) ?? '[]') as unknown;
       return Array.isArray(v) ? v.filter((c): c is string => typeof c === 'string').slice(0, 6) : [];
     } catch {
       return [];

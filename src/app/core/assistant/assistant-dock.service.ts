@@ -1,4 +1,5 @@
 import { Injectable, computed, effect, signal } from '@angular/core';
+import { appStorage } from '@core/storage/app-storage';
 
 const STORAGE_KEY = 'lascodia.assistant.dock';
 const SESSION_KEY = 'lascodia.assistant.conversationId';
@@ -36,7 +37,7 @@ export class AssistantDockService {
     effect(() => {
       const s = this.state();
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+        appStorage.setItem(STORAGE_KEY, JSON.stringify(s));
       } catch {
         /* private window or blocked storage — the dock still works, it just forgets */
       }
@@ -44,8 +45,8 @@ export class AssistantDockService {
     effect(() => {
       const id = this.conversationId();
       try {
-        if (id === null) localStorage.removeItem(SESSION_KEY);
-        else localStorage.setItem(SESSION_KEY, String(id));
+        if (id === null) appStorage.removeItem(SESSION_KEY);
+        else appStorage.setItem(SESSION_KEY, String(id));
       } catch {
         /* as above */
       }
@@ -81,7 +82,7 @@ export class AssistantDockService {
   private restore(): DockState {
     const fallback: DockState = { open: false, width: DEFAULT_WIDTH, maximised: false };
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = appStorage.getItem(STORAGE_KEY);
       if (!raw) return fallback;
       const parsed = JSON.parse(raw) as Partial<DockState>;
       return {
@@ -98,7 +99,7 @@ export class AssistantDockService {
 
   private restoreConversation(): number | null {
     try {
-      const raw = localStorage.getItem(SESSION_KEY);
+      const raw = appStorage.getItem(SESSION_KEY);
       const id = raw ? Number(raw) : NaN;
       return Number.isFinite(id) && id > 0 ? id : null;
     } catch {

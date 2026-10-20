@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Toggles "wall mode" for display on a trading floor wall / control-room monitor.
@@ -39,7 +40,7 @@ export class WallModeService {
   private set(next: boolean): void {
     this.enabled.set(next);
     try {
-      localStorage.setItem(WallModeService.STORAGE_KEY, next ? '1' : '0');
+      appStorage.setItem(WallModeService.STORAGE_KEY, next ? '1' : '0');
     } catch {
       /* localStorage may be unavailable (private mode, quota) */
     }
@@ -52,7 +53,7 @@ export class WallModeService {
 
   private readPersisted(): boolean {
     try {
-      return localStorage.getItem(WallModeService.STORAGE_KEY) === '1';
+      return appStorage.getItem(WallModeService.STORAGE_KEY) === '1';
     } catch {
       return false;
     }

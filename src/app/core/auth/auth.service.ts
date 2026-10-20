@@ -1,10 +1,35 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Observable, catchError, defer, map, of, shareReplay, tap } from 'rxjs';
+import {
+  Observable,
+  catchError,
+  defer,
+  firstValueFrom,
+  map,
+  of,
+  shareReplay,
+  switchMap,
+  tap,
+  timeout,
+} from 'rxjs';
 import { ApiService } from '../api/api.service';
-import { TokenResponseDto } from '../api/api.types';
+import { RUNTIME_CONFIG } from '../config/runtime-config';
+import { BrowserLocation } from '../browser/browser-location';
+import {
+  HOUSE_TENANT_ID,
+  setStorageIdentity,
+  type StorageIdentity,
+} from '../storage/app-storage';
 import { decodeJwt, rolesFromPayload } from './jwt';
-import { returnUrlQueryParams } from './return-url';
+import { DEFAULT_POST_LOGIN_ROUTE, returnUrlQueryParams, sanitizeReturnUrl } from './return-url';
+import { authModeFrom, type AuthMode } from './auth-mode';
+import { BffSessionService } from './bff-session.service';
+import type { BffImpersonation, BffMembership, BffSession, BffTenant } from './bff.types';
+import { CSRF_HEADER } from './bff.types';
+import { IdleTimeoutService } from './idle-timeout.service';
+import { permissionsForLegacyRoles } from './legacy-role-permissions';
+import { Permission, type PermissionKey } from './permissions.generated';
+import { canSee, type AccessSubject } from './route-access';
 
 export interface AuthUser {
   passportId: string;
@@ -16,6 +41,8 @@ export interface AuthUser {
 /**
  * Canonical role names mirroring the engine's `OperatorRoleNames`. Kept as a
  * const tuple so usages are autocompleted and typos surface at compile time.
+ * Gating no longer uses roles (permission keys do, see `hasPermission`); the
+ * names remain for the Operator Roles page and legacy feature-flag rules.
  */
 export const ROLES = {
   Viewer: 'Viewer',
@@ -26,26 +53,6 @@ export const ROLES = {
   EA: 'EA',
 } as const;
 export type Role = (typeof ROLES)[keyof typeof ROLES];
-
-// Which roles satisfy each policy — mirrors the server-side cascade in
-// `Policies.Register`. Admin covers everything; Operator covers Trader/Analyst
-// reads but not the Admin-only role management.
-const POLICY_ROLES: Record<Role, readonly Role[]> = {
-  Viewer: ['Viewer', 'Trader', 'Analyst', 'Operator', 'Admin', 'EA'],
-  Trader: ['Trader', 'Operator', 'Admin'],
-  Analyst: ['Analyst', 'Operator', 'Admin'],
-  Operator: ['Operator', 'Admin'],
-  Admin: ['Admin'],
-  EA: ['EA'],
-};
-
-export interface LoginCredentials {
-  userId?: string;
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  phoneNumber?: string;
-}
 
 /** Engine `POST /auth/login` payload (web login — password required). */
 export interface OperatorLoginCredentials {
@@ -105,8 +112,11 @@ export interface AdminMeData {
   permissions: string[];
 }
 
+/** Why a session ended without the person choosing to sign out — shown on the login page. */
+export type SignOutReason = 'expired' | 'idle';
+
 /**
- * Session persistence:
+ * Legacy session persistence (`bffAuth` off):
  *   - Token + user are mirrored to `sessionStorage` so a page refresh doesn't
  *     kick the operator back to /login. Closing the tab clears it — meets the
  *     PRD §14 "JWT not in localStorage" bar while fixing the reload UX.
@@ -115,11 +125,17 @@ export interface AdminMeData {
  *     Currently DISABLED via IDLE_LOGOUT_ENABLED so the console can be left
  *     open and unattended for long stretches without self-logging-out; flip
  *     the flag back to `true` to restore the idle timeout.
+ *
+ * With `bffAuth` on, none of that applies: the session lives server-side behind
+ * an HttpOnly cookie, nothing is stored here, and the idle timeout is ON with the
+ * organisation's own `idleTimeoutSeconds` ({@link IdleTimeoutService}).
  */
 const TOKEN_KEY = 'lascodia.auth.token';
 const USER_KEY = 'lascodia.auth.user';
 const PERMS_KEY = 'lascodia.auth.perms';
 const LAST_ACTIVITY_KEY = 'lascodia.auth.lastActivity';
+/** One-shot note for the login page: why the previous session ended (BFF sign-out leaves the app). */
+export const SIGNED_OUT_NOTE_KEY = 'lascodia.auth.signedOutNote';
 // Master switch for the client-side idle auto-logout. When false, neither
 // the restored-session staleness check nor the periodic watcher will ever
 // log the operator out for inactivity (the JWT's own server-side expiry
@@ -128,6 +144,8 @@ const IDLE_LOGOUT_ENABLED = false;
 const IDLE_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
 const ACTIVITY_THROTTLE_MS = 30 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
+/** The boot-time permission load may hold up the first render this long, no longer. */
+const INIT_TIMEOUT_MS = 10_000;
 
 // ── Token-refresh tunables ────────────────────────────────────────────
 // Schedule the proactive refresh this far ahead of the JWT's `exp`. Keep it
@@ -146,54 +164,147 @@ const REFRESH_COOKIE_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 // has no readable token string). Kept in sync with `probeCookieSession()`.
 const COOKIE_SESSION_SENTINEL = 'cookie-session';
 
+/**
+ * Who is signed in, what they may do, and the sign-in / sign-out flows — for both
+ * auth modes behind one surface ({@link AuthMode}, `config.json` → `featureFlags.bffAuth`).
+ *
+ * Gating is by PERMISSION KEY only ({@link hasPermission}). A session without
+ * permissions sees nothing privileged: the old "no role claims = full access"
+ * fallbacks are gone. The engine remains the enforcer; this is UX.
+ */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly api = inject(ApiService);
   private readonly router = inject(Router);
+  private readonly bff = inject(BffSessionService);
+  private readonly browser = inject(BrowserLocation);
+  private readonly idle = inject(IdleTimeoutService);
 
-  private readonly _token = signal<string | null>(this.readSessionString(TOKEN_KEY));
-  private readonly _user = signal<AuthUser | null>(this.readSessionJson<AuthUser>(USER_KEY));
+  /** Fixed for the life of the page: the flag is read once from `config.json`. */
+  readonly mode: AuthMode = authModeFrom(inject(RUNTIME_CONFIG));
 
-  readonly token = this._token.asReadonly();
-  readonly user = this._user.asReadonly();
-  readonly isAuthenticated = computed(() => this._token() !== null);
-
+  // ── Legacy state (empty in BFF mode) ──────────────────────────────────
+  private readonly _token = signal<string | null>(
+    this.mode === 'legacy' ? this.readSessionString(TOKEN_KEY) : null,
+  );
+  private readonly _legacyUser = signal<AuthUser | null>(
+    this.mode === 'legacy' ? this.readSessionJson<AuthUser>(USER_KEY) : null,
+  );
   /**
    * When the session is backed by an HttpOnly cookie, the JWT is unreadable
    * from JS — so `probeCookieSession()` populates this signal with the roles
    * the engine reported via `GET /auth/whoami`.
    */
   private readonly _cookieRoles = signal<string[]>([]);
+  private readonly _cookieAccountId = signal<number | null>(null);
+  /** Admin-user permissions reported by `GET /admin/auth/me`. */
+  private readonly _adminPermissions = signal<string[]>(
+    this.mode === 'legacy' ? (this.readSessionJson<string[]>(PERMS_KEY) ?? []) : [],
+  );
+  private readonly _isSuperAdmin = signal<boolean>(false);
+  private readonly _mustChangePassword = signal<boolean>(false);
+
+  /** The legacy bearer token (null in BFF mode — the browser never holds one there). */
+  readonly token = this._token.asReadonly();
+
+  /** The BFF session payload (null in legacy mode and when signed out). */
+  readonly session = this.bff.session;
+
+  readonly isAuthenticated = computed(() =>
+    this.mode === 'bff' ? this.bff.session() !== null : this._token() !== null,
+  );
+
+  readonly user = computed<AuthUser | null>(() => {
+    if (this.mode === 'legacy') return this._legacyUser();
+    const s = this.bff.session();
+    if (!s) return null;
+    return {
+      passportId: String(s.user.id),
+      firstName: s.user.displayName || s.user.username,
+      lastName: '',
+      email: s.user.email ?? '',
+    };
+  });
 
   /**
-   * Decoded role claims from the JWT, or the server-reported roles for
-   * cookie-authenticated sessions. Empty list when the token carries no role
-   * claim — legacy dev tokens from the shared library's `/auth/token` don't
-   * issue roles, so `hasRole` treats the empty-list case as "full access"
-   * (see below). Engine-issued tokens via `POST /auth/login` DO carry roles
-   * and are enforced strictly.
+   * Role claims of a legacy token (or the roles `/auth/whoami` reported for a
+   * legacy cookie session). Informational — gating uses permissions. Always
+   * empty in BFF mode: roles are per organisation there and the session reports
+   * the resulting permissions instead.
    */
   readonly roles = computed<readonly string[]>(() => {
+    if (this.mode === 'bff') return [];
     const fromToken = rolesFromPayload(decodeJwt(this._token()));
     if (fromToken.length > 0) return fromToken;
     return this._cookieRoles();
   });
 
   /**
-   * Effective permission keys for the signed-in admin user, sourced from
-   * `GET /admin/auth/me` (the engine resolves roles → permissions server-side;
-   * super admins receive the full catalog). Used to gate menus/routes — the
-   * engine remains the authoritative enforcer. Empty for broker/EA logins,
-   * which fall back to role/policy gating.
+   * Effective permission keys in the active organisation.
+   *  - BFF: exactly what `/bff/session` reports.
+   *  - Legacy admin user: what `GET /admin/auth/me` reports (super admins get the full catalog).
+   *  - Legacy trading-account login: the bundles of its role claims
+   *    ({@link permissionsForLegacyRoles}).
+   *  - Anything else: none.
    */
-  private readonly _permissions = signal<string[]>(this.readSessionJson<string[]>(PERMS_KEY) ?? []);
-  private readonly _isSuperAdmin = signal<boolean>(false);
-  private readonly _mustChangePassword = signal<boolean>(false);
+  readonly permissions = computed<readonly string[]>(() => {
+    if (this.mode === 'bff') return this.bff.session()?.permissions ?? [];
+    if (!this._token()) return [];
+    if (this.isAdminToken()) return this._adminPermissions();
+    return permissionsForLegacyRoles(this.roles());
+  });
+  private readonly permissionSet = computed(() => new Set(this.permissions()));
 
-  readonly permissions = this._permissions.asReadonly();
   readonly isSuperAdmin = this._isSuperAdmin.asReadonly();
-  /** True when the user must change their password before using the app. */
+  /** True when the user must change their password before using the app (legacy only). */
   readonly mustChangePassword = this._mustChangePassword.asReadonly();
+
+  /** The organisation the console acts in (BFF); null in legacy mode, which is always House. */
+  readonly activeTenant = computed<BffTenant | null>(() => this.bff.session()?.activeTenant ?? null);
+  /** Organisations the person belongs to (BFF); empty in legacy mode. */
+  readonly memberships = computed<readonly BffMembership[]>(
+    () => this.bff.session()?.memberships ?? [],
+  );
+  /**
+   * Platform staff may use the platform console. BFF: as `/bff/session` reports it (false while
+   * impersonating). Legacy: a House administrator holding `platform.tenants.manage` — the only
+   * platform page that works without the BFF is Organisations, whose API is gated the same way.
+   */
+  readonly isPlatformStaff = computed(() =>
+    this.mode === 'bff'
+      ? (this.bff.session()?.isPlatformStaff ?? false)
+      : this.hasPermission(Permission.PlatformTenantsManage),
+  );
+
+  /** The person as the route table ({@link ROUTE_ACCESS}) sees them. */
+  readonly accessSubject = computed<AccessSubject>(() => ({
+    hasPermission: (key: string) => this.hasPermission(key),
+    bff: this.mode === 'bff',
+    platformStaff: this.isPlatformStaff(),
+  }));
+  /** Set while platform staff view the console as this user. */
+  readonly impersonation = computed<BffImpersonation | null>(
+    () => this.bff.session()?.impersonation ?? null,
+  );
+
+  /** Whose `localStorage` namespace is in use (see `core/storage/app-storage.ts`). */
+  readonly storageIdentity = computed<StorageIdentity | null>(() => {
+    if (this.mode === 'bff') {
+      const s = this.bff.session();
+      if (!s || !s.activeTenant) return null;
+      return { userKey: `u${s.user.id}`, tenantId: s.activeTenant.id };
+    }
+    const payload = decodeJwt(this._token());
+    const adminId = Number(payload?.['adminUserId']);
+    if (Number.isInteger(adminId) && adminId > 0) {
+      return { userKey: `u${adminId}`, tenantId: HOUSE_TENANT_ID };
+    }
+    const accountId = Number(payload?.tradingAccountId ?? this._cookieAccountId());
+    if (Number.isInteger(accountId) && accountId > 0) {
+      return { userKey: `acct${accountId}`, tenantId: HOUSE_TENANT_ID };
+    }
+    return null;
+  });
 
   private lastActivity = Number(this.readSessionString(LAST_ACTIVITY_KEY) ?? Date.now());
   private activityListenersBound = false;
@@ -213,7 +324,18 @@ export class AuthService {
    */
   private refreshInFlight$: Observable<string | null> | null = null;
 
+  /** Guards the BFF teardown so a burst of 401s navigates once. */
+  private endingSession = false;
+
   constructor() {
+    if (this.mode === 'bff') {
+      // Nothing of a previous legacy session may linger next to a cookie session.
+      for (const k of [TOKEN_KEY, USER_KEY, PERMS_KEY]) this.removeSession(k);
+      // Per-person storage stays shut until `initialize()` knows who is signed in.
+      this.syncStorageIdentity();
+      return;
+    }
+
     // Mirror signal state to sessionStorage whenever it changes.
     effect(() => {
       const token = this._token();
@@ -224,7 +346,7 @@ export class AuthService {
       }
     });
     effect(() => {
-      const user = this._user();
+      const user = this._legacyUser();
       if (user) {
         this.writeSession(USER_KEY, JSON.stringify(user));
       } else {
@@ -232,7 +354,7 @@ export class AuthService {
       }
     });
     effect(() => {
-      const perms = this._permissions();
+      const perms = this._adminPermissions();
       if (perms.length > 0) {
         this.writeSession(PERMS_KEY, JSON.stringify(perms));
       } else {
@@ -251,9 +373,37 @@ export class AuthService {
       // on the server side. If we can't read `exp` (cookie session), the
       // fallback interval still keeps the cookie alive.
       this.scheduleRefresh();
-      // Re-hydrate the admin permission set from the engine on boot.
-      if (this.isAdminToken()) this.loadMe().subscribe();
+      // Re-hydrate the admin permission set from the engine on boot. (A restored
+      // admin token with NO cached permissions is loaded by `initialize()` before
+      // the first route renders.)
+      if (this.isAdminToken() && this._adminPermissions().length > 0) this.loadMe().subscribe();
     }
+    this.syncStorageIdentity();
+  }
+
+  /**
+   * Resolves who is signed in BEFORE the first route renders (an app initializer), so guards and
+   * every service that reads storage at construction see the final identity and permissions.
+   *  - BFF: `GET /bff/session`.
+   *  - Legacy: a restored admin token whose permissions were not cached loads them now.
+   * Bounded: a slow engine delays the first paint by at most {@link INIT_TIMEOUT_MS}, then the
+   * console starts with what it has (no session / no permissions — fail closed).
+   */
+  async initialize(): Promise<void> {
+    if (this.mode === 'bff') {
+      await this.bff.load();
+      this.afterBffSessionChange();
+      return;
+    }
+    if (this.isAuthenticated() && this.isAdminToken() && this._adminPermissions().length === 0) {
+      await firstValueFrom(
+        this.loadMe().pipe(
+          timeout(INIT_TIMEOUT_MS),
+          catchError(() => of(null)),
+        ),
+      );
+    }
+    this.syncStorageIdentity();
   }
 
   /** True when the current token is an admin-user token (carries the adminUserId claim). */
@@ -262,32 +412,126 @@ export class AuthService {
     return payload != null && payload['adminUserId'] != null;
   }
 
-  login(credentials: LoginCredentials): Observable<TokenResponseDto> {
-    return this.api
-      .post<TokenResponseDto>('/auth/token', {
-        userId: credentials.userId || 'dev-user-1',
-        firstName: credentials.firstName || 'Dev',
-        lastName: credentials.lastName || 'User',
-        email: credentials.email || 'dev@lascodia.com',
-        phoneNumber: credentials.phoneNumber || '',
-      })
-      .pipe(
-        tap((response) => {
-          if (response.token) {
-            this._token.set(response.token);
-            this._user.set({
-              passportId: credentials.userId || 'dev-user-1',
-              firstName: credentials.firstName || 'Dev',
-              lastName: credentials.lastName || 'User',
-              email: credentials.email || 'dev@lascodia.com',
-            });
-            this.touchActivity();
-            this.startIdleWatch();
-            this.scheduleRefresh();
-          }
-        }),
-      );
+  // ── Permission checks ─────────────────────────────────────────────────
+
+  /**
+   * True when the signed-in person holds the permission in the active organisation. A legacy super
+   * admin holds every permission (the engine bypasses checks for them too). No session, or a session
+   * the engine reported no permissions for, holds nothing.
+   */
+  hasPermission(permission: PermissionKey | string): boolean {
+    if (this.mode === 'legacy' && this._token() && this._isSuperAdmin()) return true;
+    return this.permissionSet().has(permission);
   }
+
+  /** True when the person holds at least one of the keys (an empty list is always allowed). */
+  hasAnyPermission(permissions: readonly (PermissionKey | string)[]): boolean {
+    return permissions.length === 0 || permissions.some((p) => this.hasPermission(p));
+  }
+
+  /** Whether the page at `url` is open to this person ({@link ROUTE_ACCESS}; unknown pages are not). */
+  canSeePath(url: string): boolean {
+    return canSee(url, this.accessSubject());
+  }
+
+  // ── BFF sign-in flows (contract C3.1 / C3.2) ──────────────────────────
+
+  /** Leaves for `/bff/login` (Keycloak). `returnUrl` is sanitised to a same-origin path. */
+  beginSignIn(returnUrl?: string | null): void {
+    this.browser.assign(
+      this.bff.loginUrl({ returnUrl: sanitizeReturnUrl(returnUrl) ?? DEFAULT_POST_LOGIN_ROUTE }),
+    );
+  }
+
+  /**
+   * Step-up (C3.2): sign in again with a second factor, then come back to `returnUrl`.
+   * `tenant` asks for that organisation (switching into one that requires MFA).
+   */
+  beginStepUp(returnUrl?: string | null, tenant?: number | null): void {
+    this.browser.assign(
+      this.bff.loginUrl({
+        acr: 'mfa',
+        returnUrl: sanitizeReturnUrl(returnUrl) ?? DEFAULT_POST_LOGIN_ROUTE,
+        tenant: tenant ?? null,
+      }),
+    );
+  }
+
+  /**
+   * Moves the session to another organisation, then RELOADS the console on the dashboard: every
+   * page, store, cache and realtime room belonged to the previous organisation, and a reload is the
+   * one reset that cannot miss any of them. Resolves `'stepUp'` (after starting a step-up sign-in)
+   * when that organisation requires a second factor; rejects with the engine's refusal otherwise.
+   */
+  async switchTenant(tenantId: number): Promise<'switched' | 'stepUp'> {
+    if (this.mode !== 'bff') throw new Error('Organisations are switched through the BFF session.');
+    try {
+      await this.bff.switchTenant(tenantId);
+    } catch (err) {
+      if (isStepUpError(err)) {
+        this.beginStepUp(DEFAULT_POST_LOGIN_ROUTE, tenantId);
+        return 'stepUp';
+      }
+      throw err;
+    }
+    this.idle.stop();
+    this.browser.assign(DEFAULT_POST_LOGIN_ROUTE);
+    return 'switched';
+  }
+
+  /** Re-reads `/bff/session` (fresh CSRF token, permissions, MFA time). */
+  async refreshSession(): Promise<BffSession | null> {
+    if (this.mode !== 'bff') return null;
+    const s = await this.bff.load();
+    this.afterBffSessionChange();
+    return s;
+  }
+
+  /** `X-CSRF-Token` for a request built outside HttpClient (keepalive `fetch` on page unload). */
+  csrfHeaders(): Record<string, string> {
+    const token = this.mode === 'bff' ? this.bff.csrfToken() : null;
+    return token ? { [CSRF_HEADER]: token } : {};
+  }
+
+  /** A single-use realtime ticket (BFF only). */
+  realtimeTicket(): Promise<string | null> {
+    return this.mode === 'bff' ? this.bff.wsTicket() : Promise.resolve(null);
+  }
+
+  /**
+   * The engine says the session is gone (a 401 that is not a step-up). Forget it and go to the
+   * login page, remembering where the person was. Idempotent across a burst of failing requests.
+   */
+  sessionEnded(): void {
+    if (this.mode !== 'bff') {
+      this.logout({ expired: true });
+      return;
+    }
+    if (this.endingSession) return;
+    this.endingSession = true;
+    const returnParams = returnUrlQueryParams(this.router.url);
+    this.bff.clear();
+    this.afterBffSessionChange();
+    void this.router
+      .navigate(['/login'], { queryParams: { ...returnParams, reason: 'expired' } })
+      .finally(() => (this.endingSession = false));
+  }
+
+  private afterBffSessionChange(): void {
+    this.syncStorageIdentity();
+    const s = this.bff.session();
+    if (s && s.idleTimeoutSeconds > 0) {
+      this.idle.start(s.idleTimeoutSeconds, () => this.logout({ reason: 'idle' }));
+    } else {
+      this.idle.stop();
+    }
+  }
+
+  private syncStorageIdentity(): void {
+    setStorageIdentity(this.storageIdentity());
+  }
+
+  // ── Legacy sign-in (bffAuth off) ──────────────────────────────────────
 
   /**
    * Boot-time probe for a cookie-backed session. The browser can't read the
@@ -309,7 +553,8 @@ export class AuthService {
             // ride the cookie via `withCredentials`.
             if (!this._token()) this._token.set(COOKIE_SESSION_SENTINEL);
             this._cookieRoles.set(res.data.roles);
-            this._user.set({
+            this._cookieAccountId.set(res.data.tradingAccountId);
+            this._legacyUser.set({
               passportId: String(res.data.tradingAccountId),
               firstName: '',
               lastName: '',
@@ -318,6 +563,7 @@ export class AuthService {
             this.touchActivity();
             this.startIdleWatch();
             this.scheduleRefresh();
+            this.syncStorageIdentity();
           }
         }),
         map((res) => res?.data ?? null),
@@ -340,11 +586,9 @@ export class AuthService {
   }
 
   /**
-   * Engine-backed login via `POST /auth/login`. The issued JWT carries role
-   * claims mirroring the account's `OperatorRole` grants, so `hasPolicy`
-   * becomes strict for this session (no longer falling through the
-   * empty-roles escape hatch). Use this path in production; the dev
-   * `login()` method above stays for local work.
+   * Engine-backed trading-account login via `POST /auth/login`. The issued JWT
+   * carries role claims mirroring the account's `OperatorRole` grants; the
+   * session's permissions are those roles' bundles.
    */
   loginOperator(credentials: OperatorLoginCredentials): Observable<OperatorAuthEnvelope> {
     return this.api
@@ -360,7 +604,7 @@ export class AuthService {
             const token = response.data.token;
             const account = response.data.account;
             this._token.set(token);
-            this._user.set({
+            this._legacyUser.set({
               passportId: account?.accountId ?? credentials.accountId,
               firstName: account?.accountName ?? credentials.accountId,
               lastName: '',
@@ -369,6 +613,7 @@ export class AuthService {
             this.touchActivity();
             this.startIdleWatch();
             this.scheduleRefresh();
+            this.syncStorageIdentity();
           }
         }),
       );
@@ -376,27 +621,28 @@ export class AuthService {
 
   /**
    * Admin-user login via `POST /admin/auth/login` (username + password). On success the issued
-   * JWT carries the user's role claims and (for super admins) `is_superadmin`; we then load the
-   * effective permission set from `/admin/auth/me` for menu/route gating.
+   * JWT carries the user's role claims and (for super admins) `is_superadmin`. The returned
+   * observable completes only AFTER the effective permissions have been loaded from
+   * `/admin/auth/me`, so the first page after sign-in is guarded with the real permission set.
    */
   loginAdmin(username: string, password: string): Observable<AdminAuthEnvelope> {
     return this.api.post<AdminAuthEnvelope>('/admin/auth/login', { username, password }).pipe(
-      tap((response) => {
-        if (response?.status && response.data?.token) {
-          this._token.set(response.data.token);
-          this._user.set({
-            passportId: String(response.data.user?.id ?? ''),
-            firstName: response.data.user?.displayName || response.data.user?.username || '',
-            lastName: '',
-            email: response.data.user?.email ?? '',
-          });
-          this._isSuperAdmin.set(!!response.data.user?.isSuperAdmin);
-          this._mustChangePassword.set(!!response.data.mustChangePassword);
-          this.touchActivity();
-          this.startIdleWatch();
-          this.scheduleRefresh();
-          this.loadMe().subscribe();
-        }
+      switchMap((response) => {
+        if (!(response?.status && response.data?.token)) return of(response);
+        this._token.set(response.data.token);
+        this._legacyUser.set({
+          passportId: String(response.data.user?.id ?? ''),
+          firstName: response.data.user?.displayName || response.data.user?.username || '',
+          lastName: '',
+          email: response.data.user?.email ?? '',
+        });
+        this._isSuperAdmin.set(!!response.data.user?.isSuperAdmin);
+        this._mustChangePassword.set(!!response.data.mustChangePassword);
+        this.touchActivity();
+        this.startIdleWatch();
+        this.scheduleRefresh();
+        this.syncStorageIdentity();
+        return this.loadMe().pipe(map(() => response));
       }),
     );
   }
@@ -410,10 +656,10 @@ export class AuthService {
     return this.api.get<{ data: AdminMeData | null; status: boolean }>('/admin/auth/me').pipe(
       tap((res) => {
         if (res?.status && res.data) {
-          this._permissions.set(res.data.permissions ?? []);
+          this._adminPermissions.set(res.data.permissions ?? []);
           this._isSuperAdmin.set(!!res.data.isSuperAdmin);
           this._mustChangePassword.set(!!res.data.mustChangePassword);
-          this._user.set({
+          this._legacyUser.set({
             passportId: String(res.data.id),
             firstName: res.data.displayName || res.data.username,
             lastName: '',
@@ -432,19 +678,13 @@ export class AuthService {
   }
 
   /**
-   * True when the user holds the given permission key. Super admins hold every
-   * permission. Empty-permission + empty-role tokens (legacy dev `/auth/token`)
-   * fall through to "allowed" for backward compatibility, matching `hasPolicy`.
-   */
-  hasPermission(permission: string): boolean {
-    if (this._isSuperAdmin()) return true;
-    const perms = this._permissions();
-    if (perms.length === 0 && this.roles().length === 0) return true; // legacy dev-token escape hatch
-    return perms.includes(permission);
-  }
-
-  /**
-   * Logs out locally and — if the current session is backed by an engine-issued
+   * Signs out.
+   *
+   * BFF: `POST /bff/logout`, then the browser goes to the URL it returns (Keycloak's end-session
+   * page, which comes back to the console). A session taken from the person (`expired`, `idle`)
+   * leaves a note for the login page and the route to come back to.
+   *
+   * Legacy: logs out locally and — if the current session is backed by an engine-issued
    * JWT — tells the engine to revoke the token's `jti` so the same string can't
    * be replayed. The API call is best-effort; a failure still clears the
    * local session and routes to /login (never hold a user hostage to the server).
@@ -453,7 +693,15 @@ export class AuthService {
    *   (refresh exhausted, jti revoked, idle timeout) rather than surrendered
    *   deliberately. Only then is the current route captured as a returnUrl.
    */
-  logout(options?: { expired?: boolean }): void {
+  logout(options?: { expired?: boolean; reason?: SignOutReason }): void {
+    const reason: SignOutReason | undefined =
+      options?.reason ?? (options?.expired ? 'expired' : undefined);
+
+    if (this.mode === 'bff') {
+      void this.logoutBff(reason);
+      return;
+    }
+
     const hadToken = !!this._token();
     if (hadToken) {
       // Fire-and-forget — don't block the UX on the network. errors are
@@ -473,46 +721,52 @@ export class AuthService {
     // returning that user to the page they just left on their next login would
     // be wrong, and on a shared machine it also hands the next operator the
     // previous one's context.
-    const returnParams = options?.expired ? returnUrlQueryParams(this.router.url) : {};
+    const returnParams = reason ? returnUrlQueryParams(this.router.url) : {};
 
     this.clearSession();
     this.router.navigate(['/login'], { queryParams: returnParams });
   }
 
+  private async logoutBff(reason: SignOutReason | undefined): Promise<void> {
+    if (reason) {
+      const returnUrl = returnUrlQueryParams(this.router.url)['returnUrl'] ?? null;
+      this.writeSession(SIGNED_OUT_NOTE_KEY, JSON.stringify({ reason, returnUrl }));
+    } else {
+      this.removeSession(SIGNED_OUT_NOTE_KEY);
+    }
+    this.idle.stop();
+    const url = await this.bff.logout();
+    this.syncStorageIdentity();
+    this.browser.assign(url);
+  }
+
+  /** Reads and clears the note {@link logout} left for the login page. */
+  takeSignedOutNote(): { reason: SignOutReason; returnUrl: string | null } | null {
+    const note = this.readSessionJson<{ reason: SignOutReason; returnUrl: string | null }>(
+      SIGNED_OUT_NOTE_KEY,
+    );
+    this.removeSession(SIGNED_OUT_NOTE_KEY);
+    if (!note || (note.reason !== 'expired' && note.reason !== 'idle')) return null;
+    return { reason: note.reason, returnUrl: sanitizeReturnUrl(note.returnUrl) };
+  }
+
+  /** The legacy bearer token; null in BFF mode (cookie only) and when signed out. */
   getToken(): string | null {
     return this._token();
   }
 
-  /**
-   * Gate logic that mirrors the server policy ladder. Empty-role tokens are
-   * treated as "full access" for backward compatibility with the shared
-   * library's dev `/auth/token` endpoint; once the UI migrates to engine
-   * tokens every route should naturally become strict.
-   */
-  hasPolicy(policy: Role): boolean {
-    const mine = this.roles();
-    if (mine.length === 0) return true; // legacy dev-token escape hatch
-    const allowed = POLICY_ROLES[policy];
-    return mine.some((r) => allowed.includes(r as Role));
-  }
-
-  /** True when the token carries any of the supplied roles. */
-  hasAnyRole(roles: readonly Role[]): boolean {
-    const mine = this.roles();
-    if (mine.length === 0) return true;
-    return roles.some((r) => mine.includes(r));
-  }
-
-  // ── Token-refresh plumbing ─────────────────────────────────────────
+  // ── Token-refresh plumbing (legacy) ────────────────────────────────
 
   /**
    * Force a token refresh now. De-duped: concurrent callers share the same
    * in-flight observable so the engine only sees one POST per cycle. Emits
    * the new token string on success (or the cookie sentinel for cookie
    * sessions) and `null` on any failure — the 401-fallback interceptor uses
-   * the null branch as its signal to actually log out.
+   * the null branch as its signal to actually log out. Always null in BFF
+   * mode: the engine refreshes the session's tokens server-side.
    */
   refreshToken(): Observable<string | null> {
+    if (this.mode === 'bff') return of(null);
     if (this.refreshInFlight$) return this.refreshInFlight$;
 
     const current = this._token();
@@ -605,19 +859,21 @@ export class AuthService {
     }
   }
 
-  // ── Idle-timeout plumbing ──────────────────────────────────────────
+  // ── Idle-timeout plumbing (legacy) ─────────────────────────────────
 
   private clearSession(): void {
     this._token.set(null);
-    this._user.set(null);
-    this._permissions.set([]);
+    this._legacyUser.set(null);
+    this._adminPermissions.set([]);
     this._isSuperAdmin.set(false);
     this._mustChangePassword.set(false);
     this._cookieRoles.set([]);
+    this._cookieAccountId.set(null);
     this.removeSession(LAST_ACTIVITY_KEY);
     this.stopIdleWatch();
     this.cancelRefresh();
     this.refreshInFlight$ = null;
+    this.syncStorageIdentity();
   }
 
   private isIdleExpired(): boolean {
@@ -698,4 +954,17 @@ export class AuthService {
       /* storage unavailable */
     }
   }
+}
+
+/** A refusal carrying the step-up challenge (contract C3.2). */
+export function isStepUpError(err: unknown): boolean {
+  const e = err as {
+    status?: number;
+    error?: { responseCode?: unknown } | null;
+    headers?: { get?: (n: string) => string | null };
+  } | null;
+  if (!e || e.status !== 401) return false;
+  if (e.error && typeof e.error === 'object' && e.error.responseCode === '-401-stepup') return true;
+  const www = e.headers?.get?.('WWW-Authenticate') ?? '';
+  return /insufficient_user_authentication/i.test(www);
 }

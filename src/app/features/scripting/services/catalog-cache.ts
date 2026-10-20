@@ -1,4 +1,5 @@
 import type { PineCatalog } from '@core/api/scripting.types';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Persists the language catalog between sessions so the editor has full completion and docs
@@ -80,7 +81,7 @@ export async function readCachedCatalog(): Promise<PineCatalog | null> {
     /* fall through */
   }
   try {
-    const raw = localStorage.getItem(LS_KEY);
+    const raw = appStorage.getItem(LS_KEY);
     if (!raw) return null;
     const parsed: unknown = JSON.parse(raw);
     return isCatalog(parsed) ? parsed : null;
@@ -98,14 +99,14 @@ export async function writeCachedCatalog(catalog: PineCatalog): Promise<void> {
   }
   if (stored) {
     try {
-      localStorage.removeItem(LS_KEY);
+      appStorage.removeItem(LS_KEY);
     } catch {
       /* storage unavailable */
     }
     return;
   }
   try {
-    localStorage.setItem(LS_KEY, JSON.stringify(catalog));
+    appStorage.setItem(LS_KEY, JSON.stringify(catalog));
   } catch {
     /* quota exceeded or storage unavailable — run without a cache */
   }

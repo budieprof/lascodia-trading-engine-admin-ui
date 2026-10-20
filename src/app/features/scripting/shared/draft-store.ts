@@ -1,4 +1,5 @@
 import type { ScriptInputValues } from '@core/api/scripting.types';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Local autosave of an unsaved Pine edit (PE-I3): a crash, a closed tab or a navigation away no
@@ -33,7 +34,7 @@ export function draftKey(scope: DraftScope, id: string | number | null | undefin
 
 function storage(): Storage | null {
   try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
+    return appStorage;
   } catch {
     return null;
   }

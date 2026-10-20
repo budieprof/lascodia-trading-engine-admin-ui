@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { canAccessPath } from '@core/auth/can-access.guard';
 import { PositionsPageComponent } from './pages/positions-page/positions-page.component';
 import { PositionDetailPageComponent } from './pages/position-detail-page/position-detail-page.component';
 
@@ -6,6 +7,7 @@ export const POSITIONS_ROUTES: Routes = [
   { path: '', component: PositionsPageComponent, data: { breadcrumb: 'Positions' } },
   {
     path: 'deltas',
+    canActivate: [canAccessPath('positions/deltas')],
     data: { breadcrumb: 'Position Deltas' },
     loadComponent: () =>
       import('./pages/position-deltas-page/position-deltas-page.component').then(
@@ -14,6 +16,7 @@ export const POSITIONS_ROUTES: Routes = [
   },
   {
     path: 'event-exposure',
+    canActivate: [canAccessPath('positions/event-exposure')],
     data: { breadcrumb: 'Event Exposure' },
     loadComponent: () =>
       import('./pages/event-exposure-page/event-exposure-page.component').then(

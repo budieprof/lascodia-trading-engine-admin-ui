@@ -50,6 +50,7 @@ import {
   seedFromSnapshot,
   type PriceTick,
 } from './watchlist-wall';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Multi-symbol watchlist wall — one mini-chart tile per symbol of a watchlist, so the operator can scan many pairs at
@@ -878,7 +879,7 @@ export class WatchlistPageComponent implements OnInit {
 
   private persist(key: string, value: string): void {
     try {
-      localStorage.setItem(key, value);
+      appStorage.setItem(key, value);
     } catch {
       /* localStorage full / blocked — best-effort */
     }
@@ -886,7 +887,7 @@ export class WatchlistPageComponent implements OnInit {
 
   private read(key: string): string | null {
     try {
-      return localStorage.getItem(key);
+      return appStorage.getItem(key);
     } catch {
       return null;
     }

@@ -1,4 +1,10 @@
-import { ApplicationConfig, ErrorHandler, provideZoneChangeDetection } from '@angular/core';
+import {
+  ApplicationConfig,
+  ErrorHandler,
+  inject,
+  provideAppInitializer,
+  provideZoneChangeDetection,
+} from '@angular/core';
 import {
   provideRouter,
   withPreloading,
@@ -12,6 +18,9 @@ import { provideEchartsCore } from 'ngx-echarts';
 import * as echarts from 'echarts';
 import { routes } from './app.routes';
 import { authInterceptor } from '@core/auth/auth.interceptor';
+import { csrfInterceptor } from '@core/auth/csrf.interceptor';
+import { approvalInterceptor } from '@core/auth/approval.interceptor';
+import { AuthService } from '@core/auth/auth.service';
 import { serverClockInterceptor } from '@core/time/server-clock';
 import { errorInterceptor } from '@core/auth/error.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
@@ -88,16 +97,23 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
           },
         }),
       ),
-      // Order matters: auth → retry (so retries carry the token) → error (final toast).
+      // Order matters: auth → CSRF (BFF sign-in) → retry (so retries carry both) → error (final
+      // toast, step-up, CSRF refresh) → approval (two-person 202 notice).
       provideHttpClient(
         withXhr(),
         withInterceptors([
           authInterceptor,
+          csrfInterceptor,
           retryInterceptor,
           errorInterceptor,
+          approvalInterceptor,
           serverClockInterceptor,
         ]),
       ),
+      // Who is signed in is settled before the first route renders: guards, the sidebar and every
+      // service that reads per-person storage at construction see the final identity and
+      // permissions (BFF: GET /bff/session; legacy: a restored admin token's permissions).
+      provideAppInitializer(() => inject(AuthService).initialize()),
       provideAnimations(),
       provideEchartsCore({ echarts: themedEcharts }),
       // Once for the app: a touch the browser cancels on any Lightweight Charts chart must not

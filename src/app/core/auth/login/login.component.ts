@@ -2,9 +2,11 @@ import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/cor
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { AuthService } from '../auth.service';
+import { BffSessionService } from '../bff-session.service';
+import { signInErrorMessage } from '../bff.types';
+import { SIGNIN_ERROR_PARAM } from '../auth.guard';
 import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
 import { ThemeService } from '@core/theme/theme.service';
-import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { LogoComponent } from '@shared/components/logo/logo.component';
 
 @Component({
@@ -20,205 +22,149 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
           <p>Admin Console</p>
         </div>
 
-        <div class="mode-toggle" role="tablist" aria-label="Login mode">
-          <button
-            type="button"
-            role="tab"
-            class="mode-btn"
-            [class.active]="mode() === 'admin'"
-            [attr.aria-selected]="mode() === 'admin'"
-            (click)="mode.set('admin')"
-          >
-            Admin
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="mode-btn"
-            [class.active]="mode() === 'operator'"
-            [attr.aria-selected]="mode() === 'operator'"
-            (click)="mode.set('operator')"
-          >
-            Operator
-          </button>
-          @if (devLoginAvailable) {
+        @if (bffMode) {
+          <div class="bff-signin">
+            @if (notice(); as n) {
+              <p class="notice" role="status">{{ n }}</p>
+            }
+            @if (error()) {
+              <div class="error-message" role="alert">{{ error() }}</div>
+            }
+            <button type="button" class="login-btn" (click)="onBffSignIn()" [disabled]="loading()">
+              @if (loading()) {
+                <span class="spinner"></span>
+              } @else {
+                Sign in
+              }
+            </button>
+            <p class="dev-note">
+              You sign in with your organisation account and its second factor. This console never
+              stores your password or a token.
+            </p>
+          </div>
+        } @else {
+          <div class="mode-toggle" role="tablist" aria-label="Login mode">
             <button
               type="button"
               role="tab"
               class="mode-btn"
-              [class.active]="mode() === 'dev'"
-              [attr.aria-selected]="mode() === 'dev'"
-              (click)="mode.set('dev')"
+              [class.active]="mode() === 'admin'"
+              [attr.aria-selected]="mode() === 'admin'"
+              (click)="mode.set('admin')"
             >
-              Developer <span class="dev-tag">dev</span>
+              Admin
             </button>
+            <button
+              type="button"
+              role="tab"
+              class="mode-btn"
+              [class.active]="mode() === 'operator'"
+              [attr.aria-selected]="mode() === 'operator'"
+              (click)="mode.set('operator')"
+            >
+              Operator
+            </button>
+          </div>
+
+          @if (mode() === 'admin') {
+            <form (ngSubmit)="onAdminLogin()" class="login-form">
+              <div class="field">
+                <label for="username">Username</label>
+                <input
+                  id="username"
+                  type="text"
+                  [(ngModel)]="username"
+                  name="username"
+                  placeholder="superadmin"
+                  autocomplete="username"
+                  required
+                />
+              </div>
+
+              <div class="field">
+                <label for="adminPassword">Password</label>
+                <input
+                  id="adminPassword"
+                  type="password"
+                  [(ngModel)]="adminPassword"
+                  name="adminPassword"
+                  autocomplete="current-password"
+                  required
+                />
+              </div>
+
+              @if (error()) {
+                <div class="error-message">{{ error() }}</div>
+              }
+
+              <button type="submit" [disabled]="loading()" class="login-btn">
+                @if (loading()) {
+                  <span class="spinner"></span>
+                } @else {
+                  Sign In
+                }
+              </button>
+            </form>
+
+            <p class="dev-note">Admin user — username &amp; password.</p>
+          } @else if (mode() === 'operator') {
+            <form
+              (ngSubmit)="onOperatorLogin()"
+              class="login-form"
+           
+            >
+              <div class="field">
+                <label for="accountId">Account ID</label>
+                <input
+                  id="accountId"
+                  type="text"
+                  [(ngModel)]="accountId"
+                  name="accountId"
+                  placeholder="12345678"
+                  autocomplete="username"
+                  required
+                />
+              </div>
+
+              <div class="field">
+                <label for="brokerServer">Broker Server</label>
+                <input
+                  id="brokerServer"
+                  type="text"
+                  [(ngModel)]="brokerServer"
+                  name="brokerServer"
+                  placeholder="MetaQuotes-Demo"
+                  required
+                />
+              </div>
+
+              <div class="field">
+                <label for="password">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  [(ngModel)]="password"
+                  name="password"
+                  autocomplete="current-password"
+                  required
+                />
+              </div>
+
+              @if (error()) {
+                <div class="error-message">{{ error() }}</div>
+              }
+
+              <button type="submit" [disabled]="loading()" class="login-btn">
+                @if (loading()) {
+                  <span class="spinner"></span>
+                } @else {
+                  Sign In
+                }
+              </button>
+            </form>
+
+            <p class="dev-note">Engine auth — JWT carries role claims.</p>
           }
-        </div>
-
-        @if (mode() === 'admin') {
-          <form (ngSubmit)="onAdminLogin()" class="login-form" [class.no-dev]="!devLoginAvailable">
-            <div class="field">
-              <label for="username">Username</label>
-              <input
-                id="username"
-                type="text"
-                [(ngModel)]="username"
-                name="username"
-                placeholder="superadmin"
-                autocomplete="username"
-                required
-              />
-            </div>
-
-            <div class="field">
-              <label for="adminPassword">Password</label>
-              <input
-                id="adminPassword"
-                type="password"
-                [(ngModel)]="adminPassword"
-                name="adminPassword"
-                autocomplete="current-password"
-                required
-              />
-            </div>
-
-            @if (error()) {
-              <div class="error-message">{{ error() }}</div>
-            }
-
-            <button type="submit" [disabled]="loading()" class="login-btn">
-              @if (loading()) {
-                <span class="spinner"></span>
-              } @else {
-                Sign In
-              }
-            </button>
-          </form>
-
-          <p class="dev-note">Admin user — username &amp; password.</p>
-        } @else if (mode() === 'operator') {
-          <form
-            (ngSubmit)="onOperatorLogin()"
-            class="login-form"
-            [class.no-dev]="!devLoginAvailable"
-          >
-            <div class="field">
-              <label for="accountId">Account ID</label>
-              <input
-                id="accountId"
-                type="text"
-                [(ngModel)]="accountId"
-                name="accountId"
-                placeholder="12345678"
-                autocomplete="username"
-                required
-              />
-            </div>
-
-            <div class="field">
-              <label for="brokerServer">Broker Server</label>
-              <input
-                id="brokerServer"
-                type="text"
-                [(ngModel)]="brokerServer"
-                name="brokerServer"
-                placeholder="MetaQuotes-Demo"
-                required
-              />
-            </div>
-
-            <div class="field">
-              <label for="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                [(ngModel)]="password"
-                name="password"
-                autocomplete="current-password"
-                required
-              />
-            </div>
-
-            @if (error()) {
-              <div class="error-message">{{ error() }}</div>
-            }
-
-            <button type="submit" [disabled]="loading()" class="login-btn">
-              @if (loading()) {
-                <span class="spinner"></span>
-              } @else {
-                Sign In
-              }
-            </button>
-          </form>
-
-          <p class="dev-note">Engine auth — JWT carries role claims.</p>
-        } @else {
-          <form (ngSubmit)="onDevLogin()" class="login-form" [class.no-dev]="!devLoginAvailable">
-            <p class="dev-warning" role="note">
-              Development only — mints a shared-library token with no role claims. Not for operating
-              a live engine.
-            </p>
-            <div class="field">
-              <label for="userId">User ID</label>
-              <input
-                id="userId"
-                type="text"
-                [(ngModel)]="userId"
-                name="userId"
-                placeholder="dev-user-1"
-                autocomplete="username"
-              />
-            </div>
-
-            <div class="field">
-              <label for="firstName">First Name</label>
-              <input
-                id="firstName"
-                type="text"
-                [(ngModel)]="firstName"
-                name="firstName"
-                placeholder="Dev"
-              />
-            </div>
-
-            <div class="field">
-              <label for="lastName">Last Name</label>
-              <input
-                id="lastName"
-                type="text"
-                [(ngModel)]="lastName"
-                name="lastName"
-                placeholder="User"
-              />
-            </div>
-
-            <div class="field">
-              <label for="email">Email</label>
-              <input
-                id="email"
-                type="email"
-                [(ngModel)]="email"
-                name="email"
-                placeholder="dev@lascodia.com"
-                autocomplete="email"
-              />
-            </div>
-
-            @if (error()) {
-              <div class="error-message">{{ error() }}</div>
-            }
-
-            <button type="submit" [disabled]="loading()" class="login-btn">
-              @if (loading()) {
-                <span class="spinner"></span>
-              } @else {
-                Sign In
-              }
-            </button>
-          </form>
-
-          <p class="dev-note">Development token generator — no role claims.</p>
         }
       </div>
     </div>
@@ -274,39 +220,26 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
-        /* Reserve the height of the tallest form (Developer: four fields) so
-         * the card does not resize when the operator switches tabs; the
-         * submit button is pinned to the bottom so it stays put as well. */
-        min-height: 348px;
-      }
-      /* Without the Developer tab the tallest form is Operator (three fields). */
-      .login-form.no-dev {
+        /* Reserve the height of the tallest form (Operator: three fields) so the card does not
+         * resize when the operator switches tabs; the submit button is pinned to the bottom so it
+         * stays put as well. */
         min-height: 268px;
       }
       .login-form .login-btn {
         margin-top: auto;
       }
-      .dev-tag {
-        display: inline-block;
-        margin-left: 4px;
-        padding: 0 5px;
-        border-radius: var(--radius-full);
-        background: rgba(255, 149, 0, 0.18);
-        color: #b25000;
-        font-size: 9px;
-        font-weight: var(--font-bold);
-        letter-spacing: 0.06em;
-        text-transform: uppercase;
-        vertical-align: 1px;
+      .bff-signin {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
-      .dev-warning {
+      .notice {
         margin: 0;
         padding: var(--space-2) var(--space-3);
         border-radius: var(--radius-sm);
-        background: rgba(255, 149, 0, 0.08);
-        border: 1px solid rgba(255, 149, 0, 0.3);
-        color: #b25000;
-        font-size: var(--text-xs);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
         line-height: 1.4;
       }
 
@@ -439,6 +372,11 @@ export class LoginComponent {
   private auth = inject(AuthService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private bff = inject(BffSessionService);
+
+  /** `config.json` → `featureFlags.bffAuth`: sign in through the engine's BFF (Keycloak). */
+  readonly bffMode = this.auth.mode === 'bff';
+
   constructor() {
     // ThemeService writes `data-theme` on <html> from its constructor effect,
     // but nothing on the login route (no sidebar, no chart card) injected it,
@@ -446,6 +384,7 @@ export class LoginComponent {
     // light palette. Resolving it here makes the login screen honour the
     // stored / system theme like every other route.
     inject(ThemeService);
+    if (this.bffMode) this.prepareBffPage();
   }
 
   /**
@@ -458,18 +397,11 @@ export class LoginComponent {
    * fails sanitisation (it is attacker-controllable — see return-url.ts).
    */
   private postLoginTarget(): string {
-    const raw = this.route.snapshot.queryParamMap.get(RETURN_URL_PARAM);
+    const raw = this.route.snapshot.queryParamMap.get(RETURN_URL_PARAM) ?? this.noteReturnUrl;
     return sanitizeReturnUrl(raw) ?? DEFAULT_POST_LOGIN_ROUTE;
   }
 
-  readonly mode = signal<'admin' | 'operator' | 'dev'>('admin');
-
-  /**
-   * The Developer tab only where the console talks to an engine directly (a dev build, apiBaseUrl
-   * absolute). A release is same-origin through Caddy, which refuses the dev-token endpoint: on
-   * the live engine it minted a passwordless Admin token for anyone reaching the public tunnel.
-   */
-  readonly devLoginAvailable = !!inject(RUNTIME_CONFIG).apiBaseUrl;
+  readonly mode = signal<'admin' | 'operator'>('admin');
 
   // Admin-mode fields (username + password)
   username = '';
@@ -480,14 +412,41 @@ export class LoginComponent {
   brokerServer = '';
   password = '';
 
-  // Developer-mode fields (shared-library dev token)
-  userId = 'dev-user-1';
-  firstName = 'Dev';
-  lastName = 'User';
-  email = 'dev@lascodia.com';
-
   loading = signal(false);
   error = signal<string | null>(null);
+  /** Why the person is here (BFF): their session ended, or they were idle. */
+  readonly notice = signal<string | null>(null);
+  /** The return route a BFF sign-out remembered (the logout round trip drops query params). */
+  private noteReturnUrl: string | null = null;
+
+  /**
+   * BFF: explain how the person got here — a sign-in that did not complete (`signin_error`, from
+   * `/bff/callback`), a session that ended under them, or an idle sign-out — and send someone who
+   * IS signed in straight on.
+   */
+  private prepareBffPage(): void {
+    const q = this.route.snapshot.queryParamMap;
+    const note = this.auth.takeSignedOutNote();
+    this.noteReturnUrl = note?.returnUrl ?? null;
+    const reason = note?.reason ?? q.get('reason');
+    if (reason === 'idle') {
+      this.notice.set('You were signed out after a period of inactivity. Sign in again to continue.');
+    } else if (reason === 'expired') {
+      this.notice.set('Your session has ended. Sign in again to continue.');
+    }
+    this.error.set(signInErrorMessage(q.get(SIGNIN_ERROR_PARAM)));
+    if (!this.error() && this.bff.unreachable()) {
+      this.error.set('The engine could not be reached. Check your connection and try again.');
+    }
+    if (this.auth.isAuthenticated()) void this.router.navigateByUrl(this.postLoginTarget());
+  }
+
+  /** BFF: leave for `/bff/login` (Keycloak) and come back to where the person was going. */
+  onBffSignIn(): void {
+    this.loading.set(true);
+    this.error.set(null);
+    this.auth.beginSignIn(this.postLoginTarget());
+  }
 
   onAdminLogin() {
     if (!this.username || !this.adminPassword) {
@@ -538,27 +497,6 @@ export class LoginComponent {
         },
         error: (err) => {
           this.error.set(err?.message || 'Login failed. Is the engine reachable?');
-          this.loading.set(false);
-        },
-      });
-  }
-
-  onDevLogin() {
-    this.loading.set(true);
-    this.error.set(null);
-    this.auth
-      .login({
-        userId: this.userId,
-        firstName: this.firstName,
-        lastName: this.lastName,
-        email: this.email,
-      })
-      .subscribe({
-        next: () => {
-          this.router.navigateByUrl(this.postLoginTarget());
-        },
-        error: (err) => {
-          this.error.set(err?.message || 'Login failed. Is the backend running?');
           this.loading.set(false);
         },
       });

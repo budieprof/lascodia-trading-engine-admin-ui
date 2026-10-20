@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Lets the assistant see what the operator sees.
@@ -291,7 +292,7 @@ export class ScreenCaptureService {
   private setMode(mode: VisionMode): void {
     this.mode.set(mode);
     try {
-      localStorage.setItem(MODE_KEY, mode);
+      appStorage.setItem(MODE_KEY, mode);
     } catch {
       /* a locked-down profile is not a reason to fail the capture */
     }
@@ -350,7 +351,7 @@ function pageBackground(): string {
 
 function readMode(): VisionMode {
   try {
-    return localStorage.getItem(MODE_KEY) === 'screen' ? 'screen' : 'page';
+    return appStorage.getItem(MODE_KEY) === 'screen' ? 'screen' : 'page';
   } catch {
     return 'page';
   }

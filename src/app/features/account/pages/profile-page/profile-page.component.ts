@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/c
 import { RouterLink } from '@angular/router';
 
 import { AuthService } from '@core/auth/auth.service';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 type PermGroup = { category: string; keys: string[] };
@@ -15,9 +16,21 @@ type PermGroup = { category: string; keys: string[] };
     <div class="page">
       <app-page-header
         title="My Profile"
-        subtitle="Your account details, granted roles, and effective permissions."
+        subtitle="Your account details and what you may do in this console."
       >
-        <a class="btn btn-primary" routerLink="/account/change-password">Change password</a>
+        @if (bffMode) {
+          @if (canSee('/account/sessions')) {
+            <a class="btn btn-secondary" routerLink="/account/sessions">Sessions &amp; devices</a>
+          }
+          @if (canSee('/account/tokens')) {
+            <a class="btn btn-secondary" routerLink="/account/tokens">Access tokens</a>
+          }
+          <a class="btn btn-primary" [href]="identityAccountUrl" target="_blank" rel="noopener">
+            Password &amp; second factor
+          </a>
+        } @else {
+          <a class="btn btn-primary" routerLink="/account/change-password">Change password</a>
+        }
       </app-page-header>
 
       @if (user(); as u) {
@@ -32,28 +45,41 @@ type PermGroup = { category: string; keys: string[] };
               <dt>Email</dt>
               <dd>{{ u.email || '—' }}</dd>
             </div>
-            <div class="detail">
-              <dt>Super admin</dt>
-              <dd>{{ isSuperAdmin() ? 'Yes' : 'No' }}</dd>
-            </div>
+            @if (bffMode) {
+              <div class="detail">
+                <dt>Organisation</dt>
+                <dd>{{ tenant()?.name ?? '—' }}</dd>
+              </div>
+              <div class="detail">
+                <dt>Second factor at this sign-in</dt>
+                <dd>{{ mfaUsed() ? 'Yes' : 'No' }}</dd>
+              </div>
+            } @else {
+              <div class="detail">
+                <dt>Super admin</dt>
+                <dd>{{ isSuperAdmin() ? 'Yes' : 'No' }}</dd>
+              </div>
+            }
           </dl>
         </section>
       }
 
-      <section class="card">
-        <header class="card-head">
-          <h3>Roles</h3>
-          <span class="muted">{{ roles().length }}</span>
-        </header>
-        <div class="chips pad">
-          @for (role of roles(); track role) {
-            <span class="chip">{{ role }}</span>
-          }
-          @if (roles().length === 0) {
-            <span class="muted small">No roles assigned.</span>
-          }
-        </div>
-      </section>
+      @if (!bffMode) {
+        <section class="card">
+          <header class="card-head">
+            <h3>Roles</h3>
+            <span class="muted">{{ roles().length }}</span>
+          </header>
+          <div class="chips pad">
+            @for (role of roles(); track role) {
+              <span class="chip">{{ role }}</span>
+            }
+            @if (roles().length === 0) {
+              <span class="muted small">No roles assigned.</span>
+            }
+          </div>
+        </section>
+      }
 
       <section class="card">
         <header class="card-head">
@@ -63,8 +89,8 @@ type PermGroup = { category: string; keys: string[] };
         @if (permissions().length === 0) {
           <div class="chips pad">
             <span class="muted small">
-              No explicit permissions — this account relies on role-based access or is a non-admin
-              session.
+              You hold no permissions here, so the console shows only your own account pages. Ask an
+              administrator for a role.
             </span>
           </div>
         } @else {
@@ -193,6 +219,11 @@ type PermGroup = { category: string; keys: string[] };
         background: var(--accent);
         color: #fff;
       }
+      .btn-secondary {
+        background: transparent;
+        color: var(--text-primary);
+        border-color: var(--border);
+      }
     `,
   ],
 })
@@ -203,6 +234,19 @@ export class ProfilePageComponent {
   readonly roles = this.auth.roles;
   readonly permissions = this.auth.permissions;
   readonly isSuperAdmin = this.auth.isSuperAdmin;
+  readonly bffMode = this.auth.mode === 'bff';
+  readonly tenant = this.auth.activeTenant;
+  readonly mfaUsed = computed(() => !!this.auth.session()?.mfa?.satisfied);
+  readonly identityAccountUrl = (() => {
+    const cfg = inject(RUNTIME_CONFIG);
+    return (
+      cfg.identityAccountUrl || `${cfg.apiBaseUrl.replace(/\/$/, '')}/idp/realms/lascodia/account/`
+    );
+  })();
+
+  canSee(url: string): boolean {
+    return this.auth.canSeePath(url);
+  }
 
   readonly permissionGroups = computed<PermGroup[]>(() => {
     const byCat = new Map<string, string[]>();

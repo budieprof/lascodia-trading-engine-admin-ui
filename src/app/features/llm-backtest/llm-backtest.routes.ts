@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
-import { requirePermission } from '@core/auth/permission.guard';
+import { canAccess } from '@core/auth/can-access.guard';
+import { Permission } from '@core/auth/permissions.generated';
 
 /**
  * LLM Analysis Backtest feature routes. Permission gating uses the same
@@ -14,7 +15,7 @@ export const LLM_BACKTEST_ROUTES: Routes = [
     path: '',
     pathMatch: 'full',
     data: { breadcrumb: 'LLM Backtest' },
-    canActivate: [requirePermission('llmbacktest.view')],
+    canActivate: [canAccess(Permission.LlmbacktestView)],
     loadComponent: () =>
       import('./pages/llm-backtest-index-page/llm-backtest-index-page.component').then(
         (m) => m.LlmBacktestIndexPageComponent,
@@ -23,7 +24,7 @@ export const LLM_BACKTEST_ROUTES: Routes = [
   {
     path: 'new',
     data: { breadcrumb: 'New' },
-    canActivate: [requirePermission('llmbacktest.view')],
+    canActivate: [canAccess(Permission.LlmbacktestView)],
     loadComponent: () =>
       import('./pages/llm-backtest-new-page/llm-backtest-new-page.component').then(
         (m) => m.LlmBacktestNewPageComponent,
@@ -32,7 +33,7 @@ export const LLM_BACKTEST_ROUTES: Routes = [
   {
     path: 'compare',
     data: { breadcrumb: 'Compare runs' },
-    canActivate: [requirePermission('llmbacktest.view')],
+    canActivate: [canAccess(Permission.LlmbacktestView)],
     loadComponent: () =>
       import('./pages/llm-backtest-compare-page/llm-backtest-compare-page.component').then(
         (m) => m.LlmBacktestComparePageComponent,
@@ -41,7 +42,7 @@ export const LLM_BACKTEST_ROUTES: Routes = [
   {
     path: ':id',
     data: { breadcrumb: 'Detail' },
-    canActivate: [requirePermission('llmbacktest.view')],
+    canActivate: [canAccess(Permission.LlmbacktestView)],
     loadComponent: () =>
       import('./pages/llm-backtest-detail-page/llm-backtest-detail-page.component').then(
         (m) => m.LlmBacktestDetailPageComponent,

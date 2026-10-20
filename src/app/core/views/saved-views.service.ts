@@ -1,4 +1,5 @@
 import { Injectable, computed, signal } from '@angular/core';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Per-route saved-view store. A "view" snapshots whatever filter / sort /
@@ -94,7 +95,7 @@ export class SavedViewsService {
 
   private readAll(): SavedView[] {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = appStorage.getItem(STORAGE_KEY);
       if (!raw) return [];
       const parsed = JSON.parse(raw) as SavedView[];
       return Array.isArray(parsed) ? parsed : [];
@@ -105,7 +106,7 @@ export class SavedViewsService {
 
   private persist(views: SavedView[]): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(views));
+      appStorage.setItem(STORAGE_KEY, JSON.stringify(views));
     } catch {
       /* quota exceeded / storage unavailable — silent */
     }

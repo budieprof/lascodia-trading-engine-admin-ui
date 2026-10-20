@@ -1,0 +1,488 @@
+[
+  {
+    "key": "access.viewer",
+    "category": "Access tier",
+    "description": "Baseline read-only access to dashboards, lists and detail pages.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "access.trader",
+    "category": "Access tier",
+    "description": "Trader-tier module access (order/signal actions).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "access.analyst",
+    "category": "Access tier",
+    "description": "Analyst-tier module access (ML / research actions).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "access.operator",
+    "category": "Access tier",
+    "description": "Operator-tier module access (engine config, risk, account management).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "access.admin",
+    "category": "Access tier",
+    "description": "Admin-tier module access (user & role administration).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "access.eaingest",
+    "category": "Access tier",
+    "description": "EA data-ingestion path (tick/candle/snapshot/execution reports).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.read",
+    "category": "Orders",
+    "description": "View orders and order history.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.create",
+    "category": "Orders",
+    "description": "Place new orders.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.modify",
+    "category": "Orders",
+    "description": "Modify working orders (SL/TP/price).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.cancel",
+    "category": "Orders",
+    "description": "Cancel a working order.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.cancel.batch",
+    "category": "Orders",
+    "description": "Batch-cancel multiple orders.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.approve",
+    "category": "Orders",
+    "description": "Approve a signal-generated order for placement.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "orders.ingest",
+    "category": "Orders",
+    "description": "Submit EA execution reports / orders-from-signals.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "signals.read",
+    "category": "Trade signals",
+    "description": "View generated trade signals.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "signals.approve",
+    "category": "Trade signals",
+    "description": "Approve a pending trade signal.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "signals.reject",
+    "category": "Trade signals",
+    "description": "Reject a pending trade signal.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "strategies.read",
+    "category": "Strategies",
+    "description": "View strategies and their settings.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "strategies.edit",
+    "category": "Strategies",
+    "description": "Edit strategy parameters and settings.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "strategies.lifecycle",
+    "category": "Strategies",
+    "description": "Pause/activate/promote/retire strategies.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "ml.read",
+    "category": "Machine learning",
+    "description": "View ML models, training runs and evaluations.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "ml.train",
+    "category": "Machine learning",
+    "description": "Queue ML training and hyperparameter searches.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "ml.evaluate",
+    "category": "Machine learning",
+    "description": "Run backtests / walk-forward / evaluation jobs.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "ml.rollback",
+    "category": "Machine learning",
+    "description": "Roll back / promote ML model versions.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "engine.config",
+    "category": "Engine control",
+    "description": "Read and update engine configuration.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "engine.killswitch",
+    "category": "Engine control",
+    "description": "Arm/disarm kill switches.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "engine.paper",
+    "category": "Engine control",
+    "description": "Toggle paper/live trading mode.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "marketdata.read",
+    "category": "Market data",
+    "description": "View market data, prices and analyses.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "marketdata.ingest",
+    "category": "Market data",
+    "description": "Ingest ticks/candles/snapshots (EA data path).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "risk.read",
+    "category": "Risk",
+    "description": "View risk profiles and exposure.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "risk.manage",
+    "category": "Risk",
+    "description": "Create/update risk profiles and limits.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "accounts.read",
+    "category": "Trading accounts",
+    "description": "View trading accounts.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "accounts.manage",
+    "category": "Trading accounts",
+    "description": "Manage trading accounts and EA management.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "llmbacktest.view",
+    "category": "LLM analysis backtest",
+    "description": "View LLM analysis backtest runs and per-point outcomes.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "llmbacktest.launch",
+    "category": "LLM analysis backtest",
+    "description": "Launch a new LLM analysis backtest run (cost-bearing — calls the LLM with historical snapshots).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "llmbacktest.cancel",
+    "category": "LLM analysis backtest",
+    "description": "Cancel a running or pending LLM analysis backtest run.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prompttemplate.view",
+    "category": "Prompt templates",
+    "description": "View DB-backed LLM SystemPrompt templates — listing, detail, active resolution, diff.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prompttemplate.edit",
+    "category": "Prompt templates",
+    "description": "Fork, update and archive prompt-template rows. Editor-tier permission — non-cost-of-error: edits only touch drafts (active and archived rows are immutable) so the live LLM behaviour cannot change via this key alone.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prompttemplate.promote",
+    "category": "Prompt templates",
+    "description": "Promote a draft prompt-template row to active. Cost-of-error — when UseDbBackedPromptTemplate is on the promoted row IS the live spot-analysis SystemPrompt on the next call. Gate tightly.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "users.manage",
+    "category": "Administration",
+    "description": "Create and manage admin users and their role assignments.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "roles.manage",
+    "category": "Administration",
+    "description": "Create roles and assign/update their permissions.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "audit.read",
+    "category": "Audit",
+    "description": "Read, export and verify the audit log (sign-ins, access changes, configuration and trading controls).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.tenants.manage",
+    "category": "Organisations",
+    "description": "Platform staff: create, list, suspend and reactivate organisations (tenants), and manage any organisation's members. Also requires acting in House or being a super admin.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "tenant.members.manage",
+    "category": "Organisations",
+    "description": "Add, remove, suspend and reactivate members of the organisation you are acting in.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.members.read",
+    "category": "Identity and access",
+    "description": "View the organisation's members, invitations, teams, account groups and role grants.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.invitations.manage",
+    "category": "Identity and access",
+    "description": "Invite people to the organisation and revoke pending invitations.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.grants.manage",
+    "category": "Identity and access",
+    "description": "Grant and revoke roles at organisation, account-group, account or strategy scope; manage teams and account groups. Only what you hold yourself can be granted.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.security.manage",
+    "category": "Identity and access",
+    "description": "Change the organisation's security policy: required MFA, session lifetimes, IP allow-list.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.sso.manage",
+    "category": "Identity and access",
+    "description": "Configure single sign-on for the organisation and issue SCIM provisioning tokens.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.sessions.manage",
+    "category": "Identity and access",
+    "description": "View and end other members' sign-in sessions.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.tokens.create",
+    "category": "Identity and access",
+    "description": "Create personal access tokens (limited to the permissions you hold).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.approvals.decide",
+    "category": "Identity and access",
+    "description": "Approve or reject two-person requests (the approver must also hold the action's own permission and cannot approve their own request).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.access_review",
+    "category": "Identity and access",
+    "description": "Run access reviews and revoke grants that are no longer used.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.elevation.approve",
+    "category": "Organisations",
+    "description": "Platform staff: approve time-limited access to another organisation's data.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.impersonate",
+    "category": "Organisations",
+    "description": "Platform staff: view the console as another user (read-only by default, recorded in that organisation's audit log).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  }
+]

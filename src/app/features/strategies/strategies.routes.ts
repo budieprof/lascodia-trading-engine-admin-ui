@@ -1,4 +1,5 @@
 import { Routes } from '@angular/router';
+import { canAccessPath } from '@core/auth/can-access.guard';
 import { StrategiesPageComponent } from './pages/strategies-page/strategies-page.component';
 import { StrategyDetailPageComponent } from './pages/strategy-detail-page/strategy-detail-page.component';
 import { StrategyAnalyticsPageComponent } from './pages/strategy-analytics-page/strategy-analytics-page.component';
@@ -14,11 +15,13 @@ export const STRATEGIES_ROUTES: Routes = [
   { path: 'allocation', redirectTo: '/strategy-portfolio', pathMatch: 'full' },
   {
     path: 'compare',
+    canActivate: [canAccessPath('strategies/compare')],
     component: StrategiesComparePageComponent,
     data: { breadcrumb: 'Compare' },
   },
   {
     path: 'llm-proposals',
+    canActivate: [canAccessPath('strategies/llm-proposals')],
     data: { breadcrumb: 'LLM Proposals' },
     loadComponent: () =>
       import('./pages/llm-proposals-page/llm-proposals-page.component').then(
@@ -27,6 +30,7 @@ export const STRATEGIES_ROUTES: Routes = [
   },
   {
     path: 'rejections',
+    canActivate: [canAccessPath('strategies/rejections')],
     data: { breadcrumb: 'Rejection Summary' },
     loadComponent: () =>
       import('./pages/rejection-summary-page/rejection-summary-page.component').then(
@@ -35,6 +39,7 @@ export const STRATEGIES_ROUTES: Routes = [
   },
   {
     path: 'templates',
+    canActivate: [canAccessPath('strategies/templates')],
     data: { breadcrumb: 'Templates' },
     loadComponent: () =>
       import('./pages/templates-page/templates-page.component').then(
@@ -43,6 +48,7 @@ export const STRATEGIES_ROUTES: Routes = [
   },
   {
     path: 'settings',
+    canActivate: [canAccessPath('strategies/settings')],
     data: { breadcrumb: 'Settings' },
     loadComponent: () =>
       import('./pages/strategies-settings-page/strategies-settings-page.component').then(
@@ -52,6 +58,7 @@ export const STRATEGIES_ROUTES: Routes = [
   {
     // Pine script libraries (ADR-0027 §7). Declared before ':id' so it is never read as an id.
     path: 'libraries',
+    canActivate: [canAccessPath('strategies/libraries')],
     data: { breadcrumb: 'Pine Libraries' },
     // PE-14: an unpublished library draft asks before the page is left.
     canDeactivate: [unsavedChangesGuard],

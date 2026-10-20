@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import type { DrawingKind, DrawingStyle } from './model';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Named per-tool style templates — TradingView's "Template ▾" on the floating
@@ -108,7 +109,7 @@ export class DrawingTemplates {
 
 function safeStorage(): Storage | null {
   try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
+    return appStorage;
   } catch {
     return null;
   }

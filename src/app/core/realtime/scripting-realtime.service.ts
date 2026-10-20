@@ -5,12 +5,13 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { Observable, Subject, filter, firstValueFrom, share } from 'rxjs';
+import { Observable, Subject, filter, share } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import type { ScriptSessionFrame, ScriptSessionSubscription } from '@core/api/scripting.types';
 import { backoffMs } from './realtime.service';
+import { hubConnectPlan } from './hub-auth';
 
 /** The event the scripting hub pushes (SS-I3): a warm chart session's changes, at most one a second per session. */
 export const SCRIPT_FRAME_EVENT = 'scriptFrame';
@@ -95,11 +96,21 @@ export class ScriptingRealtimeService {
     if (!this.auth.isAuthenticated()) return;
     if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
     const base = this.runtime.apiBaseUrl.replace(/\/$/, '');
-    const connection = new HubConnectionBuilder()
-      .withUrl(`${base}/api/hubs/scripting`, { accessTokenFactory: () => this.freshToken() })
-      .withAutomaticReconnect({ nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount) })
-      .configureLogging(LogLevel.Warning)
-      .build();
+    // As the trading hub does it (hub-auth.ts): legacy = token per attempt + SignalR's reconnect;
+    // BFF = one single-use ticket per connection, reconnects through scheduleRestart().
+    const plan = await hubConnectPlan(this.auth, `${base}/api/hubs/scripting`);
+    if (!plan) {
+      this.state.set(HubConnectionState.Disconnected);
+      this.scheduleRestart();
+      return;
+    }
+    let builder = new HubConnectionBuilder().withUrl(plan.url, plan.options);
+    if (plan.autoReconnect) {
+      builder = builder.withAutomaticReconnect({
+        nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount),
+      });
+    }
+    const connection = builder.configureLogging(LogLevel.Warning).build();
     connection.on(SCRIPT_FRAME_EVENT, (payload: unknown) => {
       if (isFrame(payload)) this.frames.next(payload);
     });
@@ -170,17 +181,6 @@ export class ScriptingRealtimeService {
     }
   }
 
-  /** As the trading hub does it: a cookie session swaps its sentinel for a short-lived ticket per attempt. */
-  private async freshToken(): Promise<string> {
-    const token = this.auth.getToken();
-    if (!token) return '';
-    if (token !== 'cookie-session') return token;
-    try {
-      return (await firstValueFrom(this.auth.fetchWsTicket())) ?? '';
-    } catch {
-      return '';
-    }
-  }
 }
 
 function isFrame(p: unknown): p is ScriptSessionFrame {

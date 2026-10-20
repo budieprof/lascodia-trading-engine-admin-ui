@@ -7,11 +7,12 @@ import { CommandPaletteComponent } from '@shared/components/command-palette/comm
 import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AccountScopePillComponent } from '@core/scope/account-scope-pill.component';
 import { NotificationBellComponent } from './notification-bell.component';
+import { OrgSwitcherComponent } from './org-switcher.component';
 
 @Component({
   selector: 'app-header',
   standalone: true,
-  imports: [AccountScopePillComponent, NotificationBellComponent],
+  imports: [OrgSwitcherComponent, AccountScopePillComponent, NotificationBellComponent],
   template: `
     <header class="header" role="banner">
       <div class="header-left">
@@ -51,6 +52,7 @@ import { NotificationBellComponent } from './notification-bell.component';
       </div>
 
       <div class="header-right">
+        <app-org-switcher />
         <app-account-scope-pill />
         <app-notification-bell />
         @if (auth.user(); as user) {
@@ -378,7 +380,8 @@ export class HeaderComponent {
   }
 
   onLogout() {
+    // Legacy: clears the session and routes to /login. BFF: ends the session at the engine and
+    // leaves for Keycloak's end-session page, which comes back to the console.
     this.auth.logout();
-    this.router.navigate(['/login']);
   }
 }
