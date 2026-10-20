@@ -6,11 +6,11 @@ import { canAccessPath } from '@core/auth/can-access.guard';
 import type { AccessPath } from '@core/auth/route-access';
 
 /** The organisation console pages in sidebar order; `/organisation` opens the first one the person may see. */
-const PAGES: AccessPath[] = ['organisation/terminals'];
+const PAGES: AccessPath[] = ['organisation/terminals', 'organisation/settings'];
 
 /**
  * The organisation console (multi-tenancy Phase 7, c7-tenant): what an organisation administers of
- * its own — terminals and their credentials. Every page is gated by its read's key through the
+ * its own — terminals and their credentials, settings. Every page is gated by its read's key through the
  * route table; actions by their write's key.
  */
 export const ORGANISATION_ROUTES: Routes = [
@@ -30,5 +30,12 @@ export const ORGANISATION_ROUTES: Routes = [
     data: { breadcrumb: 'Connect a terminal' },
     loadComponent: () =>
       import('./pages/terminals-page.component').then((m) => m.TerminalsPageComponent),
+  },
+  {
+    path: 'settings',
+    canActivate: [canAccessPath('organisation/settings')],
+    data: { breadcrumb: 'Settings' },
+    loadComponent: () =>
+      import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
   },
 ];

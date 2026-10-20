@@ -81,6 +81,130 @@ export interface MachineCredential {
   revokedBy: string | null;
 }
 
+// ── Layered settings (engine ConfigOverridesController, ADR-0012 addendum) ───────────────────
+
+/** `Default`, `Platform`, `Tenant`, `Account` or `LegacyAccountKey`. */
+export type ConfigSource =
+  | 'Default'
+  | 'Platform'
+  | 'Tenant'
+  | 'Account'
+  | 'LegacyAccountKey'
+  | string;
+
+/** One layer of an effective value, outermost first. */
+export interface ConfigLayerValue {
+  layer: ConfigSource;
+  value: string | null;
+  applied: boolean;
+  /** Why a stored value was not used ("unset", "looser than the inherited 10…"). */
+  note: string | null;
+}
+
+/** `Text`, `Bool`, `Int`, `Decimal`, `Enum` or `Json`. */
+export type ConfigValueKind = 'Text' | 'Bool' | 'Int' | 'Decimal' | 'Enum' | 'Json' | string;
+
+/** Which direction of a value is the more restrictive one (engine `ConfigTightness`). */
+export type ConfigTightness =
+  | 'None'
+  | 'LowerIsTighter'
+  | 'HigherIsTighter'
+  | 'FalseIsTighter'
+  | 'TrueIsTighter'
+  | 'OrderedTightestFirst'
+  | 'LowerIsTighterZeroUnlimited'
+  | string;
+
+/** `GET /config/effective` entry: a key as the scope runs with it, and where the value came from. */
+export interface EffectiveConfigEntry {
+  key: string;
+  family: string;
+  description: string;
+  value: string | null;
+  source: ConfigSource;
+  /** Layers the key may be set at: `Platform`, `Tenant`, `Account`. */
+  allowedLayers: string[];
+  valueKind: ConfigValueKind;
+  allowedValues: string[];
+  min: number | null;
+  max: number | null;
+  tightenOnly: boolean;
+  riskSensitive: boolean;
+  /** Absent on an engine older than c7-tenant: loosening cannot then be judged before saving. */
+  tightness?: ConfigTightness;
+  /** What the scope runs with if its own value is removed (absent on an older engine). */
+  inheritedValue?: string | null;
+  secret: boolean;
+  layers: ConfigLayerValue[];
+}
+
+export interface EffectiveConfig {
+  tenantId: number;
+  tradingAccountId: number | null;
+  entries: EffectiveConfigEntry[];
+}
+
+/** Where an override applies. */
+export type OverrideScopeType = 'Tenant' | 'Account';
+
+/** One of the organisation's own values. */
+export interface ConfigOverride {
+  id: number;
+  scopeType: OverrideScopeType | string;
+  tradingAccountId: number | null;
+  key: string;
+  /** `***SET` for a secret. */
+  value: string;
+  updatedBy: string;
+  updatedAtUtc: string;
+  reason: string | null;
+}
+
+/** A risk-loosening change waiting out the cooling-off period. */
+export interface PendingConfigOverride {
+  id: number;
+  scopeType: OverrideScopeType | string;
+  tradingAccountId: number | null;
+  key: string;
+  /** The change removes the value (the scope inherits again). */
+  remove: boolean;
+  newValue: string | null;
+  oldValue: string | null;
+  reason: string;
+  requestedAt: string;
+  effectiveAt: string;
+}
+
+export interface ConfigOverrides {
+  overrides: ConfigOverride[];
+  pending: PendingConfigOverride[];
+}
+
+/** `PUT /config/overrides`. */
+export interface SetConfigOverrideBody {
+  scopeType: OverrideScopeType;
+  tradingAccountId?: number;
+  key: string;
+  value: string;
+  reason?: string;
+  /** Break-glass: apply a risk-loosening change now (reason required; audit-flagged). */
+  immediate?: boolean;
+}
+
+/** `Applied`, `Removed`, `Unchanged` or `QueuedForCoolingOff`. */
+export type OverrideOutcome = 'Applied' | 'Removed' | 'Unchanged' | 'QueuedForCoolingOff' | string;
+
+/** The answer to an override write: the envelope plus the outcome fields. */
+export interface OverrideWriteResult {
+  /** The override's id, or the pending change's when it was queued. */
+  id: number;
+  outcome: OverrideOutcome | null;
+  effectiveAt: string | null;
+  pendingChangeId: number | null;
+  breakGlass: boolean;
+  message: string | null;
+}
+
 /** The organisation's accounts as the pages name them (from the account list the console already keeps). */
 export interface AccountRef {
   id: number;

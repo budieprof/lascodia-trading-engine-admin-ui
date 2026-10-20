@@ -151,8 +151,9 @@ export const ROUTE_ACCESS = {
   // ── Organisation console (multi-tenancy Phase 7, c7-tenant) ──
   // What an organisation administers of its own. Their APIs act in the acting organisation with
   // either sign-in (legacy sessions act in House), so they are not BFF-only.
-  organisation: rule(P.AccountsRead),
+  organisation: rule(P.AccountsRead, P.EngineConfig),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
+  'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House

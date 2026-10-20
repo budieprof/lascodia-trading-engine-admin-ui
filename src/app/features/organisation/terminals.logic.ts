@@ -59,7 +59,8 @@ export function enrollmentErrors(d: EnrollmentDraft): string[] {
       const server = d.brokerServer.trim();
       if (!login || !server) errors.push('Enter both the broker login and the broker server.');
       if (login.length > LOGIN_MAX) errors.push(`The login is at most ${LOGIN_MAX} characters.`);
-      if (server.length > SERVER_MAX) errors.push(`The server is at most ${SERVER_MAX} characters.`);
+      if (server.length > SERVER_MAX)
+        errors.push(`The server is at most ${SERVER_MAX} characters.`);
     }
   }
   return errors;
@@ -235,7 +236,7 @@ export function enrollmentSteps(
         code: 'launchctl kickstart -k gui/$(id -u)/com.lascodia.supervisor',
       },
       {
-        text: "Its log then says “daemon <id> enrolled”, and the credential is kept next to supervisor.yaml (machine_credential.json). It appears under Machine credentials below.",
+        text: 'Its log then says “daemon <id> enrolled”, and the credential is kept next to supervisor.yaml (machine_credential.json). It appears under Machine credentials below.',
       },
       { text: 'Remove enrollment_token from supervisor.yaml: it is spent.' },
       {

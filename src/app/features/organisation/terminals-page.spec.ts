@@ -14,6 +14,29 @@ import { TerminalsPageComponent } from './pages/terminals-page.component';
 
 ensureTestBed();
 
+function apiStub() {
+  return {
+    enrollmentTokens: vi.fn(() => of([token])),
+    machineCredentials: vi.fn(() => of([credential])),
+    createEnrollmentToken: vi.fn(() =>
+      of({
+        id: 5,
+        token: 'lsc_enr_new_secret',
+        prefix: 'lsc_enr_new',
+        kind: 'EaTerminal',
+        tradingAccountId: 1,
+        accountLogin: null,
+        brokerServer: null,
+        label: 'mac2',
+        expiresAtUtc: '2026-10-21T08:00:00Z',
+      }),
+    ),
+    revokeEnrollmentToken: vi.fn(() => of(true)),
+    revokeCredential: vi.fn(() => of(true)),
+    rotateCredential: vi.fn(() => of(true)),
+  };
+}
+
 const token: EnrollmentToken = {
   id: 4,
   prefix: 'lsc_enr_ab12',
@@ -53,30 +76,11 @@ const credential: MachineCredential = {
 };
 
 describe('TerminalsPageComponent', () => {
-  let api: Record<string, ReturnType<typeof vi.fn>>;
+  let api: ReturnType<typeof apiStub>;
   let notify: { error: ReturnType<typeof vi.fn>; success: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
-    api = {
-      enrollmentTokens: vi.fn(() => of([token])),
-      machineCredentials: vi.fn(() => of([credential])),
-      createEnrollmentToken: vi.fn(() =>
-        of({
-          id: 5,
-          token: 'lsc_enr_new_secret',
-          prefix: 'lsc_enr_new',
-          kind: 'EaTerminal',
-          tradingAccountId: 1,
-          accountLogin: null,
-          brokerServer: null,
-          label: 'mac2',
-          expiresAtUtc: '2026-10-21T08:00:00Z',
-        }),
-      ),
-      revokeEnrollmentToken: vi.fn(() => of(true)),
-      revokeCredential: vi.fn(() => of(true)),
-      rotateCredential: vi.fn(() => of(true)),
-    };
+    api = apiStub();
     notify = { error: vi.fn(), success: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
@@ -139,7 +143,12 @@ describe('TerminalsPageComponent', () => {
       tradingAccountId: 1,
     });
     expect(p.created()?.token).toBe('lsc_enr_new_secret');
-    expect(p.steps().map((s) => s.text).join(' ')).toContain('only connects Main');
+    expect(
+      p
+        .steps()
+        .map((s) => s.text)
+        .join(' '),
+    ).toContain('only connects Main');
     expect(p.draft().label).toBe('');
     expect(api.enrollmentTokens).toHaveBeenCalledTimes(2);
   });

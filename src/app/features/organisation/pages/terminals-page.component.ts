@@ -141,8 +141,8 @@ import {
           <form class="card-body" (ngSubmit)="create()">
             <p class="note">
               A token is used once: the machine exchanges it for its own credential and then signs
-              in with that. EAs need version {{ minEa }} or later. A terminal launched by an enrolled
-              supervisor daemon enrolls itself, without a token.
+              in with that. EAs need version {{ minEa }} or later. A terminal launched by an
+              enrolled supervisor daemon enrolls itself, without a token.
             </p>
             <div class="kinds" role="radiogroup" aria-label="What are you connecting?">
               <label class="check">
@@ -199,7 +199,9 @@ import {
                       class="select"
                       name="account"
                       [ngModel]="draft().tradingAccountId"
-                      (ngModelChange)="patch({ tradingAccountId: $event === null ? null : +$event })"
+                      (ngModelChange)="
+                        patch({ tradingAccountId: $event === null ? null : +$event })
+                      "
                     >
                       <option [ngValue]="null">Choose…</option>
                       @for (a of accounts(); track a.id) {
@@ -285,7 +287,9 @@ import {
                   <tr>
                     <td>
                       {{ t.label }}
-                      <span class="sub">{{ kindLabel(t.kind) }} · <code>{{ t.prefix }}…</code></span>
+                      <span class="sub"
+                        >{{ kindLabel(t.kind) }} · <code>{{ t.prefix }}…</code></span
+                      >
                     </td>
                     <td>{{ boundTo(t) }}</td>
                     <td>
@@ -520,7 +524,8 @@ export class TerminalsPageComponent {
   readonly steps = computed(() => {
     const c = this.created();
     if (!c) return [];
-    const bound = c.kind === 'EaTerminal' && (c.tradingAccountId || c.accountLogin) ? this.boundTo(c) : null;
+    const bound =
+      c.kind === 'EaTerminal' && (c.tradingAccountId || c.accountLogin) ? this.boundTo(c) : null;
     return enrollmentSteps(c, bound);
   });
 
@@ -552,7 +557,13 @@ export class TerminalsPageComponent {
   }
 
   setKind(kind: MachineKind): void {
-    this.patch({ kind, binding: 'any', tradingAccountId: null, accountLogin: '', brokerServer: '' });
+    this.patch({
+      kind,
+      binding: 'any',
+      tradingAccountId: null,
+      accountLogin: '',
+      brokerServer: '',
+    });
   }
 
   setBinding(binding: BindingMode): void {

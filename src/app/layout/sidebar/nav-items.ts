@@ -156,6 +156,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Plan & usage', route: '/iam/plan', icon: '📦' },
       // The organisation console (multi-tenancy Phase 7, c7-tenant).
       { label: 'Connect a terminal', route: '/organisation/terminals', icon: '🔌' },
+      { label: 'Settings', route: '/organisation/settings', icon: '⚙' },
     ],
   },
   {

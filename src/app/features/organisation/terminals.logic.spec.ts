@@ -114,7 +114,12 @@ describe('accounts and bindings', () => {
 
   it('says what a token connects', () => {
     const map = new Map(accountRefs([account(3)]).map((a) => [a.id, a]));
-    const t = { kind: 'EaTerminal', tradingAccountId: null, accountLogin: null, brokerServer: null };
+    const t = {
+      kind: 'EaTerminal',
+      tradingAccountId: null,
+      accountLogin: null,
+      brokerServer: null,
+    };
     expect(boundTo(t, map)).toBe('Any account of this organisation');
     expect(boundTo({ ...t, tradingAccountId: 3 }, map)).toContain('Acct 3');
     expect(boundTo({ ...t, accountLogin: '55', brokerServer: 'B' }, map)).toBe('Login 55 @ B');
@@ -135,12 +140,7 @@ describe('credentials', () => {
       ],
       accounts,
     );
-    expect(groups.map((g) => g.key)).toEqual([
-      'account:1',
-      'account:2',
-      'account:99',
-      'daemons',
-    ]);
+    expect(groups.map((g) => g.key)).toEqual(['account:1', 'account:2', 'account:99', 'daemons']);
     expect(groups[1].credentials.map((c) => c.id)).toEqual([5, 1]);
     expect(groups[2].title).toBe('Account #99');
     expect(groups[3].title).toBe('Supervisor daemons');
@@ -152,9 +152,7 @@ describe('credentials', () => {
     expect(credentialState(cred(1, { rotationRequestedAtUtc: 'x' })).label).toBe(
       'Rotation requested',
     );
-    expect(credentialState(cred(1, { rotationPending: true })).label).toBe(
-      'New secret handed out',
-    );
+    expect(credentialState(cred(1, { rotationPending: true })).label).toBe('New secret handed out');
     expect(credentialState(cred(1, { revokedAtUtc: 'x', revokedReason: 'revoked' }))).toEqual({
       label: 'Revoked',
       tone: 'bad',

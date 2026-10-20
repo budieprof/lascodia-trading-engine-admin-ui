@@ -5,11 +5,40 @@ import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
 import { queryString, rows } from '@features/iam/iam-api.service';
 import type {
+  ConfigOverrides,
   CreateEnrollmentTokenBody,
+  EffectiveConfig,
   EnrollmentToken,
   EnrollmentTokenCreated,
   MachineCredential,
+  OverrideScopeType,
+  OverrideWriteResult,
+  SetConfigOverrideBody,
 } from './organisation.types';
+
+/** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
+interface OverrideWriteResponse extends ResponseData<number> {
+  outcome?: string | null;
+  effectiveAt?: string | null;
+  pendingChangeId?: number | null;
+  breakGlass?: boolean;
+}
+
+/** An override write's result, or an {@link ApiError} for a refusal (incl. `-202-approval`). */
+export function overrideResult(res: OverrideWriteResponse | null): OverrideWriteResult {
+  if (!res || res.status !== true) {
+    const envelope = res ?? { data: null, status: false, message: null, responseCode: null };
+    throw new ApiError(res?.responseCode ?? 'UNKNOWN', res?.message ?? 'Request failed', envelope);
+  }
+  return {
+    id: res.data ?? 0,
+    outcome: res.outcome ?? null,
+    effectiveAt: res.effectiveAt ?? null,
+    pendingChangeId: res.pendingChangeId ?? null,
+    breakGlass: res.breakGlass === true,
+    message: res.message,
+  };
+}
 
 /** The pages say what went wrong themselves; session handling (step-up, CSRF, sign-in) still applies. */
 const SILENT = { silent: true } as const;
@@ -83,5 +112,51 @@ export class OrganisationApiService {
   /** `accounts.connect` (step-up). The machine picks up a new secret on its next token exchange. */
   rotateCredential(id: number): Observable<boolean> {
     return this.post(`/machine/credentials/${id}/rotate`);
+  }
+
+  // ── Layered settings (engine ConfigOverridesController; engine.config on the scope) ──
+
+  /** What one account (or, without one, the organisation) runs with, layer by layer. */
+  effectiveConfig(tradingAccountId: number | null): Observable<EffectiveConfig> {
+    return this.get(`/config/effective${queryString({ tradingAccountId })}`);
+  }
+
+  /** The organisation's own values (with an account: organisation-wide + that account's) and queued changes. */
+  configOverrides(tradingAccountId: number | null): Observable<ConfigOverrides> {
+    return this.get(`/config/overrides${queryString({ tradingAccountId })}`);
+  }
+
+  /** Set a value. A risk-loosening change may be queued, refused for step-up, or sent for approval. */
+  setOverride(body: SetConfigOverrideBody): Observable<OverrideWriteResult> {
+    return this.api
+      .put<OverrideWriteResponse>('/config/overrides', body, SILENT)
+      .pipe(map(overrideResult));
+  }
+
+  /** Remove a value: the scope inherits again. Removing a tighter value is a risk-loosening change. */
+  removeOverride(p: {
+    scopeType: OverrideScopeType;
+    tradingAccountId: number | null;
+    key: string;
+    reason: string | null;
+    immediate: boolean;
+  }): Observable<OverrideWriteResult> {
+    const q = queryString({
+      scopeType: p.scopeType,
+      tradingAccountId: p.scopeType === 'Account' ? p.tradingAccountId : null,
+      key: p.key,
+      reason: p.reason,
+      immediate: p.immediate || null,
+    });
+    return this.api
+      .delete<OverrideWriteResponse>(`/config/overrides${q}`, SILENT)
+      .pipe(map(overrideResult));
+  }
+
+  /** Cancel one of the organisation's queued changes before it takes effect. */
+  cancelPendingOverride(id: number, reason: string | null): Observable<OverrideWriteResult> {
+    return this.api
+      .post<OverrideWriteResponse>(`/config/overrides/pending/${id}/cancel`, { reason }, SILENT)
+      .pipe(map(overrideResult));
   }
 }
