@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { firstValueFrom, timeout } from 'rxjs';
 
 import { ChartLayoutsService } from '@core/services/chart-layouts.service';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * The chart's per-viewer preferences that follow the operator across browsers and machines. Screen-dependent ones —
@@ -32,7 +33,7 @@ const HYDRATE_TIMEOUT_MS = 4_000;
 
 function local(): Storage | null {
   try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
+    return appStorage;
   } catch {
     return null;
   }

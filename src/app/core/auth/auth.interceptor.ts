@@ -5,6 +5,13 @@ import { AuthService } from './auth.service';
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const authService = inject(AuthService);
 
+  // BFF sign-in: the browser holds no token. Engine calls ride the HttpOnly session cookie
+  // (`withCredentials`, set by ApiService / BffSessionService); the CSRF interceptor adds the
+  // header unsafe methods need.
+  if (authService.mode === 'bff') {
+    return next(req);
+  }
+
   // Endpoints that must NOT receive an Authorization header even when one is
   // available. /auth/token is the legacy dev login; /auth/refresh is the
   // silent-renewal endpoint — it must run with no bearer attached because the

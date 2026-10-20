@@ -22,6 +22,8 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { AssistantDockComponent } from '@shared/components/assistant-dock/assistant-dock.component';
 import { FooterVersionPillComponent } from './footer-version-pill/footer-version-pill.component';
+import { AuthService } from '@core/auth/auth.service';
+import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
 
 @Component({
   selector: 'app-layout',
@@ -39,6 +41,7 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
     KeyboardHelpComponent,
     AssistantDockComponent,
     FooterVersionPillComponent,
+    StepUpBannerComponent,
   ],
   template: `
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -64,6 +67,9 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
         <app-offline-banner />
         <app-realtime-status-banner />
         <app-kill-switch-banner />
+        @if (bffMode) {
+          <app-step-up-banner />
+        }
         <app-paper-mode-banner />
         <app-header (openMobileNav)="mobileNavOpen.set(true)" />
         <main id="main-content" class="content" tabindex="-1">
@@ -217,6 +223,8 @@ export class LayoutComponent {
   // Inject eagerly so the global keydown listener starts on layout init.
   private readonly _shortcuts = inject(KeyboardShortcutsService);
   private readonly router = inject(Router);
+  /** Step-up and impersonation exist only with `bffAuth` on. */
+  readonly bffMode = inject(AuthService).mode === 'bff';
 
   /**
    * Snapshot of the operator's pre-wall-mode sidebar state, restored on

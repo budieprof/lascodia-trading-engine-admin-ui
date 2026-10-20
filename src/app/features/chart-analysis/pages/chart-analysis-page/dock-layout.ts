@@ -1,3 +1,5 @@
+import { appStorage } from '@core/storage/app-storage';
+
 /**
  * How the chart page's Pine Editor / Strategy Tester / Pine Logs dock sits — below the chart, maximised over it (a
  * strip of the live chart kept in view) or beside it — and its sizes, remembered in this browser.
@@ -21,7 +23,7 @@ export function clampSize(v: number, min: number, max: number): number {
 /** The remembered dock layout; defaults for anything missing or malformed. */
 export function loadDockLayout(): DockLayout {
   try {
-    const raw = JSON.parse(localStorage.getItem(DOCK_LAYOUT_KEY) ?? 'null') as Partial<DockLayout> | null;
+    const raw = JSON.parse(appStorage.getItem(DOCK_LAYOUT_KEY) ?? 'null') as Partial<DockLayout> | null;
     if (!raw || typeof raw !== 'object') return DEFAULT_DOCK_LAYOUT;
     const num = (v: unknown, d: number): number => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d);
     return {
@@ -38,7 +40,7 @@ export function loadDockLayout(): DockLayout {
 /** Remember the layout; a storage refusal (private window) just means it isn't remembered. */
 export function saveDockLayout(layout: DockLayout): void {
   try {
-    localStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
+    appStorage.setItem(DOCK_LAYOUT_KEY, JSON.stringify(layout));
   } catch {
     // Not remembered.
   }

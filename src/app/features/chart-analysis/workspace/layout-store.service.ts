@@ -3,6 +3,7 @@ import type { ActiveIndicator, ChartStyle } from '../chart/chart-host.component'
 import type { TvResolution } from '../datafeed/resolution';
 import { remapStudySources } from '../indicators/study-settings';
 import { ChartPrefsService } from './chart-prefs.service';
+import { appStorage } from '@core/storage/app-storage';
 
 /** Pre-engine storage: layouts + templates in one record, and the last layout's id. */
 export const LEGACY_LAYOUTS_KEY = 'lascodia.chart.layouts.v1';
@@ -98,11 +99,11 @@ export class ChartLayoutStore {
   /** Layouts this browser saved before they moved to the engine, and the one last opened. */
   legacyLayouts(): { layouts: LegacyChartLayout[]; lastId: string | null } {
     try {
-      const raw = localStorage.getItem(LEGACY_LAYOUTS_KEY);
+      const raw = appStorage.getItem(LEGACY_LAYOUTS_KEY);
       const parsed = raw ? (JSON.parse(raw) as { layouts?: LegacyChartLayout[] }) : {};
       return {
         layouts: Array.isArray(parsed.layouts) ? parsed.layouts : [],
-        lastId: localStorage.getItem(LEGACY_LAST_KEY),
+        lastId: appStorage.getItem(LEGACY_LAST_KEY),
       };
     } catch {
       return { layouts: [], lastId: null };
@@ -112,8 +113,8 @@ export class ChartLayoutStore {
   /** After the upload succeeded: the engine owns them now. */
   clearLegacyLayouts(): void {
     try {
-      localStorage.removeItem(LEGACY_LAYOUTS_KEY);
-      localStorage.removeItem(LEGACY_LAST_KEY);
+      appStorage.removeItem(LEGACY_LAYOUTS_KEY);
+      appStorage.removeItem(LEGACY_LAST_KEY);
     } catch {
       /* ignore */
     }
@@ -131,7 +132,7 @@ export class ChartLayoutStore {
         return Array.isArray(parsed) ? (parsed as StudyTemplate[]) : [];
       }
       // Older builds kept templates beside the layouts.
-      const legacy = localStorage.getItem(LEGACY_LAYOUTS_KEY);
+      const legacy = appStorage.getItem(LEGACY_LAYOUTS_KEY);
       const old = legacy ? (JSON.parse(legacy) as { templates?: StudyTemplate[] }) : {};
       return Array.isArray(old.templates) ? old.templates : [];
     } catch {

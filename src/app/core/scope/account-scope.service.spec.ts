@@ -4,6 +4,7 @@ import { of } from 'rxjs';
 import { AccountScopeService } from './account-scope.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
+import { AuthService } from '@core/auth/auth.service';
 import type { EAInstanceDto, TradingAccountDto } from '@core/api/api.types';
 
 /**
@@ -31,6 +32,7 @@ function makeService(): AccountScopeService {
     providers: [
       { provide: TradingAccountsService, useValue: { list: () => of({ data: { data: [] } }) } },
       { provide: EAInstancesService, useValue: { list: () => of({ data: [] }) } },
+      { provide: AuthService, useValue: { hasPermission: () => true } },
     ],
   });
   return runInInjectionContext(injector, () => new AccountScopeService());

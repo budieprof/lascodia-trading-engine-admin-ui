@@ -20,6 +20,7 @@ import { hasFill, hasText, parseColor } from './colors';
 import { ChartPrefsService } from '../../workspace/chart-prefs.service';
 import { canAlertOn, fibAlertLevels } from '../drawing-alert';
 import { isPositionTool } from '../position-link';
+import { appStorage } from '@core/storage/app-storage';
 
 type Pop = 'templates' | 'line' | 'fill' | 'text' | 'width' | 'dash' | 'more' | 'alert' | null;
 
@@ -603,7 +604,7 @@ export class DrawingToolbarComponent {
 
 function readPos(): { x: number; y: number } | null {
   try {
-    const raw = localStorage.getItem(POS_KEY);
+    const raw = appStorage.getItem(POS_KEY);
     const p = raw ? (JSON.parse(raw) as { x: number; y: number } | null) : null;
     return p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null;
   } catch {

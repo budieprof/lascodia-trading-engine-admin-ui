@@ -101,7 +101,12 @@ export class ChartDrawingsService {
    */
   syncOnUnload(origin: string, ops: ChartDrawingOp[]): void {
     const token = this.auth.getToken();
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      // BFF sign-in: no token, the session cookie rides `credentials` and an unsafe request
+      // needs the session's CSRF token (it bypasses HttpClient, so no interceptor adds it).
+      ...this.auth.csrfHeaders(),
+    };
     // The cookie sentinel is not a bearer token; the HttpOnly cookie travels via `credentials`.
     if (token && token.split('.').length === 3) headers['Authorization'] = `Bearer ${token}`;
     void fetch(`${this.baseUrl}/chart-drawings/batch`, {

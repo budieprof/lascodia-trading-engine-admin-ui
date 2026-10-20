@@ -387,6 +387,7 @@ import {
   type Drawing,
   type DrawingKind,
 } from '../../drawings/model';
+import { appStorage } from '@core/storage/app-storage';
 
 /** A Pine script's latest run on the chart. */
 export interface ChartScriptRun {
@@ -583,7 +584,7 @@ const WATCHLIST_OPEN_KEY = 'lascodia.chart.watchlistOpen';
 const DOCK_WIDTH_KEY = 'lascodia.chart.watchlistWidth';
 function loadDockWidth(): number {
   try {
-    const w = Number(localStorage.getItem(DOCK_WIDTH_KEY));
+    const w = Number(appStorage.getItem(DOCK_WIDTH_KEY));
     return w >= 240 && w <= 640 ? w : 380;
   } catch {
     return 380;
@@ -592,7 +593,7 @@ function loadDockWidth(): number {
 
 function loadWatchlistOpen(): boolean {
   try {
-    return localStorage.getItem(WATCHLIST_OPEN_KEY) !== '0';
+    return appStorage.getItem(WATCHLIST_OPEN_KEY) !== '0';
   } catch {
     return true;
   }
@@ -2795,7 +2796,7 @@ export class ChartAnalysisPageComponent {
     effect(() => {
       const open = this.watchlistOpen();
       try {
-        localStorage.setItem(WATCHLIST_OPEN_KEY, open ? '1' : '0');
+        appStorage.setItem(WATCHLIST_OPEN_KEY, open ? '1' : '0');
       } catch {
         // Per-viewer convenience only.
       }
@@ -3714,7 +3715,7 @@ export class ChartAnalysisPageComponent {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       try {
-        localStorage.setItem(DOCK_WIDTH_KEY, String(this.dockWidth()));
+        appStorage.setItem(DOCK_WIDTH_KEY, String(this.dockWidth()));
       } catch {
         // Per-viewer convenience only.
       }
@@ -6816,7 +6817,7 @@ function withAlpha(hex: string, alpha: number): string {
 /** Small per-browser drawing preferences (magnet strength, stay-in-drawing). */
 function readPref<T>(key: string, fallback: T): T {
   try {
-    const raw = localStorage.getItem(`lascodia.chart.pref.${key}`);
+    const raw = appStorage.getItem(`lascodia.chart.pref.${key}`);
     return raw === null ? fallback : (JSON.parse(raw) as T);
   } catch {
     return fallback;
@@ -6829,7 +6830,7 @@ function writePref(key: string, value: unknown): void {
   if (prefsRef) prefsRef.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
   else
     try {
-      localStorage.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
+      appStorage.setItem(`lascodia.chart.pref.${key}`, JSON.stringify(value));
     } catch {
       /* preference not remembered */
     }

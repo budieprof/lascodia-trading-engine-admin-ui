@@ -1,8 +1,16 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { catchError, of, switchMap, take, timer } from 'rxjs';
+import { Observable, catchError, expand, of, reduce, switchMap, take, timer } from 'rxjs';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
 import { EAInstancesService } from '@core/services/ea-instances.service';
-import type { EAInstanceDto, TradingAccountDto } from '@core/api/api.types';
+import { appStorage } from '@core/storage/app-storage';
+import type {
+  EAInstanceDto,
+  PagedData,
+  ResponseData,
+  TradingAccountDto,
+} from '@core/api/api.types';
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 
 /**
  * Single source of truth for "which trading account(s) does the
@@ -40,9 +48,12 @@ export class AccountScopeService {
   // Refresh the underlying account + EA-instance lists on this cadence
   // so the scope stays accurate as accounts come online / go dormant.
   private static readonly REFRESH_INTERVAL_MS = 30_000;
+  /** Accounts fetched per page while paging through all of them. */
+  static readonly PAGE_SIZE = 100;
 
   private readonly accountsService = inject(TradingAccountsService);
   private readonly eaService = inject(EAInstancesService);
+  private readonly auth = inject(AuthService);
 
   readonly accounts = signal<TradingAccountDto[]>([]);
   readonly eaInstances = signal<EAInstanceDto[]>([]);
@@ -164,7 +175,7 @@ export class AccountScopeService {
   select(next: number | string): void {
     this.selected.set(next);
     try {
-      localStorage.setItem(AccountScopeService.STORAGE_KEY, String(next));
+      appStorage.setItem(AccountScopeService.STORAGE_KEY, String(next));
     } catch {
       /* localStorage unavailable — non-fatal */
     }
@@ -188,19 +199,39 @@ export class AccountScopeService {
 
   // ── Refresh helpers ─────────────────────────────────────────────────
 
+  /**
+   * Every account the engine lets this person see — paged through to the end (the engine's
+   * visibility filter decides which accounts those are; the console adds none and drops none).
+   * Skipped without `accounts.read`: the engine would refuse it on every refresh.
+   */
   private fetchAccounts() {
-    return this.accountsService.list({ currentPage: 1, itemCountPerPage: 50 }).pipe(
+    if (!this.auth.hasPermission(Permission.AccountsRead)) {
+      this.accounts.set([]);
+      return of([] as TradingAccountDto[]);
+    }
+    return fetchAllPages((page) =>
+      this.accountsService.list({
+        currentPage: page,
+        itemCountPerPage: AccountScopeService.PAGE_SIZE,
+        sortBy: 'id',
+        sortDirection: 'asc',
+      }),
+    ).pipe(
       take(1),
       catchError(() => of(null)),
-      switchMap((res) => {
-        const list = res?.data?.data ?? [];
-        if (list.length > 0) this.accounts.set(list);
-        return of(list);
+      switchMap((list) => {
+        if (list && list.length > 0) this.accounts.set(list);
+        return of(list ?? []);
       }),
     );
   }
 
+  /** EA instances say which accounts are live. `GET /ea/instances` needs `access.operator`. */
   private fetchEaInstances() {
+    if (!this.auth.hasPermission(Permission.AccessOperator)) {
+      this.eaInstances.set([]);
+      return of([] as EAInstanceDto[]);
+    }
     return this.eaService.list().pipe(
       take(1),
       catchError(() => of(null)),
@@ -217,7 +248,7 @@ export class AccountScopeService {
 
   private static readPersisted(): number | string {
     try {
-      const raw = localStorage.getItem(AccountScopeService.STORAGE_KEY);
+      const raw = appStorage.getItem(AccountScopeService.STORAGE_KEY);
       if (raw == null) return AccountScopeService.SCOPE_AGGREGATE_REAL;
       if (
         raw === AccountScopeService.SCOPE_AGGREGATE_REAL ||
@@ -230,4 +261,35 @@ export class AccountScopeService {
       return AccountScopeService.SCOPE_AGGREGATE_REAL;
     }
   }
+}
+
+/** Hard stop for a pager that never reports its end (a server bug must not become a request loop). */
+export const MAX_ACCOUNT_PAGES = 50;
+
+/**
+ * Fetches page 1, 2, … of a paged list until the pager's total is reached (or a short page),
+ * concatenating the rows. Errors propagate.
+ */
+export function fetchAllPages<T>(
+  fetchPage: (page: number) => Observable<ResponseData<PagedData<T>>>,
+): Observable<T[]> {
+  type Step = { page: number; rows: T[]; done: boolean };
+  const step = (page: number): Observable<Step> =>
+    fetchPage(page).pipe(
+      switchMap((res) => {
+        const rows = res?.data?.data ?? [];
+        const total = res?.data?.pager?.totalItemCount;
+        const perPage = res?.data?.pager?.itemCountPerPage ?? rows.length;
+        const seen = (page - 1) * perPage + rows.length;
+        const done =
+          rows.length === 0 ||
+          (typeof total === 'number' ? seen >= total : rows.length < perPage) ||
+          page >= MAX_ACCOUNT_PAGES;
+        return of({ page, rows, done });
+      }),
+    );
+  return step(1).pipe(
+    expand((s) => (s.done ? [] : step(s.page + 1))),
+    reduce((all, s) => all.concat(s.rows), [] as T[]),
+  );
 }

@@ -12,6 +12,7 @@ import {
   legacyToState,
   type ChartWorkspaceState,
 } from './workspace-state';
+import { appStorage } from '@core/storage/app-storage';
 
 export const WORKSPACE_CACHE_KEY = 'lascodia.chart.workspace.v1';
 export const DEFAULT_LAYOUT_NAME = 'Unnamed';
@@ -469,7 +470,7 @@ export class ChartWorkspaceSync {
       dirty: this.dirty,
     };
     try {
-      localStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(cache));
+      appStorage.setItem(WORKSPACE_CACHE_KEY, JSON.stringify(cache));
     } catch {
       /* too large or blocked: the engine still has it */
     }
@@ -478,7 +479,7 @@ export class ChartWorkspaceSync {
 
 function readCache(): WorkspaceCache | null {
   try {
-    const raw = localStorage.getItem(WORKSPACE_CACHE_KEY);
+    const raw = appStorage.getItem(WORKSPACE_CACHE_KEY);
     const c = raw ? (JSON.parse(raw) as WorkspaceCache) : null;
     return c && typeof c === 'object'
       ? { ...c, state: isWorkspaceState(c.state) ? c.state : null }

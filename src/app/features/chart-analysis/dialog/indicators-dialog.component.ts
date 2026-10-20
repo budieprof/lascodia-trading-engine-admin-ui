@@ -23,12 +23,13 @@ import {
   type DialogItem,
   type DialogTab,
 } from './dialog-items';
+import { appStorage } from '@core/storage/app-storage';
 
 const FAV_STORAGE = 'lascodia.chart.favouriteStudies';
 
 function loadFavourites(): Set<string> {
   try {
-    const raw = localStorage.getItem(FAV_STORAGE);
+    const raw = appStorage.getItem(FAV_STORAGE);
     return new Set(raw ? (JSON.parse(raw) as string[]) : []);
   } catch {
     return new Set();

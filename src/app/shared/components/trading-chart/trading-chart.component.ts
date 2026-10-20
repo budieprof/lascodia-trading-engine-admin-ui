@@ -44,6 +44,7 @@ import {
 } from '@core/api/api.types';
 import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 import { TIMEFRAME_PILLS, chartAnalysisTarget } from './chart-analysis-link';
+import { appStorage } from '@core/storage/app-storage';
 
 /**
  * Every price line (BID, ASK, entry, SL, TP) pins a tag to the right edge
@@ -3941,9 +3942,9 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   private consumeDeepLinkIfAny(): void {
     if (typeof localStorage === 'undefined') return;
     try {
-      const raw = localStorage.getItem(DEEP_LINK_STORAGE_KEY);
+      const raw = appStorage.getItem(DEEP_LINK_STORAGE_KEY);
       if (!raw) return;
-      localStorage.removeItem(DEEP_LINK_STORAGE_KEY);
+      appStorage.removeItem(DEEP_LINK_STORAGE_KEY);
       const parsed = JSON.parse(raw) as { symbol?: unknown; timeframe?: unknown };
       const sym = typeof parsed.symbol === 'string' ? parsed.symbol.toUpperCase() : '';
       const tf = typeof parsed.timeframe === 'string' ? parsed.timeframe : '';
@@ -3965,7 +3966,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // Indicators are per-(symbol, timeframe) because the operator likely
     // wants different overlays on different pairs (an RSI on majors,
     // none on crosses) — that part stays in the prefixed key.
-    const raw = localStorage.getItem(this.chartConfigStorageKey());
+    const raw = appStorage.getItem(this.chartConfigStorageKey());
     if (raw) {
       try {
         const parsed = JSON.parse(raw) as { indicators?: IndicatorConfig[] };
@@ -3983,9 +3984,9 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     // their dedicated keys, falling back to the signal defaults (both
     // true) when unset. Defensive bool check guards against any stale
     // non-boolean string that might be lurking from a prior storage shape.
-    const vol = localStorage.getItem(SHOW_VOLUME_STORAGE_KEY);
+    const vol = appStorage.getItem(SHOW_VOLUME_STORAGE_KEY);
     if (vol === 'true' || vol === 'false') this.showVolume.set(vol === 'true');
-    const pos = localStorage.getItem(SHOW_POSITIONS_STORAGE_KEY);
+    const pos = appStorage.getItem(SHOW_POSITIONS_STORAGE_KEY);
     if (pos === 'true' || pos === 'false') this.showPositions.set(pos === 'true');
 
     // Live-analysis state lives in EngineConfig (the engine's SpotAnalysisWorker
@@ -4008,7 +4009,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (!this.lastAnalysisByPair()[key]) {
       let restored: MarketAnalysisResultDto | null = null;
 
-      const lastRaw = localStorage.getItem(this.lastAnalysisStorageKey(sym, tf));
+      const lastRaw = appStorage.getItem(this.lastAnalysisStorageKey(sym, tf));
       if (lastRaw) {
         try {
           const parsed = JSON.parse(lastRaw) as MarketAnalysisResultDto;
@@ -4026,7 +4027,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       // 'EURUSD' while the selector uses 'EUR/USD'), re-file it under the
       // new per-pair key, and delete v1 so this runs at most once.
       if (!restored) {
-        const legacyRaw = localStorage.getItem(LEGACY_LAST_ANALYSIS_KEY);
+        const legacyRaw = appStorage.getItem(LEGACY_LAST_ANALYSIS_KEY);
         if (legacyRaw) {
           try {
             const legacy = JSON.parse(legacyRaw) as MarketAnalysisResultDto;
@@ -4038,11 +4039,11 @@ export class TradingChartComponent implements OnInit, OnDestroy {
             ) {
               restored = legacy;
               this.persistLastAnalysis(sym, tf, legacy);
-              localStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
+              appStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
             }
           } catch {
             // corrupt legacy blob — drop it so it can't wedge the bridge
-            localStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
+            appStorage.removeItem(LEGACY_LAST_ANALYSIS_KEY);
           }
         }
       }
@@ -4112,7 +4113,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       // Toggles live in their own global keys so an operator never
       // ends up with "Pos" off on GBP/USD but on for EUR/USD just
       // because of a stray click weeks ago.
-      localStorage.setItem(
+      appStorage.setItem(
         this.chartConfigStorageKey(),
         JSON.stringify({ indicators: this.indicators() }),
       );
@@ -4124,7 +4125,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   private persistGlobalToggle(key: string, value: boolean): void {
     if (typeof localStorage === 'undefined') return;
     try {
-      localStorage.setItem(key, String(value));
+      appStorage.setItem(key, String(value));
     } catch {
       // storage full / disabled — operator just won't get persistence
     }
@@ -4140,7 +4141,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   ): void {
     if (typeof localStorage === 'undefined') return;
     try {
-      localStorage.setItem(this.lastAnalysisStorageKey(symbol, timeframe), JSON.stringify(result));
+      appStorage.setItem(this.lastAnalysisStorageKey(symbol, timeframe), JSON.stringify(result));
     } catch {
       // storage full / disabled — bubble just won't survive a reload
     }

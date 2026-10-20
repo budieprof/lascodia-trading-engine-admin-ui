@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
-import { requirePermission } from '@core/auth/permission.guard';
+import { canAccess } from '@core/auth/can-access.guard';
+import { Permission } from '@core/auth/permissions.generated';
 
 /**
  * Prompt-templates feature routes. Every page requires the
@@ -18,7 +19,7 @@ export const PROMPT_TEMPLATES_ROUTES: Routes = [
     // collapses parent + empty-child crumbs when label AND url are equal, and
     // the case mismatch produced "Prompt Templates › Prompt templates".
     data: { breadcrumb: 'Prompt Templates' },
-    canActivate: [requirePermission('prompttemplate.view')],
+    canActivate: [canAccess(Permission.PrompttemplateView)],
     loadComponent: () =>
       import('./pages/prompt-templates-list-page/prompt-templates-list-page.component').then(
         (m) => m.PromptTemplatesListPageComponent,
@@ -27,7 +28,7 @@ export const PROMPT_TEMPLATES_ROUTES: Routes = [
   {
     path: 'diff',
     data: { breadcrumb: 'Diff' },
-    canActivate: [requirePermission('prompttemplate.view')],
+    canActivate: [canAccess(Permission.PrompttemplateView)],
     loadComponent: () =>
       import('./pages/prompt-template-diff-page/prompt-template-diff-page.component').then(
         (m) => m.PromptTemplateDiffPageComponent,
@@ -36,7 +37,7 @@ export const PROMPT_TEMPLATES_ROUTES: Routes = [
   {
     path: ':id',
     data: { breadcrumb: 'Editor' },
-    canActivate: [requirePermission('prompttemplate.view')],
+    canActivate: [canAccess(Permission.PrompttemplateView)],
     loadComponent: () =>
       import('./pages/prompt-template-editor-page/prompt-template-editor-page.component').then(
         (m) => m.PromptTemplateEditorPageComponent,

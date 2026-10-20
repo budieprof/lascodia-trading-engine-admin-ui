@@ -1,6 +1,7 @@
 import { Injectable, signal } from '@angular/core';
 
 import type { SidePanel } from './chart-panels.types';
+import { appStorage } from '@core/storage/app-storage';
 
 const KEY = 'lascodia.chart.sidePanel';
 const PANELS: readonly SidePanel[] = ['notes', 'depth', 'sentiment', 'account'];
@@ -25,8 +26,8 @@ export class ChartPanelsState {
   private set(panel: SidePanel | null): void {
     this.open.set(panel);
     try {
-      if (panel) localStorage.setItem(KEY, panel);
-      else localStorage.removeItem(KEY);
+      if (panel) appStorage.setItem(KEY, panel);
+      else appStorage.removeItem(KEY);
     } catch {
       // Per-viewer convenience only.
     }
@@ -34,7 +35,7 @@ export class ChartPanelsState {
 
   private restore(): SidePanel | null {
     try {
-      const v = localStorage.getItem(KEY) as SidePanel | null;
+      const v = appStorage.getItem(KEY) as SidePanel | null;
       return v && PANELS.includes(v) ? v : null;
     } catch {
       return null;

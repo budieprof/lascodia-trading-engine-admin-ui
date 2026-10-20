@@ -4,6 +4,7 @@ import { ApiService } from '@core/api/api.service';
 import type { ResponseData } from '@core/api/api.types';
 import type { AlertFiredPayload } from '@core/api/alerts.types';
 import { RealtimeService } from '@core/realtime/realtime.service';
+import { appStorage } from '@core/storage/app-storage';
 
 /** One alert pop-up on screen. */
 export interface AlertPopup {
@@ -205,7 +206,7 @@ function notificationPermission(): NotificationPermission | 'unsupported' {
 
 function readFlag(key: string, fallback: boolean): boolean {
   try {
-    const v = localStorage.getItem(key);
+    const v = appStorage.getItem(key);
     return v === null ? fallback : v === 'true';
   } catch {
     return fallback;
@@ -214,7 +215,7 @@ function readFlag(key: string, fallback: boolean): boolean {
 
 function writeFlag(key: string, value: boolean): void {
   try {
-    localStorage.setItem(key, String(value));
+    appStorage.setItem(key, String(value));
   } catch {
     /* private mode: the choice lasts this session */
   }

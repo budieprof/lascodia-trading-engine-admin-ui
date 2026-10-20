@@ -9,6 +9,7 @@
  */
 import type { Drawing } from './model';
 import { behaviorFor } from './tools/registry';
+import { appStorage } from '@core/storage/app-storage';
 
 const SYNC_KEY = 'lascodia.chart.drawings.sync.v2';
 
@@ -61,7 +62,7 @@ export function sameContent(a: Drawing, b: Drawing): boolean {
 
 export function readSyncState(): SyncStateOnDisk {
   try {
-    const raw = localStorage.getItem(SYNC_KEY);
+    const raw = appStorage.getItem(SYNC_KEY);
     if (!raw) return { versions: {}, outbox: {} };
     const parsed = JSON.parse(raw) as Partial<SyncStateOnDisk>;
     const outbox: Record<string, OutboxEntry> = {};
@@ -104,7 +105,7 @@ export function writeSyncState(
     for (const id of forgotten) if (!versions.has(id)) delete stored.versions[id];
     for (const [id, v] of versions)
       if (!stored.versions[id] || v > stored.versions[id]) stored.versions[id] = v;
-    localStorage.setItem(SYNC_KEY, JSON.stringify(stored));
+    appStorage.setItem(SYNC_KEY, JSON.stringify(stored));
   } catch {
     /* storage unavailable: the outbox lives in memory for this session */
   }

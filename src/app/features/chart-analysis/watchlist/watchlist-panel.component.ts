@@ -87,6 +87,7 @@ import {
 import { ChartPrefsService } from '../workspace/chart-prefs.service';
 import { ScriptDialogService } from '@features/scripting/shared/script-dialog.service';
 import { askName, confirmDelete } from '../dialog/chart-dialogs';
+import { appStorage } from '@core/storage/app-storage';
 
 const QUOTE_REFRESH_MS = 30_000;
 /** Calendar, news pressure and positions change slowly; one read per this period while their column shows. */
@@ -928,7 +929,7 @@ export class WatchlistPanelComponent {
 
   private loadSplit(): number {
     try {
-      const v = Number(localStorage.getItem(SPLIT_KEY));
+      const v = Number(appStorage.getItem(SPLIT_KEY));
       return v >= 0.2 && v <= 0.85 ? v : 0.55;
     } catch {
       return 0.55;

@@ -11,7 +11,8 @@ import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/ro
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs';
 import { ThemeService } from '@core/theme/theme.service';
-import { AuthService, type Role } from '@core/auth/auth.service';
+import { AuthService } from '@core/auth/auth.service';
+import { NAV_GROUPS, type NavGroup } from './nav-items';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { LogoComponent } from '@shared/components/logo/logo.component';
@@ -24,30 +25,6 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
  */
 function asEmoji(icon: string): string {
   return [...icon].length === 1 ? `${icon}️` : icon;
-}
-
-interface NavItem {
-  label: string;
-  route: string;
-  icon: string;
-  /**
-   * Required policy for this item. When set, the sidebar hides it for users
-   * whose token doesn't satisfy the policy. Tokens without any role claim
-   * (the dev `/auth/token` path) see everything; see
-   * `AuthService.hasPolicy` for the full cascade.
-   */
-  policy?: Role;
-  /**
-   * Required fine-grained permission key. When set, the item is hidden unless
-   * the user holds the permission (super admins always pass). See
-   * `AuthService.hasPermission`.
-   */
-  permission?: string;
-}
-
-interface NavGroup {
-  label: string;
-  items: NavItem[];
 }
 
 @Component({
@@ -65,22 +42,24 @@ interface NavGroup {
 
       <nav class="sidebar-nav" aria-label="Primary">
         <!-- Dashboard -->
-        <a
-          routerLink="/dashboard"
-          routerLinkActive="active"
-          ariaCurrentWhenActive="page"
-          class="nav-item"
-          [attr.aria-label]="collapsed() ? 'Dashboard' : null"
-          (mouseenter)="showTip('Dashboard', $event)"
-          (mouseleave)="hideTip()"
-          (focus)="showTip('Dashboard', $event)"
-          (blur)="hideTip()"
-        >
-          <span class="nav-icon" aria-hidden="true">⊞</span>
-          @if (!collapsed()) {
-            <span class="nav-label">Dashboard</span>
-          }
-        </a>
+        @if (canSeeDashboard()) {
+          <a
+            routerLink="/dashboard"
+            routerLinkActive="active"
+            ariaCurrentWhenActive="page"
+            class="nav-item"
+            [attr.aria-label]="collapsed() ? 'Dashboard' : null"
+            (mouseenter)="showTip('Dashboard', $event)"
+            (mouseleave)="hideTip()"
+            (focus)="showTip('Dashboard', $event)"
+            (blur)="hideTip()"
+          >
+            <span class="nav-icon" aria-hidden="true">⊞</span>
+            @if (!collapsed()) {
+              <span class="nav-label">Dashboard</span>
+            }
+          </a>
+        }
 
         @for (group of visibleGroups(); track group.label) {
           @if (!collapsed()) {
@@ -452,185 +431,8 @@ export class SidebarComponent {
     this.showTip(label, ev);
   }
 
-  navGroups: NavGroup[] = [
-    {
-      label: 'Trading',
-      items: [
-        { label: 'Orders', route: '/orders', icon: '📋' },
-        { label: 'Positions', route: '/positions', icon: '📊' },
-        { label: 'Position Deltas', route: '/positions/deltas', icon: '🔄' },
-        // Directly under Positions: it answers a question about the open book that the
-        // positions list cannot, because nothing there knows the economic calendar.
-        { label: 'Event Exposure', route: '/positions/event-exposure', icon: '📅' },
-        { label: 'Trade Signals', route: '/trade-signals', icon: '⚡' },
-        // Sibling entry, not a sub-item: 'what signals exist' and 'why did nothing
-        // happen' are different jobs, and the second is the one reached for under
-        // time pressure. It is also the only screen that shows generation-stage
-        // rejections, which never reach the signals list at all.
-        { label: 'Signal Internals', route: '/trade-signals/internals', icon: '🔬' },
-        { label: 'Signal Sensitivity', route: '/signal-sensitivity', icon: '🎛' },
-        { label: 'Signal Exits', route: '/trade-signals/feedback', icon: '📨' },
-        { label: 'Signal Rejections', route: '/rejections', icon: '🚫' },
-        // Every trade card an analysis wrote, with what became of it — the cards the chat,
-        // Patient Trader and monitor reviews produce, one page each.
-        { label: 'Recommendations', route: '/trade-recommendations', icon: '🃏' },
-        { label: 'Pending Recs', route: '/pending-signal-recs', icon: '⏸' },
-        { label: 'Market Data', route: '/market-data', icon: '📈' },
-        { label: 'Watchlist', route: '/watchlist', icon: '👁' },
-      ],
-    },
-    {
-      label: 'Configuration',
-      items: [
-        { label: 'Strategies', route: '/strategies', icon: '🎯' },
-        {
-          label: 'Strategy Settings',
-          route: '/strategies/settings',
-          icon: '⚙',
-          policy: 'Operator',
-        },
-        { label: 'Pine Libraries', route: '/strategies/libraries', icon: '📚' },
-        { label: 'Accounts', route: '/trading-accounts', icon: '🏦' },
-        { label: 'Brokers', route: '/brokers', icon: '🔗' },
-        { label: 'Risk Profiles', route: '/risk-profiles', icon: '🛡' },
-        { label: 'Spread-Reactive', route: '/spread-reactive', icon: '〰' },
-        { label: 'Currency Pairs', route: '/currency-pairs', icon: '💱' },
-        { label: 'Alerts', route: '/alerts', icon: '🔔' },
-      ],
-    },
-    {
-      label: 'ML & Optimization',
-      items: [
-        { label: 'ML Models', route: '/ml-models', icon: '🧠' },
-        { label: 'Training Queue', route: '/ml-models/training-queue', icon: '⏳' },
-        { label: 'CompositeML', route: '/composite-ml', icon: '🧩' },
-        { label: 'Drift Report', route: '/drift-report', icon: '📊' },
-        { label: 'Optimizations', route: '/optimizations', icon: '🧪', policy: 'Analyst' },
-        { label: 'Backtesting', route: '/backtests', icon: '📈', policy: 'Analyst' },
-        { label: 'Walk-Forward', route: '/walk-forward', icon: '🔄', policy: 'Analyst' },
-        {
-          label: 'Portfolio Backtests',
-          route: '/portfolio-backtests',
-          icon: '🧺',
-          policy: 'Analyst',
-        },
-      ],
-    },
-    {
-      label: 'LLM',
-      items: [
-        { label: 'Proposals', route: '/strategies/llm-proposals', icon: '💡' },
-        { label: 'Conversations', route: '/conversations', icon: '💬' },
-        { label: 'Monitors', route: '/analysis-monitors', icon: '🔭', policy: 'Operator' },
-        {
-          label: 'Agent Operations',
-          route: '/algo-engineer/operations',
-          icon: '🛠',
-          policy: 'Operator',
-        },
-        { label: 'Change Scorecard', route: '/algo-engineer/scorecard', icon: '🧮' },
-        { label: 'Spot Analysis', route: '/spot-analysis', icon: '📊' },
-        { label: 'Spot Sweep', route: '/spot-sweep', icon: '🛰' },
-        { label: 'Patient Trader', route: '/patient-trader', icon: '🎯' },
-        { label: 'News Intel', route: '/news-intel', icon: '📰', policy: 'Operator' },
-        { label: 'Viability Gates', route: '/viability-gates', icon: '🛡', policy: 'Operator' },
-        { label: 'Analyser Comparison', route: '/analyser-comparison', icon: '🆚' },
-        {
-          label: 'Look-ahead Audit',
-          route: '/analyser-comparison/audit',
-          icon: '🔎',
-          policy: 'Operator',
-        },
-        { label: 'Invocations', route: '/llm/invocations', icon: '📡' },
-        { label: 'Rationales', route: '/llm/rationales', icon: '🗒' },
-        { label: 'Settings', route: '/llm/settings', icon: '🔑', policy: 'Operator' },
-      ],
-    },
-    {
-      label: 'Analysis',
-      items: [
-        { label: 'LLM Backtest', route: '/llm-backtest', icon: '🔁' },
-        {
-          label: 'Prompt templates',
-          route: '/prompt-templates',
-          icon: '📝',
-          permission: 'prompttemplate.view',
-        },
-        { label: 'Performance', route: '/performance', icon: '📉' },
-        { label: 'Execution Quality', route: '/execution-quality', icon: '⏱' },
-        { label: 'Sentiment', route: '/sentiment', icon: '📰' },
-        { label: 'Ensemble', route: '/strategy-ensemble', icon: '⚖' },
-        { label: 'Portfolio', route: '/strategy-portfolio', icon: '🥧' },
-        { label: 'Compare', route: '/strategies/compare', icon: '🆚' },
-        { label: 'Generation', route: '/strategy-generation', icon: '🧬' },
-        { label: 'Pine Screener', route: '/pine-screener', icon: '🔍', policy: 'Analyst' },
-      ],
-    },
-    {
-      label: 'System',
-      items: [
-        { label: 'Engine Overview', route: '/engine-overview', icon: '🩺' },
-        { label: 'Fleet Health', route: '/fleet-health', icon: '📊', policy: 'Operator' },
-        { label: 'Health', route: '/system-health', icon: '💚' },
-        { label: 'Logs', route: '/system-logs', icon: '📝' },
-        { label: 'Worker Health', route: '/worker-health', icon: '⚡' },
-        { label: 'EA Instances', route: '/ea-instances', icon: '🛰' },
-        { label: 'Terminals', route: '/terminals', icon: '🖥', policy: 'Operator' },
-        { label: 'Config', route: '/engine-config', icon: '⚙', policy: 'Operator' },
-        { label: 'Audit Trail', route: '/audit-trail', icon: '📜' },
-        { label: 'Drawdown', route: '/drawdown-recovery', icon: '📉' },
-        { label: 'Martingale', route: '/martingale', icon: '🪜', policy: 'Operator' },
-        // Separate entry rather than a sub-item: configuring the ladder and investigating
-        // what it did are different jobs, and the investigation is the one an operator
-        // reaches for under time pressure. Burying it one click inside the config screen
-        // made it findable only by someone who already knew it existed.
-        {
-          label: 'Martingale Internals',
-          route: '/martingale/internals',
-          icon: '🔬',
-          policy: 'Operator',
-        },
-        { label: 'Paper Trading', route: '/paper-trading', icon: '🧪', policy: 'Operator' },
-        {
-          label: 'CME Microstructure',
-          route: '/cme-microstructure',
-          icon: '📶',
-          policy: 'Operator',
-        },
-        { label: 'Economic Events', route: '/economic-events', icon: '📅' },
-      ],
-    },
-    {
-      label: 'Ops',
-      items: [
-        { label: 'Alert Triage', route: '/alert-triage', icon: '🚨' },
-        {
-          label: 'Automation Monitor',
-          route: '/automation-monitor',
-          icon: '🤖',
-          policy: 'Operator',
-        },
-        { label: 'Kill Switches', route: '/kill-switches', icon: '⛔', policy: 'Operator' },
-        { label: 'Dead Letters', route: '/dead-letter', icon: '✉', policy: 'Operator' },
-        { label: 'Tuning', route: '/calibration', icon: '🎚' },
-        { label: 'Operator Roles', route: '/operator-roles', icon: '🔐', policy: 'Admin' },
-      ],
-    },
-    {
-      label: 'Administration',
-      items: [
-        { label: 'Users', route: '/admin/users', icon: '👤', permission: 'users.manage' },
-        {
-          label: 'Roles & Permissions',
-          route: '/admin/roles',
-          icon: '🛂',
-          permission: 'roles.manage',
-        },
-        { label: 'Audit Log', route: '/admin/audit', icon: '📜', permission: 'audit.read' },
-        { label: 'My Account', route: '/account/profile', icon: '🪪' },
-      ],
-    },
-  ];
+  readonly navGroups: NavGroup[] = NAV_GROUPS;
+  readonly canSeeDashboard = computed(() => this.auth.canSeePath('/dashboard'));
 
   /**
    * Swagger is served by the engine itself, never through Caddy. A release bakes apiBaseUrl ""
@@ -673,7 +475,8 @@ export class SidebarComponent {
   })();
 
   /**
-   * Filters the nav groups down to what the current user is allowed to see.
+   * Filters the nav groups down to what the current user is allowed to see — by the route table
+   * the guards use (`core/auth/route-access.ts`), so a page shown here is a page that opens.
    * Groups whose items all get filtered away are dropped entirely so empty
    * section headers don't linger in the sidebar.
    */
@@ -682,11 +485,7 @@ export class SidebarComponent {
       .map((g) => ({
         ...g,
         items: g.items
-          .filter(
-            (item) =>
-              (!item.policy || this.auth.hasPolicy(item.policy)) &&
-              (!item.permission || this.auth.hasPermission(item.permission)),
-          )
+          .filter((item) => this.auth.canSeePath(item.route))
           .map((item) => ({ ...item, icon: asEmoji(item.icon) })),
       }))
       .filter((g) => g.items.length > 0);

@@ -45,6 +45,7 @@ import {
   type ChartScriptResult,
   type ScriptBasis,
 } from './chart-script.model';
+import { appStorage } from '@core/storage/app-storage';
 
 export { detectScriptKind } from './chart-script.model';
 
@@ -747,7 +748,7 @@ function isRefusal(err: unknown): err is ScriptingApiError {
 
 function readLegacy(): SavedChartScript[] {
   try {
-    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = appStorage.getItem(LEGACY_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
       ? parsed.filter((s) => s && typeof s.id === 'string' && typeof s.source === 'string')
@@ -759,8 +760,8 @@ function readLegacy(): SavedChartScript[] {
 
 function writeLegacy(list: SavedChartScript[]): void {
   try {
-    if (list.length) localStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(list));
-    else localStorage.removeItem(LEGACY_STORAGE_KEY);
+    if (list.length) appStorage.setItem(LEGACY_STORAGE_KEY, JSON.stringify(list));
+    else appStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     /* storage blocked */
   }
@@ -783,7 +784,7 @@ function isPermanentRefusal(e: ScriptingApiError | null | undefined): boolean {
 
 function readDrafts(): SavedChartScript[] {
   try {
-    const raw = localStorage.getItem(DRAFTS_STORAGE_KEY);
+    const raw = appStorage.getItem(DRAFTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed)
       ? parsed.filter((s) => s && typeof s.id === 'string' && typeof s.source === 'string')
@@ -795,8 +796,8 @@ function readDrafts(): SavedChartScript[] {
 
 function writeDrafts(list: SavedChartScript[]): void {
   try {
-    if (list.length) localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(list));
-    else localStorage.removeItem(DRAFTS_STORAGE_KEY);
+    if (list.length) appStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(list));
+    else appStorage.removeItem(DRAFTS_STORAGE_KEY);
   } catch {
     /* storage blocked */
   }

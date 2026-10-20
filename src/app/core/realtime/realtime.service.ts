@@ -5,10 +5,11 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { Observable, Subject, filter, firstValueFrom, map, share, takeUntil } from 'rxjs';
+import { Observable, Subject, filter, map, share, takeUntil } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { hubConnectPlan, legacyHubToken } from './hub-auth';
 
 // Canonical event-name table. These match the method names the engine-side
 // relay handlers push (see `RealtimeRelayHandlers.cs` in the API project).
@@ -128,10 +129,11 @@ export function backoffMs(attempt: number): number {
  * connection is lazy-started on the first subscription and kept alive until
  * the authoritative auth token goes away.
  *
- * JWT is passed via the query-string `access_token` because browsers can't
- * send `Authorization` headers on WebSocket upgrades — the engine's
- * `OnMessageReceived` hook only honours that on `/api/hubs` paths (E1 in
- * DESIGN_DOCS.md).
+ * Legacy sign-in passes the JWT via the query-string `access_token` because
+ * browsers can't send `Authorization` headers on WebSocket upgrades — the
+ * engine's `OnMessageReceived` hook only honours that on `/api/hubs` paths (E1
+ * in DESIGN_DOCS.md). With `bffAuth` on there is no token: each connection
+ * presents a single-use `?ticket=` from `POST /bff/ws-ticket` (see hub-auth.ts).
  */
 @Injectable({ providedIn: 'root' })
 export class RealtimeService {
@@ -185,34 +187,50 @@ export class RealtimeService {
    */
   async connect(): Promise<void> {
     this.manualStop = false;
+    // One attempt at a time: the ticket round trip (BFF) or the legacy cookie-ticket fetch is an
+    // await between "no connection yet" and "connection assigned", and two overlapping calls
+    // (sign-in effect + wake-up) would otherwise open two hubs.
+    this.connecting ??= this.openConnection().finally(() => (this.connecting = null));
+    return this.connecting;
+  }
+
+  private connecting: Promise<void> | null = null;
+
+  private async openConnection(): Promise<void> {
     if (!this.auth.isAuthenticated()) return;
     if (this.connection && this.connection.state !== HubConnectionState.Disconnected) return;
 
-    // Cookie-backed sessions store a sentinel in `_token` — we have no real
+    // Legacy: cookie-backed sessions store a sentinel in `_token` — we have no real
     // JWT here, so swap the cookie for a short-lived ticket on each
     // (re)connect. Legacy bearer-token sessions return the real token and
-    // skip the round trip.
-    const token = await this.freshToken();
-    if (!token) return;
+    // skip the round trip. A session with nothing to present does not connect.
+    if (this.auth.mode === 'legacy' && !(await legacyHubToken(this.auth))) return;
 
     const base = this.runtime.apiBaseUrl.replace(/\/$/, '');
-    const url = `${base}/api/hubs/trading`;
+    // BFF: a single-use ticket in the URL, WebSockets only, no negotiation (hub-auth.ts).
+    // Legacy: per ATTEMPT, not per connect. A cookie session's ticket is short-lived by design,
+    // and closing over one meant every reconnect after it expired re-presented the same dead
+    // ticket and was refused — so a connection that dropped after the ticket aged out could
+    // never come back, however many times it tried.
+    const plan = await hubConnectPlan(this.auth, `${base}/api/hubs/trading`);
+    if (!plan) {
+      // No ticket (engine unreachable, or the session just ended): try again later.
+      this.scheduleRestart();
+      return;
+    }
 
-    const connection = new HubConnectionBuilder()
-      // Per ATTEMPT, not per connect. A cookie session's ticket is short-lived by design, and
-      // closing over one meant every reconnect after it expired re-presented the same dead
-      // ticket and was refused — so a connection that dropped after the ticket aged out could
-      // never come back, however many times it tried.
-      .withUrl(url, { accessTokenFactory: () => this.freshToken() })
+    let builder = new HubConnectionBuilder().withUrl(plan.url, plan.options);
+    if (plan.autoReconnect) {
       // The DEFAULT policy gives up after four attempts (0s, 2s, 10s, 30s) and closes for good.
       // A trading console is meant to stay connected: a laptop that sleeps through lunch, or an
       // engine redeployed while the tab is open, both outlast 42 seconds, and what the operator
-      // gets is a stale page wearing an "offline" banner that never clears.
-      .withAutomaticReconnect({
+      // gets is a stale page wearing an "offline" banner that never clears. (With a single-use
+      // ticket the outer loop below reconnects instead, with a fresh ticket each time.)
+      builder = builder.withAutomaticReconnect({
         nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount),
-      })
-      .configureLogging(LogLevel.Warning)
-      .build();
+      });
+    }
+    const connection = builder.configureLogging(LogLevel.Warning).build();
 
     // Register a handler per canonical event name. SignalR dispatches by
     // method name; anything the server sends outside this list never reaches
@@ -251,25 +269,6 @@ export class RealtimeService {
       // console a moment before the engine is ready left it offline until a manual reload.
       this.state.set(HubConnectionState.Disconnected);
       this.scheduleRestart();
-    }
-  }
-
-  /**
-   * A token for THIS attempt.
-   *
-   * <p>Cookie sessions carry a sentinel rather than a JWT and have to swap it for a short-lived
-   * ticket; doing that once per <c>connect()</c> rather than once per attempt is what made a long
-   * outage unrecoverable.</p>
-   */
-  private async freshToken(): Promise<string> {
-    const token = this.auth.getToken();
-    if (!token) return '';
-    if (token !== 'cookie-session') return token;
-    try {
-      return (await firstValueFrom(this.auth.fetchWsTicket())) ?? '';
-    } catch {
-      // No ticket this time — the retry loop will ask again.
-      return '';
     }
   }
 

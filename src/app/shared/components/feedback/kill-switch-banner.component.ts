@@ -5,6 +5,7 @@ import { RouterLink } from '@angular/router';
 import { LucidePower } from '@lucide/angular';
 import { KillSwitchService } from '@core/services/kill-switch.service';
 import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 
 @Component({
   selector: 'app-kill-switch-banner',
@@ -62,19 +63,11 @@ export class KillSwitchBannerComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
-    // `/admin/kill-switch/global` is gated by the Operator policy. Only fetch
-    // when the caller's token explicitly carries Operator or Admin — otherwise
-    // the engine returns 403 on every page load and the browser logs the
-    // network failure regardless of our `catchError`.
-    //
-    // We intentionally don't go through `auth.hasPolicy('Operator')` here
-    // because that helper keeps a legacy dev-token escape hatch that returns
-    // `true` for empty role claims. That's fine for ordinary route guards
-    // (don't lock dev tokens out of the app), but it's wrong for "should I
-    // fire this privileged request?" — in that case we need the strict
-    // "token actually has the role" check.
-    const mine = this.auth.roles();
-    if (!mine.some((r) => r === 'Operator' || r === 'Admin')) return;
+    // `/admin/kill-switch/global` needs `access.operator` (p0-authz endpoint map). Only fetch when
+    // the person holds it — otherwise the engine answers 403 on every page load and the browser
+    // logs the failure regardless of our `catchError`. A session without permissions holds
+    // nothing (there is no "no roles = full access" fallback any more).
+    if (!this.auth.hasPermission(Permission.AccessOperator)) return;
 
     // Re-check on a cadence: no realtime event carries the switch, so a switch engaged by
     // another operator (or the engine) used to stay invisible here until a full reload.

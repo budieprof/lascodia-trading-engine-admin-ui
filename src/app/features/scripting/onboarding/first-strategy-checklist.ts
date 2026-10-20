@@ -1,3 +1,5 @@
+import { appStorage } from '@core/storage/app-storage';
+
 /**
  * The first-strategy checklist (PE-I9): the path from a script to trading on a demo account —
  * save a compiling script, preview it, backtest it, paper-trade it, bind a demo account — with
@@ -93,7 +95,7 @@ export const CHECKLIST_DISMISSED_PREFIX = 'lascodia.pine.checklist.hidden.v1:';
 
 export function isChecklistDismissed(strategyId: number): boolean {
   try {
-    return globalThis.localStorage?.getItem(CHECKLIST_DISMISSED_PREFIX + strategyId) === '1';
+    return appStorage.getItem(CHECKLIST_DISMISSED_PREFIX + strategyId) === '1';
   } catch {
     return false;
   }
@@ -101,7 +103,7 @@ export function isChecklistDismissed(strategyId: number): boolean {
 
 export function dismissChecklist(strategyId: number): void {
   try {
-    globalThis.localStorage?.setItem(CHECKLIST_DISMISSED_PREFIX + strategyId, '1');
+    appStorage.setItem(CHECKLIST_DISMISSED_PREFIX + strategyId, '1');
   } catch {
     /* storage unavailable: it hides for this visit only */
   }
