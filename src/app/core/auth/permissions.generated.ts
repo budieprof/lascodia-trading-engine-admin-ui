@@ -151,8 +151,8 @@ export const PERMISSION_CATALOG = [
     key: 'engine.config',
     category: 'Engine control',
     description:
-      'Read and update engine configuration. Risk-loosening values also need risk.loosen.',
-    scopeable: false,
+      "Read and change the organisation's own configuration: values for all of its accounts, or — granted on an account or account group — for those accounts. Risk-loosening values also need risk.loosen.",
+    scopeable: true,
     stepUp: false,
     twoPerson: false,
     deprecated: false,
