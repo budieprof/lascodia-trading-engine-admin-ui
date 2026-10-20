@@ -43,6 +43,9 @@ const BEFORE_CATALOG_V2: Record<string, RouteRule> = {
   'kill-switches': { anyOf: [P.AccessOperator] },
   'dead-letter': { anyOf: [P.AccessOperator] },
   'platform/elevations': { anyOf: [], staffOnly: true, bffOnly: true },
+  // h8-harden moved these two engine reads to platform.infrastructure.manage the same way.
+  'system-logs': { anyOf: [P.AccessOperator] },
+  'worker-health': { anyOf: [P.AccessOperator] },
 };
 const TABLE_BEFORE: RouteTable = { ...ROUTE_ACCESS, ...BEFORE_CATALOG_V2 };
 
@@ -80,6 +83,9 @@ describe('route table after catalog v2', () => {
     expect(table['audit-trail'].anyOf).toEqual([P.DecisionsRead]);
     expect(table['operator-roles'].anyOf).toEqual([P.IamMembersRead]);
     expect(table['dead-letter'].anyOf).toEqual([P.PlatformInfrastructureManage]);
+    // h8-harden: engine-wide reads of every organisation's free text (process log, worker errors).
+    expect(table['system-logs'].anyOf).toEqual([P.PlatformInfrastructureManage]);
+    expect(table['worker-health'].anyOf).toEqual([P.PlatformInfrastructureManage]);
     expect(table['platform/elevations']).toEqual({
       anyOf: [P.PlatformElevationRequest],
       staffOnly: true,
@@ -133,6 +139,15 @@ describe('route table after catalog v2', () => {
     }
     expect(canSee('/engine-config', riskManager)).toBe(false);
     expect(canSee('/dead-letter', riskManager)).toBe(false);
+    // h8-harden: an organisation's Operator (outside House the engine honours no platform.* key) no longer sees the
+    // engine-wide log or the workers' error text; House's Operator still does (the House specs above).
+    const orgOperator = subject(
+      permissionsForLegacyRoles(['Operator']).filter((k) => !k.startsWith('platform.')),
+      true,
+      false,
+    );
+    expect(canSee('/system-logs', orgOperator)).toBe(false);
+    expect(canSee('/worker-health', orgOperator)).toBe(false);
     expect(canSee('/operator-roles', subject([P.IamMembersRead], true, false))).toBe(true);
   });
 

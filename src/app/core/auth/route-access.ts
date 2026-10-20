@@ -103,9 +103,11 @@ export const ROUTE_ACCESS = {
   'economic-events': rule(P.MarketdataRead),
   'audit-trail': rule(P.DecisionsRead), // A4.1: POST audit-trail/list
   'system-health': rule(P.AccessViewer),
-  'system-logs': rule(P.AccessOperator),
+  // h8-harden: GET system/logs is the whole process's log (every organisation's text) — platform staff / House only.
+  'system-logs': rule(P.PlatformInfrastructureManage),
   'kill-switches': rule(P.EngineKillswitch), // A4.1: GET admin/kill-switch/global, /strategy/{id}
-  'worker-health': rule(P.AccessOperator),
+  // h8-harden: GET health/workers carries every worker's last error text — platform staff / House only.
+  'worker-health': rule(P.PlatformInfrastructureManage),
   'ea-instances': rule(P.AccessOperator),
   terminals: rule(P.AccessOperator),
   'dead-letter': rule(P.PlatformInfrastructureManage), // A4.1: POST dead-letter/list
