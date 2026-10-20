@@ -148,6 +148,14 @@ export const ROUTE_ACCESS = {
   'iam/access-review': bff(P.IamAccessReview),
   'iam/plan': bff(P.TenantUsageRead), // GET tenant/usage (multi-tenancy Phase 7)
 
+  // ── An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle) ──
+  // The organisation console (c7-tenant) has an `organisation` entry too: when merged, its anyOf is the union.
+  organisation: rule(P.TenantBrandingRead, P.TenantDataExport, P.TenantClose),
+  'organisation/branding': rule(P.TenantBrandingRead), // GET tenant/branding
+  'organisation/data-export': rule(P.TenantDataExport), // GET tenant/exports
+  'organisation/close': rule(P.TenantClose), // GET tenant/closure
+  onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
+
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
   // administrators holding platform.tenants.manage). Elevation and impersonation live in the BFF session.
@@ -156,6 +164,12 @@ export const ROUTE_ACCESS = {
   // Plans, quotas and fleet health (multi-tenancy Phase 7): their APIs work with either sign-in.
   'platform/plans': { anyOf: [P.PlatformPlansManage], staffOnly: true },
   'platform/fleet': { anyOf: [P.PlatformFleetRead], staffOnly: true },
+  // Self-serve sign-ups and closed organisations (Phase 7, c7-lifecycle): their APIs work with either sign-in.
+  'platform/signups': { anyOf: [P.PlatformTenantsManage], staffOnly: true },
+  'platform/closures': {
+    anyOf: [P.PlatformTenantsManage, P.PlatformTenantsPurge],
+    staffOnly: true,
+  },
   // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
   'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },

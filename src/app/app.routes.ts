@@ -18,6 +18,12 @@ export const routes: Routes = [
       ),
   },
   {
+    // Self-serve "Create an organisation" (multi-tenancy Phase 7, c7-lifecycle): public, outside the console.
+    path: 'signup',
+    loadComponent: () =>
+      import('@features/onboarding/pages/signup-page.component').then((m) => m.SignupPageComponent),
+  },
+  {
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],
@@ -597,6 +603,29 @@ export const routes: Routes = [
         canActivate: [canAccessPath('iam')],
         data: { breadcrumb: 'Organisation' },
         loadChildren: () => import('@features/iam/iam.routes').then((m) => m.IAM_ROUTES),
+      },
+      {
+        // An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle): branding, data export, closing.
+        // The organisation console (c7-tenant) owns /organisation as well: when both are merged, spread
+        // ORGANISATION_LIFECYCLE_ROUTES into its ORGANISATION_ROUTES (the router also falls through to this
+        // entry for paths its children do not match).
+        path: 'organisation',
+        canActivate: [canAccessPath('organisation')],
+        data: { breadcrumb: 'Organisation' },
+        loadChildren: () =>
+          import('@features/organisation/lifecycle/lifecycle.routes').then(
+            (m) => m.ORGANISATION_LIFECYCLE_ROUTES,
+          ),
+      },
+      {
+        // Getting a new organisation going (multi-tenancy Phase 7, c7-lifecycle).
+        path: 'onboarding',
+        canActivate: [canAccessPath('onboarding')],
+        data: { breadcrumb: 'Get started' },
+        loadComponent: () =>
+          import('@features/onboarding/pages/onboarding-page.component').then(
+            (m) => m.OnboardingPageComponent,
+          ),
       },
       {
         // Platform console (multi-tenancy W3, U3.6): organisations, elevated access, impersonation.

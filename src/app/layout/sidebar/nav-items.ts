@@ -154,6 +154,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Approvals', route: '/iam/approvals', icon: '✅' },
       { label: 'Access review', route: '/iam/access-review', icon: '🔍' },
       { label: 'Plan & usage', route: '/iam/plan', icon: '📦' },
+      // An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle).
+      { label: 'Get started', route: '/onboarding', icon: '🚀' },
+      { label: 'Branding', route: '/organisation/branding', icon: '🎨' },
+      { label: 'Export your data', route: '/organisation/data-export', icon: '📤' },
+      { label: 'Close the organisation', route: '/organisation/close', icon: '🚪' },
     ],
   },
   {
@@ -163,6 +168,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Organisations', route: '/platform/organisations', icon: '🏢' },
       { label: 'Plans', route: '/platform/plans', icon: '📦' },
       { label: 'Fleet health', route: '/platform/fleet', icon: '🛰' },
+      { label: 'Sign-ups', route: '/platform/signups', icon: '📝' },
+      { label: 'Closed organisations', route: '/platform/closures', icon: '🗃' },
       { label: 'Elevated access', route: '/platform/elevations', icon: '⏫' },
       { label: 'Impersonation', route: '/platform/impersonation', icon: '🎭' },
     ],

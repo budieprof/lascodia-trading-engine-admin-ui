@@ -11,6 +11,8 @@ const PAGES: AccessPath[] = [
   'platform/fleet',
   'platform/elevations',
   'platform/impersonation',
+  'platform/signups',
+  'platform/closures',
 ];
 
 /** Platform console (U3.6): platform staff only (`/bff/session` → isPlatformStaff). */
@@ -50,6 +52,26 @@ export const PLATFORM_ROUTES: Routes = [
     data: { breadcrumb: 'Elevated access' },
     loadComponent: () =>
       import('./pages/elevations-page.component').then((m) => m.ElevationsPageComponent),
+  },
+  {
+    // Self-serve sign-ups and their approval (multi-tenancy Phase 7, c7-lifecycle).
+    path: 'signups',
+    canActivate: [canAccessPath('platform/signups')],
+    data: { breadcrumb: 'Sign-ups' },
+    loadComponent: () =>
+      import('@features/onboarding/pages/platform-signups-page.component').then(
+        (m) => m.PlatformSignupsPageComponent,
+      ),
+  },
+  {
+    // Closed organisations: reopening, the deletion plan and the deletion (multi-tenancy Phase 7, c7-lifecycle).
+    path: 'closures',
+    canActivate: [canAccessPath('platform/closures')],
+    data: { breadcrumb: 'Closed organisations' },
+    loadComponent: () =>
+      import('@features/organisation/lifecycle/pages/platform-closures-page.component').then(
+        (m) => m.PlatformClosuresPageComponent,
+      ),
   },
   {
     path: 'impersonation',
