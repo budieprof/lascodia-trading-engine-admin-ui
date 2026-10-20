@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { PermissionDefinition } from '@core/auth/permissions.generated';
 import {
   canDecide,
+  describeDevice,
   checkCidr,
   errorText,
   filterMembers,
@@ -279,5 +280,15 @@ describe('canDecide (two-person approvals)', () => {
   it('refuses decided or expired requests', () => {
     expect(canDecide({ ...r, status: 'Approved' }, 8).ok).toBe(false);
     expect(canDecide({ ...r, expiresAtUtc: '2020-01-01T00:00:00Z' }, 8).ok).toBe(false);
+  });
+});
+
+describe('describeDevice', () => {
+  it('names browser and platform', () => {
+    expect(describeDevice('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36')).toBe('Chrome on macOS');
+    expect(describeDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1')).toBe('Safari on iOS');
+    expect(describeDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141.0')).toBe('Edge on Windows');
+    expect(describeDevice('curl/8.4.0')).toBe('curl/8.4.0');
+    expect(describeDevice(null)).toBe('Unknown device');
   });
 });

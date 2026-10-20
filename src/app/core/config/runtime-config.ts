@@ -33,6 +33,12 @@ export interface RuntimeConfig {
    * is running is still what is deployed. {@link ReleaseWatchService} compares this.</p>
    */
   releaseId?: string;
+
+  /**
+   * Where people manage their password, second factor and passkeys with BFF sign-in (the identity
+   * provider's account console). Defaults to `<apiBaseUrl>/idp/realms/lascodia/account/`.
+   */
+  identityAccountUrl?: string;
 }
 
 export const RUNTIME_CONFIG = new InjectionToken<RuntimeConfig>('RUNTIME_CONFIG');
@@ -60,6 +66,7 @@ export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
       buildTime: cfg.buildTime,
       environmentLabel: cfg.environmentLabel,
       releaseId: cfg.releaseId,
+      identityAccountUrl: cfg.identityAccountUrl,
     };
   } catch {
     return FALLBACK_CONFIG;
