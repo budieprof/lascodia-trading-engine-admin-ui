@@ -626,6 +626,7 @@ export class SidebarComponent {
           icon: '🛂',
           permission: 'roles.manage',
         },
+        { label: 'Audit Log', route: '/admin/audit', icon: '📜', permission: 'audit.read' },
         { label: 'My Account', route: '/account/profile', icon: '🪪' },
       ],
     },

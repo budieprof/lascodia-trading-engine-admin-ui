@@ -1,0 +1,320 @@
+<div class="page">
+  <app-page-header
+    title="Audit log"
+    subtitle="Sign-ins, access changes, configuration and trading controls. Append-only and hash-chained: an event cannot be changed or removed without breaking the chain."
+  >
+    <button
+      slot="title-after"
+      type="button"
+      class="chain-badge"
+      [class]="'tone-' + badge().tone"
+      [title]="badge().detail"
+      [disabled]="verifying()"
+      (click)="verifyAll()"
+      aria-label="Verify the whole audit chain"
+    >
+      <span class="dot" aria-hidden="true"></span>
+      {{ badge().label }}
+      @if (verifying() && verifyProgress() > 0) {
+        <span class="muted">· {{ verifyProgress() | number }} checked</span>
+      }
+    </button>
+    <button
+      type="button"
+      class="btn btn-secondary"
+      (click)="exportCurrent()"
+      [disabled]="exporting() || loading()"
+      title="Download the events matching these filters as JSON Lines (oldest first)"
+    >
+      {{ exporting() ? 'Exporting…' : 'Export' }}
+    </button>
+    <app-refresh-button [refreshing]="loading()" (refresh)="reload()" />
+  </app-page-header>
+
+  <p class="chain-detail muted small" aria-live="polite">{{ badge().detail }}</p>
+
+  <form class="card filters" (ngSubmit)="apply()" aria-label="Audit log filters">
+    <label class="field">
+      <span class="label">Time</span>
+      <select class="input" name="range" [(ngModel)]="draft.range">
+        @for (r of timeRanges; track r.value) {
+          <option [value]="r.value">{{ r.label }}</option>
+        }
+      </select>
+    </label>
+    @if (draft.range === 'custom') {
+      <label class="field">
+        <span class="label">From</span>
+        <input class="input" type="datetime-local" name="from" [(ngModel)]="draft.from" />
+      </label>
+      <label class="field">
+        <span class="label">To</span>
+        <input class="input" type="datetime-local" name="to" [(ngModel)]="draft.to" />
+      </label>
+    }
+    <label class="field">
+      <span class="label">Action</span>
+      <input
+        class="input mono"
+        name="action"
+        list="audit-action-areas"
+        placeholder="auth.  iam.role.  config."
+        [(ngModel)]="draft.action"
+      />
+      <datalist id="audit-action-areas">
+        @for (a of actionAreas; track a.value) {
+          <option [value]="a.value">{{ a.label }}</option>
+        }
+      </datalist>
+    </label>
+    <label class="field">
+      <span class="label">Category</span>
+      <select class="input" name="category" [(ngModel)]="draft.category">
+        <option value="">Any</option>
+        @for (c of categories; track c) {
+          <option [value]="c">{{ c }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span class="label">Outcome</span>
+      <select class="input" name="outcome" [(ngModel)]="draft.outcome">
+        <option value="">Any</option>
+        @for (o of outcomes; track o) {
+          <option [value]="o">{{ o }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span class="label">Actor</span>
+      <input
+        class="input"
+        name="actor"
+        placeholder="admin-user:5 or a name"
+        [(ngModel)]="draft.actor"
+      />
+    </label>
+    <label class="field">
+      <span class="label">Actor type</span>
+      <select class="input" name="actorType" [(ngModel)]="draft.actorType">
+        <option value="">Any</option>
+        @for (t of actorTypes; track t) {
+          <option [value]="t">{{ t }}</option>
+        }
+      </select>
+    </label>
+    <label class="field">
+      <span class="label">Resource type</span>
+      <input class="input" name="resourceType" placeholder="AdminUser" [(ngModel)]="draft.resourceType" />
+    </label>
+    <label class="field">
+      <span class="label">Resource id</span>
+      <input class="input" name="resourceId" placeholder="17" [(ngModel)]="draft.resourceId" />
+    </label>
+    <label class="field narrow">
+      <span class="label">Tenant</span>
+      <input class="input" name="tenantId" inputmode="numeric" placeholder="All" [(ngModel)]="draft.tenantId" />
+    </label>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">Apply</button>
+      <button type="button" class="btn btn-secondary" (click)="reset()">
+        Reset{{ activeFilters() > 0 ? ' (' + activeFilters() + ')' : '' }}
+      </button>
+    </div>
+    @if (filterProblem(); as problem) {
+      <p class="filter-problem" role="alert">{{ problem }}</p>
+    }
+  </form>
+
+  <section class="card">
+    <header class="card-head">
+      <h3>Events</h3>
+      <span class="muted">newest first · {{ items().length | number }} shown{{ hasMore() ? ', more older' : '' }}</span>
+    </header>
+
+    @if (loading() && items().length === 0) {
+      <app-table-skeleton [rows]="8" [columns]="7" ariaLabel="Loading audit events" />
+    } @else if (loadError()) {
+      <app-error-state title="Could not load the audit log" [message]="loadError()" (retry)="reload()" />
+    } @else if (items().length === 0) {
+      <app-empty-state
+        title="No events match"
+        description="Nothing was recorded for these filters. Widen the time range or reset the filters."
+        actionLabel="Reset filters"
+        (actionClick)="reset()"
+      />
+    } @else {
+      <div class="table-wrap">
+        <table class="events">
+          <thead>
+            <tr>
+              <th scope="col">Time (UTC)</th>
+              <th scope="col">Action</th>
+              <th scope="col">Outcome</th>
+              <th scope="col">Actor</th>
+              <th scope="col">Resource</th>
+              <th scope="col">Client</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (e of items(); track e.id) {
+              <tr
+                tabindex="0"
+                [class.selected]="selected()?.id === e.id"
+                (click)="open(e)"
+                (keydown.enter)="open(e)"
+                [attr.aria-label]="'Event ' + e.id + ': ' + e.action"
+              >
+                <td class="mono nowrap">{{ e.occurredAtUtc | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC' }}</td>
+                <td class="mono">
+                  {{ e.action }}
+                  @if (aggregateCount(e); as count) {
+                    <span class="chip" title="Aggregated: occurrences in one window">×{{ count | number }}</span>
+                  }
+                </td>
+                <td><span class="pill" [class]="'tone-' + outcomeTone(e.outcome)">{{ e.outcome }}</span></td>
+                <td class="ellipsis" [title]="actorLabel(e)">
+                  <span class="actor-type">{{ e.actorType }}</span> {{ actorLabel(e) }}
+                </td>
+                <td class="ellipsis mono" [title]="resourceLabel(e)">{{ resourceLabel(e) }}</td>
+                <td class="mono nowrap">{{ e.clientIp ?? '—' }}</td>
+                <td class="ellipsis reason" [title]="e.reason ?? ''">{{ e.reason ?? '' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+      @if (hasMore()) {
+        <div class="more">
+          <button type="button" class="btn btn-secondary" (click)="loadOlder()" [disabled]="loadingMore()">
+            {{ loadingMore() ? 'Loading…' : 'Load older events' }}
+          </button>
+        </div>
+      }
+    }
+  </section>
+</div>
+
+@if (selected(); as e) {
+  <div class="overlay" (click)="onBackdrop($event)" role="presentation">
+    <aside
+      class="drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="audit-event-title"
+      appModalA11y
+      (dismiss)="close()"
+    >
+      <header class="drawer-head">
+        <div>
+          <h2 id="audit-event-title" class="mono">{{ e.action }}</h2>
+          <p class="muted small">
+            Event #{{ e.id }} · {{ e.occurredAtUtc | date: 'yyyy-MM-dd HH:mm:ss.SSS' : 'UTC' }} UTC ·
+            <span class="pill" [class]="'tone-' + outcomeTone(e.outcome)">{{ e.outcome }}</span>
+          </p>
+        </div>
+        <button type="button" class="close-btn" (click)="close()" aria-label="Close">×</button>
+      </header>
+
+      @if (e.reason) {
+        <p class="reason-block">{{ e.reason }}</p>
+      }
+
+      <dl class="facts">
+        <dt>Category</dt>
+        <dd>{{ e.category }}</dd>
+        <dt>Actor</dt>
+        <dd>
+          <span class="actor-type">{{ e.actorType }}</span> {{ actorLabel(e) }}
+          <button type="button" class="link-btn" (click)="filterBy('actor', e)">only this actor</button>
+        </dd>
+        @if (e.onBehalfOf) {
+          <dt>On behalf of</dt>
+          <dd class="mono">{{ e.onBehalfOf }}</dd>
+        }
+        <dt>Resource</dt>
+        <dd>
+          <span class="mono">{{ resourceLabel(e) }}</span>
+          @if (e.resourceType || e.resourceId) {
+            <button type="button" class="link-btn" (click)="filterBy('resource', e)">only this resource</button>
+          }
+        </dd>
+        <dt>Action</dt>
+        <dd>
+          <span class="mono">{{ e.action }}</span>
+          <button type="button" class="link-btn" (click)="filterBy('action', e)">only this action</button>
+        </dd>
+        <dt>Client</dt>
+        <dd class="mono">{{ e.clientIp ?? '—' }}</dd>
+        <dt>User agent</dt>
+        <dd class="wrap">{{ e.userAgent ?? '—' }}</dd>
+        <dt>Session</dt>
+        <dd class="mono wrap">{{ e.sessionId ?? '—' }}</dd>
+        <dt>Correlation</dt>
+        <dd class="mono wrap">{{ e.correlationId ?? '—' }}</dd>
+        <dt>Tenant</dt>
+        <dd>{{ e.tenantId ?? 'Platform' }}</dd>
+      </dl>
+
+      <section class="diff">
+        <header class="section-head">
+          <h3>Before → after</h3>
+          <button type="button" class="link-btn" (click)="showRaw.set(!showRaw())">
+            {{ showRaw() ? 'Show changes' : 'Show raw JSON' }}
+          </button>
+        </header>
+        @if (showRaw()) {
+          <div class="raw">
+            <div>
+              <span class="label">Before</span>
+              <pre>{{ e.before === null ? '—' : (e.before | json) }}</pre>
+            </div>
+            <div>
+              <span class="label">After</span>
+              <pre>{{ e.after === null ? '—' : (e.after | json) }}</pre>
+            </div>
+          </div>
+        } @else if (diffRows().length === 0) {
+          <p class="muted small">No before/after state was recorded for this event.</p>
+        } @else {
+          <table class="diff-table">
+            <thead>
+              <tr>
+                <th scope="col">Field</th>
+                <th scope="col">Before</th>
+                <th scope="col">After</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of diffRows(); track row.path) {
+                <tr [class]="'change-' + row.change">
+                  <td class="mono">{{ row.path }}</td>
+                  <td class="mono wrap before">{{ row.before ?? '' }}</td>
+                  <td class="mono wrap after">{{ row.after ?? '' }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <p class="muted small">Values of secret fields (keys, tokens, passwords) are never stored and show as ***.</p>
+        }
+      </section>
+
+      <section class="chain">
+        <h3>Hash chain</h3>
+        @if (e.hash) {
+          <dl class="facts">
+            <dt>Sealed</dt>
+            <dd>{{ e.sealedAtUtc | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC' }} UTC</dd>
+            <dt>Hash</dt>
+            <dd class="mono wrap">{{ e.hash }}</dd>
+            <dt>Previous</dt>
+            <dd class="mono wrap">{{ e.prevHash }}</dd>
+          </dl>
+        } @else {
+          <p class="muted small">Not sealed yet — the sealer links new events into the chain within seconds.</p>
+        }
+      </section>
+    </aside>
+  </div>
+}
