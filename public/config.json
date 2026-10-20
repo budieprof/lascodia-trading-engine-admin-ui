@@ -1,7 +1,7 @@
 {
   "apiBaseUrl": "http://localhost:5081",
   "featureFlags": {
-    "bffAuth": false,
+    "bffAuth": true,
     "chart-annotations": {
       "enabled": true,
       "permissions": ["access.trader"]
