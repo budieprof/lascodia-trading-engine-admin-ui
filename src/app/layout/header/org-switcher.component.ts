@@ -53,8 +53,8 @@ export function unavailableReason(m: BffMembership): string | null {
           class="org-pill"
           [attr.aria-expanded]="open()"
           aria-haspopup="menu"
-          [disabled]="switching()"
-          [title]="'Organisation: ' + (active()?.name ?? '')"
+          [disabled]="switching() || locked()"
+          [title]="locked() ? 'End the impersonation to switch organisation' : 'Organisation: ' + (active()?.name ?? '')"
           (click)="open.set(!open())"
         >
           <span class="org-label">Org:</span>
@@ -214,6 +214,8 @@ export class OrgSwitcherComponent {
 
   readonly active = this.auth.activeTenant;
   readonly visible = computed(() => this.auth.mode === 'bff' && this.active() !== null);
+  /** The engine refuses to switch while impersonating (contract C3.1). */
+  readonly locked = computed(() => this.auth.impersonation() !== null);
   readonly choices = computed(() =>
     orderedMemberships(this.auth.memberships(), this.active()?.id ?? null),
   );

@@ -24,6 +24,7 @@ import { AssistantDockComponent } from '@shared/components/assistant-dock/assist
 import { FooterVersionPillComponent } from './footer-version-pill/footer-version-pill.component';
 import { AuthService } from '@core/auth/auth.service';
 import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
+import { ImpersonationBannerComponent } from './impersonation-banner.component';
 
 @Component({
   selector: 'app-layout',
@@ -42,6 +43,7 @@ import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
     AssistantDockComponent,
     FooterVersionPillComponent,
     StepUpBannerComponent,
+    ImpersonationBannerComponent,
   ],
   template: `
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -68,6 +70,7 @@ import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
         <app-realtime-status-banner />
         <app-kill-switch-banner />
         @if (bffMode) {
+          <app-impersonation-banner />
           <app-step-up-banner />
         }
         <app-paper-mode-banner />

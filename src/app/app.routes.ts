@@ -589,6 +589,14 @@ export const routes: Routes = [
         loadChildren: () => import('@features/iam/iam.routes').then((m) => m.IAM_ROUTES),
       },
       {
+        // Platform console (multi-tenancy W3, U3.6): organisations, elevated access, impersonation.
+        path: 'platform',
+        canActivate: [canAccessPath('platform')],
+        data: { breadcrumb: 'Platform' },
+        loadChildren: () =>
+          import('@features/platform/platform.routes').then((m) => m.PLATFORM_ROUTES),
+      },
+      {
         path: 'account',
         canActivate: [canAccessPath('account')],
         data: { breadcrumb: 'Account' },
