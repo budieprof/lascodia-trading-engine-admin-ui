@@ -189,6 +189,25 @@ localhost rather than a blank page.
   what would be over the new limits first) and the monthly usage export (`platform.usage.read`). DTOs in
   `features/platform/plans.types.ts`, decisions in `plans.logic.ts`. LLM month-to-date usage is shown only
   when the engine says `llm.available` — never a guessed figure.
+- **Organisation console (multi-tenancy Phase 7, c7-tenant; `features/organisation/`, route
+  `/organisation/*`, sidebar "Organisation").** What an organisation administers of its own, each page on
+  its read's key and every action on its write's key; the APIs act in the active organisation with either
+  sign-in (legacy sessions act in House), so none is BFF-only. `terminals` (enrollment tokens shown once
+  with EA `InpEnrollmentToken` / supervisor `enrollment_token` steps, machine credentials per account with
+  last use, revoke/rotate — `accounts.read`/`accounts.connect`), `settings` (`/config/effective` +
+  `/config/overrides` for the organisation or one account: value, source layer, inherited value, every
+  layer; change/remove in `components/config-change-dialog`, which checks tighten-only keys and shows the
+  governed path for a risk-loosening change — `engine.config`), `risk` (organisation + account kill
+  switches, typed-confirmation emergency flatten, `TenantRisk:*` limits), `strategies` (the organisation's
+  subscriptions, platform vs private strategies, per-strategy editor over its accounts — `access.operator`),
+  `alerts` (`/alerts/channels`: e-mail, Telegram, signed webhook; secrets write-only, signing secret shown
+  once with the receiver samples — `alerts.manage`), `llm` (r6-llm `/llm/usage` + `/llm/tenant-key`; the
+  page checks the engine itself and says "not available yet" on a plain 404 — `llm.usage.read` /
+  `llm.keys.manage`). DTOs in `organisation.types.ts`, calls in
+  `organisation-api.service.ts`, decisions in `*.logic.ts` with specs; a write the engine parks for a
+  second person (`-202-approval`) or a step-up (401) is never reported as a failure (`failureMessage`).
+  Dialogs that take state (`config-change-dialog`) are opened through a method (`open(request)`), not
+  signal inputs, so the pure vitest runner can drive them.
 
 ## Verifying in a browser
 
@@ -231,9 +250,10 @@ src/app/
               route table, step-up), storage (per-person localStorage), config, realtime, polling,
               stores, feature-flags, scope (account scoping), assistant, keyboard, theme, observability
   shared/     DataTable, ChartCard, StatusBadge, trading-chart, form-field, command palette
-  features/   one folder per feature (68) — orders, positions, ea-instances, market-data,
+  features/   one folder per feature (69) — orders, positions, ea-instances, market-data,
               martingale, spot-sweep, llm-backtest, analysis-monitors, …; iam (organisation
-              administration), platform (platform console), invite (/invite/:token)
+              administration), organisation (organisation console: terminals, settings, risk,
+              subscriptions, alert channels, LLM), platform (platform console), invite (/invite/:token)
   layout/     sidebar, header, breadcrumbs, shell
 public/       config.json (runtime config + feature flags), icons, manifest
 scripts/      release.sh (deploy), generate-icons.mjs, bundle-stats.mjs, generate-permissions.mjs

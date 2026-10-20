@@ -154,6 +154,13 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Approvals', route: '/iam/approvals', icon: '✅' },
       { label: 'Access review', route: '/iam/access-review', icon: '🔍' },
       { label: 'Plan & usage', route: '/iam/plan', icon: '📦' },
+      // The organisation console (multi-tenancy Phase 7, c7-tenant).
+      { label: 'Connect a terminal', route: '/organisation/terminals', icon: '🔌' },
+      { label: 'Settings', route: '/organisation/settings', icon: '⚙' },
+      { label: 'Risk & kill switches', route: '/organisation/risk', icon: '⛔' },
+      { label: 'Strategy subscriptions', route: '/organisation/strategies', icon: '📡' },
+      { label: 'Alert channels', route: '/organisation/alerts', icon: '🔔' },
+      { label: 'LLM usage & key', route: '/organisation/llm', icon: '🧠' },
     ],
   },
   {
