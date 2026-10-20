@@ -252,6 +252,24 @@
     "deprecated": false
   },
   {
+    "key": "llm.keys.manage",
+    "category": "LLM usage and providers",
+    "description": "Store and remove the organisation's own LLM provider API keys (Anthropic, OpenAI, Google, DeepSeek). Keys are write-only. Changes need a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "llm.usage.read",
+    "category": "LLM usage and providers",
+    "description": "See the organisation's LLM usage and spend per day, provider and model, its LLM budget and which provider it runs on.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "ml.evaluate",
     "category": "Machine learning",
     "description": "Run backtests / walk-forward / evaluation jobs.",
