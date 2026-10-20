@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -9,6 +11,10 @@ import { errorText, memberLabel, reportable, when } from '@features/iam/iam.logi
 import type { CreateTenantBody, IamMember, TenantDto } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { tenantErrors, tenantStatusAction } from '../platform.logic';
+import { TenantPlanPanelComponent } from '../components/tenant-plan-panel.component';
+import { UsageExportComponent } from '../components/usage-export.component';
+import { PlansApiService } from '../plans-api.service';
+import type { PlanDto } from '../plans.types';
 
 /**
  * Organisations (U3.6; t2-core `platform/tenants`, `platform.tenants.manage`): list, create a
@@ -20,7 +26,13 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
   selector: 'app-platform-organisations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    TenantPlanPanelComponent,
+    UsageExportComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -42,6 +54,9 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
         >
           {{ tenants.loading() ? 'Loading…' : 'Search' }}
         </button>
+        @if (canReadUsage) {
+          <app-usage-export />
+        }
         <button type="button" class="btn btn-primary" (click)="creating.set(!creating())">
           New organisation
         </button>
@@ -83,6 +98,22 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                   <option value="Canary">Canary (isolation probe, demo accounts only)</option>
                 </select>
               </label>
+              @if (canManagePlans) {
+                <label class="field">
+                  <span class="label">Plan</span>
+                  <select
+                    class="select"
+                    name="plan"
+                    [ngModel]="draft().planId ?? null"
+                    (ngModelChange)="patch({ planId: $event })"
+                  >
+                    <option [ngValue]="null">The default plan</option>
+                    @for (p of assignablePlans(); track p.id) {
+                      <option [ngValue]="p.id">{{ p.name }}</option>
+                    }
+                  </select>
+                </label>
+              }
             </div>
             <label class="check">
               <input
@@ -125,6 +156,7 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                   <th>Organisation</th>
                   <th>Kind</th>
                   <th>Status</th>
+                  <th>Plan</th>
                   <th>Members</th>
                   <th>Created</th>
                   <th><span class="sr-only">Actions</span></th>
@@ -154,6 +186,9 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                         <span class="sub">{{ t.statusReason }}</span>
                       }
                     </td>
+                    <td class="small">
+                      {{ t.planName ?? 'Default plan' }}
+                    </td>
                     <td class="small">{{ t.activeMembers ?? '—' }}</td>
                     <td class="small">{{ when(t.createdAtUtc) }}</td>
                     <td class="actions">
@@ -164,6 +199,15 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                       >
                         Members
                       </button>
+                      @if (canReadUsage || canManagePlans) {
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="togglePlan(t)"
+                        >
+                          Plan &amp; usage
+                        </button>
+                      }
                       @if (action === 'suspend') {
                         <button
                           type="button"
@@ -185,7 +229,7 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                   </tr>
                   @if (openMembersFor() === t.id) {
                     <tr class="selected">
-                      <td colspan="6">
+                      <td colspan="7">
                         @if (membersError(); as e) {
                           <span class="chip bad">Could not load</span> {{ e }}
                         } @else if (members().length === 0) {
@@ -195,6 +239,18 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                             <span class="sub">{{ label(m) }} — {{ m.status }}</span>
                           }
                         }
+                      </td>
+                    </tr>
+                  }
+                  @if (openPlanFor() === t.id) {
+                    <tr class="selected">
+                      <td colspan="7">
+                        <app-tenant-plan-panel
+                          [tenant]="t"
+                          [plans]="canManagePlans ? plans.value() : null"
+                          [canReadUsage]="canReadUsage"
+                          (changed)="tenants.reload()"
+                        />
                       </td>
                     </tr>
                   }
@@ -241,6 +297,16 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
 export class OrganisationsPageComponent {
   private readonly iam = inject(IamApiService);
   private readonly notify = inject(NotificationService);
+  private readonly auth = inject(AuthService);
+  private readonly plansApi = inject(PlansApiService);
+
+  /** Multi-tenancy Phase 7: move organisations between plans / read their usage and the monthly export. */
+  protected readonly canManagePlans = this.auth.hasPermission(Permission.PlatformPlansManage);
+  protected readonly canReadUsage = this.auth.hasPermission(Permission.PlatformUsageRead);
+  readonly plans = iamResource(() => this.plansApi.plans(), [] as PlanDto[], 'Could not load plans.');
+  /** The House plan is House's alone. */
+  readonly assignablePlans = computed(() => this.plans.value().filter((p) => !p.isHousePlan));
+  readonly openPlanFor = signal<number | null>(null);
 
   protected readonly when = when;
 
@@ -273,6 +339,11 @@ export class OrganisationsPageComponent {
 
   constructor() {
     this.tenants.reload();
+    if (this.canManagePlans) this.plans.reload();
+  }
+
+  togglePlan(t: TenantDto): void {
+    this.openPlanFor.set(this.openPlanFor() === t.id ? null : t.id);
   }
 
   statusAction(t: TenantDto) {
@@ -306,6 +377,7 @@ export class OrganisationsPageComponent {
           name: '',
           kind: 'Customer',
           contributesToPlatformLearning: false,
+          planId: null,
         });
         this.notify.success(`Organisation ${body.name} created.`);
         this.tenants.reload();

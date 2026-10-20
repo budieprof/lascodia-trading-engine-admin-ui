@@ -17,6 +17,7 @@ const PAGES: AccessPath[] = [
   'iam/sso',
   'iam/approvals',
   'iam/access-review',
+  'iam/plan',
 ];
 
 /**
@@ -97,5 +98,12 @@ export const IAM_ROUTES: Routes = [
     data: { breadcrumb: 'Access review' },
     loadComponent: () =>
       import('./pages/access-review-page.component').then((m) => m.AccessReviewPageComponent),
+  },
+  {
+    // The organisation's plan and usage (multi-tenancy Phase 7).
+    path: 'plan',
+    canActivate: [canAccessPath('iam/plan')],
+    data: { breadcrumb: 'Plan & usage' },
+    loadComponent: () => import('./pages/plan-page.component').then((m) => m.PlanPageComponent),
   },
 ];

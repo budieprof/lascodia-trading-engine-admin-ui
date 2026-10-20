@@ -8,6 +8,7 @@ import { SUPPRESS_ERROR_TOAST } from '../api/api.service';
 import { AuthResponseCode, CSRF_HEADER } from './bff.types';
 import { CSRF_RETRIED, SKIP_SESSION_HANDLING } from './http-context';
 import { StepUpService } from './step-up.service';
+import { quotaRefusalMessage } from '../plans/quota-refusal';
 
 function responseCodeOf(error: HttpErrorResponse): string | null {
   const body = error.error as { responseCode?: unknown } | null;
@@ -120,7 +121,8 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
           if (error.status === 403 && !req.context.get(SUPPRESS_ERROR_TOAST)) {
             const body = error.error as ResponseData<unknown> | null;
             notificationService.error(
-              body?.message || 'You do not have permission to perform this action.',
+              quotaRefusalMessage(error) ??
+                (body?.message || 'You do not have permission to perform this action.'),
             );
             return throwError(() => error);
           }
@@ -186,7 +188,10 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
         }
 
         if (error.status === 403) {
-          notificationService.error('You do not have permission to perform this action.');
+          // A plan quota refusal says what the plan allows; anything else is a permission refusal.
+          notificationService.error(
+            quotaRefusalMessage(error) ?? 'You do not have permission to perform this action.',
+          );
           return throwError(() => error);
         }
 

@@ -309,6 +309,10 @@ export interface TenantDto {
   createdAtUtc?: string | null;
   activeMembers?: number | null;
   contributesToPlatformLearning?: boolean | null;
+  /** Its plan (multi-tenancy Phase 7); null = held to the default plan. */
+  planId?: number | null;
+  planSlug?: string | null;
+  planName?: string | null;
 }
 
 export interface CreateTenantBody {
@@ -316,6 +320,8 @@ export interface CreateTenantBody {
   name: string;
   kind: 'Customer' | 'Canary';
   contributesToPlatformLearning: boolean;
+  /** A plan for it (Phase 7); omitted/null = the default plan. */
+  planId?: number | null;
 }
 
 export type ElevationStatus = 'Pending' | 'Active' | 'Ended' | 'Expired' | 'Rejected';

@@ -72,6 +72,15 @@
     "deprecated": false
   },
   {
+    "key": "alerts.manage",
+    "category": "Alerts",
+    "description": "Set up where the organisation's alerts go — its Telegram bot and chat, e-mail recipients and webhook (URL and signing secret) — and send test alerts. Secrets are write-only. Changes need a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "audit.read",
     "category": "Audit",
     "description": "Read, export and verify the audit log (sign-ins, access changes, configuration and trading controls).",
@@ -110,7 +119,7 @@
   {
     "key": "engine.killswitch",
     "category": "Engine control",
-    "description": "See and engage kill switches (global, or a strategy's).",
+    "description": "See and engage kill switches: the organisation's, a trading account's or a strategy's (the global one is the platform operator's).",
     "scopeable": true,
     "stepUp": false,
     "twoPerson": false,
@@ -378,6 +387,15 @@
     "deprecated": false
   },
   {
+    "key": "tenant.usage.read",
+    "category": "Organisations",
+    "description": "See the organisation's plan — what it allows — and how much of it is in use.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "platform.data.manage",
     "category": "Platform staff",
     "description": "Platform staff: change platform market and reference data — currency pairs, economic events, the candle source and candle repairs, regime, microstructure, sentiment and news-intelligence backfills.",
@@ -423,6 +441,15 @@
     "deprecated": false
   },
   {
+    "key": "platform.fleet.read",
+    "category": "Platform staff",
+    "description": "Platform staff: see every organisation's EA terminals — state, version, last heartbeat, credential — and engaged kill switches (read-only; each view is audited).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "platform.impersonate",
     "category": "Platform staff",
     "description": "Platform staff: view the console as another user (read-only unless an approved elevation allows changes; recorded in that organisation's audit log). Needs a fresh MFA sign-in.",
@@ -441,6 +468,15 @@
     "deprecated": false
   },
   {
+    "key": "platform.plans.manage",
+    "category": "Platform staff",
+    "description": "Platform staff: create and edit plans (limits and features) and move organisations between plans.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "platform.research.manage",
     "category": "Platform staff",
     "description": "Platform staff: steer platform research — activate and roll back ML models, CompositeML overrides, experiments, strategy generation, LLM strategy proposals, the algo-engineer.",
@@ -453,6 +489,15 @@
     "key": "platform.research.run",
     "category": "Platform staff",
     "description": "Platform staff: queue platform research — ML training and hyperparameter searches, shadow evaluations.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.usage.read",
+    "category": "Platform staff",
+    "description": "Platform staff: see any organisation's usage against its plan and download the monthly usage export for invoicing.",
     "scopeable": false,
     "stepUp": false,
     "twoPerson": false,

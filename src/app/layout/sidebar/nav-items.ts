@@ -153,6 +153,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Single sign-on', route: '/iam/sso', icon: '🔗' },
       { label: 'Approvals', route: '/iam/approvals', icon: '✅' },
       { label: 'Access review', route: '/iam/access-review', icon: '🔍' },
+      { label: 'Plan & usage', route: '/iam/plan', icon: '📦' },
     ],
   },
   {
@@ -160,6 +161,8 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'Platform',
     items: [
       { label: 'Organisations', route: '/platform/organisations', icon: '🏢' },
+      { label: 'Plans', route: '/platform/plans', icon: '📦' },
+      { label: 'Fleet health', route: '/platform/fleet', icon: '🛰' },
       { label: 'Elevated access', route: '/platform/elevations', icon: '⏫' },
       { label: 'Impersonation', route: '/platform/impersonation', icon: '🎭' },
     ],
