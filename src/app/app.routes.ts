@@ -581,6 +581,14 @@ export const routes: Routes = [
           import('@features/audit-log/audit-log.routes').then((m) => m.AUDIT_LOG_ROUTES),
       },
       {
+        // Organisation administration (multi-tenancy W3, U3.4): members, invitations, roles,
+        // grants, teams, account groups, security policy, SSO, approvals, access review.
+        path: 'iam',
+        canActivate: [canAccessPath('iam')],
+        data: { breadcrumb: 'Organisation' },
+        loadChildren: () => import('@features/iam/iam.routes').then((m) => m.IAM_ROUTES),
+      },
+      {
         path: 'account',
         canActivate: [canAccessPath('account')],
         data: { breadcrumb: 'Account' },
