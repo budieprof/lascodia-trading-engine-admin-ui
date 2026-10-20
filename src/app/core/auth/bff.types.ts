@@ -95,7 +95,8 @@ export function signInErrorMessage(code: string | null | undefined): string | nu
     case 'no_access':
       return 'Your sign-in worked, but this console has no active account for you. Ask an administrator to invite you.';
     case 'no_membership':
-      return 'You are not an active member of any organisation yet. Ask an administrator to invite you.';
+      // A self-served organisation waiting for platform approval lands here too (multi-tenancy Phase 7, LC.1).
+      return 'You are not an active member of any organisation yet. If you have just created one, it is waiting for approval: sign in again once it is approved. Otherwise ask an administrator to invite you.';
     case 'tenant_not_available':
       return 'That organisation is not available to you. Sign in again to use another one.';
     case 'network_not_allowed':

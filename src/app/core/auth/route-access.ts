@@ -160,6 +160,10 @@ export const ROUTE_ACCESS = {
     P.AlertsManage,
     P.LlmUsageRead,
     P.LlmKeysManage,
+    // c7-lifecycle pages under /organisation
+    P.TenantBrandingRead,
+    P.TenantDataExport,
+    P.TenantClose,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
@@ -169,6 +173,11 @@ export const ROUTE_ACCESS = {
   'organisation/strategies': rule(P.AccessOperator),
   'organisation/alerts': rule(P.AlertsManage), // GET alerts/channels
   'organisation/llm': rule(P.LlmUsageRead, P.LlmKeysManage), // GET llm/usage, llm/tenant-key
+  // ── An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle) ──
+  'organisation/branding': rule(P.TenantBrandingRead), // GET tenant/branding
+  'organisation/data-export': rule(P.TenantDataExport), // GET tenant/exports
+  'organisation/close': rule(P.TenantClose), // GET tenant/closure
+  onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
@@ -178,6 +187,12 @@ export const ROUTE_ACCESS = {
   // Plans, quotas and fleet health (multi-tenancy Phase 7): their APIs work with either sign-in.
   'platform/plans': { anyOf: [P.PlatformPlansManage], staffOnly: true },
   'platform/fleet': { anyOf: [P.PlatformFleetRead], staffOnly: true },
+  // Self-serve sign-ups and closed organisations (Phase 7, c7-lifecycle): their APIs work with either sign-in.
+  'platform/signups': { anyOf: [P.PlatformTenantsManage], staffOnly: true },
+  'platform/closures': {
+    anyOf: [P.PlatformTenantsManage, P.PlatformTenantsPurge],
+    staffOnly: true,
+  },
   // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
   'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },

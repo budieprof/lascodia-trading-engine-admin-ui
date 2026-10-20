@@ -561,6 +561,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.tenants.purge',
+    category: 'Platform staff',
+    description:
+      "Platform staff: review a closed organisation's deletion plan (a dry run) and confirm the permanent deletion of its data once its grace period is over. Needs a fresh MFA sign-in.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.usage.read',
     category: 'Platform staff',
     description:
@@ -713,6 +723,46 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'tenant.branding.manage',
+    category: 'Organisations',
+    description:
+      "Change the organisation's console look: display name, primary colour, logo and favicon.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'tenant.branding.read',
+    category: 'Organisations',
+    description:
+      "See the organisation's console look (name, colour, logo, favicon) — the console applies it after sign-in.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'tenant.close',
+    category: 'Organisations',
+    description:
+      "Close the organisation: sign-in and trading stop at once, its terminals are disconnected and its data is deleted after a 30-day grace period. Needs a fresh MFA sign-in and, when the organisation has more than one Owner, a second Owner's approval.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'tenant.data.export',
+    category: 'Organisations',
+    description:
+      'Export everything the organisation owns (its records, its private strategies and its audit trail; secrets left out) as a download available for 7 days. Needs a fresh MFA sign-in.',
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'tenant.members.manage',
     category: 'Organisations',
     description:
@@ -803,6 +853,7 @@ export const Permission = {
   PlatformResearchManage: 'platform.research.manage',
   PlatformResearchRun: 'platform.research.run',
   PlatformTenantsManage: 'platform.tenants.manage',
+  PlatformTenantsPurge: 'platform.tenants.purge',
   PlatformUsageRead: 'platform.usage.read',
   PositionsFlatten: 'positions.flatten',
   PositionsManage: 'positions.manage',
@@ -819,6 +870,10 @@ export const Permission = {
   StrategiesEdit: 'strategies.edit',
   StrategiesLifecycle: 'strategies.lifecycle',
   StrategiesRead: 'strategies.read',
+  TenantBrandingManage: 'tenant.branding.manage',
+  TenantBrandingRead: 'tenant.branding.read',
+  TenantClose: 'tenant.close',
+  TenantDataExport: 'tenant.data.export',
   TenantMembersManage: 'tenant.members.manage',
   TenantUsageRead: 'tenant.usage.read',
   UsersManage: 'users.manage',

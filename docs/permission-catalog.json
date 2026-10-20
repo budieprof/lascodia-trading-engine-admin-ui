@@ -396,6 +396,42 @@
     "deprecated": false
   },
   {
+    "key": "tenant.branding.manage",
+    "category": "Organisations",
+    "description": "Change the organisation's console look: display name, primary colour, logo and favicon.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "tenant.branding.read",
+    "category": "Organisations",
+    "description": "See the organisation's console look (name, colour, logo, favicon) — the console applies it after sign-in.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "tenant.close",
+    "category": "Organisations",
+    "description": "Close the organisation: sign-in and trading stop at once, its terminals are disconnected and its data is deleted after a 30-day grace period. Needs a fresh MFA sign-in and, when the organisation has more than one Owner, a second Owner's approval.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "tenant.data.export",
+    "category": "Organisations",
+    "description": "Export everything the organisation owns (its records, its private strategies and its audit trail; secrets left out) as a download available for 7 days. Needs a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "tenant.members.manage",
     "category": "Organisations",
     "description": "Add, remove, suspend and reactivate members of the organisation you are acting in.",
@@ -509,6 +545,15 @@
     "description": "Platform staff: queue platform research — ML training and hyperparameter searches, shadow evaluations.",
     "scopeable": false,
     "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.tenants.purge",
+    "category": "Platform staff",
+    "description": "Platform staff: review a closed organisation's deletion plan (a dry run) and confirm the permanent deletion of its data once its grace period is over. Needs a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
     "twoPerson": false,
     "deprecated": false
   },

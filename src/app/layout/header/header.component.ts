@@ -8,6 +8,7 @@ import { WallModeService } from '@core/wall-mode/wall-mode.service';
 import { AccountScopePillComponent } from '@core/scope/account-scope-pill.component';
 import { NotificationBellComponent } from './notification-bell.component';
 import { OrgSwitcherComponent } from './org-switcher.component';
+import { TenantBrandingService } from '@core/branding/tenant-branding.service';
 
 @Component({
   selector: 'app-header',
@@ -34,7 +35,7 @@ import { OrgSwitcherComponent } from './org-switcher.component';
         >
           <span aria-hidden="true">←</span>
         </button>
-        <h2 class="header-title">Admin Console</h2>
+        <h2 class="header-title">{{ branding.displayName() ?? 'Admin Console' }}</h2>
       </div>
 
       <div class="header-center">
@@ -331,6 +332,8 @@ import { OrgSwitcherComponent } from './org-switcher.component';
 })
 export class HeaderComponent {
   auth = inject(AuthService);
+  /** The organisation's display name replaces the title when it set its branding (multi-tenancy Phase 7, LC.4). */
+  protected readonly branding = inject(TenantBrandingService);
   readonly wallMode = inject(WallModeService);
   private router = inject(Router);
   private location = inject(Location);

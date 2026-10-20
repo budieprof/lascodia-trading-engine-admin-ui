@@ -208,6 +208,21 @@ localhost rather than a blank page.
   second person (`-202-approval`) or a step-up (401) is never reported as a failure (`failureMessage`).
   Dialogs that take state (`config-change-dialog`) are opened through a method (`open(request)`), not
   signal inputs, so the pure vitest runner can drive them.
+- **An organisation's life cycle (Phase 7, c7-lifecycle; engine `docs/api/tenant-lifecycle.md`).**
+  `features/organisation/lifecycle/`: `/organisation/branding` (`tenant.branding.*`),
+  `/organisation/data-export` and `/organisation/close` (Owner keys `tenant.data.export` / `tenant.close`,
+  step-up; closing with two Owners answers 202 `-202-approval` — shown as pending, not failed; a finished
+  close signs the person out), `/platform/closures` (reopen, dry-run plan, confirm deletion with the typed
+  handle — `platform.tenants.purge`). `features/onboarding/`: public `/signup` (rendered only while the
+  engine answers `GET onboarding/signup` — 404 = off, and the login page's "Create an organisation" link
+  follows the same answer), `/onboarding` (the new organisation's checklist; `OnboardingLandingService`
+  lands there once after sign-in from `/` or `/dashboard` while the engine says `landOnSignIn`),
+  `/platform/signups` (approval queue). **Branding is applied by `core/branding/TenantBrandingService`**
+  (started by the layout): header/sidebar name, browser title, `--accent` / `--accent-hover` /
+  `--accent-contrast`, `meta[name=theme-color]`, favicon and the sidebar logo (images fetched with the
+  session's credentials as object URLs) — all restored on sign-out. The sign-in page stays Lascodia. The
+  export download navigates to the engine's single-use link (`LifecycleApiService.absolute`), never a
+  cached URL.
 
 ## Verifying in a browser
 

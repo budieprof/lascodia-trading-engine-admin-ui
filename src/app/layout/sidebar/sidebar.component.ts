@@ -16,6 +16,7 @@ import { NAV_GROUPS, type NavGroup } from './nav-items';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { LogoComponent } from '@shared/components/logo/logo.component';
+import { TenantBrandingService } from '@core/branding/tenant-branding.service';
 
 /**
  * Force emoji presentation on a single-code-point icon. ⚙ ⏸ 🛡 🎛 👁 … default to TEXT
@@ -34,9 +35,14 @@ function asEmoji(icon: string): string {
   template: `
     <aside class="sidebar" [class.collapsed]="collapsed()" aria-label="Primary navigation">
       <div class="sidebar-header">
-        <app-logo [size]="32" [label]="collapsed() ? 'Lascodia' : ''" />
+        <!-- The organisation's look when it set one (multi-tenancy Phase 7, LC.4); Lascodia's otherwise. -->
+        @if (branding.logoUrl(); as logo) {
+          <img class="org-logo" [src]="logo" [alt]="collapsed() ? brandName() : ''" />
+        } @else {
+          <app-logo [size]="32" [label]="collapsed() ? brandName() : ''" />
+        }
         @if (!collapsed()) {
-          <span class="logo-text">Lascodia</span>
+          <span class="logo-text">{{ brandName() }}</span>
         }
       </div>
 
@@ -208,6 +214,13 @@ function asEmoji(icon: string): string {
 
       app-logo {
         flex: none;
+      }
+
+      .org-logo {
+        flex: none;
+        max-height: 32px;
+        max-width: 120px;
+        object-fit: contain;
       }
 
       .logo-text {
@@ -394,6 +407,9 @@ export class SidebarComponent {
   collapsed = input(false);
   toggleCollapse = output();
   themeService = inject(ThemeService);
+  protected readonly branding = inject(TenantBrandingService);
+  /** The organisation's display name when it set its branding, else Lascodia. */
+  protected readonly brandName = computed(() => this.branding.displayName() ?? 'Lascodia');
   private auth = inject(AuthService);
   private preloader = inject(HoverPreloadingStrategy);
 

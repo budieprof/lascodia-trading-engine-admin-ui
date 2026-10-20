@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   HostListener,
   effect,
   inject,
@@ -25,6 +26,8 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
 import { AuthService } from '@core/auth/auth.service';
 import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
 import { ImpersonationBannerComponent } from './impersonation-banner.component';
+import { TenantBrandingService } from '@core/branding/tenant-branding.service';
+import { OnboardingLandingService } from '@features/onboarding/onboarding-landing.service';
 
 @Component({
   selector: 'app-layout',
@@ -236,6 +239,13 @@ export class LayoutComponent {
   private sidebarCollapsedBeforeWall: boolean | null = null;
 
   constructor() {
+    // The organisation's look (multi-tenancy Phase 7, LC.4) while the console is shown; the sign-in page keeps
+    // Lascodia's. A new self-served organisation opens its checklist after sign-in (LC.1).
+    const branding = inject(TenantBrandingService);
+    void branding.start();
+    inject(DestroyRef).onDestroy(() => branding.clear());
+    void inject(OnboardingLandingService).maybeLand();
+
     // Close the mobile drawer on any navigation.
     this.router.events
       .pipe(filter((e) => e instanceof NavigationEnd))

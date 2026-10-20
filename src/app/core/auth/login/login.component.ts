@@ -1,6 +1,8 @@
 import { Component, inject, signal, ChangeDetectionStrategy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ApiService } from '@core/api/api.service';
+import type { ResponseData } from '@core/api/api.types';
 import { AuthService } from '../auth.service';
 import { BffSessionService } from '../bff-session.service';
 import { signInErrorMessage } from '../bff.types';
@@ -12,7 +14,7 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, LogoComponent],
+  imports: [FormsModule, RouterLink, LogoComponent],
   template: `
     <div class="login-page">
       <div class="login-card">
@@ -41,6 +43,10 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
               You sign in with your organisation account and its second factor. This console never
               stores your password or a token.
             </p>
+            @if (signupOffered()) {
+              <!-- Self-serve sign-up (multi-tenancy Phase 7, c7-lifecycle): only while the engine offers it. -->
+              <p class="dev-note"><a routerLink="/signup">Create an organisation</a></p>
+            }
           </div>
         } @else {
           <div class="mode-toggle" role="tablist" aria-label="Login mode">
@@ -108,11 +114,7 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
 
             <p class="dev-note">Admin user — username &amp; password.</p>
           } @else if (mode() === 'operator') {
-            <form
-              (ngSubmit)="onOperatorLogin()"
-              class="login-form"
-           
-            >
+            <form (ngSubmit)="onOperatorLogin()" class="login-form">
               <div class="field">
                 <label for="accountId">Account ID</label>
                 <input
@@ -384,7 +386,15 @@ export class LoginComponent {
     // light palette. Resolving it here makes the login screen honour the
     // stored / system theme like every other route.
     inject(ThemeService);
-    if (this.bffMode) this.prepareBffPage();
+    if (this.bffMode) {
+      this.prepareBffPage();
+      inject(ApiService)
+        .get<ResponseData<{ available: boolean }>>('/onboarding/signup', { silent: true })
+        .subscribe({
+          next: (r) => this.signupOffered.set(r?.status === true && r.data?.available === true),
+          error: () => {},
+        });
+    }
   }
 
   /**
@@ -418,6 +428,8 @@ export class LoginComponent {
   readonly notice = signal<string | null>(null);
   /** The return route a BFF sign-out remembered (the logout round trip drops query params). */
   private noteReturnUrl: string | null = null;
+  /** Self-serve sign-up is on and can run (`GET onboarding/signup`; 404 while it is off). */
+  readonly signupOffered = signal(false);
 
   /**
    * BFF: explain how the person got here — a sign-in that did not complete (`signin_error`, from
@@ -430,7 +442,9 @@ export class LoginComponent {
     this.noteReturnUrl = note?.returnUrl ?? null;
     const reason = note?.reason ?? q.get('reason');
     if (reason === 'idle') {
-      this.notice.set('You were signed out after a period of inactivity. Sign in again to continue.');
+      this.notice.set(
+        'You were signed out after a period of inactivity. Sign in again to continue.',
+      );
     } else if (reason === 'expired') {
       this.notice.set('Your session has ended. Sign in again to continue.');
     }

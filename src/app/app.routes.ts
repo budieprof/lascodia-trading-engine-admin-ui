@@ -18,6 +18,12 @@ export const routes: Routes = [
       ),
   },
   {
+    // Self-serve "Create an organisation" (multi-tenancy Phase 7, c7-lifecycle): public, outside the console.
+    path: 'signup',
+    loadComponent: () =>
+      import('@features/onboarding/pages/signup-page.component').then((m) => m.SignupPageComponent),
+  },
+  {
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],
@@ -606,6 +612,16 @@ export const routes: Routes = [
         data: { breadcrumb: 'Organisation' },
         loadChildren: () =>
           import('@features/organisation/organisation.routes').then((m) => m.ORGANISATION_ROUTES),
+      },
+      {
+        // Getting a new organisation going (multi-tenancy Phase 7, c7-lifecycle).
+        path: 'onboarding',
+        canActivate: [canAccessPath('onboarding')],
+        data: { breadcrumb: 'Get started' },
+        loadComponent: () =>
+          import('@features/onboarding/pages/onboarding-page.component').then(
+            (m) => m.OnboardingPageComponent,
+          ),
       },
       {
         // Platform console (multi-tenancy W3, U3.6): organisations, elevated access, impersonation.

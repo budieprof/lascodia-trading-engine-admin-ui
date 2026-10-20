@@ -5,6 +5,8 @@ import { AuthService } from '@core/auth/auth.service';
 import { canAccessPath } from '@core/auth/can-access.guard';
 import type { AccessPath } from '@core/auth/route-access';
 
+import { ORGANISATION_LIFECYCLE_ROUTES } from './lifecycle/lifecycle.routes';
+
 /** The organisation console pages in sidebar order; `/organisation` opens the first one the person may see. */
 const PAGES: AccessPath[] = [
   'organisation/terminals',
@@ -13,6 +15,9 @@ const PAGES: AccessPath[] = [
   'organisation/strategies',
   'organisation/alerts',
   'organisation/llm',
+  'organisation/branding',
+  'organisation/data-export',
+  'organisation/close',
 ];
 
 /**
@@ -71,4 +76,6 @@ export const ORGANISATION_ROUTES: Routes = [
     data: { breadcrumb: 'LLM usage & key' },
     loadComponent: () => import('./pages/llm-page.component').then((m) => m.LlmPageComponent),
   },
+  // An organisation's life cycle (c7-lifecycle): branding, data export, closing.
+  ...ORGANISATION_LIFECYCLE_ROUTES,
 ];
