@@ -3,6 +3,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
 import { AuthService } from '@core/auth/auth.service';
+import { LscCanDirective } from '@core/auth/can.directive';
+import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -23,9 +25,6 @@ import { OrganisationApiService } from '../organisation-api.service';
 import { failureMessage } from '../organisation.logic';
 import type { LlmUsageReport, TenantLlmKey } from '../organisation.types';
 
-/** The permission of the key endpoints (engine r6-llm); its MFA hint shows once the catalog lists it. */
-const LLM_KEYS_MANAGE = 'llm.keys.manage';
-
 /**
  * LLM usage & key (multi-tenancy Phase 7, T7.6; engine r6-llm `GET /llm/usage`, `GET|PUT|DELETE
  * /llm/tenant-key`). This month's LLM calls, tokens and cost against the organisation's budget, the
@@ -37,7 +36,14 @@ const LLM_KEYS_MANAGE = 'llm.keys.manage';
   selector: 'app-org-llm-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    LscCanDirective,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    MfaHintComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
@@ -243,7 +249,7 @@ const LLM_KEYS_MANAGE = 'llm.keys.manage';
         <header class="card-head">
           <h3>Your own provider key</h3>
           <span class="spacer"></span>
-          <app-mfa-hint [permission]="keysPermission" />
+          <app-mfa-hint [permission]="P.LlmKeysManage" />
         </header>
         @switch (keysState()) {
           @case ('missing') {
@@ -293,6 +299,7 @@ const LLM_KEYS_MANAGE = 'llm.keys.manage';
                         </td>
                         <td class="actions">
                           <button
+                            *lscCan="P.LlmKeysManage"
                             type="button"
                             class="btn btn-sm btn-danger"
                             (click)="removing.set(k)"
@@ -312,7 +319,7 @@ const LLM_KEYS_MANAGE = 'llm.keys.manage';
                 organisation key.
               </p>
             } @else {
-              <form class="form-grid" (ngSubmit)="store()">
+              <form class="form-grid" *lscCan="P.LlmKeysManage" (ngSubmit)="store()">
                 <label class="field">
                   <span class="label">Provider</span>
                   <select
@@ -379,7 +386,7 @@ export class LlmPageComponent {
   protected readonly providerLabel = providerLabel;
   protected readonly paidByLabel = paidByLabel;
   protected readonly providers = LLM_KEY_PROVIDERS;
-  protected readonly keysPermission = LLM_KEYS_MANAGE;
+  protected readonly P = Permission;
 
   readonly usage = signal<LlmUsageReport | null>(null);
   readonly usageState = signal<Availability | null>(null);

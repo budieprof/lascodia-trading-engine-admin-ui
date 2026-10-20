@@ -202,8 +202,8 @@ localhost rather than a blank page.
   subscriptions, platform vs private strategies, per-strategy editor over its accounts — `access.operator`),
   `alerts` (`/alerts/channels`: e-mail, Telegram, signed webhook; secrets write-only, signing secret shown
   once with the receiver samples — `alerts.manage`), `llm` (r6-llm `/llm/usage` + `/llm/tenant-key`; the
-  page checks the engine itself and says "not available yet" on a plain 404; gated on `tenant.usage.read`
-  until r6-llm's `llm.usage.read` reaches the catalog). DTOs in `organisation.types.ts`, calls in
+  page checks the engine itself and says "not available yet" on a plain 404 — `llm.usage.read` /
+  `llm.keys.manage`). DTOs in `organisation.types.ts`, calls in
   `organisation-api.service.ts`, decisions in `*.logic.ts` with specs; a write the engine parks for a
   second person (`-202-approval`) or a step-up (401) is never reported as a failure (`failureMessage`).
   Dialogs that take state (`config-change-dialog`) are opened through a method (`open(request)`), not

@@ -158,7 +158,8 @@ export const ROUTE_ACCESS = {
     P.PositionsFlatten,
     P.AccessOperator,
     P.AlertsManage,
-    P.TenantUsageRead,
+    P.LlmUsageRead,
+    P.LlmKeysManage,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
@@ -167,11 +168,7 @@ export const ROUTE_ACCESS = {
   // GET strategy/subscriptions and strategy/{id}/account-bindings (the strategy lists need strategies.read).
   'organisation/strategies': rule(P.AccessOperator),
   'organisation/alerts': rule(P.AlertsManage), // GET alerts/channels
-  // GET llm/usage needs llm.usage.read (engine r6-llm), which reaches the console's catalog with that
-  // release; until then the page is offered to the same audience by tenant.usage.read (both are held by
-  // Operator/Admin/Owner and Billing), and the page itself says "not available yet" on an engine without
-  // the endpoint. When r6-llm's catalog is copied in, change this to P.LlmUsageRead.
-  'organisation/llm': rule(P.TenantUsageRead),
+  'organisation/llm': rule(P.LlmUsageRead, P.LlmKeysManage), // GET llm/usage, llm/tenant-key
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
