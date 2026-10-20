@@ -290,6 +290,62 @@ export interface StrategyBindingInput {
   isEnabled: boolean;
 }
 
+// ── Alert channels (engine AlertChannelsController, docs/api/alert-webhooks.md) ──
+
+/** The channels an organisation sets up. */
+export type AlertChannelName = 'Email' | 'Webhook' | 'Telegram';
+
+/** `organisation` (its own), `platform-default` (House only: the platform channel) or `not-set-up`. */
+export type AlertChannelSource = 'organisation' | 'platform-default' | 'not-set-up' | string;
+
+/** `GET /alerts/channels` row. Secrets appear only as "set" flags. */
+export interface AlertChannelSettings {
+  channel: AlertChannelName | string;
+  source: AlertChannelSource;
+  id: number | null;
+  enabled: boolean;
+  /** Where alerts go, masked where it carries a secret. */
+  destination: string | null;
+  emailTo: string | null;
+  telegramChatId: string | null;
+  telegramBotTokenSet: boolean;
+  /** Scheme and host only. */
+  webhookUrl: string | null;
+  webhookSecretSet: boolean;
+  /** Deliveries also carry the deprecated `X-Lascodia-Secret` header. */
+  webhookLegacySecretHeader: boolean;
+  webhookSecretSetAtUtc: string | null;
+  updatedAtUtc: string | null;
+  updatedBy: string | null;
+}
+
+/** `PUT /alerts/channels/{channel}`. Secrets are write-only: left out = keep the stored one. */
+export interface SaveAlertChannelBody {
+  enabled: boolean;
+  emailTo?: string;
+  telegramChatId?: string;
+  telegramBotToken?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
+  webhookLegacySecretHeader?: boolean;
+}
+
+/** A saved channel, plus a signing secret the engine generated — shown this once. */
+export interface AlertChannelSaveResult {
+  settings: AlertChannelSettings;
+  signingSecret: string | null;
+}
+
+/** `POST /alerts/channels/{channel}/test`. */
+export interface AlertChannelTestResult {
+  channel: string;
+  delivered: boolean;
+  destination: string;
+  message: string;
+  attemptedAt: string;
+  reason: string | null;
+}
+
 /** The organisation's accounts as the pages name them (from the account list the console already keeps). */
 export interface AccountRef {
   id: number;

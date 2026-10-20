@@ -159,6 +159,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Settings', route: '/organisation/settings', icon: '⚙' },
       { label: 'Risk & kill switches', route: '/organisation/risk', icon: '⛔' },
       { label: 'Strategy subscriptions', route: '/organisation/strategies', icon: '📡' },
+      { label: 'Alert channels', route: '/organisation/alerts', icon: '🔔' },
     ],
   },
   {

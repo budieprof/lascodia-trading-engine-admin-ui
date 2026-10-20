@@ -11,6 +11,7 @@ const PAGES: AccessPath[] = [
   'organisation/settings',
   'organisation/risk',
   'organisation/strategies',
+  'organisation/alerts',
 ];
 
 /**
@@ -55,5 +56,11 @@ export const ORGANISATION_ROUTES: Routes = [
     data: { breadcrumb: 'Strategy subscriptions' },
     loadComponent: () =>
       import('./pages/subscriptions-page.component').then((m) => m.SubscriptionsPageComponent),
+  },
+  {
+    path: 'alerts',
+    canActivate: [canAccessPath('organisation/alerts')],
+    data: { breadcrumb: 'Alert channels' },
+    loadComponent: () => import('./pages/alerts-page.component').then((m) => m.AlertsPageComponent),
   },
 ];

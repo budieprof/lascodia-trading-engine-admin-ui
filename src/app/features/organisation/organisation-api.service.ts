@@ -5,6 +5,10 @@ import { ApiService } from '@core/api/api.service';
 import { ApiError, type PagedData, type ResponseData } from '@core/api/api.types';
 import { queryString, rows } from '@features/iam/iam-api.service';
 import type {
+  AlertChannelName,
+  AlertChannelSaveResult,
+  AlertChannelSettings,
+  AlertChannelTestResult,
   ConfigOverrides,
   CreateEnrollmentTokenBody,
   EffectiveConfig,
@@ -13,6 +17,7 @@ import type {
   MachineCredential,
   OverrideScopeType,
   OverrideWriteResult,
+  SaveAlertChannelBody,
   ScopedKillSwitchStatus,
   SetConfigOverrideBody,
   StrategyBinding,
@@ -278,4 +283,44 @@ export class OrganisationApiService {
     );
   }
 
+  // ── Alert channels (engine AlertChannelsController; alerts.manage, changes step-up) ──
+
+  /** The organisation's e-mail, webhook and Telegram channels (secrets as "set" flags only). */
+  alertChannels(): Observable<AlertChannelSettings[]> {
+    return this.get<unknown>('/alerts/channels').pipe(map((d) => rows<AlertChannelSettings>(d)));
+  }
+
+  /** Sets up or changes one channel. A new webhook without a secret gets one generated (shown once). */
+  saveAlertChannel(
+    channel: AlertChannelName,
+    body: SaveAlertChannelBody,
+  ): Observable<AlertChannelSaveResult> {
+    return settled(
+      this.api.put<ResponseData<AlertChannelSaveResult>>(
+        `/alerts/channels/${channel.toLowerCase()}`,
+        body,
+        SILENT,
+      ),
+    );
+  }
+
+  /** Removes one channel (House falls back to its platform channel; others get nothing on it). */
+  removeAlertChannel(channel: AlertChannelName): Observable<boolean> {
+    return this.del(`/alerts/channels/${channel.toLowerCase()}`);
+  }
+
+  /** Sends a test alert through the channel (at most one per channel every 10 seconds). */
+  testAlertChannel(
+    channel: AlertChannelName,
+    message: string | null,
+  ): Observable<AlertChannelTestResult> {
+    return this.post(`/alerts/channels/${channel.toLowerCase()}/test`, {
+      message: message || null,
+    });
+  }
+
+  /** A new webhook signing secret (shown once); the old one stops at once, the deprecated header too. */
+  rotateWebhookSecret(): Observable<AlertChannelSaveResult> {
+    return this.post('/alerts/channels/webhook/rotate-secret');
+  }
 }

@@ -157,6 +157,7 @@ export const ROUTE_ACCESS = {
     P.EngineKillswitch,
     P.PositionsFlatten,
     P.AccessOperator,
+    P.AlertsManage,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
@@ -164,6 +165,7 @@ export const ROUTE_ACCESS = {
   'organisation/risk': rule(P.EngineKillswitch, P.PositionsFlatten, P.EngineConfig),
   // GET strategy/subscriptions and strategy/{id}/account-bindings (the strategy lists need strategies.read).
   'organisation/strategies': rule(P.AccessOperator),
+  'organisation/alerts': rule(P.AlertsManage), // GET alerts/channels
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
