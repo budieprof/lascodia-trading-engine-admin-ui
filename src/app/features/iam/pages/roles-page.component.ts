@@ -24,6 +24,7 @@ import {
 import type { IamRole } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
 import { MfaHintComponent } from '../shared/mfa-hint.component';
+import { PermissionFlagsComponent } from '../shared/permission-flags.component';
 
 type Mode = 'idle' | 'view' | 'edit' | 'create';
 
@@ -43,6 +44,7 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
     ConfirmDialogComponent,
     LscCanDirective,
     MfaHintComponent,
+    PermissionFlagsComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
   styles: [
@@ -209,32 +211,7 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
                             (change)="toggle(p.key)"
                           />
                           <span>{{ p.key }}</span>
-                          @if (p.stepUp) {
-                            <span
-                              class="chip info flag"
-                              title="Needs a fresh sign-in with a second factor"
-                              >MFA</span
-                            >
-                          }
-                          @if (p.twoPerson) {
-                            <span class="chip warn flag" title="Needs a second person's approval"
-                              >2-person</span
-                            >
-                          }
-                          @if (!p.scopeable) {
-                            <span
-                              class="chip flag"
-                              title="Only counts when the role is given for the whole organisation"
-                              >org-wide</span
-                            >
-                          }
-                          @if (p.deprecated) {
-                            <span
-                              class="chip flag"
-                              title="Still enforced; give the specific keys instead"
-                              >deprecated</span
-                            >
-                          }
+                          <app-permission-flags [permission]="p" />
                         </label>
                       }
                     </div>

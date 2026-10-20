@@ -13,6 +13,7 @@ import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText, filterMembers, memberLabel, reportable } from '@features/iam/iam.logic';
 import type { IamMember, TenantDto } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 
 /**
  * Impersonation (U3.6, ADR-0031 §6): platform staff view the console as another user to see what
@@ -23,7 +24,7 @@ import { iamResource } from '@features/iam/shared/iam-resource';
   selector: 'app-platform-impersonation-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -107,6 +108,7 @@ import { iamResource } from '@features/iam/shared/iam-resource';
             placeholder="e.g. Ticket 4411: their dashboard is empty"
           />
         </label>
+        <app-mfa-hint [permission]="P.PlatformImpersonate" />
       </app-confirm-dialog>
     </div>
   `,
@@ -116,6 +118,8 @@ export class ImpersonationPageComponent {
   private readonly auth = inject(AuthService);
   private readonly browser = inject(BrowserLocation);
   private readonly notify = inject(NotificationService);
+
+  protected readonly P = Permission;
 
   readonly tenants = iamResource(
     () =>

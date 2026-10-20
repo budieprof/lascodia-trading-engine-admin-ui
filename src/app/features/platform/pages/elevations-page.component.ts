@@ -17,6 +17,7 @@ import { errorText, groupCatalog, reportable, toggled, when } from '@features/ia
 import type { AccessElevation, TenantDto } from '@features/iam/iam.types';
 import { MAX_ELEVATION_MINUTES } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { elevationActions, elevationErrors } from '../platform.logic';
 
 type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
@@ -31,7 +32,7 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
   selector: 'app-platform-elevations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -225,7 +226,11 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
         [loading]="busy()"
         (confirm)="run()"
         (cancelled)="pending.set(null)"
-      />
+      >
+        @if (pending()?.kind === 'approve') {
+          <app-mfa-hint [permission]="P.PlatformElevationApprove" />
+        }
+      </app-confirm-dialog>
     </div>
   `,
 })
@@ -234,6 +239,7 @@ export class ElevationsPageComponent {
   private readonly auth = inject(AuthService);
   private readonly notify = inject(NotificationService);
 
+  protected readonly P = Permission;
   protected readonly when = when;
   protected readonly maxMinutes = MAX_ELEVATION_MINUTES;
 
