@@ -26,7 +26,12 @@ const READS: readonly PermissionKey[] = [
   P.AccountsRead,
 ];
 
-const VIEWER: readonly PermissionKey[] = [P.AccessViewer, ...READS];
+const VIEWER: readonly PermissionKey[] = [
+  P.AccessViewer,
+  ...READS,
+  // Multi-tenancy Phase 7 (c7-lifecycle): every member's console shows the organisation's look.
+  P.TenantBrandingRead,
+];
 
 const TRADER: readonly PermissionKey[] = [
   ...VIEWER,
@@ -106,6 +111,10 @@ const ADMIN: readonly PermissionKey[] = [
   P.PlatformPlansManage,
   P.PlatformUsageRead,
   P.PlatformFleetRead,
+  // An organisation's life cycle (Phase 7, c7-lifecycle): its console look; deleting closed organisations is a
+  // platform key (House only, as above).
+  P.TenantBrandingManage,
+  P.PlatformTenantsPurge,
 ];
 
 const EA: readonly PermissionKey[] = [
