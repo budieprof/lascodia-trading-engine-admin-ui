@@ -23,6 +23,28 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 :8080 {
+	# ── Security headers at the edge (multi-tenancy f1-prod P1.5, 2026-10-20) ─────────────────────────
+	# HSTS for the public console host; browsers honour it only on HTTPS (via Cloudflare), so one
+	# site-wide line is safe on http://localhost:8080 too. The engine never sends HSTS itself. Start at
+	# one day, no includeSubDomains, no preload; raise to 30 d after a clean week, then 1 y.
+	header Strict-Transport-Security "max-age=86400"
+
+	# Engine responses: no MIME sniffing and no server banner, also on error answers.
+	@engine_response path /api/* /health*
+	header @engine_response {
+		X-Content-Type-Options nosniff
+		-Server
+		defer
+	}
+
+	# Auth answers carry tokens, API keys and session cookies: no cache may keep them.
+	@engine_auth path /api/v1/lascodia-trading-engine/auth/* /api/v1/lascodia-trading-engine/admin/auth/*
+	header @engine_auth {
+		Cache-Control "no-store"
+		Pragma "no-cache"
+		defer
+	}
+
 	# Engine API — anything under /api/* tunnels straight to the Docker
 	# container's exposed port. Cloudflared can't reach this port directly
 	# from outside, hence the proxy. This also carries the SignalR hub at
@@ -33,31 +55,28 @@
 	# a public, passwordless Admin login. Nothing operational uses it: EAs authenticate with
 	# /auth/login, /auth/register and /auth/refresh; it exists for local development against :5081
 	# directly. A single path matcher, so it sorts ahead of `handle /api/*`; Caddy path matching is
-	# case-insensitive and the trailing * covers `/auth/token/`. The live file carries the same
-	# block in its app.codiapay.com:443 LAN site too.
+	# case-insensitive and the trailing * covers `/auth/token/`.
 	handle /api/v1/lascodia-trading-engine/auth/token* {
 		respond 404
 	}
 
+	# SECURITY (2026-10-19, multi-tenancy program Phase 0): this site is the PUBLIC one (cloudflared).
+	# /auth/register handed an existing account's plaintext EA API key + an EA JWT to anyone who sent
+	# its account number + broker server, and /admin/terminals/daemons/auth is anonymous trust-on-first-use
+	# that mints an EA-role JWT for any unused DaemonId. Neither has a public caller: EAs hold persisted
+	# API keys and use /auth/login; mac2 EAs bootstrap through the LAN site below; the MT5 supervisor
+	# talks to localhost:5081 directly. Keep these blocks until the engine-side fixes ship and are verified.
+	handle /api/v1/lascodia-trading-engine/auth/register* {
+		respond 404
+	}
+	handle /api/v1/lascodia-trading-engine/admin/terminals/daemons/auth* {
+		respond 404
+	}
+
 	handle /api/* {
-		# SS-08: the API's JSON is compressed HERE. A chart's script run or a
-		# screener answer is hundreds of kB of JSON that shrinks ~10x, and it
-		# went out uncompressed (only the static UI below was encoded).
-		#
-		# Compressing in Caddy rather than in the engine keeps the CPU off the
-		# money-path process, so the client's Accept-Encoding is NOT forwarded:
-		# the engine (which can compress /api/v1 JSON itself for direct callers,
-		# EngineConfig ApiCompression:*) then always answers this proxy plain.
-		#
-		# Left alone on purpose:
-		#   - EA traffic (remote instances reach the engine through this tunnel;
-		#     their HTTP client always sends X-EA-Instance-ID): the money path
-		#     keeps its exact bytes.
-		#   - the SignalR hub (WebSocket upgrade, long polling).
-		#   - /auth (token bodies next to a caller-chosen login are what
-		#     BREACH-style length attacks need).
-		#   - anything that is not JSON (`match` below), so an event stream can
-		#     never be held back by an encoder.
+		# SS-08 (chart + Pine program, 2026-10-09): the API's JSON is compressed HERE, in Caddy, not in the money-path
+		# engine — the client's Accept-Encoding is not forwarded. Never for EA traffic (X-EA-Instance-ID), the SignalR
+		# hub, or /auth; only JSON responses of 1 KB or more. Reference copy: admin-ui repo Caddyfile.
 		@compressible_api {
 			header !X-EA-Instance-ID
 			not path /api/hubs/*
@@ -75,11 +94,16 @@
 		# live there). Roll back: put back the single `reverse_proxy localhost:5081 { header_up -Accept-Encoding }`.
 		@scripting path /api/v1/lascodia-trading-engine/scripting/* /api/hubs/scripting /api/hubs/scripting/*
 		route {
+			# SECURITY (2026-10-19, multi-tenancy Phase 0): every request through this PUBLIC site is
+			# marked so the engine never treats it as a trusted network, whatever address it appears
+			# from (cloudflared reaches Caddy on loopback). header_up overwrites a client-sent value.
 			reverse_proxy @scripting localhost:5083 {
 				header_up -Accept-Encoding
+				header_up X-Lascodia-Edge public
 			}
 			reverse_proxy localhost:5081 {
 				header_up -Accept-Encoding
+				header_up X-Lascodia-Edge public
 			}
 		}
 	}
@@ -98,7 +122,31 @@
 	# index.html and HTTP 200, so every EA would read a dead engine as healthy
 	# and the dead-man switch would never fire. Do not remove it.
 	handle /health* {
-		reverse_proxy localhost:5081
+		reverse_proxy localhost:5081 {
+			header_up X-Lascodia-Edge public
+		}
+	}
+
+	# Keycloak (ADR-0030, multi-tenancy W1): the lascodia realm and its static login assets only. The
+	# admin console and admin REST API (/idp/admin/*), the master realm and the welcome page are never
+	# served on this public site (admin console: the loopback-only http://localhost:8181 site below).
+	# cloudflared -> Caddy is plain HTTP, so the scheme is asserted; the client is Cf-Connecting-IP.
+	handle /idp/realms/lascodia/* {
+		reverse_proxy localhost:8180 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host app.codiapay.com
+			header_up X-Forwarded-For {http.request.header.Cf-Connecting-IP}
+		}
+	}
+	handle /idp/resources/* {
+		reverse_proxy localhost:8180 {
+			header_up X-Forwarded-Proto https
+			header_up X-Forwarded-Host app.codiapay.com
+			header_up X-Forwarded-For {http.request.header.Cf-Connecting-IP}
+		}
+	}
+	handle /idp* {
+		respond 404
 	}
 
 	# The compiled admin UI.
@@ -122,14 +170,6 @@
 		# `header` runs BEFORE try_files in Caddy's directive order, so these
 		# match the ORIGINAL request path — which is what makes the deep-link
 		# case land in the no-cache class rather than looking like index.html.
-		#
-		# Two hash shapes. esbuild names files `-` + 8+ of [A-Z0-9]. Since
-		# Angular 22 the builder's chunk-optimisation pass is on by default and
-		# re-emits lazy chunks with 8-char mixed-case hashes that may contain
-		# `_` or `-` (`chunk-DetUXeqZ.js`, `chunk--Bp1qTLm.js`). The second
-		# alternative is anchored to those entry names so an unhashed public
-		# file (`apple-touch-icon.png`, `icon-maskable-512.png`) can never
-		# match it. The first still covers releases built before v22.
 		@hashed path_regexp (\-[A-Z0-9]{8,}|/(chunk|main|polyfills)-[A-Za-z0-9_-]{8})\.[a-z0-9]+$
 		header @hashed Cache-Control "public, max-age=31536000, immutable"
 
@@ -181,4 +221,10 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+# Keycloak admin console — loopback only (ADR-0030, multi-tenancy W1).
+http://localhost:8181 {
+	bind 127.0.0.1 ::1
+	reverse_proxy localhost:8180
 }
