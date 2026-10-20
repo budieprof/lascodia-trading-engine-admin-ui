@@ -11,6 +11,8 @@ export interface JwtPayload {
   // Application-specific claims.
   tradingAccountId?: string;
   accountType?: string;
+  /** Organisation a trading-account token belongs to (engine `SecurityClaims.TenantId`). */
+  tid?: string | number;
   // Microsoft .NET bakes role claims into the long URL below; JWTs also often
   // carry a plain `role` or `roles` claim, so we read all three.
   role?: string | string[];
@@ -57,4 +59,13 @@ export function rolesFromPayload(payload: JwtPayload | null): string[] {
     else flat.push(r);
   }
   return Array.from(new Set(flat.filter((s) => typeof s === 'string' && s.length > 0)));
+}
+
+/**
+ * The organisation (`tid` claim) a trading-account token belongs to, or null when the token
+ * carries none (minted before organisations existed — such accounts are House's).
+ */
+export function tenantFromPayload(payload: JwtPayload | null): number | null {
+  const id = Number(payload?.tid);
+  return Number.isInteger(id) && id > 0 ? id : null;
 }

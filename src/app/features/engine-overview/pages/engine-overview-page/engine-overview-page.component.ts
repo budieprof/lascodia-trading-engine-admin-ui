@@ -10,6 +10,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { catchError, forkJoin, interval, of, startWith, type Observable } from 'rxjs';
 
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { HealthService } from '@core/services/health.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeadLetterService } from '@core/services/dead-letter.service';
@@ -130,11 +132,13 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               {{ workerSnapshots().length > 0 ? healthyPct().toFixed(0) + '%' : '—' }}
             </span>
           </div>
-          <div class="kpi">
-            <span class="label">Unresolved DLQ</span>
-            <!-- The queue's total, not the 25 rows the panel below lists. -->
-            <span class="value" [class.bad]="dlqTotal() > 0">{{ dlqTotal() }}</span>
-          </div>
+          @if (canSeeDeadLetters()) {
+            <div class="kpi">
+              <span class="label">Unresolved DLQ</span>
+              <!-- The queue's total, not the 25 rows the panel below lists. -->
+              <span class="value" [class.bad]="dlqTotal() > 0">{{ dlqTotal() }}</span>
+            </div>
+          }
         </section>
 
         <!-- 3-col chart row. Below three categories a donut is a single ring and a histogram a
@@ -172,65 +176,67 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               </div>
             }
 
-            @if (dlqTypeEntries().length >= 3) {
-              <app-chart-card
-                title="DLQ by event type"
-                subtitle="Unresolved events grouped by type"
-                [options]="dlqEventTypeOptions()"
-                height="240px"
-              />
-            } @else {
-              <div class="panel compact-stat">
-                <header class="panel-head">
-                  <h3>DLQ by event type</h3>
-                  <span class="muted small">Unresolved events grouped by type</span>
-                </header>
-                @if (dlqTypeEntries().length === 0) {
-                  <p class="muted small">No unresolved dead-letters.</p>
-                } @else {
-                  <ul class="stat-list">
-                    @for (e of dlqTypeEntries(); track e.name) {
-                      <li>
-                        <span class="stat-swatch" [style.background]="e.color"></span>
-                        <span class="stat-name mono">{{ e.name }}</span>
-                        <span class="stat-value">{{ e.value }}</span>
-                        <span class="stat-share muted">{{ e.share.toFixed(0) }}%</span>
-                      </li>
-                    }
-                  </ul>
-                }
-              </div>
-            }
+            @if (canSeeDeadLetters()) {
+              @if (dlqTypeEntries().length >= 3) {
+                <app-chart-card
+                  title="DLQ by event type"
+                  subtitle="Unresolved events grouped by type"
+                  [options]="dlqEventTypeOptions()"
+                  height="240px"
+                />
+              } @else {
+                <div class="panel compact-stat">
+                  <header class="panel-head">
+                    <h3>DLQ by event type</h3>
+                    <span class="muted small">Unresolved events grouped by type</span>
+                  </header>
+                  @if (dlqTypeEntries().length === 0) {
+                    <p class="muted small">No unresolved dead-letters.</p>
+                  } @else {
+                    <ul class="stat-list">
+                      @for (e of dlqTypeEntries(); track e.name) {
+                        <li>
+                          <span class="stat-swatch" [style.background]="e.color"></span>
+                          <span class="stat-name mono">{{ e.name }}</span>
+                          <span class="stat-value">{{ e.value }}</span>
+                          <span class="stat-share muted">{{ e.share.toFixed(0) }}%</span>
+                        </li>
+                      }
+                    </ul>
+                  }
+                </div>
+              }
 
-            @if (dlqAttemptEntries().length >= 3) {
-              <app-chart-card
-                title="DLQ retry distribution"
-                subtitle="Attempt counts on unresolved rows"
-                [options]="dlqAttemptHistogram()"
-                height="240px"
-              />
-            } @else {
-              <div class="panel compact-stat">
-                <header class="panel-head">
-                  <h3>DLQ retry distribution</h3>
-                  <span class="muted small">Attempt counts on unresolved rows</span>
-                </header>
-                @if (dlqAttemptEntries().length === 0) {
-                  <p class="muted small">No unresolved dead-letters.</p>
-                } @else {
-                  <ul class="stat-list no-swatch">
-                    @for (e of dlqAttemptEntries(); track e.name) {
-                      <li>
-                        <span class="stat-name">
-                          {{ e.name }} {{ e.name === '1' ? 'attempt' : 'attempts' }}
-                        </span>
-                        <span class="stat-value">{{ e.value }}</span>
-                        <span class="stat-share muted">{{ e.value === 1 ? 'row' : 'rows' }}</span>
-                      </li>
-                    }
-                  </ul>
-                }
-              </div>
+              @if (dlqAttemptEntries().length >= 3) {
+                <app-chart-card
+                  title="DLQ retry distribution"
+                  subtitle="Attempt counts on unresolved rows"
+                  [options]="dlqAttemptHistogram()"
+                  height="240px"
+                />
+              } @else {
+                <div class="panel compact-stat">
+                  <header class="panel-head">
+                    <h3>DLQ retry distribution</h3>
+                    <span class="muted small">Attempt counts on unresolved rows</span>
+                  </header>
+                  @if (dlqAttemptEntries().length === 0) {
+                    <p class="muted small">No unresolved dead-letters.</p>
+                  } @else {
+                    <ul class="stat-list no-swatch">
+                      @for (e of dlqAttemptEntries(); track e.name) {
+                        <li>
+                          <span class="stat-name">
+                            {{ e.name }} {{ e.name === '1' ? 'attempt' : 'attempts' }}
+                          </span>
+                          <span class="stat-value">{{ e.value }}</span>
+                          <span class="stat-share muted">{{ e.value === 1 ? 'row' : 'rows' }}</span>
+                        </li>
+                      }
+                    </ul>
+                  }
+                </div>
+              }
             }
           </section>
         }
@@ -289,68 +295,72 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             }
           </div>
 
-          <!-- Dead-letter row -->
-          <div class="panel">
-            <header class="panel-head">
-              <h3>Dead-letter queue</h3>
-              <button type="button" class="link" (click)="goDeadLetters()">View all →</button>
-            </header>
-            @if (deadLetters().length === 0) {
-              <app-empty-state
-                title="Queue clean"
-                description="No unresolved dead-letter rows in the last 25 events."
-              />
-            } @else {
-              <p class="muted small list-caption">
-                {{ dlqTotal() }} unresolved {{ dlqTotal() === 1 ? 'row' : 'rows'
-                }}{{
-                  dlqTotal() > deadLetters().length
-                    ? ' — newest ' + deadLetters().length + ' shown'
-                    : ''
-                }}. Retry re-publishes the event; Discard marks it resolved without replaying. Both
-                ask first.
-              </p>
-              <ul class="dlq-list">
-                @for (d of deadLetters(); track d.id) {
-                  <li class="dlq-item" [class.busy]="dlqBusy().has(d.id)">
-                    <div class="dlq-main">
-                      <span class="dlq-type" [title]="d.errorMessage ?? ''">
-                        {{ d.eventType ?? 'unknown' }}
-                      </span>
-                      <span class="dlq-meta muted small">
-                        <span class="dlq-attempts" [class.hot]="d.attemptCount >= 3">
-                          {{ d.attemptCount }}
-                          {{ d.attemptCount === 1 ? 'attempt' : 'attempts' }}
+          <!-- The queue is platform machinery (platform.infrastructure.manage, catalog v2): without
+               the key the engine refuses the list, so the DLQ figures are left out, not shown as 0. -->
+          @if (canSeeDeadLetters()) {
+            <!-- Dead-letter row -->
+            <div class="panel">
+              <header class="panel-head">
+                <h3>Dead-letter queue</h3>
+                <button type="button" class="link" (click)="goDeadLetters()">View all →</button>
+              </header>
+              @if (deadLetters().length === 0) {
+                <app-empty-state
+                  title="Queue clean"
+                  description="No unresolved dead-letter rows in the last 25 events."
+                />
+              } @else {
+                <p class="muted small list-caption">
+                  {{ dlqTotal() }} unresolved {{ dlqTotal() === 1 ? 'row' : 'rows'
+                  }}{{
+                    dlqTotal() > deadLetters().length
+                      ? ' — newest ' + deadLetters().length + ' shown'
+                      : ''
+                  }}. Retry re-publishes the event; Discard marks it resolved without replaying.
+                  Both ask first.
+                </p>
+                <ul class="dlq-list">
+                  @for (d of deadLetters(); track d.id) {
+                    <li class="dlq-item" [class.busy]="dlqBusy().has(d.id)">
+                      <div class="dlq-main">
+                        <span class="dlq-type" [title]="d.errorMessage ?? ''">
+                          {{ d.eventType ?? 'unknown' }}
                         </span>
-                        · {{ d.createdAt | relativeTime }}
-                        @if (d.errorMessage) {
-                          · <span class="dlq-err">{{ d.errorMessage }}</span>
-                        }
-                      </span>
-                    </div>
-                    <div class="dlq-actions">
-                      <button
-                        type="button"
-                        class="btn-mini"
-                        [disabled]="dlqBusy().has(d.id)"
-                        (click)="askDlqAction(d, 'retry')"
-                      >
-                        Retry
-                      </button>
-                      <button
-                        type="button"
-                        class="btn-mini danger"
-                        [disabled]="dlqBusy().has(d.id)"
-                        (click)="askDlqAction(d, 'discard')"
-                      >
-                        Discard
-                      </button>
-                    </div>
-                  </li>
-                }
-              </ul>
-            }
-          </div>
+                        <span class="dlq-meta muted small">
+                          <span class="dlq-attempts" [class.hot]="d.attemptCount >= 3">
+                            {{ d.attemptCount }}
+                            {{ d.attemptCount === 1 ? 'attempt' : 'attempts' }}
+                          </span>
+                          · {{ d.createdAt | relativeTime }}
+                          @if (d.errorMessage) {
+                            · <span class="dlq-err">{{ d.errorMessage }}</span>
+                          }
+                        </span>
+                      </div>
+                      <div class="dlq-actions">
+                        <button
+                          type="button"
+                          class="btn-mini"
+                          [disabled]="dlqBusy().has(d.id)"
+                          (click)="askDlqAction(d, 'retry')"
+                        >
+                          Retry
+                        </button>
+                        <button
+                          type="button"
+                          class="btn-mini danger"
+                          [disabled]="dlqBusy().has(d.id)"
+                          (click)="askDlqAction(d, 'discard')"
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          }
         </section>
       }
 
@@ -910,6 +920,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   ],
 })
 export class EngineOverviewPageComponent {
+  private readonly auth = inject(AuthService);
   private readonly health = inject(HealthService);
   private readonly workers = inject(WorkersService);
   private readonly deadLetterSvc = inject(DeadLetterService);
@@ -921,6 +932,10 @@ export class EngineOverviewPageComponent {
   readonly loading = signal(true);
   readonly status = signal<EngineStatusDto | null>(null);
   readonly workerSnapshots = signal<WorkerHealthDto[]>([]);
+  /** `POST dead-letter/list` needs `platform.infrastructure.manage` (catalog v2). */
+  readonly canSeeDeadLetters = computed(() =>
+    this.auth.hasPermission(Permission.PlatformInfrastructureManage),
+  );
   readonly deadLetters = signal<DeadLetterDto[]>([]);
   /** Unresolved rows in the whole queue (pager total) — `deadLetters` holds only the newest 25. */
   readonly dlqTotal = signal(0);
@@ -1239,15 +1254,17 @@ export class EngineOverviewPageComponent {
     forkJoin({
       status: this.health.getStatus().pipe(catchError(() => of(null))),
       workers: this.workers.list().pipe(catchError(() => of(null))),
-      deadLetters: this.deadLetterSvc
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 25,
-          filter: { isResolved: false },
-          sortBy: 'deadLetteredAt',
-          sortDirection: 'desc',
-        })
-        .pipe(catchError(() => of(null))),
+      deadLetters: this.canSeeDeadLetters()
+        ? this.deadLetterSvc
+            .list({
+              currentPage: 1,
+              itemCountPerPage: 25,
+              filter: { isResolved: false },
+              sortBy: 'deadLetteredAt',
+              sortDirection: 'desc',
+            })
+            .pipe(catchError(() => of(null)))
+        : of(null),
     }).subscribe(({ status, workers, deadLetters }) => {
       if (status?.data) this.status.set(status.data);
       // /health/workers returns a raw array, not a ResponseData envelope.

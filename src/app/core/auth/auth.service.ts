@@ -20,7 +20,7 @@ import {
   setStorageIdentity,
   type StorageIdentity,
 } from '../storage/app-storage';
-import { decodeJwt, rolesFromPayload } from './jwt';
+import { decodeJwt, rolesFromPayload, tenantFromPayload } from './jwt';
 import { DEFAULT_POST_LOGIN_ROUTE, returnUrlQueryParams, sanitizeReturnUrl } from './return-url';
 import { authModeFrom, type AuthMode } from './auth-mode';
 import { BffSessionService } from './bff-session.service';
@@ -243,15 +243,15 @@ export class AuthService {
    * Effective permission keys in the active organisation.
    *  - BFF: exactly what `/bff/session` reports.
    *  - Legacy admin user: what `GET /admin/auth/me` reports (super admins get the full catalog).
-   *  - Legacy trading-account login: the bundles of its role claims
-   *    ({@link permissionsForLegacyRoles}).
+   *  - Legacy trading-account login: the bundles of its role claims, platform keys only for a
+   *    House account ({@link permissionsForLegacyRoles}).
    *  - Anything else: none.
    */
   readonly permissions = computed<readonly string[]>(() => {
     if (this.mode === 'bff') return this.bff.session()?.permissions ?? [];
     if (!this._token()) return [];
     if (this.isAdminToken()) return this._adminPermissions();
-    return permissionsForLegacyRoles(this.roles());
+    return permissionsForLegacyRoles(this.roles(), tenantFromPayload(decodeJwt(this._token())));
   });
   private readonly permissionSet = computed(() => new Set(this.permissions()));
 
