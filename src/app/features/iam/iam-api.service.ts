@@ -185,8 +185,9 @@ export class IamApiService {
   createGrant(body: CreateGrantBody): Observable<unknown> {
     return this.post('/iam/grants', body);
   }
-  revokeGrant(id: number): Observable<unknown> {
-    return this.del(`/iam/grants/${id}`);
+  /** The reason is recorded in the audit log with the revocation. */
+  revokeGrant(id: number, reason: string | null = null): Observable<unknown> {
+    return this.del(`/iam/grants/${id}${queryString({ reason })}`);
   }
   explain(q: ExplainQuery): Observable<ExplainResult> {
     return this.get<ExplainResult>(`/iam/explain${queryString({ ...q })}`);

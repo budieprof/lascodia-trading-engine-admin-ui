@@ -395,7 +395,17 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
         [loading]="busy()"
         (confirm)="revoke()"
         (cancelled)="revoking.set(null)"
-      />
+      >
+        <label class="field">
+          <span class="label">Reason (recorded in the audit log)</span>
+          <input
+            class="input"
+            name="revokeReason"
+            [ngModel]="revokeReason()"
+            (ngModelChange)="revokeReason.set($event)"
+          />
+        </label>
+      </app-confirm-dialog>
     </div>
   `,
 })
@@ -451,6 +461,7 @@ export class GrantsPageComponent {
   );
 
   readonly revoking = signal<IamGrant | null>(null);
+  readonly revokeReason = signal('');
 
   // Explain
   readonly xType = signal<PrincipalType>('User');
@@ -530,10 +541,11 @@ export class GrantsPageComponent {
     const g = this.revoking();
     if (!g || this.busy()) return;
     this.busy.set(true);
-    this.iam.revokeGrant(g.id).subscribe({
+    this.iam.revokeGrant(g.id, this.revokeReason().trim() || null).subscribe({
       next: () => {
         this.busy.set(false);
         this.revoking.set(null);
+        this.revokeReason.set('');
         this.notify.success('Grant revoked.');
         this.grants.reload();
       },

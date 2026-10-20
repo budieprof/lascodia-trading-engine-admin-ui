@@ -355,18 +355,16 @@ export class GroupsPageComponent {
       entryNoun: 'member',
       emptyEntries: 'Nobody is in this team yet.',
       list: () =>
-        this.iam
-          .teams()
-          .pipe(
-            map((ts) =>
-              ts.map((t) => ({
-                id: t.id,
-                name: t.name,
-                description: t.description ?? '',
-                size: t.memberCount ?? null,
-              })),
-            ),
+        this.iam.teams().pipe(
+          map((ts) =>
+            ts.map((t) => ({
+              id: t.id,
+              name: t.name,
+              description: t.description ?? '',
+              size: t.memberCount ?? null,
+            })),
           ),
+        ),
       create: (b) => this.iam.createTeam(b),
       update: (id, b) => this.iam.updateTeam(id, b),
       remove: (id) => this.iam.deleteTeam(id),
@@ -397,18 +395,16 @@ export class GroupsPageComponent {
       entryNoun: 'account',
       emptyEntries: 'No trading accounts in this group yet.',
       list: () =>
-        this.iam
-          .accountGroups()
-          .pipe(
-            map((gs) =>
-              gs.map((g) => ({
-                id: g.id,
-                name: g.name,
-                description: g.description ?? '',
-                size: g.accountCount ?? null,
-              })),
-            ),
+        this.iam.accountGroups().pipe(
+          map((gs) =>
+            gs.map((g) => ({
+              id: g.id,
+              name: g.name,
+              description: g.description ?? '',
+              size: g.accountCount ?? null,
+            })),
           ),
+        ),
       create: (b) => this.iam.createAccountGroup(b),
       update: (id, b) => this.iam.updateAccountGroup(id, b),
       remove: (id) => this.iam.deleteAccountGroup(id),

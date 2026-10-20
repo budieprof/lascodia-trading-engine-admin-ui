@@ -15,9 +15,10 @@ import {
   memberLabel,
   nextMemberStatus,
   reportable,
+  rolesByUser,
   when,
 } from '../iam.logic';
-import type { IamMember, IamSession, MemberStatus } from '../iam.types';
+import type { IamGrant, IamMember, IamSession, MemberStatus } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
 
 type PendingAction =
@@ -108,10 +109,14 @@ type PendingAction =
                       }
                     </td>
                     <td>
-                      @for (r of m.roles ?? []; track r) {
-                        <span class="chip info">{{ r }}</span>
-                      } @empty {
-                        <span class="muted small">None</span>
+                      @if (grants.error()) {
+                        <span class="muted small" [title]="grants.error() ?? ''">—</span>
+                      } @else {
+                        @for (r of rolesOf(m); track r) {
+                          <span class="chip info">{{ r }}</span>
+                        } @empty {
+                          <span class="muted small">{{ grants.loaded() ? 'None' : '…' }}</span>
+                        }
                       }
                     </td>
                     <td class="small">{{ when(m.joinedAtUtc) }}</td>
@@ -235,6 +240,13 @@ export class MembersPageComponent {
     [] as IamMember[],
     'Could not load members.',
   );
+  /** Roles come from grants (the members API does not carry them). */
+  readonly grants = iamResource(
+    () => this.iam.grants({ principalType: 'User' }),
+    [] as IamGrant[],
+    'Could not load roles.',
+  );
+  private readonly roleNames = computed(() => rolesByUser(this.grants.value()));
   readonly filter = signal('');
   readonly visible = computed(() => filterMembers(this.members.value(), this.filter()));
 
@@ -277,6 +289,11 @@ export class MembersPageComponent {
 
   constructor() {
     this.members.reload();
+    this.grants.reload();
+  }
+
+  rolesOf(m: IamMember): string[] {
+    return m.roles?.length ? m.roles : (this.roleNames().get(m.userId) ?? []);
   }
 
   label(m: IamMember): string {

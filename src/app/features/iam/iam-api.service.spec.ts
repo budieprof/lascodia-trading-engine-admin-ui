@@ -107,6 +107,13 @@ describe('IamApiService (contract C3.5 wire mapping)', () => {
     await b;
   });
 
+  it('records a revocation reason as a query parameter', () => {
+    api.revokeGrant(9, 'Left the desk').subscribe();
+    const del = ctl.expectOne(`${BASE}/iam/grants/9?reason=Left+the+desk`);
+    expect(del.request.method).toBe('DELETE');
+    del.flush({ status: true, data: null });
+  });
+
   it('turns a refusal envelope into an error carrying the engine message', async () => {
     const p = firstValueFrom(api.revokeGrant(9));
     ctl

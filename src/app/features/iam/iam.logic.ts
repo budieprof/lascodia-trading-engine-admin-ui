@@ -7,6 +7,7 @@ import type {
   AccessReviewEntry,
   ApprovalRequest,
   GrantSpec,
+  IamGrant,
   IamMember,
   IamRole,
   MemberStatus,
@@ -355,6 +356,27 @@ export function filterMembers(members: readonly IamMember[], text: string): IamM
         (m.email ?? '').toLowerCase().includes(q),
     )
     .sort((a, b) => (a.displayName || a.username).localeCompare(b.displayName || b.username));
+}
+
+/**
+ * Role names per person from their grants ("Trader", "Viewer · Trading account #18"), for the members
+ * list — the members API does not carry roles; grants are the source of truth (ADR-0031 §2).
+ */
+export function rolesByUser(grants: readonly IamGrant[]): Map<number, string[]> {
+  const out = new Map<number, string[]>();
+  for (const g of grants) {
+    if (g.principalType !== 'User') continue;
+    const role = g.roleName || `Role #${g.roleId}`;
+    const label =
+      g.scopeType === 'Tenant'
+        ? role
+        : `${role} · ${scopeLabel(g.scopeType, g.scopeId, g.scopeName)}`;
+    const list = out.get(g.principalId) ?? [];
+    if (!list.includes(label)) list.push(label);
+    out.set(g.principalId, list);
+  }
+  for (const list of out.values()) list.sort();
+  return out;
 }
 
 /** A member's name for lists. */

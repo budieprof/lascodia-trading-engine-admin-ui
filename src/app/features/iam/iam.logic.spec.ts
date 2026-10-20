@@ -14,6 +14,7 @@ import {
   nextMemberStatus,
   parseAllowlist,
   roleErrors,
+  rolesByUser,
   scopeLabel,
   securityPolicyErrors,
   ssoErrors,
@@ -24,7 +25,7 @@ import {
   unscopeableIn,
 } from './iam.logic';
 import { queryString, rows } from './iam-api.service';
-import type { ApprovalRequest, IamMember, IamRole } from './iam.types';
+import type { ApprovalRequest, IamGrant, IamMember, IamRole } from './iam.types';
 
 const def = (
   key: string,
@@ -358,5 +359,52 @@ describe('describeDevice', () => {
     );
     expect(describeDevice('curl/8.4.0')).toBe('curl/8.4.0');
     expect(describeDevice(null)).toBe('Unknown device');
+  });
+});
+
+describe('rolesByUser', () => {
+  it('lists each person’s roles from their grants, with the scope when narrower than the organisation', () => {
+    const grants = [
+      {
+        id: 1,
+        principalType: 'User',
+        principalId: 5,
+        roleId: 2,
+        roleName: 'Viewer',
+        scopeType: 'Tenant',
+        scopeId: null,
+      },
+      {
+        id: 2,
+        principalType: 'User',
+        principalId: 5,
+        roleId: 3,
+        roleName: 'Trader',
+        scopeType: 'TradingAccount',
+        scopeId: 18,
+      },
+      {
+        id: 3,
+        principalType: 'Team',
+        principalId: 5,
+        roleId: 4,
+        roleName: 'Analyst',
+        scopeType: 'Tenant',
+        scopeId: null,
+      },
+      {
+        id: 4,
+        principalType: 'User',
+        principalId: 6,
+        roleId: 2,
+        roleName: null,
+        scopeType: 'Tenant',
+        scopeId: null,
+      },
+    ] as IamGrant[];
+    const m = rolesByUser(grants);
+    expect(m.get(5)).toEqual(['Trader · Trading account #18', 'Viewer']);
+    expect(m.get(6)).toEqual(['Role #2']);
+    expect(m.has(7)).toBe(false);
   });
 });
