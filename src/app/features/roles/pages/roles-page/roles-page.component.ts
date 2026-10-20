@@ -5,6 +5,9 @@ import { catchError, of } from 'rxjs';
 import { RolesService, RoleDto } from '@core/services/roles.service';
 import { PermissionsService, PermissionDto } from '@core/services/permissions.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { Permission } from '@core/auth/permissions.generated';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
+import { PermissionFlagsComponent } from '@features/iam/shared/permission-flags.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
@@ -32,6 +35,8 @@ type EditorMode = 'idle' | 'edit' | 'create';
     EmptyStateComponent,
     ErrorStateComponent,
     ConfirmDialogComponent,
+    MfaHintComponent,
+    PermissionFlagsComponent,
   ],
   template: `
     <div class="page">
@@ -141,6 +146,7 @@ type EditorMode = 'idle' | 'edit' | 'create';
                             (change)="toggleEditPermission(p.key)"
                           />
                           <span>{{ p.key }}</span>
+                          <app-permission-flags [permission]="p.key" [scope]="false" />
                         </label>
                       }
                     </div>
@@ -160,6 +166,7 @@ type EditorMode = 'idle' | 'edit' | 'create';
                   </button>
                 }
                 <span class="spacer"></span>
+                <app-mfa-hint [permission]="P.RolesManage" />
                 <button
                   type="button"
                   class="btn btn-primary"
@@ -216,6 +223,7 @@ type EditorMode = 'idle' | 'edit' | 'create';
                             (change)="toggleNewPermission(p.key)"
                           />
                           <span>{{ p.key }}</span>
+                          <app-permission-flags [permission]="p.key" [scope]="false" />
                         </label>
                       }
                     </div>
@@ -224,6 +232,7 @@ type EditorMode = 'idle' | 'edit' | 'create';
               </fieldset>
               <div class="editor-actions">
                 <span class="spacer"></span>
+                <app-mfa-hint [permission]="P.RolesManage" />
                 <button
                   type="submit"
                   class="btn btn-primary"
@@ -552,6 +561,8 @@ export class RolesPageComponent {
   private readonly rolesService = inject(RolesService);
   private readonly permissionsService = inject(PermissionsService);
   private readonly notify = inject(NotificationService);
+
+  protected readonly P = Permission;
 
   readonly roles = signal<RoleDto[]>([]);
   readonly catalog = signal<PermissionDto[]>([]);

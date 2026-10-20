@@ -24,6 +24,8 @@ import {
   type ConfigUpsertResponse,
 } from '@core/services/config.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AuthResponseCode } from '@core/auth/bff.types';
+import { Permission } from '@core/auth/permissions.generated';
 import type {
   CreateRiskProfileRequest,
   EngineConfigDto,
@@ -47,6 +49,7 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 
 @Component({
   selector: 'app-risk-profiles-page',
@@ -63,6 +66,7 @@ import {
     MetricCardComponent,
     ChartCardComponent,
     DecimalPipe,
+    MfaHintComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -480,6 +484,9 @@ import {
                     placeholder="e.g. Unrestricted demo profile — disabling the R:R floor for account 22 testing."
                   ></textarea>
                 </app-form-field>
+                <!-- Loosening is risk.loosen, a step-up key (catalog v2): offer the second factor
+                     before the save rather than after a refusal. -->
+                <app-mfa-hint [permission]="P.RiskLoosen" />
 
                 <div class="actions">
                   @if (editing()?.id) {
@@ -1492,6 +1499,8 @@ export class RiskProfilesPageComponent implements OnInit {
   private readonly configService = inject(ConfigService);
   private readonly notifications = inject(NotificationService);
   private readonly fb = inject(FormBuilder);
+
+  protected readonly P = Permission;
 
   // Exposed for template `[class.profit]="String(...) === 'Long'"` checks.
   readonly String = String;
@@ -2554,6 +2563,10 @@ export class RiskProfilesPageComponent implements OnInit {
           this.editing.set(null);
           this.table?.loadData();
           this.loadProfilesSample();
+        } else if (res.responseCode === AuthResponseCode.ApprovalPending) {
+          // A two-person loosening (contract C3.3): the approval interceptor has said it was sent
+          // for approval; the profile keeps its values until a second person approves.
+          this.editing.set(null);
         } else {
           this.notifications.error(res.message ?? 'Save failed');
         }

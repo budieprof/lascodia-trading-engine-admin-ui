@@ -63,11 +63,11 @@ export class KillSwitchBannerComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
-    // `/admin/kill-switch/global` needs `access.operator` (p0-authz endpoint map). Only fetch when
-    // the person holds it — otherwise the engine answers 403 on every page load and the browser
-    // logs the failure regardless of our `catchError`. A session without permissions holds
-    // nothing (there is no "no roles = full access" fallback any more).
-    if (!this.auth.hasPermission(Permission.AccessOperator)) return;
+    // `/admin/kill-switch/global` needs `engine.killswitch` (catalog v2; `access.operator` before,
+    // which implies it). Only fetch when the person holds it — otherwise the engine answers 403 on
+    // every page load and the browser logs the failure regardless of our `catchError`. A session
+    // without permissions holds nothing (there is no "no roles = full access" fallback any more).
+    if (!this.auth.hasPermission(Permission.EngineKillswitch)) return;
 
     // Re-check on a cadence: no realtime event carries the switch, so a switch engaged by
     // another operator (or the engine) used to stay invisible here until a full reload.

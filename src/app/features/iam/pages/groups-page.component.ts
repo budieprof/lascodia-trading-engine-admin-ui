@@ -15,6 +15,7 @@ import { IamApiService } from '../iam-api.service';
 import { errorText, memberLabel, reportable } from '../iam.logic';
 import type { SaveNamedBody } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
+import { MfaHintComponent } from '../shared/mfa-hint.component';
 
 /** One group (team or account group) as the page shows it. */
 interface Group {
@@ -63,7 +64,13 @@ interface GroupKind {
   selector: 'app-iam-groups-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, LscCanDirective],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    LscCanDirective,
+    MfaHintComponent,
+  ],
   styleUrl: '../shared/iam-page.scss',
   styles: [
     `
@@ -191,6 +198,7 @@ interface GroupKind {
               </div>
               @if (canManage()) {
                 <div class="actions-row">
+                  <app-mfa-hint [permission]="P.IamGrantsManage" />
                   @if (editing() !== 'new') {
                     <button
                       type="button"

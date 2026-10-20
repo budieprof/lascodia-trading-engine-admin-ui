@@ -20,6 +20,8 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 import { PositionsService } from '@core/services/positions.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
@@ -1363,6 +1365,7 @@ export class DashboardPageComponent implements OnInit {
   private readonly ordersService = inject(OrdersService);
   private readonly healthService = inject(HealthService);
   private readonly drawdownService = inject(DrawdownRecoveryService);
+  private readonly auth = inject(AuthService);
   private readonly accountsService = inject(TradingAccountsService);
   private readonly ensembleService = inject(StrategyEnsembleService);
   private readonly alertsService = inject(AlertsService);
@@ -2394,10 +2397,15 @@ export class DashboardPageComponent implements OnInit {
       // drawdown (7.62% and "Reduced mode" on an account whose own
       // snapshot said 0.0% / Normal). The tile and the footer strip read
       // the same signal, so both were wrong together.
-      drawdown: this.drawdownService.getLatest(this.accountScope.accountIds()).pipe(
-        map((r) => r.data ?? null),
-        catchError(() => of(null as DrawdownSnapshotDto | null)),
-      ),
+      //
+      // `drawdown-recovery/latest` needs `risk.manage` (catalog v2; `access.operator` before). Without
+      // it the engine refuses on every poll, so the tile stays empty instead of asking.
+      drawdown: this.auth.hasPermission(Permission.RiskManage)
+        ? this.drawdownService.getLatest(this.accountScope.accountIds()).pipe(
+            map((r) => r.data ?? null),
+            catchError(() => of(null as DrawdownSnapshotDto | null)),
+          )
+        : of(null as DrawdownSnapshotDto | null),
       // Fetch ALL accounts (not just "current active") — the dashboard
       // is multi-account aware and the operator selects which one (or
       // the aggregate) to display via the header dropdown.  The 50-item

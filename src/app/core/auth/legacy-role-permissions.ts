@@ -1,3 +1,4 @@
+import { HOUSE_TENANT_ID } from '../storage/app-storage';
 import { Permission as P, type PermissionKey } from './permissions.generated';
 
 /**
@@ -5,9 +6,12 @@ import { Permission as P, type PermissionKey } from './permissions.generated';
  * `POST /auth/login`), whose token carries role claims but which has no `/admin/auth/me` to ask.
  *
  * Mirrors the engine's `DefaultRoles` bundles for the six ladder roles (engine master,
- * `Application/Common/Security/DefaultRoles.cs`) so such a session sees the pages its roles reach
- * and nothing else. Admin-user sessions never use this: the engine reports their permissions. A
- * session with no roles gets nothing (no "roleless = full access" fallback).
+ * `Application/Common/Security/DefaultRoles.cs`, catalog v2) so such a session sees the pages its
+ * roles reach and nothing else. Admin-user sessions never use this: the engine reports their
+ * permissions. A session with no roles gets nothing (no "roleless = full access" fallback).
+ *
+ * The engine bundles list every key their deprecated tier key implies (`PermissionCatalog.Implies`)
+ * explicitly, so the union below is already what the engine's expansion produces.
  *
  * Retire with the trading-account web login (`Auth:LegacyWebAccountLogin:Enabled`, i3-engine I3.10);
  * with `bffAuth` on that login is not offered at all.
@@ -34,6 +38,7 @@ const TRADER: readonly PermissionKey[] = [
   P.SignalsApprove,
   P.SignalsReject,
   P.StrategiesLifecycle,
+  P.PositionsManage,
 ];
 
 const ANALYST: readonly PermissionKey[] = [
@@ -45,6 +50,7 @@ const ANALYST: readonly PermissionKey[] = [
   P.LlmbacktestLaunch,
   P.PrompttemplateView,
   P.PrompttemplateEdit,
+  P.PlatformResearchRun,
 ];
 
 const OPERATOR: readonly PermissionKey[] = [
@@ -61,6 +67,16 @@ const OPERATOR: readonly PermissionKey[] = [
   P.StrategiesEdit,
   P.LlmbacktestCancel,
   P.PrompttemplatePromote,
+  P.PositionsFlatten,
+  P.EngineKillswitchRelease,
+  P.RiskLoosen,
+  P.AccountsConnect,
+  P.DecisionsRead,
+  P.DecisionsWrite,
+  P.PlatformEngineManage,
+  P.PlatformResearchManage,
+  P.PlatformDataManage,
+  P.PlatformInfrastructureManage,
 ];
 
 const ADMIN: readonly PermissionKey[] = [
@@ -69,6 +85,7 @@ const ADMIN: readonly PermissionKey[] = [
   P.UsersManage,
   P.RolesManage,
   P.AuditRead,
+  P.PlatformEngineSecrets,
   P.PlatformTenantsManage,
   P.TenantMembersManage,
   P.IamMembersRead,
@@ -80,6 +97,7 @@ const ADMIN: readonly PermissionKey[] = [
   P.IamTokensCreate,
   P.IamApprovalsDecide,
   P.IamAccessReview,
+  P.PlatformElevationRequest,
   P.PlatformElevationApprove,
   P.PlatformImpersonate,
 ];
@@ -102,9 +120,24 @@ const BUNDLES: Readonly<Record<string, readonly PermissionKey[]>> = {
   EA: EA,
 };
 
-/** Union of the bundles of the given role names; unknown role names contribute nothing. */
-export function permissionsForLegacyRoles(roles: readonly string[]): PermissionKey[] {
+/**
+ * Union of the bundles of the given role names; unknown role names contribute nothing.
+ *
+ * `tenantId` is the organisation the token belongs to (its `tid` claim). Like the engine's access
+ * evaluator, platform keys (`platform.*`) from role claims count only in House: another
+ * organisation's account session holds its ladder role's organisation keys and no platform keys.
+ * A token without `tid` predates organisations and belongs to House.
+ */
+export function permissionsForLegacyRoles(
+  roles: readonly string[],
+  tenantId: number | null = null,
+): PermissionKey[] {
+  const platformKeysCount = tenantId === null || tenantId === HOUSE_TENANT_ID;
   const out = new Set<PermissionKey>();
-  for (const r of roles) for (const k of BUNDLES[r] ?? []) out.add(k);
+  for (const r of roles) {
+    for (const k of BUNDLES[r] ?? []) {
+      if (platformKeysCount || !k.startsWith('platform.')) out.add(k);
+    }
+  }
   return [...out].sort();
 }

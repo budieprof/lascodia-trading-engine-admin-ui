@@ -17,6 +17,9 @@ import { KillSwitchService, normaliseKillSwitch } from '@core/services/kill-swit
 import { StrategiesService } from '@core/services/strategies.service';
 import { AuditTrailService } from '@core/services/audit-trail.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { AuthService } from '@core/auth/auth.service';
+import { AuthResponseCode } from '@core/auth/bff.types';
+import { Permission } from '@core/auth/permissions.generated';
 import type {
   KillSwitchStatusDto,
   StrategyDto,
@@ -29,6 +32,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 
 interface StrategySwitch {
   strategy: StrategyDto;
@@ -54,6 +58,7 @@ const PAGE_SIZE = 25;
     FormsModule,
     DatePipe,
     ModalA11yDirective,
+    MfaHintComponent,
   ],
   template: `
     <div class="page">
@@ -85,7 +90,8 @@ const PAGE_SIZE = 25;
             class="btn"
             [class.btn-destructive]="!globalEngaged()"
             [class.btn-primary]="globalEngaged()"
-            [disabled]="busyGlobal()"
+            [disabled]="busyGlobal() || (globalEngaged() && !canRelease())"
+            [title]="globalEngaged() && !canRelease() ? releaseRefusal : ''"
             (click)="requestGlobalToggle()"
           >
             {{ globalEngaged() ? 'Disengage' : 'Engage Kill Switch' }}
@@ -252,7 +258,13 @@ const PAGE_SIZE = 25;
                         type="button"
                         class="btn-row"
                         [class.danger]="!row.status?.enabled"
-                        [disabled]="busyStrategyIds().has(row.strategy.id)"
+                        [disabled]="
+                          busyStrategyIds().has(row.strategy.id) ||
+                          (row.status?.enabled === true && !canRelease())
+                        "
+                        [title]="
+                          row.status?.enabled === true && !canRelease() ? releaseRefusal : ''
+                        "
                         (click)="requestStrategyToggle(row)"
                       >
                         {{ row.status?.enabled ? 'Disengage' : 'Engage' }}
@@ -341,6 +353,10 @@ const PAGE_SIZE = 25;
                 </span>
               }
               <footer class="modal-actions">
+                @if (releasing()) {
+                  <!-- Releasing is a step-up key (catalog v2): offer the second factor up front. -->
+                  <app-mfa-hint [permission]="P.EngineKillswitchRelease" />
+                }
                 <button
                   type="button"
                   class="btn btn-ghost"
@@ -895,7 +911,22 @@ export class KillSwitchesPageComponent implements OnInit {
   private readonly strategiesService = inject(StrategiesService);
   private readonly auditService = inject(AuditTrailService);
   private readonly notifications = inject(NotificationService);
+  private readonly auth = inject(AuthService);
   private readonly fb = inject(FormBuilder);
+
+  protected readonly P = Permission;
+  /**
+   * Engaging needs `engine.killswitch` (the page's own key); releasing an engaged switch is the
+   * separate `engine.killswitch.release` (catalog v2) — which also needs a fresh second factor and,
+   * where two-person rules apply, a second person's approval.
+   */
+  readonly canRelease = computed(() => this.auth.hasPermission(Permission.EngineKillswitchRelease));
+  protected readonly releaseRefusal =
+    'Releasing a kill switch needs the engine.killswitch.release permission.';
+  /** The Decision Log entry written after a toggle is `decisions.write`. */
+  private readonly canLogDecision = computed(() =>
+    this.auth.hasPermission(Permission.DecisionsWrite),
+  );
 
   readonly rows = signal<StrategySwitch[]>([]);
   readonly loading = signal(true);
@@ -1070,6 +1101,9 @@ export class KillSwitchesPageComponent implements OnInit {
       : 'Signal generation and order submission will resume.';
   });
 
+  /** The open dialog releases (disengages) a switch. */
+  readonly releasing = computed(() => this.pending()?.nextEnabled === false);
+
   readonly dialogConfirmLabel = computed(() =>
     this.pending()?.nextEnabled ? 'Engage' : 'Disengage',
   );
@@ -1151,6 +1185,10 @@ export class KillSwitchesPageComponent implements OnInit {
             this.globalError.set(null);
             this.logAudit('KillSwitch', 0, payload);
             this.closeDialog();
+          } else if (res.responseCode === AuthResponseCode.ApprovalPending) {
+            // Two-person release (contract C3.3): the approval interceptor has said so; the switch
+            // stays engaged until a second person approves.
+            this.closeDialog();
           } else {
             this.notifications.error(res.message ?? 'Failed to toggle kill switch');
             this.closeDialog();
@@ -1191,6 +1229,8 @@ export class KillSwitchesPageComponent implements OnInit {
                 changedBy: null,
               },
             );
+            this.closeDialog();
+          } else if (res.responseCode === AuthResponseCode.ApprovalPending) {
             this.closeDialog();
           } else {
             this.notifications.error(res.message ?? 'Failed to toggle kill switch');
@@ -1294,6 +1334,9 @@ export class KillSwitchesPageComponent implements OnInit {
   }
 
   private logAudit(entityType: string, entityId: number, payload: ToggleKillSwitchRequest): void {
+    // The engine records the toggle in the audit log either way; this Decision Log entry needs
+    // `decisions.write`, and a person who may toggle without it must not see a refusal after success.
+    if (!this.canLogDecision()) return;
     this.auditService
       .create({
         entityType,

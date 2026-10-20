@@ -25,6 +25,13 @@ const bff = (...anyOf: PermissionKey[]): RouteRule => ({ anyOf, bffOnly: true })
  * `p0-authz-endpoint-map.csv`). Where the sidebar used to require a role ladder policy, that policy's
  * access-tier key is kept (Operator → `access.operator`, Analyst → `access.analyst`), so nobody gains
  * or loses a page in the move from roles to permissions.
+ *
+ * Catalog v2 (multi-tenancy W3, engine `EndpointPermissionMoveTests.Moves`) moved some of those reads
+ * off the tiers onto specific keys; their pages follow the key the read now needs (marked "A4.1"
+ * below). The House ladder roles hold every moved key their tier implied, so they see the same
+ * pages; the move lets an organisation role built from specific keys (e.g. RiskManager:
+ * `engine.killswitch`, `risk.manage`, `decisions.read`) reach the pages for them. Writes that moved
+ * are gated where the page offers them (`*lscCan` / `hasPermission`), not here.
  */
 export const ROUTE_ACCESS = {
   dashboard: rule(P.AccessViewer),
@@ -87,21 +94,21 @@ export const ROUTE_ACCESS = {
   'execution-quality': rule(P.AccessOperator),
   sentiment: rule(P.MarketdataRead),
   performance: rule(P.StrategiesRead),
-  'drawdown-recovery': rule(P.AccessOperator),
+  'drawdown-recovery': rule(P.RiskManage), // A4.1: GET drawdown-recovery/latest, /by-account
   martingale: rule(P.AccessOperator),
   'drift-report': rule(P.MlRead),
-  'operator-roles': rule(P.AccessAdmin),
+  'operator-roles': rule(P.IamMembersRead), // A4.1: GET admin/operator-roles
   'paper-trading': rule(P.AccessOperator),
   'engine-config': rule(P.AccessOperator),
   'economic-events': rule(P.MarketdataRead),
-  'audit-trail': rule(P.AccessOperator),
+  'audit-trail': rule(P.DecisionsRead), // A4.1: POST audit-trail/list
   'system-health': rule(P.AccessViewer),
   'system-logs': rule(P.AccessOperator),
-  'kill-switches': rule(P.AccessOperator),
+  'kill-switches': rule(P.EngineKillswitch), // A4.1: GET admin/kill-switch/global, /strategy/{id}
   'worker-health': rule(P.AccessOperator),
   'ea-instances': rule(P.AccessOperator),
   terminals: rule(P.AccessOperator),
-  'dead-letter': rule(P.AccessOperator),
+  'dead-letter': rule(P.PlatformInfrastructureManage), // A4.1: POST dead-letter/list
   'alert-triage': rule(P.AccessViewer),
   calibration: rule(P.AccessOperator),
   optimizations: rule(P.AccessAnalyst),
@@ -144,7 +151,8 @@ export const ROUTE_ACCESS = {
   // administrators holding platform.tenants.manage). Elevation and impersonation live in the BFF session.
   platform: { anyOf: [], staffOnly: true },
   'platform/organisations': { anyOf: [P.PlatformTenantsManage], staffOnly: true },
-  'platform/elevations': { anyOf: [], staffOnly: true, bffOnly: true },
+  // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
+  'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },
 } as const satisfies Record<string, RouteRule>;
 
@@ -164,26 +172,29 @@ export function satisfies(r: RouteRule, who: AccessSubject): boolean {
   return r.anyOf.length === 0 || r.anyOf.some((k) => who.hasPermission(k));
 }
 
+/** A route table: {@link ROUTE_ACCESS}, or another one a spec compares it with. */
+export type RouteTable = Readonly<Record<string, RouteRule>>;
+
 /**
  * The rules that apply to a URL: one per table entry that is the path or a parent of it, outermost
  * first. Empty when no entry matches — an unknown page, which {@link canSee} refuses.
  */
-export function rulesFor(url: string): RouteRule[] {
+export function rulesFor(url: string, table: RouteTable = ROUTE_ACCESS): RouteRule[] {
   const path = url.split(/[?#]/)[0].replace(/^\/+/, '').replace(/\/+$/, '');
   if (!path) return [];
   const segments = path.split('/');
   const out: RouteRule[] = [];
   for (let i = 1; i <= segments.length; i++) {
     const prefix = segments.slice(0, i).join('/');
-    const r = (ROUTE_ACCESS as Record<string, RouteRule>)[prefix];
+    const r = table[prefix];
     if (r) out.push(r);
   }
   return out;
 }
 
 /** Whether the person may open the page at `url` (fails closed for a page not in the table). */
-export function canSee(url: string, who: AccessSubject): boolean {
-  const rules = rulesFor(url);
+export function canSee(url: string, who: AccessSubject, table: RouteTable = ROUTE_ACCESS): boolean {
+  const rules = rulesFor(url, table);
   return rules.length > 0 && rules.every((r) => satisfies(r, who));
 }
 

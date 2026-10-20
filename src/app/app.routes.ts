@@ -353,7 +353,8 @@ export const routes: Routes = [
       {
         path: 'engine-overview',
         canActivate: [canAccessPath('engine-overview')],
-        // Calls /health/workers + /dead-letter/list which are Operator-gated.
+        // /health/workers is Operator-gated; the dead-letter panels need
+        // platform.infrastructure.manage and are left out without it.
         data: { breadcrumb: 'Engine Overview' },
         loadChildren: () =>
           import('@features/engine-overview/engine-overview.routes').then(

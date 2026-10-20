@@ -6,7 +6,9 @@ import type { EChartsOption } from 'echarts';
 import { OperatorRolesService } from '@core/services/operator-roles.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { OperatorRoleDto } from '@core/api/api.types';
-import { ROLES } from '@core/auth/auth.service';
+import { AuthService, ROLES } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
+import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -76,6 +78,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
     ConfirmDialogComponent,
     DatePipe,
     RelativeTimePipe,
+    MfaHintComponent,
   ],
   template: `
     <div class="page">
@@ -154,42 +157,46 @@ const DAY_MS = 24 * 60 * 60 * 1000;
         </div>
       </section>
 
-      <section class="grant-card">
-        <header class="card-head">
-          <h3>Grant a role</h3>
-          <span class="muted">
-            Changes affect future logins. Force a logout for immediate effect.
-          </span>
-        </header>
-        <form class="grant-form" (ngSubmit)="askGrant()">
-          <label class="field">
-            <span class="label">Trading Account ID</span>
-            <input
-              type="number"
-              min="1"
-              [(ngModel)]="grantAccountId"
-              name="accountId"
-              placeholder="e.g. 42"
-              required
-            />
-          </label>
-          <label class="field">
-            <span class="label">Role</span>
-            <select [(ngModel)]="grantRole" name="role">
-              @for (r of grantableRoles; track r) {
-                <option [value]="r">{{ r }}</option>
-              }
-            </select>
-          </label>
-          <button
-            type="submit"
-            class="btn btn-primary"
-            [disabled]="grantPending() || !grantAccountId"
-          >
-            {{ grantPending() ? 'Granting…' : 'Grant' }}
-          </button>
-        </form>
-      </section>
+      <!-- Listing needs iam.members.read; granting and revoking need iam.grants.manage (catalog v2). -->
+      @if (canManage()) {
+        <section class="grant-card">
+          <header class="card-head">
+            <h3>Grant a role</h3>
+            <span class="muted">
+              Changes affect future logins. Force a logout for immediate effect.
+            </span>
+          </header>
+          <form class="grant-form" (ngSubmit)="askGrant()">
+            <label class="field">
+              <span class="label">Trading Account ID</span>
+              <input
+                type="number"
+                min="1"
+                [(ngModel)]="grantAccountId"
+                name="accountId"
+                placeholder="e.g. 42"
+                required
+              />
+            </label>
+            <label class="field">
+              <span class="label">Role</span>
+              <select [(ngModel)]="grantRole" name="role">
+                @for (r of grantableRoles; track r) {
+                  <option [value]="r">{{ r }}</option>
+                }
+              </select>
+            </label>
+            <button
+              type="submit"
+              class="btn btn-primary"
+              [disabled]="grantPending() || !grantAccountId"
+            >
+              {{ grantPending() ? 'Granting…' : 'Grant' }}
+            </button>
+            <app-mfa-hint [permission]="P.IamGrantsManage" />
+          </form>
+        </section>
+      }
 
       <!-- Toolbar: search + role filter + refresh -->
       <div class="toolbar">
@@ -236,12 +243,16 @@ const DAY_MS = 24 * 60 * 60 * 1000;
           } @else if (rows().length === 0) {
             <app-empty-state
               title="No role grants yet"
-              description="Use the form above to grant the first role."
+              [description]="canManage() ? 'Use the form above to grant the first role.' : ''"
             />
           } @else if (filteredRows().length === 0) {
             <app-empty-state
               title="No role grants match"
-              description="Adjust the filters or use the form above to grant a role."
+              [description]="
+                canManage()
+                  ? 'Adjust the filters or use the form above to grant a role.'
+                  : 'Adjust the filters.'
+              "
             />
           } @else {
             <div class="roles-scroll">
@@ -253,7 +264,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                     <th>Tier</th>
                     <th>First assigned</th>
                     <th>Granted by</th>
-                    <th class="actions">Revoke</th>
+                    @if (canManage()) {
+                      <th class="actions">Revoke</th>
+                    }
                   </tr>
                 </thead>
                 <tbody>
@@ -285,18 +298,20 @@ const DAY_MS = 24 * 60 * 60 * 1000;
                           system
                         }
                       </td>
-                      <td class="actions">
-                        @for (role of row.roles; track role) {
-                          <button
-                            type="button"
-                            class="btn btn-ghost btn-xs"
-                            [disabled]="revokePending()"
-                            (click)="askRevoke(row.tradingAccountId, role)"
-                          >
-                            Revoke {{ role }}
-                          </button>
-                        }
-                      </td>
+                      @if (canManage()) {
+                        <td class="actions">
+                          @for (role of row.roles; track role) {
+                            <button
+                              type="button"
+                              class="btn btn-ghost btn-xs"
+                              [disabled]="revokePending()"
+                              (click)="askRevoke(row.tradingAccountId, role)"
+                            >
+                              Revoke {{ role }}
+                            </button>
+                          }
+                        </td>
+                      }
                     </tr>
                   }
                 </tbody>
@@ -767,6 +782,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export class OperatorRolesPageComponent {
   private readonly service = inject(OperatorRolesService);
   private readonly notify = inject(NotificationService);
+  private readonly auth = inject(AuthService);
+
+  protected readonly P = Permission;
+  /** Granting and revoking (`POST admin/operator-roles/grant|revoke`) need `iam.grants.manage`. */
+  readonly canManage = computed(() => this.auth.hasPermission(Permission.IamGrantsManage));
 
   readonly grantableRoles = GRANTABLE_ROLES;
 
