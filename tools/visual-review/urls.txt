@@ -1,6 +1,7 @@
 /account
 /account/change-password
 /account/profile
+/admin/audit
 /admin/roles
 /admin/users
 /alert-triage

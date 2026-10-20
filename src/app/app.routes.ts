@@ -517,6 +517,13 @@ export const routes: Routes = [
         loadChildren: () => import('@features/roles/roles.routes').then((m) => m.ROLES_ROUTES),
       },
       {
+        path: 'admin/audit',
+        data: { breadcrumb: 'Audit Log' },
+        canActivate: [requirePermission('audit.read')],
+        loadChildren: () =>
+          import('@features/audit-log/audit-log.routes').then((m) => m.AUDIT_LOG_ROUTES),
+      },
+      {
         path: 'account',
         data: { breadcrumb: 'Account' },
         loadChildren: () =>
