@@ -109,6 +109,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'alerts.manage',
+    category: 'Alerts',
+    description:
+      "Set up where the organisation's alerts go — its Telegram bot and chat, e-mail recipients and webhook (URL and signing secret) — and send test alerts. Secrets are write-only. Changes need a fresh MFA sign-in.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'audit.read',
     category: 'Audit',
     description:
@@ -150,7 +160,8 @@ export const PERMISSION_CATALOG = [
   {
     key: 'engine.killswitch',
     category: 'Engine control',
-    description: "See and engage kill switches (global, or a strategy's).",
+    description:
+      "See and engage kill switches: the organisation's, a trading account's or a strategy's (the global one is the platform operator's).",
     scopeable: true,
     stepUp: false,
     twoPerson: false,
@@ -460,6 +471,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.fleet.read',
+    category: 'Platform staff',
+    description:
+      "Platform staff: see every organisation's EA terminals — state, version, last heartbeat, credential — and engaged kill switches (read-only; each view is audited).",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.impersonate',
     category: 'Platform staff',
     description:
@@ -474,6 +495,16 @@ export const PERMISSION_CATALOG = [
     category: 'Platform staff',
     description:
       'Platform staff: operate platform machinery — MT5 hosts and terminals, supervisor daemons, the event-bus dead-letter queue.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'platform.plans.manage',
+    category: 'Platform staff',
+    description:
+      'Platform staff: create and edit plans (limits and features) and move organisations between plans.',
     scopeable: false,
     stepUp: false,
     twoPerson: false,
@@ -504,6 +535,16 @@ export const PERMISSION_CATALOG = [
     category: 'Organisations',
     description:
       "Platform staff: create, list, suspend and reactivate organisations (tenants), and manage any organisation's members. Also requires acting in House or being a super admin.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'platform.usage.read',
+    category: 'Platform staff',
+    description:
+      "Platform staff: see any organisation's usage against its plan and download the monthly usage export for invoicing.",
     scopeable: false,
     stepUp: false,
     twoPerson: false,
@@ -662,6 +703,15 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'tenant.usage.read',
+    category: 'Organisations',
+    description: "See the organisation's plan — what it allows — and how much of it is in use.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'users.manage',
     category: 'Administration',
     description: 'Create and manage admin users and their role assignments.',
@@ -686,6 +736,7 @@ export const Permission = {
   AccountsConnect: 'accounts.connect',
   AccountsManage: 'accounts.manage',
   AccountsRead: 'accounts.read',
+  AlertsManage: 'alerts.manage',
   AuditRead: 'audit.read',
   DecisionsRead: 'decisions.read',
   DecisionsWrite: 'decisions.write',
@@ -723,11 +774,14 @@ export const Permission = {
   PlatformElevationRequest: 'platform.elevation.request',
   PlatformEngineManage: 'platform.engine.manage',
   PlatformEngineSecrets: 'platform.engine.secrets',
+  PlatformFleetRead: 'platform.fleet.read',
   PlatformImpersonate: 'platform.impersonate',
   PlatformInfrastructureManage: 'platform.infrastructure.manage',
+  PlatformPlansManage: 'platform.plans.manage',
   PlatformResearchManage: 'platform.research.manage',
   PlatformResearchRun: 'platform.research.run',
   PlatformTenantsManage: 'platform.tenants.manage',
+  PlatformUsageRead: 'platform.usage.read',
   PositionsFlatten: 'positions.flatten',
   PositionsManage: 'positions.manage',
   PrompttemplateEdit: 'prompttemplate.edit',
@@ -744,6 +798,7 @@ export const Permission = {
   StrategiesLifecycle: 'strategies.lifecycle',
   StrategiesRead: 'strategies.read',
   TenantMembersManage: 'tenant.members.manage',
+  TenantUsageRead: 'tenant.usage.read',
   UsersManage: 'users.manage',
 } as const satisfies Record<string, PermissionKey>;
 

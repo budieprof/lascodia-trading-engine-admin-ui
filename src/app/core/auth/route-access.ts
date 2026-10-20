@@ -134,6 +134,7 @@ export const ROUTE_ACCESS = {
     P.IamSsoManage,
     P.IamApprovalsDecide,
     P.IamAccessReview,
+    P.TenantUsageRead,
   ),
   'iam/members': bff(P.IamMembersRead),
   'iam/invitations': bff(P.IamMembersRead, P.IamInvitationsManage),
@@ -145,12 +146,16 @@ export const ROUTE_ACCESS = {
   'iam/sso': bff(P.IamSsoManage),
   'iam/approvals': bff(P.IamApprovalsDecide),
   'iam/access-review': bff(P.IamAccessReview),
+  'iam/plan': bff(P.TenantUsageRead), // GET tenant/usage (multi-tenancy Phase 7)
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
   // administrators holding platform.tenants.manage). Elevation and impersonation live in the BFF session.
   platform: { anyOf: [], staffOnly: true },
   'platform/organisations': { anyOf: [P.PlatformTenantsManage], staffOnly: true },
+  // Plans, quotas and fleet health (multi-tenancy Phase 7): their APIs work with either sign-in.
+  'platform/plans': { anyOf: [P.PlatformPlansManage], staffOnly: true },
+  'platform/fleet': { anyOf: [P.PlatformFleetRead], staffOnly: true },
   // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
   'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },

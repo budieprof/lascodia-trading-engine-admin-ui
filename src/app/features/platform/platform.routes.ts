@@ -7,6 +7,8 @@ import type { AccessPath } from '@core/auth/route-access';
 
 const PAGES: AccessPath[] = [
   'platform/organisations',
+  'platform/plans',
+  'platform/fleet',
   'platform/elevations',
   'platform/impersonation',
 ];
@@ -27,6 +29,20 @@ export const PLATFORM_ROUTES: Routes = [
     data: { breadcrumb: 'Organisations' },
     loadComponent: () =>
       import('./pages/organisations-page.component').then((m) => m.OrganisationsPageComponent),
+  },
+  {
+    // Plans and quotas (multi-tenancy Phase 7).
+    path: 'plans',
+    canActivate: [canAccessPath('platform/plans')],
+    data: { breadcrumb: 'Plans' },
+    loadComponent: () => import('./pages/plans-page.component').then((m) => m.PlansPageComponent),
+  },
+  {
+    // Every organisation's EA fleet (multi-tenancy Phase 7).
+    path: 'fleet',
+    canActivate: [canAccessPath('platform/fleet')],
+    data: { breadcrumb: 'Fleet health' },
+    loadComponent: () => import('./pages/fleet-page.component').then((m) => m.FleetPageComponent),
   },
   {
     path: 'elevations',

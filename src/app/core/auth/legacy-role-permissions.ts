@@ -77,6 +77,8 @@ const OPERATOR: readonly PermissionKey[] = [
   P.PlatformResearchManage,
   P.PlatformDataManage,
   P.PlatformInfrastructureManage,
+  // Multi-tenancy Phase 7: the organisation's plan and usage.
+  P.TenantUsageRead,
 ];
 
 const ADMIN: readonly PermissionKey[] = [
@@ -100,6 +102,10 @@ const ADMIN: readonly PermissionKey[] = [
   P.PlatformElevationRequest,
   P.PlatformElevationApprove,
   P.PlatformImpersonate,
+  // Plans, usage, fleet health (Phase 7; platform keys — House only, as above).
+  P.PlatformPlansManage,
+  P.PlatformUsageRead,
+  P.PlatformFleetRead,
 ];
 
 const EA: readonly PermissionKey[] = [

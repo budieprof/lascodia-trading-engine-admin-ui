@@ -178,6 +178,17 @@ localhost rather than a blank page.
   groups, security policy, SSO + SCIM tokens, approvals, access review), `/account/sessions`,
   `/account/tokens`, `/platform/*` (organisations, elevated access, impersonation + banner),
   `/invite/:token`. Engine DTOs are mapped in `features/iam/iam-adapters.ts` only.
+- **Plans and quotas (multi-tenancy Phase 7; engine `docs/api/plans-api.md`).** A creation an
+  organisation's plan does not allow answers HTTP 403 `responseCode: "-403-quota"` with
+  `{quota, feature, limit, used, plan}`; `core/plans/quota-refusal.ts` turns it into one sentence, and the
+  error interceptor and `iam.logic` `errorText` use it — a page that shows its own errors should go
+  through `errorText` (or `quotaRefusalMessage`) rather than printing "permission denied". Screens:
+  `/iam/plan` (Plan & usage, `tenant.usage.read`), `/platform/plans` (`platform.plans.manage`),
+  `/platform/fleet` (every organisation's EA terminals, `platform.fleet.read`; each view is audited),
+  and on `/platform/organisations` a plan column, "Plan & usage" per organisation (move to a plan shows
+  what would be over the new limits first) and the monthly usage export (`platform.usage.read`). DTOs in
+  `features/platform/plans.types.ts`, decisions in `plans.logic.ts`. LLM month-to-date usage is shown only
+  when the engine says `llm.available` — never a guessed figure.
 
 ## Verifying in a browser
 
