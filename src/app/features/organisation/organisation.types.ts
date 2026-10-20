@@ -205,6 +205,30 @@ export interface OverrideWriteResult {
   message: string | null;
 }
 
+// ── Kill switches and emergency flatten (engine KillSwitchController, EmergencyFlattenController) ──
+
+/** `Platform`, `Tenant` (the organisation), `Account` or `Strategy`. */
+export type KillSwitchScope = 'Platform' | 'Tenant' | 'Account' | 'Strategy' | string;
+
+/** `GET admin/kill-switch/tenant` and `…/account/{id}`. */
+export interface ScopedKillSwitchStatus {
+  /** This switch is engaged. */
+  enabled: boolean;
+  reason: string | null;
+  changedAt: string | null;
+  changedBy: string | null;
+  scope: KillSwitchScope;
+  /** The switch that halts the scope right now (account → organisation → platform), or null. */
+  haltedBy: KillSwitchScope | null;
+}
+
+/** One of the organisation's accounts with its kill switch (or why it could not be read). */
+export interface AccountSwitchRow {
+  account: AccountRef;
+  status: ScopedKillSwitchStatus | null;
+  error: string | null;
+}
+
 /** The organisation's accounts as the pages name them (from the account list the console already keeps). */
 export interface AccountRef {
   id: number;

@@ -6,7 +6,11 @@ import { canAccessPath } from '@core/auth/can-access.guard';
 import type { AccessPath } from '@core/auth/route-access';
 
 /** The organisation console pages in sidebar order; `/organisation` opens the first one the person may see. */
-const PAGES: AccessPath[] = ['organisation/terminals', 'organisation/settings'];
+const PAGES: AccessPath[] = [
+  'organisation/terminals',
+  'organisation/settings',
+  'organisation/risk',
+];
 
 /**
  * The organisation console (multi-tenancy Phase 7, c7-tenant): what an organisation administers of
@@ -37,5 +41,11 @@ export const ORGANISATION_ROUTES: Routes = [
     data: { breadcrumb: 'Settings' },
     loadComponent: () =>
       import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
+  },
+  {
+    path: 'risk',
+    canActivate: [canAccessPath('organisation/risk')],
+    data: { breadcrumb: 'Risk & kill switches' },
+    loadComponent: () => import('./pages/risk-page.component').then((m) => m.RiskPageComponent),
   },
 ];

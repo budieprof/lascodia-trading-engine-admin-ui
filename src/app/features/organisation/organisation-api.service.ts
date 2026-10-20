@@ -13,6 +13,7 @@ import type {
   MachineCredential,
   OverrideScopeType,
   OverrideWriteResult,
+  ScopedKillSwitchStatus,
   SetConfigOverrideBody,
 } from './organisation.types';
 
@@ -158,5 +159,59 @@ export class OrganisationApiService {
     return this.api
       .post<OverrideWriteResponse>(`/config/overrides/pending/${id}/cancel`, { reason }, SILENT)
       .pipe(map(overrideResult));
+  }
+
+  // ── Kill switches and emergency flatten (engine KillSwitchController, EmergencyFlattenController) ──
+
+  /** `engine.killswitch`. The acting organisation's switch (`haltedBy` also reports the platform's). */
+  tenantKillSwitch(): Observable<ScopedKillSwitchStatus> {
+    return this.get('/admin/kill-switch/tenant');
+  }
+
+  /**
+   * Engage (`engine.killswitch`) or release (`engine.killswitch.release`: step-up, and a second
+   * person where two-person rules apply — HTTP 202) the organisation's switch. A reason is required.
+   */
+  setTenantKillSwitch(enabled: boolean, reason: string): Observable<ScopedKillSwitchStatus> {
+    return settled(
+      this.api.put<ResponseData<ScopedKillSwitchStatus>>(
+        '/admin/kill-switch/tenant',
+        { enabled, reason },
+        SILENT,
+      ),
+    );
+  }
+
+  /** `engine.killswitch` on the account. Another organisation's account is "not found". */
+  accountKillSwitch(tradingAccountId: number): Observable<ScopedKillSwitchStatus> {
+    return this.get(`/admin/kill-switch/account/${tradingAccountId}`);
+  }
+
+  /** Engage or release one account's switch (release: step-up, two-person). */
+  setAccountKillSwitch(
+    tradingAccountId: number,
+    enabled: boolean,
+    reason: string,
+  ): Observable<ScopedKillSwitchStatus> {
+    return settled(
+      this.api.put<ResponseData<ScopedKillSwitchStatus>>(
+        `/admin/kill-switch/account/${tradingAccountId}`,
+        { enabled, reason },
+        SILENT,
+      ),
+    );
+  }
+
+  /**
+   * `positions.flatten` organisation-wide: engages the organisation's kill switch, cancels its
+   * accounts' pending orders, closes their open positions and pauses its own strategies.
+   */
+  flattenOrganisation(reason: string): Observable<boolean> {
+    return this.post('/admin/emergency-flatten/tenant', { reason });
+  }
+
+  /** `positions.flatten` on the account: engages its switch, cancels its orders, closes its positions. */
+  flattenAccount(tradingAccountId: number, reason: string): Observable<boolean> {
+    return this.post(`/admin/emergency-flatten/account/${tradingAccountId}`, { reason });
   }
 }
