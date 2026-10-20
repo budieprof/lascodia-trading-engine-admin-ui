@@ -148,6 +148,12 @@ export const ROUTE_ACCESS = {
   'iam/access-review': bff(P.IamAccessReview),
   'iam/plan': bff(P.TenantUsageRead), // GET tenant/usage (multi-tenancy Phase 7)
 
+  // ── Organisation console (multi-tenancy Phase 7, c7-tenant) ──
+  // What an organisation administers of its own. Their APIs act in the acting organisation with
+  // either sign-in (legacy sessions act in House), so they are not BFF-only.
+  organisation: rule(P.AccountsRead),
+  'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
+
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
   // administrators holding platform.tenants.manage). Elevation and impersonation live in the BFF session.
