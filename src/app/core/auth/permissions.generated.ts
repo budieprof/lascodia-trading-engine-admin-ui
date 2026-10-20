@@ -275,6 +275,26 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'llm.keys.manage',
+    category: 'LLM usage and providers',
+    description:
+      "Store and remove the organisation's own LLM provider API keys (Anthropic, OpenAI, Google, DeepSeek). Keys are write-only. Changes need a fresh MFA sign-in.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'llm.usage.read',
+    category: 'LLM usage and providers',
+    description:
+      "See the organisation's LLM usage and spend per day, provider and model, its LLM budget and which provider it runs on.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'llmbacktest.cancel',
     category: 'LLM analysis backtest',
     description: 'Cancel a running or pending LLM analysis backtest run.',
@@ -753,6 +773,8 @@ export const Permission = {
   IamSessionsManage: 'iam.sessions.manage',
   IamSsoManage: 'iam.sso.manage',
   IamTokensCreate: 'iam.tokens.create',
+  LlmKeysManage: 'llm.keys.manage',
+  LlmUsageRead: 'llm.usage.read',
   LlmbacktestCancel: 'llmbacktest.cancel',
   LlmbacktestLaunch: 'llmbacktest.launch',
   LlmbacktestView: 'llmbacktest.view',
