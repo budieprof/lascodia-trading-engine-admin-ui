@@ -229,6 +229,67 @@ export interface AccountSwitchRow {
   error: string | null;
 }
 
+// ── Strategy subscriptions (engine StrategySubscriptionsController, StrategyExecutionController) ──
+
+/** One of the organisation's subscriptions: an account bound to a strategy (`GET /strategy/subscriptions`). */
+export interface StrategySubscription {
+  strategyId: number;
+  strategyName: string;
+  symbol: string;
+  timeframe: string;
+  strategyStatus: string;
+  /** A platform strategy; false = the organisation's own, private strategy. */
+  isPlatform: boolean;
+  /** A script strategy: with no enabled subscription it trades on no account at all. */
+  isScript: boolean;
+  tradingAccountId: number;
+  accountName: string;
+  accountLogin: string;
+  lotMultiplier: number;
+  /** False pauses delivery to this account. */
+  isEnabled: boolean;
+  createdAt: string;
+}
+
+export interface StrategySubscriptions {
+  /**
+   * True: the organisation's accounts receive a strategy's signals only through a subscription of its
+   * own (always outside House). False (House by default): a strategy with no House subscription
+   * reaches every House account whose EA streams its symbol.
+   */
+  requireSubscription: boolean;
+  subscriptions: StrategySubscription[];
+}
+
+/** `Platform` (no owning organisation) or `Private` (the organisation's own). */
+export type StrategyOwnership = 'Platform' | 'Private';
+
+/** The fields of the engine's `StrategyDto` the subscriptions page reads (`POST strategy/list`). */
+export interface StrategySummary {
+  id: number;
+  /** The owning organisation; null for a platform strategy (absent on an older engine). */
+  tenantId?: number | null;
+  name: string | null;
+  symbol: string | null;
+  timeframe: string;
+  status: string;
+  authoringMode?: string | null;
+}
+
+/** `GET|PUT /strategy/{id}/account-bindings` — the organisation's own set for one strategy. */
+export interface StrategyBinding {
+  tradingAccountId: number;
+  accountName: string;
+  lotMultiplier: number;
+  isEnabled: boolean;
+}
+
+export interface StrategyBindingInput {
+  tradingAccountId: number;
+  lotMultiplier: number;
+  isEnabled: boolean;
+}
+
 /** The organisation's accounts as the pages name them (from the account list the console already keeps). */
 export interface AccountRef {
   id: number;

@@ -158,6 +158,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Connect a terminal', route: '/organisation/terminals', icon: '🔌' },
       { label: 'Settings', route: '/organisation/settings', icon: '⚙' },
       { label: 'Risk & kill switches', route: '/organisation/risk', icon: '⛔' },
+      { label: 'Strategy subscriptions', route: '/organisation/strategies', icon: '📡' },
     ],
   },
   {

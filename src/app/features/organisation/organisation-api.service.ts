@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, map } from 'rxjs';
 
 import { ApiService } from '@core/api/api.service';
-import { ApiError, type ResponseData } from '@core/api/api.types';
+import { ApiError, type PagedData, type ResponseData } from '@core/api/api.types';
 import { queryString, rows } from '@features/iam/iam-api.service';
 import type {
   ConfigOverrides,
@@ -15,6 +15,11 @@ import type {
   OverrideWriteResult,
   ScopedKillSwitchStatus,
   SetConfigOverrideBody,
+  StrategyBinding,
+  StrategyBindingInput,
+  StrategyOwnership,
+  StrategySubscriptions,
+  StrategySummary,
 } from './organisation.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
@@ -214,4 +219,63 @@ export class OrganisationApiService {
   flattenAccount(tradingAccountId: number, reason: string): Observable<boolean> {
     return this.post(`/admin/emergency-flatten/account/${tradingAccountId}`, { reason });
   }
+
+  // ── Strategy subscriptions ──
+
+  /** `access.operator`. The organisation's own subscriptions and the rule its accounts receive signals under. */
+  strategySubscriptions(): Observable<StrategySubscriptions> {
+    return this.get('/strategy/subscriptions');
+  }
+
+  /** `strategies.read`. One page of platform or private strategies, by name (filter nested, as the engine requires). */
+  strategies(q: {
+    ownership: StrategyOwnership;
+    search: string;
+    status: string | null;
+    page: number;
+    pageSize: number;
+  }): Observable<PagedData<StrategySummary>> {
+    return settled(
+      this.api.post<ResponseData<PagedData<StrategySummary>>>(
+        '/strategy/list',
+        {
+          currentPage: q.page,
+          itemCountPerPage: q.pageSize,
+          sortBy: 'name',
+          sortDirection: 'asc',
+          filter: {
+            ownership: q.ownership,
+            ...(q.search.trim() ? { search: q.search.trim() } : {}),
+            ...(q.status ? { status: q.status } : {}),
+          },
+        },
+        SILENT,
+      ),
+    );
+  }
+
+  /** `access.operator`. The organisation's own subscriptions of one strategy. */
+  strategyBindings(strategyId: number): Observable<StrategyBinding[]> {
+    return this.get<unknown>(`/strategy/${strategyId}/account-bindings`).pipe(
+      map((d) => rows<StrategyBinding>(d)),
+    );
+  }
+
+  /**
+   * `access.operator`. Replaces the organisation's own subscriptions of one strategy (accounts left
+   * out are unsubscribed; another organisation's are never touched).
+   */
+  replaceStrategyBindings(
+    strategyId: number,
+    bindings: StrategyBindingInput[],
+  ): Observable<boolean> {
+    return settled(
+      this.api.put<ResponseData<boolean>>(
+        `/strategy/${strategyId}/account-bindings`,
+        bindings,
+        SILENT,
+      ),
+    );
+  }
+
 }

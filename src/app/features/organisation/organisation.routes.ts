@@ -10,6 +10,7 @@ const PAGES: AccessPath[] = [
   'organisation/terminals',
   'organisation/settings',
   'organisation/risk',
+  'organisation/strategies',
 ];
 
 /**
@@ -47,5 +48,12 @@ export const ORGANISATION_ROUTES: Routes = [
     canActivate: [canAccessPath('organisation/risk')],
     data: { breadcrumb: 'Risk & kill switches' },
     loadComponent: () => import('./pages/risk-page.component').then((m) => m.RiskPageComponent),
+  },
+  {
+    path: 'strategies',
+    canActivate: [canAccessPath('organisation/strategies')],
+    data: { breadcrumb: 'Strategy subscriptions' },
+    loadComponent: () =>
+      import('./pages/subscriptions-page.component').then((m) => m.SubscriptionsPageComponent),
   },
 ];
