@@ -33,14 +33,63 @@ describe('IamApiService (contract C3.5 wire mapping)', () => {
     TestBed.resetTestingModule();
   });
 
-  it('lists members, quietly (the page reports errors itself)', async () => {
+  it('lists members, quietly (the page reports errors itself), from the engine DTO', async () => {
     const p = firstValueFrom(api.members());
     const req = ctl.expectOne(`${BASE}/iam/members`);
     expect(req.request.method).toBe('GET');
     expect(req.request.context.get(SUPPRESS_ERROR_TOAST)).toBe(true);
     expect(req.request.withCredentials).toBe(true);
-    req.flush({ status: true, data: [{ userId: 1, username: 'ada', status: 'Active' }] });
-    expect(await p).toEqual([{ userId: 1, username: 'ada', status: 'Active' }]);
+    req.flush({
+      status: true,
+      data: [
+        {
+          adminUserId: 1,
+          username: 'ada',
+          displayName: 'Ada',
+          email: 'a@x',
+          status: 'Active',
+          lastLoginAtUtc: '2026-10-20T08:00:00Z',
+        },
+      ],
+    });
+    expect(await p).toEqual([
+      {
+        userId: 1,
+        username: 'ada',
+        displayName: 'Ada',
+        email: 'a@x',
+        status: 'Active',
+        joinedAtUtc: null,
+        lastSignInAtUtc: '2026-10-20T08:00:00Z',
+        roles: null,
+        mfaEnabled: null,
+      },
+    ]);
+  });
+
+  it('adds team members and account-group accounts as id lists, and reads them back as ids', async () => {
+    api.addTeamMember(4, 12).subscribe();
+    const add = ctl.expectOne(`${BASE}/iam/teams/4/members`);
+    expect(add.request.body).toEqual({ adminUserIds: [12] });
+    add.flush({ status: true, data: null });
+
+    const ids = firstValueFrom(api.teamMemberIds(4));
+    ctl
+      .expectOne(`${BASE}/iam/teams/4/members`)
+      .flush({ status: true, data: { id: 4, name: 'Desk', memberAdminUserIds: [12, 13] } });
+    expect(await ids).toEqual([12, 13]);
+
+    api.addAccountGroupMember(2, 18).subscribe();
+    const addAcct = ctl.expectOne(`${BASE}/iam/account-groups/2/members`);
+    expect(addAcct.request.body).toEqual({ tradingAccountIds: [18] });
+    addAcct.flush({ status: true, data: null });
+  });
+
+  it('sends approval decisions with a note', () => {
+    api.reject(5, 'Not during NFP').subscribe();
+    const r = ctl.expectOne(`${BASE}/iam/approvals/5/reject`);
+    expect(r.request.body).toEqual({ note: 'Not during NFP' });
+    r.flush({ status: true, data: null });
   });
 
   it('changes status with PATCH {status} and removes with DELETE', async () => {
@@ -60,41 +109,83 @@ describe('IamApiService (contract C3.5 wire mapping)', () => {
 
   it('turns a refusal envelope into an error carrying the engine message', async () => {
     const p = firstValueFrom(api.revokeGrant(9));
-    ctl.expectOne(`${BASE}/iam/grants/9`).flush({ status: false, data: null, responseCode: '-11', message: 'Last owner' });
+    ctl
+      .expectOne(`${BASE}/iam/grants/9`)
+      .flush({ status: false, data: null, responseCode: '-11', message: 'Last owner' });
     await expect(p).rejects.toMatchObject({ code: '-11', message: 'Last owner' });
   });
 
   it('queries grants and explain with only the set fields', () => {
     api.grants({ principalType: 'Team', principalId: 3, scopeType: null }).subscribe();
-    ctl.expectOne(`${BASE}/iam/grants?principalType=Team&principalId=3`).flush({ status: true, data: [] });
+    ctl
+      .expectOne(`${BASE}/iam/grants?principalType=Team&principalId=3`)
+      .flush({ status: true, data: [] });
 
     api
-      .explain({ principalType: 'User', principalId: 5, permission: 'orders.read', scopeType: 'TradingAccount', scopeId: 18 })
+      .explain({
+        principalType: 'User',
+        principalId: 5,
+        permission: 'orders.read',
+        scopeType: 'TradingAccount',
+        scopeId: 18,
+      })
       .subscribe();
     ctl
-      .expectOne(`${BASE}/iam/explain?principalType=User&principalId=5&permission=orders.read&scopeType=TradingAccount&scopeId=18`)
+      .expectOne(
+        `${BASE}/iam/explain?principalType=User&principalId=5&permission=orders.read&scopeType=TradingAccount&scopeId=18`,
+      )
       .flush({ status: true, data: { allowed: true, via: [], missingReason: null } });
   });
 
   it('sends invitations, grants, tokens and elevations in the contract shape', () => {
-    api.invite({ email: 'a@b.co', grants: [{ roleId: 2, scopeType: 'Tenant', scopeId: null }] }).subscribe();
+    api
+      .invite({ email: 'a@b.co', grants: [{ roleId: 2, scopeType: 'Tenant', scopeId: null }] })
+      .subscribe();
     const inv = ctl.expectOne(`${BASE}/iam/invitations`);
-    expect(inv.request.body).toEqual({ email: 'a@b.co', grants: [{ roleId: 2, scopeType: 'Tenant', scopeId: null }] });
+    expect(inv.request.body).toEqual({
+      email: 'a@b.co',
+      grants: [{ roleId: 2, scopeType: 'Tenant', scopeId: null }],
+    });
     inv.flush({ status: true, data: { invitationId: 1, acceptUrl: null } });
 
     api
-      .createGrant({ principalType: 'User', principalId: 5, roleId: 2, scopeType: 'AccountGroup', scopeId: 4, expiresAtUtc: null, reason: 'cover' })
+      .createGrant({
+        principalType: 'User',
+        principalId: 5,
+        roleId: 2,
+        scopeType: 'AccountGroup',
+        scopeId: 4,
+        expiresAtUtc: null,
+        reason: 'cover',
+      })
       .subscribe();
     ctl.expectOne(`${BASE}/iam/grants`).flush({ status: true, data: null });
 
     api.createMyToken({ name: 'CI', permissions: ['orders.read'], expiresInDays: 30 }).subscribe();
     const tok = ctl.expectOne(`${BASE}/iam/me/tokens`);
-    expect(tok.request.body).toEqual({ name: 'CI', permissions: ['orders.read'], expiresInDays: 30 });
+    expect(tok.request.body).toEqual({
+      name: 'CI',
+      permissions: ['orders.read'],
+      expiresInDays: 30,
+    });
     tok.flush({ status: true, data: { id: 1, token: 'lsc_pat_x', prefix: 'x', expiresAtUtc: '' } });
 
-    api.requestElevation({ tenantId: 3, reason: 'incident 41', minutes: 60, permissions: ['orders.read'] }).subscribe();
+    api
+      .requestElevation({
+        tenantId: 3,
+        reason: 'incident 41',
+        minutes: 60,
+        permissions: ['orders.read'],
+      })
+      .subscribe();
     const el = ctl.expectOne(`${BASE}/platform/elevations`);
-    expect(el.request.body).toEqual({ tenantId: 3, reason: 'incident 41', minutes: 60, permissions: ['orders.read'] });
+    expect(el.request.body).toEqual({
+      tenantId: 3,
+      reason: 'incident 41',
+      minutes: 60,
+      permissions: ['orders.read'],
+      allowImpersonationWrites: false,
+    });
     el.flush({ status: true, data: null });
 
     api.startImpersonation({ userId: 7, tenantId: 3, readOnly: true }).subscribe();
@@ -107,9 +198,20 @@ describe('IamApiService (contract C3.5 wire mapping)', () => {
     const p = firstValueFrom(api.tenantMembers(3));
     ctl.expectOne(`${BASE}/platform/tenants/3/members`).flush({
       status: true,
-      data: [{ tenantId: 3, adminUserId: 12, username: 'ada', displayName: 'Ada', email: 'a@x', status: 'Active' }],
+      data: [
+        {
+          tenantId: 3,
+          adminUserId: 12,
+          username: 'ada',
+          displayName: 'Ada',
+          email: 'a@x',
+          status: 'Active',
+        },
+      ],
     });
-    expect(await p).toEqual([{ userId: 12, username: 'ada', displayName: 'Ada', email: 'a@x', status: 'Active' }]);
+    expect(await p).toEqual([
+      { userId: 12, username: 'ada', displayName: 'Ada', email: 'a@x', status: 'Active' },
+    ]);
   });
 
   it('falls back to an empty list for an unexpected list shape', async () => {

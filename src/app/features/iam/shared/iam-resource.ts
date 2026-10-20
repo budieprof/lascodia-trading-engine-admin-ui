@@ -18,7 +18,11 @@ export interface IamResource<T> {
  * Loads `fetch()` into signals. A failed refresh keeps the last good value (the page shows the error
  * beside it rather than blanking); the first failure leaves `initial` with the error set.
  */
-export function iamResource<T>(fetch: () => Observable<T>, initial: T, failure = 'Could not load this.'): IamResource<T> {
+export function iamResource<T>(
+  fetch: () => Observable<T>,
+  initial: T,
+  failure = 'Could not load this.',
+): IamResource<T> {
   const value = signal<T>(initial);
   const loading = signal(false);
   const error = signal<string | null>(null);

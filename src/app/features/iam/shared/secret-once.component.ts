@@ -14,7 +14,9 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from '@angu
       <p class="title">{{ title() }}</p>
       <div class="value-row">
         <code class="value">{{ value() }}</code>
-        <button type="button" class="btn" (click)="copy()">{{ copied() ? 'Copied' : 'Copy' }}</button>
+        <button type="button" class="btn" (click)="copy()">
+          {{ copied() ? 'Copied' : 'Copy' }}
+        </button>
       </div>
       <p class="warn">{{ warning() }}</p>
       <div class="done-row">

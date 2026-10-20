@@ -44,7 +44,12 @@ interface GrantRow {
         title="Invitations"
         subtitle="Invite people into this organisation with the roles they will hold. An invitation is valid for 7 days."
       >
-        <button type="button" class="btn btn-secondary" (click)="invitations.reload()" [disabled]="invitations.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="invitations.reload()"
+          [disabled]="invitations.loading()"
+        >
           {{ invitations.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -52,6 +57,14 @@ interface GrantRow {
       <section class="card" *lscCan="P.IamInvitationsManage">
         <header class="card-head"><h3>Invite someone</h3></header>
         <form class="card-body" (ngSubmit)="send()">
+          @if (tempPassword(); as pw) {
+            <app-secret-once
+              title="Temporary password for their new account"
+              [value]="pw"
+              warning="Give it to them with the invitation link, separately. They must change it at first sign-in. It will not be shown again."
+              (dismissed)="tempPassword.set(null)"
+            />
+          }
           @if (link(); as l) {
             <app-secret-once
               title="Invitation link — send it to the person"
@@ -87,7 +100,9 @@ interface GrantRow {
                 >
                   <option [ngValue]="null">Choose…</option>
                   @for (r of roles.value(); track r.id) {
-                    <option [ngValue]="r.id">{{ r.name }}{{ r.isSystem ? '' : ' (custom)' }}</option>
+                    <option [ngValue]="r.id">
+                      {{ r.name }}{{ r.isSystem ? '' : ' (custom)' }}
+                    </option>
                   }
                 </select>
               </label>
@@ -101,13 +116,21 @@ interface GrantRow {
               @if (rows().length > 1) {
                 <div class="field">
                   <span class="label">&nbsp;</span>
-                  <button type="button" class="btn btn-secondary btn-sm" (click)="removeRow(row.key)">Remove role</button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    (click)="removeRow(row.key)"
+                  >
+                    Remove role
+                  </button>
                 </div>
               }
             </div>
           }
           <div class="row">
-            <button type="button" class="btn btn-secondary btn-sm" (click)="addRow()">Add another role</button>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="addRow()">
+              Add another role
+            </button>
           </div>
 
           @if (submitted() && errors().length) {
@@ -152,12 +175,19 @@ interface GrantRow {
                     <td>{{ inv.email }}</td>
                     <td>
                       @for (g of inv.grants ?? []; track $index) {
-                        <span class="sub">{{ g.roleName ?? roleName(g.roleId) }} · {{ scope(g.scopeType, g.scopeId) }}</span>
+                        <span class="sub"
+                          >{{ g.roleName ?? roleName(g.roleId) }} ·
+                          {{ scope(g.scopeType, g.scopeId) }}</span
+                        >
                       } @empty {
                         <span class="muted small">—</span>
                       }
                     </td>
-                    <td><span class="chip" [class.warn]="isPending(inv)">{{ inv.status || 'Pending' }}</span></td>
+                    <td>
+                      <span class="chip" [class.warn]="isPending(inv)">{{
+                        inv.status || 'Pending'
+                      }}</span>
+                    </td>
                     <td class="small">{{ inv.invitedBy || '—' }}</td>
                     <td class="small">{{ when(inv.expiresAtUtc) }}</td>
                     <td class="actions">
@@ -200,15 +230,22 @@ export class InvitationsPageComponent {
   protected readonly P = Permission;
   protected readonly when = when;
 
-  readonly invitations = iamResource(() => this.iam.invitations(), [] as IamInvitation[], 'Could not load invitations.');
+  readonly invitations = iamResource(
+    () => this.iam.invitations(),
+    [] as IamInvitation[],
+    'Could not load invitations.',
+  );
   readonly roles = iamResource(() => this.iam.roles(), [] as IamRole[], 'Could not load roles.');
 
   readonly email = signal('');
   private nextKey = 1;
-  readonly rows = signal<GrantRow[]>([{ key: 0, roleId: null, scopeType: 'Tenant', scopeId: null }]);
+  readonly rows = signal<GrantRow[]>([
+    { key: 0, roleId: null, scopeType: 'Tenant', scopeId: null },
+  ]);
   readonly submitted = signal(false);
   readonly sending = signal(false);
   readonly link = signal<string | null>(null);
+  readonly tempPassword = signal<string | null>(null);
   readonly errors = computed(() => invitationErrors(this.email(), this.specs()));
 
   readonly revoking = signal<IamInvitation | null>(null);
@@ -228,7 +265,10 @@ export class InvitationsPageComponent {
   }
 
   addRow(): void {
-    this.rows.update((rs) => [...rs, { key: this.nextKey++, roleId: null, scopeType: 'Tenant', scopeId: null }]);
+    this.rows.update((rs) => [
+      ...rs,
+      { key: this.nextKey++, roleId: null, scopeType: 'Tenant', scopeId: null },
+    ]);
   }
 
   removeRow(key: number): void {
@@ -262,9 +302,12 @@ export class InvitationsPageComponent {
         this.submitted.set(false);
         this.email.set('');
         this.rows.set([{ key: this.nextKey++, roleId: null, scopeType: 'Tenant', scopeId: null }]);
+        this.tempPassword.set(res?.temporaryPassword ?? null);
         if (res?.acceptUrl) {
           this.link.set(res.acceptUrl);
-          this.notify.success(`Invitation for ${email} created. Copy the link and send it to them.`);
+          this.notify.success(
+            `Invitation for ${email} created. Copy the link and send it to them.`,
+          );
         } else {
           this.notify.success(`Invitation e-mailed to ${email}.`);
         }

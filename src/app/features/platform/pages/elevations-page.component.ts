@@ -39,7 +39,12 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
         title="Elevated access"
         subtitle="Time-limited access to an organisation's data, approved by a second staff member and recorded in its audit log."
       >
-        <button type="button" class="btn btn-secondary" (click)="elevations.reload()" [disabled]="elevations.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="elevations.reload()"
+          [disabled]="elevations.loading()"
+        >
           {{ elevations.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -51,24 +56,51 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
             <label class="field">
               <span class="label">Organisation</span>
               @if (tenants.value().length) {
-                <select class="select" name="tenant" [ngModel]="tenantId()" (ngModelChange)="tenantId.set($event)">
+                <select
+                  class="select"
+                  name="tenant"
+                  [ngModel]="tenantId()"
+                  (ngModelChange)="tenantId.set($event)"
+                >
                   <option [ngValue]="null">Choose…</option>
                   @for (t of tenants.value(); track t.id) {
                     <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
                   }
                 </select>
               } @else {
-                <input class="input" type="number" min="1" name="tenant" placeholder="Organisation id" [ngModel]="tenantId()" (ngModelChange)="tenantId.set(+$event || null)" />
+                <input
+                  class="input"
+                  type="number"
+                  min="1"
+                  name="tenant"
+                  placeholder="Organisation id"
+                  [ngModel]="tenantId()"
+                  (ngModelChange)="tenantId.set(+$event || null)"
+                />
               }
             </label>
             <label class="field">
               <span class="label">For how long (minutes, at most {{ maxMinutes }})</span>
-              <input class="input" type="number" min="1" [max]="maxMinutes" name="minutes" [ngModel]="minutes()" (ngModelChange)="minutes.set(+$event)" />
+              <input
+                class="input"
+                type="number"
+                min="1"
+                [max]="maxMinutes"
+                name="minutes"
+                [ngModel]="minutes()"
+                (ngModelChange)="minutes.set(+$event)"
+              />
             </label>
           </div>
           <label class="field">
             <span class="label">Why (goes into the organisation's audit log)</span>
-            <input class="input" name="reason" [ngModel]="reason()" (ngModelChange)="reason.set($event)" placeholder="e.g. Support ticket 4411: positions not reconciling" />
+            <input
+              class="input"
+              name="reason"
+              [ngModel]="reason()"
+              (ngModelChange)="reason.set($event)"
+              placeholder="e.g. Support ticket 4411: positions not reconciling"
+            />
           </label>
           <fieldset class="matrix">
             <legend class="label">Permissions needed · {{ chosen().size }} selected</legend>
@@ -78,7 +110,11 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
                 <div class="matrix-checks">
                   @for (p of g.permissions; track p.key) {
                     <label class="check" [title]="p.description">
-                      <input type="checkbox" [checked]="chosen().has(p.key)" (change)="toggle(p.key)" />
+                      <input
+                        type="checkbox"
+                        [checked]="chosen().has(p.key)"
+                        (change)="toggle(p.key)"
+                      />
                       <span>{{ p.key }}</span>
                     </label>
                   }
@@ -94,7 +130,9 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
             </ul>
           }
           <div class="actions-row">
-            <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Sending…' : 'Request access' }}</button>
+            <button type="submit" class="btn btn-primary" [disabled]="busy()">
+              {{ busy() ? 'Sending…' : 'Request access' }}
+            </button>
           </div>
         </form>
       </section>
@@ -124,7 +162,9 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
                   <tr>
                     <td>{{ e.staffName || '#' + e.staffUserId }}</td>
                     <td>{{ e.tenantName || '#' + e.tenantId }}</td>
-                    <td>{{ e.reason }}<span class="sub">{{ e.permissions.join(', ') }}</span></td>
+                    <td>
+                      {{ e.reason }}<span class="sub">{{ e.permissions.join(', ') }}</span>
+                    </td>
                     <td class="small">
                       @if (e.startsAtUtc) {
                         {{ when(e.startsAtUtc) }} – {{ when(e.endsAtUtc) }}
@@ -133,20 +173,39 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
                       }
                     </td>
                     <td>
-                      <span class="chip" [class.warn]="e.status === 'Pending'" [class.ok]="e.status === 'Active'">{{ e.status }}</span>
+                      <span
+                        class="chip"
+                        [class.warn]="e.status === 'Pending'"
+                        [class.ok]="e.status === 'Active'"
+                        >{{ e.status }}</span
+                      >
                       @if (e.approvedBy) {
                         <span class="sub">approved by {{ e.approvedBy }}</span>
                       }
                     </td>
                     <td class="actions">
                       @if (can.open) {
-                        <button type="button" class="btn btn-sm btn-primary" (click)="open(e)">Open organisation</button>
+                        <button type="button" class="btn btn-sm btn-primary" (click)="open(e)">
+                          Open organisation
+                        </button>
                       }
                       @if (can.approve) {
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="pending.set({ kind: 'approve', elevation: e })">Approve</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="pending.set({ kind: 'approve', elevation: e })"
+                        >
+                          Approve
+                        </button>
                       }
                       @if (can.end) {
-                        <button type="button" class="btn btn-sm btn-danger" (click)="pending.set({ kind: 'end', elevation: e })">End</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          (click)="pending.set({ kind: 'end', elevation: e })"
+                        >
+                          End
+                        </button>
                       }
                     </td>
                   </tr>
@@ -178,7 +237,11 @@ export class ElevationsPageComponent {
   protected readonly when = when;
   protected readonly maxMinutes = MAX_ELEVATION_MINUTES;
 
-  readonly elevations = iamResource(() => this.iam.elevations(), [] as AccessElevation[], 'Could not load elevated access.');
+  readonly elevations = iamResource(
+    () => this.iam.elevations(),
+    [] as AccessElevation[],
+    'Could not load elevated access.',
+  );
   /** The organisation list needs `platform.tenants.manage`; without it an id is typed instead. */
   readonly tenants = iamResource(
     () =>
@@ -191,7 +254,8 @@ export class ElevationsPageComponent {
   readonly groups = computed(() =>
     groupCatalog(
       PERMISSION_CATALOG.filter(
-        (p: PermissionDefinition) => !p.deprecated && !p.key.startsWith('platform.') && !p.key.startsWith('access.'),
+        (p: PermissionDefinition) =>
+          !p.deprecated && !p.key.startsWith('platform.') && !p.key.startsWith('access.'),
       ),
     ),
   );
@@ -201,7 +265,9 @@ export class ElevationsPageComponent {
   readonly reason = signal('');
   readonly chosen = signal<Set<string>>(new Set());
   readonly submitted = signal(false);
-  readonly errors = computed(() => elevationErrors(this.tenantId(), this.reason(), this.minutes(), [...this.chosen()]));
+  readonly errors = computed(() =>
+    elevationErrors(this.tenantId(), this.reason(), this.minutes(), [...this.chosen()]),
+  );
   readonly busy = signal(false);
 
   readonly pending = signal<Pending | null>(null);
@@ -224,7 +290,11 @@ export class ElevationsPageComponent {
   }
 
   actions(e: AccessElevation) {
-    return elevationActions(e, this.me(), this.auth.hasPermission(Permission.PlatformElevationApprove));
+    return elevationActions(
+      e,
+      this.me(),
+      this.auth.hasPermission(Permission.PlatformElevationApprove),
+    );
   }
 
   toggle(key: string): void {
@@ -262,7 +332,10 @@ export class ElevationsPageComponent {
     const p = this.pending();
     if (!p || this.busy()) return;
     this.busy.set(true);
-    const call = p.kind === 'approve' ? this.iam.approveElevation(p.elevation.id) : this.iam.endElevation(p.elevation.id);
+    const call =
+      p.kind === 'approve'
+        ? this.iam.approveElevation(p.elevation.id)
+        : this.iam.endElevation(p.elevation.id);
     call.subscribe({
       next: () => {
         this.busy.set(false);
@@ -283,7 +356,10 @@ export class ElevationsPageComponent {
     try {
       await this.auth.switchTenant(e.tenantId);
     } catch (err) {
-      const message = err instanceof HttpErrorResponse ? (err.error as { message?: string } | null)?.message : null;
+      const message =
+        err instanceof HttpErrorResponse
+          ? (err.error as { message?: string } | null)?.message
+          : null;
       this.notify.error(message || 'Could not open that organisation.');
     }
   }

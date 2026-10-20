@@ -68,7 +68,12 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
         title="Access grants"
         subtitle="Roles given to people, teams and service accounts — for the whole organisation or a narrower scope."
       >
-        <button type="button" class="btn btn-secondary" (click)="grants.reload()" [disabled]="grants.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="grants.reload()"
+          [disabled]="grants.loading()"
+        >
           {{ grants.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -83,7 +88,12 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
           <div class="form-grid">
             <label class="field">
               <span class="label">To</span>
-              <select class="select" name="ptype" [ngModel]="pType()" (ngModelChange)="pType.set($event); pId.set(null)">
+              <select
+                class="select"
+                name="ptype"
+                [ngModel]="pType()"
+                (ngModelChange)="pType.set($event); pId.set(null)"
+              >
                 @for (t of principalTypes; track t) {
                   <option [value]="t">{{ principalNames[t] }}</option>
                 }
@@ -93,7 +103,12 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
               <span class="label">{{ principalNames[pType()] }}</span>
               @switch (pType()) {
                 @case ('User') {
-                  <select class="select" name="pid" [ngModel]="pId()" (ngModelChange)="pId.set($event)">
+                  <select
+                    class="select"
+                    name="pid"
+                    [ngModel]="pId()"
+                    (ngModelChange)="pId.set($event)"
+                  >
                     <option [ngValue]="null">Choose…</option>
                     @for (m of members.value(); track m.userId) {
                       <option [ngValue]="m.userId">{{ label(m) }}</option>
@@ -101,7 +116,12 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
                   </select>
                 }
                 @case ('Team') {
-                  <select class="select" name="pid" [ngModel]="pId()" (ngModelChange)="pId.set($event)">
+                  <select
+                    class="select"
+                    name="pid"
+                    [ngModel]="pId()"
+                    (ngModelChange)="pId.set($event)"
+                  >
                     <option [ngValue]="null">Choose…</option>
                     @for (t of teams.value(); track t.id) {
                       <option [ngValue]="t.id">{{ t.name }}</option>
@@ -109,13 +129,26 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
                   </select>
                 }
                 @default {
-                  <input class="input" type="number" min="1" name="pid" placeholder="Service account id" [ngModel]="pId()" (ngModelChange)="pId.set(toId($event))" />
+                  <input
+                    class="input"
+                    type="number"
+                    min="1"
+                    name="pid"
+                    placeholder="Service account id"
+                    [ngModel]="pId()"
+                    (ngModelChange)="pId.set(toId($event))"
+                  />
                 }
               }
             </label>
             <label class="field">
               <span class="label">Role</span>
-              <select class="select" name="role" [ngModel]="roleId()" (ngModelChange)="roleId.set($event)">
+              <select
+                class="select"
+                name="role"
+                [ngModel]="roleId()"
+                (ngModelChange)="roleId.set($event)"
+              >
                 <option [ngValue]="null">Choose…</option>
                 @for (r of roles.value(); track r.id) {
                   <option [ngValue]="r.id">{{ r.name }}</option>
@@ -125,16 +158,30 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
             <app-scope-target idPrefix="grant" [(scopeType)]="scopeType" [(scopeId)]="scopeId" />
             <label class="field">
               <span class="label">Expires (optional)</span>
-              <input class="input" type="datetime-local" name="expires" [ngModel]="expires()" (ngModelChange)="expires.set($event)" />
+              <input
+                class="input"
+                type="datetime-local"
+                name="expires"
+                [ngModel]="expires()"
+                (ngModelChange)="expires.set($event)"
+              />
             </label>
           </div>
           <label class="field">
             <span class="label">Reason (recorded in the audit log)</span>
-            <input class="input" name="reason" maxlength="500" [ngModel]="reason()" (ngModelChange)="reason.set($event)" placeholder="e.g. Covering the London desk this week" />
+            <input
+              class="input"
+              name="reason"
+              maxlength="500"
+              [ngModel]="reason()"
+              (ngModelChange)="reason.set($event)"
+              placeholder="e.g. Covering the London desk this week"
+            />
           </label>
           @if (orgWideOnly().length) {
             <p class="note warn">
-              Given for less than the whole organisation, this role does not carry: {{ orgWideOnly().join(', ') }} — those only count organisation-wide.
+              Given for less than the whole organisation, this role does not carry:
+              {{ orgWideOnly().join(', ') }} — those only count organisation-wide.
             </p>
           }
           @if (submitted() && errors().length) {
@@ -145,7 +192,9 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
             </ul>
           }
           <div class="actions-row">
-            <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Granting…' : 'Grant role' }}</button>
+            <button type="submit" class="btn btn-primary" [disabled]="busy()">
+              {{ busy() ? 'Granting…' : 'Grant role' }}
+            </button>
           </div>
         </form>
       </section>
@@ -156,7 +205,12 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
           <span class="spacer"></span>
           <label class="row small">
             Show
-            <select class="select" name="filterType" [ngModel]="filterType()" (ngModelChange)="filterType.set($event); grants.reload()">
+            <select
+              class="select"
+              name="filterType"
+              [ngModel]="filterType()"
+              (ngModelChange)="filterType.set($event); grants.reload()"
+            >
               <option [ngValue]="null">everyone</option>
               @for (t of principalTypes; track t) {
                 <option [ngValue]="t">{{ principalNames[t] }}s</option>
@@ -194,11 +248,18 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
                     <td class="small">{{ g.expiresAtUtc ? when(g.expiresAtUtc) : 'Never' }}</td>
                     <td class="small">
                       {{ when(g.grantedAtUtc) }}
-                      <span class="sub">{{ g.grantedBy || '' }}{{ g.reason ? ' — ' + g.reason : '' }}</span>
+                      <span class="sub"
+                        >{{ g.grantedBy || '' }}{{ g.reason ? ' — ' + g.reason : '' }}</span
+                      >
                     </td>
                     <td class="small">{{ g.lastUsedAtUtc ? when(g.lastUsedAtUtc) : 'Not yet' }}</td>
                     <td class="actions">
-                      <button type="button" class="btn btn-sm btn-danger" *lscCan="P.IamGrantsManage" (click)="revoking.set(g)">
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-danger"
+                        *lscCan="P.IamGrantsManage"
+                        (click)="revoking.set(g)"
+                      >
                         Revoke
                       </button>
                     </td>
@@ -213,11 +274,18 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
       <section class="card">
         <header class="card-head"><h3>Why can they?</h3></header>
         <form class="card-body" (ngSubmit)="explain()">
-          <p class="note">Ask the engine which grants give someone a permission at a scope — or what is missing.</p>
+          <p class="note">
+            Ask the engine which grants give someone a permission at a scope — or what is missing.
+          </p>
           <div class="form-grid">
             <label class="field">
               <span class="label">Who</span>
-              <select class="select" name="xtype" [ngModel]="xType()" (ngModelChange)="xType.set($event); xId.set(null)">
+              <select
+                class="select"
+                name="xtype"
+                [ngModel]="xType()"
+                (ngModelChange)="xType.set($event); xId.set(null)"
+              >
                 @for (t of principalTypes; track t) {
                   <option [value]="t">{{ principalNames[t] }}</option>
                 }
@@ -226,36 +294,67 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
             <label class="field">
               <span class="label">{{ principalNames[xType()] }}</span>
               @if (xType() === 'User') {
-                <select class="select" name="xid" [ngModel]="xId()" (ngModelChange)="xId.set($event)">
+                <select
+                  class="select"
+                  name="xid"
+                  [ngModel]="xId()"
+                  (ngModelChange)="xId.set($event)"
+                >
                   <option [ngValue]="null">Choose…</option>
                   @for (m of members.value(); track m.userId) {
                     <option [ngValue]="m.userId">{{ label(m) }}</option>
                   }
                 </select>
               } @else if (xType() === 'Team') {
-                <select class="select" name="xid" [ngModel]="xId()" (ngModelChange)="xId.set($event)">
+                <select
+                  class="select"
+                  name="xid"
+                  [ngModel]="xId()"
+                  (ngModelChange)="xId.set($event)"
+                >
                   <option [ngValue]="null">Choose…</option>
                   @for (t of teams.value(); track t.id) {
                     <option [ngValue]="t.id">{{ t.name }}</option>
                   }
                 </select>
               } @else {
-                <input class="input" type="number" min="1" name="xid" [ngModel]="xId()" (ngModelChange)="xId.set(toId($event))" />
+                <input
+                  class="input"
+                  type="number"
+                  min="1"
+                  name="xid"
+                  [ngModel]="xId()"
+                  (ngModelChange)="xId.set(toId($event))"
+                />
               }
             </label>
             <label class="field">
               <span class="label">Permission</span>
-              <select class="select" name="xperm" [ngModel]="xPermission()" (ngModelChange)="xPermission.set($event)">
+              <select
+                class="select"
+                name="xperm"
+                [ngModel]="xPermission()"
+                (ngModelChange)="xPermission.set($event)"
+              >
                 <option [ngValue]="null">Choose…</option>
                 @for (p of catalog.value(); track p.key) {
                   <option [ngValue]="p.key">{{ p.key }}</option>
                 }
               </select>
             </label>
-            <app-scope-target idPrefix="explain" label="At" [(scopeType)]="xScopeType" [(scopeId)]="xScopeId" />
+            <app-scope-target
+              idPrefix="explain"
+              label="At"
+              [(scopeType)]="xScopeType"
+              [(scopeId)]="xScopeId"
+            />
           </div>
           <div class="actions-row">
-            <button type="submit" class="btn btn-secondary" [disabled]="explaining() || !canExplain()">
+            <button
+              type="submit"
+              class="btn btn-secondary"
+              [disabled]="explaining() || !canExplain()"
+            >
               {{ explaining() ? 'Checking…' : 'Check' }}
             </button>
           </div>
@@ -265,11 +364,16 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
                 <strong>Yes.</strong> Through:
                 <ul>
                   @for (v of r.via; track v.grantId) {
-                    <li>{{ v.roleName }} — {{ scopeText(v.scopeType, v.scopeId) }} (grant #{{ v.grantId }})</li>
+                    <li>
+                      {{ v.roleName }} — {{ scopeText(v.scopeType, v.scopeId) }} (grant #{{
+                        v.grantId
+                      }})
+                    </li>
                   }
                 </ul>
               } @else {
-                <strong>No.</strong> {{ r.missingReason || 'No grant gives this permission at that scope.' }}
+                <strong>No.</strong>
+                {{ r.missingReason || 'No grant gives this permission at that scope.' }}
               }
             </div>
           }
@@ -278,7 +382,13 @@ const PRINCIPAL_NAMES: Record<PrincipalType, string> = {
 
       <app-confirm-dialog
         [open]="revoking() !== null"
-        [title]="'Revoke ' + (revoking()?.roleName ?? 'this role') + ' from ' + (revoking()?.principalName ?? 'this principal') + '?'"
+        [title]="
+          'Revoke ' +
+          (revoking()?.roleName ?? 'this role') +
+          ' from ' +
+          (revoking()?.principalName ?? 'this principal') +
+          '?'
+        "
         message="The permissions it gave stop working within seconds."
         confirmLabel="Revoke"
         confirmVariant="destructive"
@@ -351,7 +461,8 @@ export class GrantsPageComponent {
   readonly explaining = signal(false);
   readonly explained = signal<ExplainResult | null>(null);
   readonly canExplain = computed(
-    () => !!this.xId() && !!this.xPermission() && (this.xScopeType() === 'Tenant' || !!this.xScopeId()),
+    () =>
+      !!this.xId() && !!this.xPermission() && (this.xScopeType() === 'Tenant' || !!this.xScopeId()),
   );
 
   constructor() {

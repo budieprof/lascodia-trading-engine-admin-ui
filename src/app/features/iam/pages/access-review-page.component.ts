@@ -26,21 +26,46 @@ import { iamResource } from '../shared/iam-resource';
         title="Access review"
         subtitle="Who holds what, and whether they still use it. Revoke grants nobody needs."
       >
-        <button type="button" class="btn btn-secondary" (click)="report.reload()" [disabled]="report.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="report.reload()"
+          [disabled]="report.loading()"
+        >
           {{ report.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
 
       <section class="card">
         <header class="card-head">
-          <h3>{{ shown().length }} grants · {{ staleCount() }} unused for {{ report.value().staleAfterDays ?? 90 }} days</h3>
+          <h3>
+            {{ shown().length }} grants · {{ staleCount() }} unused for
+            {{ report.value().staleAfterDays ?? 90 }} days
+          </h3>
           <span class="spacer"></span>
           <label class="check small">
-            <input type="checkbox" name="staleOnly" [ngModel]="staleOnly()" (ngModelChange)="staleOnly.set($event)" />
+            <input
+              type="checkbox"
+              name="staleOnly"
+              [ngModel]="staleOnly()"
+              (ngModelChange)="staleOnly.set($event)"
+            />
             Unused only
           </label>
-          <button type="button" class="btn btn-sm btn-secondary" [disabled]="staleCount() === 0" (click)="selectStale()">Select all unused</button>
-          <button type="button" class="btn btn-sm btn-danger" [disabled]="selected().size === 0 || busy()" (click)="confirming.set(true)">
+          <button
+            type="button"
+            class="btn btn-sm btn-secondary"
+            [disabled]="staleCount() === 0"
+            (click)="selectStale()"
+          >
+            Select all unused
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm btn-danger"
+            [disabled]="selected().size === 0 || busy()"
+            (click)="confirming.set(true)"
+          >
             Revoke selected ({{ selected().size }})
           </button>
         </header>
@@ -68,17 +93,32 @@ import { iamResource } from '../shared/iam-resource';
                 @for (e of shown(); track e.grantId) {
                   <tr [class.selected]="selected().has(e.grantId)">
                     <td>
-                      <input type="checkbox" [attr.aria-label]="'Select grant ' + e.grantId" [checked]="selected().has(e.grantId)" (change)="toggle(e.grantId)" />
+                      <input
+                        type="checkbox"
+                        [attr.aria-label]="'Select grant ' + e.grantId"
+                        [checked]="selected().has(e.grantId)"
+                        (change)="toggle(e.grantId)"
+                      />
                     </td>
-                    <td>{{ e.principalName || '#' + e.principalId }}<span class="sub">{{ e.principalType }}</span></td>
+                    <td>
+                      {{ e.principalName || '#' + e.principalId
+                      }}<span class="sub">{{ e.principalType }}</span>
+                    </td>
                     <td>{{ e.roleName || '—' }}</td>
                     <td>{{ scope(e) }}</td>
                     <td class="small">{{ when(e.grantedAtUtc) }}</td>
                     <td class="small">
                       @if (e.stale) {
-                        <span class="chip warn">{{ e.lastUsedAtUtc ? when(e.lastUsedAtUtc) : 'Never used' }}</span>
+                        <span class="chip warn">{{
+                          e.lastUsedAtUtc ? when(e.lastUsedAtUtc) : 'Never used'
+                        }}</span>
                       } @else {
-                        {{ when(e.lastUsedAtUtc) }}
+                        {{ e.lastUsedAtUtc ? when(e.lastUsedAtUtc) : 'Never used' }}
+                      }
+                      @if (e.idleDays !== null && e.idleDays !== undefined) {
+                        <span class="sub"
+                          >{{ e.idleDays }} day{{ e.idleDays === 1 ? '' : 's' }} idle</span
+                        >
                       }
                     </td>
                   </tr>
@@ -108,9 +148,15 @@ export class AccessReviewPageComponent {
 
   protected readonly when = when;
 
-  readonly report = iamResource<AccessReviewReport>(() => this.iam.accessReview(), { grants: [] }, 'Could not load the access review.');
+  readonly report = iamResource<AccessReviewReport>(
+    () => this.iam.accessReview(),
+    { grants: [] },
+    'Could not load the access review.',
+  );
   readonly staleOnly = signal(true);
-  readonly shown = computed(() => this.report.value().grants.filter((e) => !this.staleOnly() || e.stale));
+  readonly shown = computed(() =>
+    this.report.value().grants.filter((e) => !this.staleOnly() || e.stale),
+  );
   readonly staleCount = computed(() => staleGrantIds(this.report.value().grants).length);
   readonly selected = signal<Set<number>>(new Set());
   readonly confirming = signal(false);

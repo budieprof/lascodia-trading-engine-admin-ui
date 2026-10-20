@@ -5,7 +5,11 @@ import { AuthService } from '@core/auth/auth.service';
 import { canAccessPath } from '@core/auth/can-access.guard';
 import type { AccessPath } from '@core/auth/route-access';
 
-const PAGES: AccessPath[] = ['platform/organisations', 'platform/elevations', 'platform/impersonation'];
+const PAGES: AccessPath[] = [
+  'platform/organisations',
+  'platform/elevations',
+  'platform/impersonation',
+];
 
 /** Platform console (U3.6): platform staff only (`/bff/session` → isPlatformStaff). */
 export const PLATFORM_ROUTES: Routes = [

@@ -29,11 +29,22 @@ import { iamResource } from '../shared/iam-resource';
         title="Approvals"
         subtitle="Actions waiting for a second person. Approving runs the action as requested."
       >
-        <select class="select search" name="status" aria-label="Show" [ngModel]="status()" (ngModelChange)="status.set($event); list.reload()">
+        <select
+          class="select search"
+          name="status"
+          aria-label="Show"
+          [ngModel]="status()"
+          (ngModelChange)="status.set($event); list.reload()"
+        >
           <option [ngValue]="'Pending'">Waiting for approval</option>
           <option [ngValue]="null">All recent requests</option>
         </select>
-        <button type="button" class="btn btn-secondary" (click)="list.reload()" [disabled]="list.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="list.reload()"
+          [disabled]="list.loading()"
+        >
           {{ list.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -42,7 +53,9 @@ import { iamResource } from '../shared/iam-resource';
         @if (list.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (list.loaded() && list.value().length === 0) {
-          <p class="pad muted">{{ status() === 'Pending' ? 'Nothing is waiting for approval.' : 'No requests.' }}</p>
+          <p class="pad muted">
+            {{ status() === 'Pending' ? 'Nothing is waiting for approval.' : 'No requests.' }}
+          </p>
         } @else if (list.value().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -61,12 +74,22 @@ import { iamResource } from '../shared/iam-resource';
                   <tr>
                     <td>
                       {{ r.summary || describe(r.actionKey) }}
-                      <span class="sub"><code>{{ r.actionKey }}</code> · request #{{ r.id }}</span>
+                      <span class="sub"
+                        ><code>{{ r.actionKey }}</code> · request #{{ r.id }}</span
+                      >
                     </td>
-                    <td class="small">{{ r.requestedBy || '—' }}<span class="sub">{{ when(r.requestedAtUtc) }}</span></td>
+                    <td class="small">
+                      {{ r.requestedBy || '—'
+                      }}<span class="sub">{{ when(r.requestedAtUtc) }}</span>
+                    </td>
                     <td class="small">{{ when(r.expiresAtUtc) }}</td>
                     <td>
-                      <span class="chip" [class.warn]="r.status === 'Pending'" [class.ok]="r.status === 'Approved' || r.status === 'Executed'" [class.bad]="r.status === 'Rejected'">
+                      <span
+                        class="chip"
+                        [class.warn]="r.status === 'Pending'"
+                        [class.ok]="r.status === 'Approved' || r.status === 'Executed'"
+                        [class.bad]="r.status === 'Rejected'"
+                      >
                         {{ r.status }}
                       </span>
                       @if (r.decidedBy) {
@@ -75,8 +98,24 @@ import { iamResource } from '../shared/iam-resource';
                     </td>
                     <td class="actions">
                       @if (r.status === 'Pending') {
-                        <button type="button" class="btn btn-sm btn-secondary" [disabled]="!d.ok" [title]="d.why" (click)="open(r, 'reject')">Reject</button>
-                        <button type="button" class="btn btn-sm btn-primary" [disabled]="!d.ok" [title]="d.why" (click)="open(r, 'approve')">Approve</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          [disabled]="!d.ok"
+                          [title]="d.why"
+                          (click)="open(r, 'reject')"
+                        >
+                          Reject
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-primary"
+                          [disabled]="!d.ok"
+                          [title]="d.why"
+                          (click)="open(r, 'approve')"
+                        >
+                          Approve
+                        </button>
                       }
                     </td>
                   </tr>
@@ -100,7 +139,12 @@ import { iamResource } from '../shared/iam-resource';
         @if (deciding()?.verdict === 'reject') {
           <label class="field">
             <span class="label">Reason (shown to the requester)</span>
-            <input class="input" name="reason" [ngModel]="reason()" (ngModelChange)="reason.set($event)" />
+            <input
+              class="input"
+              name="reason"
+              [ngModel]="reason()"
+              (ngModelChange)="reason.set($event)"
+            />
           </label>
         }
       </app-confirm-dialog>
@@ -115,13 +159,19 @@ export class ApprovalsPageComponent {
   protected readonly when = when;
 
   readonly status = signal<ApprovalStatus | null>('Pending');
-  readonly list = iamResource(() => this.iam.approvals(this.status()), [] as ApprovalRequest[], 'Could not load approvals.');
+  readonly list = iamResource(
+    () => this.iam.approvals(this.status()),
+    [] as ApprovalRequest[],
+    'Could not load approvals.',
+  );
   private readonly me = computed(() => {
     const id = Number(this.auth.user()?.passportId);
     return Number.isInteger(id) && id > 0 ? id : null;
   });
 
-  readonly deciding = signal<{ request: ApprovalRequest; verdict: 'approve' | 'reject' } | null>(null);
+  readonly deciding = signal<{ request: ApprovalRequest; verdict: 'approve' | 'reject' } | null>(
+    null,
+  );
   readonly reason = signal('');
   readonly busy = signal(false);
   readonly dialogTitle = computed(() => {
@@ -159,12 +209,19 @@ export class ApprovalsPageComponent {
     const d = this.deciding();
     if (!d || this.busy()) return;
     this.busy.set(true);
-    const call = d.verdict === 'approve' ? this.iam.approve(d.request.id) : this.iam.reject(d.request.id, this.reason().trim() || null);
+    const call =
+      d.verdict === 'approve'
+        ? this.iam.approve(d.request.id)
+        : this.iam.reject(d.request.id, this.reason().trim() || null);
     call.subscribe({
       next: () => {
         this.busy.set(false);
         this.deciding.set(null);
-        this.notify.success(d.verdict === 'approve' ? `Request #${d.request.id} approved.` : `Request #${d.request.id} rejected.`);
+        this.notify.success(
+          d.verdict === 'approve'
+            ? `Request #${d.request.id} approved.`
+            : `Request #${d.request.id} rejected.`,
+        );
         this.list.reload();
       },
       error: (e) => {

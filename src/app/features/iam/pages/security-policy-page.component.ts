@@ -37,13 +37,20 @@ import { MfaHintComponent } from '../shared/mfa-hint.component';
         title="Security policy"
         subtitle="How members of this organisation sign in. Changes apply to new requests at once."
       >
-        <button type="button" class="btn btn-secondary" (click)="load()" [disabled]="policy.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="load()"
+          [disabled]="policy.loading()"
+        >
           {{ policy.loading() ? 'Loading…' : 'Reload' }}
         </button>
       </app-page-header>
 
       @if (policy.error(); as err) {
-        <section class="card"><p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p></section>
+        <section class="card">
+          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+        </section>
       } @else if (policy.loaded()) {
         <section class="card">
           <header class="card-head">
@@ -53,21 +60,44 @@ import { MfaHintComponent } from '../shared/mfa-hint.component';
           </header>
           <form class="card-body" (ngSubmit)="review()">
             <label class="check">
-              <input type="checkbox" name="mfa" [ngModel]="mfaRequired()" (ngModelChange)="mfaRequired.set($event)" />
+              <input
+                type="checkbox"
+                name="mfa"
+                [ngModel]="mfaRequired()"
+                (ngModelChange)="mfaRequired.set($event)"
+              />
               Require a second factor (authenticator app or security key) to sign in
             </label>
             <div class="form-grid">
               <label class="field">
                 <span class="label">Sign out after this many idle minutes</span>
-                <input class="input" type="number" min="1" step="1" name="idle" [ngModel]="idleMinutes()" (ngModelChange)="idleMinutes.set(+$event)" />
+                <input
+                  class="input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  name="idle"
+                  [ngModel]="idleMinutes()"
+                  (ngModelChange)="idleMinutes.set(+$event)"
+                />
               </label>
               <label class="field">
                 <span class="label">End every session after this many hours</span>
-                <input class="input" type="number" min="1" step="1" name="absolute" [ngModel]="absoluteHours()" (ngModelChange)="absoluteHours.set(+$event)" />
+                <input
+                  class="input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  name="absolute"
+                  [ngModel]="absoluteHours()"
+                  (ngModelChange)="absoluteHours.set(+$event)"
+                />
               </label>
             </div>
             <label class="field">
-              <span class="label">Allowed networks — one per line (leave empty to allow any network)</span>
+              <span class="label"
+                >Allowed networks — one per line (leave empty to allow any network)</span
+              >
               <textarea
                 class="textarea"
                 name="allow"
@@ -81,8 +111,8 @@ import { MfaHintComponent } from '../shared/mfa-hint.component';
             </label>
             @if (allow().entries.length) {
               <p class="note warn">
-                Only these networks may sign in: {{ allow().entries.join(', ') }}. Make sure the network you are on now is one
-                of them, or you will be signed out and refused.
+                Only these networks may sign in: {{ allow().entries.join(', ') }}. Make sure the
+                network you are on now is one of them, or you will be signed out and refused.
               </p>
             }
             @if (problems().length) {
@@ -93,7 +123,11 @@ import { MfaHintComponent } from '../shared/mfa-hint.component';
               </ul>
             }
             <div class="actions-row">
-              <button type="submit" class="btn btn-primary" [disabled]="busy() || problems().length > 0 || !dirty()">
+              <button
+                type="submit"
+                class="btn btn-primary"
+                [disabled]="busy() || problems().length > 0 || !dirty()"
+              >
                 {{ busy() ? 'Saving…' : 'Save policy' }}
               </button>
             </div>
@@ -119,7 +153,11 @@ export class SecurityPolicyPageComponent {
 
   protected readonly P = Permission;
 
-  readonly policy = iamResource<SecurityPolicy | null>(() => this.iam.securityPolicy(), null, 'Could not load the policy.');
+  readonly policy = iamResource<SecurityPolicy | null>(
+    () => this.iam.securityPolicy(),
+    null,
+    'Could not load the policy.',
+  );
 
   readonly mfaRequired = signal(false);
   readonly idleMinutes = signal(60);
@@ -132,7 +170,10 @@ export class SecurityPolicyPageComponent {
     sessionAbsoluteHours: this.absoluteHours(),
     ipAllowlist: this.allow().entries,
   }));
-  readonly problems = computed(() => [...securityPolicyErrors(this.draft()), ...this.allow().errors]);
+  readonly problems = computed(() => [
+    ...securityPolicyErrors(this.draft()),
+    ...this.allow().errors,
+  ]);
   readonly dirty = computed(() => {
     const p = this.policy.value();
     return !p || JSON.stringify(normalised(p)) !== JSON.stringify(normalised(this.draft()));
@@ -140,9 +181,13 @@ export class SecurityPolicyPageComponent {
   readonly summary = computed(() => {
     const d = this.draft();
     const parts = [
-      d.mfaRequired ? 'A second factor will be required to sign in.' : 'A second factor will not be required.',
+      d.mfaRequired
+        ? 'A second factor will be required to sign in.'
+        : 'A second factor will not be required.',
       `Sessions end after ${d.sessionIdleMinutes} idle minutes and at most ${d.sessionAbsoluteHours} hours.`,
-      d.ipAllowlist.length ? `Only ${d.ipAllowlist.length} network(s) may sign in.` : 'Any network may sign in.',
+      d.ipAllowlist.length
+        ? `Only ${d.ipAllowlist.length} network(s) may sign in.`
+        : 'Any network may sign in.',
     ];
     return parts.join(' ');
   });

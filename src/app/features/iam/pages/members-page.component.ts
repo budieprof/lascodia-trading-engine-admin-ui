@@ -9,7 +9,14 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
-import { errorText, filterMembers, memberLabel, nextMemberStatus, reportable, when } from '../iam.logic';
+import {
+  errorText,
+  filterMembers,
+  memberLabel,
+  nextMemberStatus,
+  reportable,
+  when,
+} from '../iam.logic';
 import type { IamMember, IamSession, MemberStatus } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
 
@@ -35,8 +42,15 @@ type PendingAction =
         title="Members"
         subtitle="People in this organisation. Roles are given on the Access grants page; new people join through Invitations."
       >
-        <a class="btn btn-secondary" routerLink="/iam/invitations" *lscCan="P.IamInvitationsManage">Invite someone</a>
-        <button type="button" class="btn btn-secondary" (click)="members.reload()" [disabled]="members.loading()">
+        <a class="btn btn-secondary" routerLink="/iam/invitations" *lscCan="P.IamInvitationsManage"
+          >Invite someone</a
+        >
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="members.reload()"
+          [disabled]="members.loading()"
+        >
           {{ members.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -118,7 +132,14 @@ type PendingAction =
                             <button
                               type="button"
                               class="btn btn-sm btn-secondary"
-                              (click)="pending.set({ kind: 'status', member: m, to: next.to, label: next.label })"
+                              (click)="
+                                pending.set({
+                                  kind: 'status',
+                                  member: m,
+                                  to: next.to,
+                                  label: next.label,
+                                })
+                              "
                             >
                               {{ next.label }}
                             </button>
@@ -209,7 +230,11 @@ export class MembersPageComponent {
   protected readonly P = Permission;
   protected readonly when = when;
 
-  readonly members = iamResource(() => this.iam.members(), [] as IamMember[], 'Could not load members.');
+  readonly members = iamResource(
+    () => this.iam.members(),
+    [] as IamMember[],
+    'Could not load members.',
+  );
   readonly filter = signal('');
   readonly visible = computed(() => filterMembers(this.members.value(), this.filter()));
 
@@ -234,7 +259,8 @@ export class MembersPageComponent {
     if (!p) return '';
     if (p.kind === 'status' && p.to === 'Suspended')
       return 'They are signed out of this organisation and refused until reactivated. Their roles are kept.';
-    if (p.kind === 'status') return 'They can sign in to this organisation again with the roles they had.';
+    if (p.kind === 'status')
+      return 'They can sign in to this organisation again with the roles they had.';
     if (p.kind === 'remove')
       return 'They lose every role in this organisation and are signed out of it. They need a new invitation to come back.';
     return 'Every console session they have in this organisation ends now. They can sign in again.';

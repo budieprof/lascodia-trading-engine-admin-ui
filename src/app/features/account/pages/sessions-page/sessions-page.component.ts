@@ -25,10 +25,20 @@ import { iamResource } from '@features/iam/shared/iam-resource';
         title="Sessions & devices"
         subtitle="Where you are signed in. Sign out anything you do not recognise."
       >
-        <button type="button" class="btn btn-secondary" (click)="sessions.reload()" [disabled]="sessions.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="sessions.reload()"
+          [disabled]="sessions.loading()"
+        >
           {{ sessions.loading() ? 'Loading…' : 'Refresh' }}
         </button>
-        <button type="button" class="btn btn-danger" [disabled]="others().length === 0 || busy()" (click)="pending.set('others')">
+        <button
+          type="button"
+          class="btn btn-danger"
+          [disabled]="others().length === 0 || busy()"
+          (click)="pending.set('others')"
+        >
           Sign out all other sessions
         </button>
       </app-page-header>
@@ -65,7 +75,14 @@ import { iamResource } from '@features/iam/shared/iam-resource';
                     <td class="small">{{ when(s.expiresAtUtc) }}</td>
                     <td class="actions">
                       @if (!s.current) {
-                        <button type="button" class="btn btn-sm btn-danger" [disabled]="busy()" (click)="pending.set(s)">Sign out</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          [disabled]="busy()"
+                          (click)="pending.set(s)"
+                        >
+                          Sign out
+                        </button>
                       }
                     </td>
                   </tr>
@@ -80,7 +97,9 @@ import { iamResource } from '@features/iam/shared/iam-resource';
 
       <app-confirm-dialog
         [open]="pending() !== null"
-        [title]="pending() === 'others' ? 'Sign out every other session?' : 'Sign out this session?'"
+        [title]="
+          pending() === 'others' ? 'Sign out every other session?' : 'Sign out this session?'
+        "
         [message]="
           pending() === 'others'
             ? 'Every device except this one is signed out now.'
@@ -101,7 +120,11 @@ export class SessionsPageComponent {
 
   protected readonly when = when;
 
-  readonly sessions = iamResource(() => this.iam.mySessions(), [] as IamSession[], 'Could not load your sessions.');
+  readonly sessions = iamResource(
+    () => this.iam.mySessions(),
+    [] as IamSession[],
+    'Could not load your sessions.',
+  );
   readonly others = computed(() => this.sessions.value().filter((s) => !s.current));
   readonly pending = signal<IamSession | 'others' | null>(null);
   readonly busy = signal(false);
@@ -123,7 +146,9 @@ export class SessionsPageComponent {
       next: () => {
         this.busy.set(false);
         this.pending.set(null);
-        this.notify.success(p === 'others' ? 'Every other session is signed out.' : 'That session is signed out.');
+        this.notify.success(
+          p === 'others' ? 'Every other session is signed out.' : 'That session is signed out.',
+        );
         this.sessions.reload();
       },
       error: (e) => {

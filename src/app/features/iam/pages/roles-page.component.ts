@@ -13,7 +13,14 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
-import { errorText, groupCatalog, reportable, roleErrors, toggled, unknownKeys } from '../iam.logic';
+import {
+  errorText,
+  groupCatalog,
+  reportable,
+  roleErrors,
+  toggled,
+  unknownKeys,
+} from '../iam.logic';
 import type { IamRole } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
 import { MfaHintComponent } from '../shared/mfa-hint.component';
@@ -30,7 +37,13 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
   selector: 'app-iam-roles-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, LscCanDirective, MfaHintComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    LscCanDirective,
+    MfaHintComponent,
+  ],
   styleUrl: '../shared/iam-page.scss',
   styles: [
     `
@@ -84,22 +97,41 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
         title="Roles"
         subtitle="What each role allows. System roles are fixed; custom roles are yours to compose. Give roles to people on Access grants."
       >
-        <button type="button" class="btn btn-secondary" (click)="roles.reload()" [disabled]="roles.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="roles.reload()"
+          [disabled]="roles.loading()"
+        >
           {{ roles.loading() ? 'Loading…' : 'Refresh' }}
         </button>
-        <button type="button" class="btn btn-primary" *lscCan="P.RolesManage" (click)="startCreate()">New role</button>
+        <button
+          type="button"
+          class="btn btn-primary"
+          *lscCan="P.RolesManage"
+          (click)="startCreate()"
+        >
+          New role
+        </button>
       </app-page-header>
 
       <div class="layout">
         <section class="card">
-          <header class="card-head"><h3>{{ roles.value().length }} roles</h3></header>
+          <header class="card-head">
+            <h3>{{ roles.value().length }} roles</h3>
+          </header>
           @if (roles.error(); as err) {
             <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
           }
           <ul class="role-list">
             @for (r of sortedRoles(); track r.id) {
               <li>
-                <button type="button" class="role-row" [attr.aria-current]="selectedId() === r.id" (click)="select(r)">
+                <button
+                  type="button"
+                  class="role-row"
+                  [attr.aria-current]="selectedId() === r.id"
+                  (click)="select(r)"
+                >
                   <span class="role-name">{{ r.name }}</span>
                   @if (r.isSystem) {
                     <span class="chip flag">system</span>
@@ -118,7 +150,9 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
 
         <section class="card">
           @if (mode() === 'idle') {
-            <p class="pad muted">Choose a role to see what it allows{{ canManage() ? ', or create a new one' : '' }}.</p>
+            <p class="pad muted">
+              Choose a role to see what it allows{{ canManage() ? ', or create a new one' : '' }}.
+            </p>
           } @else {
             <header class="card-head">
               <h3>{{ mode() === 'create' ? 'New role' : (selected()?.name ?? '') }}</h3>
@@ -126,23 +160,38 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
                 <span class="chip">system — read-only</span>
               }
               <span class="spacer"></span>
-              <button type="button" class="btn btn-sm btn-secondary" (click)="close()">Close</button>
+              <button type="button" class="btn btn-sm btn-secondary" (click)="close()">
+                Close
+              </button>
             </header>
             <form class="card-body" (ngSubmit)="save()">
               <div class="form-grid">
                 <label class="field">
                   <span class="label">Name</span>
-                  <input class="input" name="name" [ngModel]="name()" (ngModelChange)="name.set($event)" [disabled]="readOnly()" />
+                  <input
+                    class="input"
+                    name="name"
+                    [ngModel]="name()"
+                    (ngModelChange)="name.set($event)"
+                    [disabled]="readOnly()"
+                  />
                 </label>
                 <label class="field">
                   <span class="label">Description</span>
-                  <input class="input" name="description" [ngModel]="description()" (ngModelChange)="description.set($event)" [disabled]="readOnly()" />
+                  <input
+                    class="input"
+                    name="description"
+                    [ngModel]="description()"
+                    (ngModelChange)="description.set($event)"
+                    [disabled]="readOnly()"
+                  />
                 </label>
               </div>
 
               @if (unknown().length) {
                 <p class="note warn">
-                  This role also holds permissions this console does not know yet: {{ unknown().join(', ') }}. They are kept when you save.
+                  This role also holds permissions this console does not know yet:
+                  {{ unknown().join(', ') }}. They are kept when you save.
                 </p>
               }
 
@@ -154,19 +203,37 @@ type Mode = 'idle' | 'view' | 'edit' | 'create';
                     <div class="matrix-checks">
                       @for (p of g.permissions; track p.key) {
                         <label class="check" [title]="p.description">
-                          <input type="checkbox" [checked]="chosen().has(p.key)" (change)="toggle(p.key)" />
+                          <input
+                            type="checkbox"
+                            [checked]="chosen().has(p.key)"
+                            (change)="toggle(p.key)"
+                          />
                           <span>{{ p.key }}</span>
                           @if (p.stepUp) {
-                            <span class="chip info flag" title="Needs a fresh sign-in with a second factor">MFA</span>
+                            <span
+                              class="chip info flag"
+                              title="Needs a fresh sign-in with a second factor"
+                              >MFA</span
+                            >
                           }
                           @if (p.twoPerson) {
-                            <span class="chip warn flag" title="Needs a second person's approval">2-person</span>
+                            <span class="chip warn flag" title="Needs a second person's approval"
+                              >2-person</span
+                            >
                           }
                           @if (!p.scopeable) {
-                            <span class="chip flag" title="Only counts when the role is given for the whole organisation">org-wide</span>
+                            <span
+                              class="chip flag"
+                              title="Only counts when the role is given for the whole organisation"
+                              >org-wide</span
+                            >
                           }
                           @if (p.deprecated) {
-                            <span class="chip flag" title="Still enforced; give the specific keys instead">deprecated</span>
+                            <span
+                              class="chip flag"
+                              title="Still enforced; give the specific keys instead"
+                              >deprecated</span
+                            >
                           }
                         </label>
                       }
@@ -233,12 +300,16 @@ export class IamRolesPageComponent {
   );
   readonly groups = computed(() => groupCatalog(this.catalog.value()));
   readonly sortedRoles = computed(() =>
-    [...this.roles.value()].sort((a, b) => Number(b.isSystem) - Number(a.isSystem) || a.name.localeCompare(b.name)),
+    [...this.roles.value()].sort(
+      (a, b) => Number(b.isSystem) - Number(a.isSystem) || a.name.localeCompare(b.name),
+    ),
   );
 
   readonly mode = signal<Mode>('idle');
   readonly selectedId = signal<number | null>(null);
-  readonly selected = computed(() => this.roles.value().find((r) => r.id === this.selectedId()) ?? null);
+  readonly selected = computed(
+    () => this.roles.value().find((r) => r.id === this.selectedId()) ?? null,
+  );
   readonly canManage = computed(() => this.auth.hasPermission(Permission.RolesManage));
   readonly readOnly = computed(() => this.mode() === 'view' || !this.canManage());
   readonly inUse = computed(() => (this.selected()?.assignmentCount ?? 0) > 0);
@@ -249,7 +320,12 @@ export class IamRolesPageComponent {
   readonly unknown = computed(() => unknownKeys([...this.chosen()], this.catalog.value()));
   readonly submitted = signal(false);
   readonly errors = computed(() =>
-    roleErrors(this.name(), [...this.chosen()], this.roles.value(), this.mode() === 'edit' ? this.selectedId() : null),
+    roleErrors(
+      this.name(),
+      [...this.chosen()],
+      this.roles.value(),
+      this.mode() === 'edit' ? this.selectedId() : null,
+    ),
   );
   readonly busy = signal(false);
   readonly deleting = signal(false);
@@ -296,7 +372,10 @@ export class IamRolesPageComponent {
     };
     this.busy.set(true);
     const id = this.selectedId();
-    const call = this.mode() === 'create' || id === null ? this.iam.createRole(body) : this.iam.updateRole(id, body);
+    const call =
+      this.mode() === 'create' || id === null
+        ? this.iam.createRole(body)
+        : this.iam.updateRole(id, body);
     call.subscribe({
       next: (created) => {
         this.busy.set(false);

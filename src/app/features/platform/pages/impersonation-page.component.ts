@@ -36,13 +36,26 @@ import { iamResource } from '@features/iam/shared/iam-resource';
         <header class="card-head">
           <h3>Choose the person</h3>
           <span class="spacer"></span>
-          <select class="select search" name="tenant" aria-label="Organisation" [ngModel]="tenantId()" (ngModelChange)="pickTenant($event)">
+          <select
+            class="select search"
+            name="tenant"
+            aria-label="Organisation"
+            [ngModel]="tenantId()"
+            (ngModelChange)="pickTenant($event)"
+          >
             <option [ngValue]="null">Organisation…</option>
             @for (t of tenants.value(); track t.id) {
               <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
             }
           </select>
-          <input class="input search" type="search" placeholder="Filter people" aria-label="Filter people" [ngModel]="filter()" (ngModelChange)="filter.set($event)" />
+          <input
+            class="input search"
+            type="search"
+            placeholder="Filter people"
+            aria-label="Filter people"
+            [ngModel]="filter()"
+            (ngModelChange)="filter.set($event)"
+          />
         </header>
         @if (tenantId() === null) {
           <p class="pad muted">Choose an organisation to list its members.</p>
@@ -55,9 +68,18 @@ import { iamResource } from '@features/iam/shared/iam-resource';
             <tbody>
               @for (m of shown(); track m.userId) {
                 <tr>
-                  <td>{{ label(m) }}<span class="sub">{{ m.email || '' }}</span></td>
+                  <td>
+                    {{ label(m) }}<span class="sub">{{ m.email || '' }}</span>
+                  </td>
                   <td class="actions">
-                    <button type="button" class="btn btn-sm btn-primary" [disabled]="busy()" (click)="target.set(m)">View as</button>
+                    <button
+                      type="button"
+                      class="btn btn-sm btn-primary"
+                      [disabled]="busy()"
+                      (click)="target.set(m)"
+                    >
+                      View as
+                    </button>
                   </td>
                 </tr>
               }
@@ -74,7 +96,18 @@ import { iamResource } from '@features/iam/shared/iam-resource';
         [loading]="busy()"
         (confirm)="start()"
         (cancelled)="target.set(null)"
-      />
+      >
+        <label class="field">
+          <span class="label">Why (recorded in their audit log)</span>
+          <input
+            class="input"
+            name="reason"
+            [ngModel]="reason()"
+            (ngModelChange)="reason.set($event)"
+            placeholder="e.g. Ticket 4411: their dashboard is empty"
+          />
+        </label>
+      </app-confirm-dialog>
     </div>
   `,
 })
@@ -97,11 +130,14 @@ export class ImpersonationPageComponent {
   readonly filter = signal('');
   readonly shown = computed(() =>
     filterMembers(
-      this.members().filter((m) => m.status === 'Active' && String(m.userId) !== this.auth.user()?.passportId),
+      this.members().filter(
+        (m) => m.status === 'Active' && String(m.userId) !== this.auth.user()?.passportId,
+      ),
       this.filter(),
     ),
   );
   readonly target = signal<IamMember | null>(null);
+  readonly reason = signal('');
   readonly busy = signal(false);
 
   constructor() {
@@ -128,16 +164,23 @@ export class ImpersonationPageComponent {
     const tenantId = this.tenantId();
     if (!m || tenantId === null || this.busy()) return;
     this.busy.set(true);
-    this.iam.startImpersonation({ userId: m.userId, tenantId, readOnly: true }).subscribe({
-      next: () => {
-        // The session is now theirs (read-only): reload so every page shows their console.
-        this.browser.assign(DEFAULT_POST_LOGIN_ROUTE);
-      },
-      error: (e) => {
-        this.busy.set(false);
-        this.target.set(null);
-        if (reportable(e)) this.notify.error(errorText(e, 'Impersonation did not start.'));
-      },
-    });
+    this.iam
+      .startImpersonation({
+        userId: m.userId,
+        tenantId,
+        readOnly: true,
+        reason: this.reason().trim() || null,
+      })
+      .subscribe({
+        next: () => {
+          // The session is now theirs (read-only): reload so every page shows their console.
+          this.browser.assign(DEFAULT_POST_LOGIN_ROUTE);
+        },
+        error: (e) => {
+          this.busy.set(false);
+          this.target.set(null);
+          if (reportable(e)) this.notify.error(errorText(e, 'Impersonation did not start.'));
+        },
+      });
   }
 }

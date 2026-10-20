@@ -4,7 +4,21 @@ import { Observable, map } from 'rxjs';
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
 import type { PermissionDefinition } from '@core/auth/permissions.generated';
+import {
+  memberIds,
+  toAccessReview,
+  toApproval,
+  toElevation,
+  toGrant,
+  toInvitation,
+  toMember,
+  toRole,
+  toSession,
+  toSso,
+  toToken,
+} from './iam-adapters';
 import type {
+  AcceptInvitationResult,
   AccessElevation,
   AccessReviewReport,
   ApprovalRequest,
@@ -19,14 +33,12 @@ import type {
   ExplainResult,
   GrantQuery,
   IamAccountGroup,
-  IamAccountGroupMember,
   IamGrant,
   IamInvitation,
   IamMember,
   IamRole,
   IamSession,
   IamTeam,
-  IamTeamMember,
   MemberStatus,
   PersonalAccessToken,
   RequestElevationBody,
@@ -41,6 +53,8 @@ import type {
 } from './iam.types';
 
 const SILENT = { silent: true } as const;
+
+type Raw = Record<string, unknown>;
 
 /**
  * Rows of a list answer, whatever list shape the engine chose: a bare array, a paged
@@ -57,7 +71,9 @@ export function rows<T>(data: unknown): T[] {
 }
 
 /** A query string from the set fields (null / undefined / '' left out). */
-export function queryString(params: Record<string, string | number | boolean | null | undefined>): string {
+export function queryString(
+  params: Record<string, string | number | boolean | null | undefined>,
+): string {
   const q = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v === null || v === undefined || v === '') continue;
@@ -117,7 +133,7 @@ export class IamApiService {
 
   // ── Members ──
   members(): Observable<IamMember[]> {
-    return this.list<IamMember>('/iam/members');
+    return this.list<Raw>('/iam/members').pipe(map((rs) => rs.map(toMember)));
   }
   setMemberStatus(userId: number, status: MemberStatus): Observable<unknown> {
     return this.patch(`/iam/members/${userId}`, { status });
@@ -126,7 +142,7 @@ export class IamApiService {
     return this.del(`/iam/members/${userId}`);
   }
   memberSessions(userId: number): Observable<IamSession[]> {
-    return this.list<IamSession>(`/iam/members/${userId}/sessions`);
+    return this.list<Raw>(`/iam/members/${userId}/sessions`).pipe(map((rs) => rs.map(toSession)));
   }
   endMemberSessions(userId: number): Observable<unknown> {
     return this.del(`/iam/members/${userId}/sessions`);
@@ -134,7 +150,7 @@ export class IamApiService {
 
   // ── Invitations ──
   invitations(): Observable<IamInvitation[]> {
-    return this.list<IamInvitation>('/iam/invitations');
+    return this.list<Raw>('/iam/invitations').pipe(map((rs) => rs.map(toInvitation)));
   }
   invite(body: CreateInvitationBody): Observable<CreateInvitationResult> {
     return this.post<CreateInvitationResult>('/iam/invitations', body);
@@ -142,16 +158,16 @@ export class IamApiService {
   revokeInvitation(id: number): Observable<unknown> {
     return this.del(`/iam/invitations/${id}`);
   }
-  acceptInvitation(token: string): Observable<unknown> {
-    return this.post('/iam/invitations/accept', { token });
+  acceptInvitation(token: string): Observable<AcceptInvitationResult | null> {
+    return this.post<AcceptInvitationResult | null>('/iam/invitations/accept', { token });
   }
 
   // ── Roles ──
   roles(): Observable<IamRole[]> {
-    return this.list<IamRole>('/iam/roles');
+    return this.list<Raw>('/iam/roles').pipe(map((rs) => rs.map(toRole)));
   }
-  createRole(body: SaveRoleBody): Observable<IamRole> {
-    return this.post<IamRole>('/iam/roles', body);
+  createRole(body: SaveRoleBody): Observable<IamRole | null> {
+    return this.post<Raw | null>('/iam/roles', body).pipe(map((r) => (r ? toRole(r) : null)));
   }
   updateRole(id: number, body: SaveRoleBody): Observable<unknown> {
     return this.put(`/iam/roles/${id}`, body);
@@ -162,7 +178,9 @@ export class IamApiService {
 
   // ── Grants ──
   grants(query: GrantQuery = {}): Observable<IamGrant[]> {
-    return this.list<IamGrant>(`/iam/grants${queryString({ ...query })}`);
+    return this.list<Raw>(`/iam/grants${queryString({ ...query })}`).pipe(
+      map((rs) => rs.map(toGrant)),
+    );
   }
   createGrant(body: CreateGrantBody): Observable<unknown> {
     return this.post('/iam/grants', body);
@@ -176,22 +194,36 @@ export class IamApiService {
 
   // ── Teams ──
   teams(): Observable<IamTeam[]> {
-    return this.list<IamTeam>('/iam/teams');
+    return this.list<Raw>('/iam/teams').pipe(
+      map((rs) =>
+        rs.map((t) => ({
+          id: Number(t['id']),
+          name: String(t['name'] ?? ''),
+          description: (t['description'] as string | null) ?? null,
+          memberCount: Array.isArray(t['memberAdminUserIds'])
+            ? t['memberAdminUserIds'].length
+            : ((t['memberCount'] as number | null) ?? null),
+        })),
+      ),
+    );
   }
   createTeam(body: SaveNamedBody): Observable<IamTeam> {
-    return this.post<IamTeam>('/iam/teams', body);
+    return this.post<IamTeam>('/iam/teams', { ...body, memberAdminUserIds: [] });
   }
   updateTeam(id: number, body: SaveNamedBody): Observable<unknown> {
-    return this.put(`/iam/teams/${id}`, body);
+    return this.put(`/iam/teams/${id}`, { id, ...body });
   }
   deleteTeam(id: number): Observable<unknown> {
     return this.del(`/iam/teams/${id}`);
   }
-  teamMembers(id: number): Observable<IamTeamMember[]> {
-    return this.list<IamTeamMember>(`/iam/teams/${id}/members`);
+  /** Admin-user ids in the team (`GET /iam/teams/{id}/members` answers the team). */
+  teamMemberIds(id: number): Observable<number[]> {
+    return this.get<Raw | null>(`/iam/teams/${id}/members`).pipe(
+      map((t) => memberIds(t, 'memberAdminUserIds')),
+    );
   }
   addTeamMember(id: number, userId: number): Observable<unknown> {
-    return this.post(`/iam/teams/${id}/members`, { userId });
+    return this.post(`/iam/teams/${id}/members`, { adminUserIds: [userId] });
   }
   removeTeamMember(id: number, userId: number): Observable<unknown> {
     return this.del(`/iam/teams/${id}/members/${userId}`);
@@ -199,22 +231,38 @@ export class IamApiService {
 
   // ── Account groups ──
   accountGroups(): Observable<IamAccountGroup[]> {
-    return this.list<IamAccountGroup>('/iam/account-groups');
+    return this.list<Raw>('/iam/account-groups').pipe(
+      map((rs) =>
+        rs.map((g) => ({
+          id: Number(g['id']),
+          name: String(g['name'] ?? ''),
+          description: (g['description'] as string | null) ?? null,
+          accountCount: Array.isArray(g['tradingAccountIds'])
+            ? g['tradingAccountIds'].length
+            : ((g['accountCount'] as number | null) ?? null),
+        })),
+      ),
+    );
   }
   createAccountGroup(body: SaveNamedBody): Observable<IamAccountGroup> {
-    return this.post<IamAccountGroup>('/iam/account-groups', body);
+    return this.post<IamAccountGroup>('/iam/account-groups', { ...body, tradingAccountIds: [] });
   }
   updateAccountGroup(id: number, body: SaveNamedBody): Observable<unknown> {
-    return this.put(`/iam/account-groups/${id}`, body);
+    return this.put(`/iam/account-groups/${id}`, { id, ...body });
   }
   deleteAccountGroup(id: number): Observable<unknown> {
     return this.del(`/iam/account-groups/${id}`);
   }
-  accountGroupMembers(id: number): Observable<IamAccountGroupMember[]> {
-    return this.list<IamAccountGroupMember>(`/iam/account-groups/${id}/members`);
+  /** Trading-account ids in the group (`GET /iam/account-groups/{id}/members` answers the group). */
+  accountGroupMemberIds(id: number): Observable<number[]> {
+    return this.get<Raw | null>(`/iam/account-groups/${id}/members`).pipe(
+      map((g) => memberIds(g, 'tradingAccountIds')),
+    );
   }
   addAccountGroupMember(id: number, tradingAccountId: number): Observable<unknown> {
-    return this.post(`/iam/account-groups/${id}/members`, { tradingAccountId });
+    return this.post(`/iam/account-groups/${id}/members`, {
+      tradingAccountIds: [tradingAccountId],
+    });
   }
   removeAccountGroupMember(id: number, tradingAccountId: number): Observable<unknown> {
     return this.del(`/iam/account-groups/${id}/members/${tradingAccountId}`);
@@ -228,16 +276,16 @@ export class IamApiService {
     return this.put('/iam/security-policy', body);
   }
   sso(): Observable<SsoConfig | null> {
-    return this.get<SsoConfig | null>('/iam/sso');
+    return this.get<Raw | null>('/iam/sso').pipe(map((r) => toSso(r)));
   }
   saveSso(body: SaveSsoBody): Observable<unknown> {
     return this.put('/iam/sso', body);
   }
   scimTokens(): Observable<ScimToken[]> {
-    return this.list<ScimToken>('/iam/scim-tokens');
+    return this.list<Raw>('/iam/scim-tokens').pipe(map((rs) => rs.map(toToken)));
   }
-  createScimToken(name: string): Observable<CreatedToken> {
-    return this.post<CreatedToken>('/iam/scim-tokens', { name });
+  createScimToken(name: string, expiresInDays: number): Observable<CreatedToken> {
+    return this.post<CreatedToken>('/iam/scim-tokens', { name, expiresInDays });
   }
   revokeScimToken(id: number): Observable<unknown> {
     return this.del(`/iam/scim-tokens/${id}`);
@@ -245,7 +293,7 @@ export class IamApiService {
 
   // ── Your account ──
   mySessions(): Observable<IamSession[]> {
-    return this.list<IamSession>('/iam/me/sessions');
+    return this.list<Raw>('/iam/me/sessions').pipe(map((rs) => rs.map(toSession)));
   }
   endMySession(id: string | number): Observable<unknown> {
     return this.del(`/iam/me/sessions/${encodeURIComponent(String(id))}`);
@@ -254,7 +302,7 @@ export class IamApiService {
     return this.del('/iam/me/sessions');
   }
   myTokens(): Observable<PersonalAccessToken[]> {
-    return this.list<PersonalAccessToken>('/iam/me/tokens');
+    return this.list<Raw>('/iam/me/tokens').pipe(map((rs) => rs.map(toToken)));
   }
   createMyToken(body: CreateTokenBody): Observable<CreatedToken> {
     return this.post<CreatedToken>('/iam/me/tokens', body);
@@ -265,23 +313,23 @@ export class IamApiService {
 
   // ── Approvals ──
   approvals(status: ApprovalStatus | null = 'Pending'): Observable<ApprovalRequest[]> {
-    return this.list<ApprovalRequest>(`/iam/approvals${queryString({ status })}`);
+    return this.list<Raw>(`/iam/approvals${queryString({ status })}`).pipe(
+      map((rs) => rs.map(toApproval)),
+    );
   }
-  approve(id: number): Observable<unknown> {
-    return this.post(`/iam/approvals/${id}/approve`);
+  approve(id: number, note: string | null = null): Observable<unknown> {
+    return this.post(`/iam/approvals/${id}/approve`, { note });
   }
-  reject(id: number, reason: string | null): Observable<unknown> {
-    return this.post(`/iam/approvals/${id}/reject`, { reason });
+  reject(id: number, note: string | null): Observable<unknown> {
+    return this.post(`/iam/approvals/${id}/reject`, { note });
   }
 
   // ── Access review ──
   accessReview(): Observable<AccessReviewReport> {
-    return this.get<AccessReviewReport>('/iam/access-review').pipe(
-      map((r) => ({ ...r, grants: rows(r?.grants) })),
-    );
+    return this.get<Raw | null>('/iam/access-review').pipe(map((r) => toAccessReview(r)));
   }
-  revokeReviewed(grantIds: number[]): Observable<unknown> {
-    return this.post('/iam/access-review/revoke', { grantIds });
+  revokeReviewed(grantIds: number[], reason: string | null = null): Observable<unknown> {
+    return this.post('/iam/access-review/revoke', { grantIds, reason });
   }
 
   // ── Platform console ──
@@ -298,9 +346,13 @@ export class IamApiService {
     return this.post<TenantDto>(`/platform/tenants/${id}/reactivate`, { reason });
   }
   tenantMembers(id: number): Observable<IamMember[]> {
-    return this.list<{ adminUserId: number; username: string; displayName?: string; email?: string; status: string }>(
-      `/platform/tenants/${id}/members`,
-    ).pipe(
+    return this.list<{
+      adminUserId: number;
+      username: string;
+      displayName?: string;
+      email?: string;
+      status: string;
+    }>(`/platform/tenants/${id}/members`).pipe(
       map((list) =>
         list.map((m) => ({
           userId: m.adminUserId,
@@ -313,13 +365,14 @@ export class IamApiService {
     );
   }
   elevations(): Observable<AccessElevation[]> {
-    return this.list<AccessElevation>('/platform/elevations');
+    return this.list<Raw>('/platform/elevations').pipe(map((rs) => rs.map(toElevation)));
   }
-  requestElevation(body: RequestElevationBody): Observable<AccessElevation> {
-    return this.post<AccessElevation>('/platform/elevations', body);
+  requestElevation(body: RequestElevationBody): Observable<unknown> {
+    // Changes while impersonating are never asked for from the console: read-only is the default.
+    return this.post('/platform/elevations', { ...body, allowImpersonationWrites: false });
   }
   approveElevation(id: number): Observable<unknown> {
-    return this.post(`/platform/elevations/${id}/approve`);
+    return this.post(`/platform/elevations/${id}/approve`, { id, note: null });
   }
   endElevation(id: number): Observable<unknown> {
     return this.post(`/platform/elevations/${id}/end`);

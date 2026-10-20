@@ -9,6 +9,15 @@ import { devModeOrFeatureFlag } from '@core/feature-flags/feature-flag.guard';
 export const routes: Routes = [
   { path: 'login', component: LoginComponent },
   {
+    // Invitation links (U3.7): outside the console layout — the invited person may not belong to
+    // any organisation yet. The page itself starts the sign-in when needed.
+    path: 'invite/:token',
+    loadComponent: () =>
+      import('@features/invite/invite-accept-page.component').then(
+        (m) => m.InviteAcceptPageComponent,
+      ),
+  },
+  {
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],

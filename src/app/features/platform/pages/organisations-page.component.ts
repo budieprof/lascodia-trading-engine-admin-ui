@@ -25,11 +25,26 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
   template: `
     <div class="page">
       <app-page-header title="Organisations" subtitle="Every organisation on the platform.">
-        <input class="input search" type="search" placeholder="Search slug or name" aria-label="Search organisations" [ngModel]="search()" (ngModelChange)="search.set($event)" (keyup.enter)="tenants.reload()" />
-        <button type="button" class="btn btn-secondary" (click)="tenants.reload()" [disabled]="tenants.loading()">
+        <input
+          class="input search"
+          type="search"
+          placeholder="Search slug or name"
+          aria-label="Search organisations"
+          [ngModel]="search()"
+          (ngModelChange)="search.set($event)"
+          (keyup.enter)="tenants.reload()"
+        />
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="tenants.reload()"
+          [disabled]="tenants.loading()"
+        >
           {{ tenants.loading() ? 'Loading…' : 'Search' }}
         </button>
-        <button type="button" class="btn btn-primary" (click)="creating.set(!creating())">New organisation</button>
+        <button type="button" class="btn btn-primary" (click)="creating.set(!creating())">
+          New organisation
+        </button>
       </app-page-header>
 
       @if (creating()) {
@@ -39,22 +54,43 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
             <div class="form-grid">
               <label class="field">
                 <span class="label">Slug (permanent)</span>
-                <input class="input" name="slug" [ngModel]="draft().slug" (ngModelChange)="patch({ slug: $event })" placeholder="acme-capital" />
+                <input
+                  class="input"
+                  name="slug"
+                  [ngModel]="draft().slug"
+                  (ngModelChange)="patch({ slug: $event })"
+                  placeholder="acme-capital"
+                />
               </label>
               <label class="field">
                 <span class="label">Name</span>
-                <input class="input" name="name" [ngModel]="draft().name" (ngModelChange)="patch({ name: $event })" />
+                <input
+                  class="input"
+                  name="name"
+                  [ngModel]="draft().name"
+                  (ngModelChange)="patch({ name: $event })"
+                />
               </label>
               <label class="field">
                 <span class="label">Kind</span>
-                <select class="select" name="kind" [ngModel]="draft().kind" (ngModelChange)="patch({ kind: $event })">
+                <select
+                  class="select"
+                  name="kind"
+                  [ngModel]="draft().kind"
+                  (ngModelChange)="patch({ kind: $event })"
+                >
                   <option value="Customer">Customer</option>
                   <option value="Canary">Canary (isolation probe, demo accounts only)</option>
                 </select>
               </label>
             </div>
             <label class="check">
-              <input type="checkbox" name="learning" [ngModel]="draft().contributesToPlatformLearning" (ngModelChange)="patch({ contributesToPlatformLearning: $event })" />
+              <input
+                type="checkbox"
+                name="learning"
+                [ngModel]="draft().contributesToPlatformLearning"
+                (ngModelChange)="patch({ contributesToPlatformLearning: $event })"
+              />
               Its trading may feed platform-wide research and models
             </label>
             @if (submitted() && errors().length) {
@@ -65,8 +101,12 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
               </ul>
             }
             <div class="actions-row">
-              <button type="button" class="btn btn-secondary" (click)="creating.set(false)">Cancel</button>
-              <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Creating…' : 'Create' }}</button>
+              <button type="button" class="btn btn-secondary" (click)="creating.set(false)">
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                {{ busy() ? 'Creating…' : 'Create' }}
+              </button>
             </div>
           </form>
         </section>
@@ -94,10 +134,22 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                 @for (t of tenants.value(); track t.id) {
                   @let action = statusAction(t);
                   <tr [class.selected]="openMembersFor() === t.id">
-                    <td>{{ t.name }} <span class="sub"><code>{{ t.slug }}</code> · #{{ t.id }}</span></td>
-                    <td><span class="chip" [class.info]="t.kind === 'House'">{{ t.kind }}</span></td>
                     <td>
-                      <span class="chip" [class.ok]="t.status === 'Active'" [class.bad]="t.status !== 'Active'">{{ t.status }}</span>
+                      {{ t.name }}
+                      <span class="sub"
+                        ><code>{{ t.slug }}</code> · #{{ t.id }}</span
+                      >
+                    </td>
+                    <td>
+                      <span class="chip" [class.info]="t.kind === 'House'">{{ t.kind }}</span>
+                    </td>
+                    <td>
+                      <span
+                        class="chip"
+                        [class.ok]="t.status === 'Active'"
+                        [class.bad]="t.status !== 'Active'"
+                        >{{ t.status }}</span
+                      >
                       @if (t.statusReason) {
                         <span class="sub">{{ t.statusReason }}</span>
                       }
@@ -105,11 +157,29 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
                     <td class="small">{{ t.activeMembers ?? '—' }}</td>
                     <td class="small">{{ when(t.createdAtUtc) }}</td>
                     <td class="actions">
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="toggleMembers(t)">Members</button>
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        (click)="toggleMembers(t)"
+                      >
+                        Members
+                      </button>
                       @if (action === 'suspend') {
-                        <button type="button" class="btn btn-sm btn-danger" (click)="openStatus(t, 'suspend')">Suspend</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          (click)="openStatus(t, 'suspend')"
+                        >
+                          Suspend
+                        </button>
                       } @else if (action === 'reactivate') {
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="openStatus(t, 'reactivate')">Reactivate</button>
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="openStatus(t, 'reactivate')"
+                        >
+                          Reactivate
+                        </button>
                       }
                     </td>
                   </tr>
@@ -137,10 +207,16 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
 
       <app-confirm-dialog
         [open]="statusChange() !== null"
-        [title]="(statusChange()?.action === 'suspend' ? 'Suspend ' : 'Reactivate ') + (statusChange()?.tenant?.name ?? '') + '?'"
-        [message]="statusChange()?.action === 'suspend'
-          ? 'Its members are refused at once. Its EAs keep connecting so open positions stay managed — this is not a kill switch.'
-          : 'Its members can sign in again.'"
+        [title]="
+          (statusChange()?.action === 'suspend' ? 'Suspend ' : 'Reactivate ') +
+          (statusChange()?.tenant?.name ?? '') +
+          '?'
+        "
+        [message]="
+          statusChange()?.action === 'suspend'
+            ? 'Its members are refused at once. Its EAs keep connecting so open positions stay managed — this is not a kill switch.'
+            : 'Its members can sign in again.'
+        "
         [confirmLabel]="statusChange()?.action === 'suspend' ? 'Suspend' : 'Reactivate'"
         [confirmVariant]="statusChange()?.action === 'suspend' ? 'destructive' : 'primary'"
         [loading]="busy()"
@@ -148,8 +224,15 @@ import { tenantErrors, tenantStatusAction } from '../platform.logic';
         (cancelled)="statusChange.set(null)"
       >
         <label class="field">
-          <span class="label">Reason (recorded{{ statusChange()?.action === 'suspend' ? ', required' : '' }})</span>
-          <input class="input" name="reason" [ngModel]="reason()" (ngModelChange)="reason.set($event)" />
+          <span class="label"
+            >Reason (recorded{{ statusChange()?.action === 'suspend' ? ', required' : '' }})</span
+          >
+          <input
+            class="input"
+            name="reason"
+            [ngModel]="reason()"
+            (ngModelChange)="reason.set($event)"
+          />
         </label>
       </app-confirm-dialog>
     </div>
@@ -162,10 +245,19 @@ export class OrganisationsPageComponent {
   protected readonly when = when;
 
   readonly search = signal('');
-  readonly tenants = iamResource(() => this.iam.tenants(this.search().trim() || undefined), [] as TenantDto[], 'Could not load organisations.');
+  readonly tenants = iamResource(
+    () => this.iam.tenants(this.search().trim() || undefined),
+    [] as TenantDto[],
+    'Could not load organisations.',
+  );
 
   readonly creating = signal(false);
-  readonly draft = signal<CreateTenantBody>({ slug: '', name: '', kind: 'Customer', contributesToPlatformLearning: false });
+  readonly draft = signal<CreateTenantBody>({
+    slug: '',
+    name: '',
+    kind: 'Customer',
+    contributesToPlatformLearning: false,
+  });
   readonly submitted = signal(false);
   readonly errors = computed(() => tenantErrors(this.draft()));
   readonly busy = signal(false);
@@ -174,7 +266,9 @@ export class OrganisationsPageComponent {
   readonly members = signal<IamMember[]>([]);
   readonly membersError = signal<string | null>(null);
 
-  readonly statusChange = signal<{ tenant: TenantDto; action: 'suspend' | 'reactivate' } | null>(null);
+  readonly statusChange = signal<{ tenant: TenantDto; action: 'suspend' | 'reactivate' } | null>(
+    null,
+  );
   readonly reason = signal('');
 
   constructor() {
@@ -196,14 +290,23 @@ export class OrganisationsPageComponent {
   create(): void {
     this.submitted.set(true);
     if (this.errors().length || this.busy()) return;
-    const body = { ...this.draft(), slug: this.draft().slug.trim().toLowerCase(), name: this.draft().name.trim() };
+    const body = {
+      ...this.draft(),
+      slug: this.draft().slug.trim().toLowerCase(),
+      name: this.draft().name.trim(),
+    };
     this.busy.set(true);
     this.iam.createTenant(body).subscribe({
       next: () => {
         this.busy.set(false);
         this.submitted.set(false);
         this.creating.set(false);
-        this.draft.set({ slug: '', name: '', kind: 'Customer', contributesToPlatformLearning: false });
+        this.draft.set({
+          slug: '',
+          name: '',
+          kind: 'Customer',
+          contributesToPlatformLearning: false,
+        });
         this.notify.success(`Organisation ${body.name} created.`);
         this.tenants.reload();
       },
@@ -243,12 +346,16 @@ export class OrganisationsPageComponent {
     }
     this.busy.set(true);
     const call =
-      c.action === 'suspend' ? this.iam.suspendTenant(c.tenant.id, reason) : this.iam.reactivateTenant(c.tenant.id, reason || null);
+      c.action === 'suspend'
+        ? this.iam.suspendTenant(c.tenant.id, reason)
+        : this.iam.reactivateTenant(c.tenant.id, reason || null);
     call.subscribe({
       next: () => {
         this.busy.set(false);
         this.statusChange.set(null);
-        this.notify.success(`${c.tenant.name} ${c.action === 'suspend' ? 'suspended' : 'reactivated'}.`);
+        this.notify.success(
+          `${c.tenant.name} ${c.action === 'suspend' ? 'suspended' : 'reactivated'}.`,
+        );
         this.tenants.reload();
       },
       error: (e) => {

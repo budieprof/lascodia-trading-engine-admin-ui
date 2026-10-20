@@ -37,7 +37,13 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
   selector: 'app-account-tokens-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent, SecretOnceComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    MfaHintComponent,
+    SecretOnceComponent,
+  ],
   styleUrl: '../../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -45,7 +51,12 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
         title="Access tokens"
         subtitle="Tokens for scripts and tools that call the engine as you, in this organisation only."
       >
-        <button type="button" class="btn btn-secondary" (click)="tokens.reload()" [disabled]="tokens.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="tokens.reload()"
+          [disabled]="tokens.loading()"
+        >
           {{ tokens.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -68,11 +79,23 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
           <div class="form-grid">
             <label class="field">
               <span class="label">Name — what will use it</span>
-              <input class="input" name="name" maxlength="80" [ngModel]="name()" (ngModelChange)="name.set($event)" placeholder="e.g. Nightly P&L export" />
+              <input
+                class="input"
+                name="name"
+                maxlength="80"
+                [ngModel]="name()"
+                (ngModelChange)="name.set($event)"
+                placeholder="e.g. Nightly P&L export"
+              />
             </label>
             <label class="field">
               <span class="label">Expires after</span>
-              <select class="select" name="days" [ngModel]="days()" (ngModelChange)="days.set(+$event)">
+              <select
+                class="select"
+                name="days"
+                [ngModel]="days()"
+                (ngModelChange)="days.set(+$event)"
+              >
                 @for (d of lifetimes; track d) {
                   <option [ngValue]="d">{{ d }} days</option>
                 }
@@ -80,14 +103,20 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
             </label>
           </div>
           <fieldset class="matrix">
-            <legend class="label">Permissions · {{ chosen().size }} selected (only ones you hold are offered)</legend>
+            <legend class="label">
+              Permissions · {{ chosen().size }} selected (only ones you hold are offered)
+            </legend>
             @for (g of groups(); track g.category) {
               <div>
                 <span class="matrix-cat">{{ g.category }}</span>
                 <div class="matrix-checks">
                   @for (p of g.permissions; track p.key) {
                     <label class="check" [title]="p.description">
-                      <input type="checkbox" [checked]="chosen().has(p.key)" (change)="toggle(p.key)" />
+                      <input
+                        type="checkbox"
+                        [checked]="chosen().has(p.key)"
+                        (change)="toggle(p.key)"
+                      />
                       <span>{{ p.key }}</span>
                     </label>
                   }
@@ -105,7 +134,9 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
             </ul>
           }
           <div class="actions-row">
-            <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Creating…' : 'Create token' }}</button>
+            <button type="submit" class="btn btn-primary" [disabled]="busy()">
+              {{ busy() ? 'Creating…' : 'Create token' }}
+            </button>
           </div>
         </form>
       </section>
@@ -132,13 +163,32 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
               <tbody>
                 @for (t of tokens.value(); track t.id) {
                   <tr>
-                    <td>{{ t.name }} <span class="sub"><code>lsc_pat_{{ t.prefix }}…</code></span></td>
+                    <td>
+                      {{ t.name }}
+                      <span class="sub"
+                        ><code>lsc_pat_{{ t.prefix }}…</code></span
+                      >
+                    </td>
                     <td class="small">{{ t.permissions.join(', ') }}</td>
                     <td class="small">{{ when(t.createdAtUtc) }}</td>
                     <td class="small">{{ t.lastUsedAtUtc ? when(t.lastUsedAtUtc) : 'Never' }}</td>
-                    <td class="small">{{ when(t.expiresAtUtc) }}</td>
+                    <td class="small">
+                      {{ when(t.expiresAtUtc) }}
+                      @if (t.status && t.status !== 'Active') {
+                        <span class="chip">{{ t.status }}</span>
+                      }
+                    </td>
                     <td class="actions">
-                      <button type="button" class="btn btn-sm btn-danger" [disabled]="busy()" (click)="revoking.set(t)">Revoke</button>
+                      @if (!t.status || t.status === 'Active') {
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          [disabled]="busy()"
+                          (click)="revoking.set(t)"
+                        >
+                          Revoke
+                        </button>
+                      }
                     </td>
                   </tr>
                 }
@@ -170,18 +220,28 @@ export class TokensPageComponent {
   protected readonly when = when;
   protected readonly lifetimes = LIFETIMES;
 
-  readonly tokens = iamResource(() => this.iam.myTokens(), [] as PersonalAccessToken[], 'Could not load your tokens.');
+  readonly tokens = iamResource(
+    () => this.iam.myTokens(),
+    [] as PersonalAccessToken[],
+    'Could not load your tokens.',
+  );
   private readonly held = computed(() => new Set(this.auth.permissions()));
   /** Only what the session holds can go on a token (deprecated tier keys are not offered). */
   readonly groups = computed(() =>
-    groupCatalog(PERMISSION_CATALOG.filter((p: PermissionDefinition) => this.held().has(p.key) && !p.deprecated)),
+    groupCatalog(
+      PERMISSION_CATALOG.filter(
+        (p: PermissionDefinition) => this.held().has(p.key) && !p.deprecated,
+      ),
+    ),
   );
 
   readonly name = signal('');
   readonly days = signal(90);
   readonly chosen = signal<Set<string>>(new Set());
   readonly submitted = signal(false);
-  readonly errors = computed(() => tokenErrors(this.name(), [...this.chosen()], this.days(), this.held()));
+  readonly errors = computed(() =>
+    tokenErrors(this.name(), [...this.chosen()], this.days(), this.held()),
+  );
   readonly busy = signal(false);
   readonly created = signal<string | null>(null);
   readonly revoking = signal<PersonalAccessToken | null>(null);
@@ -199,7 +259,11 @@ export class TokensPageComponent {
     if (this.errors().length || this.busy()) return;
     this.busy.set(true);
     this.iam
-      .createMyToken({ name: this.name().trim(), permissions: [...this.chosen()].sort(), expiresInDays: this.days() })
+      .createMyToken({
+        name: this.name().trim(),
+        permissions: [...this.chosen()].sort(),
+        expiresInDays: this.days(),
+      })
       .subscribe({
         next: (t) => {
           this.busy.set(false);

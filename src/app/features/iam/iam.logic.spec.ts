@@ -26,7 +26,11 @@ import {
 import { queryString, rows } from './iam-api.service';
 import type { ApprovalRequest, IamMember, IamRole } from './iam.types';
 
-const def = (key: string, category: string, over: Partial<PermissionDefinition> = {}): PermissionDefinition => ({
+const def = (
+  key: string,
+  category: string,
+  over: Partial<PermissionDefinition> = {},
+): PermissionDefinition => ({
   key,
   category,
   description: key,
@@ -49,8 +53,14 @@ describe('checkCidr (security policy allow-list)', () => {
 
   it('refuses malformed input in plain words', () => {
     expect(checkCidr('')).toMatchObject({ ok: false });
-    expect(checkCidr('256.1.1.1')).toMatchObject({ ok: false, error: expect.stringContaining('not an IP') });
-    expect(checkCidr('10.0.0.1/33')).toMatchObject({ ok: false, error: expect.stringContaining('0–32') });
+    expect(checkCidr('256.1.1.1')).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('not an IP'),
+    });
+    expect(checkCidr('10.0.0.1/33')).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('0–32'),
+    });
     expect(checkCidr('10.0.0.0/8/1')).toMatchObject({ ok: false });
     expect(checkCidr('010.0.0.1')).toMatchObject({ ok: false });
     expect(checkCidr('2001:db8:::1')).toMatchObject({ ok: false });
@@ -78,14 +88,19 @@ describe('checkCidr (security policy allow-list)', () => {
 });
 
 describe('securityPolicyErrors', () => {
-  const ok = { mfaRequired: true, sessionIdleMinutes: 60, sessionAbsoluteHours: 12, ipAllowlist: [] };
+  const ok = {
+    mfaRequired: true,
+    sessionIdleMinutes: 60,
+    sessionAbsoluteHours: 12,
+    ipAllowlist: [],
+  };
   it('accepts sane lifetimes', () => expect(securityPolicyErrors(ok)).toEqual([]));
   it('refuses zero, fractions and an idle timeout longer than the session', () => {
     expect(securityPolicyErrors({ ...ok, sessionIdleMinutes: 0 })).toHaveLength(1);
     expect(securityPolicyErrors({ ...ok, sessionAbsoluteHours: 1.5 })).toHaveLength(1);
-    expect(securityPolicyErrors({ ...ok, sessionIdleMinutes: 121, sessionAbsoluteHours: 2 })).toEqual([
-      'The idle timeout cannot be longer than the whole session.',
-    ]);
+    expect(
+      securityPolicyErrors({ ...ok, sessionIdleMinutes: 121, sessionAbsoluteHours: 2 }),
+    ).toEqual(['The idle timeout cannot be longer than the whole session.']);
   });
 });
 
@@ -99,19 +114,29 @@ describe('catalog grouping', () => {
   ];
 
   it('groups by category with keys sorted', () => {
-    expect(groupCatalog(catalog).map((g) => [g.category, g.permissions.map((p) => p.key)])).toEqual([
-      ['Access tier', ['access.admin', 'access.viewer']],
-      ['Audit', ['audit.read']],
-      ['Orders', ['orders.create', 'orders.read']],
-    ]);
+    expect(groupCatalog(catalog).map((g) => [g.category, g.permissions.map((p) => p.key)])).toEqual(
+      [
+        ['Access tier', ['access.admin', 'access.viewer']],
+        ['Audit', ['audit.read']],
+        ['Orders', ['orders.create', 'orders.read']],
+      ],
+    );
   });
 
   it('keeps keys the console does not know visible', () => {
-    expect(unknownKeys(['orders.read', 'zeta.new', 'alpha.new'], catalog)).toEqual(['alpha.new', 'zeta.new']);
+    expect(unknownKeys(['orders.read', 'zeta.new', 'alpha.new'], catalog)).toEqual([
+      'alpha.new',
+      'zeta.new',
+    ]);
   });
 
   it('flags role permissions that only apply organisation-wide', () => {
-    const role = { id: 1, name: 'Auditor', permissions: ['audit.read', 'orders.read'], isSystem: false } as IamRole;
+    const role = {
+      id: 1,
+      name: 'Auditor',
+      permissions: ['audit.read', 'orders.read'],
+      isSystem: false,
+    } as IamRole;
     expect(unscopeableIn(role, 'TradingAccount', catalog)).toEqual(['audit.read']);
     expect(unscopeableIn(role, 'Tenant', catalog)).toEqual([]);
     expect(unscopeableIn(null, 'Strategy', catalog)).toEqual([]);
@@ -121,7 +146,10 @@ describe('catalog grouping', () => {
 describe('roleErrors', () => {
   const existing = [{ id: 1, name: 'Desk Lead', permissions: [], isSystem: false } as IamRole];
   it('needs a unique name and at least one permission', () => {
-    expect(roleErrors('', [], existing, null)).toEqual(['Give the role a name.', 'Choose at least one permission.']);
+    expect(roleErrors('', [], existing, null)).toEqual([
+      'Give the role a name.',
+      'Choose at least one permission.',
+    ]);
     expect(roleErrors('desk lead', ['orders.read'], existing, null)).toEqual([
       'A role called "desk lead" already exists in this organisation.',
     ]);
@@ -131,7 +159,14 @@ describe('roleErrors', () => {
 
 describe('grants', () => {
   const now = Date.parse('2026-10-20T10:00:00Z');
-  const draft = { principalId: 4, roleId: 2, scopeType: 'Tenant' as const, scopeId: null, expiresLocal: '', reason: '' };
+  const draft = {
+    principalId: 4,
+    roleId: 2,
+    scopeType: 'Tenant' as const,
+    scopeId: null,
+    expiresLocal: '',
+    reason: '',
+  };
 
   it('labels scopes plainly', () => {
     expect(scopeLabel('Tenant', null)).toBe('Whole organisation');
@@ -145,7 +180,9 @@ describe('grants', () => {
       'Choose who gets the role.',
       'Choose a role.',
     ]);
-    expect(grantErrors({ ...draft, scopeType: 'AccountGroup' }, now)).toEqual(['Choose what the role applies to.']);
+    expect(grantErrors({ ...draft, scopeType: 'AccountGroup' }, now)).toEqual([
+      'Choose what the role applies to.',
+    ]);
     expect(grantErrors({ ...draft, expiresLocal: '2026-10-19T10:00' }, now)).toEqual([
       'The expiry must be in the future.',
     ]);
@@ -159,15 +196,16 @@ describe('grants', () => {
 
 describe('invitations', () => {
   it('needs an address and complete role rows', () => {
-    expect(invitationErrors('ada@example.com', [{ roleId: 2, scopeType: 'Tenant', scopeId: null }])).toEqual([]);
+    expect(
+      invitationErrors('ada@example.com', [{ roleId: 2, scopeType: 'Tenant', scopeId: null }]),
+    ).toEqual([]);
     expect(invitationErrors('nope', [])).toEqual([
       'Enter the e-mail address of the person to invite.',
       'Give the person at least one role.',
     ]);
-    expect(invitationErrors('a@b.co', [{ roleId: 0, scopeType: 'TradingAccount', scopeId: null }])).toEqual([
-      'Role 1: choose a role.',
-      'Role 1: choose what it applies to.',
-    ]);
+    expect(
+      invitationErrors('a@b.co', [{ roleId: 0, scopeType: 'TradingAccount', scopeId: null }]),
+    ).toEqual(['Role 1: choose a role.', 'Role 1: choose what it applies to.']);
   });
 });
 
@@ -234,7 +272,9 @@ describe('API helpers', () => {
 
   it('prefers the engine’s message for errors', () => {
     expect(errorText({ error: { message: 'Last owner' } }, 'x')).toBe('Last owner');
-    expect(errorText({ message: 'Http failure response for …' }, 'Could not save.')).toBe('Could not save.');
+    expect(errorText({ message: 'Http failure response for …' }, 'Could not save.')).toBe(
+      'Could not save.',
+    );
     expect(errorText(null, 'fallback')).toBe('fallback');
   });
 });
@@ -264,18 +304,36 @@ describe('ssoErrors', () => {
     expect(ssoErrors({ ...oidc, domains: [] }, false)).toEqual([
       'Add at least one e-mail domain to route to this connection.',
     ]);
-    expect(ssoErrors({ ...oidc, domains: ['not a domain'] }, false)).toEqual(['Not e-mail domains: not a domain.']);
+    expect(ssoErrors({ ...oidc, domains: ['not a domain'] }, false)).toEqual([
+      'Not e-mail domains: not a domain.',
+    ]);
   });
   it('does not ask SAML for a client id or secret', () => {
     expect(
-      ssoErrors({ ...oidc, protocol: 'saml', clientId: '', clientSecret: null, issuerOrMetadataUrl: 'https://idp/metadata' }, false),
+      ssoErrors(
+        {
+          ...oidc,
+          protocol: 'saml',
+          clientId: '',
+          clientSecret: null,
+          issuerOrMetadataUrl: 'https://idp/metadata',
+        },
+        false,
+      ),
     ).toEqual([]);
   });
 });
 
 describe('canDecide (two-person approvals)', () => {
-  const r = { id: 1, actionKey: 'engine.killswitch.release', status: 'Pending', requestedByUserId: 7, expiresAtUtc: new Date(Date.now() + 3600_000).toISOString() } as ApprovalRequest;
-  it('lets another person decide a pending request', () => expect(canDecide(r, 8)).toEqual({ ok: true, why: '' }));
+  const r = {
+    id: 1,
+    actionKey: 'engine.killswitch.release',
+    status: 'Pending',
+    requestedByUserId: 7,
+    expiresAtUtc: new Date(Date.now() + 3600_000).toISOString(),
+  } as ApprovalRequest;
+  it('lets another person decide a pending request', () =>
+    expect(canDecide(r, 8)).toEqual({ ok: true, why: '' }));
   it('never lets the requester approve their own', () => expect(canDecide(r, 7).ok).toBe(false));
   it('refuses decided or expired requests', () => {
     expect(canDecide({ ...r, status: 'Approved' }, 8).ok).toBe(false);
@@ -285,9 +343,19 @@ describe('canDecide (two-person approvals)', () => {
 
 describe('describeDevice', () => {
   it('names browser and platform', () => {
-    expect(describeDevice('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36')).toBe('Chrome on macOS');
-    expect(describeDevice('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1')).toBe('Safari on iOS');
-    expect(describeDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141.0')).toBe('Edge on Windows');
+    expect(
+      describeDevice(
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36',
+      ),
+    ).toBe('Chrome on macOS');
+    expect(
+      describeDevice(
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+      ),
+    ).toBe('Safari on iOS');
+    expect(describeDevice('Mozilla/5.0 (Windows NT 10.0; Win64; x64) Edg/141.0')).toBe(
+      'Edge on Windows',
+    );
     expect(describeDevice('curl/8.4.0')).toBe('curl/8.4.0');
     expect(describeDevice(null)).toBe('Unknown device');
   });

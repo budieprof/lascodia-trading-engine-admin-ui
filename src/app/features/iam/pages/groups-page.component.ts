@@ -29,6 +29,8 @@ interface Entry {
   id: number;
   label: string;
   detail: string;
+  /** Shown when already in a group, never offered for adding (e.g. a suspended member). */
+  inactive?: boolean;
 }
 
 /** What differs between teams and account groups. */
@@ -42,7 +44,10 @@ interface GroupKind {
   create(b: SaveNamedBody): Observable<unknown>;
   update(id: number, b: SaveNamedBody): Observable<unknown>;
   remove(id: number): Observable<unknown>;
-  entries(id: number): Observable<Entry[]>;
+  /** Ids in the group (the engine answers ids; labels come from the candidates). */
+  entryIds(id: number): Observable<number[]>;
+  /** How to show an id that is not among the candidates (left the organisation, not visible). */
+  unknownLabel(id: number): string;
   add(id: number, entryId: number): Observable<unknown>;
   drop(id: number, entryId: number): Observable<unknown>;
   /** Everything that could be added (people of the organisation / visible trading accounts). */
@@ -102,17 +107,29 @@ interface GroupKind {
   template: `
     <div class="page">
       <app-page-header [title]="kind.title" [subtitle]="kind.subtitle">
-        <button type="button" class="btn btn-secondary" (click)="groups.reload()" [disabled]="groups.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="groups.reload()"
+          [disabled]="groups.loading()"
+        >
           {{ groups.loading() ? 'Loading…' : 'Refresh' }}
         </button>
-        <button type="button" class="btn btn-primary" *lscCan="P.IamGrantsManage" (click)="startCreate()">
+        <button
+          type="button"
+          class="btn btn-primary"
+          *lscCan="P.IamGrantsManage"
+          (click)="startCreate()"
+        >
           New {{ kind.noun }}
         </button>
       </app-page-header>
 
       <div class="layout">
         <section class="card">
-          <header class="card-head"><h3>{{ groups.value().length }} {{ kind.noun }}s</h3></header>
+          <header class="card-head">
+            <h3>{{ groups.value().length }} {{ kind.noun }}s</h3>
+          </header>
           @if (groups.error(); as err) {
             <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
           } @else if (groups.loaded() && groups.value().length === 0) {
@@ -121,10 +138,16 @@ interface GroupKind {
           <ul class="list">
             @for (g of groups.value(); track g.id) {
               <li>
-                <button type="button" class="item" [attr.aria-current]="selectedId() === g.id" (click)="select(g)">
+                <button
+                  type="button"
+                  class="item"
+                  [attr.aria-current]="selectedId() === g.id"
+                  (click)="select(g)"
+                >
                   <strong>{{ g.name }}</strong>
                   <span class="sub small muted">
-                    {{ g.description || 'No description' }}{{ g.size !== null ? ' · ' + g.size : '' }}
+                    {{ g.description || 'No description'
+                    }}{{ g.size !== null ? ' · ' + g.size : '' }}
                   </span>
                 </button>
               </li>
@@ -139,25 +162,50 @@ interface GroupKind {
             <header class="card-head">
               <h3>{{ editing() === 'new' ? 'New ' + kind.noun : name() }}</h3>
               <span class="spacer"></span>
-              <button type="button" class="btn btn-sm btn-secondary" (click)="close()">Close</button>
+              <button type="button" class="btn btn-sm btn-secondary" (click)="close()">
+                Close
+              </button>
             </header>
             <form class="card-body" (ngSubmit)="save()">
               <div class="form-grid">
                 <label class="field">
                   <span class="label">Name</span>
-                  <input class="input" name="name" [ngModel]="name()" (ngModelChange)="name.set($event)" [disabled]="!canManage()" />
+                  <input
+                    class="input"
+                    name="name"
+                    [ngModel]="name()"
+                    (ngModelChange)="name.set($event)"
+                    [disabled]="!canManage()"
+                  />
                 </label>
                 <label class="field">
                   <span class="label">Description</span>
-                  <input class="input" name="description" [ngModel]="description()" (ngModelChange)="description.set($event)" [disabled]="!canManage()" />
+                  <input
+                    class="input"
+                    name="description"
+                    [ngModel]="description()"
+                    (ngModelChange)="description.set($event)"
+                    [disabled]="!canManage()"
+                  />
                 </label>
               </div>
               @if (canManage()) {
                 <div class="actions-row">
                   @if (editing() !== 'new') {
-                    <button type="button" class="btn btn-danger" (click)="deleting.set(true)" [disabled]="busy()">Delete</button>
+                    <button
+                      type="button"
+                      class="btn btn-danger"
+                      (click)="deleting.set(true)"
+                      [disabled]="busy()"
+                    >
+                      Delete
+                    </button>
                   }
-                  <button type="submit" class="btn btn-primary" [disabled]="busy() || !name().trim()">
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    [disabled]="busy() || !name().trim()"
+                  >
                     {{ busy() ? 'Saving…' : 'Save' }}
                   </button>
                 </div>
@@ -166,16 +214,31 @@ interface GroupKind {
 
             @if (editing() !== 'new') {
               <header class="card-head">
-                <h3>{{ entries().length }} {{ kind.entryNoun }}{{ entries().length === 1 ? '' : 's' }}</h3>
+                <h3>
+                  {{ entries().length }} {{ kind.entryNoun }}{{ entries().length === 1 ? '' : 's' }}
+                </h3>
                 <span class="spacer"></span>
                 @if (canManage()) {
-                  <select class="select search" name="add" [ngModel]="adding()" (ngModelChange)="adding.set($event)" [attr.aria-label]="'Add a ' + kind.entryNoun">
+                  <select
+                    class="select search"
+                    name="add"
+                    [ngModel]="adding()"
+                    (ngModelChange)="adding.set($event)"
+                    [attr.aria-label]="'Add a ' + kind.entryNoun"
+                  >
                     <option [ngValue]="null">Add a {{ kind.entryNoun }}…</option>
                     @for (c of addable(); track c.id) {
                       <option [ngValue]="c.id">{{ c.label }}</option>
                     }
                   </select>
-                  <button type="button" class="btn btn-sm btn-primary" [disabled]="adding() === null || busy()" (click)="add()">Add</button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-primary"
+                    [disabled]="adding() === null || busy()"
+                    (click)="add()"
+                  >
+                    Add
+                  </button>
                 }
               </header>
               @if (entriesError(); as e) {
@@ -187,10 +250,19 @@ interface GroupKind {
                   <tbody>
                     @for (e of entries(); track e.id) {
                       <tr>
-                        <td>{{ e.label }} <span class="sub">{{ e.detail }}</span></td>
+                        <td>
+                          {{ e.label }} <span class="sub">{{ e.detail }}</span>
+                        </td>
                         <td class="actions">
                           @if (canManage()) {
-                            <button type="button" class="btn btn-sm btn-secondary" [disabled]="busy()" (click)="dropping.set(e)">Remove</button>
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-secondary"
+                              [disabled]="busy()"
+                              (click)="dropping.set(e)"
+                            >
+                              Remove
+                            </button>
                           }
                         </td>
                       </tr>
@@ -235,7 +307,9 @@ export class GroupsPageComponent {
 
   protected readonly P = Permission;
   readonly kind: GroupKind =
-    inject(ActivatedRoute).snapshot.data['groupKind'] === 'account-group' ? this.accountGroupKind() : this.teamKind();
+    inject(ActivatedRoute).snapshot.data['groupKind'] === 'account-group'
+      ? this.accountGroupKind()
+      : this.teamKind();
 
   readonly canManage = computed(() => this.auth.hasPermission(Permission.IamGrantsManage));
   readonly groups = iamResource(() => this.kind.list(), [] as Group[], 'Could not load the list.');
@@ -245,11 +319,17 @@ export class GroupsPageComponent {
   readonly editing = signal<number | 'new' | null>(null);
   readonly name = signal('');
   readonly description = signal('');
-  readonly entries = signal<Entry[]>([]);
+  readonly entryIds = signal<number[]>([]);
+  readonly entries = computed<Entry[]>(() => {
+    const known = new Map(this.candidates.value().map((c) => [c.id, c]));
+    return this.entryIds().map(
+      (id) => known.get(id) ?? { id, label: this.kind.unknownLabel(id), detail: '' },
+    );
+  });
   readonly entriesError = signal<string | null>(null);
   readonly addable = computed(() => {
-    const inside = new Set(this.entries().map((e) => e.id));
-    return this.candidates.value().filter((c) => !inside.has(c.id));
+    const inside = new Set(this.entryIds());
+    return this.candidates.value().filter((c) => !inside.has(c.id) && !c.inactive);
   });
   readonly adding = signal<number | null>(null);
   readonly busy = signal(false);
@@ -263,7 +343,8 @@ export class GroupsPageComponent {
 
   constructor() {
     this.groups.reload();
-    if (this.canManage()) this.candidates.reload();
+    // Also the labels of what is in a group: the engine answers ids only.
+    this.candidates.reload();
   }
 
   private teamKind(): GroupKind {
@@ -274,57 +355,76 @@ export class GroupsPageComponent {
       entryNoun: 'member',
       emptyEntries: 'Nobody is in this team yet.',
       list: () =>
-        this.iam.teams().pipe(
-          map((ts) => ts.map((t) => ({ id: t.id, name: t.name, description: t.description ?? '', size: t.memberCount ?? null }))),
-        ),
+        this.iam
+          .teams()
+          .pipe(
+            map((ts) =>
+              ts.map((t) => ({
+                id: t.id,
+                name: t.name,
+                description: t.description ?? '',
+                size: t.memberCount ?? null,
+              })),
+            ),
+          ),
       create: (b) => this.iam.createTeam(b),
       update: (id, b) => this.iam.updateTeam(id, b),
       remove: (id) => this.iam.deleteTeam(id),
-      entries: (id) =>
-        this.iam
-          .teamMembers(id)
-          .pipe(
-            map((ms) =>
-              ms.map((m) => ({ id: m.userId, label: memberLabel({ username: m.username ?? `#${m.userId}`, displayName: m.displayName, email: m.email }), detail: m.email ?? '' })),
-            ),
-          ),
+      entryIds: (id) => this.iam.teamMemberIds(id),
+      unknownLabel: (id) => `Member #${id}`,
       add: (id, userId) => this.iam.addTeamMember(id, userId),
       drop: (id, userId) => this.iam.removeTeamMember(id, userId),
       candidates: () =>
-        this.iam
-          .members()
-          .pipe(map((ms) => ms.filter((m) => m.status === 'Active').map((m) => ({ id: m.userId, label: memberLabel(m), detail: m.email ?? '' })))),
+        this.iam.members().pipe(
+          map((ms) =>
+            ms.map((m) => ({
+              id: m.userId,
+              label: memberLabel(m),
+              detail: m.status === 'Active' ? (m.email ?? '') : `${m.status} · ${m.email ?? ''}`,
+              inactive: m.status !== 'Active',
+            })),
+          ),
+        ),
     };
   }
 
   private accountGroupKind(): GroupKind {
     return {
       title: 'Account groups',
-      subtitle: 'Sets of trading accounts. Grant a role at an account group and it applies to every account in it.',
+      subtitle:
+        'Sets of trading accounts. Grant a role at an account group and it applies to every account in it.',
       noun: 'account group',
       entryNoun: 'account',
       emptyEntries: 'No trading accounts in this group yet.',
       list: () =>
         this.iam
           .accountGroups()
-          .pipe(map((gs) => gs.map((g) => ({ id: g.id, name: g.name, description: g.description ?? '', size: g.accountCount ?? null })))),
+          .pipe(
+            map((gs) =>
+              gs.map((g) => ({
+                id: g.id,
+                name: g.name,
+                description: g.description ?? '',
+                size: g.accountCount ?? null,
+              })),
+            ),
+          ),
       create: (b) => this.iam.createAccountGroup(b),
       update: (id, b) => this.iam.updateAccountGroup(id, b),
       remove: (id) => this.iam.deleteAccountGroup(id),
-      entries: (id) =>
-        this.iam
-          .accountGroupMembers(id)
-          .pipe(
-            map((ms) =>
-              ms.map((m) => ({ id: m.tradingAccountId, label: m.accountName || `Account #${m.tradingAccountId}`, detail: m.accountId ?? '' })),
-            ),
-          ),
+      entryIds: (id) => this.iam.accountGroupMemberIds(id),
+      unknownLabel: (id) => `Account #${id}`,
       add: (id, accountId) => this.iam.addAccountGroupMember(id, accountId),
       drop: (id, accountId) => this.iam.removeAccountGroupMember(id, accountId),
       candidates: () =>
         this.auth.hasPermission(Permission.AccountsRead)
           ? fetchAllPages((page) =>
-              this.accountsApi.list({ currentPage: page, itemCountPerPage: 100, sortBy: 'id', sortDirection: 'asc' }),
+              this.accountsApi.list({
+                currentPage: page,
+                itemCountPerPage: 100,
+                sortBy: 'id',
+                sortDirection: 'asc',
+              }),
             ).pipe(
               map((as) =>
                 as.map((a) => ({
@@ -352,7 +452,7 @@ export class GroupsPageComponent {
     this.editing.set('new');
     this.name.set('');
     this.description.set('');
-    this.entries.set([]);
+    this.entryIds.set([]);
   }
 
   close(): void {
@@ -361,10 +461,10 @@ export class GroupsPageComponent {
   }
 
   private loadEntries(id: number): void {
-    this.entries.set([]);
+    this.entryIds.set([]);
     this.entriesError.set(null);
-    this.kind.entries(id).subscribe({
-      next: (e) => this.entries.set(e),
+    this.kind.entryIds(id).subscribe({
+      next: (ids) => this.entryIds.set(ids),
       error: (err) => this.entriesError.set(errorText(err, 'Could not load the members.')),
     });
   }

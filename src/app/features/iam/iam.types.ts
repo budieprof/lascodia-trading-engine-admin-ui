@@ -9,7 +9,12 @@
  */
 
 export type ScopeType = 'Tenant' | 'AccountGroup' | 'TradingAccount' | 'Strategy';
-export const SCOPE_TYPES: readonly ScopeType[] = ['Tenant', 'AccountGroup', 'TradingAccount', 'Strategy'];
+export const SCOPE_TYPES: readonly ScopeType[] = [
+  'Tenant',
+  'AccountGroup',
+  'TradingAccount',
+  'Strategy',
+];
 
 export type PrincipalType = 'User' | 'Team' | 'ServiceAccount';
 export const PRINCIPAL_TYPES: readonly PrincipalType[] = ['User', 'Team', 'ServiceAccount'];
@@ -61,6 +66,15 @@ export interface CreateInvitationResult {
   invitationId: number;
   /** Single-use link the inviter passes on — set when the engine could not e-mail it. */
   acceptUrl: string | null;
+  /** First-sign-in password of a NEW account the engine created (no e-mail set up yet); shown once. */
+  temporaryPassword?: string | null;
+}
+
+/** `POST /iam/invitations/accept` — the organisation joined. */
+export interface AcceptInvitationResult {
+  tenantId: number;
+  slug: string;
+  name: string;
 }
 
 export interface IamInvitation {
@@ -82,6 +96,8 @@ export interface IamRole {
   permissions: string[];
   /** System roles (Owner, Admin, Trader, …) are read-only. */
   isSystem: boolean;
+  /** A platform-staff role (PlatformAdmin, …): only meaningful in House. */
+  platform?: boolean | null;
   /** How many grants use it (delete is refused while any do). */
   assignmentCount?: number | null;
 }
@@ -152,24 +168,11 @@ export interface IamTeam {
   memberCount?: number | null;
 }
 
-export interface IamTeamMember {
-  userId: number;
-  username?: string | null;
-  displayName?: string | null;
-  email?: string | null;
-}
-
 export interface IamAccountGroup {
   id: number;
   name: string;
   description?: string | null;
   accountCount?: number | null;
-}
-
-export interface IamAccountGroupMember {
-  tradingAccountId: number;
-  accountName?: string | null;
-  accountId?: string | null;
 }
 
 export interface SaveNamedBody {
@@ -198,6 +201,9 @@ export interface SsoConfig {
   enabled: boolean;
   /** Whether a secret is stored (the secret itself never comes back). */
   hasClientSecret?: boolean | null;
+  /** Last time the identity provider was configured in Keycloak, and what went wrong if it failed. */
+  lastSyncedAtUtc?: string | null;
+  lastSyncError?: string | null;
 }
 
 /** `PUT /iam/sso`. `clientSecret` omitted (or null) keeps the stored one. */
@@ -213,6 +219,8 @@ export interface ScimToken {
   createdAtUtc?: string | null;
   expiresAtUtc?: string | null;
   lastUsedAtUtc?: string | null;
+  /** `Active`, `Revoked` or `Expired`. */
+  status?: string | null;
 }
 
 // ── Personal access tokens (C3.5: GET|POST /iam/me/tokens, DELETE /iam/me/tokens/{id}) ──
@@ -225,6 +233,8 @@ export interface PersonalAccessToken {
   createdAtUtc?: string | null;
   expiresAtUtc: string;
   lastUsedAtUtc?: string | null;
+  /** `Active`, `Revoked` or `Expired`. */
+  status?: string | null;
 }
 
 export interface CreateTokenBody {
@@ -275,6 +285,8 @@ export interface AccessReviewEntry {
   lastUsedAtUtc?: string | null;
   /** Unused for the review window (90 days). */
   stale: boolean;
+  /** Days since last use (or since granted, never used). */
+  idleDays?: number | null;
 }
 
 export interface AccessReviewReport {
@@ -335,6 +347,8 @@ export interface StartImpersonationBody {
   userId: number;
   tenantId: number;
   readOnly: true;
+  /** Recorded in the organisation's audit log. */
+  reason?: string | null;
 }
 
 /** Most elevated access may last (C3.5: minutes ≤ 240). */

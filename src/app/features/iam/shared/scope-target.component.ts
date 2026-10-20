@@ -70,7 +70,9 @@ const SCOPE_NAMES: Record<ScopeType, string> = {
               }
             </select>
             @if (groups.loaded() && groups.value().length === 0) {
-              <span class="small muted">No account groups yet — create one under Account groups.</span>
+              <span class="small muted"
+                >No account groups yet — create one under Account groups.</span
+              >
             }
           </label>
         }
@@ -87,7 +89,8 @@ const SCOPE_NAMES: Record<ScopeType, string> = {
               <option [ngValue]="null">Choose…</option>
               @for (a of accounts.value(); track a.id) {
                 <option [ngValue]="a.id">
-                  {{ a.accountName || a.accountId }} · {{ a.accountId }}{{ a.isPaper ? ' · paper' : '' }}
+                  {{ a.accountName || a.accountId }} · {{ a.accountId
+                  }}{{ a.isPaper ? ' · paper' : '' }}
                 </option>
               }
             </select>
@@ -163,12 +166,21 @@ export class ScopeTargetComponent {
   readonly types = SCOPE_TYPES;
   readonly names = SCOPE_NAMES;
 
-  readonly groups = iamResource<IamAccountGroup[]>(() => this.iam.accountGroups(), [], 'Could not load account groups.');
+  readonly groups = iamResource<IamAccountGroup[]>(
+    () => this.iam.accountGroups(),
+    [],
+    'Could not load account groups.',
+  );
   readonly accounts = iamResource<TradingAccountDto[]>(
     () =>
       this.auth.hasPermission(Permission.AccountsRead)
         ? fetchAllPages((page) =>
-            this.accountsApi.list({ currentPage: page, itemCountPerPage: 100, sortBy: 'id', sortDirection: 'asc' }),
+            this.accountsApi.list({
+              currentPage: page,
+              itemCountPerPage: 100,
+              sortBy: 'id',
+              sortDirection: 'asc',
+            }),
           ).pipe(catchError(() => of([] as TradingAccountDto[])))
         : of([] as TradingAccountDto[]),
     [],
@@ -181,8 +193,10 @@ export class ScopeTargetComponent {
     effect(() => {
       const t = this.needs();
       untracked(() => {
-        if (t === 'AccountGroup' && !this.groups.loaded() && !this.groups.loading()) this.groups.reload();
-        if (t === 'TradingAccount' && !this.accounts.loaded() && !this.accounts.loading()) this.accounts.reload();
+        if (t === 'AccountGroup' && !this.groups.loaded() && !this.groups.loading())
+          this.groups.reload();
+        if (t === 'TradingAccount' && !this.accounts.loaded() && !this.accounts.loading())
+          this.accounts.reload();
       });
     });
   }

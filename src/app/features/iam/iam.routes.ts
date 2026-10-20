@@ -50,7 +50,8 @@ export const IAM_ROUTES: Routes = [
     path: 'roles',
     canActivate: [canAccessPath('iam/roles')],
     data: { breadcrumb: 'Roles' },
-    loadComponent: () => import('./pages/roles-page.component').then((m) => m.IamRolesPageComponent),
+    loadComponent: () =>
+      import('./pages/roles-page.component').then((m) => m.IamRolesPageComponent),
   },
   {
     path: 'grants',

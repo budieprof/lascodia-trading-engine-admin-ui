@@ -18,7 +18,10 @@ import { StepUpService, mfaIsFresh } from '@core/auth/step-up.service';
   template: `
     @if (required()) {
       @if (fresh()) {
-        <span class="hint ok" title="Your last sign-in used a second factor less than five minutes ago.">
+        <span
+          class="hint ok"
+          title="Your last sign-in used a second factor less than five minutes ago."
+        >
           Second factor confirmed
         </span>
       } @else {

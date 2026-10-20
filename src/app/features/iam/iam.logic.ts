@@ -157,10 +157,7 @@ export function securityPolicyErrors(p: SecurityPolicy): string[] {
   if (!Number.isInteger(p.sessionAbsoluteHours) || p.sessionAbsoluteHours < 1) {
     errors.push('Session lifetime must be a whole number of hours, at least 1.');
   }
-  if (
-    errors.length === 0 &&
-    p.sessionIdleMinutes > p.sessionAbsoluteHours * 60
-  ) {
+  if (errors.length === 0 && p.sessionIdleMinutes > p.sessionAbsoluteHours * 60) {
     errors.push('The idle timeout cannot be longer than the whole session.');
   }
   return errors;
@@ -173,12 +170,17 @@ const DOMAIN = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2
 /** Problems with an SSO form before it is saved. */
 export function ssoErrors(d: SaveSsoBody, hasStoredSecret: boolean): string[] {
   const errors: string[] = [];
-  if (!d.displayName.trim()) errors.push('Give the connection a name people will recognise on the sign-in page.');
+  if (!d.displayName.trim())
+    errors.push('Give the connection a name people will recognise on the sign-in page.');
   try {
     const u = new URL(d.issuerOrMetadataUrl);
     if (u.protocol !== 'https:') errors.push('The issuer / metadata URL must use https.');
   } catch {
-    errors.push(d.protocol === 'oidc' ? 'Enter the identity provider’s issuer URL.' : 'Enter the SAML metadata URL.');
+    errors.push(
+      d.protocol === 'oidc'
+        ? 'Enter the identity provider’s issuer URL.'
+        : 'Enter the SAML metadata URL.',
+    );
   }
   if (d.protocol === 'oidc') {
     if (!d.clientId.trim()) errors.push('Enter the client id the identity provider gave you.');
@@ -186,7 +188,8 @@ export function ssoErrors(d: SaveSsoBody, hasStoredSecret: boolean): string[] {
   }
   const bad = d.domains.filter((x) => !DOMAIN.test(x));
   if (bad.length) errors.push(`Not e-mail domains: ${bad.join(', ')}.`);
-  if (d.enabled && d.domains.length === 0) errors.push('Add at least one e-mail domain to route to this connection.');
+  if (d.enabled && d.domains.length === 0)
+    errors.push('Add at least one e-mail domain to route to this connection.');
   return errors;
 }
 
@@ -216,13 +219,21 @@ export function groupCatalog(catalog: readonly PermissionDefinition[]): Permissi
 }
 
 /** Keys a role holds that this console's catalog copy does not know (shown, never dropped). */
-export function unknownKeys(keys: readonly string[], catalog: readonly PermissionDefinition[]): string[] {
+export function unknownKeys(
+  keys: readonly string[],
+  catalog: readonly PermissionDefinition[],
+): string[] {
   const known = new Set(catalog.map((p) => p.key));
   return keys.filter((k) => !known.has(k)).sort();
 }
 
 /** Problems with a role before it is saved. */
-export function roleErrors(name: string, permissions: readonly string[], existing: readonly IamRole[], editingId: number | null): string[] {
+export function roleErrors(
+  name: string,
+  permissions: readonly string[],
+  existing: readonly IamRole[],
+  editingId: number | null,
+): string[] {
   const errors: string[] = [];
   const n = name.trim();
   if (!n) errors.push('Give the role a name.');
@@ -237,7 +248,11 @@ export function roleErrors(name: string, permissions: readonly string[], existin
 // ── Grants ────────────────────────────────────────────────────────────
 
 /** Plain words for a scope. */
-export function scopeLabel(scopeType: string, scopeId: number | null, name?: string | null): string {
+export function scopeLabel(
+  scopeType: string,
+  scopeId: number | null,
+  name?: string | null,
+): string {
   switch (scopeType) {
     case 'Tenant':
       return 'Whole organisation';
@@ -311,7 +326,8 @@ export function invitationErrors(email: string, grants: readonly GrantSpec[]): s
   if (grants.length === 0) errors.push('Give the person at least one role.');
   grants.forEach((g, i) => {
     if (!g.roleId) errors.push(`Role ${i + 1}: choose a role.`);
-    if (g.scopeType !== 'Tenant' && !g.scopeId) errors.push(`Role ${i + 1}: choose what it applies to.`);
+    if (g.scopeType !== 'Tenant' && !g.scopeId)
+      errors.push(`Role ${i + 1}: choose what it applies to.`);
   });
   return errors;
 }
@@ -319,7 +335,9 @@ export function invitationErrors(email: string, grants: readonly GrantSpec[]): s
 // ── Members ───────────────────────────────────────────────────────────
 
 /** The status change offered for a member, or null (invited people are handled as invitations). */
-export function nextMemberStatus(status: MemberStatus | string): { to: MemberStatus; label: string } | null {
+export function nextMemberStatus(
+  status: MemberStatus | string,
+): { to: MemberStatus; label: string } | null {
   if (status === 'Active') return { to: 'Suspended', label: 'Suspend' };
   if (status === 'Suspended') return { to: 'Active', label: 'Reactivate' };
   return null;
@@ -347,12 +365,17 @@ export function memberLabel(m: Pick<IamMember, 'username' | 'displayName' | 'ema
 // ── Approvals ─────────────────────────────────────────────────────
 
 /** Whether this person may decide the request (never their own; only while pending). */
-export function canDecide(r: ApprovalRequest, myUserId: number | null): { ok: boolean; why: string } {
-  if (r.status !== 'Pending') return { ok: false, why: `Already ${String(r.status).toLowerCase()}.` };
+export function canDecide(
+  r: ApprovalRequest,
+  myUserId: number | null,
+): { ok: boolean; why: string } {
+  if (r.status !== 'Pending')
+    return { ok: false, why: `Already ${String(r.status).toLowerCase()}.` };
   if (myUserId !== null && r.requestedByUserId === myUserId) {
     return { ok: false, why: 'You cannot approve your own request — another person must.' };
   }
-  if (r.expiresAtUtc && Date.parse(r.expiresAtUtc) <= Date.now()) return { ok: false, why: 'This request has expired.' };
+  if (r.expiresAtUtc && Date.parse(r.expiresAtUtc) <= Date.now())
+    return { ok: false, why: 'This request has expired.' };
   return { ok: true, why: '' };
 }
 
