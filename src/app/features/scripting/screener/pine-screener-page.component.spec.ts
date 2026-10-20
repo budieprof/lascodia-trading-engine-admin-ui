@@ -8,6 +8,7 @@ import { Router, provideRouter } from '@angular/router';
 import { AgGridAngular } from 'ag-grid-angular';
 
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { provideAuthWithPermissions } from '@core/testing/auth-test-double';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 import { PineScreenerPageComponent } from './pine-screener-page.component';
@@ -315,6 +316,8 @@ describe('PineScreenerPageComponent', () => {
         provideHttpClientTesting(),
         provideRouter([]),
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
+        // The screener's save / run controls need operator and analyst permissions.
+        provideAuthWithPermissions('access.operator', 'access.analyst'),
       ],
     });
     TestBed.overrideComponent(PineScreenerPageComponent, {

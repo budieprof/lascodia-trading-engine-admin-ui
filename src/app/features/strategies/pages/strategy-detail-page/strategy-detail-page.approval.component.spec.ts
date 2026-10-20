@@ -9,6 +9,7 @@ import { StrategyDetailPageComponent } from './strategy-detail-page.component';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { NotificationService } from '@core/notifications/notification.service';
+import { provideAuthWithPermissions } from '@core/testing/auth-test-double';
 import type { StrategyDto } from '@core/api/api.types';
 
 // The detail page's lifecycle actions: Activate (whose refusal for a Draft points at "Submit for
@@ -42,6 +43,8 @@ describe('StrategyDetailPageComponent (approval and activation)', () => {
         { provide: ActivatedRoute, useValue: { snapshot: { paramMap: { get: () => '41' } } } },
         { provide: RealtimeService, useValue: { on: () => EMPTY } },
         { provide: NotificationService, useValue: notify },
+        // An operator: the lifecycle and Execution controls need access.operator.
+        provideAuthWithPermissions('access.operator', 'access.analyst', 'strategies.read'),
       ],
     });
     http = TestBed.inject(HttpTestingController);
