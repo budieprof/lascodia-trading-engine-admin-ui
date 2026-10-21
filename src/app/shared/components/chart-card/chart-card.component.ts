@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input } from '@angular/core';
+import {
+  booleanAttribute,
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+} from '@angular/core';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 
@@ -12,6 +19,7 @@ import { ThemeService } from '@core/theme/theme.service';
   template: `
     <section
       class="chart-card"
+      [class.flush]="flush()"
       [attr.aria-labelledby]="title() ? titleId : null"
       [attr.aria-describedby]="subtitle() ? subtitleId : null"
     >
@@ -73,6 +81,17 @@ import { ThemeService } from '@core/theme/theme.service';
       .chart-card:hover {
         box-shadow: var(--shadow-md);
         transform: translateY(-1px);
+      }
+
+      /* Chart as one cell of a parent panel: the panel owns the frame. */
+      .chart-card.flush,
+      .chart-card.flush:hover {
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding: 0;
+        box-shadow: none;
+        transform: none;
       }
 
       .chart-header {
@@ -184,6 +203,11 @@ export class ChartCardComponent {
   emptyMessage = input<string | null>(null);
   /** Optional second line under `emptyMessage` ("Need ≥ 3 trades", "Feed resumes at market open"). */
   emptyHint = input<string | null>(null);
+  /**
+   * Drop the card chrome (border, shadow, padding, hover lift) so the chart sits
+   * inside a panel that already frames it, such as one cell of a shared section.
+   */
+  flush = input(false, { transform: booleanAttribute });
 
   /** Registered echarts theme name, driven by the global ThemeService. */
   readonly echartsTheme = computed(() =>
