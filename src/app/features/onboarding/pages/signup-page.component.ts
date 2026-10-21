@@ -4,7 +4,7 @@ import { RouterLink } from '@angular/router';
 
 import { ApiError } from '@core/api/api.types';
 import { ThemeService } from '@core/theme/theme.service';
-import { LogoComponent } from '@shared/components/logo/logo.component';
+import { SignInShellComponent } from '@shared/components/sign-in-shell/sign-in-shell.component';
 import { OnboardingApiService } from '../onboarding-api.service';
 import { signupProblems, signupRefusal, slugFrom } from '../onboarding.logic';
 import type { PublicSignupAvailability, SignupBody, SignupResult } from '../onboarding.types';
@@ -22,107 +22,13 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
   selector: 'app-signup-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, LogoComponent],
-  styles: [
-    `
-      .signup-page {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-6) var(--space-4);
-        background: var(--bg-secondary);
-      }
-      .card {
-        width: min(480px, 100%);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-md);
-        padding: var(--space-6);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      header {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-2);
-        text-align: center;
-      }
-      h1 {
-        margin: 0;
-        font-size: var(--text-xl);
-      }
-      p {
-        margin: 0;
-        color: var(--text-secondary);
-      }
-      form {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      label {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-      }
-      .hint {
-        font-weight: normal;
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      input {
-        padding: 9px 12px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-      }
-      .submit {
-        padding: 10px 14px;
-        border-radius: var(--radius-md);
-        border: none;
-        background: var(--accent);
-        color: #fff;
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-      }
-      .submit:disabled {
-        opacity: 0.6;
-        cursor: default;
-      }
-      .errors {
-        margin: 0;
-        padding-left: var(--space-4);
-        color: var(--loss);
-        font-size: var(--text-sm);
-      }
-      .sent {
-        border-left: 3px solid var(--profit);
-        padding-left: var(--space-3);
-        color: var(--text-primary);
-      }
-      .foot {
-        text-align: center;
-        font-size: var(--text-sm);
-      }
-    `,
-  ],
+  imports: [FormsModule, RouterLink, SignInShellComponent],
   template: `
-    <main class="signup-page">
-      <section class="card" aria-labelledby="signup-title">
-        <header>
-          <app-logo [size]="48" />
-          <h1 id="signup-title">Create an organisation</h1>
-          <p>Trade demo accounts with Lascodia's strategies and research.</p>
-        </header>
+    <app-sign-in-shell>
+      <h1 class="si-title" id="signup-title">Create an organisation</h1>
+      <p class="si-subtitle">Trade demo accounts with Lascodia's strategies and research.</p>
 
+      <section class="si-body" aria-labelledby="signup-title">
         @switch (state()) {
           @case ('loading') {
             <p role="status">Loading…</p>
@@ -134,23 +40,25 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
             </p>
           }
           @case ('unavailable') {
-            <p role="status">
+            <p class="si-alert" role="status">
               Creating an organisation is not available right now. Please try again later.
             </p>
           }
           @case ('error') {
-            <p role="alert">
+            <p class="si-alert si-alert--danger" role="alert">
               The sign-up page could not be loaded. Check your connection and try again.
             </p>
           }
           @case ('sent') {
-            <p class="sent" role="status">{{ result()?.message }}</p>
+            <p class="si-alert si-alert--success" role="status">{{ result()?.message }}</p>
           }
           @case ('form') {
-            <form (ngSubmit)="submit()" novalidate>
-              <label>
-                Your work e-mail address
+            <form class="si-form" (ngSubmit)="submit()" novalidate>
+              <div class="si-field">
+                <label for="signup-email">Your work e-mail address</label>
                 <input
+                  id="signup-email"
+                  class="si-input"
                   type="email"
                   name="email"
                   autocomplete="email"
@@ -158,10 +66,12 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
                   [ngModel]="email()"
                   (ngModelChange)="email.set($event)"
                 />
-              </label>
-              <label>
-                Your name
+              </div>
+              <div class="si-field">
+                <label for="signup-name">Your name</label>
                 <input
+                  id="signup-name"
+                  class="si-input"
                   name="displayName"
                   autocomplete="name"
                   maxlength="128"
@@ -169,10 +79,12 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
                   [ngModel]="displayName()"
                   (ngModelChange)="displayName.set($event)"
                 />
-              </label>
-              <label>
-                Organisation name
+              </div>
+              <div class="si-field">
+                <label for="signup-org">Organisation name</label>
                 <input
+                  id="signup-org"
+                  class="si-input"
                   name="organisationName"
                   autocomplete="organization"
                   maxlength="128"
@@ -180,33 +92,38 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
                   [ngModel]="organisationName()"
                   (ngModelChange)="organisationName.set($event)"
                 />
-              </label>
-              <label>
-                Handle
-                <span class="hint"
-                  >(optional — how the organisation is named in links;
-                  {{ suggestedSlug() || 'made from its name' }})</span
-                >
+              </div>
+              <div class="si-field">
+                <label for="signup-slug">Handle</label>
                 <input
+                  id="signup-slug"
+                  class="si-input"
                   name="slug"
                   maxlength="63"
                   autocomplete="off"
+                  aria-describedby="signup-slug-hint"
                   [placeholder]="suggestedSlug()"
                   [ngModel]="slug()"
                   (ngModelChange)="slug.set($event)"
                 />
-              </label>
+                <span class="si-field__hint" id="signup-slug-hint"
+                  >Optional: how the organisation is named in links;
+                  {{ suggestedSlug() || 'made from its name' }}.</span
+                >
+              </div>
               @if (shownProblems().length) {
-                <ul class="errors" role="alert">
-                  @for (p of shownProblems(); track p) {
-                    <li>{{ p }}</li>
-                  }
-                </ul>
+                <div class="si-alert si-alert--danger" role="alert">
+                  <ul>
+                    @for (p of shownProblems(); track p) {
+                      <li>{{ p }}</li>
+                    }
+                  </ul>
+                </div>
               }
-              <button type="submit" class="submit" [disabled]="busy()">
+              <button type="submit" class="si-btn si-btn--primary" [disabled]="busy()">
                 {{ busy() ? 'Sending…' : 'Create organisation' }}
               </button>
-              <p class="hint">
+              <p class="si-note">
                 We e-mail you a link to verify your address and set your password and a second
                 factor (authenticator app).
                 @if (availability()?.requiresApproval) {
@@ -218,9 +135,11 @@ type PageState = 'loading' | 'off' | 'unavailable' | 'form' | 'sent' | 'error';
           }
         }
 
-        <p class="foot">Already have an account? <a routerLink="/login">Sign in</a></p>
+        <p class="si-foot">
+          Already have an account? <a class="si-link" routerLink="/login">Sign in</a>
+        </p>
       </section>
-    </main>
+    </app-sign-in-shell>
   `,
 })
 export class SignupPageComponent {

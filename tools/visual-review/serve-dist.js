@@ -7,7 +7,7 @@
 // then point the crawl scripts at it with BASE=http://localhost:4300.
 //
 // Mirrors Caddyfile: scripting API + hub -> research (:5083); every other /api/* -> api (:5081,
-// WebSocket upgrade for SignalR); /health* -> api; everything else static with SPA fallback.
+// WebSocket upgrade for SignalR); /health*, /bff/*, /scim/* -> api; everything else static with SPA fallback.
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
@@ -31,7 +31,9 @@ const api = createProxyMiddleware({
   target: 'http://localhost:5081',
   changeOrigin: true,
   ws: true,
-  pathFilter: ['/api', '/health'],
+  // /bff and /scim sit at the engine root, like Caddy's @engine_root route; without /bff the sign-in
+  // page reports "The engine could not be reached".
+  pathFilter: ['/api', '/health', '/bff', '/scim'],
 });
 app.use(scripting);
 app.use(api);

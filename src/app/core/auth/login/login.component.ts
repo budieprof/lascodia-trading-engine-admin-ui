@@ -9,52 +9,65 @@ import { signInErrorMessage } from '../bff.types';
 import { SIGNIN_ERROR_PARAM } from '../auth.guard';
 import { DEFAULT_POST_LOGIN_ROUTE, RETURN_URL_PARAM, sanitizeReturnUrl } from '../return-url';
 import { ThemeService } from '@core/theme/theme.service';
-import { LogoComponent } from '@shared/components/logo/logo.component';
+import { SignInShellComponent } from '@shared/components/sign-in-shell/sign-in-shell.component';
 
 @Component({
   selector: 'app-login',
   standalone: true,
-  imports: [FormsModule, RouterLink, LogoComponent],
+  imports: [FormsModule, RouterLink, SignInShellComponent],
   template: `
-    <div class="login-page">
-      <div class="login-card">
-        <div class="login-header">
-          <app-logo [size]="60" />
-          <h1>Lascodia Trading Engine</h1>
-          <p>Admin Console</p>
-        </div>
+    <app-sign-in-shell [secured]="bffMode">
+      @if (bffMode) {
+        <h1 class="si-title">Sign in</h1>
+        <p class="si-subtitle">
+          Use your organisation account. You will confirm it is you with a second factor.
+        </p>
 
-        @if (bffMode) {
-          <div class="bff-signin">
-            @if (notice(); as n) {
-              <p class="notice" role="status">{{ n }}</p>
+        <div class="si-body">
+          @if (notice(); as n) {
+            <p class="si-alert" role="status">{{ n }}</p>
+          }
+          @if (error()) {
+            <p class="si-alert si-alert--danger" role="alert">{{ error() }}</p>
+          }
+          <button
+            type="button"
+            class="si-btn si-btn--primary"
+            (click)="onBffSignIn()"
+            [disabled]="loading()"
+          >
+            @if (loading()) {
+              <span class="si-spinner" aria-hidden="true"></span>
+              <span>Opening sign-in…</span>
+            } @else {
+              Continue to sign in
             }
-            @if (error()) {
-              <div class="error-message" role="alert">{{ error() }}</div>
-            }
-            <button type="button" class="login-btn" (click)="onBffSignIn()" [disabled]="loading()">
-              @if (loading()) {
-                <span class="spinner"></span>
-              } @else {
-                Sign in
-              }
-            </button>
-            <p class="dev-note">
-              You sign in with your organisation account and its second factor. This console never
-              stores your password or a token.
+          </button>
+          <p class="si-note">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M8 1a3.5 3.5 0 0 0-3.5 3.5V6H4a1.5 1.5 0 0 0-1.5 1.5v6A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5v-6A1.5 1.5 0 0 0 12 6h-.5V4.5A3.5 3.5 0 0 0 8 1Zm2 5H6V4.5a2 2 0 1 1 4 0V6Z"
+              />
+            </svg>
+            This console never sees your password and never stores a token.
+          </p>
+          @if (signupOffered()) {
+            <!-- Self-serve sign-up (multi-tenancy Phase 7, c7-lifecycle): only while the engine offers it. -->
+            <p class="si-foot">
+              New to Lascodia? <a class="si-link" routerLink="/signup">Create an organisation</a>
             </p>
-            @if (signupOffered()) {
-              <!-- Self-serve sign-up (multi-tenancy Phase 7, c7-lifecycle): only while the engine offers it. -->
-              <p class="dev-note"><a routerLink="/signup">Create an organisation</a></p>
-            }
-          </div>
-        } @else {
-          <div class="mode-toggle" role="tablist" aria-label="Login mode">
+          }
+        </div>
+      } @else {
+        <h1 class="si-title">Sign in</h1>
+        <p class="si-subtitle">Lascodia Trading Engine admin console.</p>
+
+        <div class="si-body">
+          <div class="si-segmented" role="tablist" aria-label="Login mode">
             <button
               type="button"
               role="tab"
-              class="mode-btn"
-              [class.active]="mode() === 'admin'"
               [attr.aria-selected]="mode() === 'admin'"
               (click)="mode.set('admin')"
             >
@@ -63,8 +76,6 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
             <button
               type="button"
               role="tab"
-              class="mode-btn"
-              [class.active]="mode() === 'operator'"
               [attr.aria-selected]="mode() === 'operator'"
               (click)="mode.set('operator')"
             >
@@ -73,11 +84,12 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
           </div>
 
           @if (mode() === 'admin') {
-            <form (ngSubmit)="onAdminLogin()" class="login-form">
-              <div class="field">
+            <form (ngSubmit)="onAdminLogin()" class="si-form login-form">
+              <div class="si-field">
                 <label for="username">Username</label>
                 <input
                   id="username"
+                  class="si-input"
                   type="text"
                   [(ngModel)]="username"
                   name="username"
@@ -87,10 +99,11 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
                 />
               </div>
 
-              <div class="field">
+              <div class="si-field">
                 <label for="adminPassword">Password</label>
                 <input
                   id="adminPassword"
+                  class="si-input"
                   type="password"
                   [(ngModel)]="adminPassword"
                   name="adminPassword"
@@ -100,25 +113,26 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
               </div>
 
               @if (error()) {
-                <div class="error-message">{{ error() }}</div>
+                <p class="si-alert si-alert--danger" role="alert">{{ error() }}</p>
               }
 
-              <button type="submit" [disabled]="loading()" class="login-btn">
+              <button type="submit" [disabled]="loading()" class="si-btn si-btn--primary">
                 @if (loading()) {
-                  <span class="spinner"></span>
+                  <span class="si-spinner" aria-hidden="true"></span>
                 } @else {
-                  Sign In
+                  Sign in
                 }
               </button>
             </form>
 
-            <p class="dev-note">Admin user — username &amp; password.</p>
+            <p class="si-note">Admin user: username and password.</p>
           } @else if (mode() === 'operator') {
-            <form (ngSubmit)="onOperatorLogin()" class="login-form">
-              <div class="field">
+            <form (ngSubmit)="onOperatorLogin()" class="si-form login-form">
+              <div class="si-field">
                 <label for="accountId">Account ID</label>
                 <input
                   id="accountId"
+                  class="si-input"
                   type="text"
                   [(ngModel)]="accountId"
                   name="accountId"
@@ -128,10 +142,11 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
                 />
               </div>
 
-              <div class="field">
-                <label for="brokerServer">Broker Server</label>
+              <div class="si-field">
+                <label for="brokerServer">Broker server</label>
                 <input
                   id="brokerServer"
+                  class="si-input"
                   type="text"
                   [(ngModel)]="brokerServer"
                   name="brokerServer"
@@ -140,10 +155,11 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
                 />
               </div>
 
-              <div class="field">
+              <div class="si-field">
                 <label for="password">Password</label>
                 <input
                   id="password"
+                  class="si-input"
                   type="password"
                   [(ngModel)]="password"
                   name="password"
@@ -153,219 +169,34 @@ import { LogoComponent } from '@shared/components/logo/logo.component';
               </div>
 
               @if (error()) {
-                <div class="error-message">{{ error() }}</div>
+                <p class="si-alert si-alert--danger" role="alert">{{ error() }}</p>
               }
 
-              <button type="submit" [disabled]="loading()" class="login-btn">
+              <button type="submit" [disabled]="loading()" class="si-btn si-btn--primary">
                 @if (loading()) {
-                  <span class="spinner"></span>
+                  <span class="si-spinner" aria-hidden="true"></span>
                 } @else {
-                  Sign In
+                  Sign in
                 }
               </button>
             </form>
 
-            <p class="dev-note">Engine auth — JWT carries role claims.</p>
+            <p class="si-note">Engine auth: the token carries role claims.</p>
           }
-        }
-      </div>
-    </div>
+        </div>
+      }
+    </app-sign-in-shell>
   `,
   changeDetection: ChangeDetectionStrategy.Eager,
   styles: [
     `
-      .login-page {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--bg-primary);
-        padding: var(--space-4);
-      }
-
-      .login-card {
-        width: 100%;
-        max-width: 400px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-xl);
-        padding: var(--space-10);
-        box-shadow: var(--shadow-lg);
-      }
-
-      .login-header {
-        text-align: center;
-        margin-bottom: var(--space-8);
-      }
-
-      app-logo {
-        margin: 0 auto var(--space-4);
-        /* Lift the mark off the card the way an app icon sits on a shelf. */
-        filter: drop-shadow(0 6px 16px rgba(0, 87, 216, 0.28));
-      }
-
-      .login-header h1 {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        margin: 0 0 var(--space-1);
-        letter-spacing: var(--tracking-tight);
-      }
-
-      .login-header p {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        margin: 0;
-      }
-
+      /* Reserve the height of the tallest legacy form (Operator: three fields) so the page does not
+       * jump when the operator switches tabs; the submit button stays pinned to the bottom. */
       .login-form {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-        /* Reserve the height of the tallest form (Operator: three fields) so the card does not
-         * resize when the operator switches tabs; the submit button is pinned to the bottom so it
-         * stays put as well. */
-        min-height: 268px;
+        min-height: 300px;
       }
-      .login-form .login-btn {
+      .login-form .si-btn {
         margin-top: auto;
-      }
-      .bff-signin {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .notice {
-        margin: 0;
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-        line-height: 1.4;
-      }
-
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-
-      .field label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-      }
-
-      .field input {
-        height: 40px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-base);
-        font-family: inherit;
-        outline: none;
-        transition:
-          box-shadow 0.15s ease,
-          border-color 0.15s ease;
-      }
-
-      .field input:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.3);
-      }
-
-      .field input::placeholder {
-        color: var(--text-tertiary);
-      }
-
-      .error-message {
-        font-size: var(--text-sm);
-        color: var(--loss);
-        text-align: center;
-      }
-
-      .login-btn {
-        height: 44px;
-        background: var(--accent);
-        color: white;
-        border: none;
-        border-radius: var(--radius-full);
-        font-size: var(--text-base);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-top: var(--space-2);
-      }
-
-      .login-btn:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-
-      .login-btn:active:not(:disabled) {
-        transform: scale(0.97);
-      }
-
-      .login-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-
-      .spinner {
-        width: 18px;
-        height: 18px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: white;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-      }
-
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .dev-note {
-        text-align: center;
-        font-size: 11px;
-        color: var(--text-tertiary);
-        margin: var(--space-4) 0 0;
-      }
-
-      .mode-toggle {
-        display: flex;
-        gap: 4px;
-        padding: 4px;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
-        margin-bottom: var(--space-5);
-      }
-
-      .mode-btn {
-        flex: 1;
-        padding: 8px 16px;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        transition: all 0.15s ease;
-      }
-
-      .mode-btn.active {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm);
       }
     `,
   ],

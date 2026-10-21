@@ -8,7 +8,7 @@ import { signInErrorMessage, type BffMembership } from '@core/auth/bff.types';
 import { BrowserLocation } from '@core/browser/browser-location';
 import { DEFAULT_POST_LOGIN_ROUTE } from '@core/auth/return-url';
 import { ThemeService } from '@core/theme/theme.service';
-import { LogoComponent } from '@shared/components/logo/logo.component';
+import { SignInShellComponent } from '@shared/components/sign-in-shell/sign-in-shell.component';
 import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText } from '@features/iam/iam.logic';
 import { isPlausibleInviteToken, newlyActive } from './invite.logic';
@@ -28,18 +28,16 @@ type Stage = 'sign-in' | 'ready' | 'accepting' | 'accepted' | 'failed' | 'unsupp
   selector: 'app-invite-accept-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, LogoComponent],
+  imports: [RouterLink, SignInShellComponent],
   template: `
-    <div class="wrap">
-      <div class="card">
-        <div class="head">
-          <app-logo [size]="48" />
-          <h1>Join an organisation</h1>
-        </div>
+    <app-sign-in-shell>
+      <h1 class="si-title">Join an organisation</h1>
+      <p class="si-subtitle">Accept an invitation to work in a Lascodia organisation.</p>
 
+      <div class="si-body">
         @switch (stage()) {
           @case ('invalid') {
-            <p class="error" role="alert">
+            <p class="si-alert si-alert--danger" role="alert">
               This invitation link is not complete. Open the link from the message you received
               again.
             </p>
@@ -49,111 +47,54 @@ type Stage = 'sign-in' | 'ready' | 'accepting' | 'accepted' | 'failed' | 'unsupp
               Invitations are accepted with organisation sign-in, which this console is not using
               yet. Ask the person who invited you to add you instead.
             </p>
-            <a class="btn" routerLink="/login">Go to sign-in</a>
+            <a class="si-btn si-btn--secondary" routerLink="/login">Go to sign-in</a>
           }
           @case ('sign-in') {
             @if (error()) {
-              <p class="error" role="alert">{{ error() }}</p>
+              <p class="si-alert si-alert--danger" role="alert">{{ error() }}</p>
             }
             <p>
-              You have been invited to a Lascodia organisation. Sign in — or create your account —
-              with the e-mail address the invitation was sent to, then accept it here.
+              Sign in, or create your account, with the e-mail address the invitation was sent to,
+              then accept it here.
             </p>
-            <button type="button" class="btn primary" (click)="signIn()">Sign in to accept</button>
+            <button type="button" class="si-btn si-btn--primary" (click)="signIn()">
+              Sign in to accept
+            </button>
           }
           @case ('ready') {
             <p>
               Signed in as <strong>{{ who() }}</strong
               >. Accept the invitation to join the organisation with the roles it gives you.
             </p>
-            <button type="button" class="btn primary" (click)="accept()">Accept invitation</button>
-            <a class="btn" [routerLink]="landing">Not now</a>
+            <div class="si-actions">
+              <button type="button" class="si-btn si-btn--primary" (click)="accept()">
+                Accept invitation
+              </button>
+              <a class="si-btn si-btn--secondary" [routerLink]="landing">Not now</a>
+            </div>
           }
           @case ('accepting') {
-            <p>Accepting…</p>
+            <p role="status">Accepting…</p>
           }
           @case ('accepted') {
-            <p class="ok" role="status">You have joined.</p>
-            @for (m of joined(); track m.tenantId) {
-              <button type="button" class="btn primary" (click)="open(m)">Open {{ m.name }}</button>
-            }
-            <a class="btn" [routerLink]="landing">Go to the console</a>
+            <p class="si-alert si-alert--success" role="status">You have joined.</p>
+            <div class="si-actions">
+              @for (m of joined(); track m.tenantId) {
+                <button type="button" class="si-btn si-btn--primary" (click)="open(m)">
+                  Open {{ m.name }}
+                </button>
+              }
+              <a class="si-btn si-btn--secondary" [routerLink]="landing">Go to the console</a>
+            </div>
           }
           @case ('failed') {
-            <p class="error" role="alert">{{ error() }}</p>
-            <a class="btn" [routerLink]="landing">Go to the console</a>
+            <p class="si-alert si-alert--danger" role="alert">{{ error() }}</p>
+            <a class="si-btn si-btn--secondary" [routerLink]="landing">Go to the console</a>
           }
         }
       </div>
-    </div>
+    </app-sign-in-shell>
   `,
-  styles: [
-    `
-      .wrap {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--bg-primary);
-        padding: var(--space-4);
-      }
-      .card {
-        width: 100%;
-        max-width: 440px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-xl);
-        padding: var(--space-8);
-        box-shadow: var(--shadow-lg);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        line-height: 1.5;
-      }
-      .head {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      h1 {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      p {
-        margin: 0;
-      }
-      .error {
-        color: var(--loss);
-      }
-      .ok {
-        font-weight: var(--font-semibold);
-      }
-      .btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 42px;
-        border-radius: var(--radius-full);
-        border: 1px solid var(--border);
-        background: transparent;
-        color: var(--text-primary);
-        font-size: var(--text-base);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        text-decoration: none;
-        cursor: pointer;
-      }
-      .btn.primary {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
-      }
-    `,
-  ],
 })
 export class InviteAcceptPageComponent {
   private readonly auth = inject(AuthService);
