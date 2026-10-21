@@ -811,56 +811,64 @@
   z-index: 1;
 }
 
-/* ── Combined analytics row ─────────────────────────────────────
-   Regime / ML prediction / correlation + the spread & volatility
-   charts, all on one row. minmax(0, …) lets the echarts cells shrink
-   below their content width so nothing overflows the track. */
-.analytics-row {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: var(--space-3);
-  margin-top: var(--space-3);
-  /* Top-aligned: stretching every card to the tallest one and centring the
-     short panels' content left three cards with a title at the top and the
-     numbers floating in the middle of empty space. */
-  align-items: start;
+/* ── Regime & Cross-Market panel ────────────────────────────────
+   Market Insights chrome (.insights-section / .insights-grid): one frame,
+   hairline cells. Cells stretch to the row, so the two short panels
+   (regime, ML prediction) stack in one column beside the three tall ones
+   instead of each padding out to the spread chart's height. Every area is
+   filled at every breakpoint, so the 1px border backdrop never shows
+   through as a grey block. minmax(0, …) lets the echarts cells shrink. */
+.insights-grid.analytics-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr);
+  grid-template-areas:
+    'regime corr spread vol'
+    'pred corr spread vol';
 }
-/* Give the three insight panels the same standalone card chrome as the
-   app-chart-card siblings (background + padding already come from
-   .insight-card). */
-.analytics-row > .insight-card {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  justify-content: flex-start;
+.a-regime {
+  grid-area: regime;
 }
-/* Keep a long correlation list from stretching the whole row — scroll it. */
-.analytics-row .insight-correlation .corr-list {
-  max-height: 240px;
-  overflow-y: auto;
+.a-pred {
+  grid-area: pred;
 }
-/* Viewport width, sidebar included: five-up wants ~1,400px of CONTENT, which a 1440px screen
-   with the sidebar open does not have (the spread chart was 200px wide). */
-@media (max-width: 1720px) {
-  .analytics-row {
-    /* insight panels (3-up) on top, charts (2-up) below */
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-  .analytics-row > .insight-card {
-    grid-column: span 2;
-  }
-  .analytics-row > app-chart-card {
-    grid-column: span 3;
+.a-corr {
+  grid-area: corr;
+}
+.a-spread {
+  grid-area: spread;
+}
+.a-vol {
+  grid-area: vol;
+}
+/* Viewport width, sidebar included: four-up wants ~1,250px of content, which a
+   1440px screen with the sidebar open does not have. */
+@media (max-width: 1560px) {
+  .insights-grid.analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'regime corr'
+      'pred corr'
+      'spread vol';
   }
 }
 @media (max-width: 900px) {
-  .analytics-row {
-    grid-template-columns: 1fr;
+  .insights-grid.analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'regime' 'pred' 'corr' 'spread' 'vol';
   }
-  .analytics-row > .insight-card,
-  .analytics-row > app-chart-card {
-    grid-column: auto;
-  }
+}
+/* The correlation list fills its cell and scrolls; size containment keeps a long
+   watch list from setting the row height for every other cell. */
+.a-corr .corr-list {
+  contain: size;
+  flex: 1 1 auto;
+  min-height: 240px;
+  overflow-y: auto;
+}
+.insight-caption {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
 }
 
 @media (max-width: 1200px) {
