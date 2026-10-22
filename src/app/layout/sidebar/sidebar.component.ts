@@ -34,7 +34,11 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
           <app-logo [size]="32" [label]="collapsed() ? brandName() : ''" />
         }
         @if (!collapsed()) {
-          <span class="logo-text">{{ brandName() }}</span>
+          <!-- Two-line lockup: the name, and what it is in a quieter line under it. -->
+          <span class="logo-lockup">
+            <span class="logo-text">{{ brandName() }}</span>
+            <span class="logo-sub">Trading Engine</span>
+          </span>
         }
       </div>
 
@@ -242,11 +246,30 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         object-fit: contain;
       }
 
+      .logo-lockup {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+        min-width: 0;
+        line-height: 1.15;
+      }
+
       .logo-text {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
+        font-size: 16px;
+        font-weight: 650;
         color: var(--text-primary);
-        letter-spacing: var(--tracking-tight);
+        letter-spacing: -0.018em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .logo-sub {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        /* secondary, not tertiary: tertiary is ~3.3:1 on the sidebar grey, short of AA at 11px */
+        color: var(--text-secondary);
+        letter-spacing: 0.01em;
         white-space: nowrap;
       }
 

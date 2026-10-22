@@ -7,9 +7,16 @@ import { ChangeDetectionStrategy, Component, computed, input } from '@angular/co
  * both render it above the fold, and inline shapes cost no request and stay
  * crisp at any size.
  *
- * The geometry mirrors `scripts/generate-icons.mjs`, which produces the
- * favicon and PWA rasters from the same coordinates. Change one, change both.
- * That file carries the reasoning behind the two-candle composition.
+ * Same composition and blues as the favicon (`scripts/generate-icons.mjs`, which
+ * carries the reasoning behind the two candles), but a different drawing: that
+ * one is fitted to a 16px browser tab, this one to the 32px sidebar, where the
+ * favicon's heavy strokes read as a white block on the tile. Here 1px = 16 grid
+ * units and every edge sits on a multiple of 16: axis 3px, candle bodies 4px
+ * wide, wicks 1px, with the glyph centred in 112..400 x 96..416 (about 60% of
+ * the plate). A hairline inner edge and a top highlight give the tile depth.
+ * Keycloak's sign-in theme carries a copy (engine repo,
+ * deploy/keycloak/themes/lascodia/login/resources/img/logo-mark.svg): change both.
+ * Check changes with a true 1x render magnified, not the 512 artwork.
  */
 
 /**
@@ -35,29 +42,40 @@ let instanceCount = 0;
       [attr.aria-hidden]="label() ? null : 'true'"
     >
       <defs>
-        <linearGradient [attr.id]="fillId" x1="0" y1="0" x2="0.4" y2="1">
-          <stop offset="0" stop-color="#3B9DFF" />
-          <stop offset="1" stop-color="#0057D8" />
+        <linearGradient [attr.id]="fillId" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#4DA6FF" />
+          <stop offset="1" stop-color="#0A4FD1" />
         </linearGradient>
         <linearGradient [attr.id]="sheenId" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="#fff" stop-opacity="0.1" />
-          <stop offset="0.55" stop-color="#fff" stop-opacity="0" />
+          <stop offset="0" stop-color="#fff" stop-opacity="0.22" />
+          <stop offset="0.5" stop-color="#fff" stop-opacity="0" />
         </linearGradient>
       </defs>
-      <rect width="512" height="512" rx="114" [attr.fill]="fillRef()" />
-      <rect width="512" height="512" rx="114" [attr.fill]="sheenRef()" />
-      <path
-        d="M80 80 V432 H432"
+      <rect width="512" height="512" rx="120" [attr.fill]="fillRef()" />
+      <rect width="512" height="512" rx="120" [attr.fill]="sheenRef()" />
+      <rect
+        x="8"
+        y="8"
+        width="496"
+        height="496"
+        rx="112"
         fill="none"
         stroke="#fff"
-        stroke-width="64"
+        stroke-opacity="0.18"
+        stroke-width="16"
+      />
+      <path
+        d="M136 120 V392 H376"
+        fill="none"
+        stroke="#fff"
+        stroke-width="48"
         stroke-linecap="round"
         stroke-linejoin="round"
       />
-      <path d="M208 240 V408" stroke="#fff" stroke-width="40" stroke-linecap="round" />
-      <rect x="160" y="288" width="96" height="104" rx="22" fill="#fff" />
-      <path d="M352 96 V360" stroke="#fff" stroke-width="40" stroke-linecap="round" />
-      <rect x="304" y="144" width="96" height="168" rx="22" fill="#fff" />
+      <path d="M240 224 V352" stroke="#fff" stroke-width="16" stroke-linecap="round" />
+      <rect x="208" y="256" width="64" height="80" rx="12" fill="#fff" />
+      <path d="M336 112 V288" stroke="#fff" stroke-width="16" stroke-linecap="round" />
+      <rect x="304" y="144" width="64" height="112" rx="12" fill="#fff" />
     </svg>
   `,
   styles: [
