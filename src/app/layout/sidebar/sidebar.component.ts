@@ -10,28 +10,20 @@ import {
 import { NavigationEnd, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map, startWith } from 'rxjs';
+import { LucideDynamicIcon } from '@lucide/angular';
 import { ThemeService } from '@core/theme/theme.service';
 import { AuthService } from '@core/auth/auth.service';
 import { NAV_GROUPS, type NavGroup } from './nav-items';
+import { navIcon } from './nav-icons';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { LogoComponent } from '@shared/components/logo/logo.component';
 import { TenantBrandingService } from '@core/branding/tenant-branding.service';
 
-/**
- * Force emoji presentation on a single-code-point icon. ⚙ ⏸ 🛡 🎛 👁 … default to TEXT
- * presentation unless followed by U+FE0F, and rendered as tiny monochrome glyphs (Strategy
- * Settings read as a dot) beside full-colour neighbours. Harmless on code points that are
- * emoji by default; multi-code-point icons already carry their selector.
- */
-function asEmoji(icon: string): string {
-  return [...icon].length === 1 ? `${icon}️` : icon;
-}
-
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, LogoComponent],
+  imports: [RouterLink, RouterLinkActive, LogoComponent, LucideDynamicIcon],
   template: `
     <aside class="sidebar" [class.collapsed]="collapsed()" aria-label="Primary navigation">
       <div class="sidebar-header">
@@ -60,7 +52,13 @@ function asEmoji(icon: string): string {
             (focus)="showTip('Dashboard', $event)"
             (blur)="hideTip()"
           >
-            <span class="nav-icon" aria-hidden="true">⊞</span>
+            <svg
+              class="nav-icon"
+              [lucideIcon]="icons.dashboard"
+              [size]="18"
+              [strokeWidth]="1.75"
+              aria-hidden="true"
+            ></svg>
             @if (!collapsed()) {
               <span class="nav-label">Dashboard</span>
             }
@@ -89,7 +87,13 @@ function asEmoji(icon: string): string {
               (focus)="onItemEnter(item.route, item.label, $event)"
               (blur)="hideTip()"
             >
-              <span class="nav-icon" aria-hidden="true">{{ item.icon }}</span>
+              <svg
+                class="nav-icon"
+                [lucideIcon]="item.icon"
+                [size]="18"
+                [strokeWidth]="1.75"
+                aria-hidden="true"
+              ></svg>
               @if (!collapsed()) {
                 <span class="nav-label">{{ item.label }}</span>
               }
@@ -111,7 +115,13 @@ function asEmoji(icon: string): string {
             (focus)="showTip('API Swagger', $event)"
             (blur)="hideTip()"
           >
-            <span class="nav-icon" aria-hidden="true">⌘</span>
+            <svg
+              class="nav-icon"
+              [lucideIcon]="icons.swagger"
+              [size]="18"
+              [strokeWidth]="1.75"
+              aria-hidden="true"
+            ></svg>
             @if (!collapsed()) {
               <span class="nav-label">API Swagger</span>
             }
@@ -131,9 +141,13 @@ function asEmoji(icon: string): string {
           (focus)="showTip(themeService.theme() === 'dark' ? 'Light mode' : 'Dark mode', $event)"
           (blur)="hideTip()"
         >
-          <span class="nav-icon" aria-hidden="true">{{
-            themeService.theme() === 'dark' ? '☀' : '☾'
-          }}</span>
+          <svg
+            class="nav-icon"
+            [lucideIcon]="themeService.theme() === 'dark' ? icons.light : icons.dark"
+            [size]="18"
+            [strokeWidth]="1.75"
+            aria-hidden="true"
+          ></svg>
           @if (!collapsed()) {
             <span class="nav-label">{{ themeService.theme() === 'dark' ? 'Light' : 'Dark' }}</span>
           }
@@ -149,8 +163,13 @@ function asEmoji(icon: string): string {
           (focus)="showTip(collapsed() ? 'Expand sidebar' : 'Collapse sidebar', $event)"
           (blur)="hideTip()"
         >
-          <!-- ▸ / ◂ are SMALL triangles: at 14px they rendered as a dot. -->
-          <span class="nav-icon" aria-hidden="true">{{ collapsed() ? '»' : '«' }}</span>
+          <svg
+            class="nav-icon"
+            [lucideIcon]="collapsed() ? icons.expand : icons.collapse"
+            [size]="18"
+            [strokeWidth]="1.75"
+            aria-hidden="true"
+          ></svg>
           @if (!collapsed()) {
             <span class="nav-label">Collapse</span>
           }
@@ -349,11 +368,13 @@ function asEmoji(icon: string): string {
         outline-offset: -2px;
       }
 
+      /* Line icons in the item's text colour (stroke = currentColor): grey at rest, primary on
+         hover, accent when active. 18px drawn in the 20px slot the labels are aligned to. */
       .nav-icon {
-        width: 20px;
-        min-width: 20px;
-        text-align: center;
-        font-size: 14px;
+        flex: none;
+        width: 18px;
+        height: 18px;
+        margin: 0 1px;
       }
 
       .nav-label {
@@ -448,6 +469,15 @@ export class SidebarComponent {
   }
 
   readonly navGroups: NavGroup[] = NAV_GROUPS;
+  /** The rail's own controls, in the same line-icon set as the nav items. */
+  protected readonly icons = {
+    dashboard: navIcon.LayoutDashboard,
+    swagger: navIcon.Braces,
+    light: navIcon.Sun,
+    dark: navIcon.Moon,
+    collapse: navIcon.PanelLeftClose,
+    expand: navIcon.PanelLeftOpen,
+  };
   readonly canSeeDashboard = computed(() => this.auth.canSeePath('/dashboard'));
 
   /**
@@ -500,9 +530,7 @@ export class SidebarComponent {
     const groups = this.navGroups
       .map((g) => ({
         ...g,
-        items: g.items
-          .filter((item) => this.auth.canSeePath(item.route))
-          .map((item) => ({ ...item, icon: asEmoji(item.icon) })),
+        items: g.items.filter((item) => this.auth.canSeePath(item.route)),
       }))
       .filter((g) => g.items.length > 0);
     return groups;
