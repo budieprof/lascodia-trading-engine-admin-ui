@@ -1,3 +1,5 @@
+import { ENTITLEMENT_RESPONSE_CODE, entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
+
 import { BookState } from './md-book';
 import { TickRing, TradeRing } from './md-rings';
 import type {
@@ -6,8 +8,10 @@ import type {
   MdHistory,
   MdHistoryRequest,
   MdKind,
+  MdRevokedWire,
   MdSubscribeResult,
 } from './marketdata.types';
+import { MD_REVOKED_EVENT } from './marketdata.types';
 
 /**
  * The market-data stream's engine room, free of Angular so it can be tested with a fake connection: one hub
@@ -51,6 +55,8 @@ export interface MdStreamDeps {
   changed(symbolKey: string): void;
   /** The connection state changed. */
   stateChanged(state: MdStreamState): void;
+  /** The server ended subscriptions because the organisation lost feeds (`mdRevoked`): re-read the entitlements. */
+  revoked?(feeds: readonly string[]): void;
 }
 
 export type MdStreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
@@ -102,8 +108,14 @@ export interface MdWatchStatus {
   protocol: MdProtocol | null;
   /** `sourceId:kind` pairs streaming. */
   subscribed: string[];
-  /** Feeds refused by entitlements. */
+  /** Feeds refused by entitlements (at Subscribe, or revoked since). */
   denied: string[];
+  /** Why each denied feed was refused, by feed id (the engine's words). */
+  deniedReasons: Record<string, string>;
+  /** "Not entitled" in the engine's words, through the shared entitlement-refusal helper; null when nothing is refused. */
+  notEntitled: string | null;
+  /** Set when the server revoked feeds mid-stream (`mdRevoked`). */
+  revoked: { feeds: string[]; message: string } | null;
   /** Requested sources / kinds the hub does not know. */
   unknown: string[];
   error: string | null;
@@ -174,6 +186,9 @@ export class MarketDataStreamCore {
           protocol: this.protocol,
           subscribed: [],
           denied: [],
+          deniedReasons: {},
+          notEntitled: null,
+          revoked: null,
           unknown: [],
           error: null,
         },
@@ -287,6 +302,7 @@ export class MarketDataStreamCore {
     this.restartAttempt = 0;
     this.unavailableUntil = 0;
     conn.on(MD_FRAME_EVENT, (payload: unknown) => this.onFramePayload(payload));
+    conn.on(MD_REVOKED_EVENT, (payload: unknown) => this.onRevoked(payload));
     conn.onclose(() => {
       if (this.connection !== conn) return;
       this.connection = null;
@@ -387,11 +403,17 @@ export class MarketDataStreamCore {
     entry.subscribedKey = key;
     const r = await this.invoke<MdSubscribeResult>('Subscribe', entry.key, w.sources, w.kinds);
     if (this.symbols.get(entry.key) !== entry) return;
+    const denied = r?.denied ?? [];
+    const deniedReasons = { ...(r?.deniedReasons ?? {}) };
     entry.status = {
       state: this.state,
       protocol: this.protocol,
       subscribed: r?.subscribed ?? [],
-      denied: r?.denied ?? [],
+      denied,
+      deniedReasons,
+      notEntitled: notEntitledText(denied, deniedReasons),
+      // A fresh answer replaces a revocation: if the feed is still lost it is in `denied` again.
+      revoked: null,
       unknown: r?.unknown ?? [],
       error: r
         ? (r.error ?? (r.ok ? null : 'Nothing could be subscribed.'))
@@ -449,6 +471,54 @@ export class MarketDataStreamCore {
       for (const f of held) this.applyFrame(entry, f);
       this.deps.changed(entry.key);
     }
+  }
+
+  // ── Entitlement revocation (C6) ────────────────────────────────────────────────────────────
+
+  /**
+   * `mdRevoked`: the server has already ended these subscriptions. Drop what they streamed (renderers must not keep
+   * drawing a feed the organisation no longer has), say "not entitled" in the engine's words, and tell the Angular side
+   * to re-read the entitlements. Nothing is re-subscribed: a new Subscribe would answer `denied` until a licence is back.
+   */
+  private onRevoked(payload: unknown): void {
+    const r = payload as Partial<MdRevokedWire> | null;
+    if (!r || typeof r !== 'object') return;
+    const feeds = Array.isArray(r.feeds) ? r.feeds.filter((f): f is string => typeof f === 'string') : [];
+    const message = typeof r.message === 'string' ? r.message : '';
+    const touched = new Set<SymbolEntry>();
+    for (const sub of Array.isArray(r.subscriptions) ? r.subscriptions : []) {
+      if (typeof sub !== 'string') continue;
+      const [symbol, sourceId, kind] = sub.split('|');
+      const entry = symbol ? this.symbols.get(symbol.toUpperCase()) : undefined;
+      if (!entry || !sourceId) continue;
+      const stream = entry.streams.get(sourceId);
+      if (stream) {
+        if (kind === 'book') {
+          stream.book.reset();
+          this.emitBook(entry, stream, [], true);
+        } else if (kind === 'ticks') stream.ticks.clear();
+        else if (kind === 'trades') stream.trades.clear();
+      }
+      entry.status.subscribed = entry.status.subscribed.filter((s) => s !== `${sourceId}:${kind}`);
+      // Nothing left that this source may stream here: forget it entirely.
+      if (stream && !entry.status.subscribed.some((s) => s.startsWith(`${sourceId}:`))) entry.streams.delete(sourceId);
+      touched.add(entry);
+    }
+    // Only the symbols whose subscriptions ended are refused; others never streamed the lost feed.
+    for (const entry of touched) {
+      const denied = [...new Set([...entry.status.denied, ...feeds])];
+      const deniedReasons = { ...entry.status.deniedReasons };
+      for (const f of feeds) deniedReasons[f] = message || deniedReasons[f] || '';
+      entry.status = {
+        ...entry.status,
+        denied,
+        deniedReasons,
+        notEntitled: notEntitledText(denied, deniedReasons),
+        revoked: { feeds, message },
+      };
+      this.deps.changed(entry.key);
+    }
+    this.deps.revoked?.(feeds);
   }
 
   // ── Frames ─────────────────────────────────────────────────────────────────────────────────
@@ -545,4 +615,14 @@ export class MarketDataStreamCore {
       .catch(() => undefined)
       .finally(() => (stream.keyframePending = false));
   }
+}
+
+/** "Not entitled" for refused feeds, worded by the shared helper (the engine's reason, else its default sentence). */
+export function notEntitledText(denied: readonly string[], reasons: Readonly<Record<string, string>>): string | null {
+  if (!denied.length) return null;
+  const reason = denied.map((f) => reasons[f]).find((m) => typeof m === 'string' && m.trim());
+  return entitlementRefusalMessage({
+    responseCode: ENTITLEMENT_RESPONSE_CODE,
+    message: reason ?? `Your organisation is not entitled to ${denied.join(', ')}.`,
+  });
 }

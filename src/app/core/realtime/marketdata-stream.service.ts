@@ -11,6 +11,7 @@ import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { MarketDataEntitlementsService } from '@core/market-data/md-entitlements.service';
 import { hubConnectPlan } from './hub-auth';
 import { MarketDataApiService } from './marketdata-api.service';
 import {
@@ -64,6 +65,9 @@ const EMPTY_STATUS: MdWatchStatus = {
   protocol: null,
   subscribed: [],
   denied: [],
+  deniedReasons: {},
+  notEntitled: null,
+  revoked: null,
   unknown: [],
   error: null,
 };
@@ -81,6 +85,8 @@ export class MarketDataStreamService {
   private readonly runtime = inject(RUNTIME_CONFIG);
   private readonly api = inject(MarketDataApiService);
   private readonly zone = inject(NgZone);
+  /** The organisation's feeds (C6): re-read when the hub revokes one, so layers grey it out before asking again. */
+  readonly entitlements = inject(MarketDataEntitlementsService);
   private readonly perSymbol = new Map<string, SymbolSignals>();
 
   /** The hub connection's state; `connected` = frames are flowing (consumers may stop polling). */
@@ -96,6 +102,7 @@ export class MarketDataStreamService {
     clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
     backoffMs,
     changed: (key) => this.markDirty(key),
+    revoked: () => void this.entitlements.refresh(),
     stateChanged: (s) => {
       this.state.set(s);
       this.protocol.set(s === 'connected' ? this.core.currentProtocol : null);

@@ -3,6 +3,7 @@ import { DestroyRef, computed, effect, inject, signal, untracked } from '@angula
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
+import { entitledIn, type MyMarketDataEntitlements } from '@core/market-data/md-entitlements.service';
 import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
 import { sourceKinds, sourceLabel, type MdSource } from '@core/realtime/marketdata.types';
 import { createWebGlHeatSurface } from './gl/heat-gl';
@@ -130,6 +131,17 @@ const MIN_BAND_PX = 4;
 /** A debounce never holds a fetch back longer than this (replay playing steps faster than the debounce). */
 const MAX_DEBOUNCE_MS = 1_500;
 
+/** A source's feeds the organisation may not view (C6), as words; null when all may be (or entitlements are unknown). */
+export function sourceRefusal(
+  src: Pick<MdSource, 'feeds'>,
+  me: MyMarketDataEntitlements | null,
+): string | null {
+  const lost = Object.values(src.feeds ?? {}).filter(
+    (feed): feed is string => !!feed && entitledIn(me, feed, 'display') === false,
+  );
+  return lost.length ? `not entitled to ${[...new Set(lost)].join(', ')}` : null;
+}
+
 function errorText(e: unknown): string {
   // Not entitled (engine C6, `-403-entitlement`): the engine's reason names the feed — a state, not a fault.
   const notEntitled = entitlementRefusalMessage(e);
@@ -218,17 +230,35 @@ export class OrderFlowFeed {
       untracked(() => this.schedule());
     });
 
-    // The market-data sources, once a layer that names one is on.
+    // The market-data sources, once a layer that names one is on — and the organisation's entitlements (C6), so the
+    // picker can say which feeds are not licensed before anything is asked of them.
     effect(() => {
       const s = deps.settings();
       if (!(s.heatmap || s.trades) || this.sourcesAsked) return;
       this.sourcesAsked = true;
-      untracked(() =>
+      untracked(() => {
+        void this.mdStream.entitlements.load();
         this.mdApi.sources().then(
           (list) => this.mdSources.set(list),
           () => this.mdSources.set([]),
-        ),
-      );
+        );
+      });
+    });
+
+    // The entitlements changed (the hub revoked a feed, `mdRevoked` → refresh): the source list the engine filters by
+    // them is stale too — read it again, bypassing its cache.
+    let lastEntitlements: unknown = undefined;
+    effect(() => {
+      const me = this.mdStream.entitlements.entitlements();
+      untracked(() => {
+        const first = lastEntitlements === undefined;
+        lastEntitlements = me;
+        if (first || !this.sourcesAsked) return;
+        this.mdApi.sources(true).then(
+          (list) => this.mdSources.set(list),
+          () => undefined,
+        );
+      });
     });
 
     // A new symbol or source: the stream layers start over (an error for the old one must not stick). Declared before
@@ -376,6 +406,14 @@ export class OrderFlowFeed {
       widthPx: v.widthPx,
       pricePerPx: v.pricePerPx,
     };
+  }
+
+  /**
+   * Why a source is not usable for display (a feed of it the organisation is not entitled to, per `md/entitlements/me`),
+   * or null — unknown entitlements never refuse (the data call itself says so).
+   */
+  sourceNotEntitled(src: MdSource): string | null {
+    return sourceRefusal(src, this.mdStream.entitlements.entitlements());
   }
 
   /** The source the trade layer reads: the picked one when it publishes trades, else the first that does. */

@@ -710,7 +710,10 @@
               >
                 <option value="">Automatic</option>
                 @for (src of orderFlowFeed.mdSources() ?? []; track src.sourceId) {
-                  <option [value]="src.sourceId">{{ src.displayName }}</option>
+                  @let refused = orderFlowFeed.sourceNotEntitled(src);
+                  <option [value]="src.sourceId" [disabled]="!!refused">
+                    {{ src.displayName }}{{ refused ? ' — ' + refused : '' }}
+                  </option>
                 }
               </select>
             </label>

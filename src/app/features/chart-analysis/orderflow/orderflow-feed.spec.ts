@@ -171,7 +171,14 @@ describe('OrderFlowFeed', () => {
         { provide: ChartFlowService, useValue: api },
         { provide: LiveDepthService, useValue: { watch } },
         { provide: MarketDataApiService, useValue: md },
-        { provide: MarketDataStreamService, useValue: { watch: () => null, usable: () => false } },
+        {
+          provide: MarketDataStreamService,
+          useValue: {
+            watch: () => null,
+            usable: () => false,
+            entitlements: { entitlements: signal(null), load: async () => null },
+          },
+        },
         { provide: AuthService, useValue: { hasPermission: (k: string) => perms.has(k) } },
       ],
     });

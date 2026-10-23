@@ -22,6 +22,7 @@ class FakeConnection implements MdConnection {
   async invoke<T>(method: string, ...args: unknown[]): Promise<T> {
     this.calls.push({ method, args });
     if (method === 'Subscribe') {
+      if (this.answer) return this.answer as T;
       const [, sources, kinds] = args as [string, string[] | null, string[]];
       return {
         ok: true,
@@ -40,6 +41,8 @@ class FakeConnection implements MdConnection {
   push(frame: MdFrame): void {
     this.handlers.get(MD_FRAME_EVENT)!(frame);
   }
+  /** Overrides the next Subscribe answer. */
+  answer: Record<string, unknown> | null = null;
 }
 
 function harness(
@@ -50,6 +53,7 @@ function harness(
   const conns: FakeConnection[] = [];
   const historyCalls: MdHistoryRequest[] = [];
   const changed: string[] = [];
+  const revoked: string[] = [];
   const deps: MdStreamDeps = {
     connect: async (p) => {
       if (p === 'messagepack' && opts.refuseMsgpack) throw new Error('handshake refused');
@@ -72,10 +76,12 @@ function harness(
     backoffMs: () => 1000,
     changed: (k) => changed.push(k),
     stateChanged: () => undefined,
+    revoked: (feeds) => revoked.push(...feeds),
   };
   const core = new MarketDataStreamCore(deps);
   return {
     core,
+    revoked,
     conns,
     timers,
     historyCalls,
@@ -216,5 +222,65 @@ describe('MarketDataStreamCore', () => {
     expect(h.conns[0].calls.some((c) => c.method === 'Unsubscribe')).toBe(true);
     expect(h.conns[0].stopped).toBe(true);
     expect(h.core.state).toBe('idle');
+  });
+
+  // ── Entitlements (C6) ────────────────────────────────────────────────────────────────────
+
+  it('reads deniedReasons from Subscribe and words "not entitled" through the shared helper', async () => {
+    const h = harness();
+    h.core.watch({ symbol: 'EURUSD', kinds: ['book'] }); // connects; the first answer is the default
+    await flush();
+    h.conns[0].answer = {
+      ok: false,
+      denied: ['broker-dom'],
+      deniedReasons: { 'broker-dom': "Your organisation is not entitled to the 'broker-dom' feed." },
+      subscribed: [],
+    };
+    h.core.watch({ symbol: 'GBPUSD', kinds: ['book'] });
+    await flush();
+    const st = h.core.status('GBPUSD')!;
+    expect(st.denied).toEqual(['broker-dom']);
+    expect(st.deniedReasons['broker-dom']).toContain('not entitled');
+    expect(st.notEntitled).toBe("Your organisation is not entitled to the 'broker-dom' feed.");
+    expect(h.core.status('EURUSD')!.notEntitled).toBeNull();
+  });
+
+  it('mdRevoked drops what the ended subscriptions streamed, says why, and asks for the entitlements again', async () => {
+    const h = harness();
+    h.core.watch({ symbol: 'EURUSD', sources: ['src'], kinds: ['book', 'ticks'] });
+    h.core.watch({ symbol: 'GBPUSD', sources: ['src'], kinds: ['book'] });
+    await flush();
+    const c = h.conns[0];
+    c.push({ symbol: 'EURUSD', sourceId: 'src', book: [{ t: 1, k: 'S', b: [[1.1, 5]], a: [[1.1002, 3]] }] });
+    c.push({ symbol: 'GBPUSD', sourceId: 'src', book: [{ t: 1, k: 'S', b: [[1.3, 5]], a: [[1.3002, 3]] }] });
+    const resets: boolean[] = [];
+    h.core.onBook('EURUSD', (_s, _e, reset) => resets.push(reset));
+    expect(h.core.stream('EURUSD', 'src')!.book.known).toBe(true);
+
+    c.handlers.get('mdRevoked')!({
+      feeds: ['broker-dom'],
+      subscriptions: ['EURUSD|src|book'],
+      message: "The licence for 'broker-dom' ended.",
+    });
+
+    // EURUSD lost its book (ticks still subscribed, so the source stays, its book unknown); GBPUSD is untouched.
+    const s = h.core.stream('EURUSD', 'src')!;
+    expect(s.book.known).toBe(false);
+    expect(resets).toEqual([true]);
+    const st = h.core.status('EURUSD')!;
+    expect(st.denied).toContain('broker-dom');
+    expect(st.revoked).toEqual({ feeds: ['broker-dom'], message: "The licence for 'broker-dom' ended." });
+    expect(st.notEntitled).toBe("The licence for 'broker-dom' ended.");
+    expect(st.subscribed).toEqual(['src:ticks']);
+    expect(h.core.status('GBPUSD')!.revoked).toBeNull();
+    expect(h.core.stream('GBPUSD', 'src')!.book.known).toBe(true);
+    expect(h.revoked).toEqual(['broker-dom']);
+    // Nothing is re-subscribed on a revocation.
+    expect(c.calls.filter((x) => x.method === 'Subscribe')).toHaveLength(2);
+
+    // The last kind of a source ended: the source is forgotten.
+    c.handlers.get('mdRevoked')!({ feeds: ['broker-ticks'], subscriptions: ['EURUSD|src|ticks'], message: '' });
+    expect(h.core.stream('EURUSD', 'src')).toBeNull();
+    expect(h.core.status('EURUSD')!.notEntitled).toBe("The licence for 'broker-dom' ended.");
   });
 });

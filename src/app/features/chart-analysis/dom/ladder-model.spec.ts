@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyBookEvents, bestPrices, bookFromLevels, emptyBook } from './book-state';
+import { BookState } from '@core/realtime/md-book';
 import {
   addTicks,
   buildLadder,
@@ -22,33 +22,15 @@ import type { OcoGroup } from '../trading/manual-trading.types';
 
 const PT = 0.00001;
 
-describe('book state (C2 S/D events)', () => {
-  it('a snapshot replaces the book, deltas set absolute sizes and 0 removes a level', () => {
-    const book = emptyBook();
-    applyBookEvents(book, [{ t: 1, k: 'S', b: [[1.1, 5], [1.09999, 3]], a: [[1.10002, 4]] }]);
-    applyBookEvents(book, [
-      { t: 2, k: 'D', b: [[1.1, 0], [1.09998, 7]], a: [[1.10002, 9]] },
-    ]);
-    expect([...book.bids.entries()].sort()).toEqual([[1.09998, 7], [1.09999, 3]]);
-    expect(book.asks.get(1.10002)).toBe(9);
-    expect(book.t).toBe(2);
-    expect(bestPrices(book)).toEqual({ bid: 1.09999, ask: 1.10002 });
-
-    applyBookEvents(book, [{ t: 3, k: 'S', b: [[1.2, 1]], a: [[1.2001, 1]] }]);
-    expect(book.bids.size).toBe(1);
-  });
-
-  it('drops deltas that arrive before any snapshot and says so', () => {
-    const book = emptyBook();
-    expect(applyBookEvents(book, [{ t: 1, k: 'D', b: [[1.1, 5]], a: [] }])).toBe(false);
-    expect(book.bids.size).toBe(0);
-    expect(book.hasSnapshot).toBe(false);
-  });
-
-  it('builds a book from a polled snapshot', () => {
-    const book = bookFromLevels([{ price: 1.1, volume: 2 }, { price: 1.0, volume: 0 }], [{ price: 1.2, volume: 1 }], 9);
-    expect(book.bids.size).toBe(1);
-    expect(bestPrices(book)).toEqual({ bid: 1.1, ask: 1.2 });
+describe('the ladder reads the shared hub book', () => {
+  it('takes the core BookState (S/D folded by the stream service) as it is', () => {
+    const book = new BookState();
+    book.apply({ t: 1, k: 'S', b: [[1.1, 5], [1.09999, 3]], a: [[1.10002, 4]] });
+    book.apply({ t: 2, k: 'D', b: [[1.1, 0]], a: [] });
+    const rows = buildLadder({ rowSize: PT, centerIndex: 110000, halfRows: 2 }, 5, book, [], [], new Map(), PT);
+    expect(rows.find((r) => r.price === 1.1)!.bidSize).toBe(0);
+    expect(rows.find((r) => r.price === 1.09999)).toMatchObject({ bidSize: 3, bestBid: true });
+    expect(rows.find((r) => r.price === 1.10002)).toMatchObject({ askSize: 4, bestAsk: true });
   });
 });
 
@@ -76,8 +58,8 @@ describe('the ladder grid', () => {
   });
 
   it('rows carry book sizes, best prices, the spread, my orders, my position and the session ticks', () => {
-    const book = emptyBook();
-    applyBookEvents(book, [{ t: 1, k: 'S', b: [[1.1, 2_000_000], [1.09998, 1_000_000]], a: [[1.10003, 500_000]] }]);
+    const book = new BookState();
+    book.apply({ t: 1, k: 'S', b: [[1.1, 2_000_000], [1.09998, 1_000_000]], a: [[1.10003, 500_000]] });
     const order: LadderOrder = {
       id: 7, isSignal: false, direction: 'Buy', price: 1.09998, lots: 0.1, stopLoss: null, takeProfit: null,
       kind: 'Limit', status: 'Submitted', ocoGroupId: null,
@@ -105,8 +87,8 @@ describe('the ladder grid', () => {
   });
 
   it('aggregates book levels and ticks into wider rows', () => {
-    const book = emptyBook();
-    applyBookEvents(book, [{ t: 1, k: 'S', b: [[1.10001, 1], [1.10004, 2]], a: [[1.10012, 5]] }]);
+    const book = new BookState();
+    book.apply({ t: 1, k: 'S', b: [[1.10001, 1], [1.10004, 2]], a: [[1.10012, 5]] });
     const ticks = new Map<number, number>();
     addTicks(ticks, [1.10001, 1.10009], PT);
     const rows = buildLadder({ rowSize: PT * 10, centerIndex: 11000, halfRows: 2 }, 5, book, [], [], ticks, PT);

@@ -1,4 +1,3 @@
-import type { BookState } from './book-state';
 import type { TicketDirection } from '../trading/manual-trading.types';
 
 /**
@@ -109,7 +108,8 @@ export function addTicks(counts: Map<number, number>, bids: readonly number[], r
 export function buildLadder(
   grid: LadderGrid,
   digits: number,
-  book: BookState | null,
+  /** Price → size per side, as the source reports sizes (the shared hub's `BookState` fits). */
+  book: { readonly bids: ReadonlyMap<number, number>; readonly asks: ReadonlyMap<number, number> } | null,
   orders: readonly LadderOrder[],
   positions: readonly LadderPosition[],
   tickCounts: ReadonlyMap<number, number>,

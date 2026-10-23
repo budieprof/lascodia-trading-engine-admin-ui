@@ -35,7 +35,11 @@ import type {
 import { DEFAULT_STOP_ATR, DEFAULT_TARGET_R, firstRefusal } from '../trading/ticket-model';
 import { newCorrelationId } from '../trading/position-lines';
 import { LadderArmingService } from './ladder-arming.service';
-import { LadderFeedService, type LadderWatch } from './ladder-feed.service';
+import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
+import { MarketDataStreamService, type MdWatch } from '@core/realtime/marketdata-stream.service';
+import { LiveDepthService, type LiveDepth } from '../orderflow/live-depth.service';
+import { pickBookStream } from '../orderflow/stream-depth';
+import { parseDepth } from '../panels/side/depth';
 import {
   addTicks,
   buildLadder,
@@ -60,6 +64,16 @@ const HALF_ROWS = 20;
 const ORDERS_POLL_MS = 3_000;
 /** The ATR behind the default brackets is re-read this often. */
 const ATR_TTL_MS = 5 * 60_000;
+
+/** What the ladder shows: where its book comes from, the book (price → size maps), the quote. */
+interface LadderView {
+  mode: 'connecting' | 'stream' | 'poll' | 'none';
+  sourceId: string | null;
+  book: { bids: ReadonlyMap<number, number>; asks: ReadonlyMap<number, number> } | null;
+  quote: { bid: number | null; ask: number | null };
+}
+
+const NO_VIEW: LadderView = { mode: 'none', sourceId: null, book: null, quote: { bid: null, ask: null } };
 
 /** What the confirm dialog is about. */
 type LadderAction =
@@ -94,10 +108,8 @@ type LadderAction =
       <p class="lp-note" data-testid="ladder-source">
         {{ sourceLabel() }}
       </p>
-      @if (denied().length) {
-        <p class="lp-warn" data-testid="ladder-denied">
-          Not entitled to {{ denied().join(', ') }} — this organisation's data plan does not include it.
-        </p>
+      @if (notEntitled(); as why) {
+        <p class="lp-warn" data-testid="ladder-denied">{{ why }}</p>
       }
       <div class="lp-controls">
         <label>
@@ -218,7 +230,7 @@ type LadderAction =
               >
             }
           </span>
-          <span class="lp-cell bid" role="gridcell" (click)="onCell($event, 'bid', r)" [attr.data-testid]="'bid-' + r.index">
+          <span class="lp-cell bid" role="gridcell" tabindex="-1" (click)="onCell($event, 'bid', r)" (keydown.enter)="onCellKey($event, 'bid', r)" [attr.data-testid]="'bid-' + r.index">
             <i class="bar" [style.width.%]="r.bidShare * 100"></i>{{ r.bidSize ? units(r.bidSize) : '' }}
           </span>
           <span class="lp-price" [class.avg]="r.positions.length > 0">
@@ -227,7 +239,7 @@ type LadderAction =
               <small class="avg-tag" [class.long]="p.direction === 'Buy'">{{ p.direction === 'Buy' ? 'L' : 'S' }} {{ p.lots }}</small>
             }
           </span>
-          <span class="lp-cell ask" role="gridcell" (click)="onCell($event, 'ask', r)" [attr.data-testid]="'ask-' + r.index">
+          <span class="lp-cell ask" role="gridcell" tabindex="-1" (click)="onCell($event, 'ask', r)" (keydown.enter)="onCellKey($event, 'ask', r)" [attr.data-testid]="'ask-' + r.index">
             <i class="bar" [style.width.%]="r.askShare * 100"></i>{{ r.askSize ? units(r.askSize) : '' }}
           </span>
           <span class="lp-mine">
@@ -599,7 +611,9 @@ type LadderAction =
   ],
 })
 export class LadderPanelComponent {
-  private readonly feedService = inject(LadderFeedService);
+  private readonly stream = inject(MarketDataStreamService);
+  private readonly liveDepth = inject(LiveDepthService);
+  private readonly mdApi = inject(MarketDataApiService);
   private readonly panels = inject(ChartPanelsService);
   private readonly trading = inject(ManualTradingService);
   private readonly scope = inject(AccountScopeService);
@@ -624,7 +638,11 @@ export class LadderPanelComponent {
   readonly centre = signal<number | null>(null);
 
   // ── State ─────────────────────────────────────────────────────────────────
-  private readonly watch = signal<LadderWatch | null>(null);
+  /** The shared market-data hub watch (ticks + book) and the shared live depth (stream-first, 1.5 s poll fallback). */
+  private readonly md = signal<MdWatch | null>(null);
+  private readonly depth = signal<LiveDepth | null>(null);
+  /** The source whose book is shown (its ticks feed the session tick count). */
+  private shownSource: string | null = null;
   readonly strip = signal<AccountStrip | null>(null);
   readonly ocoGroups = signal<OcoGroup[]>([]);
   readonly ocoMode = signal(false);
@@ -650,7 +668,56 @@ export class LadderPanelComponent {
   });
   readonly fmt = computed(() => `1.${this.digits()}-${this.digits()}`);
   readonly rowSize = computed(() => pointSize(this.digits()) * this.rowTicks());
-  readonly denied = computed(() => this.watch()?.denied() ?? []);
+  /**
+   * The ladder's market: the shared hub's freshest book (every change) while the hub delivers one, else the shared
+   * live-depth poll (its own fallback while the hub is not delivering), else nothing. Re-read at the hub's ≤ 4 Hz.
+   */
+  readonly view = computed<LadderView>(() => {
+    const md = this.md();
+    const depth = this.depth();
+    md?.version();
+    depth?.snapshot();
+    if (!md || !depth) return NO_VIEW;
+    const s = this.stream.usable() ? pickBookStream(md.streams(), null, Date.now()) : null;
+    if (s) {
+      const last = s.ticks.last();
+      const quote =
+        last && last.t >= s.book.t
+          ? { bid: last.bid, ask: last.ask }
+          : { bid: s.book.bestBid(), ask: s.book.bestAsk() };
+      return { mode: 'stream', sourceId: s.sourceId, book: s.book, quote };
+    }
+    const snap = depth.snapshot();
+    if (snap) {
+      const d = parseDepth(snap, 50);
+      return {
+        mode: depth.via() === 'stream' ? 'stream' : 'poll',
+        sourceId: snap.sourceId ?? null,
+        book: {
+          bids: new Map(d.bids.map((l) => [l.price, l.volume] as [number, number])),
+          asks: new Map(d.asks.map((l) => [l.price, l.volume] as [number, number])),
+        },
+        quote: { bid: d.bids[0]?.price ?? null, ask: d.asks[0]?.price ?? null },
+      };
+    }
+    const state = md.status().state;
+    return { ...NO_VIEW, mode: state === 'connecting' || state === 'reconnecting' ? 'connecting' : 'none' };
+  });
+
+  /**
+   * "Not entitled" in the engine's words: the hub's refusal or revocation (through the shared entitlement-refusal
+   * helper), the polled read's `-403-entitlement`, or — before anything is asked — `md/entitlements/me` saying the
+   * broker DOM feed is not licensed.
+   */
+  readonly notEntitled = computed<string | null>(() => {
+    const st = this.md()?.status();
+    if (st?.notEntitled) return st.notEntitled;
+    const err = this.depth()?.error() ?? null;
+    if (err && /entitled/i.test(err)) return err;
+    if (this.stream.entitlements.isEntitled('broker-dom') === false)
+      return "Your organisation is not entitled to the broker DOM feed ('broker-dom').";
+    return null;
+  });
   readonly permitted = computed(() => this.auth.hasPermission(Permission.AccessTrader));
   readonly armedHere = computed(() => {
     this.arming.arming();
@@ -661,10 +728,10 @@ export class LadderPanelComponent {
   readonly canArm = computed(() => this.canPlace() && this.mode() === 'Live');
 
   readonly sourceLabel = computed(() => {
-    const w = this.watch();
-    if (!w) return '';
-    const src = w.sourceId() ?? 'the broker';
-    switch (w.mode()) {
+    const v = this.view();
+    if (!this.md()) return '';
+    const src = v.sourceId ?? 'the broker';
+    switch (v.mode) {
       case 'stream':
         return `Live book from ${src} (one broker's MT5 depth, every change) — not the whole market.`;
       case 'poll':
@@ -677,10 +744,9 @@ export class LadderPanelComponent {
   });
 
   readonly rows = computed<LadderRow[]>(() => {
-    const w = this.watch();
-    w?.version();
-    const book = w?.book() ?? null;
-    const q = w?.quote() ?? { bid: null, ask: null, t: 0 };
+    const v = this.view();
+    const book = v.book;
+    const q = v.quote;
     const rowSize = this.rowSize();
     const centre = this.centre() ?? centreIndexFor(q.bid, q.ask, rowSize);
     if (centre === null) return [];
@@ -732,19 +798,34 @@ export class LadderPanelComponent {
     // The feed of the symbol, while the panel is open.
     effect((onCleanup) => {
       const symbol = this.symbol();
-      const w = this.feedService.watch(symbol);
+      const md = this.stream.watch({ symbol, sources: null, kinds: ['book', 'ticks'] });
+      const depth = this.liveDepth.watch(symbol);
       untracked(() => {
-        this.watch.set(w);
+        this.md.set(md);
+        this.depth.set(depth);
+        this.shownSource = null;
         this.centre.set(null);
         this.tickCounts.clear();
         this.ocoFirst.set(null);
+        void this.stream.entitlements.load();
       });
-      const off = w.onTicks((t) => addTicks(this.tickCounts, t.b, pointSize(this.digits())));
-      void this.loadSessionTicks(symbol, w);
+      // Ticks of the shown source (outside the zone, synchronous with the hub): the session's count per price.
+      const off = md.onFrame((frame, s) => {
+        if (!frame.ticks?.b?.length) return;
+        if (this.shownSource !== null && s.sourceId !== this.shownSource) return;
+        addTicks(this.tickCounts, frame.ticks.b, pointSize(this.digits()));
+      });
+      void this.loadSessionTicks(symbol, md);
       onCleanup(() => {
         off();
-        w.release();
+        md.release();
+        depth.release();
       });
+    });
+
+    // Remember which source is shown (a plain field: the frame listener reads it outside Angular).
+    effect(() => {
+      this.shownSource = this.view().sourceId;
     });
 
     // Default account: the scope's single account, else the only live one. Changing it (or the symbol) disarms.
@@ -768,10 +849,8 @@ export class LadderPanelComponent {
 
     // Auto re-centre when the market leaves the middle of the view.
     effect(() => {
-      const w = this.watch();
-      w?.version();
-      if (!w || !this.autoCentre()) return;
-      const q = w.quote();
+      const q = this.view().quote;
+      if (!this.autoCentre()) return;
       untracked(() => {
         const c = this.centre();
         if (c === null) return;
@@ -821,11 +900,22 @@ export class LadderPanelComponent {
   }
 
   /** The session's ticks (since 17:00 New York) from the store, so the tick column is the session's, not the panel's. */
-  private async loadSessionTicks(symbol: string, w: LadderWatch): Promise<void> {
+  private async loadSessionTicks(symbol: string, md: MdWatch): Promise<void> {
     const now = Date.now();
     const from = fxSessionStart(now);
-    const ticks = await this.feedService.historyTicks(symbol, w.sourceId(), from, now);
-    if (this.watch() !== w) return;
+    let ticks: { b: readonly number[] } | null = null;
+    try {
+      const h = await this.mdApi.history({ symbol, from, to: now, kinds: ['ticks'] });
+      const sources = h.sources ?? [];
+      // The source with the most ticks (the one the ladder will most likely show).
+      ticks = sources.reduce<{ b: readonly number[] } | null>(
+        (best, src) => ((src.ticks?.b?.length ?? 0) > (best?.b.length ?? 0) ? (src.ticks ?? null) : best),
+        null,
+      );
+    } catch {
+      ticks = null;
+    }
+    if (this.md() !== md) return;
     if (ticks?.b?.length) {
       addTicks(this.tickCounts, ticks.b, pointSize(this.digits()));
       this.tickNote.set('tick count per price this session (since 17:00 New York; ticks, not traded volume)');
@@ -869,7 +959,7 @@ export class LadderPanelComponent {
   }
 
   recentre(): void {
-    const q = this.watch()?.quote();
+    const q = this.view().quote;
     this.centre.set(q ? centreIndexFor(q.bid, q.ask, this.rowSize()) : null);
   }
 
@@ -929,7 +1019,7 @@ export class LadderPanelComponent {
       this.hint.set('Orders at a price are live only (paper tickets fill at market). Switch the ladder to Live, or use Buy/Sell MKT.');
       return;
     }
-    const q = this.watch()?.quote() ?? { bid: null, ask: null, t: 0 };
+    const q = this.view().quote;
     const intent = ladderIntent(column, row.price, q.bid, q.ask, e.shiftKey);
     if ('problem' in intent) {
       this.hint.set(intent.problem);
@@ -964,6 +1054,12 @@ export class LadderPanelComponent {
     await this.loadPlacePreview();
   }
 
+  /** Enter on a focused cell = a click there (Shift+Enter = the stop modifier). */
+  onCellKey(e: Event, column: LadderColumn, row: LadderRow): void {
+    const k = e as KeyboardEvent;
+    void this.onCell(new MouseEvent('click', { shiftKey: k.shiftKey }), column, row);
+  }
+
   async market(direction: 'Buy' | 'Sell'): Promise<void> {
     if (!this.canPlace()) return;
     const request = await this.requestFor(direction, null);
@@ -990,7 +1086,7 @@ export class LadderPanelComponent {
       takeProfit: null,
       mode,
     };
-    const q = this.watch()?.quote();
+    const q = this.view().quote;
     const entry = price ?? (direction === 'Buy' ? q?.ask : q?.bid) ?? null;
     const atr = await this.atrFor(base);
     const b = entry === null ? null : ladderBrackets(direction, entry, atr, { stopAtr: this.stopAtr(), targetR: this.targetR() }, this.digits());
@@ -1079,7 +1175,7 @@ export class LadderPanelComponent {
     if (!Number.isFinite(index)) return;
     const row = this.rows().find((r) => r.index === index);
     if (!row || rowIndex(d.order.price, this.rowSize()) === index) return;
-    const q = this.watch()?.quote() ?? { bid: null, ask: null, t: 0 };
+    const q = this.view().quote;
     const problem = dropProblem(d.order, row.price, q.bid, q.ask);
     if (problem) {
       this.hint.set(problem);

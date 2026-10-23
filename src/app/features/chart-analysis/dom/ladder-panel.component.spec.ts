@@ -12,9 +12,13 @@ import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { ChartPanelsService } from '../panels/side/chart-panels.service';
 import { ManualTradingService } from '../trading/manual-trading.service';
 import type { ManualTradePreview, ManualTradeRequest } from '../trading/manual-trading.types';
-import { applyBookEvents, emptyBook, type BookState, type MdTicks } from './book-state';
+import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
+import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
+import { MdSourceStream, type MdFrameListener, type MdWatchStatus } from '@core/realtime/marketdata-stream';
+import type { MdFrame } from '@core/realtime/marketdata.types';
+import { LiveDepthService } from '../orderflow/live-depth.service';
+import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import { LadderArmingService } from './ladder-arming.service';
-import { LadderFeedService, type LadderFeedMode, type LadderWatch } from './ladder-feed.service';
 import { LadderPanelComponent } from './ladder-panel.component';
 
 declareSignalIo(LadderPanelComponent, { inputs: ['symbol', 'digits'] });
@@ -58,11 +62,19 @@ function preview(over: Partial<ManualTradePreview> = {}): ManualTradePreview {
 describe('LadderPanelComponent (price ladder + trading)', () => {
   let fixture: ComponentFixture<LadderPanelComponent>;
   let el: HTMLElement;
-  let book: BookState;
+  let stream: MdSourceStream;
+  let usable = true;
+  let entitledDom: boolean | null = null;
   const version = signal(0);
-  const mode = signal<LadderFeedMode>('stream');
-  const tickListeners: ((t: MdTicks) => void)[] = [];
+  const status = signal<MdWatchStatus>({
+    state: 'connected', protocol: 'messagepack', subscribed: [], denied: [], deniedReasons: {}, notEntitled: null,
+    revoked: null, unknown: [], error: null,
+  });
+  const frameListeners: MdFrameListener[] = [];
   const released = vi.fn();
+  const depthReleased = vi.fn();
+  const polled = signal<OrderBookSnapshot | null>(null);
+  const pollError = signal<string | null>(null);
   const defaultPreview = (r: ManualTradeRequest) => of(ok(preview({ direction: r.direction, entry: r.entryPrice ?? 1.1 })));
   const trading = {
     preview: vi.fn(defaultPreview),
@@ -76,21 +88,32 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
   };
   const notify = { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() };
 
-  const watch = (): LadderWatch => ({
-    version: version.asReadonly(),
-    mode: mode.asReadonly(),
-    sources: signal(['mt5-metaquotes-demo']).asReadonly(),
-    sourceId: signal<string | null>('mt5-metaquotes-demo').asReadonly(),
-    denied: signal<string[]>([]).asReadonly(),
-    book: () => book,
-    quote: () => ({ bid: 1.1, ask: 1.10002, t: 1 }),
-    onTicks: (l) => {
-      tickListeners.push(l);
-      return () => undefined;
-    },
-    selectSource: () => undefined,
-    release: released,
-  });
+  const mdStream = {
+    usable: () => usable,
+    watch: () => ({
+      symbol: 'EURUSD',
+      version: version.asReadonly(),
+      status: status.asReadonly(),
+      streams: () => [stream],
+      stream: () => stream,
+      onFrame: (l: MdFrameListener) => {
+        frameListeners.push(l);
+        return () => undefined;
+      },
+      onBook: () => () => undefined,
+      release: released,
+    }),
+    entitlements: { load: async () => null, isEntitled: () => entitledDom },
+  };
+  const liveDepth = {
+    watch: () => ({
+      snapshot: polled.asReadonly(),
+      error: pollError.asReadonly(),
+      readAt: signal(0).asReadonly(),
+      via: signal<'stream' | 'poll'>('poll').asReadonly(),
+      release: depthReleased,
+    }),
+  };
 
   const byId = <T extends Element = HTMLElement>(id: string) => el.querySelector(`[data-testid="${id}"]`) as T | null;
   const settle = async () => {
@@ -105,7 +128,9 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
       imports: [LadderPanelComponent],
       providers: [
         provideAuthWithPermissions(...permissions),
-        { provide: LadderFeedService, useValue: { watch, historyTicks: vi.fn(async () => null) } },
+        { provide: MarketDataStreamService, useValue: mdStream },
+        { provide: LiveDepthService, useValue: liveDepth },
+        { provide: MarketDataApiService, useValue: { history: vi.fn(async () => ({ sources: [], truncated: false, message: null })) } },
         { provide: ManualTradingService, useValue: trading },
         { provide: ChartPanelsService, useValue: { accountStrip: vi.fn(() => of(null)) } },
         {
@@ -127,13 +152,20 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
   }
 
   beforeEach(() => {
-    book = emptyBook();
-    applyBookEvents(book, [{ t: 1, k: 'S', b: [[1.1, 1_000_000], [1.09999, 2_000_000]], a: [[1.10002, 500_000]] }]);
+    stream = new MdSourceStream('EURUSD', 'mt5-metaquotes-demo');
+    stream.book.apply({ t: 1, k: 'S', b: [[1.1, 1_000_000], [1.09999, 2_000_000]], a: [[1.10002, 500_000]] });
+    stream.lastFrameAt = Date.now();
+    usable = true;
+    entitledDom = null;
+    polled.set(null);
+    pollError.set(null);
+    status.update((st) => ({ ...st, denied: [], deniedReasons: {}, notEntitled: null, revoked: null }));
+    frameListeners.length = 0;
+    depthReleased.mockClear();
     Object.values(trading).forEach((f) => f.mockClear());
     trading.preview.mockImplementation(defaultPreview);
     Object.values(notify).forEach((f) => f.mockClear());
     released.mockClear();
-    tickListeners.length = 0;
   });
 
   afterEach(() => {
@@ -275,7 +307,12 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
   it('counts the session ticks per price from the stream', async () => {
     setup();
     await settle();
-    tickListeners.forEach((l) => l({ t: [1, 2, 3], b: [1.1, 1.1, 1.09999], a: [1.10002, 1.10002, 1.10001] }));
+    const frame: MdFrame = {
+      symbol: 'EURUSD',
+      sourceId: 'mt5-metaquotes-demo',
+      ticks: { t: [1, 2, 3], b: [1.1, 1.1, 1.09999], a: [1.10002, 1.10002, 1.10001] },
+    };
+    frameListeners.forEach((l) => l(frame, stream));
     version.update((v) => v + 1);
     await settle();
     const row = el.querySelector('[data-index="110000"] .lp-vol');
@@ -287,5 +324,36 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     await settle();
     fixture.destroy();
     expect(released).toHaveBeenCalled();
+    expect(depthReleased).toHaveBeenCalled();
+  });
+
+  it('while the hub is not delivering, it shows the shared live depth’s polled book and says so', async () => {
+    usable = false;
+    polled.set({
+      id: 1, symbol: 'EURUSD', bidPrice: 1.2, askPrice: 1.20002, bidVolume: 1, askVolume: 1, spreadPoints: 2,
+      levelsJson: JSON.stringify({ bids: [{ P: 1.2, V: 3_000_000 }], asks: [{ P: 1.20002, V: 1_000_000 }] }),
+      instanceId: 'ea-1', capturedAt: new Date().toISOString(),
+    });
+    setup();
+    await settle();
+    expect(byId('ladder-source')?.textContent).toContain('polled every 1.5 s');
+    expect(byId('bid-120000')?.textContent).toContain('3M');
+  });
+
+  it('says "not entitled" in the engine’s words when the hub refuses or revokes the feed', async () => {
+    setup();
+    await settle();
+    expect(byId('ladder-denied')).toBeNull();
+    status.update((st) => ({ ...st, denied: ['broker-dom'], notEntitled: "The licence for 'broker-dom' ended." }));
+    version.update((v) => v + 1);
+    await settle();
+    expect(byId('ladder-denied')?.textContent).toContain("The licence for 'broker-dom' ended.");
+  });
+
+  it('says "not entitled" before asking when md/entitlements/me does not list the broker DOM feed', async () => {
+    entitledDom = false;
+    setup();
+    await settle();
+    expect(byId('ladder-denied')?.textContent).toContain('broker-dom');
   });
 });

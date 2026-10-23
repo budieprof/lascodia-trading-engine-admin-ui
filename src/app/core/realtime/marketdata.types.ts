@@ -48,9 +48,21 @@ export interface MdFrame {
 export interface MdSubscribeResult {
   ok: boolean;
   denied: string[];
+  /** Why each denied feed was refused, by feed id (engine C6: not entitled, plan, licence expired, usage). */
+  deniedReasons?: Record<string, string> | null;
   subscribed?: string[];
   unknown?: string[];
   error?: string | null;
+}
+
+/** The server event that ends subscriptions whose feed the organisation lost (engine C6, additive to C4). */
+export const MD_REVOKED_EVENT = 'mdRevoked';
+
+/** `mdRevoked`: the feeds lost, the subscriptions ended (`SYMBOL|sourceId|kind`) and why. */
+export interface MdRevokedWire {
+  feeds: string[];
+  subscriptions: string[];
+  message: string;
 }
 
 /** C5 request. */
