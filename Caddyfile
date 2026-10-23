@@ -92,7 +92,7 @@
 		# SS-I4 (chart + Pine program, 2026-10-09): the scripting API and its hub run in the research process (Pine CPU
 		# off the money path; research publishes 127.0.0.1:5083). strategy/{id}/script/* stays on api (the live sessions
 		# live there). Roll back: put back the single `reverse_proxy localhost:5081 { header_up -Accept-Encoding }`.
-		@scripting path /api/v1/lascodia-trading-engine/scripting/* /api/v1/lascodia-trading-engine/chart-flow/* /api/hubs/scripting /api/hubs/scripting/*
+		@scripting path /api/v1/lascodia-trading-engine/scripting/* /api/v1/lascodia-trading-engine/chart-flow/* /api/v1/lascodia-trading-engine/md/history /api/hubs/scripting /api/hubs/scripting/*
 		route {
 			# SECURITY (2026-10-19, multi-tenancy Phase 0): every request through this PUBLIC site is
 			# marked so the engine never treats it as a trusted network, whatever address it appears
