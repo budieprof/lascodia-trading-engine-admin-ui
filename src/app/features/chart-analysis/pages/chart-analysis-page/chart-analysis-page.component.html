@@ -675,6 +675,46 @@
           >
             <app-chart-icon name="alert" [size]="28" /> Fills &amp; slippage
           </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().trades"
+            (click)="toggleOrderFlow('trades')"
+            data-testid="of-trades"
+            title="Each real trade as a bubble (size = area, colour = aggressor) — only sources with a tape (CME futures, venues); spot FX brokers have none"
+          >
+            <app-chart-icon name="volume-profile" [size]="28" /> Trades (venue tape)
+          </button>
+          @if (orderFlow().trades) {
+            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Hide trades smaller than this (the source's own size unit)">
+              Min size
+              <input
+                type="number"
+                min="0"
+                step="1"
+                style="width: 72px"
+                [value]="orderFlow().tradeMinSize"
+                (change)="setTradeMinSize(+$any($event.target).value)"
+                aria-label="Minimum trade size"
+              />
+            </label>
+          }
+          @if (orderFlow().heatmap || orderFlow().trades) {
+            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Which market-data source feeds the heatmap, the depth panel and the trades (only sources you are entitled to)">
+              Source
+              <select
+                [value]="orderFlow().sourceId ?? ''"
+                (change)="setOrderFlowSource($any($event.target).value)"
+                aria-label="Market-data source"
+                data-testid="of-source"
+              >
+                <option value="">Automatic</option>
+                @for (src of orderFlowFeed.mdSources() ?? []; track src.sourceId) {
+                  <option [value]="src.sourceId">{{ src.displayName }}</option>
+                }
+              </select>
+            </label>
+          }
         </div>
       }
     </div>
@@ -1914,6 +1954,8 @@
                 [digits]="precision()"
                 [timeZone]="timezone()"
                 [replayAt]="orderFlowReplayClip()"
+                [sourceId]="orderFlow().sourceId"
+                [tickReplayBook]="tickReplayBook()"
                 (symbolSelected)="selectSymbol($event)"
               />
             </aside>

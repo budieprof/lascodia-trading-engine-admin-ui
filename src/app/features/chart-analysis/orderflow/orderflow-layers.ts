@@ -141,7 +141,7 @@ export class OrderFlowLayers {
     return this.axisCache;
   }
   private unsubscribeRedraw: (() => void) | null = null;
-  private redrawFn: (() => void) | null = null;
+  private redrawFn: ((fn: () => void) => () => void) | null = null;
   private readonly heatmap = new HeatmapPrimitive(this.primitiveDeps);
   private readonly footprint = new FootprintPrimitive(this.primitiveDeps);
   private readonly fills = new FillsPrimitive(this.primitiveDeps);

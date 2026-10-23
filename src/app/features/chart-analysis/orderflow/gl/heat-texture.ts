@@ -98,7 +98,7 @@ export class HeatFolder {
     this.bestBid = new Float64Array(spec.cols).fill(NaN);
     this.bestAsk = new Float64Array(spec.cols).fill(NaN);
     // The book as it stood when column 0 opens.
-    const n = timeline.countAtOrBefore(spec.t0 - 1e-9);
+    const n = timeline.countBefore(spec.t0);
     const start = timeline.afterCount(n);
     this.consumed = n;
     if (start.known) {

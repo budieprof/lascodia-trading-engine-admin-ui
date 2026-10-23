@@ -403,6 +403,9 @@ import {
 } from '../../drawings/model';
 import { appStorage } from '@core/storage/app-storage';
 import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
+import type { OrderBookSnapshot } from '../../panels/side/chart-panels.types';
+import { bookToSnapshot } from '../../orderflow/stream-depth';
+import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { replayClipUtc } from '../../orderflow/orderflow-replay';
 import {
   DEFAULT_ORDER_FLOW,
@@ -720,6 +723,7 @@ export class ChartAnalysisPageComponent {
    * roll a bar early or late (the countdown reads the same clock).
    */
   private readonly serverClock = inject(ServerClock);
+  private readonly mdApi = inject(MarketDataApiService);
   /** PC-I1: warm sessions' frames (`/api/hubs/scripting`), and their resync and end calls. */
   private readonly scriptHub = inject(ScriptingRealtimeService);
   private readonly scriptingApi = inject(ScriptingService);
@@ -1738,9 +1742,26 @@ export class ChartAnalysisPageComponent {
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
   readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
-  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills'): void {
+  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades'): void {
     this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
   }
+  /** The market-data source for the heatmap / depth / trades ('' = automatic). */
+  setOrderFlowSource(sourceId: string): void {
+    this.orderFlow.update((s) => restoredOrderFlow({ ...s, sourceId: sourceId || null }));
+  }
+  setTradeMinSize(value: number): void {
+    this.orderFlow.update((s) => restoredOrderFlow({ ...s, tradeMinSize: value }));
+  }
+  /** Tick replay's book at the head for the depth panel (undefined outside tick replay). */
+  readonly tickReplayBook = computed<OrderBookSnapshot | null | undefined>(() => {
+    const head = this.replay.tickHead();
+    const tick = this.replay.tick;
+    if (head === null || !tick) return undefined;
+    tick.version();
+    const tape = tick.tape;
+    if (!tape) return null;
+    return bookToSnapshot(this.symbol(), tape.sourceId ?? 'recording', tape.bookAt(head));
+  });
   setHeatmapOpacity(value: number): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
   }
@@ -1758,6 +1779,9 @@ export class ChartAnalysisPageComponent {
   /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
   readonly orderFlowReplayClip = computed(() => {
     if (!this.replay.active()) return null;
+    // Tick replay: the head is an exact instant — every layer stops there.
+    const tickHead = this.replay.tickHead();
+    if (tickHead !== null) return tickHead;
     const intrabar = this.replay.cursor().sub !== null ? this.replay.intrabarSource() : null;
     const unit = resolutionMs(intrabar ?? this.resolution());
     return replayClipUtc(this.replay.headBar(), unit);
@@ -1961,6 +1985,12 @@ export class ChartAnalysisPageComponent {
     }),
     fetchIntrabar: (resolution, fromMs, toMs, count) =>
       this.feed.getBars(this.symbol(), resolution, fromMs, toMs, count).then((r) => r.bars),
+    tickData: {
+      history: (req) => this.mdApi.history(req),
+      symbol: () => this.symbol(),
+      sourceId: () => this.orderFlow().sourceId,
+      now: () => this.serverClock.now(),
+    },
   });
   readonly replayActive = this.replay.active;
   readonly replayIndex = this.replay.index;

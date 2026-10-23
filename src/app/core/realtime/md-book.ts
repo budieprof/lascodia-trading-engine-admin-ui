@@ -181,6 +181,18 @@ export class BookTimeline {
     return lo;
   }
 
+  /** Number of events with time < `t` (strictly). */
+  countBefore(t: number): number {
+    let lo = 0;
+    let hi = this.times.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.times[mid] < t) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
   /**
    * The book after every event at or before `t` (a fresh copy is NOT made — treat the result as read-only; it is
    * valid until the next call). Sequential calls with a growing `t` fold only the new events.
