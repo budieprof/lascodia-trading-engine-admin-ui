@@ -24,6 +24,12 @@ export const routes: Routes = [
       import('@features/onboarding/pages/signup-page.component').then((m) => m.SignupPageComponent),
   },
   {
+    // Public system status (engine resilience program): no sign-in, outside the console; reads GET /health/status.
+    path: 'status',
+    loadComponent: () =>
+      import('@features/status/status-page.component').then((m) => m.StatusPageComponent),
+  },
+  {
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],
