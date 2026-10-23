@@ -115,6 +115,8 @@ export class TradeFeed {
   refMax = 0;
   state: TradeFeedState = { kind: 'idle' };
   private held: { symbol: string; sourceId: string; fromUtc: number; toUtc: number } | null = null;
+  private pending: { symbol: string; sourceId: string; fromUtc: number; toUtc: number } | null =
+    null;
   private md: MdWatch | null = null;
   private mdKey = '';
   private seq = 0;
@@ -131,29 +133,34 @@ export class TradeFeed {
     live: boolean;
   }): void {
     const symbol = opts.symbol.toUpperCase();
-    const cap = opts.head ?? this.deps.now();
+    const now = this.deps.now();
+    const span = Math.max(10_000, opts.toUtc - opts.fromUtc);
+    // In replay the read reaches a view's width past the head (never past now) so a playing head does not refetch
+    // constantly; the layer draws nothing after the head (TradeBubblesModel.clipUtc).
+    const cap = opts.head !== null ? Math.min(now, opts.head + span / 2) : now;
     const from = Math.floor(opts.fromUtc);
-    const to = Math.ceil(Math.min(cap, opts.toUtc));
+    const to = Math.ceil(opts.head !== null ? cap : Math.min(cap, opts.toUtc));
     if (!(to > from) || to - from > MD_HISTORY_MAX_BOOK_MS) {
       this.state = { kind: 'idle' };
       return;
     }
     const h = this.held;
     const live = opts.live && opts.head === null;
-    const covered =
-      h &&
-      h.symbol === symbol &&
-      h.sourceId === opts.sourceId &&
-      from >= h.fromUtc &&
-      (live || to <= h.toUtc);
+    const holds = (w: typeof h) =>
+      !!w &&
+      w.symbol === symbol &&
+      w.sourceId === opts.sourceId &&
+      from >= w.fromUtc &&
+      (live || (opts.head ?? to) <= w.toUtc);
     this.syncLive(live ? `${symbol}|${opts.sourceId}` : '', symbol, opts.sourceId);
-    if (covered) return;
+    if (holds(h) || holds(this.pending)) return;
     void this.fetch(symbol, opts.sourceId, from, to);
   }
 
   clear(): void {
     this.seq++;
     this.held = null;
+    this.pending = null;
     this.ring = new TradeRing(65_536);
     this.state = { kind: 'idle' };
     this.syncLive('', '', '');
@@ -162,6 +169,7 @@ export class TradeFeed {
   private async fetch(symbol: string, sourceId: string, from: number, to: number): Promise<void> {
     const n = ++this.seq;
     this.state = { kind: 'loading' };
+    this.pending = { symbol, sourceId, fromUtc: from, toUtc: to };
     this.deps.changed();
     try {
       const h = await this.deps.history({
@@ -172,6 +180,7 @@ export class TradeFeed {
         kinds: ['trades'],
       });
       if (n !== this.seq) return;
+      this.pending = null;
       const src = h.sources?.find((s) => s.sourceId === sourceId);
       const ring = new TradeRing(Math.max(65_536, (src?.trades?.t.length ?? 0) + 16_384));
       if (src?.trades) ring.pushColumns(src.trades);
@@ -185,6 +194,7 @@ export class TradeFeed {
           : { kind: 'ready' };
     } catch (e) {
       if (n !== this.seq) return;
+      this.pending = null;
       const m = (e as { message?: unknown })?.message;
       this.state = {
         kind: 'error',

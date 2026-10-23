@@ -225,9 +225,28 @@ describe('StreamHeatmap', () => {
     });
     await flush();
     expect(h.watches).toHaveLength(0);
-    expect(h.calls[0].to).toBeLessThanOrEqual(head);
+    // The read reaches past the head (a view's width, never past now) so a playing head need not refetch…
+    expect(h.calls[0].to).toBeGreaterThan(head);
     const l1 = h.heat.layer()!;
+    // …but nothing after the head is folded.
     expect(l1.foldedTo).toBe(head);
+    const later = l1.folder.colOf(fx.book[130].t);
+    if (later < l1.folder.spec.cols)
+      expect(
+        l1.folder.data
+          .subarray(later * l1.folder.spec.rows, (later + 1) * l1.folder.spec.rows)
+          .every((v) => v === 0),
+      ).toBe(true);
+    // Forward: the same folder, advanced.
+    h.heat.update({
+      symbol: 'EURUSD',
+      sourceId: null,
+      view: { ...view, toUtc: head },
+      head: fx.book[90].t,
+      live: true,
+    });
+    expect(h.heat.layer()!.folder).toBe(l1.folder);
+    expect(h.heat.layer()!.foldedTo).toBe(fx.book[90].t);
     const back = fx.book[40].t;
     h.heat.update({
       symbol: 'EURUSD',
@@ -237,6 +256,7 @@ describe('StreamHeatmap', () => {
       live: true,
     });
     const l2 = h.heat.layer()!;
+    expect(l2.folder).not.toBe(l1.folder);
     expect(h.calls).toHaveLength(1);
     expect(l2.foldedTo).toBe(back);
     const after = l2.folder.colOf(back) + 2;
@@ -246,6 +266,22 @@ describe('StreamHeatmap', () => {
           .subarray(after * l2.folder.spec.rows, (after + 1) * l2.folder.spec.rows)
           .every((v) => v === 0),
       ).toBe(true);
+  });
+
+  it('does not stack reads while one covering the window is in flight', async () => {
+    const h = harness(fullAnswer);
+    h.heat.update({ symbol: 'EURUSD', sourceId: null, view, head: null, live: false });
+    h.heat.update({
+      symbol: 'EURUSD',
+      sourceId: null,
+      view: { ...view, fromUtc: T0 + 100 },
+      head: null,
+      live: false,
+    });
+    h.heat.update({ symbol: 'EURUSD', sourceId: null, view, head: null, live: false });
+    expect(h.calls).toHaveLength(1);
+    await flush();
+    expect(h.heat.layer()).not.toBeNull();
   });
 
   it('says why when the window holds no book', async () => {

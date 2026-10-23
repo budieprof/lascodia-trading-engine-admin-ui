@@ -130,6 +130,15 @@ export class StreamHeatmap {
   private head: number | null = null;
   private liveWanted = false;
   state: StreamHeatState = { kind: 'idle' };
+  /** The read in flight (what it covers). */
+  private pending: {
+    symbol: string;
+    sourceId: string | null;
+    fromUtc: number;
+    toUtc: number;
+  } | null = null;
+  /** The instant the folder was last advanced to. */
+  private foldedAt = -Infinity;
 
   constructor(private readonly deps: StreamHeatDeps) {}
 
@@ -179,31 +188,52 @@ export class StreamHeatmap {
     this.head = opts.head;
     this.liveWanted = opts.live && opts.head === null;
     this.syncLive();
-    const cap = opts.head ?? this.deps.now();
-    const window = streamWindowFor(opts.view, cap);
-    if (!window) {
+    const now = this.deps.now();
+    if (!streamWindowFor(opts.view, opts.head ?? now)) {
       this.state = { kind: 'idle' };
       return;
     }
+    // In replay the window reaches a view's width PAST the head (never past now), so a playing head does not refetch
+    // every few seconds; nothing after the head is folded, drawn or hovered (foldedTo = the head).
+    const viewSpan = Math.max(10_000, opts.view.toUtc - opts.view.fromUtc);
+    const cap = opts.head !== null ? Math.min(now, opts.head + viewSpan) : now;
+    const window =
+      streamWindowFor(
+        opts.head !== null ? { ...opts.view, toUtc: Math.max(opts.view.toUtc, cap) } : opts.view,
+        cap,
+      ) ?? streamWindowFor(opts.view, opts.head ?? now)!;
     const h = this.held;
-    const sameSeries =
-      !!h && h.symbol === this.wantedSymbol && (!opts.sourceId || h.sourceId === opts.sourceId);
     const span = window.toUtc - window.fromUtc;
-    // Live, the held window keeps growing with the stream: only its start matters.
-    const covered =
-      sameSeries &&
-      window.fromUtc >= h!.fromUtc - span * 0.05 &&
-      (this.liveWanted ? true : window.toUtc <= h!.toUtc + span * 0.05);
-    if (!covered) {
+    const holds = (
+      w: { symbol: string; sourceId: string | null; fromUtc: number; toUtc: number } | null,
+    ) =>
+      !!w &&
+      w.symbol === this.wantedSymbol &&
+      (!opts.sourceId || w.sourceId === opts.sourceId) &&
+      window.fromUtc >= w.fromUtc - span * 0.05 &&
+      // Live, the held window keeps growing with the stream: only its start matters.
+      (this.liveWanted || window.toUtc <= w.toUtc + span * 0.05);
+    if (!holds(h)) {
+      // A read of a window that covers this one is already on its way.
+      if (holds(this.pending)) return;
       void this.fetch(this.wantedSymbol, opts.sourceId, window);
       return;
     }
-    if (this.needsRefold() || (headMoved && this.head !== null)) this.refold();
+    if (this.needsRefold()) this.refold();
+    else if (headMoved && this.head !== null) {
+      // Forward: fold only the new events; back: fold again from the timeline (nothing is fetched).
+      if (this.head >= this.foldedAt && this.folder) {
+        this.folder.advanceTo(this.head);
+        this.foldedAt = this.head;
+        this.deps.changed();
+      } else this.refold();
+    }
   }
 
   /** Stop everything (the layer was turned off). */
   clear(): void {
     this.seq++;
+    this.pending = null;
     this.held = null;
     this.folder = null;
     this.state = { kind: 'idle' };
@@ -214,6 +244,7 @@ export class StreamHeatmap {
 
   dispose(): void {
     this.clear();
+    this.pending = null;
     if (this.raf !== null && typeof cancelAnimationFrame !== 'undefined')
       cancelAnimationFrame(this.raf);
   }
@@ -225,6 +256,7 @@ export class StreamHeatmap {
   ): Promise<void> {
     const n = ++this.seq;
     this.state = { kind: 'loading' };
+    this.pending = { symbol, sourceId, ...window };
     this.deps.changed();
     try {
       const answer = await this.deps.history({
@@ -235,6 +267,7 @@ export class StreamHeatmap {
         kinds: ['book', 'ticks'],
       });
       if (n !== this.seq) return;
+      this.pending = null;
       const src = pickHistorySource(answer.sources ?? [], sourceId);
       if (!src) {
         this.held = null;
@@ -267,6 +300,7 @@ export class StreamHeatmap {
       this.refold();
     } catch (e) {
       if (n !== this.seq) return;
+      this.pending = null;
       const m = (e as { message?: unknown })?.message;
       this.state = {
         kind: 'error',
@@ -324,8 +358,10 @@ export class StreamHeatmap {
     const spec = this.specNow();
     if (!h || !spec) return;
     const f = new HeatFolder(spec, h.timeline);
-    f.advanceTo(this.head ?? (this.liveWanted ? this.deps.now() : h.toUtc));
+    const to = this.head ?? (this.liveWanted ? this.deps.now() : h.toUtc);
+    f.advanceTo(to);
     this.folder = f;
+    this.foldedAt = to;
     this.robust = f.robustMax();
     this.robustAt = this.deps.now();
     this.deps.changed();
