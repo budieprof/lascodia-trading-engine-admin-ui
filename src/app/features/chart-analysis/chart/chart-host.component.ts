@@ -158,8 +158,12 @@ import {
   type ProvenanceTip,
 } from '../overlays/provenance-tip.component';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
-import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
-import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import {
+  EVENT_LANE_HEIGHT,
+  EventMarksRenderer,
+  type EventMark,
+} from '../overlays/event-marks-renderer';
+import { formatEventTime, groupCard, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
 import { paintLegend, paintTable, placeTable, stackTables, type LegendRun } from './snapshot';
@@ -1122,6 +1126,17 @@ export class ChartHostComponent implements OnDestroy {
     (ms) => this.eventX(ms),
     () => this.serverClock.now(),
   );
+  /**
+   * The event lane on the lowest pane when that is not the price pane (PR-6): flags only — the lines and
+   * blackout bands stay on the price pane. `eventLane` is where it is attached.
+   */
+  private readonly eventLaneRenderer = new EventMarksRenderer(
+    (ms) => this.eventX(ms),
+    () => this.serverClock.now(),
+  );
+  private eventLane: { index: number; el: HTMLElement | null; pane: IPaneApi<Time> } | null = null;
+  /** The volume series the lane's bottom margin was last applied to, and that margin. */
+  private laneMargin: { series: ISeriesApi<'Histogram'> | null; bottom: number } = { series: null, bottom: 0 };
   /** One renderer per active profile study, keyed by the study's uid. */
   private profileRenderers = new Map<string, ProfileRenderer>();
   /** Every active pattern study paints through this one renderer. */
@@ -1194,7 +1209,10 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const show = this.showVolume();
-      untracked(() => this.syncVolumeSeries(show));
+      untracked(() => {
+        this.syncVolumeSeries(show);
+        this.syncEventLane();
+      });
     });
 
     effect(() => {
@@ -1332,7 +1350,11 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const events = this.events();
       const minImpact = this.minEventImpact();
-      untracked(() => this.eventRenderer.setMarks(events, minImpact));
+      untracked(() => {
+        this.eventRenderer.setMarks(events, minImpact);
+        this.eventLaneRenderer.setMarks(events, minImpact);
+        this.syncEventLane();
+      });
     });
 
     effect(() => {
@@ -1350,6 +1372,8 @@ export class ChartHostComponent implements OnDestroy {
         });
         for (const r of this.profileRenderers.values()) r.setOpacity(effectiveOpacity(groups, 'profiles'));
         this.eventRenderer.setOpacity(effectiveOpacity(groups, 'events'));
+        this.eventLaneRenderer.setOpacity(effectiveOpacity(groups, 'events'));
+        this.syncEventLane();
         this.overlayRenderer.setOpacity(effectiveOpacity(groups, 'trades'));
       });
     });
@@ -1468,6 +1492,7 @@ export class ChartHostComponent implements OnDestroy {
     }
     const breaks = this.sessionBreaksRenderer.breaks();
     for (const b of this.paneBreaks) b.renderer.setBreaks(breaks);
+    this.syncEventLane();
   }
 
   /**
@@ -1879,18 +1904,82 @@ export class ChartHostComponent implements OnDestroy {
    * point on the price pane.
    */
   private updateEventTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
-    const mark = point && (paneIndex ?? 0) === 0 ? this.eventRenderer.hit(point.x, point.y) : null;
-    if (!mark) {
+    const marks = point ? this.eventGroupAt(point, paneIndex) : null;
+    if (!marks) {
       if (this.eventTip()) this.eventTip.set(null);
       return;
     }
-    const when = formatEventTime(mark.time, Math.round(this.timezoneShiftMs(mark.time) / 60_000));
-    const card = eventCard(mark, when, this.serverClock.now());
+    const mark = marks[0];
+    const timeOf = (m: EventMark) =>
+      formatEventTime(m.time, Math.round(this.timezoneShiftMs(m.time) / 60_000));
+    const card = groupCard(marks, timeOf(mark), this.serverClock.now(), timeOf);
     const el = this.container().nativeElement;
     const height = 92 + card.rows.length * 20 + (card.surprise ? 18 : 0);
+    // The lane may sit on a lower pane: its point is in that pane's coordinates.
+    const top = this.paneTop(paneIndex ?? 0);
     const x = Math.max(4, Math.min(point!.x + 10, el.clientWidth - 248));
-    const y = Math.max(4, point!.y - height - 12);
+    const y = Math.max(4, top + point!.y - height - 12);
     this.eventTip.set({ x, y, card });
+  }
+
+  /** The events of the flag (or next-event chip) under a pane point: the price pane's, or the lane's (PR-6). */
+  private eventGroupAt(point: { x: number; y: number }, paneIndex?: number): EventMark[] | null {
+    const index = paneIndex ?? 0;
+    if (index === 0) return this.eventRenderer.hitGroup(point.x, point.y);
+    return this.eventLane?.index === index ? this.eventLaneRenderer.hitGroup(point.x, point.y) : null;
+  }
+
+  /** A pane's top in the container (px). */
+  private paneTop(index: number): number {
+    if (index === 0) return 0;
+    const pane = this.chart?.panes()[index]?.getHTMLElement()?.getBoundingClientRect();
+    const host = this.container().nativeElement.getBoundingClientRect();
+    return pane ? pane.top - host.top : 0;
+  }
+
+  /**
+   * The event lane goes on the lowest pane, just above the time axis (PR-6): the price pane's renderer draws it
+   * when the price pane is the only one; otherwise the lane renderer moves to the lowest pane. Volume shares the
+   * price pane, so while the lane is there the volume's scale gets a bottom margin of the lane's height — the flags
+   * no longer sit on the volume bars. Runs when panes come and go, on resize, and when events or volume change.
+   */
+  private syncEventLane(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const panes = chart.panes();
+    const last = panes.length - 1;
+    const onPrice = last <= 0;
+    this.eventRenderer.setLane(onPrice);
+    const el = onPrice ? null : (panes[last].getHTMLElement() ?? null);
+    if (!onPrice && (this.eventLane?.index !== last || this.eventLane.el !== el)) {
+      this.detachEventLane();
+      panes[last].attachPrimitive(this.eventLaneRenderer);
+      this.eventLane = { index: last, el, pane: panes[last] };
+      this.eventLaneRenderer.setLines(false);
+    } else if (onPrice) {
+      this.detachEventLane();
+    }
+    const height = chart.paneSize(0).height;
+    const reserve =
+      onPrice &&
+      untracked(this.events).length > 0 &&
+      effectiveOpacity(untracked(this.layerGroups), 'events') > 0 &&
+      height > 0;
+    const bottom = reserve ? Math.min(0.15, (EVENT_LANE_HEIGHT + 2) / height) : 0;
+    if (this.volume && (this.laneMargin.series !== this.volume || this.laneMargin.bottom !== bottom)) {
+      this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom } });
+      this.laneMargin = { series: this.volume, bottom };
+    }
+  }
+
+  private detachEventLane(): void {
+    if (!this.eventLane) return;
+    try {
+      this.eventLane.pane.detachPrimitive(this.eventLaneRenderer);
+    } catch {
+      // Its pane went with a study.
+    }
+    this.eventLane = null;
   }
 
   /**
@@ -1997,6 +2086,8 @@ export class ChartHostComponent implements OnDestroy {
     this.volume = null;
     this.markerApi = null;
     this.paneBreaks = [];
+    this.eventLane = null;
+    this.laneMargin = { series: null, bottom: 0 };
     this.indicatorSeries = [];
     this.externalSeries.clear();
     this.priceExternal.clear();
@@ -2080,6 +2171,7 @@ export class ChartHostComponent implements OnDestroy {
     this.resizeObserver = new ResizeObserver(() => {
       this.sizeToContainer(el);
       this.layoutScriptTables();
+      this.syncEventLane();
     });
     this.resizeObserver.observe(el);
 
@@ -2099,8 +2191,8 @@ export class ChartHostComponent implements OnDestroy {
     el.addEventListener('mouseleave', () => this.crosshairSync.emit(null));
     // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
     this.chart.subscribeClick((param) => {
-      if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
-      const mark = this.eventRenderer.hit(param.point.x, param.point.y);
+      if (!param.point || this.tool() !== null) return;
+      const mark = this.eventGroupAt(param.point, param.paneIndex)?.[0];
       if (mark) this.eventOpen.emit(mark.event);
     });
     this.bindHold(el);
@@ -2333,7 +2425,12 @@ export class ChartHostComponent implements OnDestroy {
    * chart area, with its exact price (PR-7: "Add alert at <level>"); null when the point is on none.
    */
   derivedLevelAt(x: number, y: number): AlertableLevel | null {
-    const left = this.scaleSide() === 'left' ? (this.chart?.priceScale('left').width() ?? 0) : 0;
+    let left = 0;
+    try {
+      if (this.scaleSide() === 'left') left = this.chart?.priceScale('left').width() ?? 0;
+    } catch {
+      left = 0;
+    }
     return this.analysisRenderer.levelAt(x - left, y);
   }
 

@@ -13,22 +13,30 @@ export type { EventImpact, EventMark } from './chart-events';
  * come from, so seeing where those prints land relative to a setup is the
  * point of the feature, not decoration.
  *
- * Drawn as a vertical line plus a flag at the bottom rather than a bar marker,
- * because an event belongs to an INSTANT on the axis, not to a candle: a 13:30
- * print has no H4 bar of its own. Until 2026-10 the line was placed with
- * `timeToCoordinate`, which answers only for a bar's own open — so 12:30 and
- * 13:30 UTC releases never showed on 1h, most never on 4h and 1D, and upcoming
- * events (no bar yet) never at all (CC-07). The host now hands an `xAt` that
- * interpolates between bars and projects past the last one (CC-I2).
+ * Drawn as a vertical line plus a flag rather than a bar marker, because an
+ * event belongs to an INSTANT on the axis, not to a candle: a 13:30 print has no
+ * H4 bar of its own. Until 2026-10 the line was placed with `timeToCoordinate`,
+ * which answers only for a bar's own open — so 12:30 and 13:30 UTC releases
+ * never showed on 1h, most never on 4h and 1D, and upcoming events (no bar yet)
+ * never at all (CC-07). The host now hands an `xAt` that interpolates between
+ * bars and projects past the last one (CC-I2).
  *
  * <ul>
- *   <li>Upcoming events inside the right margin are drawn where they will
- *       land; the next one beyond the right edge is a chip at the edge with a
+ *   <li>The flags sit in their own thin LANE just above the time axis (PR-6) — at
+ *       the bottom of the lowest pane — not over the volume bars. On the price pane
+ *       the renderer keeps the event's vertical line and the blackout band
+ *       ({@link setLines}); the lane may be this renderer's pane or another
+ *       instance's ({@link setLane}).</li>
+ *   <li>Events closer together than a flag merge into ONE flag with a count: the
+ *       most important (then earliest) one's flag, and every one of them in the
+ *       hover card.</li>
+ *   <li>Upcoming events inside the right margin are drawn where they will land;
+ *       the next one beyond the right edge is a chip above the lane with a
  *       countdown.</li>
- *   <li>Optional shading over the news blackout around Tier-1 events: the
- *       window live refuses new entries in (`bands`).</li>
- *   <li>Flags are hit-testable ({@link hit}) for the host's hover card and
- *       click → the event's reading.</li>
+ *   <li>Optional shading over the news blackout around Tier-1 events: the window
+ *       live refuses new entries in (`bands`).</li>
+ *   <li>Flags are hit-testable ({@link hit}, {@link hitGroup}) for the host's
+ *       hover card and click → the event's reading.</li>
  * </ul>
  */
 
@@ -38,13 +46,14 @@ const IMPACT_COLOR: Record<EventImpact, string> = {
   Low: '#787B86',
 };
 
-/** The flag strip at the bottom of the pane, where marks are hovered and clicked. */
-const FLAG_STRIP = 26;
+/** The event lane's height (px) at the bottom of its pane. */
+export const EVENT_LANE_HEIGHT = 22;
 /** An event badge: a circle with the currency's flag, ringed in the impact colour (TradingView's timescale mark). */
 const BADGE_R = 9;
-/** Badges closer than this stack upwards instead of overlapping (at most {@link MAX_STACK} high). */
-const BADGE_GAP = 2 * BADGE_R + 2;
-const MAX_STACK = 3;
+/** Events whose flags would be closer than this merge into one flag with a count. */
+export const EVENT_MERGE_GAP = 2 * BADGE_R + 2;
+
+const IMPACT_RANK: Record<EventImpact, number> = { High: 2, Medium: 1, Low: 0 };
 
 /** Flag artwork as images for the canvas, loaded once per currency; `onReady` repaints when one arrives. */
 const flagImages = new Map<string, HTMLImageElement | null>();
@@ -68,9 +77,48 @@ function flagImage(ccy: string, onReady: () => void): HTMLImageElement | null {
   return null;
 }
 
-/** Where a mark was drawn on the last frame (media px): its badge centre. */
+/** Events sharing one flag: the one whose flag is drawn first, then the others in time order. */
+export interface EventGroup {
+  /** The most important (then earliest) event — its flag and its click. */
+  mark: EventMark;
+  /** Every event in the group, `mark` first. */
+  marks: EventMark[];
+  /** The flag's x: the primary event's. */
+  x: number;
+}
+
+/**
+ * Events placed at x, merged where their flags would overlap (PR-6): each group spans less than `gap` px from
+ * its first event, so a run of events a few pixels apart becomes a few flags, not one flag swallowing a day.
+ */
+export function groupEventMarks(
+  placed: readonly { mark: EventMark; x: number }[],
+  gap = EVENT_MERGE_GAP,
+): EventGroup[] {
+  const sorted = [...placed].sort((a, b) => a.x - b.x || a.mark.time - b.mark.time);
+  const groups: { start: number; items: { mark: EventMark; x: number }[] }[] = [];
+  for (const p of sorted) {
+    const g = groups[groups.length - 1];
+    if (g && p.x - g.start < gap) g.items.push(p);
+    else groups.push({ start: p.x, items: [p] });
+  }
+  return groups.map(({ items }) => {
+    const ranked = [...items].sort(
+      (a, b) => IMPACT_RANK[b.mark.impact] - IMPACT_RANK[a.mark.impact] || a.mark.time - b.mark.time,
+    );
+    const primary = ranked[0];
+    return {
+      mark: primary.mark,
+      marks: [primary.mark, ...ranked.slice(1).map((r) => r.mark).sort((a, b) => a.time - b.time)],
+      x: primary.x,
+    };
+  });
+}
+
+/** Where a flag was drawn on the last frame (media px): its badge centre, and every event it stands for. */
 export interface PlacedMark {
   mark: EventMark;
+  marks: EventMark[];
   x: number;
   y: number;
 }
@@ -85,6 +133,10 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   private paneHeight = 0;
   /** The Events layer group's opacity (PR-5); 0 draws nothing and hits nothing. */
   private opacity = 1;
+  /** This pane draws the event lane (the flags) at its bottom. */
+  private lane = true;
+  /** This pane draws each event's vertical line and the blackout bands (the price pane). */
+  private lines = true;
 
   constructor(
     /** UTC ms → x on the pane (media px), between bars and past the last one; null with no bars. */
@@ -119,22 +171,41 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** Whether this renderer's pane holds the event lane — the lowest pane, just above the time axis (PR-6). */
+  setLane(on: boolean): void {
+    if (on === this.lane) return;
+    this.lane = on;
+    this.requestUpdate?.();
+  }
+
+  /** Whether this renderer draws the events' vertical lines and blackout bands (the price pane's does). */
+  setLines(on: boolean): void {
+    if (on === this.lines) return;
+    this.lines = on;
+    this.requestUpdate?.();
+  }
+
   /** Repaint (the view moved, or the clock: the next event's countdown). */
   redraw(): void {
     this.requestUpdate?.();
   }
 
-  /** The marks drawn on the last frame, left to right. */
+  /** The flags drawn on the last frame, left to right. */
   placed(): readonly PlacedMark[] {
     return this.placedMarks;
   }
 
   /**
-   * The event under (x, y) — pane media px: a flag in the strip along the bottom of the pane, or
-   * the "next event" chip at the right edge. Null elsewhere: hovering a candle near an event's line
-   * is reading the candle.
+   * The event under (x, y) — pane media px: a flag in the lane, or the "next event" chip at the right edge — the
+   * flag's primary event when several share it. Null elsewhere: hovering a candle near an event's line is reading
+   * the candle.
    */
   hit(x: number, y: number): EventMark | null {
+    return this.hitGroup(x, y)?.[0] ?? null;
+  }
+
+  /** Every event of the flag under (x, y), primary first; the chip's one event; null elsewhere. */
+  hitGroup(x: number, y: number): EventMark[] | null {
     let best: PlacedMark | null = null;
     let bestD = Infinity;
     for (const p of this.placedMarks) {
@@ -144,10 +215,10 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
         bestD = d;
       }
     }
-    if (best) return best.mark;
+    if (best) return best.marks;
     const chip = this.nextChip;
     if (chip && x >= chip.x && x <= chip.x + chip.w && y >= chip.y && y <= chip.y + chip.h)
-      return chip.mark;
+      return [chip.mark];
     return null;
   }
 
@@ -172,30 +243,31 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   private draw(target: CanvasRenderingTarget2D): void {
     this.placedMarks = [];
     this.nextChip = null;
-    if (this.opacity <= 0) return;
+    if (this.opacity <= 0 || (!this.lane && !this.lines)) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const w = mediaSize.width;
       const h = mediaSize.height;
       this.paneHeight = h;
+      const laneTop = h - EVENT_LANE_HEIGHT;
       ctx.save();
       ctx.globalAlpha = this.opacity;
 
       // The blackout first, under the lines: the time live refuses new entries around Tier-1 prints.
-      ctx.fillStyle = 'rgba(242,54,69,0.07)';
-      for (const band of this.bands) {
-        const a = this.xAt(band.from);
-        const b = this.xAt(band.to);
-        if (a === null || b === null) continue;
-        const left = Math.max(0, Math.min(a, b));
-        const right = Math.min(w, Math.max(a, b));
-        if (right > left) ctx.fillRect(left, 0, right - left, h);
+      if (this.lines) {
+        ctx.fillStyle = 'rgba(242,54,69,0.07)';
+        for (const band of this.bands) {
+          const a = this.xAt(band.from);
+          const b = this.xAt(band.to);
+          if (a === null || b === null) continue;
+          const left = Math.max(0, Math.min(a, b));
+          const right = Math.min(w, Math.max(a, b));
+          if (right > left) ctx.fillRect(left, 0, right - left, this.lane ? laneTop : h);
+        }
       }
 
       const now = this.now();
       let next: EventMark | null = null;
-      // The rightmost badge x on each stack level: a badge takes the lowest level with room at its x.
-      const levelX: number[] = [];
-      const badges: { mark: EventMark; x: number; y: number }[] = [];
+      const onScreen: { mark: EventMark; x: number }[] = [];
       for (const mark of this.marks) {
         if (!passesImpact(mark.impact, this.minImpact)) continue;
         const x = this.xAt(mark.time);
@@ -205,40 +277,43 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
           if (!next && mark.time > now) next = mark;
           continue;
         }
-
-        // The event's instant across the pane, faint: the badge at the bottom is what reads.
+        onScreen.push({ mark, x });
+        if (!this.lines) continue;
+        // The event's instant across the pane, faint: the flag in the lane is what reads.
         ctx.strokeStyle = IMPACT_COLOR[mark.impact];
         ctx.globalAlpha = (mark.impact === 'High' ? 0.35 : 0.2) * this.opacity;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, h - 2 * BADGE_R - 4);
+        ctx.lineTo(x, this.lane ? laneTop : h);
         ctx.stroke();
-
-        let level = levelX.findIndex((lx) => x - lx >= BADGE_GAP);
-        if (level < 0) level = levelX.length < MAX_STACK ? levelX.length : MAX_STACK - 1;
-        levelX[level] = x;
-        const y = h - BADGE_R - 4 - level * BADGE_GAP;
-        badges.push({ mark, x, y });
       }
-
-      // Badges after the lines, so a later event's line never crosses an earlier badge.
       ctx.setLineDash([]);
-      for (const { mark, x, y } of badges) {
-        this.drawBadge(ctx, mark, x, y, mark.time > now);
-        this.placedMarks.push({ mark, x, y });
-      }
 
-      if (next) this.drawNextChip(ctx, next, w, h, now);
+      if (this.lane && (onScreen.length > 0 || next)) {
+        // The lane: a faint strip with a hairline on top, so the flags read as their own row.
+        ctx.globalAlpha = this.opacity;
+        ctx.fillStyle = 'rgba(120,123,134,0.07)';
+        ctx.fillRect(0, laneTop, w, EVENT_LANE_HEIGHT);
+        ctx.fillStyle = 'rgba(120,123,134,0.28)';
+        ctx.fillRect(0, laneTop, w, 1);
+        const y = laneTop + EVENT_LANE_HEIGHT / 2;
+        for (const g of groupEventMarks(onScreen)) {
+          this.drawBadge(ctx, g.mark, g.x, y, g.mark.time > now);
+          if (g.marks.length > 1) this.drawCount(ctx, g.marks.length, g.x, y);
+          this.placedMarks.push({ mark: g.mark, marks: g.marks, x: g.x, y });
+        }
+        if (next) this.drawNextChip(ctx, next, w, laneTop, now);
+      }
       ctx.restore();
     });
   }
 
   /**
    * One event: a solid circle with the currency's flag (or its code on the impact colour when there is no flag), a
-   * white separator and a 2px ring in the impact colour — readable over candles and volume. An upcoming event (not
-   * printed yet) is drawn faded with a dashed ring.
+   * white separator and a 2px ring in the impact colour. An upcoming event (not printed yet) is drawn faded with a
+   * dashed ring.
    */
   private drawBadge(ctx: CanvasRenderingContext2D, mark: EventMark, x: number, y: number, upcoming: boolean): void {
     const color = IMPACT_COLOR[mark.impact];
@@ -274,20 +349,40 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
     ctx.restore();
   }
 
-  /** The next upcoming event beyond the right edge: "USD Non-Farm Payrolls · in 2d 4h ▸". */
+  /** How many events share a flag: a small count bubble on its upper right. */
+  private drawCount(ctx: CanvasRenderingContext2D, count: number, x: number, y: number): void {
+    const text = count > 9 ? '9+' : String(count);
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.font = '600 8px -apple-system, system-ui, sans-serif';
+    const r = 5.5;
+    const cx = x + BADGE_R - 1;
+    const cy = y - BADGE_R + 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#131722';
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, cx, cy + 0.5);
+    ctx.restore();
+  }
+
+  /** The next upcoming event beyond the right edge: "USD Non-Farm Payrolls · in 2d 4h ▸", just above the lane. */
   private drawNextChip(
     ctx: CanvasRenderingContext2D,
     mark: EventMark,
     w: number,
-    h: number,
+    laneTop: number,
     now: number,
   ): void {
     const title = mark.title.length > 26 ? `${mark.title.slice(0, 25)}…` : mark.title;
     const text = `${mark.currency} ${title} · ${eventCountdown(now, mark.time) ?? ''} ▸`;
     ctx.font = '10px -apple-system, system-ui, sans-serif';
     const tw = ctx.measureText(text).width + 12;
-    // Just above the flag strip: the flags of events near the right edge stay visible and hittable.
-    const chip = { mark, x: Math.max(0, w - tw - 4), y: h - FLAG_STRIP - 18, w: tw, h: 16 };
+    // Above the lane: the flags of events near the right edge stay visible and hittable.
+    const chip = { mark, x: Math.max(0, w - tw - 4), y: laneTop - 18, w: tw, h: 16 };
     ctx.globalAlpha = 0.9 * this.opacity;
     ctx.fillStyle = IMPACT_COLOR[mark.impact];
     ctx.fillRect(chip.x, chip.y, chip.w, chip.h);
