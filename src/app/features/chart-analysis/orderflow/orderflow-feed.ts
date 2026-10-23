@@ -147,11 +147,15 @@ export class OrderFlowFeed {
     });
 
     // The live book: one shared 1.5 s poll, only while the heatmap is on, the newest bar is on screen and not in replay.
-    effect((onCleanup) => {
-      const want =
+    // A boolean, so a pan that keeps the right edge in view does not drop and re-open the poll.
+    const wantLive = computed(
+      () =>
         deps.settings().heatmap &&
         deps.view()?.rightEdgeInView === true &&
-        deps.replayClip() === null;
+        deps.replayClip() === null,
+    );
+    effect((onCleanup) => {
+      const want = wantLive();
       const symbol = deps.symbol();
       if (!want || !symbol) return;
       const watch = this.liveDepth.watch(symbol);
@@ -216,6 +220,16 @@ export class OrderFlowFeed {
       this.timer = undefined;
       this.refresh({});
     }, DEBOUNCE_MS);
+  }
+
+  /** The bars to ask about: in replay, none that opens at or after the head. */
+  private barsNow(): readonly Bar[] {
+    const bars = this.deps.bars();
+    const clip = this.deps.replayClip();
+    if (clip === null || !bars.length || bars[bars.length - 1].time < clip) return bars;
+    let n = bars.length;
+    while (n > 0 && bars[n - 1].time >= clip) n--;
+    return bars.slice(0, n);
   }
 
   /** The newest-bar cap of every fetch: the replay head, else now. */
@@ -294,7 +308,7 @@ export class OrderFlowFeed {
   }
 
   private refreshFlow(symbol: string, view: OrderFlowView, force: boolean): void {
-    const bars = this.deps.bars();
+    const bars = this.barsNow();
     if (!force && this.covers(this.flow()?.span ?? null, view, bars, symbol)) return;
     const idx = flowIndexes(view, bars.length, MAX_FLOW_BARS);
     if (!idx) return;
@@ -350,7 +364,7 @@ export class OrderFlowFeed {
 
   private refreshFootprint(symbol: string, view: OrderFlowView, force: boolean): void {
     if (view.barSpacing < FOOTPRINT_MIN_BAR_PX) return;
-    const bars = this.deps.bars();
+    const bars = this.barsNow();
     const span = this.footprintSpan(view, bars);
     if (!span?.allowed) return;
     const rowPoints = footprintRowPoints(view.pricePerPx, this.point(), this.deps.pipSize());
@@ -418,7 +432,11 @@ export class OrderFlowFeed {
   // ── The model ───────────────────────────────────────────────────────────
 
   /** The flow answer for this series, cut at the replay head (null when it reaches past it). */
-  private readonly flowBars = computed<{ bars: TickBarDto[]; coverage: number | null } | null>(
+  private readonly flowBars = computed<{
+    bars: TickBarDto[];
+    coverage: number | null;
+    fromUtc: number;
+  } | null>(
     () => {
       const f = this.flow();
       const symbol = this.deps.symbol();
@@ -427,8 +445,14 @@ export class OrderFlowFeed {
       const clip = this.deps.replayClip();
       if (clip !== null && f.span.endUtc > clip) return null;
       const coverage = f.data.tickCoverageFromUtc ? utcMs(f.data.tickCoverageFromUtc) : NaN;
-      return { bars: f.data.bars, coverage: Number.isFinite(coverage) ? coverage : null };
+      return {
+        bars: f.data.bars,
+        coverage: Number.isFinite(coverage) ? coverage : null,
+        fromUtc: f.span.fromUtc,
+      };
     },
+    // The same answer stays the same value while the replay head moves, so the panes are not rewritten per step.
+    { equal: (a, b) => a === b || (a !== null && b !== null && a.bars === b.bars) },
   );
 
   /** The ribbon's "liquidity pulled" flags, once per answer. */
@@ -481,7 +505,7 @@ export class OrderFlowFeed {
     if (!view) return { model: null, lines: [] };
     if (view.barSpacing < FOOTPRINT_MIN_BAR_PX)
       return { model: null, lines: ['Zoom in to see the footprint'] };
-    const bars = this.deps.bars();
+    const bars = this.barsNow();
     const span = this.footprintSpan(view, bars);
     if (span && !span.allowed)
       return {
@@ -536,9 +560,8 @@ export class OrderFlowFeed {
     const note = this.stateNote(this.flowState(), 'tick flow');
     const notes: string[] = [];
     if (!f) return { bars: [], notes: note ? [note] : ['waiting for the chart'] };
-    const view = this.deps.view();
     if (f.coverage === null) notes.push('no ticks retained for this symbol');
-    else if (view && view.fromUtc < f.coverage)
+    else if (f.fromUtc < f.coverage)
       notes.push(
         kind === 'cvd'
           ? `no ticks before ${formatUtcShort(f.coverage)} (ticks are kept 14 days)`
@@ -550,6 +573,10 @@ export class OrderFlowFeed {
       ? { bars: f.bars, pulled: this.pulled(), notes }
       : { bars: f.bars, notes };
   }
+
+  /** The panes' models, recomputed only when their answer or load state changes — not on a pan. */
+  private readonly cvdPane = computed(() => this.flowPane('cvd'));
+  private readonly ribbonPane = computed(() => this.flowPane('ribbon'));
 
   private fillsLayer(): { fills: FillMark[]; lines: string[] } {
     if (!this.canReadFills())
@@ -609,8 +636,8 @@ export class OrderFlowFeed {
       footprint,
       fills,
       captions,
-      cvd: s.cvd ? this.flowPane('cvd') : null,
-      ribbon: s.ribbon ? this.flowPane('ribbon') : null,
+      cvd: s.cvd ? this.cvdPane() : null,
+      ribbon: s.ribbon ? this.ribbonPane() : null,
     };
   });
 }
