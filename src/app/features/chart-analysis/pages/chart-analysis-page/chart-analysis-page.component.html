@@ -1696,12 +1696,12 @@
               Add indicator…
             </button>
             @if (cm.level; as lvl) {
-              <button type="button" (click)="createAlertAtLevel()" data-testid="alert-at-level">
+              <button type="button" (click)="createAlertAtLevel($event)" data-testid="alert-at-level">
                 Add alert at {{ lvl.label }} {{ lvl.price | number: '1.' + precision() + '-' + precision() }}
               </button>
             }
             @if (cm.price !== null) {
-              <button type="button" (click)="createAlertHere()">
+              <button type="button" (click)="createAlertHere($event)">
                 Add alert at {{ cm.price | number: '1.' + precision() + '-' + precision() }}
               </button>
             }
