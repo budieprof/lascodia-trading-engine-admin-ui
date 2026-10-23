@@ -5,6 +5,9 @@ import {
   HEAT_LUT,
   buildHeatGrid,
   clipHeatGrid,
+  depthHalfSpan,
+  heatHitAt,
+  placeHeatGrid,
   foldLiveSnapshot,
   formatBucket,
   heatCellAt,
@@ -223,5 +226,74 @@ describe('heatmap grid (OF-1)', () => {
     expect(formatBucket(30_000)).toBe('30 s');
     expect(formatBucket(5 * MIN)).toBe('5 min');
     expect(formatBucket(3 * 60 * MIN)).toBe('3 h');
+  });
+
+  describe('draw / hover round trip (placeHeatGrid + heatHitAt)', () => {
+    // A linear chart: 1 px per 10 s from T0, 1 px per point downwards from 1.10010.
+    const xAt = (ms: number) => (ms - T0) / 10_000;
+    const yAt = (p: number) => (1.1001 - p) / 0.00001;
+    const g = buildHeatGrid(dto(), 0.00001);
+    const placed = placeHeatGrid(g, xAt, yAt, 1000, 1000);
+
+    it('every painted cell hit-tests back to itself, at its centre and its edges', () => {
+      for (const col of placed) {
+        for (const cell of col.cells) {
+          for (const [x, y] of [
+            [(col.x0 + col.x1) / 2, cell.y + cell.h / 2],
+            [col.x0, cell.y],
+            [col.x1 - 0.01, cell.y + cell.h - 0.01],
+          ]) {
+            const hit = heatHitAt(placed, x, y);
+            expect(hit?.column).toBe(col.column);
+            expect(hit?.cell).toBe(cell);
+          }
+        }
+      }
+      // The cell's price and volume are the bucket's level: 1.09999 holds 2M in the first bucket.
+      const col0 = placed[0];
+      const cell = col0.cells.find((c) => Math.abs(c.price - 1.09999) < 1e-9)!;
+      expect(cell.volume).toBe(2_000_000);
+      expect(heatHitAt(placed, 3, cell.y + 0.5)?.cell?.volume).toBe(2_000_000);
+    });
+
+    it('a pointer between buckets (no snapshot) is off every column; empty price rows report no cell', () => {
+      // Bucket +1 min (x 6..12) was omitted by the engine.
+      expect(heatHitAt(placed, 9, yAt(1.1))).toBeNull();
+      // Far from any level inside a drawn column: the column, but no cell.
+      const far = heatHitAt(placed, 3, yAt(1.0995));
+      expect(far?.column).toBe(placed[0].column);
+      expect(far?.cell).toBeNull();
+    });
+
+    it('sub-pixel rows and overlapping narrow buckets: the last painted (the visible one) wins', () => {
+      const tight = placeHeatGrid(
+        g,
+        (ms) => (ms - T0) / 1_000_000,
+        (p) => (1.1001 - p) / 0.001,
+        1000,
+        1000,
+      );
+      // Both buckets land on the same pixel column: the hover reports the later one, which is painted on top.
+      const hit = heatHitAt(tight, tight[1].x0, tight[1].cells[0].y);
+      expect(hit?.column).toBe(tight[1].column);
+      // A pointer a pixel off a 1 px row still finds it (tolerance).
+      const c = tight[1].cells[0];
+      expect(heatHitAt(tight, tight[1].x0, c.y + c.h + 1)?.cell).toBeTruthy();
+    });
+
+    it('columns and rows off the pane are not placed', () => {
+      expect(placeHeatGrid(g, xAt, yAt, 5, 1000)).toHaveLength(1);
+      expect(placeHeatGrid(g, xAt, yAt, 1000, 1000).every((c) => c.cells.length > 0)).toBe(true);
+      expect(placeHeatGrid(g, xAt, () => -50, 1000, 1000).every((c) => c.cells.length === 0)).toBe(
+        true,
+      );
+    });
+  });
+
+  it('depth half-span: the typical reach of the book from the mid', () => {
+    const g = buildHeatGrid(dto(), 0.00001);
+    // Column 0: mid 1.10001, levels 1.09999..1.10003 → reach 2 points + half a row; column 1: 1 point + half.
+    expect(depthHalfSpan(g)).toBeCloseTo(0.000025, 10);
+    expect(depthHalfSpan({ ...g, columns: [] })).toBe(0);
   });
 });

@@ -95,6 +95,8 @@ export interface OrderFlowSettings {
   cvd: boolean;
   /** OF-3: per-bar tick-count footprint on the price pane. */
   footprint: boolean;
+  /** The footprint's row height in MT5 points; null: adaptive (about ten rows per typical visible bar). */
+  footprintRowPoints: number | null;
   /** OF-4: spread and tick-rate ribbon pane. */
   ribbon: boolean;
   /** OF-6: fill markers with requested vs filled price. */
@@ -107,6 +109,7 @@ export const DEFAULT_ORDER_FLOW: OrderFlowSettings = {
   heatmapOpacity: 0.6,
   cvd: false,
   footprint: false,
+  footprintRowPoints: null,
   ribbon: false,
   fills: false,
 };
@@ -124,6 +127,12 @@ export function restoredOrderFlow(
       : DEFAULT_ORDER_FLOW.heatmapOpacity,
     cvd: s.cvd === true,
     footprint: s.footprint === true,
+    footprintRowPoints:
+      typeof s.footprintRowPoints === 'number' &&
+      Number.isInteger(s.footprintRowPoints) &&
+      s.footprintRowPoints >= 1
+        ? s.footprintRowPoints
+        : null,
     ribbon: s.ribbon === true,
     fills: s.fills === true,
   };

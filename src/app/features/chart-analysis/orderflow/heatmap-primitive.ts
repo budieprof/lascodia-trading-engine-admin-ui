@@ -10,7 +10,13 @@ import type {
 
 import { formatUnits } from '../panels/side/depth';
 import { drawHoverCard, formatUtcShort } from './canvas-text';
-import { heatLutColor, type HeatColumn, type HeatGrid } from './heatmap-grid';
+import {
+  heatHitAt,
+  heatLutColor,
+  placeHeatGrid,
+  type HeatGrid,
+  type PlacedHeatColumn,
+} from './heatmap-grid';
 
 /** What the heatmap draws: the (replay-clipped) grid and its opacity. */
 export interface HeatmapLayerModel {
@@ -26,13 +32,6 @@ export interface OrderFlowPrimitiveDeps {
   precision: () => number;
 }
 
-/** A column as placed on the last frame (media px). */
-interface PlacedColumn {
-  x0: number;
-  x1: number;
-  column: HeatColumn;
-}
-
 /**
  * OF-1 — the liquidity heatmap (Bookmap): one broker's DOM per time bucket painted BEHIND the candles (`zOrder`
  * bottom). Each bucket's levels fill their own bucket only — a gap where no snapshot was captured stays empty — coloured
@@ -46,7 +45,7 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
   private requestUpdate?: () => void;
   private chart: IChartApi | null = null;
   private hover: { x: number; y: number } | null = null;
-  private placed: PlacedColumn[] = [];
+  private placed: PlacedHeatColumn[] = [];
   private readonly onCrosshair = (p: MouseEventParams<Time>) => {
     const next = p.point && (p.paneIndex ?? 0) === 0 ? { x: p.point.x, y: p.point.y } : null;
     if (!next && !this.hover) return;
@@ -109,39 +108,20 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
     if (!model || !series || model.grid.columns.length === 0 || model.opacity <= 0) return;
     const { grid } = model;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
-      const width = mediaSize.width;
-      const half = grid.rowStep / 2;
-      // Rows share keys across columns: each row's y is projected once per frame.
-      const rowY = new Map<number, [number, number] | null>();
-      const yOf = (key: number): [number, number] | null => {
-        let hit = rowY.get(key);
-        if (hit !== undefined) return hit;
-        const p = key * grid.rowStep;
-        const top = series.priceToCoordinate(p + half);
-        const bottom = series.priceToCoordinate(p - half);
-        hit =
-          top === null || bottom === null
-            ? null
-            : [Math.min(top, bottom), Math.max(1, Math.abs(bottom - top))];
-        rowY.set(key, hit);
-        return hit;
-      };
+      this.placed = placeHeatGrid(
+        grid,
+        this.deps.xAt,
+        (p) => series.priceToCoordinate(p),
+        mediaSize.width,
+        mediaSize.height,
+      );
       ctx.save();
       ctx.globalAlpha = model.opacity;
-      for (const c of grid.columns) {
-        const x0 = this.deps.xAt(c.t);
-        const x1 = this.deps.xAt(c.end);
-        if (x0 === null || x1 === null || x1 < 0 || x0 > width) continue;
-        const left = Math.floor(x0);
-        const w = Math.max(1, Math.ceil(x1) - left);
-        this.placed.push({ x0: left, x1: left + w, column: c });
-        for (let i = 0; i < c.rows.length; i++) {
-          const v = c.volumes[i];
-          if (!(v > 0)) continue;
-          const y = yOf(c.rows[i]);
-          if (!y || y[0] > mediaSize.height || y[0] + y[1] < 0) continue;
-          ctx.fillStyle = heatLutColor(v, grid.robustMax);
-          ctx.fillRect(left, y[0], w, y[1]);
+      for (const col of this.placed) {
+        const w = col.x1 - col.x0;
+        for (const cell of col.cells) {
+          ctx.fillStyle = heatLutColor(cell.volume, grid.robustMax);
+          ctx.fillRect(col.x0, cell.y, w, cell.h);
         }
       }
       // Best bid / ask as step lines over the buckets that have a book.
@@ -180,18 +160,16 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
     const series = this.deps.series();
     const hover = this.hover;
     if (!model || !series || !hover) return;
-    const placed = this.placed.find((p) => hover.x >= p.x0 && hover.x < p.x1);
-    if (!placed) return;
-    const price = series.coordinateToPrice(hover.y);
-    if (price === null) return;
-    const { grid } = model;
-    const c = placed.column;
-    const key = Math.round(Number(price) / grid.rowStep);
-    let volume = 0;
-    for (let i = 0; i < c.rows.length; i++) if (c.rows[i] === key) volume = c.volumes[i];
+    // The same rectangles the frame painted (placeHeatGrid): what the card names is what is under the pointer.
+    const hit = heatHitAt(this.placed, hover.x, hover.y);
+    if (!hit) return;
+    const c = hit.column;
+    const price = hit.cell?.price ?? Number(series.coordinateToPrice(hover.y));
+    const volume = hit.cell?.volume ?? 0;
+    if (!Number.isFinite(price)) return;
     const digits = this.deps.precision();
     const lines = [
-      `Broker DOM · ${(key * grid.rowStep).toFixed(digits)}`,
+      `Broker DOM · ${price.toFixed(digits)}`,
       volume > 0 ? `${formatUnits(volume)} units resting` : 'No liquidity shown at this price',
       `Book captured ${formatUtcShort(c.capturedAt)}`,
     ];

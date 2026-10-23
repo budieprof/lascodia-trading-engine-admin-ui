@@ -26,7 +26,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const bars: Bar[] = Array.from({ length: 48 }, (_, i) => ({
   time: T0 + i * H,
   open: 1.1,
-  high: 1.1,
+  high: 1.1002,
   low: 1.1,
   close: 1.1,
   volume: 1,
@@ -267,8 +267,13 @@ describe('OrderFlowFeed', () => {
     await settle();
     const req = api.tickBars.mock.calls[0][0] as TickBarsRequest;
     expect(req.footprint).toBe(true);
-    // 14 px at 0.00001 a px is 1.4 pips: rows of 2 pips (20 points).
-    expect(req.footprintRowPoints).toBe(20);
+    // Bars span 2 pips (20 points): adaptive rows of 2 points cut each into ten.
+    expect(req.footprintRowPoints).toBe(2);
+    expect(feed.model()!.captions[0]).toContain('rows of 0.2 pip (auto)');
+    // The operator's fixed size wins and is re-asked.
+    settings.update((s) => ({ ...s, footprintRowPoints: 10 }));
+    await settle();
+    expect((api.tickBars.mock.calls.at(-1)![0] as TickBarsRequest).footprintRowPoints).toBe(10);
     expect(req.barTimes.length).toBeLessThanOrEqual(500);
   });
 
