@@ -597,6 +597,68 @@
           >
             <app-chart-icon name="delta" [size]="28" /> Delta (estimated)
           </button>
+          <!-- Order flow (orderflow/): one broker's DOM and quote stream — labelled as such on the chart. -->
+          <div class="tb-menu-sep"></div>
+          <div class="tb-menu-heading">Order flow</div>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().heatmap"
+            (click)="toggleOrderFlow('heatmap')"
+            title="Liquidity heatmap behind the candles from one broker's MT5 depth of book (kept 7 days)"
+          >
+            <app-chart-icon name="volume-profile" [size]="28" /> Liquidity heatmap (broker DOM)
+          </button>
+          @if (orderFlow().heatmap) {
+            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Heatmap opacity">
+              Opacity
+              <input
+                type="range"
+                min="0.1"
+                max="1"
+                step="0.05"
+                [value]="orderFlow().heatmapOpacity"
+                (input)="setHeatmapOpacity(+$any($event.target).value)"
+                aria-label="Heatmap opacity"
+              />
+            </label>
+          }
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().cvd"
+            (click)="toggleOrderFlow('cvd')"
+            title="Cumulative tick delta in its own pane: quote up-ticks minus down-ticks (tick rule) — no traded volume exists for spot FX"
+          >
+            <app-chart-icon name="delta" [size]="28" /> Tick delta (CVD)
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().footprint"
+            (click)="toggleOrderFlow('footprint')"
+            title="Per-bar tick counts (down × up) per price row with 3:1 diagonal imbalances — zoom in to see it"
+          >
+            <app-chart-icon name="structure" [size]="28" /> Footprint (tick counts)
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().ribbon"
+            (click)="toggleOrderFlow('ribbon')"
+            title="Broker spread (avg, min–max) and ticks per minute in a thin pane; marks bars where liquidity was pulled"
+          >
+            <app-chart-icon name="sr-levels" [size]="28" /> Spread &amp; tick rate
+          </button>
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().fills"
+            (click)="toggleOrderFlow('fills')"
+            title="Fills of the accounts in scope at their price, requested vs filled and the slippage"
+          >
+            <app-chart-icon name="alert" [size]="28" /> Fills &amp; slippage
+          </button>
         </div>
       }
     </div>
@@ -1455,6 +1517,7 @@
           (scriptAction)="onScriptAction($event)"
           (scriptTradeClick)="onScriptTradeClick($event)"
           [externalPanes]="chartExternalPanes()"
+          [orderFlow]="orderFlowFeed.model()"
           (loadMore)="loadOlder()"
           (legend)="onLegend($event)"
           (toolComplete)="onToolComplete()"
@@ -1834,6 +1897,7 @@
                 [timeframe]="resolutionLabel(resolution())"
                 [digits]="precision()"
                 [timeZone]="timezone()"
+                [replayAt]="orderFlowReplayClip()"
                 (symbolSelected)="selectSymbol($event)"
               />
             </aside>

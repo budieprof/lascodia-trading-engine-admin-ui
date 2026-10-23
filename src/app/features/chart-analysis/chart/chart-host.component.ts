@@ -208,6 +208,7 @@ import {
 } from '@shared/pine-chart/components/pine-table-overlay.component';
 import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
+import { OrderFlowLayers, type OrderFlowModel } from '../orderflow/orderflow-layers';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -732,6 +733,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly scriptResults = input<ChartScriptLayer[]>([]);
   /** Externally sourced series (FX fundamentals), each in its own pane. */
   readonly externalPanes = input<ExternalPane[]>([]);
+  /** The order-flow layers to draw (heatmap, footprint, fills, CVD and spread panes — `orderflow/`); null: none. */
+  readonly orderFlow = input<OrderFlowModel | null>(null);
   readonly resolution = input<string>('');
   /**
    * The symbol's session as the engine reports it (`scripting/chart-bars`): the trading days the
@@ -1317,6 +1320,12 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.applyExternalPanes(panes));
     });
 
+    // Order flow (orderflow/): its primitives ride on the price series, its panes follow the bars (syncData).
+    effect(() => {
+      const model = this.orderFlow();
+      untracked(() => this.orderFlowLayers.setModel(model));
+    });
+
     effect(() => {
       const overlays = this.overlays();
       untracked(() => this.overlayRenderer.setOverlays(overlays));
@@ -1387,6 +1396,7 @@ export class ChartHostComponent implements OnDestroy {
     this.cancelGlide();
     this.cancelPick();
     this.scriptLayers.dispose();
+    this.orderFlowLayers.dispose();
     cancelAnimationFrame(this.tablesFrame);
     this.paneObserver?.disconnect();
     this.resizeObserver?.disconnect();
@@ -2455,6 +2465,21 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
+   * The order-flow layers (orderflow/): price-pane primitives hung through {@link attachPricePrimitive}, the CVD and
+   * spread panes, and the visible window the page fetches for (`view`).
+   */
+  readonly orderFlowLayers = new OrderFlowLayers({
+    chart: () => this.chart,
+    price: () => this.price,
+    attachPricePrimitive: (p) => this.attachPricePrimitive(p),
+    logicalAt: (ms) => this.logicalAtMs(ms),
+    plotted: () => this.plotted,
+    plottedUtc: () => this.plottedUtc,
+    dark: () => this.theme.theme() === 'dark',
+    precision: () => this.precision(),
+  });
+
+  /**
    * Fit the price axis to the visible data, leaving the time window — and the scale's mode: log,
    * percent, indexed — alone (TradingView's "auto"; CC-19: it used to switch the mode to normal).
    */
@@ -2578,6 +2603,7 @@ export class ChartHostComponent implements OnDestroy {
     this.tickCountdown();
     this.syncLastValueLabel();
     this.emitLegend();
+    this.orderFlowLayers.barsChanged();
   }
 
   /** The bar count the session breaks were last found for: a tick changes no day. */

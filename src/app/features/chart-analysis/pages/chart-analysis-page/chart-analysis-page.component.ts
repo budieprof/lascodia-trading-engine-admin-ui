@@ -402,6 +402,14 @@ import {
   type DrawingKind,
 } from '../../drawings/model';
 import { appStorage } from '@core/storage/app-storage';
+import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
+import { replayClipUtc } from '../../orderflow/orderflow-replay';
+import {
+  DEFAULT_ORDER_FLOW,
+  orderFlowCount,
+  restoredOrderFlow,
+  type OrderFlowSettings,
+} from '../../orderflow/orderflow.types';
 
 /** A Pine script's latest run on the chart. */
 export interface ChartScriptRun {
@@ -832,7 +840,7 @@ export class ChartAnalysisPageComponent {
         this.showSupportResistance(),
         this.showStructure(),
         this.deltaOn(),
-      ].filter(Boolean).length,
+      ].filter(Boolean).length + orderFlowCount(this.orderFlow()),
   );
 
   /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
@@ -1727,6 +1735,36 @@ export class ChartAnalysisPageComponent {
     if (existing) this.removeIndicator(existing.uid);
     else this.addIndicator('est-delta');
   }
+
+  // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
+  readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
+  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills'): void {
+    this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
+  }
+  setHeatmapOpacity(value: number): void {
+    this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
+  }
+  /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
+  readonly orderFlowReplayClip = computed(() => {
+    if (!this.replay.active()) return null;
+    const intrabar = this.replay.cursor().sub !== null ? this.replay.intrabarSource() : null;
+    const unit = resolutionMs(intrabar ?? this.resolution());
+    return replayClipUtc(this.replay.headBar(), unit);
+  });
+  readonly orderFlowFeed = new OrderFlowFeed({
+    settings: () => this.orderFlow(),
+    symbol: () => this.symbol(),
+    resolution: () => this.resolution(),
+    bars: () => this.displayBars(),
+    style: () => this.style(),
+    view: () => this.host()?.orderFlowLayers.view() ?? null,
+    accountIds: () => this.accountScope.accountIds(),
+    accountKey: () => this.accountScope.accountIdsKey(),
+    replayClip: () => this.orderFlowReplayClip(),
+    precision: () => this.precision(),
+    pipSize: () => this.pipSize(),
+    now: () => this.serverClock.now(),
+  });
   private readonly orders = inject(OrdersService);
   private readonly martingale = inject(MartingaleService);
 
@@ -5695,6 +5733,7 @@ export class ChartAnalysisPageComponent {
         showWatches: this.showWatchMarks(),
         vpNakedPocs: this.profileExtras().nakedPocs,
         vpDeveloping: this.profileExtras().developing,
+        orderFlow: { ...this.orderFlow() },
       },
       layerGroups: persistLayerGroups(this.layerGroups()),
       split: this.splitState(),
@@ -6153,6 +6192,7 @@ export class ChartAnalysisPageComponent {
       developing: o.vpDeveloping ?? false,
     });
     this.layerGroups.set(restoreLayerGroups(s.layerGroups));
+    this.orderFlow.set(restoredOrderFlow(o.orderFlow));
   }
 
   private flushPendingView(): void {
