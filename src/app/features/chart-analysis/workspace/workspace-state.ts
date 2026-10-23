@@ -1,4 +1,5 @@
 import type { ActiveIndicator, ChartStyle, ChartViewState } from '../chart/chart-host.component';
+import type { OrderFlowSettings } from '../orderflow/orderflow.types';
 import type { TvResolution } from '../datafeed/resolution';
 import type {
   ChartScriptItem,
@@ -10,6 +11,7 @@ import type { ScriptDisplaySettings } from '../scripts/script-display';
 import type { LegacyChartLayout } from './layout-store.service';
 import type { ChartAppearance } from '../chart/appearance';
 import type { CompareSeriesSpec } from '../compare/compare-series';
+import type { PersistedLayerGroups } from '../overlays/layer-groups';
 
 /** A Pine script on the chart, as a layout restores it. */
 export interface WorkspaceScript {
@@ -158,6 +160,12 @@ export interface ChartWorkspaceState {
     fitTradeLines?: boolean;
     /** Watch / monitor marks and lines (default on). */
     showWatches?: boolean;
+    /** The volume profile's naked POCs (default off, PR-2). */
+    vpNakedPocs?: boolean;
+    /** The volume profile's developing POC / VAH / VAL (default off, PR-3). */
+    vpDeveloping?: boolean;
+    /** Order-flow layers (heatmap, CVD, footprint, spread ribbon, fills); absent: all off. */
+    orderFlow?: Partial<OrderFlowSettings>;
   };
   /** The split view: its arrangement — and, in v1, each comparison panel's series (CC-12; v2: `charts`). */
   split?: {
@@ -166,6 +174,8 @@ export interface ChartWorkspaceState {
   };
   /** v2: the layout's other charts, in order (CC-I5). */
   charts?: ChartPanelState[];
+  /** Layer groups' show/hide and opacity (PR-5, `overlays/layer-groups.ts`); absent: all shown, defaults. */
+  layerGroups?: PersistedLayerGroups;
   /** v2: the main chart's link group (1 … 3; absent or 0: not linked). */
   link?: number;
   /** v2: what linked charts follow of each other. */

@@ -140,9 +140,30 @@ import {
   type SrLevel,
 } from '../overlays/analysis-overlays';
 import { marketStructure } from '../overlays/market-structure';
+import {
+  DEFAULT_PROFILE_EXTRAS,
+  profileExtras,
+  type ProfileExtrasSettings,
+} from '../overlays/profile-levels';
+import { provenanceOf } from '../overlays/provenance';
+import type { AlertableLevel } from '../overlays/overlay-hits';
+import {
+  DEFAULT_LAYER_GROUPS,
+  effectiveOpacity,
+  type LayerGroupsState,
+} from '../overlays/layer-groups';
+import {
+  placeProvenanceTip,
+  ProvenanceTipComponent,
+  type ProvenanceTip,
+} from '../overlays/provenance-tip.component';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
-import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
-import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
+import {
+  EVENT_LANE_HEIGHT,
+  EventMarksRenderer,
+  type EventMark,
+} from '../overlays/event-marks-renderer';
+import { formatEventTime, groupCard, type EventCard } from '../overlays/chart-events';
 import { SessionBreaksRenderer, sessionBreakIndexes, utcDay } from '../overlays/session-breaks';
 import { changeText, formatStudyValue, formatVolume } from './legend-format';
 import { paintLegend, paintTable, placeTable, stackTables, type LegendRun } from './snapshot';
@@ -187,6 +208,7 @@ import {
 } from '@shared/pine-chart/components/pine-table-overlay.component';
 import { alignToBars, type PanePoint } from '../panels/fx-fundamentals';
 import { ALL_PATTERNS, profileIdOf, studyKind, studySubId } from '../studies';
+import { OrderFlowLayers, type OrderFlowModel } from '../orderflow/orderflow-layers';
 
 /**
  * Chart styles the toolbar can switch between — the 18 of TradingView's
@@ -385,7 +407,7 @@ interface ExternalLineSeries {
 @Component({
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineTableOverlayComponent, ScriptStatusLineComponent],
+  imports: [PineTableOverlayComponent, ScriptStatusLineComponent, ProvenanceTipComponent],
   template: `<div class="chart-host" #container></div>
     @for (o of scriptTables(); track o.key) {
       <div
@@ -486,7 +508,8 @@ interface ExternalLineSeries {
         }
         <div class="row date">Click for the event's reading</div>
       </div>
-    }`,
+    }
+    <app-provenance-tip [tip]="provenanceTip()" />`,
   styles: [
     `
       .inline-edit {
@@ -643,6 +666,10 @@ export class ChartHostComponent implements OnDestroy {
   readonly showSupportResistance = input<boolean>(false);
   /** Balance range, value area, stop pools and the events that formed them. */
   readonly showStructure = input<boolean>(false);
+  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3). */
+  readonly profileExtras = input<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
+  /** Layer groups' show/hide and opacity (PR-5): structure, profiles, events and trade lines here. */
+  readonly layerGroups = input<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
   readonly indicators = input<ActiveIndicator[]>([]);
   /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib; null = off. */
   readonly autoAnalysis = input<AutoAnalysisSettings | null>(null);
@@ -706,6 +733,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly scriptResults = input<ChartScriptLayer[]>([]);
   /** Externally sourced series (FX fundamentals), each in its own pane. */
   readonly externalPanes = input<ExternalPane[]>([]);
+  /** The order-flow layers to draw (heatmap, footprint, fills, CVD and spread panes — `orderflow/`); null: none. */
+  readonly orderFlow = input<OrderFlowModel | null>(null);
   readonly resolution = input<string>('');
   /**
    * The symbol's session as the engine reports it (`scripting/chart-bars`): the trading days the
@@ -861,6 +890,8 @@ export class ChartHostComponent implements OnDestroy {
   } | null>(null);
   /** The economic event under the pointer, as a card above its flag (CC-I2). */
   readonly eventTip = signal<{ x: number; y: number; card: EventCard } | null>(null);
+  /** "How was this computed?" for the derived layer under the pointer (PR-4). */
+  readonly provenanceTip = signal<ProvenanceTip | null>(null);
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private holdOrigin: { x: number; y: number } | null = null;
   private holding = false;
@@ -1098,6 +1129,17 @@ export class ChartHostComponent implements OnDestroy {
     (ms) => this.eventX(ms),
     () => this.serverClock.now(),
   );
+  /**
+   * The event lane on the lowest pane when that is not the price pane (PR-6): flags only — the lines and
+   * blackout bands stay on the price pane. `eventLane` is where it is attached.
+   */
+  private readonly eventLaneRenderer = new EventMarksRenderer(
+    (ms) => this.eventX(ms),
+    () => this.serverClock.now(),
+  );
+  private eventLane: { index: number; el: HTMLElement | null; pane: IPaneApi<Time> } | null = null;
+  /** The volume series the lane's bottom margin was last applied to, and that margin. */
+  private laneMargin: { series: ISeriesApi<'Histogram'> | null; bottom: number } = { series: null, bottom: 0 };
   /** One renderer per active profile study, keyed by the study's uid. */
   private profileRenderers = new Map<string, ProfileRenderer>();
   /** Every active pattern study paints through this one renderer. */
@@ -1170,7 +1212,10 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const show = this.showVolume();
-      untracked(() => this.syncVolumeSeries(show));
+      untracked(() => {
+        this.syncVolumeSeries(show);
+        this.syncEventLane();
+      });
     });
 
     effect(() => {
@@ -1275,6 +1320,12 @@ export class ChartHostComponent implements OnDestroy {
       untracked(() => this.applyExternalPanes(panes));
     });
 
+    // Order flow (orderflow/): its primitives ride on the price series, its panes follow the bars (syncData).
+    effect(() => {
+      const model = this.orderFlow();
+      untracked(() => this.orderFlowLayers.setModel(model));
+    });
+
     effect(() => {
       const overlays = this.overlays();
       untracked(() => this.overlayRenderer.setOverlays(overlays));
@@ -1292,6 +1343,7 @@ export class ChartHostComponent implements OnDestroy {
       this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
+      this.profileExtras();
       this.autoAnalysis();
       this.calendar();
       untracked(() => this.recomputeAnalysis());
@@ -1307,12 +1359,33 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const events = this.events();
       const minImpact = this.minEventImpact();
-      untracked(() => this.eventRenderer.setMarks(events, minImpact));
+      untracked(() => {
+        this.eventRenderer.setMarks(events, minImpact);
+        this.eventLaneRenderer.setMarks(events, minImpact);
+        this.syncEventLane();
+      });
     });
 
     effect(() => {
       const bands = this.eventBands();
       untracked(() => this.eventRenderer.setBands(bands));
+    });
+
+    // Layer groups (PR-5): each renderer draws at its group's opacity, 0 when the group is hidden.
+    effect(() => {
+      const groups = this.layerGroups();
+      untracked(() => {
+        this.analysisRenderer.setOpacity({
+          structure: effectiveOpacity(groups, 'structure'),
+          profiles: effectiveOpacity(groups, 'profiles'),
+        });
+        for (const r of this.profileRenderers.values()) r.setOpacity(effectiveOpacity(groups, 'profiles'));
+        this.eventRenderer.setOpacity(effectiveOpacity(groups, 'events'));
+        this.eventLaneRenderer.setOpacity(effectiveOpacity(groups, 'events'));
+        this.syncEventLane();
+        this.overlayRenderer.setOpacity(effectiveOpacity(groups, 'trades'));
+        this.orderFlowLayers.setGroupOpacity(effectiveOpacity(groups, 'flow'));
+      });
     });
   }
 
@@ -1324,6 +1397,7 @@ export class ChartHostComponent implements OnDestroy {
     this.cancelGlide();
     this.cancelPick();
     this.scriptLayers.dispose();
+    this.orderFlowLayers.dispose();
     cancelAnimationFrame(this.tablesFrame);
     this.paneObserver?.disconnect();
     this.resizeObserver?.disconnect();
@@ -1429,6 +1503,7 @@ export class ChartHostComponent implements OnDestroy {
     }
     const breaks = this.sessionBreaksRenderer.breaks();
     for (const b of this.paneBreaks) b.renderer.setBreaks(breaks);
+    this.syncEventLane();
   }
 
   /**
@@ -1456,6 +1531,7 @@ export class ChartHostComponent implements OnDestroy {
       this.analysisRenderer.setLevels([]);
       this.analysisRenderer.setStructure(null);
       this.analysisRenderer.setAuto(null);
+      this.analysisRenderer.setProfileExtras(null);
       return;
     }
 
@@ -1467,10 +1543,11 @@ export class ChartHostComponent implements OnDestroy {
     // Period profiles cover every loaded bar — the renderer culls off-screen periods, and
     // re-slicing on pan would split a session in two at the viewport edge. Their sessions, weeks
     // and months are the symbol's trading ones (on the unshifted bars, where a day is an instant's).
-    this.analysisRenderer.setPeriodProfiles(
-      wantProfile && mode !== 'visible'
-        ? periodProfiles(bars, mode, { dayOf: this.calendar()?.dayOf })
-        : [],
+    const dayOf = this.calendar()?.dayOf;
+    const periods = wantProfile && mode !== 'visible' ? periodProfiles(bars, mode, { dayOf }) : [];
+    this.analysisRenderer.setPeriodProfiles(periods);
+    this.analysisRenderer.setProfileExtras(
+      wantProfile ? profileExtras(bars, periods, mode, this.profileExtras(), dayOf) : null,
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
@@ -1838,18 +1915,101 @@ export class ChartHostComponent implements OnDestroy {
    * point on the price pane.
    */
   private updateEventTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
-    const mark = point && (paneIndex ?? 0) === 0 ? this.eventRenderer.hit(point.x, point.y) : null;
-    if (!mark) {
+    const marks = point ? this.eventGroupAt(point, paneIndex) : null;
+    if (!marks) {
       if (this.eventTip()) this.eventTip.set(null);
       return;
     }
-    const when = formatEventTime(mark.time, Math.round(this.timezoneShiftMs(mark.time) / 60_000));
-    const card = eventCard(mark, when, this.serverClock.now());
+    const mark = marks[0];
+    const timeOf = (m: EventMark) =>
+      formatEventTime(m.time, Math.round(this.timezoneShiftMs(m.time) / 60_000));
+    const card = groupCard(marks, timeOf(mark), this.serverClock.now(), timeOf);
     const el = this.container().nativeElement;
     const height = 92 + card.rows.length * 20 + (card.surprise ? 18 : 0);
+    // The lane may sit on a lower pane: its point is in that pane's coordinates.
+    const top = this.paneTop(paneIndex ?? 0);
     const x = Math.max(4, Math.min(point!.x + 10, el.clientWidth - 248));
-    const y = Math.max(4, point!.y - height - 12);
+    const y = Math.max(4, top + point!.y - height - 12);
     this.eventTip.set({ x, y, card });
+  }
+
+  /** The events of the flag (or next-event chip) under a pane point: the price pane's, or the lane's (PR-6). */
+  private eventGroupAt(point: { x: number; y: number }, paneIndex?: number): EventMark[] | null {
+    const index = paneIndex ?? 0;
+    if (index === 0) return this.eventRenderer.hitGroup(point.x, point.y);
+    return this.eventLane?.index === index ? this.eventLaneRenderer.hitGroup(point.x, point.y) : null;
+  }
+
+  /** A pane's top in the container (px). */
+  private paneTop(index: number): number {
+    if (index === 0) return 0;
+    const pane = this.chart?.panes()[index]?.getHTMLElement()?.getBoundingClientRect();
+    const host = this.container().nativeElement.getBoundingClientRect();
+    return pane ? pane.top - host.top : 0;
+  }
+
+  /**
+   * The event lane goes on the lowest pane, just above the time axis (PR-6): the price pane's renderer draws it
+   * when the price pane is the only one; otherwise the lane renderer moves to the lowest pane. Volume shares the
+   * price pane, so while the lane is there the volume's scale gets a bottom margin of the lane's height — the flags
+   * no longer sit on the volume bars. Runs when panes come and go, on resize, and when events or volume change.
+   */
+  private syncEventLane(): void {
+    const chart = this.chart;
+    if (!chart) return;
+    const panes = chart.panes();
+    const last = panes.length - 1;
+    const onPrice = last <= 0;
+    this.eventRenderer.setLane(onPrice);
+    const el = onPrice ? null : (panes[last].getHTMLElement() ?? null);
+    if (!onPrice && (this.eventLane?.index !== last || this.eventLane.el !== el)) {
+      this.detachEventLane();
+      panes[last].attachPrimitive(this.eventLaneRenderer);
+      this.eventLane = { index: last, el, pane: panes[last] };
+      this.eventLaneRenderer.setLines(false);
+    } else if (onPrice) {
+      this.detachEventLane();
+    }
+    const height = chart.paneSize(0).height;
+    const reserve =
+      onPrice &&
+      untracked(this.events).length > 0 &&
+      effectiveOpacity(untracked(this.layerGroups), 'events') > 0 &&
+      height > 0;
+    const bottom = reserve ? Math.min(0.15, (EVENT_LANE_HEIGHT + 2) / height) : 0;
+    if (this.volume && (this.laneMargin.series !== this.volume || this.laneMargin.bottom !== bottom)) {
+      this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom } });
+      this.laneMargin = { series: this.volume, bottom };
+    }
+  }
+
+  private detachEventLane(): void {
+    if (!this.eventLane) return;
+    try {
+      this.eventLane.pane.detachPrimitive(this.eventLaneRenderer);
+    } catch {
+      // Its pane went with a study.
+    }
+    this.eventLane = null;
+  }
+
+  /**
+   * The provenance card of the derived layer under the pointer (PR-4) — structure, profiles, S/R, auto
+   * analysis — on the price pane, unless an event's card is showing.
+   */
+  private updateProvenanceTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
+    const hit =
+      point && (paneIndex ?? 0) === 0 && !this.eventTip() ? this.analysisRenderer.hit(point.x, point.y) : null;
+    if (!hit) {
+      if (this.provenanceTip()) this.provenanceTip.set(null);
+      return;
+    }
+    const card = provenanceOf(hit.key, hit.facts);
+    const el = this.container().nativeElement;
+    const at = placeProvenanceTip(point!, card, el.clientWidth, el.clientHeight);
+    const now = this.provenanceTip();
+    if (now && now.x === at.x && now.y === at.y && now.card.title === card.title) return;
+    this.provenanceTip.set({ ...at, card });
   }
 
   /** Show the most recent `count` bars. */
@@ -1937,6 +2097,8 @@ export class ChartHostComponent implements OnDestroy {
     this.volume = null;
     this.markerApi = null;
     this.paneBreaks = [];
+    this.eventLane = null;
+    this.laneMargin = { series: null, bottom: 0 };
     this.indicatorSeries = [];
     this.externalSeries.clear();
     this.priceExternal.clear();
@@ -2020,6 +2182,7 @@ export class ChartHostComponent implements OnDestroy {
     this.resizeObserver = new ResizeObserver(() => {
       this.sizeToContainer(el);
       this.layoutScriptTables();
+      this.syncEventLane();
     });
     this.resizeObserver.observe(el);
 
@@ -2031,6 +2194,7 @@ export class ChartHostComponent implements OnDestroy {
           : null;
       this.emitLegend();
       this.updateEventTip(param.point, param.paneIndex);
+      this.updateProvenanceTip(param.point, param.paneIndex);
       // Only the operator's own moves go to linked charts (a set position has no source event).
       if (param.sourceEvent && this.crosshairTime !== null)
         this.crosshairSync.emit(this.utcAtPlottedSeconds(this.crosshairTime));
@@ -2038,8 +2202,8 @@ export class ChartHostComponent implements OnDestroy {
     el.addEventListener('mouseleave', () => this.crosshairSync.emit(null));
     // An event's flag (or the next-event chip) opens its reading; an armed drawing tool owns clicks.
     this.chart.subscribeClick((param) => {
-      if (!param.point || this.tool() !== null || (param.paneIndex ?? 0) !== 0) return;
-      const mark = this.eventRenderer.hit(param.point.x, param.point.y);
+      if (!param.point || this.tool() !== null) return;
+      const mark = this.eventGroupAt(param.point, param.paneIndex)?.[0];
       if (mark) this.eventOpen.emit(mark.event);
     });
     this.bindHold(el);
@@ -2268,6 +2432,20 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /**
+   * The derived level — a profile's POC / VAH / VAL, a naked POC, a range edge — drawn under (x, y) of the
+   * chart area, with its exact price (PR-7: "Add alert at <level>"); null when the point is on none.
+   */
+  derivedLevelAt(x: number, y: number): AlertableLevel | null {
+    let left = 0;
+    try {
+      if (this.scaleSide() === 'left') left = this.chart?.priceScale('left').width() ?? 0;
+    } catch {
+      left = 0;
+    }
+    return this.analysisRenderer.levelAt(x - left, y);
+  }
+
+  /**
    * Primitives other features hang on the price series (the chart alert lines). Kept here so they are re-attached
    * every time the series is rebuilt (style change, new bars) — primitives live on the series, not the chart.
    */
@@ -2286,6 +2464,23 @@ export class ChartHostComponent implements OnDestroy {
       }
     };
   }
+
+  /**
+   * The order-flow layers (orderflow/): price-pane primitives hung through {@link attachPricePrimitive}, the CVD and
+   * spread panes, and the visible window the page fetches for (`view`).
+   */
+  readonly orderFlowLayers = new OrderFlowLayers({
+    chart: () => this.chart,
+    price: () => this.price,
+    attachPricePrimitive: (p) => this.attachPricePrimitive(p),
+    logicalAt: (ms) => this.logicalAtMs(ms),
+    plotted: () => this.plotted,
+    plottedUtc: () => this.plottedUtc,
+    dark: () => this.theme.theme() === 'dark',
+    precision: () => this.precision(),
+    // The CVD / spread panes come and go with their toggles: the session breaks and the event lane follow them.
+    panesChanged: () => this.syncPaneBreaks(),
+  });
 
   /**
    * Fit the price axis to the visible data, leaving the time window — and the scale's mode: log,
@@ -2411,6 +2606,7 @@ export class ChartHostComponent implements OnDestroy {
     this.tickCountdown();
     this.syncLastValueLabel();
     this.emitLegend();
+    this.orderFlowLayers.barsChanged();
   }
 
   /** The bar count the session breaks were last found for: a tick changes no day. */
@@ -3978,6 +4174,7 @@ export class ChartHostComponent implements OnDestroy {
       if (!r) {
         // Snapped to the chart bar holding an instant: profiles built from finer bars start and end inside one.
         r = new ProfileRenderer(() => this.price, this.utcToBarX);
+        r.setOpacity(effectiveOpacity(untracked(this.layerGroups), 'profiles'));
         this.price.attachPrimitive(r);
         this.profileRenderers.set(a.uid, r);
       }

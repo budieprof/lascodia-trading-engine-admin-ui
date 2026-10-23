@@ -270,6 +270,20 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
+import {
+  DEFAULT_PROFILE_EXTRAS,
+  type ProfileExtrasSettings,
+} from '../../overlays/profile-levels';
+import type { AlertableLevel } from '../../overlays/overlay-hits';
+import {
+  DEFAULT_LAYER_GROUPS,
+  effectiveOpacity,
+  persistLayerGroups,
+  restoreLayerGroups,
+  type LayerGroupId,
+  type LayerGroupsState,
+} from '../../overlays/layer-groups';
+import { LayerGroupsMenuComponent } from '../../overlays/layer-groups-menu.component';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -388,6 +402,14 @@ import {
   type DrawingKind,
 } from '../../drawings/model';
 import { appStorage } from '@core/storage/app-storage';
+import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
+import { replayClipUtc } from '../../orderflow/orderflow-replay';
+import {
+  DEFAULT_ORDER_FLOW,
+  orderFlowCount,
+  restoredOrderFlow,
+  type OrderFlowSettings,
+} from '../../orderflow/orderflow.types';
 
 /** A Pine script's latest run on the chart. */
 export interface ChartScriptRun {
@@ -667,6 +689,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ChartPaletteComponent,
     MeasuredBottomDirective,
     CompareDialogComponent,
+    LayerGroupsMenuComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -817,7 +840,7 @@ export class ChartAnalysisPageComponent {
         this.showSupportResistance(),
         this.showStructure(),
         this.deltaOn(),
-      ].filter(Boolean).length,
+      ].filter(Boolean).length + orderFlowCount(this.orderFlow()),
   );
 
   /** A level picked on the chart for the alert form (right-click "Add alert at …"); null = 10 points off the live price. */
@@ -1685,6 +1708,24 @@ export class ChartAnalysisPageComponent {
   readonly volumeProfileModes = VOLUME_PROFILE_MODES;
   readonly showSupportResistance = signal(false);
   readonly showStructure = signal(false);
+  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3); saved with the layout. */
+  readonly profileExtras = signal<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
+  toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
+    this.profileExtras.update((s) => ({ ...s, [key]: !s[key] }));
+  }
+
+  /**
+   * Layer groups (PR-5): Structure, Profiles, Order flow, Events, Trades — each shown/hidden and faded
+   * together from the layer menu; saved with the layout.
+   */
+  readonly layerGroups = signal<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
+  /**
+   * What a group's layers draw at: its opacity, 0 when hidden. Reactive (reads the signal), so a template
+   * can bind `[opacity]="layerGroupOpacity('flow')"` — the order-flow layers take theirs from here.
+   */
+  layerGroupOpacity(id: LayerGroupId): number {
+    return effectiveOpacity(this.layerGroups(), id);
+  }
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
   readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
@@ -1694,6 +1735,36 @@ export class ChartAnalysisPageComponent {
     if (existing) this.removeIndicator(existing.uid);
     else this.addIndicator('est-delta');
   }
+
+  // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
+  readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
+  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills'): void {
+    this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
+  }
+  setHeatmapOpacity(value: number): void {
+    this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
+  }
+  /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
+  readonly orderFlowReplayClip = computed(() => {
+    if (!this.replay.active()) return null;
+    const intrabar = this.replay.cursor().sub !== null ? this.replay.intrabarSource() : null;
+    const unit = resolutionMs(intrabar ?? this.resolution());
+    return replayClipUtc(this.replay.headBar(), unit);
+  });
+  readonly orderFlowFeed = new OrderFlowFeed({
+    settings: () => this.orderFlow(),
+    symbol: () => this.symbol(),
+    resolution: () => this.resolution(),
+    bars: () => this.displayBars(),
+    style: () => this.style(),
+    view: () => this.host()?.orderFlowLayers.view() ?? null,
+    accountIds: () => this.accountScope.accountIds(),
+    accountKey: () => this.accountScope.accountIdsKey(),
+    replayClip: () => this.orderFlowReplayClip(),
+    precision: () => this.precision(),
+    pipSize: () => this.pipSize(),
+    now: () => this.serverClock.now(),
+  });
   private readonly orders = inject(OrdersService);
   private readonly martingale = inject(MartingaleService);
 
@@ -1997,7 +2068,13 @@ export class ChartAnalysisPageComponent {
   readonly timezones = CHART_TIMEZONES;
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
-  readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
+  readonly contextMenu = signal<{
+    x: number;
+    y: number;
+    price: number | null;
+    /** A derived level under the click (PR-7): its alert is offered at the level's exact price. */
+    level?: AlertableLevel | null;
+  } | null>(null);
   protected readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
   /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
@@ -5654,7 +5731,11 @@ export class ChartAnalysisPageComponent {
         showClosedTrades: this.showClosedTrades(),
         fitTradeLines: this.fitTradeLines(),
         showWatches: this.showWatchMarks(),
+        vpNakedPocs: this.profileExtras().nakedPocs,
+        vpDeveloping: this.profileExtras().developing,
+        orderFlow: { ...this.orderFlow() },
       },
+      layerGroups: persistLayerGroups(this.layerGroups()),
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
       ...(this.mainLink() ? { link: this.mainLink() } : {}),
@@ -6106,6 +6187,12 @@ export class ChartAnalysisPageComponent {
     this.showClosedTrades.set(o.showClosedTrades ?? false);
     this.fitTradeLines.set(o.fitTradeLines ?? true);
     this.showWatchMarks.set(o.showWatches ?? true);
+    this.profileExtras.set({
+      nakedPocs: o.vpNakedPocs ?? false,
+      developing: o.vpDeveloping ?? false,
+    });
+    this.layerGroups.set(restoreLayerGroups(s.layerGroups));
+    this.orderFlow.set(restoredOrderFlow(o.orderFlow));
   }
 
   private flushPendingView(): void {
@@ -6322,7 +6409,26 @@ export class ChartAnalysisPageComponent {
     // The price under the cursor is captured HERE, while the pointer position
     // is still meaningful. Reading it when the menu item is clicked would
     // measure wherever the pointer had drifted to by then.
-    this.contextMenu.set({ x: ev.clientX - host.left, y, price: this.host()?.priceAtY(y) ?? null });
+    const x = ev.clientX - host.left;
+    this.contextMenu.set({
+      x,
+      y,
+      price: this.host()?.priceAtY(y) ?? null,
+      level: this.host()?.derivedLevelAt(x, y) ?? null,
+    });
+  }
+
+  /**
+   * "Add alert at POC 1.16234" (PR-7): the right-clicked profile or structure level's exact price into the
+   * same alert form as "Add alert at …" — nothing is armed until the operator saves it.
+   */
+  createAlertAtLevel(): void {
+    const level = this.contextMenu()?.level;
+    this.contextMenu.set(null);
+    if (!level || !Number.isFinite(level.price) || level.price <= 0) return;
+    this.alertPreset.set(level.price);
+    this.alertDraft.set(null);
+    this.openMenu.set('alert');
   }
 
   // ── Chart alerts (alerts v2) ─────────────────────────────────────────────

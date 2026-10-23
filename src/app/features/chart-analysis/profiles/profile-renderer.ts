@@ -32,6 +32,8 @@ export const DEFAULT_PROFILE_COLORS: ProfileColors = {
  */
 export class ProfileRenderer implements ISeriesPrimitive<Time> {
   private model: ProfileRenderModel | null = null;
+  /** The Profiles layer group's opacity (PR-5); 0 draws nothing. */
+  private opacity = 1;
   private requestUpdate?: () => void;
 
   constructor(
@@ -55,6 +57,13 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** The Profiles layer group's opacity, 0..1 (PR-5). */
+  setOpacity(opacity: number): void {
+    if (opacity === this.opacity) return;
+    this.opacity = opacity;
+    this.requestUpdate?.();
+  }
+
   updateAllViews(): void {
     /* projection happens in draw() */
   }
@@ -72,9 +81,11 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
     target.useBitmapCoordinateSpace((scope) => {
       const series = this.series();
       const model = this.model;
-      if (!series || !model) return;
+      if (!series || !model || this.opacity <= 0) return;
       const ctx = scope.context;
       ctx.save();
+      // Lines inherit it; the fills below multiply their own alpha by it.
+      ctx.globalAlpha = this.opacity;
       ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
       const width = scope.mediaSize.width;
       if (model.kind === 'volume') {
@@ -125,7 +136,7 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
     const yHigh = series.priceToCoordinate(vp.vah);
     const yLow = series.priceToCoordinate(vp.val);
     if (anchor === 'span' && yHigh !== null && yLow !== null) {
-      ctx.globalAlpha = 0.06;
+      ctx.globalAlpha = 0.06 * this.opacity;
       ctx.fillStyle = c.valueArea;
       ctx.fillRect(left, Math.min(yHigh, yLow), right - left, Math.abs(yLow - yHigh));
     }
@@ -140,7 +151,7 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       const inVa = row.priceLow >= vp.val - 1e-12 && row.priceHigh <= vp.vah + 1e-12;
       const w = (vol / vp.maxRowVolume) * maxW;
       const upW = (row.upVol / vol) * w;
-      ctx.globalAlpha = inVa ? 0.55 : 0.25;
+      ctx.globalAlpha = (inVa ? 0.55 : 0.25) * this.opacity;
       // Right-anchored grows leftwards from the edge; span-anchored grows rightwards from t0.
       const x = anchor === 'right' ? right - w : left;
       ctx.fillStyle = c.up;
@@ -148,7 +159,7 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       ctx.fillStyle = c.down;
       ctx.fillRect(x + upW, y, w - upW, h);
     });
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = this.opacity;
     this.hLine(ctx, series, vp.poc, left, right, c.poc, 2, []);
     this.hLine(ctx, series, vp.vah, left, right, c.vaLine, 1, [4, 3]);
     this.hLine(ctx, series, vp.val, left, right, c.vaLine, 1, [4, 3]);
@@ -190,17 +201,17 @@ export class ProfileRenderer implements ISeriesPrimitive<Time> {
       const inVa = row.priceLow >= tpo.val - 1e-12 && row.priceHigh <= tpo.vah + 1e-12;
       const single = tpo.singlePrints.includes(i);
       if (useLetters) {
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = this.opacity;
         ctx.fillStyle =
           i === tpo.pocIndex ? c.poc : single ? c.down : inVa ? c.valueArea : c.tpoText;
         row.letters.forEach((l, k) => ctx.fillText(l, left + k * cell, y + h / 2));
       } else {
-        ctx.globalAlpha = inVa ? 0.55 : 0.25;
+        ctx.globalAlpha = (inVa ? 0.55 : 0.25) * this.opacity;
         ctx.fillStyle = i === tpo.pocIndex ? c.poc : c.valueArea;
         ctx.fillRect(left, y, row.letters.length * cell, h);
       }
     });
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = this.opacity;
     this.hLine(ctx, series, tpo.poc, left, right, c.poc, 1.5, []);
     this.hLine(ctx, series, tpo.vah, left, right, c.vaLine, 1, [4, 3]);
     this.hLine(ctx, series, tpo.val, left, right, c.vaLine, 1, [4, 3]);

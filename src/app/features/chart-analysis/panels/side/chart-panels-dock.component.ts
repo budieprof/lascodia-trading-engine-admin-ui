@@ -40,7 +40,7 @@ const TITLES: Record<SidePanel, string> = {
         />
       }
       @case ('depth') {
-        <app-depth-panel [symbol]="symbol()" [digits]="digits()" />
+        <app-depth-panel [symbol]="symbol()" [digits]="digits()" [asOfUtc]="replayAt()" />
       }
       @case ('sentiment') {
         <app-sentiment-panel [symbol]="symbol()" [timeZone]="timeZone()" />
@@ -85,6 +85,8 @@ export class ChartPanelsDockComponent {
   readonly digits = input<number>(5);
   /** The chart's time zone. */
   readonly timeZone = input<string | null>(null);
+  /** Bar Replay's head (UTC ms): the depth panel shows the book as of then (OF-5); null when live. */
+  readonly replayAt = input<number | null>(null);
   /** A note about another symbol asked for that symbol's chart. */
   readonly symbolSelected = output<string>();
 
