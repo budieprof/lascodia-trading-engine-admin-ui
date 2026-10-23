@@ -24,10 +24,11 @@ export interface HeatQuad {
 }
 
 export interface HeatDrawParams {
-  /** Media (CSS) px of the pane and the device pixel ratio. */
+  /** Media (CSS) px of the pane (quads are in these), and the canvas's bitmap size. */
   width: number;
   height: number;
-  dpr: number;
+  pixelWidth: number;
+  pixelHeight: number;
   quads: readonly HeatQuad[];
   robustMax: number;
   opacity: number;
@@ -226,8 +227,8 @@ class WebGlHeatSurface implements HeatSurface {
   draw(p: HeatDrawParams): void {
     if (this.lost) return;
     const gl = this.gl;
-    const w = Math.max(1, Math.round(p.width * p.dpr));
-    const h = Math.max(1, Math.round(p.height * p.dpr));
+    const w = Math.max(1, Math.round(p.pixelWidth));
+    const h = Math.max(1, Math.round(p.pixelHeight));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;

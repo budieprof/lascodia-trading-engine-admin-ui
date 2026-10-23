@@ -2,6 +2,14 @@ import { DestroyRef, computed, effect, inject, signal, untracked } from '@angula
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
+import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
+import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
+import { sourceKinds, sourceLabel, type MdSource } from '@core/realtime/marketdata.types';
+import { createWebGlHeatSurface } from './gl/heat-gl';
+import type { StreamHeatSource } from './heatmap-primitive';
+import { StreamHeatmap, streamHeatFits, streamWindowFor } from './stream-heatmap';
+import { TradeFeed } from './trade-bubbles';
+import type { TradeBubblesModel } from './trade-bubbles-primitive';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { formatUtcShort, shortInstance } from './canvas-text';
@@ -68,7 +76,23 @@ export interface OrderFlowFeedDeps {
   pipSize: () => number;
   /** Server time (UTC ms). */
   now: () => number;
+  /** Whether the event-level WebGL heatmap can run here (default: a WebGL2 context can be made). */
+  gpu?: () => boolean;
 }
+
+let gpuProbe: boolean | null = null;
+/** Whether this browser can run the WebGL2 heatmap (probed once). */
+export function webGlHeatAvailable(): boolean {
+  if (gpuProbe === null) {
+    const s = createWebGlHeatSurface();
+    gpuProbe = s !== null;
+    s?.dispose();
+  }
+  return gpuProbe;
+}
+
+/** How the heatmap is drawn now: off, bucketed C1 snapshots (canvas 2D), or every book event (WebGL). */
+export type HeatMode = 'none' | 'grid' | 'stream';
 
 type LoadState = { kind: 'idle' } | { kind: 'loading' } | { kind: 'error'; message: string };
 
@@ -111,6 +135,34 @@ export class OrderFlowFeed {
   private readonly api = inject(ChartFlowService);
   private readonly liveDepth = inject(LiveDepthService);
   private readonly auth = inject(AuthService);
+  private readonly mdApi = inject(MarketDataApiService);
+  private readonly mdStream = inject(MarketDataStreamService);
+
+  /** The market-data sources the caller is entitled to (C7), once a layer that uses them is on; null before. */
+  readonly mdSources = signal<MdSource[] | null>(null);
+  private sourcesAsked = false;
+  /** Bumped when the stream layers' STATE changes (loading / ready / error / source) — not per frame. */
+  private readonly streamState = signal(0);
+  private streamStateKey = '';
+  private readonly redrawListeners = new Set<() => void>();
+  private readonly streamHeat = new StreamHeatmap({
+    history: (r) => this.mdApi.history(r),
+    watch: (spec) => this.mdStream.watch(spec),
+    now: () => this.deps.now(),
+    point: () => this.point(),
+    changed: () => this.streamChanged(),
+  });
+  private readonly tradeFeed = new TradeFeed({
+    history: (r) => this.mdApi.history(r),
+    watch: (spec) => this.mdStream.watch(spec),
+    now: () => this.deps.now(),
+    changed: () => this.streamChanged(),
+  });
+  /** The event-level heatmap as the primitive pulls it. */
+  private readonly streamSource: StreamHeatSource = {
+    layer: () => this.streamHeat.layer(),
+    label: 'Broker DOM',
+  };
 
   private readonly heat = signal<{ window: HeatWindow; grid: HeatGrid } | null>(null);
   private readonly heatState = signal<LoadState>({ kind: 'idle' });
@@ -151,11 +203,73 @@ export class OrderFlowFeed {
       untracked(() => this.schedule());
     });
 
-    // The live book: one shared 1.5 s poll, only while the heatmap is on, the newest bar is on screen and not in replay.
-    // A boolean, so a pan that keeps the right edge in view does not drop and re-open the poll.
+    // The market-data sources, once a layer that names one is on.
+    effect(() => {
+      const s = deps.settings();
+      if (!(s.heatmap || s.trades) || this.sourcesAsked) return;
+      this.sourcesAsked = true;
+      untracked(() =>
+        this.mdApi.sources().then(
+          (list) => this.mdSources.set(list),
+          () => this.mdSources.set([]),
+        ),
+      );
+    });
+
+    // A new symbol or source: the stream layers start over (an error for the old one must not stick). Declared before
+    // the effects that fetch, so on a change it runs first.
+    let seriesKey: string | null = null;
+    effect(() => {
+      const key = `${deps.symbol()}|${deps.settings().sourceId ?? ''}`;
+      untracked(() => {
+        const first = seriesKey === null;
+        seriesKey = key;
+        if (first) return;
+        this.streamHeat.clear();
+        this.tradeFeed.clear();
+        this.streamStateKey = '';
+        this.streamState.update((v) => v + 1);
+      });
+    });
+
+    // The event-level heatmap and the trade layer follow the view and the replay head at once (no debounce — the
+    // tick replay moves the head every frame; a move inside the held window only advances the fold).
+    effect(() => {
+      const mode = this.heatMode();
+      const view = deps.view();
+      const clip = deps.replayClip();
+      const symbol = deps.symbol();
+      const sourceId = deps.settings().sourceId;
+      untracked(() => {
+        if (mode !== 'stream' || !view || !symbol) {
+          if (mode !== 'stream') this.streamHeat.clear();
+          return;
+        }
+        this.streamHeat.update({ symbol, sourceId, view: this.streamView(view), head: clip, live: view.rightEdgeInView });
+      });
+    });
+    effect(() => {
+      const s = deps.settings();
+      const view = deps.view();
+      const clip = deps.replayClip();
+      const symbol = deps.symbol();
+      const src = this.tradeSource();
+      untracked(() => {
+        if (!s.trades || !view || !symbol || !src) {
+          this.tradeFeed.clear();
+          return;
+        }
+        const w = streamWindowFor(this.streamView(view), clip ?? deps.now());
+        if (!w) return;
+        this.tradeFeed.update({ symbol, sourceId: src.sourceId, fromUtc: w.fromUtc, toUtc: w.toUtc, head: clip, live: view.rightEdgeInView });
+      });
+    });
+    // The live book: one shared 1.5 s poll, only while the BUCKETED heatmap is on, the newest bar is on screen and not
+    // in replay (the event-level layer has its own stream). A boolean, so a pan that keeps the right edge in view does
+    // not drop and re-open the poll.
     const wantLive = computed(
       () =>
-        deps.settings().heatmap &&
+        this.heatMode() === 'grid' &&
         deps.view()?.rightEdgeInView === true &&
         deps.replayClip() === null,
     );
@@ -196,6 +310,9 @@ export class OrderFlowFeed {
     inject(DestroyRef).onDestroy(() => {
       clearInterval(tick);
       clearTimeout(this.timer);
+      this.streamHeat.dispose();
+      this.tradeFeed.clear();
+      this.redrawListeners.clear();
       this.seq.heat++;
       this.seq.flow++;
       this.seq.foot++;
@@ -208,6 +325,58 @@ export class OrderFlowFeed {
     const bars = this.deps.bars();
     return `${bars.length}|${bars[0]?.time}|${bars.at(-1)?.time}`;
   });
+
+  /** How the heatmap is drawn for this view (see {@link HeatMode}). */
+  readonly heatMode = computed<HeatMode>(() => {
+    const s = this.deps.settings();
+    const v = this.deps.view();
+    if (!s.heatmap) return 'none';
+    if (!v || !(this.deps.gpu ?? webGlHeatAvailable)()) return 'grid';
+    this.streamState();
+    const cap = this.deps.replayClip() ?? this.deps.now();
+    if (!streamHeatFits(this.streamView(v, cap))) return 'grid';
+    // No event-level book for this symbol / window (none stored, not entitled): the bucketed snapshots instead.
+    if (this.streamHeat.state.kind === 'error') return 'grid';
+    return 'stream';
+  });
+
+  /** The view as the stream layers read it: at the live edge it reaches now (or the head). */
+  private streamView(v: OrderFlowView, cap = this.deps.replayClip() ?? this.deps.now()) {
+    return {
+      fromUtc: v.fromUtc,
+      toUtc: v.rightEdgeInView ? Math.max(v.toUtc, cap) : v.toUtc,
+      widthPx: v.widthPx,
+      pricePerPx: v.pricePerPx,
+    };
+  }
+
+  /** The source the trade layer reads: the picked one when it publishes trades, else the first that does. */
+  readonly tradeSource = computed<MdSource | null>(() => {
+    const list = this.mdSources() ?? [];
+    const withTrades = list.filter((s) => sourceKinds(s).includes('trades'));
+    const picked = this.deps.settings().sourceId;
+    return withTrades.find((s) => s.sourceId === picked) ?? withTrades[0] ?? null;
+  });
+
+  /** A stream layer changed: redraw now; re-derive the captions only when its state changed. */
+  private streamChanged(): void {
+    for (const l of this.redrawListeners) l();
+    const h = this.streamHeat.state;
+    const t = this.tradeFeed.state;
+    const key = `${h.kind}|${h.kind === 'error' ? h.message : ''}|${this.streamHeat.sourceId()}|${this.streamHeat.note()}|${t.kind}|${t.kind === 'error' ? t.message : ''}`;
+    if (key !== this.streamStateKey) {
+      this.streamStateKey = key;
+      this.streamState.update((v) => v + 1);
+    }
+  }
+
+  private readonly redrawSub = (fn: () => void) => this.subscribeRedraw(fn);
+
+  /** Register a redraw callback (the chart's layers: stream data advanced). Returns the unsubscribe. */
+  subscribeRedraw(fn: () => void): () => void {
+    this.redrawListeners.add(fn);
+    return () => this.redrawListeners.delete(fn);
+  }
 
   /** Whether the fills layer can be read with this session's permissions. */
   readonly canReadFills = computed(() => this.auth.hasPermission(Permission.AccessOperator));
@@ -253,7 +422,7 @@ export class OrderFlowFeed {
     const symbol = this.deps.symbol();
     if (!view || !symbol) return;
     const priceBased = PRICE_BASED_STYLES.has(this.deps.style());
-    if (s.heatmap) this.refreshHeat(symbol, view);
+    if (s.heatmap && this.heatMode() === 'grid') this.refreshHeat(symbol, view);
     if ((s.cvd || s.ribbon) && !priceBased) this.refreshFlow(symbol, view, force.flow === true);
     if (s.footprint && !priceBased) this.refreshFootprint(symbol, view, force.flow === true);
     if (s.fills && this.canReadFills()) this.refreshFills(symbol, view, force.fills === true);
@@ -492,10 +661,61 @@ export class OrderFlowFeed {
     return null;
   }
 
+  /** The label of a source id (its registry display name), else the id. */
+  private labelOf(sourceId: string | null): string {
+    if (!sourceId) return 'broker';
+    const src = this.mdSources()?.find((s) => s.sourceId === sourceId);
+    return src ? sourceLabel(src) : sourceId;
+  }
+
+  private streamCaptions(): { model: OrderFlowModel['heatmap']; lines: string[] } {
+    this.streamState();
+    const st = this.streamHeat.state;
+    const sourceId = this.streamHeat.sourceId();
+    if (st.kind === 'loading' && !sourceId) return { model: null, lines: ['Broker DOM depth: loading every book event…'] };
+    if (st.kind === 'idle' && !sourceId) return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
+    const src = this.mdSources()?.find((s) => s.sourceId === sourceId) ?? null;
+    const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
+    this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
+    const live = this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
+    const lines = [
+      `${kind} depth — ${this.labelOf(sourceId)}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
+      `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
+    ];
+    const note = this.streamHeat.note();
+    if (note) lines.push(note);
+    return { model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity }, lines };
+  }
+
+  private tradeLayer(): { model: TradeBubblesModel | null; lines: string[] } {
+    this.streamState();
+    const symbol = this.deps.symbol();
+    if (this.mdSources() === null) return { model: null, lines: ['Trades: loading sources…'] };
+    const src = this.tradeSource();
+    if (!src)
+      return {
+        model: null,
+        lines: [`Trades: no source you are entitled to publishes trades for ${symbol} (spot FX brokers have no tape; CME / venue feeds do)`],
+      };
+    const v = this.deps.view();
+    if (v && !streamHeatFits(this.streamView(v))) return { model: null, lines: ['Trades: zoom in to 2 h or less to see each trade'] };
+    const st = this.tradeFeed.state;
+    if (st.kind === 'error') return { model: null, lines: [`Trades unavailable — ${st.message}`] };
+    const min = this.deps.settings().tradeMinSize;
+    const lines = [
+      `Trades — ${sourceLabel(src)}, each print: size = area, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
+    ];
+    return {
+      model: { feed: this.tradeFeed, label: sourceLabel(src), minSize: min, clipUtc: this.deps.replayClip() },
+      lines,
+    };
+  }
+
   private heatCaptions(view: OrderFlowView | null): {
     model: OrderFlowModel['heatmap'];
     lines: string[];
   } {
+    if (this.heatMode() === 'stream') return this.streamCaptions();
     const symbol = this.deps.symbol();
     const lines: string[] = [];
     const h = this.heat();
@@ -642,9 +862,10 @@ export class OrderFlowFeed {
   /** What the chart host draws; null with every order-flow layer off. */
   readonly model = computed<OrderFlowModel | null>(() => {
     const s = this.deps.settings();
-    if (!s.heatmap && !s.cvd && !s.ribbon && !s.footprint && !s.fills) return null;
+    if (!s.heatmap && !s.cvd && !s.ribbon && !s.footprint && !s.fills && !s.trades) return null;
     const view = this.deps.view();
     const captions: string[] = [];
+    let trades: TradeBubblesModel | null = null;
     let heatmap: OrderFlowModel['heatmap'] = null;
     let footprint: FootprintLayerModel | null = null;
     let fills: FillMark[] = [];
@@ -667,7 +888,14 @@ export class OrderFlowFeed {
       fills = f.fills;
       captions.push(...f.lines);
     }
+    if (s.trades) {
+      const t = this.tradeLayer();
+      trades = t.model;
+      captions.push(...t.lines);
+    }
     return {
+      trades,
+      subscribeRedraw: this.redrawSub,
       heatmap,
       footprint,
       fills,
