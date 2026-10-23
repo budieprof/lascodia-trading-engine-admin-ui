@@ -47,6 +47,8 @@ export class OverlayRenderer implements ISeriesPrimitive<Time> {
   private overlays: PriceOverlay[] = [];
   private requestUpdate?: () => void;
   private fit = true;
+  /** The Trades layer group's opacity (PR-5); 0 hides the lines and their axis chips. */
+  private opacity = 1;
 
   constructor(
     private readonly series: () => ISeriesApi<SeriesType> | null,
@@ -81,12 +83,19 @@ export class OverlayRenderer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /** The Trades layer group's opacity, 0..1 (PR-5). */
+  setOpacity(opacity: number): void {
+    if (opacity === this.opacity) return;
+    this.opacity = opacity;
+    this.requestUpdate?.();
+  }
+
   updateAllViews(): void {
     /* projected per frame in draw() */
   }
 
   autoscaleInfo() {
-    if (!this.fit || this.overlays.length === 0) return null;
+    if (!this.fit || this.overlays.length === 0 || this.opacity <= 0) return null;
     const prices = this.overlays.map((o) => o.price);
     return {
       priceRange: { minValue: Math.min(...prices), maxValue: Math.max(...prices) },
@@ -96,7 +105,7 @@ export class OverlayRenderer implements ISeriesPrimitive<Time> {
   /** The lines' prices as chips on the price axis, in each line's colour. */
   priceAxisViews(): readonly ISeriesPrimitiveAxisView[] {
     const series = this.series();
-    if (!series) return [];
+    if (!series || this.opacity <= 0) return [];
     const dp = this.precision();
     // Read at paint time: the views may outlive a scroll or a zoom of the price scale.
     const y = (o: PriceOverlay) => series.priceToCoordinate(o.price);
@@ -123,11 +132,12 @@ export class OverlayRenderer implements ISeriesPrimitive<Time> {
 
   private draw(target: CanvasRenderingTarget2D): void {
     const series = this.series();
-    if (!series || this.overlays.length === 0) return;
+    if (!series || this.overlays.length === 0 || this.opacity <= 0) return;
 
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const w = mediaSize.width;
       ctx.save();
+      ctx.globalAlpha = this.opacity;
       ctx.font = '11px -apple-system, system-ui, sans-serif';
       ctx.textBaseline = 'middle';
 

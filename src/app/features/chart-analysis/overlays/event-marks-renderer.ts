@@ -83,6 +83,8 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   private placedMarks: PlacedMark[] = [];
   private nextChip: { mark: EventMark; x: number; y: number; w: number; h: number } | null = null;
   private paneHeight = 0;
+  /** The Events layer group's opacity (PR-5); 0 draws nothing and hits nothing. */
+  private opacity = 1;
 
   constructor(
     /** UTC ms → x on the pane (media px), between bars and past the last one; null with no bars. */
@@ -107,6 +109,13 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   /** Spans to shade (UTC ms): the news blackout around Tier-1 events. Empty: no shading. */
   setBands(bands: readonly { from: number; to: number }[]): void {
     this.bands = [...bands];
+    this.requestUpdate?.();
+  }
+
+  /** The Events layer group's opacity, 0..1 (PR-5). */
+  setOpacity(opacity: number): void {
+    if (opacity === this.opacity) return;
+    this.opacity = opacity;
     this.requestUpdate?.();
   }
 
@@ -163,11 +172,13 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   private draw(target: CanvasRenderingTarget2D): void {
     this.placedMarks = [];
     this.nextChip = null;
+    if (this.opacity <= 0) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const w = mediaSize.width;
       const h = mediaSize.height;
       this.paneHeight = h;
       ctx.save();
+      ctx.globalAlpha = this.opacity;
 
       // The blackout first, under the lines: the time live refuses new entries around Tier-1 prints.
       ctx.fillStyle = 'rgba(242,54,69,0.07)';
@@ -197,7 +208,7 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
 
         // The event's instant across the pane, faint: the badge at the bottom is what reads.
         ctx.strokeStyle = IMPACT_COLOR[mark.impact];
-        ctx.globalAlpha = mark.impact === 'High' ? 0.35 : 0.2;
+        ctx.globalAlpha = (mark.impact === 'High' ? 0.35 : 0.2) * this.opacity;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 3]);
         ctx.beginPath();
@@ -232,7 +243,7 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
   private drawBadge(ctx: CanvasRenderingContext2D, mark: EventMark, x: number, y: number, upcoming: boolean): void {
     const color = IMPACT_COLOR[mark.impact];
     ctx.save();
-    ctx.globalAlpha = upcoming ? 0.6 : 1;
+    ctx.globalAlpha = (upcoming ? 0.6 : 1) * this.opacity;
     ctx.beginPath();
     ctx.arc(x, y, BADGE_R, 0, Math.PI * 2);
     ctx.fillStyle = '#FFFFFF';
@@ -277,10 +288,10 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
     const tw = ctx.measureText(text).width + 12;
     // Just above the flag strip: the flags of events near the right edge stay visible and hittable.
     const chip = { mark, x: Math.max(0, w - tw - 4), y: h - FLAG_STRIP - 18, w: tw, h: 16 };
-    ctx.globalAlpha = 0.9;
+    ctx.globalAlpha = 0.9 * this.opacity;
     ctx.fillStyle = IMPACT_COLOR[mark.impact];
     ctx.fillRect(chip.x, chip.y, chip.w, chip.h);
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = this.opacity;
     ctx.fillStyle = '#FFFFFF';
     ctx.textBaseline = 'middle';
     ctx.fillText(text, chip.x + 6, chip.y + chip.h / 2 + 0.5);

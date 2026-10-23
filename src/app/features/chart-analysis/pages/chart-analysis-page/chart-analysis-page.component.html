@@ -360,6 +360,9 @@
       </button>
       @if (openMenu() === 'overlays') {
         <div class="tb-menu tb-overlays-menu" role="menu" (click)="$event.stopPropagation()">
+          <!-- PR-5: layer groups — show/hide and opacity per group, saved with the layout. -->
+          <app-layer-groups-menu [groups]="layerGroups()" (groupsChange)="layerGroups.set($event)" />
+          <div class="tb-menu-sep"></div>
           <div class="tb-menu-heading">Data</div>
           <button
             type="button"
@@ -1440,6 +1443,7 @@
           [showSupportResistance]="showSupportResistance()"
           [showStructure]="showStructure()"
           [profileExtras]="profileExtras()"
+          [layerGroups]="layerGroups()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [session]="sessionSpec()"

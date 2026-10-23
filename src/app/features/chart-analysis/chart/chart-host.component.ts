@@ -148,6 +148,11 @@ import {
 import { provenanceOf } from '../overlays/provenance';
 import type { AlertableLevel } from '../overlays/overlay-hits';
 import {
+  DEFAULT_LAYER_GROUPS,
+  effectiveOpacity,
+  type LayerGroupsState,
+} from '../overlays/layer-groups';
+import {
   placeProvenanceTip,
   ProvenanceTipComponent,
   type ProvenanceTip,
@@ -658,6 +663,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly showStructure = input<boolean>(false);
   /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3). */
   readonly profileExtras = input<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
+  /** Layer groups' show/hide and opacity (PR-5): structure, profiles, events and trade lines here. */
+  readonly layerGroups = input<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
   readonly indicators = input<ActiveIndicator[]>([]);
   /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib; null = off. */
   readonly autoAnalysis = input<AutoAnalysisSettings | null>(null);
@@ -1331,6 +1338,20 @@ export class ChartHostComponent implements OnDestroy {
     effect(() => {
       const bands = this.eventBands();
       untracked(() => this.eventRenderer.setBands(bands));
+    });
+
+    // Layer groups (PR-5): each renderer draws at its group's opacity, 0 when the group is hidden.
+    effect(() => {
+      const groups = this.layerGroups();
+      untracked(() => {
+        this.analysisRenderer.setOpacity({
+          structure: effectiveOpacity(groups, 'structure'),
+          profiles: effectiveOpacity(groups, 'profiles'),
+        });
+        for (const r of this.profileRenderers.values()) r.setOpacity(effectiveOpacity(groups, 'profiles'));
+        this.eventRenderer.setOpacity(effectiveOpacity(groups, 'events'));
+        this.overlayRenderer.setOpacity(effectiveOpacity(groups, 'trades'));
+      });
     });
   }
 
@@ -4027,6 +4048,7 @@ export class ChartHostComponent implements OnDestroy {
       if (!r) {
         // Snapped to the chart bar holding an instant: profiles built from finer bars start and end inside one.
         r = new ProfileRenderer(() => this.price, this.utcToBarX);
+        r.setOpacity(effectiveOpacity(untracked(this.layerGroups), 'profiles'));
         this.price.attachPrimitive(r);
         this.profileRenderers.set(a.uid, r);
       }

@@ -275,6 +275,15 @@ import {
   type ProfileExtrasSettings,
 } from '../../overlays/profile-levels';
 import type { AlertableLevel } from '../../overlays/overlay-hits';
+import {
+  DEFAULT_LAYER_GROUPS,
+  effectiveOpacity,
+  persistLayerGroups,
+  restoreLayerGroups,
+  type LayerGroupId,
+  type LayerGroupsState,
+} from '../../overlays/layer-groups';
+import { LayerGroupsMenuComponent } from '../../overlays/layer-groups-menu.component';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -672,6 +681,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ChartPaletteComponent,
     MeasuredBottomDirective,
     CompareDialogComponent,
+    LayerGroupsMenuComponent,
   ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
@@ -1694,6 +1704,19 @@ export class ChartAnalysisPageComponent {
   readonly profileExtras = signal<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
   toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
     this.profileExtras.update((s) => ({ ...s, [key]: !s[key] }));
+  }
+
+  /**
+   * Layer groups (PR-5): Structure, Profiles, Order flow, Events, Trades — each shown/hidden and faded
+   * together from the layer menu; saved with the layout.
+   */
+  readonly layerGroups = signal<LayerGroupsState>(DEFAULT_LAYER_GROUPS);
+  /**
+   * What a group's layers draw at: its opacity, 0 when hidden. Reactive (reads the signal), so a template
+   * can bind `[opacity]="layerGroupOpacity('flow')"` — the order-flow layers take theirs from here.
+   */
+  layerGroupOpacity(id: LayerGroupId): number {
+    return effectiveOpacity(this.layerGroups(), id);
   }
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
@@ -5673,6 +5696,7 @@ export class ChartAnalysisPageComponent {
         vpNakedPocs: this.profileExtras().nakedPocs,
         vpDeveloping: this.profileExtras().developing,
       },
+      layerGroups: persistLayerGroups(this.layerGroups()),
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
       ...(this.mainLink() ? { link: this.mainLink() } : {}),
@@ -6128,6 +6152,7 @@ export class ChartAnalysisPageComponent {
       nakedPocs: o.vpNakedPocs ?? false,
       developing: o.vpDeveloping ?? false,
     });
+    this.layerGroups.set(restoreLayerGroups(s.layerGroups));
   }
 
   private flushPendingView(): void {
