@@ -201,3 +201,64 @@ export interface EaCommandStatus {
   createdAt: string;
   acknowledgedAt: string | null;
 }
+
+// ── OCO pairs (C8, engine `POST|GET order/oco`, `DELETE order/oco/{id}`) ──────────────────────────────────────────
+
+/** Where one leg stands, as the engine's reconciler sees it. */
+export type OcoLegPhase =
+  | 'SignalWorking'
+  | 'OrderUnplaced'
+  | 'OrderWorking'
+  | 'Cancelling'
+  | 'Filled'
+  | 'Dead'
+  | 'Unknown';
+
+export type OcoStatus =
+  | 'Active'
+  | 'Triggered'
+  | 'Completed'
+  | 'Cancelling'
+  | 'Cancelled'
+  | 'BothFilled'
+  | 'NeedsAttention';
+
+export interface OcoLeg {
+  leg: 1 | 2;
+  tradeSignalId: number;
+  orderId: number | null;
+  direction: TicketDirection | string;
+  entryPrice: number;
+  stopLoss: number | null;
+  takeProfit: number | null;
+  phase: OcoLegPhase | string;
+  detail: string;
+}
+
+export interface OcoGroup {
+  id: number;
+  tradingAccountId: number;
+  symbol: string;
+  status: OcoStatus | string;
+  filledLeg: number | null;
+  note: string | null;
+  cancelRequested: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+  closedAtUtc: string | null;
+  legs: OcoLeg[];
+}
+
+/** `POST order/oco`: two manual pending tickets (live) on one account. */
+export interface OcoCreateRequest {
+  accountId: number;
+  legs: [ManualTradeRequest, ManualTradeRequest];
+}
+
+export interface OcoCreateResult {
+  group: OcoGroup | null;
+  /** The refused leg (1 or 2); null when created. */
+  refusedLeg: number | null;
+  previews: ManualTradePreview[];
+  message: string;
+}

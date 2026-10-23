@@ -4,6 +4,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { AccountStripComponent } from './account-strip.component';
 import { ChartPanelsState } from './chart-panels-state.service';
 import { DepthPanelComponent } from './depth-panel.component';
+import { LadderPanelComponent } from '../../dom/ladder-panel.component';
 import { NotesPanelComponent } from './notes-panel.component';
 import { SentimentPanelComponent } from './sentiment-panel.component';
 import type { SidePanel } from './chart-panels.types';
@@ -11,6 +12,7 @@ import type { SidePanel } from './chart-panels.types';
 const TITLES: Record<SidePanel, string> = {
   notes: 'Notes & ideas',
   depth: 'Broker depth',
+  ladder: 'Price ladder (DOM)',
   sentiment: 'Sentiment',
   account: 'Account',
 };
@@ -23,7 +25,7 @@ const TITLES: Record<SidePanel, string> = {
   selector: 'app-chart-panels-dock',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [NotesPanelComponent, DepthPanelComponent, SentimentPanelComponent, AccountStripComponent],
+  imports: [NotesPanelComponent, DepthPanelComponent, LadderPanelComponent, SentimentPanelComponent, AccountStripComponent],
   template: `
     <div class="cpd-title">
       <span>{{ title() }} · {{ symbol() }}</span>
@@ -48,6 +50,9 @@ const TITLES: Record<SidePanel, string> = {
           [sourceId]="sourceId()"
           [tickReplayBook]="tickReplayBook()"
         />
+      }
+      @case ('ladder') {
+        <app-ladder-panel [symbol]="symbol()" [digits]="digits()" />
       }
       @case ('sentiment') {
         <app-sentiment-panel [symbol]="symbol()" [timeZone]="timeZone()" />

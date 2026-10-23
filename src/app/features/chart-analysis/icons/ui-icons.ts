@@ -102,6 +102,8 @@ export const UI_ICONS: Record<string, string> = {
     '<path d="M14 5.5l8.5 4.5-8.5 4.5L5.5 10z"/><path d="M5.5 14l8.5 4.5 8.5-4.5"/><path d="M5.5 18l8.5 4.5 8.5-4.5"/>',
   volume:
     '<path d="M5.5 22.5h17"/><path d="M8.5 22.5v-5M11.5 22.5v-9M14.5 22.5v-6M17.5 22.5v-11M20.5 22.5v-7"/>',
+  // Price ladder (DOM): bid / price / ask columns, the market row marked.
+  ladder: '<rect x="6.5" y="5.5" width="15" height="17" rx="1.5"/><path d="M11.5 5.5v17M16.5 5.5v17M6.5 10h15M6.5 18h15"/><path d="M6.5 14h15" stroke-width="2.4"/>',
   trades: '<path d="M5.5 20l5-6 4 3 7-8.5"/><path d="M8 8.5h4M10 6.5v4"/>' + DOT(21.5, 8.5, 1.4),
   alert:
     '<path d="M14 5.5a5.5 5.5 0 0 0-5.5 5.5v4.5L6.5 19h15l-2-3.5V11A5.5 5.5 0 0 0 14 5.5z"/><path d="M12 21.5a2 2 0 0 0 4 0"/>',

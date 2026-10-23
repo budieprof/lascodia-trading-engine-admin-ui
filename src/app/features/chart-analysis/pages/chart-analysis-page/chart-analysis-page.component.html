@@ -1363,6 +1363,16 @@
       <button
         type="button"
         class="strip-btn"
+        [class.active]="chartPanels.open() === 'ladder'"
+        (click)="openPanel('ladder')"
+        title="Price ladder (DOM): trade from the book"
+        data-testid="ladder-button"
+      >
+        <app-chart-icon name="ladder" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
         [class.active]="chartPanels.open() === 'sentiment'"
         (click)="openPanel('sentiment')"
         title="Sentiment: news pressure and COT positioning"

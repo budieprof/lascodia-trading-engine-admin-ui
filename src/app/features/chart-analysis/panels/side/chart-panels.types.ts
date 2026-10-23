@@ -170,4 +170,4 @@ export interface OrderBookSnapshot {
   sourceId?: string;
 }
 
-export type SidePanel = 'notes' | 'depth' | 'sentiment' | 'account';
+export type SidePanel = 'notes' | 'depth' | 'ladder' | 'sentiment' | 'account';
