@@ -242,6 +242,17 @@ localhost rather than a blank page.
   source health + last hour from `GET md/dispersion`) and the Order-flow source "Consolidated" with per-source checkboxes
   (heatmap/depth follow it; tick replay ignores it — no tick tape).
 
+- **CME futures on the spot chart (market-data program cme-tier2).** CME sources (`cme-*`, C7 `kind: CmeFutures`, per-symbol
+  `symbols[]` with `priceTransform` / contract size) are stored as CME published them (futures prices, contracts). The console
+  draws them in SPOT terms: `md/history` is always called with `spot: true` (the engine inverts 6J/6C/6S with sides swapped
+  and subtracts the basis of each minute), and live hub frames of `cme-*` sources go through `CmeSpotService.mapFrame`
+  (`core/realtime/cme-spot.ts`: the same transform with the live `GET md/basis`) before the stream core applies them — a
+  frame arriving before `md/sources` answered is dropped (its book repairs from history). Legends say "CME 6E 6EZ6
+  (futures, basis-adjusted)" or "not basis-adjusted". The Order-flow menu's **CME order flow** toggle draws markers from
+  `POST md/orderflow` (research-routed; `orderflow/cme-flow.ts` + `cme-flow-primitive.ts`): ◆ large lots, ↗ sweeps, ICE
+  iceberg-like levels (MBP-10 cannot prove a hidden order — say so), ABS absorption; with a CME source picked the CVD pane
+  and the footprint show the REAL aggressor delta instead of the tick rule. Refusals (`-403-entitlement`) show as "not entitled".
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with

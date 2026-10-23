@@ -1744,7 +1744,7 @@ export class ChartAnalysisPageComponent {
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
   readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
-  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades'): void {
+  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades' | 'cmeFlow'): void {
     this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
   }
   /** The market-data source for the heatmap / depth / trades ('' = automatic). */

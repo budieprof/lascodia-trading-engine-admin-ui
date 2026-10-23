@@ -327,3 +327,23 @@ describe('MarketDataStreamCore — consolidated pseudo-source (multibook)', () =
     expect(s.book.bestBid()).toBe(1.1);
   });
 });
+
+describe('MarketDataStreamCore frame mapping (cme-tier2)', () => {
+  it('applies mapFrame before a frame reaches the book, and drops a frame it answers null for', async () => {
+    const h = harness();
+    let drop = true;
+    (h.core as unknown as { deps: MdStreamDeps }).deps.mapFrame = (f) =>
+      drop ? null : { ...f, book: f.book?.map((e) => ({ ...e, b: e.b.map(([p, s]) => [p - 0.001, s] as [number, number]), a: e.a.map(([p, s]) => [p - 0.001, s] as [number, number]) })) };
+    h.core.watch({ symbol: 'EURUSD', kinds: ['book'] });
+    await flush();
+    const c = h.conns[0];
+    c.push({ symbol: 'EURUSD', sourceId: 'cme-databento', book: fixture.book.slice(0, 1) });
+    expect(h.core.stream('EURUSD', 'cme-databento')).toBeNull();
+    drop = false;
+    c.push({ symbol: 'EURUSD', sourceId: 'cme-databento', book: fixture.book.slice(0, 10) });
+    const s = h.core.stream('EURUSD', 'cme-databento')!;
+    expect(s.book.known).toBe(true);
+    const raw = fixture.book[0].b[0][0];
+    expect(s.book.bidLevels().some(([p]) => Math.abs(p - (raw - 0.001)) < 1e-12)).toBe(true);
+  });
+});

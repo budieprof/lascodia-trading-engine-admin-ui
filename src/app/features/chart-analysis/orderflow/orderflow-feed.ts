@@ -16,6 +16,11 @@ import { createWebGlHeatSurface } from './gl/heat-gl';
 import type { StreamHeatSource } from './heatmap-primitive';
 import { StreamHeatmap, streamHeatFits, streamWindowFor } from './stream-heatmap';
 import { TradeFeed } from './trade-bubbles';
+import { CmeFlowFeed, cmeBarsAsTickBars, cmeFootprintRows } from './cme-flow';
+import type { CmeFlowLayerModel } from './cme-flow-primitive';
+import { CmeSpotService } from '@core/realtime/cme-spot.service';
+import { cmeSpotLabel, futuresSymbolOf } from '@core/realtime/cme-spot';
+import type { MdSourceSymbol } from '@core/realtime/marketdata.types';
 import type { TradeBubblesModel } from './trade-bubbles-primitive';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { resolutionMs, type TvResolution } from '../datafeed/resolution';
@@ -170,6 +175,7 @@ export class OrderFlowFeed {
   private readonly auth = inject(AuthService);
   private readonly mdApi = inject(MarketDataApiService);
   private readonly mdStream = inject(MarketDataStreamService);
+  private readonly cmeSpot = inject(CmeSpotService);
 
   /** The market-data sources the caller is entitled to (C7), once a layer that uses them is on; null before. */
   readonly mdSources = signal<MdSource[] | null>(null);
@@ -191,6 +197,14 @@ export class OrderFlowFeed {
     now: () => this.deps.now(),
     changed: () => this.streamChanged(),
   });
+  /** cme-tier2: the engine's analysis of the real CME tape + book for the window (md/orderflow). */
+  private readonly cmeFlow = new CmeFlowFeed({
+    orderFlow: (r) => this.mdApi.orderFlow(r),
+    now: () => this.deps.now(),
+    changed: () => this.cmeChanged(),
+  });
+  /** Bumped when the CME answer or its state changes. */
+  private readonly cmeState = signal(0);
   /** The event-level heatmap as the primitive pulls it. */
   private readonly streamSource: StreamHeatSource = {
     layer: () => this.streamHeat.layer(),
@@ -240,12 +254,15 @@ export class OrderFlowFeed {
     // picker can say which feeds are not licensed before anything is asked of them.
     effect(() => {
       const s = deps.settings();
-      if (!(s.heatmap || s.trades) || this.sourcesAsked) return;
+      if (!(s.heatmap || s.trades || s.cmeFlow || s.cvd || s.footprint) || this.sourcesAsked) return;
       this.sourcesAsked = true;
       untracked(() => {
         void this.mdStream.entitlements.load();
         this.mdApi.sources().then(
-          (list) => this.mdSources.set(list),
+          (list) => {
+            this.mdSources.set(list);
+            this.cmeSpot.setSources(list);
+          },
           () => this.mdSources.set([]),
         );
       });
@@ -278,6 +295,8 @@ export class OrderFlowFeed {
         if (first) return;
         this.streamHeat.clear();
         this.tradeFeed.clear();
+        this.cmeFlow.clear();
+        this.cmeState.update((v) => v + 1);
         this.streamStateKey = '';
         this.streamState.update((v) => v + 1);
       });
@@ -328,6 +347,58 @@ export class OrderFlowFeed {
         });
       });
     });
+    // cme-tier2: the CME analysis follows the visible bars (markers; the CVD pane / footprint when a CME source is picked).
+    effect(() => {
+      const want = this.cmeWanted();
+      const view = deps.view();
+      const clip = deps.replayClip();
+      const symbol = deps.symbol();
+      const src = this.cmeSource();
+      const res = deps.resolution();
+      untracked(() => {
+        if (!want || !view || !symbol || !src) {
+          if (this.cmeFlow.data || this.cmeFlow.state.kind !== 'idle') {
+            this.cmeFlow.clear();
+            this.cmeState.update((v) => v + 1);
+          }
+          return;
+        }
+        const barMs = resolutionMs(res as TvResolution) ?? 60_000;
+        this.cmeFlow.update({
+          symbol,
+          sourceId: src.source.sourceId,
+          fromUtc: view.fromUtc,
+          toUtc: view.toUtc + barMs,
+          // CME bars of at most an hour, summed into the chart's bars (a 2h / 4h / daily bar opens on an hour).
+          barSeconds: Math.max(1, Math.min(3_600, Math.round(barMs / 1000))),
+          live: view.rightEdgeInView && clip === null,
+          head: clip,
+        });
+      });
+    });
+    const cmeTick = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      const v = this.deps.view();
+      if (!v?.rightEdgeInView || this.deps.replayClip() !== null || !this.cmeWanted()) return;
+      const src = this.cmeSource();
+      const symbol = this.deps.symbol();
+      if (!src || !symbol) return;
+      const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
+      this.cmeFlow.update({
+        symbol,
+        sourceId: src.source.sourceId,
+        fromUtc: v.fromUtc,
+        toUtc: v.toUtc + barMs,
+        barSeconds: Math.max(1, Math.min(3_600, Math.round(barMs / 1000))),
+        live: true,
+        head: null,
+      });
+    }, 5_000);
+    inject(DestroyRef).onDestroy(() => {
+      clearInterval(cmeTick);
+      this.cmeFlow.clear();
+    });
+
     // The live book: one shared 1.5 s poll, only while the BUCKETED heatmap is on, the newest bar is on screen and not
     // in replay (the event-level layer has its own stream). A boolean, so a pan that keeps the right edge in view does
     // not drop and re-open the poll.
@@ -429,6 +500,84 @@ export class OrderFlowFeed {
     const picked = this.deps.settings().sourceId;
     return withTrades.find((s) => s.sourceId === picked) ?? withTrades[0] ?? null;
   });
+
+  /**
+   * cme-tier2: the CME source the order-flow analysis reads — the picked source when it is a CME futures source holding
+   * this symbol, else (for the markers only) the first such source. Null without one (or before md/sources answered).
+   */
+  readonly cmeSource = computed<{ source: MdSource; spec: MdSourceSymbol; picked: boolean } | null>(() => {
+    const list = this.mdSources() ?? [];
+    const symbol = this.deps.symbol();
+    const picked = this.deps.settings().sourceId;
+    const pickedSrc = list.find((s) => s.sourceId === picked);
+    const pickedSpec = futuresSymbolOf(pickedSrc, symbol);
+    if (pickedSrc && pickedSpec) return { source: pickedSrc, spec: pickedSpec, picked: true };
+    for (const s of list) {
+      const spec = futuresSymbolOf(s, symbol);
+      if (spec) return { source: s, spec, picked: false };
+    }
+    return null;
+  });
+
+  /** The CVD pane / footprint show the REAL CME delta: a CME source is picked and the layer is on. */
+  private readonly cmeDrivesFlow = computed(() => {
+    const s = this.deps.settings();
+    return this.cmeSource()?.picked === true && (s.cvd || s.footprint);
+  });
+
+  /** Whether the CME analysis is needed at all (markers on, or it drives the CVD / footprint). */
+  private readonly cmeWanted = computed(() => this.deps.settings().cmeFlow || this.cmeDrivesFlow());
+
+  private cmeChanged(): void {
+    this.cmeState.update((v) => v + 1);
+    for (const l of this.redrawListeners) l();
+  }
+
+  /** "CME 6E 6EZ6 (futures, basis-adjusted)" for the analysis on screen. */
+  private cmeLabel(): string {
+    const src = this.cmeSource();
+    const d = this.cmeFlow.data;
+    if (!src) return 'CME';
+    return cmeSpotLabel(src.spec.sourceSymbol, d?.spot.basisAdjusted ?? false, d?.contracts.at(-1) ?? src.spec.frontContract);
+  }
+
+  /** The CME markers layer + its captions. */
+  private cmeLayer(): { model: CmeFlowLayerModel | null; lines: string[] } {
+    this.cmeState();
+    const symbol = this.deps.symbol();
+    if (this.mdSources() === null) return { model: null, lines: ['CME order flow: loading sources…'] };
+    const src = this.cmeSource();
+    if (!src)
+      return {
+        model: null,
+        lines: [`CME order flow: no CME source you are entitled to carries ${symbol} (needs cme-trades / cme-l2 and an enabled CME feed)`],
+      };
+    const st = this.cmeFlow.state;
+    if (st.kind === 'error') return { model: null, lines: [`CME order flow unavailable — ${st.message}`] };
+    if (st.kind === 'idle' && st.message) return { model: null, lines: [st.message] };
+    const d = this.cmeFlow.data;
+    const label = this.cmeLabel();
+    const lines: string[] = [];
+    if (!d) lines.push(`CME order flow — ${label}: ${st.kind === 'loading' ? 'loading…' : 'waiting for the chart'}`);
+    else {
+      const th = d.thresholds;
+      lines.push(
+        `CME order flow — ${label}: ◆ large lots ≥ ${th.largeLotContracts} contracts (${d.largeLots.length}), ↗ sweeps ≥ ${th.sweepMinLevels} levels (${d.sweeps.length})` +
+          (d.bookAnalysed ? `, ICE iceberg-like (${d.icebergs.length}), ABS absorption (${d.absorptions.length})` : ' · book not analysed (window > 2 h)'),
+      );
+      if (d.bookAnalysed) lines.push('Iceberg-like = traded beyond what the level showed while refilling; MBP-10 cannot prove a hidden order (MBO can)');
+      if (!d.spot.basisAdjusted) lines.push('CME basis not estimated yet for this window: futures prices sit at their premium to spot');
+    }
+    return {
+      model: {
+        feed: this.cmeFlow,
+        label,
+        show: { large: true, sweeps: true, levels: true },
+        clipUtc: this.deps.replayClip(),
+      },
+      lines,
+    };
+  }
 
   /** A stream layer changed: redraw now; re-derive the captions only when its state changed. */
   private streamChanged(): void {
@@ -765,9 +914,16 @@ export class OrderFlowFeed {
     }
     const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
     this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
+    const futures = futuresSymbolOf(src, this.deps.symbol());
+    const spotState = futures && sourceId ? this.cmeSpot.stateOf(this.deps.symbol(), sourceId) : null;
+    const who = futures
+      ? cmeSpotLabel(futures.sourceSymbol, spotState?.mapping.basis != null, futures.frontContract)
+      : this.labelOf(sourceId);
     const lines = [
-      `${kind} depth — ${this.labelOf(sourceId)}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
-      `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
+      `${kind} depth — ${who}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
+      futures
+        ? `Sizes in contracts of ${futures.contractSize.toLocaleString('en-US')} ${futures.contractCurrency}${futures.priceTransform === 'Invert' ? '; prices inverted (1 / futures) with the book sides swapped' : ''}; CME book history is kept 400 days`
+        : `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
     ];
     const note = this.streamHeat.note();
     if (note) lines.push(note);
@@ -795,13 +951,18 @@ export class OrderFlowFeed {
     const st = this.tradeFeed.state;
     if (st.kind === 'error') return { model: null, lines: [`Trades unavailable — ${st.message}`] };
     const min = this.deps.settings().tradeMinSize;
+    const futures = futuresSymbolOf(src, symbol);
+    const spotState = futures ? this.cmeSpot.stateOf(symbol, src.sourceId) : null;
+    const label = futures
+      ? cmeSpotLabel(futures.sourceSymbol, spotState?.mapping.basis != null, futures.frontContract)
+      : sourceLabel(src);
     const lines = [
-      `Trades — ${sourceLabel(src)}, each print: size = area, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
+      `Trades — ${label}, each print: size = area${futures ? ' (contracts)' : ''}, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
     ];
     return {
       model: {
         feed: this.tradeFeed,
-        label: sourceLabel(src),
+        label,
         minSize: min,
         clipUtc: this.deps.replayClip(),
       },
@@ -858,6 +1019,7 @@ export class OrderFlowFeed {
     if (!view) return { model: null, lines: [] };
     if (view.barSpacing < FOOTPRINT_MIN_BAR_PX)
       return { model: null, lines: ['Zoom in to see the footprint'] };
+    if (this.cmeDrivesFlow()) return this.cmeFootprint(view);
     const bars = this.barsNow();
     const span = this.footprintSpan(view, bars);
     if (span && !span.allowed)
@@ -920,7 +1082,53 @@ export class OrderFlowFeed {
     return { model: { bars: out, rowPrice }, lines };
   }
 
+  /** cme-tier2: the CVD pane from the REAL CME aggressor delta (a CME source is picked). */
+  private cmeCvdPane(): FlowPaneModel {
+    this.cmeState();
+    const st = this.cmeFlow.state;
+    const d = this.cmeFlow.data;
+    const title = `Real aggressor delta (CVD) — ${this.cmeLabel()}, contracts`;
+    if (st.kind === 'error') return { bars: [], notes: [`unavailable — ${st.message}`], title };
+    if (st.kind === 'idle' && st.message) return { bars: [], notes: [st.message], title };
+    if (!d) return { bars: [], notes: [st.kind === 'loading' ? 'loading…' : 'waiting for the chart'], title };
+    const bars = this.deps.bars();
+    const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
+    const notes = [`from ${d.cvdAnchor === 'session' ? 'the CME session open' : 'the first bar of the window'}; CME's own aggressor flag, not a tick rule`];
+    if (d.spot.inverted) notes.push('inverted contract: a buyer of the future sells the spot pair (delta sign follows the spot pair)');
+    return { bars: cmeBarsAsTickBars(d, bars.map((b) => b.time), barMs), notes, title };
+  }
+
+  /** cme-tier2: the footprint from the REAL CME prints (contracts by price, spot terms). */
+  private cmeFootprint(view: OrderFlowView): { model: FootprintLayerModel | null; lines: string[] } {
+    this.cmeState();
+    const d = this.cmeFlow.data;
+    const st = this.cmeFlow.state;
+    const src = this.cmeSource();
+    if (st.kind === 'error') return { model: null, lines: [`CME footprint unavailable — ${st.message}`] };
+    if (!d || !src) return { model: null, lines: [st.kind === 'loading' ? 'CME footprint: loading…' : 'CME footprint: waiting for the chart'] };
+    const bars = this.barsNow();
+    const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
+    // Row = one CME tick in spot terms (inverted: dp ≈ tick × spot²), or the operator's rows when set.
+    const last = d.bars.at(-1)?.c ?? 0;
+    const tick = src.spec.priceTransform === 'Invert' ? src.spec.tickSize * last * last : src.spec.tickSize;
+    const manual = this.deps.settings().footprintRowPoints;
+    const rowPrice = manual !== null ? manual * this.point() : tick > 0 ? tick : this.point() * 5;
+    const out: FootprintBar[] = [];
+    for (let i = 0; i < bars.length; i++) {
+      const t = bars[i].time;
+      if (t + barMs < view.fromUtc || t > view.toUtc) continue;
+      const end = i + 1 < bars.length ? bars[i + 1].time : t + barMs;
+      const rows = cmeFootprintRows(d.bars, t, end);
+      if (rows) out.push({ t, end, cells: footprintCells(rows, rowPrice) });
+    }
+    return {
+      model: { bars: out, rowPrice },
+      lines: [`Footprint — ${this.cmeLabel()}: real aggressor contracts (sell × buy) per price; shaded: 3:1 diagonal imbalance`],
+    };
+  }
+
   private flowPane(kind: 'cvd' | 'ribbon'): FlowPaneModel {
+    if (kind === 'cvd' && this.cmeDrivesFlow()) return this.cmeCvdPane();
     if (PRICE_BASED_STYLES.has(this.deps.style()))
       return {
         bars: [],
@@ -976,7 +1184,7 @@ export class OrderFlowFeed {
   /** What the chart host draws; null with every order-flow layer off. */
   readonly model = computed<OrderFlowModel | null>(() => {
     const s = this.deps.settings();
-    if (!s.heatmap && !s.cvd && !s.ribbon && !s.footprint && !s.fills && !s.trades) return null;
+    if (!s.heatmap && !s.cvd && !s.ribbon && !s.footprint && !s.fills && !s.trades && !s.cmeFlow) return null;
     const view = this.deps.view();
     const captions: string[] = [];
     let trades: TradeBubblesModel | null = null;
@@ -1007,8 +1215,15 @@ export class OrderFlowFeed {
       trades = t.model;
       captions.push(...t.lines);
     }
+    let cme: CmeFlowLayerModel | null = null;
+    if (s.cmeFlow) {
+      const c = this.cmeLayer();
+      cme = c.model;
+      captions.push(...c.lines);
+    }
     return {
       trades,
+      cme,
       subscribeRedraw: this.redrawSub,
       heatmap,
       footprint,

@@ -58,6 +58,11 @@ export interface MdStreamDeps {
   stateChanged(state: MdStreamState): void;
   /** The server ended subscriptions because the organisation lost feeds (`mdRevoked`): re-read the entitlements. */
   revoked?(feeds: readonly string[]): void;
+  /**
+   * cme-tier2: map a frame before it is applied (CME futures onto the spot symbol — `CmeSpotService`); null drops it
+   * (its source is not resolved yet: the book repairs from history). Absent: frames are applied as received.
+   */
+  mapFrame?(frame: MdFrame): MdFrame | null;
 }
 
 export type MdStreamState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'unavailable';
@@ -533,8 +538,10 @@ export class MarketDataStreamCore {
   // ── Frames ─────────────────────────────────────────────────────────────────────────────────
 
   private onFramePayload(payload: unknown): void {
-    const f = payload as MdFrame | null;
-    if (!f || typeof f.symbol !== 'string' || typeof f.sourceId !== 'string') return;
+    const raw = payload as MdFrame | null;
+    if (!raw || typeof raw.symbol !== 'string' || typeof raw.sourceId !== 'string') return;
+    const f = this.deps.mapFrame ? this.deps.mapFrame(raw) : raw;
+    if (!f) return;
     const entry = this.symbols.get(f.symbol.toUpperCase());
     if (!entry) return;
     this.lastGoodAt = this.deps.now();

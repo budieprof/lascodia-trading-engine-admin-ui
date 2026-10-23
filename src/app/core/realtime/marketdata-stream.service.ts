@@ -14,6 +14,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { MarketDataEntitlementsService } from '@core/market-data/md-entitlements.service';
 import { hubConnectPlan } from './hub-auth';
 import { MarketDataApiService } from './marketdata-api.service';
+import { CmeSpotService } from './cme-spot.service';
 import {
   MarketDataStreamCore,
   type MdBookListener,
@@ -87,6 +88,7 @@ export class MarketDataStreamService {
   private readonly zone = inject(NgZone);
   /** The organisation's feeds (C6): re-read when the hub revokes one, so layers grey it out before asking again. */
   readonly entitlements = inject(MarketDataEntitlementsService);
+  private readonly cmeSpot = inject(CmeSpotService);
   private readonly perSymbol = new Map<string, SymbolSignals>();
 
   /** The hub connection's state; `connected` = frames are flowing (consumers may stop polling). */
@@ -107,6 +109,8 @@ export class MarketDataStreamService {
       this.state.set(s);
       this.protocol.set(s === 'connected' ? this.core.currentProtocol : null);
     },
+    // cme-tier2: CME futures frames onto the spot symbol (inversion, side swap, live basis) before they are applied.
+    mapFrame: (f) => this.cmeSpot.mapFrame(f),
   });
 
   constructor() {
