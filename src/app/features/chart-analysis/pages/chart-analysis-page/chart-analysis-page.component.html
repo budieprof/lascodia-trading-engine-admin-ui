@@ -703,12 +703,13 @@
             <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Which market-data source feeds the heatmap, the depth panel and the trades (only sources you are entitled to)">
               Source
               <select
-                [value]="orderFlow().sourceId ?? ''"
+                [value]="isConsolidatedPick() ? 'consolidated' : (orderFlow().sourceId ?? '')"
                 (change)="setOrderFlowSource($any($event.target).value)"
                 aria-label="Market-data source"
                 data-testid="of-source"
               >
                 <option value="">Automatic</option>
+                <option value="consolidated">Consolidated — all your sources (spot, base units)</option>
                 @for (src of orderFlowFeed.mdSources() ?? []; track src.sourceId) {
                   @let refused = orderFlowFeed.sourceNotEntitled(src);
                   <option [value]="src.sourceId" [disabled]="!!refused">
@@ -717,6 +718,16 @@
                 }
               </select>
             </label>
+            @if (isConsolidatedPick() && consolidatableSources().length > 1) {
+              <div class="tb-menu-chips" style="font-size: 12px; flex-wrap: wrap" role="group" aria-label="Sources in the consolidated heatmap" data-testid="of-consolidated-sources">
+                @for (src of consolidatableSources(); track src.sourceId) {
+                  <label style="display: inline-flex; align-items: center; gap: 3px">
+                    <input type="checkbox" [checked]="consolidatedHas(src.sourceId)" (change)="toggleConsolidatedSource(src.sourceId)" />
+                    {{ src.displayName }}
+                  </label>
+                }
+              </div>
+            }
           }
         </div>
       }
@@ -1372,6 +1383,16 @@
         data-testid="ladder-button"
       >
         <app-chart-icon name="ladder" [size]="28" />
+      </button>
+      <button
+        type="button"
+        class="strip-btn"
+        [class.active]="chartPanels.open() === 'multibook'"
+        (click)="openPanel('multibook')"
+        title="Multibook: the consolidated book of every source you may see, with dispersion and source health"
+        data-testid="multibook-button"
+      >
+        <app-chart-icon name="multibook" [size]="28" />
       </button>
       <button
         type="button"

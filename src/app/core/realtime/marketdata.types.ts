@@ -42,6 +42,145 @@ export interface MdFrame {
   ticks?: MdTicksWire | null;
   book?: MdBookEventWire[] | null;
   trades?: MdTradesWire | null;
+  /** Multibook: on a `consolidated` source's frames, the whole consolidated view (≤ 10 Hz on change, else 1 Hz). */
+  consolidated?: MdConsolidatedWire | null;
+}
+
+// ── Multibook (engine `ConsolidatedBookService`): the consolidated pseudo-source ─────────────────────────────────
+
+/** The consolidated pseudo-source: every enabled source the caller is entitled to. */
+export const CONSOLIDATED_SOURCE = 'consolidated';
+/** A subset: `consolidated:a,b` (sorted ids). */
+export const CONSOLIDATED_PREFIX = 'consolidated:';
+
+export function isConsolidatedId(id: string | null | undefined): boolean {
+  return !!id && (id === CONSOLIDATED_SOURCE || id.startsWith(CONSOLIDATED_PREFIX));
+}
+
+/** The registry sources a consolidated id names (null = all entitled). */
+export function consolidatedSubset(id: string): string[] | null {
+  if (id === CONSOLIDATED_SOURCE || !id.startsWith(CONSOLIDATED_PREFIX)) return null;
+  return [...new Set(id.slice(CONSOLIDATED_PREFIX.length).split(',').map((s) => s.trim()).filter(Boolean))].sort();
+}
+
+/** "Consolidated — all your sources" / "Consolidated — A + B" (registry display names when known). */
+export function consolidatedLabel(id: string, sources: readonly Pick<MdSource, 'sourceId' | 'displayName'>[] | null): string {
+  const subset = consolidatedSubset(id);
+  if (!subset) return 'Consolidated — all your sources';
+  const names = subset.map((s) => sourceLabel(sources?.find((x) => x.sourceId === s) ?? { sourceId: s, displayName: '' }));
+  return `Consolidated — ${names.join(' + ')}`;
+}
+
+/** The canonical consolidated id for `enabled` out of `all` sources (every one enabled = `consolidated`). */
+export function consolidatedId(all: readonly string[], enabled: readonly string[]): string {
+  const on = [...new Set(enabled)].filter((s) => all.includes(s)).sort();
+  if (!on.length || on.length === new Set(all).size) return CONSOLIDATED_SOURCE;
+  return CONSOLIDATED_PREFIX + on.join(',');
+}
+
+/**
+ * One consolidated level: spot price, total size in BASE-CURRENCY UNITS (known sizes only), `partial` when a contributor's
+ * size is unknown, and each source's share (`src[i]` holds `sz[i]`; null = unknown size).
+ */
+export interface MdConsolidatedLevelWire {
+  p: number;
+  s: number;
+  partial: boolean;
+  src: string[];
+  sz: (number | null)[];
+}
+
+export interface MdConsolidatedCrossWire {
+  bidSource: string;
+  askSource: string;
+  bid: number;
+  ask: number;
+  locked: boolean;
+}
+
+/** One source's health in the consolidated view. */
+export interface MdConsolidatedSourceWire {
+  sourceId: string;
+  name: string;
+  /** `Mt5Broker` | `CmeFutures` | `FixVenue`. */
+  kind: string;
+  /** `live` | `stale` | `no-data` | `no-basis`. */
+  state: string;
+  /** `book` (levels with sizes) | `quote` (top of book only). */
+  mode: string;
+  bid: number | null;
+  ask: number | null;
+  mid: number | null;
+  /** Source stamp of the top shown (epoch ms), -1 none. */
+  topT: number;
+  /** Server now − the source's newest stamp (ms), -1 unknown. */
+  ageMs: number;
+  /** Server receive − source stamp of its newest row (ms; includes clock offset), -1 unknown. */
+  lagMs: number;
+  bidLevels: number;
+  askLevels: number;
+  sizeUnit: string;
+  sizeKnown: boolean;
+  /** Mid − the median mid of the live sources (price). */
+  dev: number | null;
+  /** Futures basis applied (spot = futures − basis). */
+  basis: number | null;
+}
+
+/** The consolidated view (engine time `t`): prices spot-equivalent, sizes in base-currency units. */
+export interface MdConsolidatedWire {
+  t: number;
+  point: number;
+  sizeUnit: string;
+  b: MdConsolidatedLevelWire[];
+  a: MdConsolidatedLevelWire[];
+  bestBid: number | null;
+  bestAsk: number | null;
+  bestBidSources: string[];
+  bestAskSources: string[];
+  crossed: boolean;
+  locked: boolean;
+  crosses: MdConsolidatedCrossWire[];
+  medianMid: number | null;
+  midRange: number | null;
+  sources: MdConsolidatedSourceWire[];
+}
+
+/** `GET md/dispersion`: one source's statistics in one minute. */
+export interface MdDispersionSourceWire {
+  sourceId: string;
+  samples: number;
+  liveSamples: number;
+  staleSamples: number;
+  meanMid?: number | null;
+  meanDev?: number | null;
+  meanAbsDev?: number | null;
+  maxAbsDev?: number | null;
+  meanSpread?: number | null;
+  maxAgeMs: number;
+  meanLagMs?: number | null;
+  maxLagMs: number;
+}
+
+/** `GET md/dispersion`: one minute (aggregates null when a source you may not read took part). */
+export interface MdDispersionMinuteWire {
+  t: number;
+  samples: number;
+  sampleIntervalMs: number;
+  meanLiveSources: number;
+  midRangeMean: number | null;
+  midRangeMax: number | null;
+  rangeSamples: number | null;
+  crossedSamples: number | null;
+  lockedSamples: number | null;
+  point: number;
+  sources: MdDispersionSourceWire[];
+}
+
+export interface MdDispersionWire {
+  symbol: string;
+  minutes: MdDispersionMinuteWire[];
+  denied: string[];
 }
 
 /** What `Subscribe(symbol, sourceIds, kinds)` answers (C4 + the engine's additive fields). */
@@ -83,6 +222,8 @@ export interface MdKeyframeWire {
 
 export interface MdHistorySourceWire {
   sourceId: string;
+  /** Multibook: the registry sources a `consolidated` answer was built from. */
+  contributors?: string[] | null;
   keyframe?: MdKeyframeWire | null;
   ticks?: MdTicksWire | null;
   book?: MdBookEventWire[] | null;

@@ -234,6 +234,13 @@ localhost rather than a blank page.
   `mdRevoked` when a licence ends — call `refresh()` then). Staff pages: `/market-data/entitlements` (grants per
   organisation + feed + validity, `platform.data.manage`) and `/market-data/usage` (monthly exchange usage report, CSV per
   organisation or per user, `platform.usage.read`), both in the sidebar's Platform group; plans carry `marketDataFeeds`.
+- **Multibook (engine market-data program, multibook).** The hub's computed source `consolidated` (or
+  `consolidated:a,b`) is the engine's consolidated book of every source the organisation may see: spot prices, sizes in
+  BASE-CURRENCY units, each level's per-source shares in the frame's `consolidated` view. `MarketDataStreamCore` never
+  folds a consolidated id into "all sources" (it subscribes `["*", "consolidated"]`). Chart: rail "Multibook" panel
+  (`features/chart-analysis/multibook/`: per-source colour ladder with client-side source toggles, dispersion strip,
+  source health + last hour from `GET md/dispersion`) and the Order-flow source "Consolidated" with per-source checkboxes
+  (heatmap/depth follow it; tick replay ignores it — no tick tape).
 
 ## Verifying in a browser
 
