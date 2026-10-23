@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import { LscCanDirective } from '@core/auth/can.directive';
 import { Permission } from '@core/auth/permissions.generated';
@@ -55,6 +56,7 @@ import {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    RouterLink,
     LscCanDirective,
     PageHeaderComponent,
     ConfirmDialogComponent,
@@ -102,6 +104,9 @@ import {
         title="Connect a terminal"
         subtitle="Every EA and every supervisor has its own credential. Create a token to connect one, and revoke what you no longer trust."
       >
+        <a class="btn btn-primary" routerLink="/organisation/terminals/connect"
+          >Guided connection</a
+        >
         <button
           type="button"
           class="btn btn-secondary"
@@ -307,6 +312,16 @@ import {
                       >
                     </td>
                     <td class="actions">
+                      @if (
+                        t.kind === 'EaTerminal' && (t.status === 'Pending' || t.status === 'Used')
+                      ) {
+                        <a
+                          class="btn btn-sm btn-secondary"
+                          routerLink="/organisation/terminals/connect"
+                          [queryParams]="{ token: t.id }"
+                          >Follow</a
+                        >
+                      }
                       @if (t.status === 'Pending') {
                         <button
                           *lscCan="P.AccountsManage"

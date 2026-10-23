@@ -73,6 +73,20 @@ export const navIcon = {
       ['path', { d: 'M4 2C2.8 3.7 2 5.7 2 8', key: 'tap9e0' }],
     ],
   },
+  BookOpen: {
+    name: 'book-open',
+    size: 24,
+    node: [
+      ['path', { d: 'M12 5v16', key: '1f6ucr' }],
+      [
+        'path',
+        {
+          d: 'M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z',
+          key: '1fyvmf',
+        },
+      ],
+    ],
+  },
   Bot: {
     name: 'bot',
     size: 24,
@@ -1020,6 +1034,19 @@ export const navIcon = {
       ['path', { d: 'M17.99 11.66A6 6 0 0 1 15.77 16.67', key: '1u2y91' }],
       ['circle', { cx: '12', cy: '12', r: '2', key: '1c9p78' }],
       ['path', { d: 'm13.41 10.59 5.66-5.66', key: 'mhq4k0' }],
+    ],
+  },
+  RadioTower: {
+    name: 'radio-tower',
+    size: 24,
+    node: [
+      ['path', { d: 'M4.9 16.1C1 12.2 1 5.8 4.9 1.9', key: 's0qx1y' }],
+      ['path', { d: 'M7.8 4.7a6.14 6.14 0 0 0-.8 7.5', key: '1idnkw' }],
+      ['circle', { cx: '12', cy: '9', r: '2', key: '1092wv' }],
+      ['path', { d: 'M16.2 4.8c2 2 2.26 5.11.8 7.47', key: 'ojru2q' }],
+      ['path', { d: 'M19.1 1.9a9.96 9.96 0 0 1 0 14.1', key: 'rhi7fg' }],
+      ['path', { d: 'M9.5 18h5', key: 'mfy3pd' }],
+      ['path', { d: 'm8 22 4-11 4 11', key: '25yftu' }],
     ],
   },
   Repeat2: {

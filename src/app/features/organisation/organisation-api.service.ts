@@ -28,6 +28,7 @@ import type {
   StrategySummary,
   TenantLlmKey,
 } from './organisation.types';
+import type { EnrollmentProgress, TerminalSetup } from './connect/terminal-wizard.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
 interface OverrideWriteResponse extends ResponseData<number> {
@@ -108,6 +109,19 @@ export class OrganisationApiService {
   /** `accounts.manage`. A used token cannot be revoked (revoke its credential instead). */
   revokeEnrollmentToken(id: number): Observable<boolean> {
     return this.del(`/machine/enrollments/${id}`);
+  }
+
+  /**
+   * `accounts.read` (engine enterprise onboarding). The wizard's facts: engine URL for the EA, EA
+   * download, token lifetime, demo-only rule, plan terminal limit.
+   */
+  terminalSetup(): Observable<TerminalSetup> {
+    return this.get('/onboarding/terminal-setup');
+  }
+
+  /** `accounts.read`. Where one enrollment token stands, with the troubleshooting hints. */
+  enrollmentProgress(id: number): Observable<EnrollmentProgress> {
+    return this.get(`/machine/enrollments/${id}/progress`);
   }
 
   /** `accounts.read`. Active only unless `includeRevoked`. */

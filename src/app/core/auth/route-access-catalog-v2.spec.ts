@@ -54,6 +54,8 @@ const BEFORE_CATALOG_V2: Record<string, RouteRule> = {
 const ADDED_AFTER_CATALOG_V2: readonly string[] = [
   // Market-data entitlements (market-data program C6): GET admin/md/entitlements needs platform.data.manage.
   'market-data/entitlements',
+  // Market-data sources (engine enterprise onboarding): GET admin/md/sources needs platform.data.manage.
+  'market-data/sources',
 ];
 const TABLE_NOW: RouteTable = Object.fromEntries(
   Object.entries(ROUTE_ACCESS).filter(([path]) => !ADDED_AFTER_CATALOG_V2.includes(path)),
@@ -98,6 +100,10 @@ describe('route table after catalog v2', () => {
     expect(table['system-logs'].anyOf).toEqual([P.PlatformInfrastructureManage]);
     expect(table['worker-health'].anyOf).toEqual([P.PlatformInfrastructureManage]);
     expect(table['market-data/entitlements']).toEqual({
+      anyOf: [P.PlatformDataManage],
+      staffOnly: true,
+    });
+    expect(table['market-data/sources']).toEqual({
       anyOf: [P.PlatformDataManage],
       staffOnly: true,
     });

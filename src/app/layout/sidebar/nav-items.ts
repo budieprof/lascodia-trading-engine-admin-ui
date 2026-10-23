@@ -199,6 +199,7 @@ export const NAV_GROUPS: NavGroup[] = [
       // Market-data entitlements (C6): staff pages that live under /market-data.
       { label: 'Data entitlements', route: '/market-data/entitlements', icon: navIcon.KeyRound },
       { label: 'Data usage', route: '/market-data/usage', icon: navIcon.ChartColumnStacked },
+      { label: 'Data sources', route: '/market-data/sources', icon: navIcon.RadioTower },
       { label: 'Sign-ups', route: '/platform/signups', icon: navIcon.UserPlus },
       { label: 'Closed organisations', route: '/platform/closures', icon: navIcon.Archive },
       { label: 'Elevated access', route: '/platform/elevations', icon: navIcon.ChevronsUp },
@@ -214,6 +215,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'My Account', route: '/account/profile', icon: navIcon.CircleUser },
       { label: 'Sessions & devices', route: '/account/sessions', icon: navIcon.Laptop },
       { label: 'Access tokens', route: '/account/tokens', icon: navIcon.Ticket },
+      // The documentation portal (enterprise onboarding).
+      { label: 'Documentation', route: '/docs', icon: navIcon.BookOpen },
     ],
   },
 ];

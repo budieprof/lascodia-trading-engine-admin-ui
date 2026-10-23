@@ -25,6 +25,8 @@
     "icons": "node scripts/generate-icons.mjs",
     "permissions:generate": "node scripts/generate-permissions.mjs",
     "permissions:check": "node scripts/generate-permissions.mjs --check",
+    "docs:api": "node scripts/sync-api-reference.mjs",
+    "docs:api:check": "node scripts/sync-api-reference.mjs --check",
     "codegen:api": "npx --yes openapi-typescript@^7.13.0 \"${SWAGGER_URL:-http://localhost:5000/swagger/v1/swagger.json}\" -o src/app/core/api/_generated/schema.ts",
     "storybook": "ng run lascodia-admin:storybook",
     "storybook:build": "ng run lascodia-admin:build-storybook",

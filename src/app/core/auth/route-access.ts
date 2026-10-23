@@ -60,6 +60,7 @@ export const ROUTE_ACCESS = {
   // Market-data entitlements and the exchange usage report (market-data program C6): platform staff.
   'market-data/entitlements': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/entitlements
   'market-data/usage': { anyOf: [P.PlatformUsageRead], staffOnly: true }, // GET admin/md/usage
+  'market-data/sources': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/sources
   'chart-analysis': rule(P.MarketdataRead),
   watchlist: rule(P.MarketdataRead),
   'spot-analysis': rule(P.AccessOperator),
@@ -171,6 +172,8 @@ export const ROUTE_ACCESS = {
     P.TenantClose,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
+  // The guided connection (enterprise onboarding): GET onboarding/terminal-setup + machine/enrollments/{id}/progress.
+  'organisation/terminals/connect': rule(P.AccountsRead),
   'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
   // GET admin/kill-switch/tenant + account/{id}; flatten and TenantRisk:* limits are sections by their keys.
   'organisation/risk': rule(P.EngineKillswitch, P.PositionsFlatten, P.EngineConfig),
@@ -183,6 +186,8 @@ export const ROUTE_ACCESS = {
   'organisation/data-export': rule(P.TenantDataExport), // GET tenant/exports
   'organisation/close': rule(P.TenantClose), // GET tenant/closure
   onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
+  // The documentation portal (enterprise onboarding): static guides + the API reference; no engine read.
+  docs: rule(),
 
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House

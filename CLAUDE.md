@@ -258,6 +258,22 @@ localhost rather than a blank page.
   through an interceptor-free `HttpClient` (no session, no sign-in redirect, no error toasts), worst component first,
   refreshed every 30 s, the last answer kept and marked stale when the engine does not answer. It shows only the engine's
   fixed words — never add counts, ids or host names to it.
+- **Enterprise onboarding (engine `docs/api/onboarding-api.md`).** `/organisation/terminals/connect` is the guided
+  terminal connection (`features/organisation/connect/`): `GET onboarding/terminal-setup`, one enrollment token (shown
+  once) + a browser-built MT5 preset (`InpEngineBaseUrl` + `InpEnrollmentToken` — never sent anywhere), the MT5 steps
+  (WebRequest allow-list = the engine ORIGIN), then `GET machine/enrollments/{id}/progress` polled (`nextPollMs`) until
+  `connected`, with the engine's hints (4060, expired/refused token, clock skew, old EA); `?token=<id>` follows an
+  earlier token (the terminals page's **Follow**). `/market-data/sources` (staff, `platform.data.manage`) edits the
+  registry (`admin/md/sources`; MT5 rows read-only). `/demo` is PUBLIC (outside the layout, plain `HttpClient` with
+  `SKIP_SESSION_HANDLING`): recorded data replayed on a loop — the "RECORDED DATA, REPLAYED" banner and the engine's
+  `label` stay on screen, no order entry; `ShowcaseBannerComponent` marks the console while acting in a `Demo`-kind
+  organisation. `/docs` is the documentation portal: guides are `public/docs-content/*.md` rendered by
+  `features/docs/markdown.ts` (escape first, fixed subset — never raw HTML), listed in `docs-catalog.ts` (a spec checks
+  every file and internal link); `/docs/api` reads `public/docs-content/api-reference.json`, the engine's generated
+  reference — refresh it with `npm run docs:api` (`ENGINE_DIR`, default `../lascodia-trading-engine`) whenever the
+  engine's `docs/api/api-reference.json` changes. Assets live in `docs-content/`, not `docs/`, so the static server's
+  `try_files` never mistakes the `/docs` route for a directory. Platform → Organisations has **Invite first Owner**
+  (`POST platform/tenants/{id}/owner-invitation`).
 
 ## Verifying in a browser
 

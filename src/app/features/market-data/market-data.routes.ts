@@ -24,6 +24,16 @@ export const MARKET_DATA_ROUTES: Routes = [
       ),
   },
   {
+    // The market-data source registry (engine C7): platform staff enable sources and set their writers.
+    path: 'sources',
+    canActivate: [canAccessPath('market-data/sources')],
+    data: { breadcrumb: 'Sources' },
+    loadComponent: () =>
+      import('./sources/pages/md-sources-page.component').then(
+        (m) => m.MarketDataSourcesPageComponent,
+      ),
+  },
+  {
     // The exchange usage report (engine C6): who read which feed in a month.
     path: 'usage',
     canActivate: [canAccessPath('market-data/usage')],

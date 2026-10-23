@@ -23,6 +23,8 @@ const RESERVED = new Set([
   'public',
   'internal',
   'lascodia',
+  // The showcase organisation's handle (engine enterprise onboarding): only the engine's seeder creates it.
+  'demo',
 ]);
 
 export function isValidSlug(slug: string): boolean {

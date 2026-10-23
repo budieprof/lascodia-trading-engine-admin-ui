@@ -30,12 +30,26 @@ export const routes: Routes = [
       import('@features/status/status-page.component').then((m) => m.StatusPageComponent),
   },
   {
+    // The public demonstration (engine enterprise onboarding): recorded data replayed on a loop, no
+    // sign-in, no trading. Off in the engine, the page says the demo is not available.
+    path: 'demo',
+    loadComponent: () =>
+      import('@features/demo/demo-page.component').then((m) => m.DemoPageComponent),
+  },
+  {
     path: '',
     component: LayoutComponent,
     canActivate: [authGuard],
     canActivateChild: [mustChangePasswordGuard],
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
+      {
+        // The documentation portal (engine enterprise onboarding): any signed-in person.
+        path: 'docs',
+        canActivate: [canAccessPath('docs')],
+        data: { breadcrumb: 'Documentation' },
+        loadChildren: () => import('@features/docs/docs.routes').then((m) => m.DOCS_ROUTES),
+      },
       {
         path: 'dashboard',
         canActivate: [canAccessPath('dashboard')],

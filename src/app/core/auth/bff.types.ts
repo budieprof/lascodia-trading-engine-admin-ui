@@ -12,8 +12,8 @@ export interface BffUser {
   email: string;
 }
 
-/** `House`, `Customer` or `Canary`. */
-export type TenantKind = 'House' | 'Customer' | 'Canary' | string;
+/** `House`, `Customer`, `Canary` or `Demo` (the showcase organisation: recorded data, never trades). */
+export type TenantKind = 'House' | 'Customer' | 'Canary' | 'Demo' | string;
 
 export interface BffTenant {
   id: number;

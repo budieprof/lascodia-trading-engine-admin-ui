@@ -71,6 +71,7 @@ import type { OnboardingItem, TenantOnboarding } from '../onboarding.types';
         title="Get started"
         subtitle="A few steps to get your organisation trading (demo accounts)."
       >
+        <a class="btn btn-secondary" routerLink="/docs/getting-started">Read the guide</a>
         <button
           type="button"
           class="btn btn-secondary"
