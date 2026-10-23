@@ -2,7 +2,7 @@ import type { MdHistory, MdHistoryRequest } from '@core/realtime/marketdata.type
 import { loadMdFixture } from '@core/realtime/testing/md-fixture';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { ReplayController } from './replay-controller';
-import { CHUNK_MS, TickReplay, TickTape, formingBarFromTicks, tickReplayView } from './tick-replay';
+import { CHUNK_MS, TickReplay, TickTape, footprintRowsFromTape, formingBarFromTicks, tickReplayView } from './tick-replay';
 
 const fx = loadMdFixture();
 const T0 = Math.min(fx.book[0].t, fx.ticks.t[0]);
@@ -108,6 +108,34 @@ describe('TickTape', () => {
     expect(view).toHaveLength(2);
     expect(view[1].close).toBe(bids[9]);
     expect(tickReplayView(bars, bars[1].time + 60_000, (i) => bars[i].time + 60_000, tape)).toHaveLength(2);
+  });
+});
+
+describe('footprint from the tape', () => {
+  it('counts the tick rule over mids at bid prices, carrying direction through unchanged mids and into the window', () => {
+    const tape = new TickTape(T0);
+    tape.append({ ticks: fx.ticks }, T1 + 1);
+    const from = fx.ticks.t[10];
+    const to = fx.ticks.t[60];
+    // Reference, written out plainly.
+    let last: number | null = null;
+    let dir = 0;
+    const ref = new Map<number, { up: number; down: number }>();
+    fx.ticks.t.forEach((t, i) => {
+      const mid = (fx.ticks.b[i] + fx.ticks.a[i]) / 2;
+      let d = 0;
+      if (last !== null) d = mid > last ? 1 : mid < last ? -1 : dir;
+      if (d !== 0) dir = d;
+      last = mid;
+      if (t < from || t > to || d === 0) return;
+      const r = ref.get(fx.ticks.b[i]) ?? { up: 0, down: 0 };
+      if (d > 0) r.up++;
+      else r.down++;
+      ref.set(fx.ticks.b[i], r);
+    });
+    const rows = footprintRowsFromTape(tape, from, to);
+    expect(new Map(rows.map((r) => [r.price, { up: r.up, down: r.down }]))).toEqual(ref);
+    expect(rows.reduce((n, r) => n + r.up + r.down, 0)).toBeGreaterThan(0);
   });
 });
 

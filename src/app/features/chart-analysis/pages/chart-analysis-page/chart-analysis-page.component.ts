@@ -405,6 +405,7 @@ import { appStorage } from '@core/storage/app-storage';
 import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
 import type { OrderBookSnapshot } from '../../panels/side/chart-panels.types';
 import { bookToSnapshot } from '../../orderflow/stream-depth';
+import { footprintRowsFromTape } from '../../replay/tick-replay';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { replayClipUtc } from '../../orderflow/orderflow-replay';
 import {
@@ -1799,6 +1800,12 @@ export class ChartAnalysisPageComponent {
     precision: () => this.precision(),
     pipSize: () => this.pipSize(),
     now: () => this.serverClock.now(),
+    tickFootprint: (from, to) => {
+      const tick = this.replay.tick;
+      if (!tick || this.replay.tickHead() === null || !tick.tape) return null;
+      tick.version();
+      return footprintRowsFromTape(tick.tape, from, to);
+    },
   });
   private readonly orders = inject(OrdersService);
   private readonly martingale = inject(MartingaleService);

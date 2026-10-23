@@ -3,6 +3,7 @@ import { signal } from '@angular/core';
 import { BookTimeline, type BookState } from '@core/realtime/md-book';
 import type { MdHistory, MdHistoryRequest } from '@core/realtime/marketdata.types';
 import type { Bar } from '../datafeed/candle-feed.service';
+import type { FootprintRowDto } from '../orderflow/orderflow.types';
 
 /**
  * Tick + book replay — the unit BELOW Bar Replay's intrabar `sub`: the recorded market-data stream (C5 `md/history`:
@@ -151,6 +152,46 @@ export function formingBarFromTicks(bar: Bar, tape: TickTape, head: number): Bar
   const out: Bar = { time: bar.time, open: tape.b[i0], high, low, close: tape.b[i1 - 1], volume: i1 - i0 };
   if (bar.closeTime !== undefined) out.closeTime = bar.closeTime;
   return out;
+}
+
+/**
+ * A footprint for [from, to] from the tape's ticks, by the engine's rules (C2 / `TickFlowMinuteBuilder`): the classic
+ * tick rule over MID quotes (an unchanged mid carries the last direction; a stream's first quote has none), each tick
+ * counted at its BID price. The direction carries in from the ticks before `from` held in the tape.
+ */
+export function footprintRowsFromTape(tape: TickTape, from: number, to: number): FootprintRowDto[] {
+  const i0 = tape.ticksBefore(from);
+  const i1 = tape.ticksAtOrBefore(to);
+  if (i1 <= i0) return [];
+  // The direction going into the window (from the tape's ticks before it).
+  let lastMid: number | null = null;
+  let dir = 0;
+  for (let i = 0; i < i0; i++) {
+    const mid = (tape.b[i] + tape.a[i]) / 2;
+    if (lastMid !== null) {
+      const sgn = mid > lastMid ? 1 : mid < lastMid ? -1 : 0;
+      if (sgn !== 0) dir = sgn;
+    }
+    lastMid = mid;
+  }
+  const rows = new Map<number, FootprintRowDto>();
+  for (let i = i0; i < i1; i++) {
+    const mid = (tape.b[i] + tape.a[i]) / 2;
+    let d = 0;
+    if (lastMid !== null) {
+      const sgn = mid > lastMid ? 1 : mid < lastMid ? -1 : 0;
+      d = sgn !== 0 ? sgn : dir;
+    }
+    if (d !== 0) dir = d;
+    lastMid = mid;
+    if (d === 0) continue;
+    const price = tape.b[i];
+    const row = rows.get(price) ?? { price, up: 0, down: 0 };
+    if (d > 0) row.up++;
+    else row.down++;
+    rows.set(price, row);
+  }
+  return [...rows.values()];
 }
 
 /**

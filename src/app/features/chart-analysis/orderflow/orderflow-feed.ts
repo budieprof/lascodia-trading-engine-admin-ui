@@ -29,7 +29,7 @@ import {
 } from './heatmap-grid';
 import { LiveDepthService, type LiveDepth } from './live-depth.service';
 import type { FlowPaneModel, OrderFlowModel } from './orderflow-layers';
-import type { OrderFlowSettings, OrderFlowView, TickBarDto, TickBarsDto } from './orderflow.types';
+import type { FootprintRowDto, OrderFlowSettings, OrderFlowView, TickBarDto, TickBarsDto } from './orderflow.types';
 import { utcMs } from '../panels/fx-fundamentals';
 import {
   FOOTPRINT_MIN_BAR_PX,
@@ -78,6 +78,11 @@ export interface OrderFlowFeedDeps {
   now: () => number;
   /** Whether the event-level WebGL heatmap can run here (default: a WebGL2 context can be made). */
   gpu?: () => boolean;
+  /**
+   * Tick replay: the footprint rows of [from, to] from the recorded ticks (the bar forming at the head follows the
+   * head exactly); null outside tick replay.
+   */
+  tickFootprint?: (fromUtc: number, toUtc: number) => FootprintRowDto[] | null;
 }
 
 let gpuProbe: boolean | null = null;
@@ -793,6 +798,18 @@ export class OrderFlowFeed {
       const end = next ? utcMs(next.t) : f.span.endUtc;
       out.push({ t, end, cells: footprintCells(b.footprint, rowPrice) });
     });
+    // Tick replay: the bar forming at the head, from the recorded ticks up to the head (C2 answers stop before it).
+    const clipNow = this.deps.replayClip();
+    const forming = bars.at(-1);
+    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow) {
+      const rowsNow = this.deps.tickFootprint(forming.time, clipNow);
+      if (rowsNow) {
+        const at = out.findIndex((b) => b.t === forming.time);
+        const fb: FootprintBar = { t: forming.time, end: Math.max(clipNow, forming.time + 1), cells: footprintCells(rowsNow, rowPrice) };
+        if (at >= 0) out[at] = fb;
+        else out.push(fb);
+      }
+    }
     const rows = formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
     const mode = this.deps.settings().footprintRowPoints === null ? ' (auto)' : '';
     const lines = [
