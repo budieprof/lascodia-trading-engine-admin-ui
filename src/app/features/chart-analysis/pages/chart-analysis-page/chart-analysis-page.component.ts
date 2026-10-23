@@ -270,6 +270,10 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
+import {
+  DEFAULT_PROFILE_EXTRAS,
+  type ProfileExtrasSettings,
+} from '../../overlays/profile-levels';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -1685,6 +1689,11 @@ export class ChartAnalysisPageComponent {
   readonly volumeProfileModes = VOLUME_PROFILE_MODES;
   readonly showSupportResistance = signal(false);
   readonly showStructure = signal(false);
+  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3); saved with the layout. */
+  readonly profileExtras = signal<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
+  toggleProfileExtra(key: keyof ProfileExtrasSettings): void {
+    this.profileExtras.update((s) => ({ ...s, [key]: !s[key] }));
+  }
 
   /** The estimated-delta study, which is a PANE study rather than a price overlay. */
   readonly deltaOn = computed(() => this.active().some((i) => i.defId === 'est-delta'));
@@ -5654,6 +5663,8 @@ export class ChartAnalysisPageComponent {
         showClosedTrades: this.showClosedTrades(),
         fitTradeLines: this.fitTradeLines(),
         showWatches: this.showWatchMarks(),
+        vpNakedPocs: this.profileExtras().nakedPocs,
+        vpDeveloping: this.profileExtras().developing,
       },
       split: this.splitState(),
       ...(this.panelStates().length ? { charts: this.panelStates() } : {}),
@@ -6106,6 +6117,10 @@ export class ChartAnalysisPageComponent {
     this.showClosedTrades.set(o.showClosedTrades ?? false);
     this.fitTradeLines.set(o.fitTradeLines ?? true);
     this.showWatchMarks.set(o.showWatches ?? true);
+    this.profileExtras.set({
+      nakedPocs: o.vpNakedPocs ?? false,
+      developing: o.vpDeveloping ?? false,
+    });
   }
 
   private flushPendingView(): void {

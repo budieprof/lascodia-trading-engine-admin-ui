@@ -504,6 +504,33 @@
                 </button>
               }
             </div>
+            <!-- PR-2 / PR-3: naked POCs and the developing POC / value area. -->
+            <div class="tb-menu-chips">
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                class="tb-chip"
+                [class.on]="profileExtras().nakedPocs"
+                [attr.aria-checked]="profileExtras().nakedPocs"
+                (click)="toggleProfileExtra('nakedPocs')"
+                title="POCs of the last 10 finished trading days (or Asia / London / New York sessions) carried right until price trades through them"
+              >
+                Naked POCs
+              </button>
+              @if (volumeProfileMode() !== 'visible') {
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  class="tb-chip"
+                  [class.on]="profileExtras().developing"
+                  [attr.aria-checked]="profileExtras().developing"
+                  (click)="toggleProfileExtra('developing')"
+                  title="Where the POC, VAH and VAL stood bar by bar as each period developed"
+                >
+                  Developing POC / VA
+                </button>
+              }
+            </div>
           }
           <button
             type="button"
@@ -1412,6 +1439,7 @@
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"
           [showStructure]="showStructure()"
+          [profileExtras]="profileExtras()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [session]="sessionSpec()"

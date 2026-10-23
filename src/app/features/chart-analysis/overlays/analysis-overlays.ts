@@ -1,5 +1,10 @@
 import { atr, periodKey, type DayOf, type Ohlc, type VolumeProfileBin } from '../indicators/math';
-import { volumeProfile as volumeProfileOf } from '../profiles/profile-math';
+import {
+  SESSION_WINDOWS,
+  sessionStartOf,
+  volumeProfile as volumeProfileOf,
+} from '../profiles/profile-math';
+import { sessionDayOf } from '../indicators/sessions';
 
 /**
  * Analytical overlays computed from the loaded bars: volume profile, auto-detected
@@ -72,8 +77,15 @@ export function profileWithValueArea(
   };
 }
 
-/** How the chart-level volume profile slices the bars, as TradingView's VP family does. */
-export type VolumeProfileMode = 'visible' | 'session' | 'week' | 'month';
+/**
+ * How the chart-level volume profile slices the bars, as TradingView's VP family does. `session` is
+ * the symbol's trading day (17:00–17:00 New York for FX); `sessions` is one profile per Asia, London
+ * and New York session (DeepCharts / Sierra "session profiles", PR-1).
+ */
+export type VolumeProfileMode = 'visible' | 'session' | 'sessions' | 'week' | 'month';
+
+/** The calendar modes, which slice by a period key ({@link periodStart}). */
+export type PeriodMode = Exclude<VolumeProfileMode, 'visible' | 'sessions'>;
 
 export const VOLUME_PROFILE_MODES: ReadonlyArray<{
   id: VolumeProfileMode;
@@ -86,15 +98,38 @@ export const VOLUME_PROFILE_MODES: ReadonlyArray<{
     hint: 'One profile of the bars on screen, re-profiled as you pan',
   },
   { id: 'session', label: 'Session', hint: 'One profile per trading session' },
+  {
+    id: 'sessions',
+    label: 'Asia · London · NY',
+    hint:
+      'One compact profile per Asia (Tokyo 09:00–18:00), London (08:00–17:00) and New York ' +
+      '(08:00–17:00) session, each on its own clock — the Sessions indicator’s hours. Needs 1h bars or finer.',
+  },
   { id: 'week', label: 'Periodic · Week', hint: 'One profile per trading week' },
   { id: 'month', label: 'Periodic · Month', hint: 'One profile per month of trading days' },
 ];
+
+/** The named intraday sessions a `sessions` profile is cut by (`indicators/sessions.ts`). */
+export type NamedSession = 'asia' | 'london' | 'newyork';
+
+export const NAMED_SESSION_LABEL: Readonly<Record<NamedSession, string>> = {
+  asia: 'Asia',
+  london: 'London',
+  newyork: 'New York',
+};
 
 export interface PeriodProfile {
   /** First and last bar time (ms) in the period. */
   t0: number;
   t1: number;
   profile: VolumeProfileResult;
+  /** Index of the period's first and last bar in the bars it was cut from. */
+  startIdx: number;
+  endIdx: number;
+  /** "Mon 20 Oct", "London 20 Oct", "wk 19 Oct", "Oct 2026" — what the period is called on the chart. */
+  label: string;
+  /** Which named session it is (`sessions` mode only). */
+  session?: NamedSession;
 }
 
 /**
@@ -109,11 +144,7 @@ export interface PeriodProfile {
  * with Sunday folded into the following week, so FX's Sunday-evening open is not left as a
  * one-candle profile of its own.</p>
  */
-export function periodStart(
-  time: number,
-  mode: Exclude<VolumeProfileMode, 'visible'>,
-  dayOf?: DayOf,
-): number {
+export function periodStart(time: number, mode: PeriodMode, dayOf?: DayOf): number {
   if (dayOf) {
     return periodKey(time, mode === 'session' ? 'Day' : mode === 'week' ? 'Week' : 'Month', dayOf);
   }
@@ -141,6 +172,7 @@ export function periodProfiles(
   mode: Exclude<VolumeProfileMode, 'visible'>,
   opts: { minBars?: number; dayOf?: DayOf } = {},
 ): PeriodProfile[] {
+  if (mode === 'sessions') return namedSessionProfiles(bars, opts.minBars ?? 3);
   const minBars = opts.minBars ?? 3;
   const keyOf = (t: number) => periodStart(t, mode, opts.dayOf);
   const out: PeriodProfile[] = [];
@@ -150,12 +182,100 @@ export function periodProfiles(
     if (!boundary) continue;
     const slice = bars.slice(start, i);
     if (slice.length >= minBars) {
-      const profile = profileWithValueArea(slice, Math.max(24, Math.min(72, slice.length * 2)));
-      if (profile) out.push({ t0: slice[0].time, t1: slice[slice.length - 1].time, profile });
+      const profile = profileWithValueArea(slice, periodBins(slice.length));
+      if (profile)
+        out.push({
+          t0: slice[0].time,
+          t1: slice[slice.length - 1].time,
+          profile,
+          startIdx: start,
+          endIdx: i - 1,
+          label: periodLabel(slice[0].time, mode, opts.dayOf),
+        });
     }
     start = i;
   }
   return out;
+}
+
+/** Rows for one period's profile: fine enough for a busy day, not empty buckets for a quiet one. */
+export function periodBins(barCount: number): number {
+  return Math.max(24, Math.min(72, barCount * 2));
+}
+
+const DAY_MS = 86_400_000;
+const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "20 Oct" of a date held as UTC ms of its midnight. */
+function dayMonth(dateMs: number): string {
+  const d = new Date(dateMs);
+  return `${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}`;
+}
+
+/**
+ * What a period is called on the chart: its trading DATE for a session ("Mon 20 Oct" — an FX session
+ * opening Sunday 17:00 New York is Monday's), the Monday of its week, its month.
+ */
+export function periodLabel(time: number, mode: PeriodMode, dayOf?: DayOf): string {
+  const date = dayOf ? Math.floor(dayOf(time) / DAY_MS) * DAY_MS : Math.floor(time / DAY_MS) * DAY_MS;
+  const d = new Date(date);
+  if (mode === 'month') return `${MONTH[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  if (mode === 'week') {
+    const back = (d.getUTCDay() + 6) % 7; // Monday = 0
+    return `wk ${dayMonth(date - back * DAY_MS)}`;
+  }
+  return `${WEEKDAY[d.getUTCDay()]} ${dayMonth(date)}`;
+}
+
+/**
+ * One profile per Asia, London and New York session (PR-1): the bars inside each session's window
+ * on its own clock (`SESSION_WINDOWS`, the Sessions indicator's and the session profile study's
+ * hours — not new ones), in time order. The windows overlap (London and New York share four hours),
+ * so a bar can be in two sessions' profiles: that is what the sessions are.
+ */
+function namedSessionProfiles(bars: readonly Ohlc[], minBars: number): PeriodProfile[] {
+  const out: PeriodProfile[] = [];
+  for (const session of ['asia', 'london', 'newyork'] as const) {
+    const window = SESSION_WINDOWS[session];
+    let i = 0;
+    while (i < bars.length) {
+      const key = sessionStartOf(bars[i].time, session);
+      if (key === null) {
+        i++;
+        continue;
+      }
+      let j = i;
+      while (j + 1 < bars.length && sessionStartOf(bars[j + 1].time, session) === key) j++;
+      if (j - i + 1 >= minBars) {
+        const slice = bars.slice(i, j + 1);
+        const profile = profileWithValueArea(slice, periodBins(slice.length));
+        const localDay = sessionDayOf(bars[i].time, window);
+        if (profile && localDay !== null)
+          out.push({
+            t0: bars[i].time,
+            t1: bars[j].time,
+            profile,
+            startIdx: i,
+            endIdx: j,
+            label: `${NAMED_SESSION_LABEL[session]} ${dayMonth(localDay)}`,
+            session,
+          });
+      }
+      i = j + 1;
+    }
+  }
+  return out.sort((a, b) => a.t0 - b.t0 || a.t1 - b.t1);
+}
+
+/**
+ * Why `sessions` mode draws nothing on these bars, or null when it can: a session is nine hours, so
+ * bars coarser than an hour leave two or three per session — not a distribution.
+ */
+export function sessionProfileNotice(barIntervalMs: number): string | null {
+  return barIntervalMs > 3_600_000
+    ? 'Session profiles need 1h bars or finer — a 9-hour session is two or three bars here.'
+    : null;
 }
 
 // ── Support and resistance ───────────────────────────────────────────────────

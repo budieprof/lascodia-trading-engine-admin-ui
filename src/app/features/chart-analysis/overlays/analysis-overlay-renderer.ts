@@ -1,8 +1,22 @@
 import type { CanvasRenderingTarget2D } from 'fancy-canvas';
 import type { ISeriesApi, ISeriesPrimitive, SeriesType, Time } from 'lightweight-charts';
-import type { PeriodProfile, SrLevel, VolumeProfileResult } from './analysis-overlays';
+import {
+  NAMED_SESSION_LABEL,
+  type NamedSession,
+  type PeriodProfile,
+  type SrLevel,
+  type VolumeProfileResult,
+} from './analysis-overlays';
 import type { MarketStructure } from './market-structure';
 import type { AutoAnalysis } from './auto-analysis';
+import type { ProfileExtras } from './profile-levels';
+
+/** Each named session's colour on its compact profile (PR-1). */
+const SESSION_TINT: Readonly<Record<NamedSession, string>> = {
+  asia: '#AB47BC',
+  london: '#2962FF',
+  newyork: '#FF9800',
+};
 
 /**
  * Draws the analytical overlays on the price pane: the volume profile and the
@@ -58,6 +72,7 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
   private structure: MarketStructure | null = null;
   /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib. */
   private auto: AutoAnalysis | null = null;
+  private extras: ProfileExtras | null = null;
   private requestUpdate?: () => void;
 
   constructor(
@@ -83,6 +98,12 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
   /** Session / periodic profiles — each drawn inside its own time span. */
   setPeriodProfiles(periods: readonly PeriodProfile[]): void {
     this.periods = periods;
+    this.requestUpdate?.();
+  }
+
+  /** Naked POCs, developing POC / VA lines and the mode's notice (PR-2, PR-3); null: none. */
+  setProfileExtras(extras: ProfileExtras | null): void {
+    this.extras = extras;
     this.requestUpdate?.();
   }
 
@@ -130,6 +151,7 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       this.drawStructure(ctx, series, width);
       this.drawProfile(ctx, series, width, height);
       this.drawPeriodProfiles(ctx, series, width, height);
+      this.drawProfileExtras(ctx, series, width);
       this.drawLevels(ctx, series, width);
       this.drawAuto(ctx, series, width);
       ctx.restore();
@@ -182,15 +204,29 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
       const span = Math.max(4, x1 - x0);
       const profile = period.profile;
       if (profile.peak <= 0) continue;
-      const maxWidth = span * 0.7;
+      // Asia / London / New York overlap: their compact profiles stay narrower so neighbours stay readable.
+      const maxWidth = span * (period.session ? 0.55 : 0.7);
       const binHeight = this.binHeight(series, profile, height);
+      const tint = period.session ? SESSION_TINT[period.session] : '#2962FF';
 
       // Faint frame over the value area, so each period's accepted range reads at a glance.
       const vaTop = series.priceToCoordinate(profile.valueAreaHigh);
       const vaBottom = series.priceToCoordinate(profile.valueAreaLow);
+      if (period.session) {
+        // The session's name over its profile, in its tint: three overlapping sessions need telling apart.
+        const top = series.priceToCoordinate(profile.bins[profile.bins.length - 1]?.price ?? profile.poc);
+        if (top !== null && span >= 28) {
+          ctx.globalAlpha = 0.9;
+          ctx.fillStyle = tint;
+          ctx.font = '9px -apple-system, system-ui, sans-serif';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(NAMED_SESSION_LABEL[period.session], x0 + 2, top - binHeight / 2 - 2);
+        }
+      }
       if (vaTop !== null && vaBottom !== null) {
-        ctx.globalAlpha = 0.06;
-        ctx.fillStyle = '#2962FF';
+        ctx.globalAlpha = period.session ? 0.08 : 0.06;
+        ctx.fillStyle = tint;
         ctx.fillRect(
           x0,
           Math.min(vaTop, vaBottom) - binHeight / 2,
@@ -218,6 +254,109 @@ export class AnalysisOverlayRenderer implements ISeriesPrimitive<Time> {
         ctx.stroke();
       }
     }
+    ctx.restore();
+  }
+
+  /**
+   * Developing POC / VAH / VAL as step lines (PR-3) — each level held from its bar's open to the next
+   * bar's — then the naked POCs (PR-2): dashed on to the right edge while naked, dotted and fainter up
+   * to the bar that traded through them once touched. Then the mode's notice, if it draws nothing.
+   */
+  private drawProfileExtras(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    width: number,
+  ): void {
+    const extras = this.extras;
+    if (!extras) return;
+    ctx.save();
+    for (const d of extras.developing) {
+      this.stepLine(ctx, series, d.t, d.poc, '#FF6D00', 1.25, []);
+      this.stepLine(ctx, series, d.t, d.vah, '#2962FF', 1, [2, 2]);
+      this.stepLine(ctx, series, d.t, d.val, '#2962FF', 1, [2, 2]);
+    }
+    const placed: number[] = [];
+    for (const n of extras.naked) {
+      const x0 = this.timeToX(n.from);
+      const y = series.priceToCoordinate(n.price);
+      if (x0 === null || y === null || x0 > width) continue;
+      const x1 = n.until === null ? width : this.timeToX(n.until);
+      if (x1 === null || x1 < 0) continue;
+      ctx.globalAlpha = n.until === null ? 0.9 : 0.45;
+      ctx.strokeStyle = '#FF6D00';
+      ctx.lineWidth = 1;
+      ctx.setLineDash(n.until === null ? [6, 3] : [1, 3]);
+      ctx.beginPath();
+      ctx.moveTo(x0, Math.round(y) + 0.5);
+      ctx.lineTo(x1, Math.round(y) + 0.5);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      // Only the naked ones are labelled: a touched POC is history, its line says where it ended.
+      if (n.until === null) {
+        ctx.globalAlpha = 1;
+        this.tag(
+          ctx,
+          `${n.label} ${n.price.toFixed(this.precision())}`,
+          Math.max(4, x0 + 4),
+          nudge(y, placed),
+          '#FF6D00',
+          'left',
+        );
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (extras.notice) this.notice(ctx, extras.notice);
+    ctx.restore();
+  }
+
+  /** A step line through (t[i], v[i]): flat from each point to the next one's time, then a step. */
+  private stepLine(
+    ctx: CanvasRenderingContext2D,
+    series: ISeriesApi<SeriesType>,
+    t: readonly number[],
+    v: readonly number[],
+    colour: string,
+    lineWidth: number,
+    dash: number[],
+  ): void {
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = lineWidth;
+    ctx.setLineDash(dash);
+    ctx.beginPath();
+    let prevY: number | null = null;
+    for (let i = 0; i < t.length; i++) {
+      const x = this.timeToX(t[i]);
+      const y = series.priceToCoordinate(v[i]);
+      if (x === null || y === null) {
+        prevY = null;
+        continue;
+      }
+      if (prevY === null) ctx.moveTo(x, y);
+      else {
+        ctx.lineTo(x, prevY);
+        ctx.lineTo(x, y);
+      }
+      prevY = y;
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /** Why the chosen profile mode draws nothing, in the pane's top-left corner. */
+  private notice(ctx: CanvasRenderingContext2D, text: string): void {
+    ctx.save();
+    ctx.font = '11px -apple-system, system-ui, sans-serif';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + 12;
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = 'rgba(19, 23, 34, 0.75)';
+    ctx.fillRect(8, 30, w, 20);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'left';
+    ctx.fillText(text, 14, 40);
     ctx.restore();
   }
 

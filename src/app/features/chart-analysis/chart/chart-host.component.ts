@@ -140,6 +140,11 @@ import {
   type SrLevel,
 } from '../overlays/analysis-overlays';
 import { marketStructure } from '../overlays/market-structure';
+import {
+  DEFAULT_PROFILE_EXTRAS,
+  profileExtras,
+  type ProfileExtrasSettings,
+} from '../overlays/profile-levels';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
@@ -643,6 +648,8 @@ export class ChartHostComponent implements OnDestroy {
   readonly showSupportResistance = input<boolean>(false);
   /** Balance range, value area, stop pools and the events that formed them. */
   readonly showStructure = input<boolean>(false);
+  /** The volume profile's naked POCs and developing POC / VA (PR-2, PR-3). */
+  readonly profileExtras = input<ProfileExtrasSettings>(DEFAULT_PROFILE_EXTRAS);
   readonly indicators = input<ActiveIndicator[]>([]);
   /** Auto analysis (DR-I11): scored trendlines, higher-timeframe levels, the zig-zag Fib; null = off. */
   readonly autoAnalysis = input<AutoAnalysisSettings | null>(null);
@@ -1292,6 +1299,7 @@ export class ChartHostComponent implements OnDestroy {
       this.volumeProfileMode();
       this.showSupportResistance();
       this.showStructure();
+      this.profileExtras();
       this.autoAnalysis();
       this.calendar();
       untracked(() => this.recomputeAnalysis());
@@ -1456,6 +1464,7 @@ export class ChartHostComponent implements OnDestroy {
       this.analysisRenderer.setLevels([]);
       this.analysisRenderer.setStructure(null);
       this.analysisRenderer.setAuto(null);
+      this.analysisRenderer.setProfileExtras(null);
       return;
     }
 
@@ -1467,10 +1476,11 @@ export class ChartHostComponent implements OnDestroy {
     // Period profiles cover every loaded bar — the renderer culls off-screen periods, and
     // re-slicing on pan would split a session in two at the viewport edge. Their sessions, weeks
     // and months are the symbol's trading ones (on the unshifted bars, where a day is an instant's).
-    this.analysisRenderer.setPeriodProfiles(
-      wantProfile && mode !== 'visible'
-        ? periodProfiles(bars, mode, { dayOf: this.calendar()?.dayOf })
-        : [],
+    const dayOf = this.calendar()?.dayOf;
+    const periods = wantProfile && mode !== 'visible' ? periodProfiles(bars, mode, { dayOf }) : [];
+    this.analysisRenderer.setPeriodProfiles(periods);
+    this.analysisRenderer.setProfileExtras(
+      wantProfile ? profileExtras(bars, periods, mode, this.profileExtras(), dayOf) : null,
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
     this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
