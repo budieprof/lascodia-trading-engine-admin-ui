@@ -110,6 +110,12 @@ export interface OrderFlowSettings {
   trades: boolean;
   /** Trades smaller than this (in the source's own size unit) are not drawn. */
   tradeMinSize: number;
+  /**
+   * cme-tier2: CME order-flow markers (large lots, sweeps / stop runs, iceberg-like levels, absorption) from the
+   * engine's analysis of the real CME tape + book; with a CME source picked, the CVD pane and the footprint show the
+   * REAL aggressor delta instead of the tick rule.
+   */
+  cmeFlow: boolean;
 }
 
 /** Every layer off by default. */
@@ -124,6 +130,7 @@ export const DEFAULT_ORDER_FLOW: OrderFlowSettings = {
   sourceId: null,
   trades: false,
   tradeMinSize: 0,
+  cmeFlow: false,
 };
 
 /** A saved layout's order-flow toggles, defaulted and clamped (layouts saved before this feature carry none). */
@@ -156,12 +163,13 @@ export function restoredOrderFlow(
       typeof s.tradeMinSize === 'number' && Number.isFinite(s.tradeMinSize) && s.tradeMinSize > 0
         ? s.tradeMinSize
         : 0,
+    cmeFlow: s.cmeFlow === true,
   };
 }
 
 /** How many order-flow layers are on (the toolbar's overlay count). */
 export function orderFlowCount(s: OrderFlowSettings): number {
-  return [s.heatmap, s.cvd, s.footprint, s.ribbon, s.fills, s.trades].filter(Boolean).length;
+  return [s.heatmap, s.cvd, s.footprint, s.ribbon, s.fills, s.trades, s.cmeFlow].filter(Boolean).length;
 }
 
 // ── What the chart is showing (reported by the host's layers) ──────────────────

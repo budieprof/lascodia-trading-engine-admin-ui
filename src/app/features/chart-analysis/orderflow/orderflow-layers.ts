@@ -24,6 +24,7 @@ import { FootprintPrimitive, type FootprintLayerModel } from './footprint-primit
 import { FillsPrimitive } from './fills-primitive';
 import { HeatmapPrimitive, type HeatmapLayerModel } from './heatmap-primitive';
 import { TradeBubblesPrimitive, type TradeBubblesModel } from './trade-bubbles-primitive';
+import { CmeFlowPrimitive, type CmeFlowLayerModel } from './cme-flow-primitive';
 import type { OrderFlowView, TickBarDto } from './orderflow.types';
 import { utcMs } from '../panels/fx-fundamentals';
 
@@ -33,6 +34,8 @@ export interface FlowPaneModel {
   /** OF-4 only: one flag per bar in `bars` — spread ≥ 2× median while the tick rate spikes. */
   pulled?: readonly boolean[];
   notes: readonly string[];
+  /** The pane's title when it is not the default (cme-tier2: the REAL CME aggressor delta). */
+  title?: string;
 }
 
 /** Everything the order-flow layers draw on one chart; the page builds it (orderflow-feed.ts). */
@@ -48,6 +51,8 @@ export interface OrderFlowModel {
   ribbon: FlowPaneModel | null;
   /** Trade bubbles (sources with real trades); null: none drawn. */
   trades?: TradeBubblesModel | null;
+  /** cme-tier2: CME order-flow markers (large lots, sweeps, iceberg-like levels, absorption); null: none. */
+  cme?: CmeFlowLayerModel | null;
   /**
    * The stream layers (event-level heatmap, trades) advance without the model changing: the layers register here to
    * redraw (called outside Angular, at most once per animation frame per source of change).
@@ -147,6 +152,7 @@ export class OrderFlowLayers {
   private readonly footprint = new FootprintPrimitive(this.primitiveDeps);
   private readonly fills = new FillsPrimitive(this.primitiveDeps);
   private readonly bubbles = new TradeBubblesPrimitive(this.primitiveDeps);
+  private readonly cmeMarkers = new CmeFlowPrimitive(this.primitiveDeps);
   private readonly captions = new CaptionPrimitive('price', () => this.surface.dark());
 
   private chartRef: IChartApi | null = null;
@@ -157,7 +163,7 @@ export class OrderFlowLayers {
 
   constructor(private readonly surface: OrderFlowSurface) {
     // Through the host, so they are re-attached to every new price series (style switch, rebuilt chart).
-    for (const p of [this.heatmap, this.footprint, this.fills, this.bubbles, this.captions])
+    for (const p of [this.heatmap, this.footprint, this.fills, this.bubbles, this.cmeMarkers, this.captions])
       surface.attachPricePrimitive(p);
   }
 
@@ -173,6 +179,7 @@ export class OrderFlowLayers {
         this.unsubscribeRedraw = sub(() => {
           this.heatmap.redraw();
           this.bubbles.redraw();
+          this.cmeMarkers.redraw();
         });
     }
   }
@@ -208,6 +215,8 @@ export class OrderFlowLayers {
     this.fills.setAlpha(a);
     this.bubbles.setAlpha(a);
     this.bubbles.setModel(model?.trades ?? null);
+    this.cmeMarkers.setAlpha(a);
+    this.cmeMarkers.setModel(model?.cme ?? null);
     this.heatmap.setModel(model?.heatmap ?? null);
     this.footprint.setModel(model?.footprint ?? null);
     this.fills.setFills(model?.fills ?? []);
@@ -429,7 +438,7 @@ export class OrderFlowLayers {
     );
     p.line.setData(line);
     p.hist.setData(hist);
-    p.caption.setLines([CVD_TITLE, ...m.notes]);
+    p.caption.setLines([m.title ?? CVD_TITLE, ...m.notes]);
   }
 
   private writeRibbon(p: RibbonPane, m: FlowPaneModel): void {

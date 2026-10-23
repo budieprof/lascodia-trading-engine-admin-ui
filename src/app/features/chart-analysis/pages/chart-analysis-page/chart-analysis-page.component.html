@@ -699,8 +699,18 @@
               />
             </label>
           }
-          @if (orderFlow().heatmap || orderFlow().trades) {
-            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Which market-data source feeds the heatmap, the depth panel and the trades (only sources you are entitled to)">
+          <button
+            type="button"
+            class="tb-menu-item tb-check"
+            [class.on]="orderFlow().cmeFlow"
+            (click)="toggleOrderFlow('cmeFlow')"
+            data-testid="of-cme"
+            title="From the real CME futures tape and book (cme-trades / cme-l2): large lots, sweeps / stop runs, iceberg-like levels and absorption, in spot terms (basis-adjusted). Pick a CME source to make the CVD and footprint show the real aggressor delta."
+          >
+            <app-chart-icon name="volume-profile" [size]="28" /> CME order flow (futures)
+          </button>
+          @if (orderFlow().heatmap || orderFlow().trades || orderFlow().cmeFlow || orderFlow().cvd || orderFlow().footprint) {
+            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Which market-data source feeds the heatmap, the depth panel and the trades — and, when it is a CME source, the real-delta CVD and footprint (only sources you are entitled to)">
               Source
               <select
                 [value]="orderFlow().sourceId ?? ''"
