@@ -6,6 +6,7 @@ import { ChartPanelsService } from '../panels/side/chart-panels.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import { bookToSnapshot, pickBookStream } from './stream-depth';
 import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
+import { isConsolidatedId } from '@core/realtime/marketdata.types';
 
 /** How often the live book is read when the hub is not delivering (the EA reports it about once a second). */
 export const LIVE_DEPTH_POLL_MS = 1_500;
@@ -129,6 +130,8 @@ export class LiveDepthService {
   }
 
   private async read(feed: Feed): Promise<void> {
+    // The consolidated book (multibook) has no polled equivalent: a single broker's book must not stand in for it.
+    if (isConsolidatedId(feed.sourceId)) return;
     const n = ++feed.seq;
     try {
       const snap = await firstValueFrom(this.api.orderBook(feed.symbol));

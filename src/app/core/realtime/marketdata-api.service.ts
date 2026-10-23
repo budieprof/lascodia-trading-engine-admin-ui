@@ -3,7 +3,13 @@ import { firstValueFrom } from 'rxjs';
 
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
-import type { MdHistory, MdHistoryRequest, MdHistoryWire, MdSource } from './marketdata.types';
+import type {
+  MdDispersionWire,
+  MdHistory,
+  MdHistoryRequest,
+  MdHistoryWire,
+  MdSource,
+} from './marketdata.types';
 
 /** How long the source registry answer is reused. */
 const SOURCES_TTL_MS = 5 * 60_000;
@@ -28,6 +34,15 @@ export class MarketDataApiService {
       ...res.data,
       message: res.message && res.message !== 'Successful' ? res.message : null,
     };
+  }
+
+  /** Multibook: per-minute quote dispersion across sources in [from, to) (epoch ms, ≤ 7 days; entitled sources only). */
+  async dispersion(symbol: string, from: number, to: number): Promise<MdDispersionWire> {
+    const q = `symbol=${encodeURIComponent(symbol)}&from=${Math.floor(from)}&to=${Math.floor(to)}`;
+    const data = await firstValueFrom(
+      this.api.getEnvelope<MdDispersionWire>(`/md/dispersion?${q}`, { silent: true }),
+    );
+    return data ?? { symbol, minutes: [], denied: [] };
   }
 
   /** C7, cached; a failed read is not cached. */

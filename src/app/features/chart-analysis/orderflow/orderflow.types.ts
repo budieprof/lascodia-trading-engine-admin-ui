@@ -103,7 +103,8 @@ export interface OrderFlowSettings {
   fills: boolean;
   /**
    * Market-data source (C7 `md/sources` id) feeding the heatmap, the depth panel and the trade layer; null = automatic
-   * (the source holding the most book for the window).
+   * (the source holding the most book for the window). Multibook: `consolidated` / `consolidated:a,b` = the consolidated
+   * book of the entitled sources (spot prices, base-currency units).
    */
   sourceId: string | null;
   /** Trade bubbles from a source that publishes real trades (CME / venues). */
@@ -148,7 +149,10 @@ export function restoredOrderFlow(
     ribbon: s.ribbon === true,
     fills: s.fills === true,
     sourceId:
-      typeof s.sourceId === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(s.sourceId)
+      typeof s.sourceId === 'string' &&
+      (/^[A-Za-z0-9._:-]{1,64}$/.test(s.sourceId) ||
+        // Multibook: "consolidated:a,b" — a subset of registry sources.
+        /^consolidated:[A-Za-z0-9._-]{1,64}(,[A-Za-z0-9._-]{1,64}){0,31}$/.test(s.sourceId))
         ? s.sourceId
         : null,
     trades: s.trades === true,

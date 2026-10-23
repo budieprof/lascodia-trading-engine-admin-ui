@@ -284,3 +284,46 @@ describe('MarketDataStreamCore', () => {
     expect(h.core.status('EURUSD')!.notEntitled).toBe("The licence for 'broker-dom' ended.");
   });
 });
+
+describe('MarketDataStreamCore — consolidated pseudo-source (multibook)', () => {
+  it('never folds a consolidated id into "all sources": all + consolidated subscribes ["*", "consolidated"]', async () => {
+    const h = harness();
+    h.core.watch({ symbol: 'EURUSD', sources: ['consolidated'], kinds: ['book'] });
+    await flush();
+    let subs = h.conns[0].calls.filter((c) => c.method === 'Subscribe');
+    expect(subs.at(-1)!.args).toEqual(['EURUSD', ['consolidated'], ['book']]);
+
+    h.core.watch({ symbol: 'EURUSD', sources: null, kinds: ['ticks'] });
+    await flush();
+    subs = h.conns[0].calls.filter((c) => c.method === 'Subscribe');
+    expect(subs.at(-1)!.args).toEqual(['EURUSD', ['*', 'consolidated'], ['book', 'ticks']]);
+
+    h.core.watch({ symbol: 'EURUSD', sources: ['mt5-a'], kinds: ['book'] });
+    await flush();
+    // Still "all" (the null watcher) — the named source adds nothing.
+    expect(h.conns[0].calls.filter((c) => c.method === 'Subscribe').at(-1)!.args[1]).toEqual(['*', 'consolidated']);
+  });
+
+  it('keeps the latest consolidated view on the consolidated stream and folds its book like any source', async () => {
+    const h = harness();
+    h.core.watch({ symbol: 'EURUSD', sources: ['consolidated'], kinds: ['book'] });
+    await flush();
+    const view = {
+      t: 1, point: 0.00001, sizeUnit: 'base', b: [], a: [], bestBid: 1.1, bestAsk: 1.1001, bestBidSources: ['x'],
+      bestAskSources: ['x'], crossed: false, locked: false, crosses: [], medianMid: 1.10005, midRange: null, sources: [],
+    };
+    h.conns[0].push({
+      symbol: 'EURUSD', sourceId: 'consolidated',
+      book: [{ t: 1, k: 'S', b: [[1.1, 2_000_000]], a: [[1.1001, 1_000_000]] }],
+      consolidated: view,
+    });
+    const s = h.core.stream('EURUSD', 'consolidated')!;
+    expect(s.book.known).toBe(true);
+    expect(s.book.bestBid()).toBe(1.1);
+    expect(s.consolidated).toEqual(view);
+    // A heartbeat (view only) keeps the book and refreshes the view.
+    h.conns[0].push({ symbol: 'EURUSD', sourceId: 'consolidated', consolidated: { ...view, t: 2 } });
+    expect(s.consolidated!.t).toBe(2);
+    expect(s.book.bestBid()).toBe(1.1);
+  });
+});

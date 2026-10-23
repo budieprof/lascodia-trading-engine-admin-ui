@@ -5,7 +5,13 @@ import { Permission } from '@core/auth/permissions.generated';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { entitledIn, type MyMarketDataEntitlements } from '@core/market-data/md-entitlements.service';
 import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
-import { sourceKinds, sourceLabel, type MdSource } from '@core/realtime/marketdata.types';
+import {
+  consolidatedLabel,
+  isConsolidatedId,
+  sourceKinds,
+  sourceLabel,
+  type MdSource,
+} from '@core/realtime/marketdata.types';
 import { createWebGlHeatSurface } from './gl/heat-gl';
 import type { StreamHeatSource } from './heatmap-primitive';
 import { StreamHeatmap, streamHeatFits, streamWindowFor } from './stream-heatmap';
@@ -730,6 +736,7 @@ export class OrderFlowFeed {
   /** The label of a source id (its registry display name), else the id. */
   private labelOf(sourceId: string | null): string {
     if (!sourceId) return 'broker';
+    if (isConsolidatedId(sourceId)) return consolidatedLabel(sourceId, this.mdSources());
     const src = this.mdSources()?.find((s) => s.sourceId === sourceId);
     return src ? sourceLabel(src) : sourceId;
   }
@@ -743,10 +750,21 @@ export class OrderFlowFeed {
     if (st.kind === 'idle' && !sourceId)
       return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
     const src = this.mdSources()?.find((s) => s.sourceId === sourceId) ?? null;
-    const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
-    this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
     const live =
       this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
+    if (isConsolidatedId(sourceId)) {
+      // Multibook: every entitled source combined by the engine — say exactly what the colours mean.
+      this.streamSource.label = 'Consolidated book';
+      const lines = [
+        `${this.labelOf(sourceId)}: consolidated book, every change (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
+        'Spot prices (CME basis-adjusted); sizes in base-currency units summed across sources; a source silent for 15 s is left out',
+      ];
+      const note = this.streamHeat.note();
+      if (note) lines.push(note);
+      return { model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity }, lines };
+    }
+    const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
+    this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
     const lines = [
       `${kind} depth — ${this.labelOf(sourceId)}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
       `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,

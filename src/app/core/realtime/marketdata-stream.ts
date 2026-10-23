@@ -3,6 +3,7 @@ import { ENTITLEMENT_RESPONSE_CODE, entitlementRefusalMessage } from '@core/mark
 import { BookState } from './md-book';
 import { TickRing, TradeRing } from './md-rings';
 import type {
+  MdConsolidatedWire,
   MdBookEventWire,
   MdFrame,
   MdHistory,
@@ -11,7 +12,7 @@ import type {
   MdRevokedWire,
   MdSubscribeResult,
 } from './marketdata.types';
-import { MD_REVOKED_EVENT } from './marketdata.types';
+import { MD_REVOKED_EVENT, isConsolidatedId } from './marketdata.types';
 
 /**
  * The market-data stream's engine room, free of Angular so it can be tested with a fake connection: one hub
@@ -83,6 +84,8 @@ export class MdSourceStream {
   lastFrameAt = 0;
   /** Times the book had to be re-keyed (gap, orphan delta). */
   bookGaps = 0;
+  /** Multibook: the latest consolidated view (only on a `consolidated` source). */
+  consolidated: MdConsolidatedWire | null = null;
   /** A keyframe read is in flight / last tried at. */
   keyframePending = false;
   keyframeTriedAt = 0;
@@ -362,17 +365,23 @@ export class MarketDataStreamCore {
 
   // ── Subscriptions ──────────────────────────────────────────────────────────────────────────
 
-  /** The union of what the watchers of a symbol want. */
+  /**
+   * The union of what the watchers of a symbol want. A consolidated id (multibook) is a computed source, never part of
+   * "all sources": with both wanted the hub is asked for `["*", "consolidated…"]` (`*` = every registry source).
+   */
   private wanted(entry: SymbolEntry): { sources: string[] | null; kinds: MdKind[] } {
     let all = false;
     const sources = new Set<string>();
+    const computed = new Set<string>();
     const kinds = new Set<MdKind>();
     for (const s of entry.specs.values()) {
       if (!s.sources || s.sources.length === 0) all = true;
-      else for (const id of s.sources) sources.add(id);
+      else for (const id of s.sources) (isConsolidatedId(id) ? computed : sources).add(id);
       for (const k of s.kinds) kinds.add(k);
     }
-    return { sources: all ? null : [...sources].sort(), kinds: [...kinds].sort() };
+    const virtual = [...computed].sort();
+    const list = all ? (virtual.length ? ['*', ...virtual] : null) : [...[...sources].sort(), ...virtual];
+    return { sources: list, kinds: [...kinds].sort() };
   }
 
   private async sync(entry: SymbolEntry): Promise<void> {
@@ -558,6 +567,7 @@ export class MarketDataStreamCore {
   private applyFrame(entry: SymbolEntry, f: MdFrame): void {
     const stream = this.streamOf(entry, f.sourceId);
     stream.lastFrameAt = this.deps.now();
+    if (f.consolidated) stream.consolidated = f.consolidated;
     if (f.ticks) stream.ticks.pushColumns(f.ticks);
     if (f.trades) stream.trades.pushColumns(f.trades);
     if (f.book?.length) {

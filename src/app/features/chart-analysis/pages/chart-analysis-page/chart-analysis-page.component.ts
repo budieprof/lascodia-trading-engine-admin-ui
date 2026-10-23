@@ -1,3 +1,4 @@
+import { consolidatedId, consolidatedSubset, isConsolidatedId } from '@core/realtime/marketdata.types';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -1750,6 +1751,25 @@ export class ChartAnalysisPageComponent {
   setOrderFlowSource(sourceId: string): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, sourceId: sourceId || null }));
   }
+  /** Multibook: the sources the consolidated heatmap may combine (every entitled source with a book). */
+  readonly consolidatableSources = computed(() =>
+    (this.orderFlowFeed.mdSources() ?? []).filter((s) => !!s.feeds?.book || !!s.feeds?.ticks),
+  );
+  /** Whether a source is in the consolidated pick (all are when the pick is plain `consolidated`). */
+  consolidatedHas(sourceId: string): boolean {
+    const id = this.orderFlow().sourceId;
+    const subset = id ? consolidatedSubset(id) : null;
+    return !subset || subset.includes(sourceId);
+  }
+  /** Multibook: turn one source in or out of the consolidated heatmap (at least one stays in). */
+  toggleConsolidatedSource(sourceId: string): void {
+    const all = this.consolidatableSources().map((s) => s.sourceId);
+    const current = all.filter((s) => this.consolidatedHas(s));
+    const next = current.includes(sourceId) ? current.filter((s) => s !== sourceId) : [...current, sourceId];
+    if (!next.length) return;
+    this.setOrderFlowSource(consolidatedId(all, next));
+  }
+  readonly isConsolidatedPick = computed(() => isConsolidatedId(this.orderFlow().sourceId));
   setTradeMinSize(value: number): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, tradeMinSize: value }));
   }
@@ -1995,7 +2015,11 @@ export class ChartAnalysisPageComponent {
     tickData: {
       history: (req) => this.mdApi.history(req),
       symbol: () => this.symbol(),
-      sourceId: () => this.orderFlow().sourceId,
+      // The consolidated book has no tick tape: tick replay then reads the automatic source.
+      sourceId: () => {
+        const s = this.orderFlow().sourceId;
+        return isConsolidatedId(s) ? null : s;
+      },
       now: () => this.serverClock.now(),
     },
   });
