@@ -16,6 +16,7 @@ import {
   heatNeedsFetch,
   heatWindowFor,
   levelStep,
+  MIN_BUCKET_MS,
   percentile,
   robustMaxOf,
 } from './heatmap-grid';
@@ -208,6 +209,18 @@ describe('heatmap grid (OF-1)', () => {
     const held = heatWindowFor('EURUSD', view, T0 + 1000 * MIN, T0 + 10 * MIN)!;
     expect(held.fromUtc).toBe(T0 + 10 * MIN);
     expect(heatWindowFor('EURUSD', view, T0 + 1000 * MIN, T0 + 500 * MIN)).toBeNull();
+  });
+
+  it('never asks for buckets shorter than the book arrives (zoomed in: no stripes)', () => {
+    // Two minutes across 1200 px would be ~1 px of chart = 0.4 s per bucket at 3 px each.
+    const w = heatWindowFor(
+      'EURUSD',
+      { fromUtc: T0, toUtc: T0 + 2 * MIN, widthPx: 1200 },
+      T0 + 10 * MIN,
+      null,
+    )!;
+    expect((w.toUtc - w.fromUtc) / w.buckets).toBeGreaterThanOrEqual(MIN_BUCKET_MS);
+    expect(w.buckets).toBe(Math.floor((w.toUtc - w.fromUtc) / MIN_BUCKET_MS));
   });
 
   it('refetches on a pan off the window, a big zoom, or another symbol — not on a small pan', () => {

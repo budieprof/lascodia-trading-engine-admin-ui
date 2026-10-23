@@ -264,13 +264,18 @@ export interface HeatWindow {
 export const MAX_BUCKETS = 800;
 /** About one column per 3 px of chart. */
 export const PX_PER_BUCKET = 3;
+/**
+ * The shortest bucket asked for. The broker's book arrives about once a second (median 1.1 s, p90 2.2 s on EURUSD,
+ * 2026-10-23); buckets shorter than that come back mostly empty and a zoomed-in heatmap turns into stripes.
+ */
+export const MIN_BUCKET_MS = 3_000;
 /** The window fetched reaches this share of the view past each side, so a small pan needs no new fetch. */
 export const WINDOW_MARGIN = 0.25;
 
 /**
  * The window to fetch for a view: the view widened by {@link WINDOW_MARGIN} each side, never before the oldest
  * snapshot held (when known) nor past `capUtc` (now, or the replay head); bucket count ≈ px / 3 over that window,
- * at most 800. Null when nothing of it can hold depth.
+ * at most 800 and never shorter than {@link MIN_BUCKET_MS} each. Null when nothing of it can hold depth.
  */
 export function heatWindowFor(
   symbol: string,
@@ -286,7 +291,14 @@ export function heatWindowFor(
   fromUtc = Math.floor(fromUtc / 1000) * 1000;
   toUtc = Math.ceil(toUtc / 1000) * 1000;
   const px = Math.max(1, view.widthPx) * ((toUtc - fromUtc) / span);
-  const buckets = Math.max(1, Math.min(MAX_BUCKETS, Math.round(px / PX_PER_BUCKET)));
+  const buckets = Math.max(
+    1,
+    Math.min(
+      MAX_BUCKETS,
+      Math.round(px / PX_PER_BUCKET),
+      Math.floor((toUtc - fromUtc) / MIN_BUCKET_MS),
+    ),
+  );
   return { symbol, fromUtc, toUtc, buckets };
 }
 
