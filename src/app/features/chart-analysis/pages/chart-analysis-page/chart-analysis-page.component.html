@@ -360,6 +360,9 @@
       </button>
       @if (openMenu() === 'overlays') {
         <div class="tb-menu tb-overlays-menu" role="menu" (click)="$event.stopPropagation()">
+          <!-- PR-5: layer groups — show/hide and opacity per group, saved with the layout. -->
+          <app-layer-groups-menu [groups]="layerGroups()" (groupsChange)="layerGroups.set($event)" />
+          <div class="tb-menu-sep"></div>
           <div class="tb-menu-heading">Data</div>
           <button
             type="button"
@@ -501,6 +504,33 @@
                   [title]="m.hint"
                 >
                   {{ m.label }}
+                </button>
+              }
+            </div>
+            <!-- PR-2 / PR-3: naked POCs and the developing POC / value area. -->
+            <div class="tb-menu-chips">
+              <button
+                type="button"
+                role="menuitemcheckbox"
+                class="tb-chip"
+                [class.on]="profileExtras().nakedPocs"
+                [attr.aria-checked]="profileExtras().nakedPocs"
+                (click)="toggleProfileExtra('nakedPocs')"
+                title="POCs of the last 10 finished trading days (or Asia / London / New York sessions) carried right until price trades through them"
+              >
+                Naked POCs
+              </button>
+              @if (volumeProfileMode() !== 'visible') {
+                <button
+                  type="button"
+                  role="menuitemcheckbox"
+                  class="tb-chip"
+                  [class.on]="profileExtras().developing"
+                  [attr.aria-checked]="profileExtras().developing"
+                  (click)="toggleProfileExtra('developing')"
+                  title="Where the POC, VAH and VAL stood bar by bar as each period developed"
+                >
+                  Developing POC / VA
                 </button>
               }
             </div>
@@ -1412,6 +1442,8 @@
           [volumeProfileMode]="volumeProfileMode()"
           [showSupportResistance]="showSupportResistance()"
           [showStructure]="showStructure()"
+          [profileExtras]="profileExtras()"
+          [layerGroups]="layerGroups()"
           [symbol]="symbol()"
           [resolution]="resolution()"
           [session]="sessionSpec()"
@@ -1600,6 +1632,11 @@
             <button type="button" (click)="openStudiesDialog(); closeContextMenu()">
               Add indicator…
             </button>
+            @if (cm.level; as lvl) {
+              <button type="button" (click)="createAlertAtLevel()" data-testid="alert-at-level">
+                Add alert at {{ lvl.label }} {{ lvl.price | number: '1.' + precision() + '-' + precision() }}
+              </button>
+            }
             @if (cm.price !== null) {
               <button type="button" (click)="createAlertHere()">
                 Add alert at {{ cm.price | number: '1.' + precision() + '-' + precision() }}

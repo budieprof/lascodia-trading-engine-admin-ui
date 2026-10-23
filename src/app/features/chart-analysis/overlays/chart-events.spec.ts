@@ -9,6 +9,7 @@ import {
   eventCountdown,
   eventsWindow,
   formatEventTime,
+  groupCard,
   markOf,
   mergeMarks,
   missingOnTheLeft,
@@ -113,6 +114,20 @@ describe('chart events — what the chart draws on its time axis (CC-07, CC-I2, 
     expect(formatEventTime(t, 0)).toBe('Fri 9 Oct 12:30 UTC');
     expect(formatEventTime(t, -240)).toBe('Fri 9 Oct 08:30 UTC−4');
     expect(formatEventTime(t, 330)).toBe('Fri 9 Oct 18:00 UTC+5:30');
+  });
+
+  it('cards a shared flag with every event on it (PR-6)', () => {
+    const nfp = mark();
+    const rate = mark({ id: 2, title: 'Unemployment Rate' });
+    const cad = mark({ id: 3, title: 'Employment Change', currency: 'CAD', impact: 'Medium', scheduledAt: '2026-10-09T12:45:00Z' });
+    const card = groupCard([nfp, rate, cad], 'Fri 9 Oct 12:30 UTC', NOW + 5 * H, (m) => formatEventTime(m.time, 0));
+    expect(card.title).toBe('Non-Farm Payrolls');
+    expect(card.rows.slice(-2)).toEqual([
+      { label: 'Also (1)', value: 'USD Unemployment Rate · High' },
+      { label: 'Also (2)', value: 'CAD Employment Change · Medium · Fri 9 Oct 12:45 UTC' },
+    ]);
+    // Row labels stay unique (the card tracks rows by label).
+    expect(new Set(card.rows.map((r) => r.label)).size).toBe(card.rows.length);
   });
 
   it('filters by the minimum importance', () => {

@@ -178,6 +178,27 @@ export function eventCard(mark: EventMark, when: string, nowMs: number): EventCa
   return { title: mark.title, currency: mark.currency, impact: mark.impact, when, rows, surprise };
 }
 
+/**
+ * The card of a flag several events share (PR-6): the primary event's card, then one row per other event
+ * ("Also (1)  USD Retail Sales · 12:30"), so a merged flag never hides an event. `timeOf` formats an
+ * event's time on the chart's clock (the caller's, as for `when`).
+ */
+export function groupCard(
+  marks: readonly EventMark[],
+  when: string,
+  nowMs: number,
+  timeOf: (mark: EventMark) => string,
+): EventCard {
+  const card = eventCard(marks[0], when, nowMs);
+  marks.slice(1).forEach((m, i) =>
+    card.rows.push({
+      label: `Also (${i + 1})`,
+      value: `${m.currency} ${m.title} · ${m.impact}${m.time !== marks[0].time ? ` · ${timeOf(m)}` : ''}`,
+    }),
+  );
+  return card;
+}
+
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
