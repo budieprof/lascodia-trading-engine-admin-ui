@@ -6433,7 +6433,9 @@ export class ChartAnalysisPageComponent {
    * "Add alert at POC 1.16234" (PR-7): the right-clicked profile or structure level's exact price into the
    * same alert form as "Add alert at …" — nothing is armed until the operator saves it.
    */
-  createAlertAtLevel(): void {
+  createAlertAtLevel(ev?: Event): void {
+    // The same click would reach the page's (document:click) close-all and shut the popover it opens.
+    ev?.stopPropagation();
     const level = this.contextMenu()?.level;
     this.contextMenu.set(null);
     if (!level || !Number.isFinite(level.price) || level.price <= 0) return;
@@ -6452,7 +6454,9 @@ export class ChartAnalysisPageComponent {
    * Add an alert at the right-clicked price: opens the alert form at that level. The operator still sees the direction
    * (pre-set to the way price must travel to reach it), the side and the rest before anything is armed.
    */
-  createAlertHere(): void {
+  createAlertHere(ev?: Event): void {
+    // The same click would reach the page's (document:click) close-all and shut the popover it opens.
+    ev?.stopPropagation();
     const menu = this.contextMenu();
     this.contextMenu.set(null);
     const price = menu?.price;
