@@ -641,6 +641,22 @@
           >
             <app-chart-icon name="structure" [size]="28" /> Footprint (tick counts)
           </button>
+          @if (orderFlow().footprint) {
+            <div class="tb-menu-chips" title="Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)">
+              @for (r of footprintRowChoices; track r.label) {
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="tb-chip"
+                  [class.on]="orderFlow().footprintRowPoints === r.points"
+                  (click)="setFootprintRows(r.points)"
+                  [title]="r.hint"
+                >
+                  {{ r.label }}
+                </button>
+              }
+            </div>
+          }
           <button
             type="button"
             class="tb-menu-item tb-check"

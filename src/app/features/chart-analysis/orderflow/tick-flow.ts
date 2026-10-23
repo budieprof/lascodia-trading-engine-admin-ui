@@ -211,24 +211,61 @@ export function footprintCells(
     });
 }
 
-/** Footprint rows in pips: the smallest of these that leaves a row tall enough to read its numbers. */
-const ROW_PIPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+/** Footprint row heights in MT5 points (1 point = 0.1 pip on a 5-digit pair): the "nice" steps a row snaps to. */
+export const ROW_POINT_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000];
+/** Rows a typical bar is cut into (ATAS / Sierra Chart keep a bar to about ten). */
+export const TARGET_ROWS = 10;
+/** A held row size is kept while a typical bar still has this many rows (no flapping at a step's edge). */
+export const KEEP_ROWS: readonly [number, number] = [6, 16];
+
+/** The median high − low of bars `[from, to]` (price); 0 for none. */
+export function medianBarRange(
+  bars: readonly { high: number; low: number }[],
+  from: number,
+  to: number,
+): number {
+  const ranges: number[] = [];
+  for (let i = Math.max(0, from); i <= Math.min(bars.length - 1, to); i++) {
+    const r = bars[i].high - bars[i].low;
+    if (Number.isFinite(r) && r > 0) ranges.push(r);
+  }
+  return median(ranges) ?? 0;
+}
 
 /**
- * The footprint's row height in MT5 points for the price scale on screen: the smallest "nice" number of pips whose
- * row is at least `minRowPx` tall, so the "down × up" counts fit. `point` is 10^-digits, `pip` the symbol's pip.
+ * The footprint's row height in MT5 points, adaptive like ATAS / Sierra Chart: the nice step that cuts the median
+ * visible bar into about {@link TARGET_ROWS} rows (never under one point). A `held` size is kept while it still gives
+ * between 6 and 16 rows, so a small zoom or pan does not re-ask. `point` is 10^-digits.
  */
 export function footprintRowPoints(
-  pricePerPx: number | null,
+  medianRange: number,
   point: number,
-  pip: number,
-  minRowPx = 14,
+  held: number | null = null,
 ): number {
   const p = point > 0 ? point : 0.00001;
-  const pipPrice = pip > 0 ? pip : p * 10;
-  const need = pricePerPx !== null && pricePerPx > 0 ? pricePerPx * minRowPx : pipPrice;
-  const pips = ROW_PIPS.find((n) => n * pipPrice >= need) ?? ROW_PIPS[ROW_PIPS.length - 1];
-  return Math.max(1, Math.round((pips * pipPrice) / p));
+  if (!(medianRange > 0)) return held ?? ROW_POINT_STEPS[0];
+  const rowsAt = (points: number) => medianRange / (points * p);
+  if (held !== null && held >= 1) {
+    const rows = rowsAt(held);
+    if (rows >= KEEP_ROWS[0] && rows <= KEEP_ROWS[1]) return held;
+  }
+  let best = ROW_POINT_STEPS[0];
+  let bestErr = Infinity;
+  for (const step of ROW_POINT_STEPS) {
+    const err = Math.abs(Math.log(rowsAt(step) / TARGET_ROWS));
+    if (err < bestErr) {
+      bestErr = err;
+      best = step;
+    }
+  }
+  return best;
+}
+
+/** "0.2 pip", "1 pip", "5 pips" — a row size for the caption. */
+export function formatRowSize(points: number, point: number, pip: number): string {
+  const pips = pip > 0 ? (points * point) / pip : points;
+  const text = pips >= 10 ? String(Math.round(pips)) : String(Math.round(pips * 10) / 10);
+  return `${text} pip${pips === 1 || pips < 1 ? '' : 's'}`;
 }
 
 /** Bars at least this wide (px) can hold a footprint's numbers. */

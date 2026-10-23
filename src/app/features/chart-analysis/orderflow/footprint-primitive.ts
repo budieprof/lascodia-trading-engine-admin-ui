@@ -21,7 +21,7 @@ const UP = '#26A69A';
 const DOWN = '#EF5350';
 
 /**
- * OF-3 — the footprint: inside each bar, one cell per price row with its "down × up" TICK COUNTS (tick rule over the
+ * OF-3 — the footprint: inside each bar, one cell per price row with its down (left) and up (right) TICK COUNTS (tick rule over the
  * broker's quotes — not traded volume, which spot FX does not publish). Diagonal 3:1 imbalances are shaded (green:
  * up-ticks against the row below, red: down-ticks against the row above) and the bar's busiest row is outlined.
  * Drawn above the candles; the page only hands it bars wide enough to read (≥ 60 px).
@@ -94,30 +94,38 @@ export class FootprintPrimitive implements ISeriesPrimitive<Time> {
           const top = Math.min(yTop, yBot);
           const h = Math.max(1, Math.abs(yBot - yTop));
           if (top > mediaSize.height || top + h < 0) continue;
-          ctx.fillStyle = c.buyImbalance
-            ? 'rgba(38,166,154,0.38)'
-            : c.sellImbalance
-              ? 'rgba(239,83,80,0.38)'
-              : dark
-                ? 'rgba(42,46,57,0.55)'
-                : 'rgba(240,243,250,0.7)';
-          ctx.fillRect(left, top + 0.5, w, Math.max(1, h - 1));
-          if (c.maxActivity) {
-            ctx.strokeStyle = '#FFB300';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(left + 0.5, top + 1, w - 1, Math.max(1, h - 2));
+          // Light enough that the candle reads through: an imbalance shades only its own side of the cell (buyers'
+          // up-ticks on the right, sellers' down-ticks on the left), a quiet cell is just a hairline frame.
+          const half = w / 2;
+          if (c.sellImbalance) {
+            ctx.fillStyle = 'rgba(239,83,80,0.28)';
+            ctx.fillRect(left, top + 0.5, half, Math.max(1, h - 1));
           }
+          if (c.buyImbalance) {
+            ctx.fillStyle = 'rgba(38,166,154,0.28)';
+            ctx.fillRect(left + half, top + 0.5, w - half, Math.max(1, h - 1));
+          }
+          ctx.strokeStyle = c.maxActivity
+            ? '#FFB300'
+            : dark
+              ? 'rgba(120,123,134,0.28)'
+              : 'rgba(120,123,134,0.22)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(left + 0.5, top + 1, w - 1, Math.max(1, h - 2));
           if (h >= 10) {
             const cy = top + h / 2;
-            const mid = left + w / 2;
-            ctx.fillStyle = dark ? '#787b86' : '#9598a1';
-            ctx.fillText('×', mid, cy);
-            ctx.textAlign = 'right';
-            ctx.fillStyle = DOWN;
-            ctx.fillText(String(c.down), mid - 5, cy);
+            // Counts at the cell's edges, each on a halo of the background, so the candle body in the middle stays
+            // visible and the numbers stay legible over it.
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = dark ? 'rgba(19,23,34,0.85)' : 'rgba(255,255,255,0.9)';
             ctx.textAlign = 'left';
+            ctx.strokeText(String(c.down), left + 3, cy);
+            ctx.fillStyle = DOWN;
+            ctx.fillText(String(c.down), left + 3, cy);
+            ctx.textAlign = 'right';
+            ctx.strokeText(String(c.up), left + w - 3, cy);
             ctx.fillStyle = UP;
-            ctx.fillText(String(c.up), mid + 5, cy);
+            ctx.fillText(String(c.up), left + w - 3, cy);
             ctx.textAlign = 'center';
           }
         }

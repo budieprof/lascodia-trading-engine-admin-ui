@@ -10,6 +10,7 @@ import { joinFills, type FillMark } from './fills';
 import type { FootprintBar, FootprintLayerModel } from './footprint-primitive';
 import {
   clipHeatGrid,
+  depthHalfSpan,
   buildHeatGrid,
   foldLiveSnapshot,
   formatBucket,
@@ -30,6 +31,8 @@ import {
   footprintAllowed,
   footprintCells,
   footprintRowPoints,
+  formatRowSize,
+  medianBarRange,
   liquidityPulled,
   tickBarsRequest,
   barEnd,
@@ -86,6 +89,8 @@ interface FlowFetched {
 const LIVE_FLOW_REFRESH_MS = 30_000;
 const LIVE_FILLS_REFRESH_MS = 60_000;
 const DEBOUNCE_MS = 300;
+/** A drawn depth band thinner than this (px) gets the "clearer on 15m and below" hint. */
+const MIN_BAND_PX = 4;
 /** A debounce never holds a fetch back longer than this (replay playing steps faster than the debounce). */
 const MAX_DEBOUNCE_MS = 1_500;
 
@@ -362,13 +367,33 @@ export class OrderFlowFeed {
     };
   }
 
+  /**
+   * The footprint's row size: the operator's, or adaptive — about ten rows across the median visible bar, the held
+   * size kept while it still gives 6–16 (a small zoom or pan re-asks nothing).
+   */
+  private rowPointsFor(
+    view: OrderFlowView,
+    bars: readonly Bar[],
+    held: FlowFetched | null,
+  ): number {
+    const manual = this.deps.settings().footprintRowPoints;
+    if (manual !== null) return manual;
+    const sameSeries =
+      held?.symbol === this.deps.symbol() && held?.resolution === this.deps.resolution();
+    return footprintRowPoints(
+      medianBarRange(bars, view.fromIndex, view.toIndex),
+      this.point(),
+      sameSeries ? (held?.rowPoints ?? null) : null,
+    );
+  }
+
   private refreshFootprint(symbol: string, view: OrderFlowView, force: boolean): void {
     if (view.barSpacing < FOOTPRINT_MIN_BAR_PX) return;
     const bars = this.barsNow();
     const span = this.footprintSpan(view, bars);
     if (!span?.allowed) return;
-    const rowPoints = footprintRowPoints(view.pricePerPx, this.point(), this.deps.pipSize());
     const held = this.foot()?.span ?? null;
+    const rowPoints = this.rowPointsFor(view, bars, held);
     if (!force && held?.rowPoints === rowPoints && this.covers(held, view, bars, symbol)) return;
     const barMs = resolutionMs(this.deps.resolution() as TvResolution);
     const req = tickBarsRequest(symbol, bars, span, barMs, this.cap(), { rowPoints });
@@ -494,6 +519,16 @@ export class OrderFlowFeed {
         `Depth history starts ${formatUtcShort(grid.oldestAvailableUtc)} (order books are kept 7 days)`,
       );
     if (grid.columns.length === 0) lines.push('No broker depth captured in this window');
+    else if (view?.pricePerPx) {
+      // A broker DOM is often ~10 levels, about a pip each side: on 1h that is a few px under the candles.
+      const halfSpan = depthHalfSpan(grid);
+      if (halfSpan > 0 && (2 * halfSpan) / view.pricePerPx < MIN_BAND_PX) {
+        const pips = halfSpan / this.deps.pipSize();
+        lines.push(
+          `Broker depth spans only ±${pips < 10 ? pips.toFixed(1) : Math.round(pips)} pips — clearer on 15m and below`,
+        );
+      }
+    }
     if (note && this.heatState().kind === 'error') lines.push(note);
     return { model: { grid, opacity: this.deps.settings().heatmapOpacity }, lines };
   }
@@ -538,9 +573,10 @@ export class OrderFlowFeed {
       const end = next ? utcMs(next.t) : f.span.endUtc;
       out.push({ t, end, cells: footprintCells(b.footprint, rowPrice) });
     });
-    const pips = Math.round(((f.span.rowPoints ?? 10) * this.point()) / this.deps.pipSize());
+    const rows = formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
+    const mode = this.deps.settings().footprintRowPoints === null ? ' (auto)' : '';
     const lines = [
-      `Footprint — tick counts (down × up, tick rule on broker quotes), rows of ${pips} pip${pips === 1 ? '' : 's'}; shaded: 3:1 diagonal imbalance`,
+      `Footprint — tick counts (down × up, tick rule on broker quotes), rows of ${rows}${mode}; shaded: 3:1 diagonal imbalance`,
     ];
     if (candleOnly > 0)
       lines.push(

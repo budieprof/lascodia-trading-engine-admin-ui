@@ -1744,6 +1744,17 @@ export class ChartAnalysisPageComponent {
   setHeatmapOpacity(value: number): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
   }
+  /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height in MT5 points. */
+  readonly footprintRowChoices = [
+    { label: 'Auto rows', points: null, hint: 'About ten rows across a typical visible bar' },
+    { label: '1 pt', points: 1, hint: 'One MT5 point per row (0.1 pip on a 5-digit pair)' },
+    { label: '2 pt', points: 2, hint: 'Two points per row' },
+    { label: '5 pt', points: 5, hint: 'Five points per row' },
+    { label: '10 pt', points: 10, hint: 'Ten points per row (1 pip on a 5-digit pair)' },
+  ];
+  setFootprintRows(points: number | null): void {
+    this.orderFlow.update((s) => restoredOrderFlow({ ...s, footprintRowPoints: points }));
+  }
   /** Bar Replay's head instant: every order-flow layer, and the depth panel, stop there (OF-5). Null when live. */
   readonly orderFlowReplayClip = computed(() => {
     if (!this.replay.active()) return null;

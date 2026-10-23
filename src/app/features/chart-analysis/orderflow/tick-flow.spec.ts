@@ -7,6 +7,8 @@ import {
   footprintAllowed,
   footprintCells,
   footprintRowPoints,
+  formatRowSize,
+  medianBarRange,
   liquidityPulled,
   tickBarsByTime,
   tickBarsRequest,
@@ -214,12 +216,45 @@ describe('footprint maths (OF-3)', () => {
     expect(merged[0]).toMatchObject({ up: 4, down: 6 });
   });
 
-  it('row height: the smallest nice number of pips at least 14 px tall', () => {
-    // 5-digit EURUSD, point 0.00001, pip 0.0001.
-    expect(footprintRowPoints(0.000005, 0.00001, 0.0001)).toBe(10); // 14 px = 0.7 pip → 1 pip
-    expect(footprintRowPoints(0.00002, 0.00001, 0.0001)).toBe(50); // 2.8 pips → 5 pips
-    expect(footprintRowPoints(null, 0.00001, 0.0001)).toBe(10);
-    // 3-digit USDJPY: point 0.001, pip 0.01.
-    expect(footprintRowPoints(0.002, 0.001, 0.01)).toBe(50); // 0.028 → 5 pips = 50 points
+  it('row height: about ten rows across the median bar, snapped to nice points, never under one point', () => {
+    const P = 0.00001; // 5-digit EURUSD point; a pip is 10 points
+    // An EURUSD 1m bar of ~2 pips (20 points): rows of 2 points (0.2 pip) give 10 rows — not 1 pip (2 rows).
+    expect(footprintRowPoints(0.0002, P)).toBe(2);
+    // ~1 pip: 1 point (10 rows).
+    expect(footprintRowPoints(0.0001, P)).toBe(1);
+    // A 1h bar of ~15 pips: 2 points gives 75 rows, 20 points gives 7.5, 10 points 15 — 20 is nearest ten (log).
+    expect(footprintRowPoints(0.0015, P)).toBe(20);
+    // ~50 pips on 4h: 50 points (5 pips) = 10 rows.
+    expect(footprintRowPoints(0.005, P)).toBe(50);
+    // Tiny bars never go below one point; no range keeps what is held (or one point).
+    expect(footprintRowPoints(0.00001, P)).toBe(1);
+    expect(footprintRowPoints(0, P)).toBe(1);
+    expect(footprintRowPoints(0, P, 5)).toBe(5);
+    // 3-digit USDJPY: point 0.001; a 20-pip (0.2) bar → 20 points (2 pips) = 10 rows.
+    expect(footprintRowPoints(0.2, 0.001)).toBe(20);
+  });
+
+  it('keeps a held row size while a typical bar still has 6–16 rows (no flapping), re-picks beyond', () => {
+    const P = 0.00001;
+    expect(footprintRowPoints(0.00025, P, 2)).toBe(2); // 12.5 rows: kept
+    expect(footprintRowPoints(0.00013, P, 2)).toBe(2); // 6.5 rows: kept
+    expect(footprintRowPoints(0.0004, P, 2)).toBe(5); // 20 rows: re-picked (8 at 5 points)
+    expect(footprintRowPoints(0.0001, P, 2)).toBe(1); // 5 rows: re-picked
+  });
+
+  it('median visible bar range, and the row size in words', () => {
+    const bars = [
+      { high: 1.1003, low: 1.1 },
+      { high: 1.1001, low: 1.1 },
+      { high: 1.1, low: 1.1 },
+      { high: 1.1002, low: 1.1 },
+    ];
+    expect(medianBarRange(bars, 0, 3)).toBeCloseTo(0.0002, 10);
+    expect(medianBarRange(bars, 1, 1)).toBeCloseTo(0.0001, 10);
+    expect(medianBarRange([], 0, 3)).toBe(0);
+    expect(formatRowSize(2, 0.00001, 0.0001)).toBe('0.2 pip');
+    expect(formatRowSize(10, 0.00001, 0.0001)).toBe('1 pip');
+    expect(formatRowSize(50, 0.00001, 0.0001)).toBe('5 pips');
+    expect(formatRowSize(20, 0.001, 0.01)).toBe('2 pips');
   });
 });

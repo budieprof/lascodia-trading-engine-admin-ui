@@ -344,3 +344,123 @@ export function formatBucket(ms: number): string {
   const h = Math.round((m / 60) * 10) / 10;
   return `${h} h`;
 }
+
+// ── Placement: one projection shared by the draw and the hover ────────────────
+
+/** A cell as painted on a frame (media px), with what it stands for. */
+export interface PlacedHeatCell {
+  y: number;
+  h: number;
+  price: number;
+  volume: number;
+}
+
+/** A column as painted on a frame: its x span and its cells in paint order. */
+export interface PlacedHeatColumn {
+  x0: number;
+  x1: number;
+  column: HeatColumn;
+  cells: PlacedHeatCell[];
+}
+
+/**
+ * Where every cell of the grid is painted: bucket → x (`xAt`, UTC ms → px, a bar's open its left edge) and row → y
+ * (`yAt`, price → px), each cell at least 1 px. Columns off the pane's `width` and rows off its `height` are left out.
+ * The renderer paints exactly these rectangles and the hover hit-tests the same ones ({@link heatHitAt}), so what the
+ * card reports is what was drawn under the pointer.
+ */
+export function placeHeatGrid(
+  grid: HeatGrid,
+  xAt: (utcMs: number) => number | null,
+  yAt: (price: number) => number | null,
+  width: number,
+  height: number,
+): PlacedHeatColumn[] {
+  const half = grid.rowStep / 2;
+  const rowY = new Map<number, [number, number] | null>();
+  const yOf = (key: number): [number, number] | null => {
+    let hit = rowY.get(key);
+    if (hit !== undefined) return hit;
+    const p = key * grid.rowStep;
+    const top = yAt(p + half);
+    const bottom = yAt(p - half);
+    hit =
+      top === null || bottom === null
+        ? null
+        : [Math.min(top, bottom), Math.max(1, Math.abs(bottom - top))];
+    rowY.set(key, hit);
+    return hit;
+  };
+  const out: PlacedHeatColumn[] = [];
+  for (const c of grid.columns) {
+    const x0 = xAt(c.t);
+    const x1 = xAt(c.end);
+    if (x0 === null || x1 === null || x1 < 0 || x0 > width) continue;
+    const left = Math.floor(x0);
+    const right = left + Math.max(1, Math.ceil(x1) - left);
+    const cells: PlacedHeatCell[] = [];
+    for (let i = 0; i < c.rows.length; i++) {
+      const volume = c.volumes[i];
+      if (!(volume > 0)) continue;
+      const y = yOf(c.rows[i]);
+      if (!y || y[0] > height || y[0] + y[1] < 0) continue;
+      cells.push({ y: y[0], h: y[1], price: c.rows[i] * grid.rowStep, volume });
+    }
+    out.push({ x0: left, x1: right, column: c, cells });
+  }
+  return out;
+}
+
+/**
+ * The painted cell under (x, y): searched in reverse paint order, because where columns or rows share a pixel (narrow
+ * buckets, sub-pixel rows) the LAST painted is the one visible. With no cell exactly there, the nearest within
+ * `tolerancePx` vertically in the topmost column under x. Null off every column; `cell` null on a column with no
+ * liquidity near the pointer.
+ */
+export function heatHitAt(
+  placed: readonly PlacedHeatColumn[],
+  x: number,
+  y: number,
+  tolerancePx = 2,
+): { column: HeatColumn; cell: PlacedHeatCell | null } | null {
+  let top: PlacedHeatColumn | null = null;
+  for (let i = placed.length - 1; i >= 0; i--) {
+    const p = placed[i];
+    if (x < p.x0 || x >= p.x1) continue;
+    top ??= p;
+    for (let j = p.cells.length - 1; j >= 0; j--) {
+      const c = p.cells[j];
+      if (y >= c.y && y < c.y + c.h) return { column: p.column, cell: c };
+    }
+  }
+  if (!top) return null;
+  let best: PlacedHeatCell | null = null;
+  let bestD = tolerancePx;
+  for (const c of top.cells) {
+    const d = y < c.y ? c.y - y : y >= c.y + c.h ? y - (c.y + c.h) + 1 : 0;
+    if (d <= bestD) {
+      bestD = d;
+      best = c;
+    }
+  }
+  return { column: top.column, cell: best };
+}
+
+/**
+ * How far the broker's book reaches from the mid, typically: the median over the columns of the deepest level's
+ * distance (price, half a row included). Broker DOMs are often ~10 levels, about a pip each side — a sliver on 1h.
+ */
+export function depthHalfSpan(grid: HeatGrid): number {
+  const spans: number[] = [];
+  for (const c of grid.columns) {
+    if (c.rows.length === 0) continue;
+    const mid = c.bid > 0 && c.ask > 0 ? (c.bid + c.ask) / 2 : NaN;
+    const lo = c.rows[0] * grid.rowStep;
+    const hi = c.rows[c.rows.length - 1] * grid.rowStep;
+    const reach = Number.isFinite(mid) ? Math.max(hi - mid, mid - lo) : (hi - lo) / 2;
+    spans.push(reach + grid.rowStep / 2);
+  }
+  if (spans.length === 0) return 0;
+  spans.sort((a, b) => a - b);
+  return spans[spans.length >> 1];
+}
