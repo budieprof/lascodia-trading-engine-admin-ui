@@ -60,6 +60,8 @@ export interface OrderFlowSurface {
   plottedUtc(): readonly Bar[];
   dark(): boolean;
   precision(): number;
+  /** A flow pane was added or removed (the host re-hangs its per-pane renderers). */
+  panesChanged?(): void;
 }
 
 const CVD_TITLE = 'Tick delta (CVD, tick rule)';
@@ -99,7 +101,10 @@ export class OrderFlowLayers {
     equal: (a, b) => JSON.stringify(a) === JSON.stringify(b),
   });
 
+  /** What the page asked for, and what is drawn after the layer group's opacity / visibility. */
+  private source: OrderFlowModel | null = null;
   private model: OrderFlowModel | null = null;
+  private groupAlpha = 1;
   private readonly primitiveDeps = {
     series: () => this.surface.price(),
     // A bar's open is its LEFT edge on screen (half a bar before its centre), so a bucket or a fill inside the bar
@@ -130,7 +135,34 @@ export class OrderFlowLayers {
   }
 
   setModel(model: OrderFlowModel | null): void {
+    this.source = model;
+    this.apply();
+  }
+
+  /**
+   * The Order flow layer group (overlays/layer-groups.ts): its opacity fades every price-pane flow layer on top of
+   * the heatmap's own opacity, and 0 (group hidden) takes the layers and their panes off the chart and stops
+   * fetching, exactly as if every flow toggle were off — the toggles themselves are kept.
+   */
+  setGroupOpacity(opacity: number): void {
+    const a = Number.isFinite(opacity) ? Math.min(1, Math.max(0, opacity)) : 1;
+    if (a === this.groupAlpha) return;
+    this.groupAlpha = a;
+    this.apply();
+  }
+
+  private apply(): void {
+    const src = this.source;
+    const a = this.groupAlpha;
+    const model: OrderFlowModel | null =
+      !src || a <= 0
+        ? null
+        : a >= 1 || !src.heatmap
+          ? src
+          : { ...src, heatmap: { ...src.heatmap, opacity: src.heatmap.opacity * a } };
     this.model = model;
+    this.footprint.setAlpha(a);
+    this.fills.setAlpha(a);
     this.heatmap.setModel(model?.heatmap ?? null);
     this.footprint.setModel(model?.footprint ?? null);
     this.fills.setFills(model?.fills ?? []);
@@ -178,10 +210,13 @@ export class OrderFlowLayers {
     }
     if (!chart) return;
     const m = this.model;
+    const hadCvd = !!this.cvd;
+    const hadRibbon = !!this.ribbon;
     if (!m?.cvd && this.cvd) this.removeCvd(chart);
     if (!m?.ribbon && this.ribbon) this.removeRibbon(chart);
     if (m?.cvd && !this.cvd) this.cvd = this.createCvd(chart);
     if (m?.ribbon && !this.ribbon) this.ribbon = this.createRibbon(chart);
+    if (hadCvd !== !!this.cvd || hadRibbon !== !!this.ribbon) this.surface.panesChanged?.();
     const plotted = this.surface.plotted();
     const utc = this.surface.plottedUtc();
     const barsKey = `${plotted.length}|${plotted[0]?.time}|${plotted.at(-1)?.time}|${utc[0]?.time}|${utc.at(-1)?.time}`;

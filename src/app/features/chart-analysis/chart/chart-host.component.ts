@@ -1384,6 +1384,7 @@ export class ChartHostComponent implements OnDestroy {
         this.eventLaneRenderer.setOpacity(effectiveOpacity(groups, 'events'));
         this.syncEventLane();
         this.overlayRenderer.setOpacity(effectiveOpacity(groups, 'trades'));
+        this.orderFlowLayers.setGroupOpacity(effectiveOpacity(groups, 'flow'));
       });
     });
   }
@@ -2477,6 +2478,8 @@ export class ChartHostComponent implements OnDestroy {
     plottedUtc: () => this.plottedUtc,
     dark: () => this.theme.theme() === 'dark',
     precision: () => this.precision(),
+    // The CVD / spread panes come and go with their toggles: the session breaks and the event lane follow them.
+    panesChanged: () => this.syncPaneBreaks(),
   });
 
   /**

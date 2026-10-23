@@ -20,6 +20,7 @@ const PAPER = '#9C27B0';
 export class FillsPrimitive implements ISeriesPrimitive<Time> {
   private fills: readonly FillMark[] = [];
   private requestUpdate?: () => void;
+  private alpha = 1;
   private chart: IChartApi | null = null;
   private hover: { x: number; y: number } | null = null;
   private placed: { x: number; y: number; fill: FillMark }[] = [];
@@ -42,6 +43,13 @@ export class FillsPrimitive implements ISeriesPrimitive<Time> {
     this.chart?.unsubscribeCrosshairMove(this.onCrosshair);
     this.chart = null;
     this.requestUpdate = undefined;
+  }
+
+  /** The Order flow layer group's opacity (0..1). */
+  setAlpha(alpha: number): void {
+    if (alpha === this.alpha) return;
+    this.alpha = alpha;
+    this.requestUpdate?.();
   }
 
   setFills(fills: readonly FillMark[]): void {
@@ -71,6 +79,7 @@ export class FillsPrimitive implements ISeriesPrimitive<Time> {
     if (!series || this.fills.length === 0) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       ctx.save();
+      ctx.globalAlpha = this.alpha;
       for (const f of this.fills) {
         const x = this.deps.xAt(f.time);
         const y = series.priceToCoordinate(f.filledPrice);

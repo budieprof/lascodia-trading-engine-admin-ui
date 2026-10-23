@@ -26,7 +26,7 @@ describe('LayerGroupsMenuComponent (PR-5)', () => {
       '✓ Trades',
     ]);
     expect(el.querySelector('[data-testid="layer-group-flow"]')!.getAttribute('aria-checked')).toBe('true');
-    expect(rows[2].querySelector('.lg-value')!.textContent).toBe('60%');
+    expect(rows[2].querySelector('.lg-value')!.textContent).toBe('100%');
   });
 
   it('hides a group on a click, and fades one with its slider', () => {

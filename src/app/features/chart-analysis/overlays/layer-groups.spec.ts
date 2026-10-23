@@ -10,10 +10,10 @@ import {
 } from './layer-groups';
 
 describe('layer groups (PR-5)', () => {
-  it('has the five groups, all shown; order flow starts at 0.6', () => {
+  it('has the five groups, all shown at full strength', () => {
     expect(LAYER_GROUPS.map((g) => g.id)).toEqual(['structure', 'profiles', 'flow', 'events', 'trades']);
     expect(LAYER_GROUPS.every((g) => DEFAULT_LAYER_GROUPS[g.id].visible)).toBe(true);
-    expect(effectiveOpacity(DEFAULT_LAYER_GROUPS, 'flow')).toBe(0.6);
+    expect(effectiveOpacity(DEFAULT_LAYER_GROUPS, 'flow')).toBe(1);
     expect(effectiveOpacity(DEFAULT_LAYER_GROUPS, 'structure')).toBe(1);
   });
 

@@ -29,6 +29,7 @@ const DOWN = '#EF5350';
 export class FootprintPrimitive implements ISeriesPrimitive<Time> {
   private model: FootprintLayerModel | null = null;
   private requestUpdate?: () => void;
+  private alpha = 1;
 
   constructor(private readonly deps: OrderFlowPrimitiveDeps) {}
 
@@ -38,6 +39,13 @@ export class FootprintPrimitive implements ISeriesPrimitive<Time> {
 
   detached(): void {
     this.requestUpdate = undefined;
+  }
+
+  /** The Order flow layer group's opacity (0..1). */
+  setAlpha(alpha: number): void {
+    if (alpha === this.alpha) return;
+    this.alpha = alpha;
+    this.requestUpdate?.();
   }
 
   setModel(model: FootprintLayerModel | null): void {
@@ -68,6 +76,7 @@ export class FootprintPrimitive implements ISeriesPrimitive<Time> {
     const dark = this.deps.dark();
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       ctx.save();
+      ctx.globalAlpha = this.alpha;
       ctx.font = '10px -apple-system, BlinkMacSystemFont, "Trebuchet MS", Roboto, sans-serif';
       ctx.textBaseline = 'middle';
       ctx.textAlign = 'center';

@@ -48,13 +48,13 @@ export const LAYER_GROUPS: readonly LayerGroupDef[] = [
 export const MIN_GROUP_OPACITY = 0.1;
 
 /**
- * Every group shown at full strength, except Order flow at 0.6 — the liquidity heatmap is drawn behind
- * the candles and at full strength buries them (its own default is 0.6).
+ * Every group shown at full strength. Order flow too: its slider multiplies the flow layers' own strengths (the
+ * liquidity heatmap already starts at 0.6 so it does not bury the candles), so the two never fade it twice.
  */
 export const DEFAULT_LAYER_GROUPS: LayerGroupsState = {
   structure: { visible: true, opacity: 1 },
   profiles: { visible: true, opacity: 1 },
-  flow: { visible: true, opacity: 0.6 },
+  flow: { visible: true, opacity: 1 },
   events: { visible: true, opacity: 1 },
   trades: { visible: true, opacity: 1 },
 };
