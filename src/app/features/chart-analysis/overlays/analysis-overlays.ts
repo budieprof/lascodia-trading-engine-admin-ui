@@ -24,6 +24,8 @@ export interface VolumeProfileResult {
   valueAreaLow: number;
   valueAreaHigh: number;
   peak: number;
+  /** How many bars were profiled (the hover's provenance, PR-4). */
+  bars: number;
 }
 
 /**
@@ -74,6 +76,7 @@ export function profileWithValueArea(
     valueAreaLow: row(p.val, 'priceLow').price,
     valueAreaHigh: row(p.vah, 'priceHigh').price,
     peak: computed[p.pocIndex].volume,
+    bars: bars.length,
   };
 }
 

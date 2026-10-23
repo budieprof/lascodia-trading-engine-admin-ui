@@ -145,6 +145,12 @@ import {
   profileExtras,
   type ProfileExtrasSettings,
 } from '../overlays/profile-levels';
+import { provenanceOf } from '../overlays/provenance';
+import {
+  placeProvenanceTip,
+  ProvenanceTipComponent,
+  type ProvenanceTip,
+} from '../overlays/provenance-tip.component';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 import { EventMarksRenderer, type EventMark } from '../overlays/event-marks-renderer';
 import { eventCard, formatEventTime, type EventCard } from '../overlays/chart-events';
@@ -390,7 +396,7 @@ interface ExternalLineSeries {
 @Component({
   selector: 'app-chart-host',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PineTableOverlayComponent, ScriptStatusLineComponent],
+  imports: [PineTableOverlayComponent, ScriptStatusLineComponent, ProvenanceTipComponent],
   template: `<div class="chart-host" #container></div>
     @for (o of scriptTables(); track o.key) {
       <div
@@ -491,7 +497,8 @@ interface ExternalLineSeries {
         }
         <div class="row date">Click for the event's reading</div>
       </div>
-    }`,
+    }
+    <app-provenance-tip [tip]="provenanceTip()" />`,
   styles: [
     `
       .inline-edit {
@@ -868,6 +875,8 @@ export class ChartHostComponent implements OnDestroy {
   } | null>(null);
   /** The economic event under the pointer, as a card above its flag (CC-I2). */
   readonly eventTip = signal<{ x: number; y: number; card: EventCard } | null>(null);
+  /** "How was this computed?" for the derived layer under the pointer (PR-4). */
+  readonly provenanceTip = signal<ProvenanceTip | null>(null);
   private holdTimer: ReturnType<typeof setTimeout> | null = null;
   private holdOrigin: { x: number; y: number } | null = null;
   private holding = false;
@@ -1862,6 +1871,25 @@ export class ChartHostComponent implements OnDestroy {
     this.eventTip.set({ x, y, card });
   }
 
+  /**
+   * The provenance card of the derived layer under the pointer (PR-4) — structure, profiles, S/R, auto
+   * analysis — on the price pane, unless an event's card is showing.
+   */
+  private updateProvenanceTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
+    const hit =
+      point && (paneIndex ?? 0) === 0 && !this.eventTip() ? this.analysisRenderer.hit(point.x, point.y) : null;
+    if (!hit) {
+      if (this.provenanceTip()) this.provenanceTip.set(null);
+      return;
+    }
+    const card = provenanceOf(hit.key, hit.facts);
+    const el = this.container().nativeElement;
+    const at = placeProvenanceTip(point!, card, el.clientWidth, el.clientHeight);
+    const now = this.provenanceTip();
+    if (now && now.x === at.x && now.y === at.y && now.card.title === card.title) return;
+    this.provenanceTip.set({ ...at, card });
+  }
+
   /** Show the most recent `count` bars. */
   showLastBars(count: number): boolean {
     const scale = this.chart?.timeScale();
@@ -2041,6 +2069,7 @@ export class ChartHostComponent implements OnDestroy {
           : null;
       this.emitLegend();
       this.updateEventTip(param.point, param.paneIndex);
+      this.updateProvenanceTip(param.point, param.paneIndex);
       // Only the operator's own moves go to linked charts (a set position has no source event).
       if (param.sourceEvent && this.crosshairTime !== null)
         this.crosshairSync.emit(this.utcAtPlottedSeconds(this.crosshairTime));

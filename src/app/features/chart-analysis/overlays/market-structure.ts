@@ -45,6 +45,29 @@ export interface MarketStructure {
   markers: StructureMarker[];
   /** One line describing the balance, or null when price is not balancing. */
   summary: string | null;
+  /**
+   * What the read was computed from — the hover's "how was this computed?" (PR-4). Null when there
+   * was nothing to read (too few bars, no ATR).
+   */
+  basis: StructureBasis | null;
+}
+
+/** The inputs a structure read used, in the units its thresholds are stated in. */
+export interface StructureBasis {
+  /** Bars read (the visible window). */
+  bars: number;
+  /** ATR(14) of the last bar, in price. */
+  atr: number;
+  /** One pip in price, as the labels count it. */
+  pip: number;
+  balanceAtr: number;
+  minBalanceBars: number;
+  poolAtr: number;
+  climaxMult: number;
+  /** Bars the climax averages look back over. */
+  climaxWindow: number;
+  /** Bars in the balance, or null when price is not balancing. */
+  balanceBars: number | null;
 }
 
 export interface StructureOptions {
@@ -115,7 +138,7 @@ export function marketStructure(
   bars: readonly Ohlc[],
   opts: StructureOptions = {},
 ): MarketStructure {
-  const empty: MarketStructure = { levels: [], zones: [], markers: [], summary: null };
+  const empty: MarketStructure = { levels: [], zones: [], markers: [], summary: null, basis: null };
   if (bars.length < 30) return empty;
 
   const atrSeries = atr(bars as Ohlc[], 14);
@@ -145,7 +168,10 @@ export function marketStructure(
   }
 
   // ── Balance, stop pools, and the events inside it ────────────────────────
-  const balance = findBalance(bars, atrValue, opts.balanceAtr ?? 6, opts.minBalanceBars ?? 12);
+  const balanceAtr = opts.balanceAtr ?? 6;
+  const minBalanceBars = opts.minBalanceBars ?? 12;
+  const poolAtr = opts.poolAtr ?? 0.4;
+  const balance = findBalance(bars, atrValue, balanceAtr, minBalanceBars);
 
   let summary: string | null = null;
   if (balance) {
@@ -165,7 +191,7 @@ export function marketStructure(
 
     // Where stops are ASSUMED to rest: just beyond the range everyone can see. Nobody
     // publishes this, so the label says so wherever it is drawn.
-    const pool = atrValue * (opts.poolAtr ?? 0.4);
+    const pool = atrValue * poolAtr;
     zones.push(
       { from: balance.high, to: balance.high + pool, label: 'Stop pool (est.)', kind: 'pool' },
       { from: balance.low - pool, to: balance.low, label: 'Stop pool (est.)', kind: 'pool' },
@@ -244,5 +270,16 @@ export function marketStructure(
     kind: 'live',
   });
 
-  return { levels, zones, markers, summary };
+  const basis: StructureBasis = {
+    bars: bars.length,
+    atr: atrValue,
+    pip: pipSize(bars[bars.length - 1].close),
+    balanceAtr,
+    minBalanceBars,
+    poolAtr,
+    climaxMult: mult,
+    climaxWindow: window,
+    balanceBars: balance ? bars.length - balance.fromIndex : null,
+  };
+  return { levels, zones, markers, summary, basis };
 }
