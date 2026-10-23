@@ -14,6 +14,7 @@ export type TradeLineKind =
   | 'orderPrice'
   | 'orderStop'
   | 'orderTarget'
+  | 'ocoLeg'
   | 'pending';
 
 export interface TradeLine {

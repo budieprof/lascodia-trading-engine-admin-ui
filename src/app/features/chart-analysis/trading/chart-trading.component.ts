@@ -25,9 +25,11 @@ import { ManualTradingService } from './manual-trading.service';
 import type {
   ManualTradePreview,
   ManualTradeResult,
+  OcoGroup,
   OrderEntryMovePreview,
   PositionChangePreview,
 } from './manual-trading.types';
+import { ocoLines, ocoOrderIndex } from './oco-lines';
 import { OrderTicketComponent } from './order-ticket.component';
 import {
   actionableLines,
@@ -81,7 +83,8 @@ type ChartAction =
       withBrackets: boolean;
     }
   | { type: 'close'; positionId: number; lots: number; preview: PositionChangePreview | null }
-  | { type: 'cancel'; order: OrderDto };
+  | { type: 'cancel'; order: OrderDto }
+  | { type: 'ocoCancel'; group: OcoGroup };
 
 /**
  * Trading from the chart (SP-I3 / SP-I4) in one place, so the page only places it:
@@ -186,6 +189,15 @@ type ChartAction =
                   data-testid="close-lots"
                 />
               </label>
+            }
+            @case ('ocoCancel') {
+              <h3>Cancel the OCO pair #{{ a.group.id }}</h3>
+              <p>
+                @for (leg of a.group.legs; track leg.leg) {
+                  Leg {{ leg.leg }}: {{ leg.direction }} at {{ leg.entryPrice | number: digits() }} ({{ leg.phase }}).
+                }
+              </p>
+              <p class="muted">Both legs that have not filled are cancelled; a filled leg is a position and stays.</p>
             }
             @case ('cancel') {
               <h3>Cancel the working order</h3>
@@ -432,6 +444,8 @@ export class ChartTradingComponent {
   readonly actionError = signal<string | null>(null);
   readonly sending = signal(false);
   readonly pending = signal<PendingChange[]>([]);
+  /** The open OCO pairs on the symbol in scope (C8), re-read whenever the trade layer's orders change. */
+  readonly ocoGroups = signal<OcoGroup[]>([]);
 
   private readonly actionDialog = viewChild<ElementRef<HTMLDialogElement>>('actionDialog');
 
@@ -462,6 +476,8 @@ export class ChartTradingComponent {
 
   /** Every line this layer handles: the ticket's, the actionable positions' and orders', and the pending ghosts. */
   private readonly allLines = computed<TradeLine[]>(() => [
+    // OCO legs first: at the same price an order's own line (after them) wins the press, so it still drags.
+    ...ocoLines(this.ocoGroups(), this.symbol(), this.inScope()),
     ...this.ticketBrackets(),
     ...actionableLines(
       this.positions(),
@@ -504,6 +520,8 @@ export class ChartTradingComponent {
           : 'Close the position';
       case 'cancel':
         return 'Cancel the order';
+      case 'ocoCancel':
+        return 'Cancel the pair';
     }
   });
 
@@ -544,6 +562,14 @@ export class ChartTradingComponent {
         });
         this.open.set(true);
       });
+    });
+
+    // The open OCO pairs, re-read when the symbol, the scope or the trade layer's orders change.
+    effect(() => {
+      const symbol = this.symbol();
+      this.accountIds();
+      this.orders();
+      untracked(() => this.loadOcoGroups(symbol));
     });
 
     const poll = setInterval(() => this.pollPending(), PENDING_POLL_MS);
@@ -622,8 +648,33 @@ export class ChartTradingComponent {
     }
     if (line.kind === 'orderPrice' && line.refId != null) {
       const o = this.orders().find((x) => x.id === line.refId);
-      if (o) this.openAction({ type: 'cancel', order: o });
+      // A leg of an OCO pair is cancelled as the pair (cancelling one leg alone would end the pair anyway).
+      const pair = o ? ocoOrderIndex(this.ocoGroups()).get(o.id) : undefined;
+      if (pair) this.openAction({ type: 'ocoCancel', group: pair });
+      else if (o) this.openAction({ type: 'cancel', order: o });
+      return;
     }
+    if (line.kind === 'ocoLeg' && line.refId != null) {
+      const g = this.ocoGroups().find((x) => x.id === line.refId);
+      if (g) this.openAction({ type: 'ocoCancel', group: g });
+    }
+  }
+
+  private ocoSeq = 0;
+  private loadOcoGroups(symbol: string): void {
+    const ids = this.accountIds();
+    const seq = ++this.ocoSeq;
+    this.trading
+      .ocoGroups(symbol, ids.length === 1 ? ids[0] : null)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (seq === this.ocoSeq) this.ocoGroups.set(res?.status && res.data ? res.data : []);
+        },
+        error: () => {
+          /* no pairs drawn; the next refresh tries again */
+        },
+      });
   }
 
   // ── The confirm dialog ────────────────────────────────────────────────────
@@ -783,6 +834,28 @@ export class ChartTradingComponent {
         );
         return;
       }
+      case 'ocoCancel':
+        this.trading
+          .cancelOco(a.group.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (res) => {
+              this.sending.set(false);
+              if (!res?.status) {
+                this.actionError.set(res?.message || 'The engine refused to cancel the pair.');
+                return;
+              }
+              this.closeAction();
+              this.notify.success(res.message || `OCO pair #${a.group.id}: cancelling.`);
+              this.changed.emit();
+              this.loadOcoGroups(this.symbol());
+            },
+            error: () => {
+              this.sending.set(false);
+              this.actionError.set('The cancel was not sent — the engine did not answer.');
+            },
+          });
+        return;
       case 'cancel':
         this.send(this.trading.cancelOrder(a.order.id, cid), {
           correlationId: cid,

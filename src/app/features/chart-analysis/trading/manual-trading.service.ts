@@ -9,6 +9,9 @@ import type {
   ManualTradePreview,
   ManualTradeRequest,
   ManualTradeResult,
+  OcoCreateRequest,
+  OcoCreateResult,
+  OcoGroup,
   OrderEntryMovePreview,
   PositionChangePreview,
 } from './manual-trading.types';
@@ -114,5 +117,27 @@ export class ManualTradingService {
     return this.api.get(
       `/position/command-status?correlationId=${encodeURIComponent(correlationId)}`,
     );
+  }
+
+  // ── OCO pairs (C8) ──────────────────────────────────────────────────────────
+
+  /**
+   * `POST order/oco` — two live manual pending tickets linked one-cancels-the-other. The engine previews both and
+   * refuses the pair unless both pass; then each goes through the manual-signal path like any ticket.
+   */
+  createOco(request: OcoCreateRequest): Observable<ResponseData<OcoCreateResult>> {
+    return this.api.post('/order/oco', request);
+  }
+
+  /** `GET order/oco` — the account's open pairs on a symbol (the chart links its order lines with them). */
+  ocoGroups(symbol: string, accountId: number | null): Observable<ResponseData<OcoGroup[]>> {
+    const qs = new URLSearchParams({ symbol, openOnly: 'true' });
+    if (accountId !== null) qs.set('tradingAccountId', String(accountId));
+    return this.api.get(`/order/oco?${qs}`, { silent: true });
+  }
+
+  /** `DELETE order/oco/{id}` — cancels both legs that have not filled (a filled leg is a position and stays). */
+  cancelOco(groupId: number): Observable<ResponseData<OcoGroup>> {
+    return this.api.delete(`/order/oco/${groupId}`);
   }
 }

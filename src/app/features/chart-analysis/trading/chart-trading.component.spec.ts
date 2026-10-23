@@ -212,7 +212,14 @@ describe('ChartTradingComponent (SP-I3)', () => {
     el = fixture.nativeElement as HTMLElement;
   });
 
+  /** The open OCO pairs the chart reads with its orders (C8); none unless a test answers otherwise. */
+  const flushOco = (groups: unknown[] = []) =>
+    http
+      .match((r) => r.method === 'GET' && r.url.startsWith(`${BASE}/order/oco`))
+      .forEach((r) => r.flush(ok(groups)));
+
   afterEach(() => {
+    flushOco();
     fixture.destroy();
     http.verify();
     vi.useRealTimers();
@@ -433,5 +440,54 @@ describe('ChartTradingComponent (SP-I3)', () => {
     fixture.detectChanges();
     expect(byId<HTMLButtonElement>('trade-action-apply').disabled).toBe(true);
     expect(byId('trade-action-dialog').textContent).toContain('needs v8.47.250');
+  });
+
+  // ── OCO pairs (C8) ─────────────────────────────────────────────────────────
+
+  const PAIR = {
+    id: 12,
+    tradingAccountId: 17,
+    symbol: 'EURUSD',
+    status: 'Active',
+    filledLeg: null,
+    note: null,
+    cancelRequested: false,
+    createdAtUtc: '2026-10-23T12:00:00Z',
+    updatedAtUtc: '2026-10-23T12:00:00Z',
+    closedAtUtc: null,
+    legs: [
+      { leg: 1, tradeSignalId: 901, orderId: 601, direction: 'Buy', entryPrice: 1.095, stopLoss: 1.092, takeProfit: 1.101, phase: 'OrderWorking', detail: '' },
+      { leg: 2, tradeSignalId: 902, orderId: null, direction: 'Sell', entryPrice: 1.105, stopLoss: 1.108, takeProfit: 1.099, phase: 'SignalWorking', detail: '' },
+    ],
+  };
+
+  it('reads the account’s open OCO pairs for the symbol and cancels a leg’s order as the pair', () => {
+    const read = http.expectOne((r) => r.url.startsWith(`${BASE}/order/oco`));
+    expect(read.request.url).toContain('symbol=EURUSD');
+    expect(read.request.url).toContain('tradingAccountId=17');
+    read.flush(ok([PAIR]));
+    fixture.detectChanges();
+
+    click({ kind: 'orderPrice', refId: 601, price: 1.095 });
+    fixture.detectChanges();
+    expect(byId('trade-action-dialog').textContent).toContain('Cancel the OCO pair #12');
+    byId<HTMLButtonElement>('trade-action-apply').click();
+
+    const del = http.expectOne(`${BASE}/order/oco/12`);
+    expect(del.request.method).toBe('DELETE');
+    del.flush(ok({ ...PAIR, status: 'Cancelling', cancelRequested: true }));
+    expect(notify.success).toHaveBeenCalled();
+    expect(changed).toBeGreaterThan(0);
+    // No single-order cancel was sent.
+    http.expectNone((r) => r.url.includes('/order/601/cancel'));
+  });
+
+  it('a click on a leg still waiting as a signal also asks to cancel the pair', () => {
+    http.expectOne((r) => r.url.startsWith(`${BASE}/order/oco`)).flush(ok([PAIR]));
+    fixture.detectChanges();
+
+    click({ kind: 'ocoLeg', refId: 12, price: 1.105 });
+    fixture.detectChanges();
+    expect(byId('trade-action-dialog').textContent).toContain('Leg 2: Sell');
   });
 });
