@@ -1,4 +1,5 @@
 import type { ActiveIndicator, ChartStyle, ChartViewState } from '../chart/chart-host.component';
+import type { OrderFlowSettings } from '../orderflow/orderflow.types';
 import type { TvResolution } from '../datafeed/resolution';
 import type {
   ChartScriptItem,
@@ -158,6 +159,8 @@ export interface ChartWorkspaceState {
     fitTradeLines?: boolean;
     /** Watch / monitor marks and lines (default on). */
     showWatches?: boolean;
+    /** Order-flow layers (heatmap, CVD, footprint, spread ribbon, fills); absent: all off. */
+    orderFlow?: Partial<OrderFlowSettings>;
   };
   /** The split view: its arrangement — and, in v1, each comparison panel's series (CC-12; v2: `charts`). */
   split?: {

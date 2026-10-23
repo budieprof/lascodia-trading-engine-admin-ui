@@ -68,7 +68,10 @@ const snap = (over: Partial<OrderBookSnapshot> = {}): OrderBookSnapshot => ({
   bidVolume: 1,
   askVolume: 1,
   spreadPoints: 2,
-  levelsJson: JSON.stringify({ bids: [{ P: 1.10002, V: 700_000 }], asks: [{ P: 1.10004, V: 900_000 }] }),
+  levelsJson: JSON.stringify({
+    bids: [{ P: 1.10002, V: 700_000 }],
+    asks: [{ P: 1.10004, V: 900_000 }],
+  }),
   instanceId: 'LASC-1',
   capturedAt: iso(T0 + 2 * MIN + 55_000),
   ...over,
@@ -173,7 +176,10 @@ describe('heatmap grid (OF-1)', () => {
     expect(foldLiveSnapshot(g, snap({ symbol: 'GBPUSD' }))).toBe(g);
     expect(foldLiveSnapshot(g, snap({ levelsJson: null }))).toBe(g);
     // A new instance is named as a source.
-    expect(foldLiveSnapshot(g, snap({ instanceId: 'LASC-2' })).sources).toEqual(['LASC-1', 'LASC-2']);
+    expect(foldLiveSnapshot(g, snap({ instanceId: 'LASC-2' })).sources).toEqual([
+      'LASC-1',
+      'LASC-2',
+    ]);
   });
 
   it('replay clipping: nothing at or after the head, the spanning column ends there', () => {
@@ -204,7 +210,9 @@ describe('heatmap grid (OF-1)', () => {
   it('refetches on a pan off the window, a big zoom, or another symbol — not on a small pan', () => {
     const a = { symbol: 'EURUSD', fromUtc: T0, toUtc: T0 + 150 * MIN, buckets: 150 };
     expect(heatNeedsFetch(null, a)).toBe(true);
-    expect(heatNeedsFetch(a, { ...a, fromUtc: T0 + 5 * MIN, toUtc: T0 + 150 * MIN, buckets: 145 })).toBe(false);
+    expect(
+      heatNeedsFetch(a, { ...a, fromUtc: T0 + 5 * MIN, toUtc: T0 + 150 * MIN, buckets: 145 }),
+    ).toBe(false);
     expect(heatNeedsFetch(a, { ...a, fromUtc: T0 - 60 * MIN, toUtc: T0 + 90 * MIN })).toBe(true);
     expect(heatNeedsFetch(a, { ...a, buckets: 50 })).toBe(true);
     expect(heatNeedsFetch(a, { ...a, symbol: 'GBPUSD' })).toBe(true);

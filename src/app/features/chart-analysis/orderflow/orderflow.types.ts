@@ -112,7 +112,9 @@ export const DEFAULT_ORDER_FLOW: OrderFlowSettings = {
 };
 
 /** A saved layout's order-flow toggles, defaulted and clamped (layouts saved before this feature carry none). */
-export function restoredOrderFlow(saved: Partial<OrderFlowSettings> | null | undefined): OrderFlowSettings {
+export function restoredOrderFlow(
+  saved: Partial<OrderFlowSettings> | null | undefined,
+): OrderFlowSettings {
   const s = saved ?? {};
   const opacity = Number(s.heatmapOpacity);
   return {

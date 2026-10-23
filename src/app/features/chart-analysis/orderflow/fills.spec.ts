@@ -58,7 +58,12 @@ describe('fills & slippage (OF-6)', () => {
     );
     expect(hidden).toBe(1);
     expect(fills.map((f) => f.id)).toEqual([2, 1]);
-    expect(fills[1]).toMatchObject({ side: 'Buy', kind: 'adverse', slippagePoints: 12, accountId: 7 });
+    expect(fills[1]).toMatchObject({
+      side: 'Buy',
+      kind: 'adverse',
+      slippagePoints: 12,
+      accountId: 7,
+    });
     expect(fills[0]).toMatchObject({ side: 'Sell', kind: 'favourable', isPaper: true });
     // A missing Z is read as UTC.
     expect(fills[1].time).toBe(Date.parse('2026-10-20T10:00:00Z'));
@@ -93,7 +98,9 @@ describe('replay (OF-5)', () => {
   it('clips at the end of the newest revealed unit', () => {
     expect(replayClipUtc(null, 60_000)).toBeNull();
     expect(replayClipUtc({ time: T }, 60_000)).toBe(T + 60_000);
-    expect(replayClipUtc({ time: T, closeTime: T + 4 * 3_600_000 }, 60_000)).toBe(T + 4 * 3_600_000);
+    expect(replayClipUtc({ time: T, closeTime: T + 4 * 3_600_000 }, 60_000)).toBe(
+      T + 4 * 3_600_000,
+    );
     expect(replayClipUtc({ time: T }, null)).toBe(T);
   });
 
@@ -115,6 +122,9 @@ describe('replay (OF-5)', () => {
     expect(bookAtHead(snap('2026-10-20T10:00:01Z'), T).kind).toBe('future');
     const at = bookAtHead(snap('2026-10-20T09:59:58Z'), T);
     expect(at).toMatchObject({ kind: 'book', ageMs: 2_000, stale: false });
-    expect(bookAtHead(snap('2026-10-20T09:50:00Z'), T)).toMatchObject({ kind: 'book', stale: true });
+    expect(bookAtHead(snap('2026-10-20T09:50:00Z'), T)).toMatchObject({
+      kind: 'book',
+      stale: true,
+    });
   });
 });

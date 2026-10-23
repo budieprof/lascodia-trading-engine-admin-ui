@@ -47,7 +47,12 @@ export function flowIndexes(
  * The exclusive end of bar `i`: the next bar's open; for the newest, its own close on the session grid or its
  * fixed width — never past `capUtc` (now, or the replay head), and always after its open.
  */
-export function barEnd(bars: readonly FlowBar[], i: number, barMs: number | null, capUtc: number): number {
+export function barEnd(
+  bars: readonly FlowBar[],
+  i: number,
+  barMs: number | null,
+  capUtc: number,
+): number {
   const next = bars[i + 1];
   if (next) return next.time;
   const bar = bars[i];
@@ -80,7 +85,9 @@ export function tickBarsRequest(
 
 /** Whether the engine allows a footprint over these bars (C2: ≤ 3 days and ≤ 500 bars). */
 export function footprintAllowed(barCount: number, fromUtc: number, endUtc: number): boolean {
-  return barCount > 0 && barCount <= MAX_FOOTPRINT_BARS && endUtc - fromUtc <= MAX_FOOTPRINT_SPAN_MS;
+  return (
+    barCount > 0 && barCount <= MAX_FOOTPRINT_BARS && endUtc - fromUtc <= MAX_FOOTPRINT_SPAN_MS
+  );
 }
 
 /** The response's bars by their UTC open (ms). */
@@ -117,7 +124,10 @@ export const PULLED_RULES: PulledRules = { window: 20, spreadX: 2, rateX: 2, min
  * least twice its own — quotes flickering while the broker widens, as around a news print. Only bars built from ticks
  * are judged (a candle-filled bar has a spread but no tick rate). Returns one flag per bar.
  */
-export function liquidityPulled(bars: readonly TickBarDto[], rules: PulledRules = PULLED_RULES): boolean[] {
+export function liquidityPulled(
+  bars: readonly TickBarDto[],
+  rules: PulledRules = PULLED_RULES,
+): boolean[] {
   const out: boolean[] = new Array(bars.length).fill(false);
   for (let i = 0; i < bars.length; i++) {
     const b = bars[i];
@@ -127,7 +137,8 @@ export function liquidityPulled(bars: readonly TickBarDto[], rules: PulledRules 
     for (let j = Math.max(0, i - rules.window); j < i; j++) {
       const p = bars[j];
       if (p.spreadAvgPoints !== null && p.spreadAvgPoints > 0) spreads.push(p.spreadAvgPoints);
-      if (p.source === 'ticks' && p.ticksPerMinute !== null && p.ticksPerMinute > 0) rates.push(p.ticksPerMinute);
+      if (p.source === 'ticks' && p.ticksPerMinute !== null && p.ticksPerMinute > 0)
+        rates.push(p.ticksPerMinute);
     }
     if (spreads.length < rules.minHistory || rates.length < rules.minHistory) continue;
     const ms = median(spreads)!;
@@ -170,7 +181,10 @@ export function footprintCells(
     if (!Number.isFinite(r.price)) continue;
     const k = Math.round(r.price / rowPrice);
     const held = byKey.get(k);
-    byKey.set(k, held ? { price: held.price, up: held.up + r.up, down: held.down + r.down } : { ...r });
+    byKey.set(
+      k,
+      held ? { price: held.price, up: held.up + r.up, down: held.down + r.down } : { ...r },
+    );
   }
   let maxKey: number | null = null;
   let maxTicks = 0;
@@ -204,7 +218,12 @@ const ROW_PIPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
  * The footprint's row height in MT5 points for the price scale on screen: the smallest "nice" number of pips whose
  * row is at least `minRowPx` tall, so the "down × up" counts fit. `point` is 10^-digits, `pip` the symbol's pip.
  */
-export function footprintRowPoints(pricePerPx: number | null, point: number, pip: number, minRowPx = 14): number {
+export function footprintRowPoints(
+  pricePerPx: number | null,
+  point: number,
+  pip: number,
+  minRowPx = 14,
+): number {
   const p = point > 0 ? point : 0.00001;
   const pipPrice = pip > 0 ? pip : p * 10;
   const need = pricePerPx !== null && pricePerPx > 0 ? pricePerPx * minRowPx : pipPrice;

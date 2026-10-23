@@ -53,7 +53,9 @@ export function percentile(values: ArrayLike<number>, p: number): number {
 
 /** The median positive gap between distinct prices — the broker's level spacing; `floor` when there are no gaps. */
 export function levelStep(prices: Iterable<number>, floor: number): number {
-  const distinct = [...new Set(prices)].filter((p) => Number.isFinite(p) && p > 0).sort((a, b) => a - b);
+  const distinct = [...new Set(prices)]
+    .filter((p) => Number.isFinite(p) && p > 0)
+    .sort((a, b) => a - b);
   const gaps: number[] = [];
   for (let i = 1; i < distinct.length; i++) {
     const g = distinct[i] - distinct[i - 1];
@@ -72,11 +74,7 @@ function validLevels(raw: readonly HeatmapLevel[] | null | undefined): HeatmapLe
   if (!Array.isArray(raw)) return [];
   return raw.filter(
     (l) =>
-      Array.isArray(l) &&
-      Number.isFinite(l[0]) &&
-      l[0] > 0 &&
-      Number.isFinite(l[1]) &&
-      l[1] >= 0,
+      Array.isArray(l) && Number.isFinite(l[0]) && l[0] > 0 && Number.isFinite(l[1]) && l[1] >= 0,
   );
 }
 
@@ -182,7 +180,9 @@ export function heatColor(intensity: number): string {
 }
 
 /** 256 precomputed colours, so a frame never formats a colour string per cell. */
-export const HEAT_LUT: readonly string[] = Array.from({ length: 256 }, (_, i) => heatColor(i / 255));
+export const HEAT_LUT: readonly string[] = Array.from({ length: 256 }, (_, i) =>
+  heatColor(i / 255),
+);
 
 /** The LUT colour of a volume. */
 export function heatLutColor(volume: number, robustMax: number): string {
@@ -200,7 +200,9 @@ export function snapshotLevels(snapshot: OrderBookSnapshot): HeatmapLevel[] {
   const side = (raw: unknown): HeatmapLevel[] =>
     Array.isArray(raw)
       ? validLevels(
-          (raw as { P?: unknown; V?: unknown }[]).map((l) => [Number(l?.P), Number(l?.V)] as HeatmapLevel),
+          (raw as { P?: unknown; V?: unknown }[]).map(
+            (l) => [Number(l?.P), Number(l?.V)] as HeatmapLevel,
+          ),
         )
       : [];
   return [...side(parsed.bids), ...side(parsed.asks)];
@@ -230,7 +232,8 @@ export function foldLiveSnapshot(grid: HeatGrid, snapshot: OrderBookSnapshot): H
     levels,
     grid.rowStep,
   );
-  const columns = last && last.t === t ? [...grid.columns.slice(0, -1), column] : [...grid.columns, column];
+  const columns =
+    last && last.t === t ? [...grid.columns.slice(0, -1), column] : [...grid.columns, column];
   const sources = grid.sources.includes(snapshot.instanceId)
     ? grid.sources
     : [...grid.sources, snapshot.instanceId];

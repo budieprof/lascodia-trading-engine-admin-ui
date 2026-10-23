@@ -19,7 +19,10 @@ describe('tick-bars request (OF-2)', () => {
   it('sends the chart’s own bar opens; the last bar ends at the next open', () => {
     const bars = [0, 1, 2, 3].map((i) => ({ time: T0 + i * H }));
     const req = tickBarsRequest('EURUSD', bars, { from: 1, to: 2 }, H, T0 + 10 * H, null)!;
-    expect(req.barTimes).toEqual([new Date(T0 + H).toISOString(), new Date(T0 + 2 * H).toISOString()]);
+    expect(req.barTimes).toEqual([
+      new Date(T0 + H).toISOString(),
+      new Date(T0 + 2 * H).toISOString(),
+    ]);
     expect(req.endUtc).toBe(new Date(T0 + 3 * H).toISOString());
     expect(req.footprint).toBe(false);
     expect('footprintRowPoints' in req).toBe(false);
@@ -33,7 +36,9 @@ describe('tick-bars request (OF-2)', () => {
       { time: T0 + 8 * H, closeTime: T0 + 12 * H },
     ];
     const live = T0 + 9 * H;
-    const req = tickBarsRequest('EURUSD', bars, { from: 0, to: 2 }, 4 * H, live, { rowPoints: 10 })!;
+    const req = tickBarsRequest('EURUSD', bars, { from: 0, to: 2 }, 4 * H, live, {
+      rowPoints: 10,
+    })!;
     expect(req.barTimes).toEqual(bars.map((b) => new Date(b.time).toISOString()));
     // The forming bar ends now, not at its session close.
     expect(req.endUtc).toBe(new Date(live).toISOString());
@@ -51,19 +56,25 @@ describe('tick-bars request (OF-2)', () => {
   });
 
   it('indexes: the visible bars, half again to the left, to the newest when it is on screen, capped', () => {
-    expect(flowIndexes({ fromIndex: 100, toIndex: 199, rightEdgeInView: true }, 300, 2000)).toEqual({
-      from: 50,
-      to: 299,
-    });
-    expect(flowIndexes({ fromIndex: 100, toIndex: 199, rightEdgeInView: false }, 300, 2000)).toEqual({
+    expect(flowIndexes({ fromIndex: 100, toIndex: 199, rightEdgeInView: true }, 300, 2000)).toEqual(
+      {
+        from: 50,
+        to: 299,
+      },
+    );
+    expect(
+      flowIndexes({ fromIndex: 100, toIndex: 199, rightEdgeInView: false }, 300, 2000),
+    ).toEqual({
       from: 50,
       to: 224,
     });
     // Too many: the newest are kept.
-    expect(flowIndexes({ fromIndex: 0, toIndex: 2999, rightEdgeInView: true }, 3000, 2000)).toEqual({
-      from: 1000,
-      to: 2999,
-    });
+    expect(flowIndexes({ fromIndex: 0, toIndex: 2999, rightEdgeInView: true }, 3000, 2000)).toEqual(
+      {
+        from: 1000,
+        to: 2999,
+      },
+    );
     expect(flowIndexes({ fromIndex: 0, toIndex: 10, rightEdgeInView: true }, 0, 2000)).toBeNull();
   });
 
@@ -75,7 +86,10 @@ describe('tick-bars request (OF-2)', () => {
   });
 
   it('indexes the response by bar open', () => {
-    const m = tickBarsByTime([bar({ t: '2026-10-19T21:00:00Z' }), bar({ t: '2026-10-19T22:00:00' })]);
+    const m = tickBarsByTime([
+      bar({ t: '2026-10-19T21:00:00Z' }),
+      bar({ t: '2026-10-19T22:00:00' }),
+    ]);
     expect(m.has(T0)).toBe(true);
     expect(m.has(T0 + H)).toBe(true);
   });
@@ -108,19 +122,27 @@ describe('liquidity pulled (OF-4)', () => {
   });
 
   it('wide spread alone, or a tick burst alone, is not “pulled”', () => {
-    expect(liquidityPulled([...calm, bar({ spreadAvgPoints: 6, ticksPerMinute: 12 })]).at(-1)).toBe(false);
-    expect(liquidityPulled([...calm, bar({ spreadAvgPoints: 2.5, ticksPerMinute: 60 })]).at(-1)).toBe(false);
+    expect(liquidityPulled([...calm, bar({ spreadAvgPoints: 6, ticksPerMinute: 12 })]).at(-1)).toBe(
+      false,
+    );
+    expect(
+      liquidityPulled([...calm, bar({ spreadAvgPoints: 2.5, ticksPerMinute: 60 })]).at(-1),
+    ).toBe(false);
   });
 
   it('candle-filled bars and short histories are never judged', () => {
     const candle = bar({ source: 'candle', spreadAvgPoints: 9, ticksPerMinute: null });
     expect(liquidityPulled([...calm, candle]).at(-1)).toBe(false);
-    expect(liquidityPulled([bar(), bar(), bar({ spreadAvgPoints: 9, ticksPerMinute: 90 })]).at(-1)).toBe(false);
+    expect(
+      liquidityPulled([bar(), bar(), bar({ spreadAvgPoints: 9, ticksPerMinute: 90 })]).at(-1),
+    ).toBe(false);
   });
 
   it('a candle bar’s spread counts toward the spread median but not the tick-rate median', () => {
     const mixed = [
-      ...Array.from({ length: 10 }, () => bar({ source: 'candle', spreadAvgPoints: 2, ticksPerMinute: null })),
+      ...Array.from({ length: 10 }, () =>
+        bar({ source: 'candle', spreadAvgPoints: 2, ticksPerMinute: null }),
+      ),
       ...Array.from({ length: 5 }, () => bar()),
       bar({ spreadAvgPoints: 4, ticksPerMinute: 20 }),
     ];
@@ -140,7 +162,9 @@ describe('footprint maths (OF-3)', () => {
       ],
       row,
     );
-    expect(cells.map((c) => c.price)).toEqual([1.1002, 1.1001, 1.1].map((p) => expect.closeTo(p, 10)));
+    expect(cells.map((c) => c.price)).toEqual(
+      [1.1002, 1.1001, 1.1].map((p) => expect.closeTo(p, 10)),
+    );
     expect(cells.find((c) => c.maxActivity)?.up).toBe(20);
     expect(cells.filter((c) => c.maxActivity)).toHaveLength(1);
   });
