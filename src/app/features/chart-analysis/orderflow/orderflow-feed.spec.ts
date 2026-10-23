@@ -262,7 +262,7 @@ describe('OrderFlowFeed', () => {
     await settle();
     expect(api.heatmap).toHaveBeenCalledTimes(1);
     const m = feed.model()!;
-    expect(m.heatmap!.grid.columns).toHaveLength(1);
+    expect(m.heatmap!.grid!.columns).toHaveLength(1);
     expect(m.heatmap!.opacity).toBe(0.6);
     expect(m.captions[0]).toMatch(/^Broker DOM depth — LASC-1, sampled every .+ · live$/);
     expect(m.captions).toContain(
@@ -283,7 +283,7 @@ describe('OrderFlowFeed', () => {
       capturedAt: iso(NOW - 1000),
     });
     TestBed.tick();
-    expect(feed.model()!.heatmap!.grid.columns).toHaveLength(2);
+    expect(feed.model()!.heatmap!.grid!.columns).toHaveLength(2);
   });
 
   it('heatmap zoomed in with WebGL: every book event from md/history (C5), labelled with its source', async () => {
@@ -333,7 +333,7 @@ describe('OrderFlowFeed', () => {
     const [, , to] = api.heatmap.mock.calls[0];
     expect(to).toBeLessThanOrEqual(T0 + 40 * H);
     // The answer's column was captured a second after the head: it is the future.
-    expect(feed.model()!.heatmap!.grid.columns).toHaveLength(0);
+    expect(feed.model()!.heatmap!.grid!.columns).toHaveLength(0);
   });
 
   it('footprint: zoomed out it asks nothing and says so; zoomed in it asks with a row height', async () => {
