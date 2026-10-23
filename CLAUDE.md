@@ -253,6 +253,12 @@ localhost rather than a blank page.
   iceberg-like levels (MBP-10 cannot prove a hidden order — say so), ABS absorption; with a CME source picked the CVD pane
   and the footprint show the REAL aggressor delta instead of the tick rule. Refusals (`-403-entitlement`) show as "not entitled".
 
+- **Public status page (engine resilience program, ADR-0034).** `/status` — no sign-in, outside the console
+  (`features/status/`): renders the engine's `GET /health/status` (server root, forwarded by Caddy's `/health*` block)
+  through an interceptor-free `HttpClient` (no session, no sign-in redirect, no error toasts), worst component first,
+  refreshed every 30 s, the last answer kept and marked stale when the engine does not answer. It shows only the engine's
+  fixed words — never add counts, ids or host names to it.
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
