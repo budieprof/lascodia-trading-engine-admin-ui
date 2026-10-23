@@ -112,7 +112,11 @@ export interface MdWatchStatus {
 /** A listener for one symbol's frames: the frame as received and the source's state AFTER it was applied. */
 export type MdFrameListener = (frame: MdFrame, stream: MdSourceStream) => void;
 /** A listener for book events applied to a source (live, resync and keyframe repairs alike); `reset` = book replaced. */
-export type MdBookListener = (stream: MdSourceStream, events: readonly MdBookEventWire[], reset: boolean) => void;
+export type MdBookListener = (
+  stream: MdSourceStream,
+  events: readonly MdBookEventWire[],
+  reset: boolean,
+) => void;
 
 interface SymbolEntry {
   key: string;
@@ -165,7 +169,14 @@ export class MarketDataStreamCore {
         streams: new Map(),
         frameListeners: new Set(),
         bookListeners: new Set(),
-        status: { state: this.state, protocol: this.protocol, subscribed: [], denied: [], unknown: [], error: null },
+        status: {
+          state: this.state,
+          protocol: this.protocol,
+          subscribed: [],
+          denied: [],
+          unknown: [],
+          error: null,
+        },
         subscribedKey: null,
         held: null,
       };
@@ -368,7 +379,11 @@ export class MarketDataStreamCore {
     } else await this.subscribeNow(entry, w, key);
   }
 
-  private async subscribeNow(entry: SymbolEntry, w: { sources: string[] | null; kinds: MdKind[] }, key: string): Promise<void> {
+  private async subscribeNow(
+    entry: SymbolEntry,
+    w: { sources: string[] | null; kinds: MdKind[] },
+    key: string,
+  ): Promise<void> {
     entry.subscribedKey = key;
     const r = await this.invoke<MdSubscribeResult>('Subscribe', entry.key, w.sources, w.kinds);
     if (this.symbols.get(entry.key) !== entry) return;
@@ -378,7 +393,9 @@ export class MarketDataStreamCore {
       subscribed: r?.subscribed ?? [],
       denied: r?.denied ?? [],
       unknown: r?.unknown ?? [],
-      error: r ? (r.error ?? (r.ok ? null : 'Nothing could be subscribed.')) : 'The market-data hub did not answer.',
+      error: r
+        ? (r.error ?? (r.ok ? null : 'Nothing could be subscribed.'))
+        : 'The market-data hub did not answer.',
     };
     if (!r) entry.subscribedKey = null;
     this.deps.changed(entry.key);
@@ -391,7 +408,11 @@ export class MarketDataStreamCore {
       const streams = [...entry.streams.values()];
       const since = Math.min(
         ...streams.map((s) => {
-          const last = Math.max(s.ticks.lastTime || 0, s.book.known ? s.book.t : 0, s.trades.lastTime || 0);
+          const last = Math.max(
+            s.ticks.lastTime || 0,
+            s.book.known ? s.book.t : 0,
+            s.trades.lastTime || 0,
+          );
           return last > 0 ? last : now - RESYNC_MAX_MS;
         }),
       );
@@ -485,7 +506,12 @@ export class MarketDataStreamCore {
     this.deps.changed(entry.key);
   }
 
-  private emitBook(entry: SymbolEntry, stream: MdSourceStream, events: readonly MdBookEventWire[], reset: boolean): void {
+  private emitBook(
+    entry: SymbolEntry,
+    stream: MdSourceStream,
+    events: readonly MdBookEventWire[],
+    reset: boolean,
+  ): void {
     for (const l of entry.bookListeners) l(stream, events, reset);
   }
 
@@ -497,7 +523,13 @@ export class MarketDataStreamCore {
     stream.keyframeTriedAt = now;
     stream.bookGaps++;
     this.deps
-      .history({ symbol: entry.key, sourceIds: [stream.sourceId], from: now - KEYFRAME_LOOKBACK_MS, to: now + 1, kinds: ['book'] })
+      .history({
+        symbol: entry.key,
+        sourceIds: [stream.sourceId],
+        from: now - KEYFRAME_LOOKBACK_MS,
+        to: now + 1,
+        kinds: ['book'],
+      })
       .then((h) => {
         if (stream.book.known) return; // the hub's own S came first
         const src = h.sources?.find((s) => s.sourceId === stream.sourceId);

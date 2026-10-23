@@ -15,7 +15,11 @@ export interface TradeBubblesModel {
   clipUtc: number | null;
 }
 
-const SIDE_FILL: Record<number, string> = { 1: 'rgba(38,166,154,0.55)', [-1]: 'rgba(239,83,80,0.55)', 0: 'rgba(120,123,134,0.5)' };
+const SIDE_FILL: Record<number, string> = {
+  1: 'rgba(38,166,154,0.55)',
+  [-1]: 'rgba(239,83,80,0.55)',
+  0: 'rgba(120,123,134,0.5)',
+};
 const SIDE_STROKE: Record<number, string> = { 1: '#26A69A', [-1]: '#EF5350', 0: '#787B86' };
 
 /**
@@ -89,7 +93,17 @@ export class TradeBubblesPrimitive implements ISeriesPrimitive<Time> {
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) => {
       const ring = m.feed.ring;
       const t1 = m.clipUtc ?? Infinity;
-      this.placed = placeBubbles(ring, -Infinity, t1, m.minSize, m.feed.refMax, this.deps.xAt, (p) => series.priceToCoordinate(p), mediaSize.width, mediaSize.height);
+      this.placed = placeBubbles(
+        ring,
+        -Infinity,
+        t1,
+        m.minSize,
+        m.feed.refMax,
+        this.deps.xAt,
+        (p) => series.priceToCoordinate(p),
+        mediaSize.width,
+        mediaSize.height,
+      );
       ctx.save();
       ctx.globalAlpha = this.alpha;
       ctx.lineWidth = 1;
@@ -106,10 +120,19 @@ export class TradeBubblesPrimitive implements ISeriesPrimitive<Time> {
       const hit = hover ? bubbleAt(this.placed, hover.x, hover.y) : null;
       if (hit && hover) {
         const digits = this.deps.precision();
-        const side = hit.side === 1 ? 'buyer-initiated' : hit.side === -1 ? 'seller-initiated' : 'aggressor not reported';
+        const side =
+          hit.side === 1
+            ? 'buyer-initiated'
+            : hit.side === -1
+              ? 'seller-initiated'
+              : 'aggressor not reported';
         drawHoverCard(
           ctx,
-          [`${m.label} trade · ${hit.price.toFixed(digits)}`, `${formatUnits(hit.size)} (size as reported) · ${side}`, formatUtcMs(hit.t)],
+          [
+            `${m.label} trade · ${hit.price.toFixed(digits)}`,
+            `${formatUnits(hit.size)} (size as reported) · ${side}`,
+            formatUtcMs(hit.t),
+          ],
           hover.x,
           hover.y,
           mediaSize,

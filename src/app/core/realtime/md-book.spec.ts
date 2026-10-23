@@ -8,7 +8,10 @@ const fixture = loadMdFixture();
 const events = fixture.book;
 
 /** An independent fold (the engine's BookFold rules), for comparison. */
-function refFold(evs: readonly MdBookEventWire[], upTo: number): { b: Map<number, number>; a: Map<number, number>; known: boolean } {
+function refFold(
+  evs: readonly MdBookEventWire[],
+  upTo: number,
+): { b: Map<number, number>; a: Map<number, number>; known: boolean } {
   const b = new Map<number, number>();
   const a = new Map<number, number>();
   let known = false;
@@ -19,8 +22,14 @@ function refFold(evs: readonly MdBookEventWire[], upTo: number): { b: Map<number
       a.clear();
       known = true;
     } else if (!known) continue;
-    for (const [p, s] of e.b) (s > 0 ? b.set(p, s) : b.delete(p));
-    for (const [p, s] of e.a) (s > 0 ? a.set(p, s) : a.delete(p));
+    for (const [p, s] of e.b) {
+      if (s > 0) b.set(p, s);
+      else b.delete(p);
+    }
+    for (const [p, s] of e.a) {
+      if (s > 0) a.set(p, s);
+      else a.delete(p);
+    }
   }
   return { b, a, known };
 }
@@ -28,14 +37,49 @@ function refFold(evs: readonly MdBookEventWire[], upTo: number): { b: Map<number
 describe('BookState', () => {
   it('applies a snapshot then deltas with absolute sizes; size 0 removes', () => {
     const s = new BookState();
-    s.apply({ t: 1, k: 'S', b: [[1.1, 5], [1.09, 3]], a: [[1.11, 4]] });
-    s.apply({ t: 2, k: 'D', b: [[1.1, 0], [1.095, 7]], a: [[1.11, 9], [1.12, 1]] });
-    expect(s.bidLevels()).toEqual([[1.095, 7], [1.09, 3]]);
-    expect(s.askLevels()).toEqual([[1.11, 9], [1.12, 1]]);
+    s.apply({
+      t: 1,
+      k: 'S',
+      b: [
+        [1.1, 5],
+        [1.09, 3],
+      ],
+      a: [[1.11, 4]],
+    });
+    s.apply({
+      t: 2,
+      k: 'D',
+      b: [
+        [1.1, 0],
+        [1.095, 7],
+      ],
+      a: [
+        [1.11, 9],
+        [1.12, 1],
+      ],
+    });
+    expect(s.bidLevels()).toEqual([
+      [1.095, 7],
+      [1.09, 3],
+    ]);
+    expect(s.askLevels()).toEqual([
+      [1.11, 9],
+      [1.12, 1],
+    ]);
     expect(s.bestBid()).toBe(1.095);
     expect(s.bestAsk()).toBe(1.11);
     expect(s.t).toBe(2);
-    expect(s.toKeyframe(3)).toEqual({ t: 3, b: [[1.095, 7], [1.09, 3]], a: [[1.11, 9], [1.12, 1]] });
+    expect(s.toKeyframe(3)).toEqual({
+      t: 3,
+      b: [
+        [1.095, 7],
+        [1.09, 3],
+      ],
+      a: [
+        [1.11, 9],
+        [1.12, 1],
+      ],
+    });
   });
 
   it('refuses a delta on an unknown book and counts it', () => {
@@ -66,7 +110,15 @@ describe('BookTimeline', () => {
     expect(long.length).toBeGreaterThan(CHECKPOINT_EVERY * 2);
     const tl = new BookTimeline();
     tl.appendAll(long);
-    const probes = [long[0].t - 1, long[3].t, long[300].t, long[599].t, long[17].t + 1, long[450].t, long[long.length - 1].t + 5];
+    const probes = [
+      long[0].t - 1,
+      long[3].t,
+      long[300].t,
+      long[599].t,
+      long[17].t + 1,
+      long[450].t,
+      long[long.length - 1].t + 5,
+    ];
     for (const t of probes) {
       const got = tl.at(t);
       const ref = refFold(long, t);

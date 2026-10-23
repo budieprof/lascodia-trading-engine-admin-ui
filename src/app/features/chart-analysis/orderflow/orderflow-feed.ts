@@ -29,7 +29,13 @@ import {
 } from './heatmap-grid';
 import { LiveDepthService, type LiveDepth } from './live-depth.service';
 import type { FlowPaneModel, OrderFlowModel } from './orderflow-layers';
-import type { FootprintRowDto, OrderFlowSettings, OrderFlowView, TickBarDto, TickBarsDto } from './orderflow.types';
+import type {
+  FootprintRowDto,
+  OrderFlowSettings,
+  OrderFlowView,
+  TickBarDto,
+  TickBarsDto,
+} from './orderflow.types';
 import { utcMs } from '../panels/fx-fundamentals';
 import {
   FOOTPRINT_MIN_BAR_PX,
@@ -250,7 +256,13 @@ export class OrderFlowFeed {
           if (mode !== 'stream') this.streamHeat.clear();
           return;
         }
-        this.streamHeat.update({ symbol, sourceId, view: this.streamView(view), head: clip, live: view.rightEdgeInView });
+        this.streamHeat.update({
+          symbol,
+          sourceId,
+          view: this.streamView(view),
+          head: clip,
+          live: view.rightEdgeInView,
+        });
       });
     });
     effect(() => {
@@ -266,7 +278,14 @@ export class OrderFlowFeed {
         }
         const w = streamWindowFor(this.streamView(view), clip ?? deps.now());
         if (!w) return;
-        this.tradeFeed.update({ symbol, sourceId: src.sourceId, fromUtc: w.fromUtc, toUtc: w.toUtc, head: clip, live: view.rightEdgeInView });
+        this.tradeFeed.update({
+          symbol,
+          sourceId: src.sourceId,
+          fromUtc: w.fromUtc,
+          toUtc: w.toUtc,
+          head: clip,
+          live: view.rightEdgeInView,
+        });
       });
     });
     // The live book: one shared 1.5 s poll, only while the BUCKETED heatmap is on, the newest bar is on screen and not
@@ -677,19 +696,25 @@ export class OrderFlowFeed {
     this.streamState();
     const st = this.streamHeat.state;
     const sourceId = this.streamHeat.sourceId();
-    if (st.kind === 'loading' && !sourceId) return { model: null, lines: ['Broker DOM depth: loading every book event…'] };
-    if (st.kind === 'idle' && !sourceId) return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
+    if (st.kind === 'loading' && !sourceId)
+      return { model: null, lines: ['Broker DOM depth: loading every book event…'] };
+    if (st.kind === 'idle' && !sourceId)
+      return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
     const src = this.mdSources()?.find((s) => s.sourceId === sourceId) ?? null;
     const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
     this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
-    const live = this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
+    const live =
+      this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
     const lines = [
       `${kind} depth — ${this.labelOf(sourceId)}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
       `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
     ];
     const note = this.streamHeat.note();
     if (note) lines.push(note);
-    return { model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity }, lines };
+    return {
+      model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity },
+      lines,
+    };
   }
 
   private tradeLayer(): { model: TradeBubblesModel | null; lines: string[] } {
@@ -700,10 +725,13 @@ export class OrderFlowFeed {
     if (!src)
       return {
         model: null,
-        lines: [`Trades: no source you are entitled to publishes trades for ${symbol} (spot FX brokers have no tape; CME / venue feeds do)`],
+        lines: [
+          `Trades: no source you are entitled to publishes trades for ${symbol} (spot FX brokers have no tape; CME / venue feeds do)`,
+        ],
       };
     const v = this.deps.view();
-    if (v && !streamHeatFits(this.streamView(v))) return { model: null, lines: ['Trades: zoom in to 2 h or less to see each trade'] };
+    if (v && !streamHeatFits(this.streamView(v)))
+      return { model: null, lines: ['Trades: zoom in to 2 h or less to see each trade'] };
     const st = this.tradeFeed.state;
     if (st.kind === 'error') return { model: null, lines: [`Trades unavailable — ${st.message}`] };
     const min = this.deps.settings().tradeMinSize;
@@ -711,7 +739,12 @@ export class OrderFlowFeed {
       `Trades — ${sourceLabel(src)}, each print: size = area, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
     ];
     return {
-      model: { feed: this.tradeFeed, label: sourceLabel(src), minSize: min, clipUtc: this.deps.replayClip() },
+      model: {
+        feed: this.tradeFeed,
+        label: sourceLabel(src),
+        minSize: min,
+        clipUtc: this.deps.replayClip(),
+      },
       lines,
     };
   }
@@ -805,7 +838,11 @@ export class OrderFlowFeed {
       const rowsNow = this.deps.tickFootprint(forming.time, clipNow);
       if (rowsNow) {
         const at = out.findIndex((b) => b.t === forming.time);
-        const fb: FootprintBar = { t: forming.time, end: Math.max(clipNow, forming.time + 1), cells: footprintCells(rowsNow, rowPrice) };
+        const fb: FootprintBar = {
+          t: forming.time,
+          end: Math.max(clipNow, forming.time + 1),
+          cells: footprintCells(rowsNow, rowPrice),
+        };
         if (at >= 0) out[at] = fb;
         else out.push(fb);
       }

@@ -1,4 +1,12 @@
-import { DestroyRef, Injectable, NgZone, inject, signal, type Signal, type WritableSignal } from '@angular/core';
+import {
+  DestroyRef,
+  Injectable,
+  NgZone,
+  inject,
+  signal,
+  type Signal,
+  type WritableSignal,
+} from '@angular/core';
 import { HubConnectionBuilder, LogLevel } from '@microsoft/signalr';
 
 import { AuthService } from '@core/auth/auth.service';
@@ -177,7 +185,9 @@ export class MarketDataStreamService {
     let builder = new HubConnectionBuilder().withUrl(plan.url, plan.options);
     if (protocol === 'messagepack') builder = builder.withHubProtocol(new MessagePackHubProtocol());
     if (plan.autoReconnect)
-      builder = builder.withAutomaticReconnect({ nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount) });
+      builder = builder.withAutomaticReconnect({
+        nextRetryDelayInMilliseconds: (ctx) => backoffMs(ctx.previousRetryCount),
+      });
     const connection = builder.configureLogging(LogLevel.Warning).build();
     await connection.start();
     return connection;

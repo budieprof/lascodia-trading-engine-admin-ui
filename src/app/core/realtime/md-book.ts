@@ -112,7 +112,11 @@ export class BookState {
   /** The book as a C5 keyframe stamped `t` (bids best first, asks best first); null while unknown. */
   toKeyframe(t: number): MdKeyframeWire | null {
     if (!this.known) return null;
-    return { t, b: this.bidLevels().map((l) => [l[0], l[1]]), a: this.askLevels().map((l) => [l[0], l[1]]) };
+    return {
+      t,
+      b: this.bidLevels().map((l) => [l[0], l[1]]),
+      a: this.askLevels().map((l) => [l[0], l[1]]),
+    };
   }
 }
 

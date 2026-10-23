@@ -26,10 +26,15 @@ function utf8Decode(bytes: Uint8Array, start: number, end: number): string {
     if (c < 0x80) out += String.fromCharCode(c);
     else if (c < 0xe0) out += String.fromCharCode(((c & 0x1f) << 6) | (bytes[i++] & 0x3f));
     else if (c < 0xf0)
-      out += String.fromCharCode(((c & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f));
+      out += String.fromCharCode(
+        ((c & 0x0f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f),
+      );
     else {
       const cp =
-        ((c & 0x07) << 18) | ((bytes[i++] & 0x3f) << 12) | ((bytes[i++] & 0x3f) << 6) | (bytes[i++] & 0x3f);
+        ((c & 0x07) << 18) |
+        ((bytes[i++] & 0x3f) << 12) |
+        ((bytes[i++] & 0x3f) << 6) |
+        (bytes[i++] & 0x3f);
       out += String.fromCodePoint(cp);
     }
   }
@@ -43,9 +48,15 @@ function utf8Encode(s: string): Uint8Array {
     const cp = ch.codePointAt(0)!;
     if (cp < 0x80) out.push(cp);
     else if (cp < 0x800) out.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
-    else if (cp < 0x10000) out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+    else if (cp < 0x10000)
+      out.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
     else
-      out.push(0xf0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3f), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+      out.push(
+        0xf0 | (cp >> 18),
+        0x80 | ((cp >> 12) & 0x3f),
+        0x80 | ((cp >> 6) & 0x3f),
+        0x80 | (cp & 0x3f),
+      );
   }
   return Uint8Array.from(out);
 }

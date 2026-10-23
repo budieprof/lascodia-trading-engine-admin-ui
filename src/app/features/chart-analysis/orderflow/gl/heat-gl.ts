@@ -126,13 +126,20 @@ function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLSh
  * A WebGL2 surface, or null where WebGL2 is not available (jsdom, old GPUs, a lost context) — the caller then keeps
  * the canvas-2D bucket heatmap.
  */
-export function createWebGlHeatSurface(doc: Document | null = typeof document !== 'undefined' ? document : null): HeatSurface | null {
+export function createWebGlHeatSurface(
+  doc: Document | null = typeof document !== 'undefined' ? document : null,
+): HeatSurface | null {
   if (!doc) return null;
   let canvas: HTMLCanvasElement;
   let gl: WebGL2RenderingContext | null = null;
   try {
     canvas = doc.createElement('canvas');
-    gl = canvas.getContext('webgl2', { premultipliedAlpha: true, alpha: true, antialias: false, preserveDrawingBuffer: true });
+    gl = canvas.getContext('webgl2', {
+      premultipliedAlpha: true,
+      alpha: true,
+      antialias: false,
+      preserveDrawingBuffer: true,
+    });
   } catch {
     return null;
   }
@@ -221,7 +228,17 @@ class WebGlHeatSurface implements HeatSurface {
     const d = folder.takeDirty();
     if (!d) return;
     const n = d.to - d.from + 1;
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, d.from, rows, n, gl.RED, gl.FLOAT, folder.data.subarray(d.from * rows, (d.to + 1) * rows));
+    gl.texSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      0,
+      d.from,
+      rows,
+      n,
+      gl.RED,
+      gl.FLOAT,
+      folder.data.subarray(d.from * rows, (d.to + 1) * rows),
+    );
   }
 
   draw(p: HeatDrawParams): void {

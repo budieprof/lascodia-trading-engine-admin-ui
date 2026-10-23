@@ -8,7 +8,13 @@ describe('msgpack codec', () => {
     const value = {
       symbol: 'EURUSD',
       sourceId: 'mt5-metaquotes-demo',
-      ticks: { t: [1792771523554, 1792771523600], b: [1.11996, 1.11997], a: [1.11997, 1.11998], f: [6, 2], v: [0, 0] },
+      ticks: {
+        t: [1792771523554, 1792771523600],
+        b: [1.11996, 1.11997],
+        a: [1.11997, 1.11998],
+        f: [6, 2],
+        v: [0, 0],
+      },
       book: [{ t: 1792771523554, k: 'S', b: [[1.11996, 2200000]], a: [[1.11997, 2000000]] }],
       neg: [-1, -31, -32, -33, -128, -129, -40000, -3000000000],
       big: [127, 128, 255, 256, 65535, 65536, 4294967295, 4294967296, Number.MAX_SAFE_INTEGER],
@@ -26,7 +32,16 @@ describe('msgpack codec', () => {
     const ms = 1792771523554;
     const hi = Math.floor(ms / 2 ** 32);
     const lo = ms >>> 0;
-    bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255, (lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    bytes.push(
+      (hi >>> 24) & 255,
+      (hi >>> 16) & 255,
+      (hi >>> 8) & 255,
+      hi & 255,
+      (lo >>> 24) & 255,
+      (lo >>> 16) & 255,
+      (lo >>> 8) & 255,
+      lo & 255,
+    );
     bytes.push(0xa1, 0x70, 0xcb);
     const f = new DataView(new ArrayBuffer(8));
     f.setFloat64(0, 1.11996);
@@ -37,15 +52,22 @@ describe('msgpack codec', () => {
     expect(msgpackDecode(Uint8Array.from([0xd0, 0x80]))).toBe(-128);
     expect(msgpackDecode(Uint8Array.from([0xd1, 0x80, 0x00]))).toBe(-32768);
     expect(msgpackDecode(Uint8Array.from([0xd2, 0xff, 0xff, 0xff, 0xfe]))).toBe(-2);
-    expect(msgpackDecode(Uint8Array.from([0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfd]))).toBe(-3);
+    expect(
+      msgpackDecode(Uint8Array.from([0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfd])),
+    ).toBe(-3);
     expect(msgpackDecode(Uint8Array.from([0xca, 0x3f, 0xc0, 0x00, 0x00]))).toBe(1.5);
     expect(msgpackDecode(Uint8Array.from([0xdc, 0x00, 0x02, 0x01, 0x02]))).toEqual([1, 2]);
     expect(msgpackDecode(Uint8Array.from([0xde, 0x00, 0x01, 0xa1, 0x61, 0x07]))).toEqual({ a: 7 });
   });
 
   it('decodes the timestamp extension as a Date and other extensions raw', () => {
-    expect(msgpackDecode(Uint8Array.from([0xd6, 0xff, 0x00, 0x00, 0x00, 0x3c]))).toEqual(new Date(60_000));
-    expect(msgpackDecode(Uint8Array.from([0xd4, 0x05, 0x09]))).toEqual({ type: 5, data: Uint8Array.from([9]) });
+    expect(msgpackDecode(Uint8Array.from([0xd6, 0xff, 0x00, 0x00, 0x00, 0x3c]))).toEqual(
+      new Date(60_000),
+    );
+    expect(msgpackDecode(Uint8Array.from([0xd4, 0x05, 0x09]))).toEqual({
+      type: 5,
+      data: Uint8Array.from([9]),
+    });
   });
 
   it('refuses truncated data', () => {
@@ -76,7 +98,11 @@ describe('MessagePackHubProtocol', () => {
   });
 
   it('parses an md invocation, a completion with a result, a void completion, a ping and a close', () => {
-    const md = { symbol: 'EURUSD', sourceId: 'mt5-x', book: [{ t: 1, k: 'D', b: [[1.1, 0]], a: [] }] };
+    const md = {
+      symbol: 'EURUSD',
+      sourceId: 'mt5-x',
+      book: [{ t: 1, k: 'D', b: [[1.1, 0]], a: [] }],
+    };
     const parts = [
       msgpackEncode([MessageType.Invocation, {}, null, 'md', [md]]),
       msgpackEncode([MessageType.Completion, {}, '1', 3, { ok: true, denied: [] }]),
@@ -95,7 +121,11 @@ describe('MessagePackHubProtocol', () => {
     expect(msgs).toHaveLength(6);
     expect(msgs[0]).toMatchObject({ type: MessageType.Invocation, target: 'md', arguments: [md] });
     expect((msgs[0] as { invocationId?: string }).invocationId).toBeUndefined();
-    expect(msgs[1]).toMatchObject({ type: MessageType.Completion, invocationId: '1', result: { ok: true, denied: [] } });
+    expect(msgs[1]).toMatchObject({
+      type: MessageType.Completion,
+      invocationId: '1',
+      result: { ok: true, denied: [] },
+    });
     expect(msgs[2]).toEqual({ type: MessageType.Completion, headers: {}, invocationId: '2' });
     expect(msgs[3]).toMatchObject({ error: 'boom' });
     expect(msgs[4]).toEqual({ type: MessageType.Ping });
@@ -113,7 +143,14 @@ describe('MessagePackHubProtocol', () => {
       }),
     );
     const [[s, e]] = binaryFrames(out);
-    expect(new MsgPackReader(out, s, e).read()).toEqual([1, {}, '7', 'Subscribe', ['EURUSD', null, ['book', 'ticks']], []]);
+    expect(new MsgPackReader(out, s, e).read()).toEqual([
+      1,
+      {},
+      '7',
+      'Subscribe',
+      ['EURUSD', null, ['book', 'ticks']],
+      [],
+    ]);
     const ping = new Uint8Array(protocol.writeMessage({ type: MessageType.Ping }));
     expect([...ping]).toEqual([2, 0x91, 6]);
   });

@@ -8,7 +8,12 @@ import { BookTimeline } from '../../src/app/core/realtime/md-book';
 import type { MdBookEventWire } from '../../src/app/core/realtime/marketdata.types';
 import { createWebGlHeatSurface } from '../../src/app/features/chart-analysis/orderflow/gl/heat-gl';
 import { heatQuads } from '../../src/app/features/chart-analysis/orderflow/gl/heat-layout';
-import { HeatFolder, bookLevelStep, bookPriceRange, heatSpecFor } from '../../src/app/features/chart-analysis/orderflow/gl/heat-texture';
+import {
+  HeatFolder,
+  bookLevelStep,
+  bookPriceRange,
+  heatSpecFor,
+} from '../../src/app/features/chart-analysis/orderflow/gl/heat-texture';
 
 interface BenchInput {
   events: MdBookEventWire[];
@@ -23,7 +28,14 @@ interface BenchInput {
 function stats(xs: number[]) {
   const s = [...xs].sort((a, b) => a - b);
   const q = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))];
-  return { n: s.length, mean: s.reduce((a, b) => a + b, 0) / s.length, p50: q(0.5), p95: q(0.95), p99: q(0.99), max: s[s.length - 1] };
+  return {
+    n: s.length,
+    mean: s.reduce((a, b) => a + b, 0) / s.length,
+    p50: q(0.5),
+    p95: q(0.95),
+    p99: q(0.99),
+    max: s[s.length - 1],
+  };
 }
 
 async function run(input: BenchInput) {
@@ -73,7 +85,9 @@ async function run(input: BenchInput) {
   const tUpload = performance.now() - t3;
 
   const dbg = gl.getExtension('WEBGL_debug_renderer_info');
-  const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+  const renderer = dbg
+    ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+    : gl.getParameter(gl.RENDERER);
 
   const pxPerMs = width / (to - from);
   const frameCpu: number[] = [];
@@ -89,15 +103,25 @@ async function run(input: BenchInput) {
       last = now;
       const a = performance.now();
       // Live: append this frame's events and fold them.
-      for (let k = 0; k < input.liveEventsPerFrame && li < live.length; k++, li++) timeline.append(live[li]);
+      for (let k = 0; k < input.liveEventsPerFrame && li < live.length; k++, li++)
+        timeline.append(live[li]);
       if (input.liveEventsPerFrame > 0) folder.advanceTo(li < live.length ? live[li].t : to);
       // Pan a little every frame (projection changes, texture does not).
       const pan = (n % 120) - 60;
       const xAt = (t: number) => (t - from) * pxPerMs + pan;
-      const yAt = (p: number) => height / 2 - (p - (range.lo + range.hi) / 2) / (((range.hi - range.lo) * 2) / height);
+      const yAt = (p: number) =>
+        height / 2 - (p - (range.lo + range.hi) / 2) / (((range.hi - range.lo) * 2) / height);
       const quads = heatQuads(spec, [{ t0: from, t1: to }], xAt, yAt, width, height);
       surface.sync(folder);
-      surface.draw({ width, height, pixelWidth: width * dpr, pixelHeight: height * dpr, quads, robustMax, opacity: 0.6 });
+      surface.draw({
+        width,
+        height,
+        pixelWidth: width * dpr,
+        pixelHeight: height * dpr,
+        quads,
+        robustMax,
+        opacity: 0.6,
+      });
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(surface.canvas as CanvasImageSource, 0, 0, canvas.width, canvas.height);
       frameCpu.push(performance.now() - a);
@@ -118,7 +142,13 @@ async function run(input: BenchInput) {
     renderer,
     events: events.length,
     spanMinutes: (to - from) / 60_000,
-    grid: { cols: spec.cols, rows: spec.rows, colMs: spec.colMs, rowStep: spec.rowStep, textureMB: (spec.cols * spec.rows * 4) / 1e6 },
+    grid: {
+      cols: spec.cols,
+      rows: spec.rows,
+      colMs: spec.colMs,
+      rowStep: spec.rowStep,
+      textureMB: (spec.cols * spec.rows * 4) / 1e6,
+    },
     setupMs: { timeline: tTimeline, fold: tFold, robustMax: tRobust, firstUpload: tUpload },
     frameMs: stats(frameCpu),
     frameWithGpuFinishMs: stats(frameGpuSync),

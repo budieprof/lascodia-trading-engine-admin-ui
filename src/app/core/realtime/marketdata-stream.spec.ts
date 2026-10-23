@@ -1,4 +1,10 @@
-import { MarketDataStreamCore, MD_FRAME_EVENT, type MdConnection, type MdProtocol, type MdStreamDeps } from './marketdata-stream';
+import {
+  MarketDataStreamCore,
+  MD_FRAME_EVENT,
+  type MdConnection,
+  type MdProtocol,
+  type MdStreamDeps,
+} from './marketdata-stream';
 import type { MdFrame, MdHistory, MdHistoryRequest } from './marketdata.types';
 import { loadMdFixture } from './testing/md-fixture';
 
@@ -17,7 +23,11 @@ class FakeConnection implements MdConnection {
     this.calls.push({ method, args });
     if (method === 'Subscribe') {
       const [, sources, kinds] = args as [string, string[] | null, string[]];
-      return { ok: true, denied: [], subscribed: (sources ?? ['src']).flatMap((s) => kinds.map((k) => `${s}:${k}`)) } as T;
+      return {
+        ok: true,
+        denied: [],
+        subscribed: (sources ?? ['src']).flatMap((s) => kinds.map((k) => `${s}:${k}`)),
+      } as T;
     }
     return undefined as T;
   }
@@ -32,7 +42,9 @@ class FakeConnection implements MdConnection {
   }
 }
 
-function harness(opts: { refuseMsgpack?: boolean; history?: (r: MdHistoryRequest) => Promise<MdHistory> } = {}) {
+function harness(
+  opts: { refuseMsgpack?: boolean; history?: (r: MdHistoryRequest) => Promise<MdHistory> } = {},
+) {
   let now = fixture.book[fixture.book.length - 1].t + 1_000;
   const timers: { fn: () => void; ms: number }[] = [];
   const conns: FakeConnection[] = [];
@@ -47,7 +59,9 @@ function harness(opts: { refuseMsgpack?: boolean; history?: (r: MdHistoryRequest
     },
     history: (r) => {
       historyCalls.push(r);
-      return opts.history ? opts.history(r) : Promise.resolve({ sources: [], truncated: false, message: null });
+      return opts.history
+        ? opts.history(r)
+        : Promise.resolve({ sources: [], truncated: false, message: null });
     },
     now: () => now,
     setTimeout: (fn, ms) => {
@@ -122,7 +136,13 @@ describe('MarketDataStreamCore', () => {
     const kfBook = fixture.book[0];
     const h = harness({
       history: async (r) => ({
-        sources: [{ sourceId: r.sourceIds![0], keyframe: { t: r.from, b: kfBook.b, a: kfBook.a }, book: [] }],
+        sources: [
+          {
+            sourceId: r.sourceIds![0],
+            keyframe: { t: r.from, b: kfBook.b, a: kfBook.a },
+            book: [],
+          },
+        ],
         truncated: false,
         message: null,
       }),
@@ -133,7 +153,11 @@ describe('MarketDataStreamCore', () => {
     h.core.onBook('EURUSD', (_s, _e, reset) => resets.push(reset));
     h.conns[0].push({ symbol: 'EURUSD', sourceId: 'src', book: [fixture.book[1]] }); // a D first
     expect(h.historyCalls).toHaveLength(1);
-    expect(h.historyCalls[0]).toMatchObject({ symbol: 'EURUSD', sourceIds: ['src'], kinds: ['book'] });
+    expect(h.historyCalls[0]).toMatchObject({
+      symbol: 'EURUSD',
+      sourceIds: ['src'],
+      kinds: ['book'],
+    });
     // A second orphan within the retry window does not ask again.
     h.conns[0].push({ symbol: 'EURUSD', sourceId: 'src', book: [fixture.book[2]] });
     expect(h.historyCalls).toHaveLength(1);
@@ -150,7 +174,12 @@ describe('MarketDataStreamCore', () => {
     h.core.watch({ symbol: 'EURUSD', kinds: ['book', 'ticks'] });
     await flush();
     const c1 = h.conns[0];
-    c1.push({ symbol: 'EURUSD', sourceId: 'src', book: fixture.book.slice(0, 20), ticks: { t: [fixture.book[19].t], b: [1.1], a: [1.2] } });
+    c1.push({
+      symbol: 'EURUSD',
+      sourceId: 'src',
+      book: fixture.book.slice(0, 20),
+      ticks: { t: [fixture.book[19].t], b: [1.1], a: [1.2] },
+    });
     // Drop.
     c1.closeCb!();
     expect(h.core.state).toBe('reconnecting');
@@ -165,7 +194,11 @@ describe('MarketDataStreamCore', () => {
     c2.push({ symbol: 'EURUSD', sourceId: 'src', book: fixture.book.slice(40, 50) });
     const s = h.core.stream('EURUSD', 'src')!;
     expect(s.bookEvents).toBe(20);
-    release({ sources: [{ sourceId: 'src', book: fixture.book.slice(15, 40) }], truncated: false, message: null });
+    release({
+      sources: [{ sourceId: 'src', book: fixture.book.slice(15, 40) }],
+      truncated: false,
+      message: null,
+    });
     await flush();
     await flush();
     // 19..39 from history (15..18 are older than the book and skipped; 19 shares the book's time and is applied again —

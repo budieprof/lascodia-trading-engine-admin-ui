@@ -7,7 +7,12 @@ import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
  * (`market-data/order-book/latest`'s {@link OrderBookSnapshot}), so the hub can replace the 1.5 s poll without either
  * consumer changing. `instanceId` carries the SOURCE id (the hub has no EA instance), flagged by `sourceId`.
  */
-export function bookToSnapshot(symbol: string, sourceId: string, book: BookState, maxLevels = 50): OrderBookSnapshot | null {
+export function bookToSnapshot(
+  symbol: string,
+  sourceId: string,
+  book: BookState,
+  maxLevels = 50,
+): OrderBookSnapshot | null {
   if (!book.known || !Number.isFinite(book.t)) return null;
   const bids = book.bidLevels().slice(0, maxLevels);
   const asks = book.askLevels().slice(0, maxLevels);

@@ -161,7 +161,8 @@ export class TradeRing extends Ring {
   pushColumns(c: MdTradesWire): number {
     let kept = 0;
     const n = Math.min(c.t?.length ?? 0, c.p?.length ?? 0, c.s?.length ?? 0);
-    for (let i = 0; i < n; i++) if (this.push(c.t[i], c.p[i], c.s[i], sideCode(c.side?.[i]))) kept++;
+    for (let i = 0; i < n; i++)
+      if (this.push(c.t[i], c.p[i], c.s[i], sideCode(c.side?.[i]))) kept++;
     return kept;
   }
 

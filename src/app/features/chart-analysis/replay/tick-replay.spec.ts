@@ -2,7 +2,14 @@ import type { MdHistory, MdHistoryRequest } from '@core/realtime/marketdata.type
 import { loadMdFixture } from '@core/realtime/testing/md-fixture';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { ReplayController } from './replay-controller';
-import { CHUNK_MS, TickReplay, TickTape, footprintRowsFromTape, formingBarFromTicks, tickReplayView } from './tick-replay';
+import {
+  CHUNK_MS,
+  TickReplay,
+  TickTape,
+  footprintRowsFromTape,
+  formingBarFromTicks,
+  tickReplayView,
+} from './tick-replay';
 
 const fx = loadMdFixture();
 const T0 = Math.min(fx.book[0].t, fx.ticks.t[0]);
@@ -21,19 +28,32 @@ function recorded(r: MdHistoryRequest): MdHistory {
         b.clear();
         a.clear();
       }
-      for (const [p, s] of e.b) (s > 0 ? b.set(p, s) : b.delete(p));
-      for (const [p, s] of e.a) (s > 0 ? a.set(p, s) : a.delete(p));
+      for (const [p, s] of e.b) {
+        if (s > 0) b.set(p, s);
+        else b.delete(p);
+      }
+      for (const [p, s] of e.a) {
+        if (s > 0) a.set(p, s);
+        else a.delete(p);
+      }
     }
     keyframe = { t: r.from, b: [...b] as [number, number][], a: [...a] as [number, number][] };
   }
-  const idx = fx.ticks.t.map((t, i) => [t, i] as const).filter(([t]) => t >= r.from && t < r.to).map(([, i]) => i);
+  const idx = fx.ticks.t
+    .map((t, i) => [t, i] as const)
+    .filter(([t]) => t >= r.from && t < r.to)
+    .map(([, i]) => i);
   return {
     sources: [
       {
         sourceId: fx.sourceId,
         keyframe,
         book: fx.book.filter((e) => e.t >= r.from && e.t < r.to),
-        ticks: { t: idx.map((i) => fx.ticks.t[i]), b: idx.map((i) => fx.ticks.b[i]), a: idx.map((i) => fx.ticks.a[i]) },
+        ticks: {
+          t: idx.map((i) => fx.ticks.t[i]),
+          b: idx.map((i) => fx.ticks.b[i]),
+          a: idx.map((i) => fx.ticks.a[i]),
+        },
       },
     ],
     truncated: false,
@@ -88,7 +108,10 @@ describe('TickTape', () => {
     expect(tape.prevEventBefore(walked[10])).toBe(walked[9]);
     const q = tape.lastTick(fx.ticks.t[5]);
     expect(q).toEqual({ t: fx.ticks.t[5], bid: fx.ticks.b[5], ask: fx.ticks.a[5] });
-    expect(tape.ticksIn(fx.ticks.t[2], fx.ticks.t[4]).map((x) => x.t)).toEqual([fx.ticks.t[3], fx.ticks.t[4]]);
+    expect(tape.ticksIn(fx.ticks.t[2], fx.ticks.t[4]).map((x) => x.t)).toEqual([
+      fx.ticks.t[3],
+      fx.ticks.t[4],
+    ]);
   });
 
   it('folds the forming bar from bid ticks; a bar with no tick yet is not drawn', () => {
@@ -98,7 +121,13 @@ describe('TickTape', () => {
     const head = fx.ticks.t[9];
     const f = formingBarFromTicks(bar, tape, head)!;
     const bids = fx.ticks.b.slice(0, 10);
-    expect(f).toMatchObject({ open: bids[0], close: bids[9], high: Math.max(...bids), low: Math.min(...bids), volume: 10 });
+    expect(f).toMatchObject({
+      open: bids[0],
+      close: bids[9],
+      high: Math.max(...bids),
+      low: Math.min(...bids),
+      volume: 10,
+    });
     const bars: Bar[] = [
       { time: fx.ticks.t[0] - 60_000, open: 1, high: 1, low: 1, close: 1, volume: 1 },
       bar,
@@ -107,7 +136,9 @@ describe('TickTape', () => {
     const view = tickReplayView(bars, head, (i) => bars[i].time + 60_000, tape);
     expect(view).toHaveLength(2);
     expect(view[1].close).toBe(bids[9]);
-    expect(tickReplayView(bars, bars[1].time + 60_000, (i) => bars[i].time + 60_000, tape)).toHaveLength(2);
+    expect(
+      tickReplayView(bars, bars[1].time + 60_000, (i) => bars[i].time + 60_000, tape),
+    ).toHaveLength(2);
   });
 });
 
@@ -180,7 +211,14 @@ describe('ReplayController tick mode', () => {
   it('moves the head through ticks, folds the forming bar, and fills paper trades on the recorded bid / ask', async () => {
     const calls: MdHistoryRequest[] = [];
     // Bars: 10 s bars around the recording (only their times matter; the head bar is folded from ticks).
-    const bars: Bar[] = Array.from({ length: 6 }, (_, i) => ({ time: T0 - 10_000 + i * 10_000, open: 1, high: 1, low: 1, close: 1, volume: 1 }));
+    const bars: Bar[] = Array.from({ length: 6 }, (_, i) => ({
+      time: T0 - 10_000 + i * 10_000,
+      open: 1,
+      high: 1,
+      low: 1,
+      close: 1,
+      volume: 1,
+    }));
     const rc = new ReplayController({
       bars: () => bars,
       resolution: () => '1S' as never,

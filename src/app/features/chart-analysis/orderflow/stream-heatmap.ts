@@ -8,7 +8,13 @@ import {
   type MdHistoryRequest,
   type MdHistorySourceWire,
 } from '@core/realtime/marketdata.types';
-import { HeatFolder, bookLevelStep, bookPriceRange, heatSpecFor, type HeatTextureSpec } from './gl/heat-texture';
+import {
+  HeatFolder,
+  bookLevelStep,
+  bookPriceRange,
+  heatSpecFor,
+  type HeatTextureSpec,
+} from './gl/heat-texture';
 
 /**
  * The event-level heatmap's data side (no Angular, no GL): what one window of the chart needs —
@@ -77,7 +83,10 @@ interface Held {
 }
 
 /** The fetch window for a view: the view ± margin, ending at the cap; null when it is wider than C5 serves book for. */
-export function streamWindowFor(view: StreamHeatView, capUtc: number): { fromUtc: number; toUtc: number } | null {
+export function streamWindowFor(
+  view: StreamHeatView,
+  capUtc: number,
+): { fromUtc: number; toUtc: number } | null {
   const span = Math.max(10_000, view.toUtc - view.fromUtc);
   const fromUtc = Math.floor(view.fromUtc - span * STREAM_WINDOW_MARGIN);
   const toUtc = Math.ceil(Math.min(capUtc, view.toUtc + span * STREAM_WINDOW_MARGIN));
@@ -93,7 +102,10 @@ export function streamHeatFits(view: Pick<StreamHeatView, 'fromUtc' | 'toUtc'>):
 }
 
 /** Pick the source to draw from a C5 answer: the requested one, else the one with the most book events. */
-export function pickHistorySource(sources: readonly MdHistorySourceWire[], wanted: string | null): MdHistorySourceWire | null {
+export function pickHistorySource(
+  sources: readonly MdHistorySourceWire[],
+  wanted: string | null,
+): MdHistorySourceWire | null {
   if (wanted) return sources.find((s) => s.sourceId === wanted) ?? null;
   let best: MdHistorySourceWire | null = null;
   for (const s of sources) {
@@ -153,7 +165,13 @@ export class StreamHeatmap {
    * Point the layer at a view. `head` = the replay head (null live), `live` = the right edge is on screen. Fetches when
    * the window moved off what is held; re-folds when the zoom changed; otherwise only advances.
    */
-  update(opts: { symbol: string; sourceId: string | null; view: StreamHeatView; head: number | null; live: boolean }): void {
+  update(opts: {
+    symbol: string;
+    sourceId: string | null;
+    view: StreamHeatView;
+    head: number | null;
+    live: boolean;
+  }): void {
     this.wantedSymbol = opts.symbol.toUpperCase();
     this.wantedSource = opts.sourceId;
     this.view = opts.view;
@@ -168,7 +186,8 @@ export class StreamHeatmap {
       return;
     }
     const h = this.held;
-    const sameSeries = !!h && h.symbol === this.wantedSymbol && (!opts.sourceId || h.sourceId === opts.sourceId);
+    const sameSeries =
+      !!h && h.symbol === this.wantedSymbol && (!opts.sourceId || h.sourceId === opts.sourceId);
     const span = window.toUtc - window.fromUtc;
     // Live, the held window keeps growing with the stream: only its start matters.
     const covered =
@@ -195,10 +214,15 @@ export class StreamHeatmap {
 
   dispose(): void {
     this.clear();
-    if (this.raf !== null && typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(this.raf);
+    if (this.raf !== null && typeof cancelAnimationFrame !== 'undefined')
+      cancelAnimationFrame(this.raf);
   }
 
-  private async fetch(symbol: string, sourceId: string | null, window: { fromUtc: number; toUtc: number }): Promise<void> {
+  private async fetch(
+    symbol: string,
+    sourceId: string | null,
+    window: { fromUtc: number; toUtc: number },
+  ): Promise<void> {
     const n = ++this.seq;
     this.state = { kind: 'loading' };
     this.deps.changed();
@@ -215,8 +239,13 @@ export class StreamHeatmap {
       if (!src) {
         this.held = null;
         this.folder = null;
-        const denied = answer.denied?.length ? ` (not entitled to ${answer.denied.join(', ')})` : '';
-        this.state = { kind: 'error', message: `no book stored for ${symbol} in this window${denied}` };
+        const denied = answer.denied?.length
+          ? ` (not entitled to ${answer.denied.join(', ')})`
+          : '';
+        this.state = {
+          kind: 'error',
+          message: `no book stored for ${symbol} in this window${denied}`,
+        };
         this.deps.changed();
         return;
       }
@@ -239,7 +268,10 @@ export class StreamHeatmap {
     } catch (e) {
       if (n !== this.seq) return;
       const m = (e as { message?: unknown })?.message;
-      this.state = { kind: 'error', message: typeof m === 'string' && m ? m : 'md/history did not answer' };
+      this.state = {
+        kind: 'error',
+        message: typeof m === 'string' && m ? m : 'md/history did not answer',
+      };
       this.deps.changed();
     }
   }
@@ -251,7 +283,9 @@ export class StreamHeatmap {
     if (!h || !v) return null;
     const viewSpan = Math.max(10_000, v.toUtc - v.fromUtc);
     const pxPerMs = v.widthPx / viewSpan;
-    const end = this.liveWanted ? Math.max(h.toUtc, this.deps.now()) + viewSpan * LIVE_HEADROOM : h.toUtc;
+    const end = this.liveWanted
+      ? Math.max(h.toUtc, this.deps.now()) + viewSpan * LIVE_HEADROOM
+      : h.toUtc;
     const from = h.fromUtc;
     const range = bookPriceRange(h.timeline);
     const lastTick = h.ticks.last();
@@ -323,7 +357,11 @@ export class StreamHeatmap {
     this.md = null;
     this.mdKey = key;
     if (!key || !h) return;
-    const md = this.deps.watch({ symbol: h.symbol, sources: [h.sourceId], kinds: ['book', 'ticks'] });
+    const md = this.deps.watch({
+      symbol: h.symbol,
+      sources: [h.sourceId],
+      kinds: ['book', 'ticks'],
+    });
     if (!md) return;
     this.md = md;
     md.onBook((stream, events, reset) => {

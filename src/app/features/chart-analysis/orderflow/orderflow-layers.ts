@@ -134,7 +134,8 @@ export class OrderFlowLayers {
     if (this.axisCache?.bars === bars) return this.axisCache;
     const times = bars.map((b) => b.time);
     const gaps: number[] = [];
-    for (let i = Math.max(1, times.length - 200); i < times.length; i++) gaps.push(times[i] - times[i - 1]);
+    for (let i = Math.max(1, times.length - 200); i < times.length; i++)
+      gaps.push(times[i] - times[i - 1]);
     gaps.sort((a, b) => a - b);
     const barMs = gaps.length ? gaps[gaps.length >> 1] : 0;
     this.axisCache = { bars, times, barMs };

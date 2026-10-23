@@ -115,7 +115,9 @@ export function sourceKinds(s: MdSource): MdKind[] {
 }
 
 /** A short label for a source: its display name without the trailing "(MT5 broker)" style suffix. */
-export function sourceLabel(s: Pick<MdSource, 'displayName' | 'sourceId'> | null | undefined): string {
+export function sourceLabel(
+  s: Pick<MdSource, 'displayName' | 'sourceId'> | null | undefined,
+): string {
   if (!s) return 'unknown source';
   const name = (s.displayName || s.sourceId).replace(/\s*\([^)]*\)\s*$/, '').trim();
   return name || s.sourceId;

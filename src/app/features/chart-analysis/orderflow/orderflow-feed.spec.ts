@@ -139,7 +139,9 @@ describe('OrderFlowFeed', () => {
           sources: [
             {
               sourceId: 'mt5-metaquotes-demo',
-              book: [{ t: r.from + 1000, k: 'S', b: [[1.1, 1_000_000]], a: [[1.10002, 2_000_000]] }],
+              book: [
+                { t: r.from + 1000, k: 'S', b: [[1.1, 1_000_000]], a: [[1.10002, 2_000_000]] },
+              ],
               ticks: { t: [r.from + 1000], b: [1.1], a: [1.10002] },
             },
           ],
@@ -305,12 +307,17 @@ describe('OrderFlowFeed', () => {
     expect(api.heatmap).not.toHaveBeenCalled();
     expect(watch).not.toHaveBeenCalled();
     expect(md.history).toHaveBeenCalledTimes(1);
-    expect(md.history.mock.calls[0][0]).toMatchObject({ symbol: 'EURUSD', kinds: ['book', 'ticks'] });
+    expect(md.history.mock.calls[0][0]).toMatchObject({
+      symbol: 'EURUSD',
+      kinds: ['book', 'ticks'],
+    });
     expect(feed.heatMode()).toBe('stream');
     const m = feed.model()!;
     expect(m.heatmap!.stream).toBeDefined();
     expect(m.heatmap!.stream!.layer()).not.toBeNull();
-    expect(m.captions[0]).toBe('Broker depth — MetaQuotes-Demo, every book event (event-level, WebGL)');
+    expect(m.captions[0]).toBe(
+      'Broker depth — MetaQuotes-Demo, every book event (event-level, WebGL)',
+    );
     expect(m.captions[1]).toMatch(/^Sizes as the source reports them \(registered unit: Lots\)/);
   });
 

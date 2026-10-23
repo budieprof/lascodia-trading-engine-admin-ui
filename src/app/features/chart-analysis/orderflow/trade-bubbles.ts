@@ -1,7 +1,11 @@
 import { TradeRing } from '@core/realtime/md-rings';
 import type { MdWatch } from '@core/realtime/marketdata-stream.service';
 import type { MdWatchSpec } from '@core/realtime/marketdata-stream';
-import { MD_HISTORY_MAX_BOOK_MS, type MdHistory, type MdHistoryRequest } from '@core/realtime/marketdata.types';
+import {
+  MD_HISTORY_MAX_BOOK_MS,
+  type MdHistory,
+  type MdHistoryRequest,
+} from '@core/realtime/marketdata.types';
 import { percentile } from './heatmap-grid';
 
 /**
@@ -77,7 +81,11 @@ export function placeBubbles(
 }
 
 /** The bubble under (x, y): the topmost (last painted) containing it. */
-export function bubbleAt(placed: readonly PlacedBubble[], x: number, y: number): PlacedBubble | null {
+export function bubbleAt(
+  placed: readonly PlacedBubble[],
+  x: number,
+  y: number,
+): PlacedBubble | null {
   for (let i = placed.length - 1; i >= 0; i--) {
     const b = placed[i];
     const dx = x - b.x;
@@ -94,7 +102,11 @@ export interface TradeFeedDeps {
   changed(): void;
 }
 
-export type TradeFeedState = { kind: 'idle' } | { kind: 'loading' } | { kind: 'error'; message: string } | { kind: 'ready' };
+export type TradeFeedState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'ready' };
 
 /** The trades one source printed in the window (history + live), for the bubbles layer. */
 export class TradeFeed {
@@ -110,7 +122,14 @@ export class TradeFeed {
   constructor(private readonly deps: TradeFeedDeps) {}
 
   /** Point at a window; `head` = replay head (no live), `live` = the right edge is on screen. */
-  update(opts: { symbol: string; sourceId: string; fromUtc: number; toUtc: number; head: number | null; live: boolean }): void {
+  update(opts: {
+    symbol: string;
+    sourceId: string;
+    fromUtc: number;
+    toUtc: number;
+    head: number | null;
+    live: boolean;
+  }): void {
     const symbol = opts.symbol.toUpperCase();
     const cap = opts.head ?? this.deps.now();
     const from = Math.floor(opts.fromUtc);
@@ -121,7 +140,12 @@ export class TradeFeed {
     }
     const h = this.held;
     const live = opts.live && opts.head === null;
-    const covered = h && h.symbol === symbol && h.sourceId === opts.sourceId && from >= h.fromUtc && (live || to <= h.toUtc);
+    const covered =
+      h &&
+      h.symbol === symbol &&
+      h.sourceId === opts.sourceId &&
+      from >= h.fromUtc &&
+      (live || to <= h.toUtc);
     this.syncLive(live ? `${symbol}|${opts.sourceId}` : '', symbol, opts.sourceId);
     if (covered) return;
     void this.fetch(symbol, opts.sourceId, from, to);
@@ -140,7 +164,13 @@ export class TradeFeed {
     this.state = { kind: 'loading' };
     this.deps.changed();
     try {
-      const h = await this.deps.history({ symbol, sourceIds: [sourceId], from, to, kinds: ['trades'] });
+      const h = await this.deps.history({
+        symbol,
+        sourceIds: [sourceId],
+        from,
+        to,
+        kinds: ['trades'],
+      });
       if (n !== this.seq) return;
       const src = h.sources?.find((s) => s.sourceId === sourceId);
       const ring = new TradeRing(Math.max(65_536, (src?.trades?.t.length ?? 0) + 16_384));
@@ -149,11 +179,17 @@ export class TradeFeed {
       this.sourceId = sourceId;
       this.refMax = tradeRefMax(ring);
       this.held = { symbol, sourceId, fromUtc: from, toUtc: to };
-      this.state = h.denied?.length && !src ? { kind: 'error', message: `not entitled to ${h.denied.join(', ')}` } : { kind: 'ready' };
+      this.state =
+        h.denied?.length && !src
+          ? { kind: 'error', message: `not entitled to ${h.denied.join(', ')}` }
+          : { kind: 'ready' };
     } catch (e) {
       if (n !== this.seq) return;
       const m = (e as { message?: unknown })?.message;
-      this.state = { kind: 'error', message: typeof m === 'string' && m ? m : 'md/history did not answer' };
+      this.state = {
+        kind: 'error',
+        message: typeof m === 'string' && m ? m : 'md/history did not answer',
+      };
     }
     this.deps.changed();
   }

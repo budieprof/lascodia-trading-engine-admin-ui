@@ -57,7 +57,13 @@ export class TickTape {
   }
 
   /** Append one window's source data (ticks / book events at or after the current end). */
-  append(src: { ticks?: { t: number[]; b: number[]; a: number[] } | null; book?: { t: number; k: 'S' | 'D'; b: [number, number][]; a: [number, number][] }[] | null }, to: number): void {
+  append(
+    src: {
+      ticks?: { t: number[]; b: number[]; a: number[] } | null;
+      book?: { t: number; k: 'S' | 'D'; b: [number, number][]; a: [number, number][] }[] | null;
+    },
+    to: number,
+  ): void {
     const last = this.t.length ? this.t[this.t.length - 1] : -Infinity;
     const ticks = src.ticks;
     if (ticks)
@@ -149,7 +155,14 @@ export function formingBarFromTicks(bar: Bar, tape: TickTape, head: number): Bar
     if (tape.b[i] > high) high = tape.b[i];
     if (tape.b[i] < low) low = tape.b[i];
   }
-  const out: Bar = { time: bar.time, open: tape.b[i0], high, low, close: tape.b[i1 - 1], volume: i1 - i0 };
+  const out: Bar = {
+    time: bar.time,
+    open: tape.b[i0],
+    high,
+    low,
+    close: tape.b[i1 - 1],
+    volume: i1 - i0,
+  };
   if (bar.closeTime !== undefined) out.closeTime = bar.closeTime;
   return out;
 }
@@ -198,7 +211,12 @@ export function footprintRowsFromTape(tape: TickTape, from: number, to: number):
  * The bars plotted at a tick-replay head: every bar that ENDED by the head, then the bar containing the head folded
  * from its ticks so far (left out until its first tick — even its open is not known before that).
  */
-export function tickReplayView(bars: readonly Bar[], head: number, barEnd: (i: number) => number, tape: TickTape | null): Bar[] {
+export function tickReplayView(
+  bars: readonly Bar[],
+  head: number,
+  barEnd: (i: number) => number,
+  tape: TickTape | null,
+): Bar[] {
   let lo = 0;
   let hi = bars.length;
   while (lo < hi) {
@@ -383,22 +401,35 @@ export class TickReplay {
         const wanted = this.tape?.sourceId ?? sourceId;
         let src = wanted ? h.sources?.find((s) => s.sourceId === wanted) : undefined;
         if (!src && !wanted)
-          src = [...(h.sources ?? [])].sort((x, y) => (y.book?.length ?? 0) + (y.ticks?.t.length ?? 0) - ((x.book?.length ?? 0) + (x.ticks?.t.length ?? 0)))[0];
+          src = [...(h.sources ?? [])].sort(
+            (x, y) =>
+              (y.book?.length ?? 0) +
+              (y.ticks?.t.length ?? 0) -
+              ((x.book?.length ?? 0) + (x.ticks?.t.length ?? 0)),
+          )[0];
         if (!this.tape) {
           this.tape = new TickTape(from, new BookTimeline(src?.keyframe ?? null));
           this.tape.sourceId = src?.sourceId ?? wanted ?? null;
-          if (!src?.keyframe && src?.book?.length) this.note.set('No book snapshot within 2 h before the start: the book is unknown until the first snapshot in the tape.');
+          if (!src?.keyframe && src?.book?.length)
+            this.note.set(
+              'No book snapshot within 2 h before the start: the book is unknown until the first snapshot in the tape.',
+            );
         }
         // A truncated answer ends at its last row; the next window starts there.
         const lastRow = Math.max(src?.ticks?.t.at(-1) ?? from, src?.book?.at(-1)?.t ?? from);
         this.tape.append(src ?? {}, h.truncated ? lastRow : to);
-        if (!src) this.note.set(`No recorded ticks or book for ${this.deps.symbol()} from ${new Date(from).toISOString().slice(0, 16)}Z.`);
+        if (!src)
+          this.note.set(
+            `No recorded ticks or book for ${this.deps.symbol()} from ${new Date(from).toISOString().slice(0, 16)}Z.`,
+          );
         this.version.update((v) => v + 1);
       })
       .catch((e: unknown) => {
         if (n !== this.seq) return;
         const m = (e as { message?: unknown })?.message;
-        this.note.set(`The recording could not be read (${typeof m === 'string' && m ? m : 'md/history did not answer'}).`);
+        this.note.set(
+          `The recording could not be read (${typeof m === 'string' && m ? m : 'md/history did not answer'}).`,
+        );
       })
       .finally(() => {
         if (this.inFlight === job) this.inFlight = null;

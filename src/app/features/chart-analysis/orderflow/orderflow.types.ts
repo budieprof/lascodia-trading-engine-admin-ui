@@ -147,10 +147,15 @@ export function restoredOrderFlow(
         : null,
     ribbon: s.ribbon === true,
     fills: s.fills === true,
-    sourceId: typeof s.sourceId === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(s.sourceId) ? s.sourceId : null,
+    sourceId:
+      typeof s.sourceId === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(s.sourceId)
+        ? s.sourceId
+        : null,
     trades: s.trades === true,
     tradeMinSize:
-      typeof s.tradeMinSize === 'number' && Number.isFinite(s.tradeMinSize) && s.tradeMinSize > 0 ? s.tradeMinSize : 0,
+      typeof s.tradeMinSize === 'number' && Number.isFinite(s.tradeMinSize) && s.tradeMinSize > 0
+        ? s.tradeMinSize
+        : 0,
   };
 }
 

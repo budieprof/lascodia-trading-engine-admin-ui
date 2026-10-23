@@ -31,7 +31,8 @@ export class MessagePackHubProtocol implements IHubProtocol {
   readonly transferFormat = TransferFormat.Binary;
 
   parseMessages(input: string | ArrayBuffer, logger: ILogger): HubMessage[] {
-    if (typeof input === 'string') throw new Error('MessagePack hub protocol: expected binary input.');
+    if (typeof input === 'string')
+      throw new Error('MessagePack hub protocol: expected binary input.');
     const bytes = new Uint8Array(input);
     const out: HubMessage[] = [];
     for (const [start, end] of binaryFrames(bytes)) {
@@ -41,7 +42,12 @@ export class MessagePackHubProtocol implements IHubProtocol {
     return out;
   }
 
-  private parseOne(bytes: Uint8Array, start: number, end: number, logger: ILogger): HubMessage | null {
+  private parseOne(
+    bytes: Uint8Array,
+    start: number,
+    end: number,
+    logger: ILogger,
+  ): HubMessage | null {
     const props = new MsgPackReader(bytes, start, end).read();
     if (!Array.isArray(props) || props.length === 0) throw new MsgPackError('Invalid payload.');
     const type = props[0] as MessageType;
@@ -79,7 +85,8 @@ export class MessagePackHubProtocol implements IHubProtocol {
       case MessageType.Completion: {
         if (props.length < 4) throw new MsgPackError('Invalid payload for Completion message.');
         const kind = props[3];
-        if (kind !== 2 && props.length < 5) throw new MsgPackError('Invalid payload for Completion message.');
+        if (kind !== 2 && props.length < 5)
+          throw new MsgPackError('Invalid payload for Completion message.');
         const base = { type, headers: headersOf(props[1]), invocationId: props[2] as string };
         if (kind === 1) return { ...base, error: String(props[4]) } satisfies CompletionMessage;
         if (kind === 3) return { ...base, result: props[4] } satisfies CompletionMessage;
@@ -110,12 +117,20 @@ export class MessagePackHubProtocol implements IHubProtocol {
       case MessageType.Invocation:
       case MessageType.StreamInvocation: {
         const m = message as InvocationMessage | StreamInvocationMessage;
-        const payload: unknown[] = [m.type, m.headers ?? {}, m.invocationId ?? null, m.target, m.arguments];
+        const payload: unknown[] = [
+          m.type,
+          m.headers ?? {},
+          m.invocationId ?? null,
+          m.target,
+          m.arguments,
+        ];
         if (m.streamIds) payload.push(m.streamIds);
         return frame(msgpackEncode(payload));
       }
       case MessageType.StreamItem:
-        return frame(msgpackEncode([message.type, message.headers ?? {}, message.invocationId, message.item]));
+        return frame(
+          msgpackEncode([message.type, message.headers ?? {}, message.invocationId, message.item]),
+        );
       case MessageType.Completion: {
         const m = message as CompletionMessage;
         const kind = m.error ? 1 : m.result !== undefined ? 3 : 2;

@@ -48,14 +48,16 @@ export function heatSpecFor(opts: {
   pricePerPx: number | null;
 }): HeatTextureSpec | null {
   const span = opts.toUtc - opts.fromUtc;
-  if (!(span > 0) || !(opts.widthPx > 0) || !(opts.levelStep > 0) || !(opts.pHigh >= opts.pLow)) return null;
+  if (!(span > 0) || !(opts.widthPx > 0) || !(opts.levelStep > 0) || !(opts.pHigh >= opts.pLow))
+    return null;
   const cols = Math.max(1, Math.min(MAX_COLS, Math.ceil(opts.widthPx)));
   const colMs = Math.max(1, span / cols);
   const margin = Math.max((opts.pHigh - opts.pLow) * 0.5, opts.levelStep * 20);
   const lo = opts.pLow - margin;
   const hi = opts.pHigh + margin;
   let rowStep = opts.levelStep;
-  if (opts.pricePerPx && opts.pricePerPx > rowStep) rowStep = Math.ceil(opts.pricePerPx / opts.levelStep) * opts.levelStep;
+  if (opts.pricePerPx && opts.pricePerPx > rowStep)
+    rowStep = Math.ceil(opts.pricePerPx / opts.levelStep) * opts.levelStep;
   while ((hi - lo) / rowStep + 1 > MAX_ROWS) rowStep += opts.levelStep;
   const p0 = Math.floor(lo / rowStep) * rowStep;
   const rows = Math.max(1, Math.ceil((hi - p0) / rowStep) + 1);
@@ -198,7 +200,8 @@ export class HeatFolder {
     this.book.version++;
     if (c >= 0 && c < this.spec.cols) {
       const base = c * this.spec.rows;
-      for (const r of this.touched) if (this.rowSum[r] > this.data[base + r]) this.data[base + r] = this.rowSum[r];
+      for (const r of this.touched)
+        if (this.rowSum[r] > this.data[base + r]) this.data[base + r] = this.rowSum[r];
       this.markDirty(c);
     }
   }
@@ -260,11 +263,19 @@ export class HeatFolder {
   }
 
   /** The cell under (t, price): its column, row, price and the largest size painted there. */
-  cellAt(t: number, price: number): { col: number; row: number; price: number; size: number } | null {
+  cellAt(
+    t: number,
+    price: number,
+  ): { col: number; row: number; price: number; size: number } | null {
     const col = this.colOf(t);
     const row = this.rowOf(price);
     if (col < 0 || col >= this.filled || row < 0 || row >= this.spec.rows) return null;
-    return { col, row, price: this.spec.p0 + row * this.spec.rowStep, size: this.data[col * this.spec.rows + row] };
+    return {
+      col,
+      row,
+      price: this.spec.p0 + row * this.spec.rowStep,
+      size: this.data[col * this.spec.rows + row],
+    };
   }
 }
 
@@ -279,7 +290,12 @@ export interface TimeSegment {
  * so a session break or weekend (a jump between two opens) is a kink in time → x; each run is drawn as its own quad.
  * Before the first bar and after the last the axis extrapolates linearly (the live edge).
  */
-export function timeSegments(barTimes: readonly number[], barMs: number, t0: number, t1: number): TimeSegment[] {
+export function timeSegments(
+  barTimes: readonly number[],
+  barMs: number,
+  t0: number,
+  t1: number,
+): TimeSegment[] {
   if (!(t1 > t0)) return [];
   if (barTimes.length < 2 || !(barMs > 0)) return [{ t0, t1 }];
   const out: TimeSegment[] = [];
@@ -306,7 +322,12 @@ export function timeSegments(barTimes: readonly number[], barMs: number, t0: num
 
 /** The last bid / ask of each column from ticks (NaN where a column had none). */
 export function quoteColumns(
-  ticks: { size: number; timeAt(i: number): number; bidAt(i: number): number; askAt(i: number): number },
+  ticks: {
+    size: number;
+    timeAt(i: number): number;
+    bidAt(i: number): number;
+    askAt(i: number): number;
+  },
   spec: Pick<HeatTextureSpec, 't0' | 'colMs' | 'cols'>,
 ): { bid: Float64Array; ask: Float64Array } {
   const bid = new Float64Array(spec.cols).fill(NaN);
@@ -327,7 +348,8 @@ export function bookLevelStep(events: readonly MdBookEventWire[], floor: number)
     if (e.k !== 'S') continue;
     for (const side of [e.b, e.a]) {
       const ps = side.map((l) => l[0]).sort((x, y) => x - y);
-      for (let i = 1; i < ps.length; i++) if (ps[i] - ps[i - 1] > floor / 2) gaps.push(ps[i] - ps[i - 1]);
+      for (let i = 1; i < ps.length; i++)
+        if (ps[i] - ps[i - 1] > floor / 2) gaps.push(ps[i] - ps[i - 1]);
     }
     if (gaps.length > 200) break;
   }

@@ -35,7 +35,8 @@ function reference(events: readonly MdBookEventWire[], spec: HeatTextureSpec): F
   };
   const take = (c: number) => {
     if (!known) return;
-    for (const [r, v] of sums()) if (r >= 0 && r < spec.rows && v > out[c * spec.rows + r]) out[c * spec.rows + r] = v;
+    for (const [r, v] of sums())
+      if (r >= 0 && r < spec.rows && v > out[c * spec.rows + r]) out[c * spec.rows + r] = v;
   };
   let i = 0;
   for (let c = 0; c < spec.cols; c++) {
@@ -55,8 +56,14 @@ function reference(events: readonly MdBookEventWire[], spec: HeatTextureSpec): F
       asks.clear();
       known = true;
     } else if (!known) return;
-    for (const [p, s] of e.b) (s > 0 ? bids.set(p, s) : bids.delete(p));
-    for (const [p, s] of e.a) (s > 0 ? asks.set(p, s) : asks.delete(p));
+    for (const [p, s] of e.b) {
+      if (s > 0) bids.set(p, s);
+      else bids.delete(p);
+    }
+    for (const [p, s] of e.a) {
+      if (s > 0) asks.set(p, s);
+      else asks.delete(p);
+    }
     lastT = e.t;
   }
 }
@@ -114,14 +121,22 @@ describe('HeatFolder', () => {
     expect(first).toBe(0);
     const orphan: MdBookEventWire = { ...fx.book[1], t: fx.book[0].t - 5_000 };
     const silent = STALE_BOOK_MS + 30_000;
-    const later = fx.book.slice(1, 5).map((e, k) => ({ ...e, k: 'D' as const, t: fx.book[0].t + silent + k }));
+    const later = fx.book
+      .slice(1, 5)
+      .map((e, k) => ({ ...e, k: 'D' as const, t: fx.book[0].t + silent + k }));
     const events = [orphan, fx.book[0], ...later];
-    const spec: HeatTextureSpec = { ...specOver(fx.book, 10), t0: orphan.t, colMs: 1_000, cols: Math.ceil((silent + 10_000) / 1_000) };
+    const spec: HeatTextureSpec = {
+      ...specOver(fx.book, 10),
+      t0: orphan.t,
+      colMs: 1_000,
+      cols: Math.ceil((silent + 10_000) / 1_000),
+    };
     const tl = new BookTimeline();
     tl.appendAll(events);
     const f = new HeatFolder(spec, tl);
     f.advanceTo(Infinity);
-    const colSum = (c: number) => f.data.subarray(c * spec.rows, (c + 1) * spec.rows).reduce((a, b) => a + b, 0);
+    const colSum = (c: number) =>
+      f.data.subarray(c * spec.rows, (c + 1) * spec.rows).reduce((a, b) => a + b, 0);
     expect(colSum(0)).toBe(0); // only the orphan delta: unknown book
     expect(colSum(5)).toBeGreaterThan(0); // the snapshot
     expect(colSum(5 + Math.floor(STALE_BOOK_MS / 1000) + 5)).toBe(0); // silent > 65 s
@@ -161,13 +176,37 @@ describe('HeatFolder', () => {
 
 describe('heat spec + layout', () => {
   it('sizes rows to the book step, coarser when a pixel holds several, and caps them', () => {
-    const s = heatSpecFor({ fromUtc: 0, toUtc: 60_000, widthPx: 600, pLow: 1.1, pHigh: 1.101, levelStep: 0.00001, pricePerPx: null })!;
+    const s = heatSpecFor({
+      fromUtc: 0,
+      toUtc: 60_000,
+      widthPx: 600,
+      pLow: 1.1,
+      pHigh: 1.101,
+      levelStep: 0.00001,
+      pricePerPx: null,
+    })!;
     expect(s.cols).toBe(600);
     expect(s.colMs).toBe(100);
     expect(s.rowStep).toBeCloseTo(0.00001, 10);
-    const coarse = heatSpecFor({ fromUtc: 0, toUtc: 60_000, widthPx: 600, pLow: 1.1, pHigh: 1.101, levelStep: 0.00001, pricePerPx: 0.000035 })!;
+    const coarse = heatSpecFor({
+      fromUtc: 0,
+      toUtc: 60_000,
+      widthPx: 600,
+      pLow: 1.1,
+      pHigh: 1.101,
+      levelStep: 0.00001,
+      pricePerPx: 0.000035,
+    })!;
     expect(coarse.rowStep).toBeCloseTo(0.00004, 10);
-    const wide = heatSpecFor({ fromUtc: 0, toUtc: 60_000, widthPx: 600, pLow: 1, pHigh: 1.5, levelStep: 0.00001, pricePerPx: null })!;
+    const wide = heatSpecFor({
+      fromUtc: 0,
+      toUtc: 60_000,
+      widthPx: 600,
+      pLow: 1,
+      pHigh: 1.5,
+      levelStep: 0.00001,
+      pricePerPx: null,
+    })!;
     expect(wide.rows).toBeLessThanOrEqual(2_048);
   });
 

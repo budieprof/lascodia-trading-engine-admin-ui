@@ -55,7 +55,11 @@ export class LiveDepthService {
     const key = `${symbol.toUpperCase()}|${sourceId ?? ''}`;
     let feed = this.feeds.get(key);
     if (!feed) {
-      const md = this.stream.watch({ symbol, sources: sourceId ? [sourceId] : null, kinds: ['book'] });
+      const md = this.stream.watch({
+        symbol,
+        sources: sourceId ? [sourceId] : null,
+        kinds: ['book'],
+      });
       const created: Feed = {
         symbol,
         sourceId,

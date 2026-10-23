@@ -148,7 +148,11 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
 
   // ── Event-level (WebGL) ─────────────────────────────────────────────────────
 
-  private drawStream(target: CanvasRenderingTarget2D, src: StreamHeatSource, opacity: number): void {
+  private drawStream(
+    target: CanvasRenderingTarget2D,
+    src: StreamHeatSource,
+    opacity: number,
+  ): void {
     const series = this.deps.series();
     const layer = src.layer();
     if (!series || !layer) return;
@@ -160,30 +164,44 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
     // Draw up to the end of the column the fold reached (now live, the head in replay); nothing past it.
     const lastCol = Math.min(spec.cols, layer.folder.colOf(layer.foldedTo) + 1);
     const t1 = spec.t0 + lastCol * spec.colMs;
-    this.segments = timeSegments(this.deps.barTimes?.() ?? [], this.deps.barMs?.() ?? 0, spec.t0, t1);
-    target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
-      const width = bitmapSize.width / hr;
-      const height = bitmapSize.height / vr;
-      const quads = heatQuads(spec, this.segments, this.deps.xAt, (p) => series.priceToCoordinate(p), width, height);
-      gpu.sync(layer.folder);
-      gpu.draw({
-        width,
-        height,
-        pixelWidth: bitmapSize.width,
-        pixelHeight: bitmapSize.height,
-        quads,
-        robustMax: layer.robustMax,
-        opacity,
-      });
-      ctx.drawImage(gpu.canvas as CanvasImageSource, 0, 0, bitmapSize.width, bitmapSize.height);
-      // Best bid / ask from the ticks.
-      ctx.save();
-      ctx.scale(hr, vr);
-      ctx.globalAlpha = Math.min(1, opacity + 0.3);
-      ctx.lineWidth = 1;
-      this.drawQuoteLines(ctx, layer, series, t1, width);
-      ctx.restore();
-    });
+    this.segments = timeSegments(
+      this.deps.barTimes?.() ?? [],
+      this.deps.barMs?.() ?? 0,
+      spec.t0,
+      t1,
+    );
+    target.useBitmapCoordinateSpace(
+      ({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
+        const width = bitmapSize.width / hr;
+        const height = bitmapSize.height / vr;
+        const quads = heatQuads(
+          spec,
+          this.segments,
+          this.deps.xAt,
+          (p) => series.priceToCoordinate(p),
+          width,
+          height,
+        );
+        gpu.sync(layer.folder);
+        gpu.draw({
+          width,
+          height,
+          pixelWidth: bitmapSize.width,
+          pixelHeight: bitmapSize.height,
+          quads,
+          robustMax: layer.robustMax,
+          opacity,
+        });
+        ctx.drawImage(gpu.canvas as CanvasImageSource, 0, 0, bitmapSize.width, bitmapSize.height);
+        // Best bid / ask from the ticks.
+        ctx.save();
+        ctx.scale(hr, vr);
+        ctx.globalAlpha = Math.min(1, opacity + 0.3);
+        ctx.lineWidth = 1;
+        this.drawQuoteLines(ctx, layer, series, t1, width);
+        ctx.restore();
+      },
+    );
     this.frameMs.push(performance.now() - started);
     if (this.frameMs.length > FRAME_SAMPLES) this.frameMs.shift();
   }
@@ -214,7 +232,8 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
         if (x === null || y === null) continue;
         if (x > width + 1) break;
         // A pause longer than the feed's snapshot cadence breaks the line (nothing carried across a gap).
-        if (lastY === null || (i > i0 && ticks.timeAt(i) - ticks.timeAt(i - 1) > 65_000)) ctx.moveTo(x, y);
+        if (lastY === null || (i > i0 && ticks.timeAt(i) - ticks.timeAt(i - 1) > 65_000))
+          ctx.moveTo(x, y);
         else {
           ctx.lineTo(x, lastY);
           ctx.lineTo(x, y);
@@ -290,14 +309,19 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
     const series = this.deps.series();
     const hover = this.hover;
     if (!model || !series || !hover) return;
-    const lines = model.stream ? this.streamHoverLines(model.stream, series, hover) : this.gridHoverLines(series, hover);
+    const lines = model.stream
+      ? this.streamHoverLines(model.stream, series, hover)
+      : this.gridHoverLines(series, hover);
     if (!lines) return;
     target.useMediaCoordinateSpace(({ context: ctx, mediaSize }) =>
       drawHoverCard(ctx, lines, hover.x, hover.y, mediaSize, this.deps.dark()),
     );
   }
 
-  private gridHoverLines(series: ISeriesApi<SeriesType>, hover: { x: number; y: number }): string[] | null {
+  private gridHoverLines(
+    series: ISeriesApi<SeriesType>,
+    hover: { x: number; y: number },
+  ): string[] | null {
     // The same rectangles the frame painted (placeHeatGrid): what the card names is what is under the pointer.
     const hit = heatHitAt(this.placed, hover.x, hover.y);
     if (!hit) return null;
@@ -321,7 +345,13 @@ export class HeatmapPrimitive implements ISeriesPrimitive<Time> {
   ): string[] | null {
     const layer = src.layer();
     if (!layer) return null;
-    return streamHoverText(layer, src.label, timeAtX(this.segments, this.deps.xAt, hover.x), Number(series.coordinateToPrice(hover.y)), this.deps.precision());
+    return streamHoverText(
+      layer,
+      src.label,
+      timeAtX(this.segments, this.deps.xAt, hover.x),
+      Number(series.coordinateToPrice(hover.y)),
+      this.deps.precision(),
+    );
   }
 }
 
@@ -342,7 +372,8 @@ export function streamHoverText(
   let size = 0;
   if (book.known)
     for (const m of [book.bids, book.asks])
-      for (const [p, s] of m) if (p >= cell.price - half - 1e-12 && p < cell.price + half - 1e-12) size += s;
+      for (const [p, s] of m)
+        if (p >= cell.price - half - 1e-12 && p < cell.price + half - 1e-12) size += s;
   const lines = [`${label} · ${cell.price.toFixed(digits)}`];
   if (!book.known || t - book.t > 65_000) {
     lines.push('Book unknown here (no snapshot yet, or the feed paused)');
@@ -357,6 +388,8 @@ export function streamHoverText(
   const bb = book.bestBid();
   const ba = book.bestAsk();
   if (bb !== null && ba !== null)
-    lines.push(`Best ${bb.toFixed(digits)} / ${ba.toFixed(digits)} · last change ${formatUtcMs(book.t)}`);
+    lines.push(
+      `Best ${bb.toFixed(digits)} / ${ba.toFixed(digits)} · last change ${formatUtcMs(book.t)}`,
+    );
   return lines;
 }
