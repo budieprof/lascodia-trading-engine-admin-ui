@@ -89,7 +89,10 @@ const REPLAY_READ_MS = 400;
         }
       </div>
       <div class="dp-foot muted">
-        @if (asOfUtc() === null) {
+        @if (snapshot()?.sourceId; as src) {
+          Source {{ src }} · {{ asOfUtc() === null ? 'streamed' : 'recorded stream' }} ·
+          {{ asOfUtc() === null ? (age() === null ? '' : age() + ' s since last change') : 'at ' + utc(capturedMs()) }}
+        } @else if (asOfUtc() === null) {
           EA {{ shortInstance() }} · {{ age() === null ? '' : age() + ' s old' }}
           @if ((age() ?? 0) > 30) {
             <b class="dp-stale">— stale</b>
@@ -194,6 +197,13 @@ export class DepthPanelComponent {
   readonly digits = input<number>(5);
   /** Bar Replay's head (UTC ms): show the book as of then; null = the live book. */
   readonly asOfUtc = input<number | null>(null);
+  /** The chart's source picker (C7): which source's book to show; null = the freshest one streaming. */
+  readonly sourceId = input<string | null>(null);
+  /**
+   * Tick replay (`replay/tick-replay.ts`): the book folded from the recorded stream at the head — shown as is, nothing is
+   * fetched. Undefined outside tick replay; null = no book known at the head.
+   */
+  readonly tickReplayBook = input<OrderBookSnapshot | null | undefined>(undefined);
 
   private readonly replayBook = signal<BookAtHead | null>(null);
   private readonly replayError = signal<string | null>(null);
@@ -205,6 +215,8 @@ export class DepthPanelComponent {
 
   readonly snapshot = computed<OrderBookSnapshot | null>(() => {
     if (this.asOfUtc() !== null) {
+      const tick = this.tickReplayBook();
+      if (tick !== undefined) return tick;
       const b = this.replayBook();
       return b?.kind === 'book' ? b.snapshot : null;
     }
@@ -213,6 +225,8 @@ export class DepthPanelComponent {
   readonly error = computed<string | null>(() => {
     const head = this.asOfUtc();
     if (head === null) return this.live()?.error() ?? null;
+    if (this.tickReplayBook() !== undefined)
+      return this.tickReplayBook() ? null : `No book in the recorded stream at ${this.utc(head)} (none before it in the replay window).`;
     if (this.replayError()) return this.replayError();
     const b = this.replayBook();
     if (b?.kind === 'none') return `No broker depth stored for ${this.symbol()} at or before ${this.utc(head)} (order books are kept 7 days).`;
@@ -249,8 +263,9 @@ export class DepthPanelComponent {
     // Live: the shared poll, while open and not in replay.
     effect((onCleanup) => {
       const symbol = this.symbol();
+      const sourceId = this.sourceId();
       if (this.asOfUtc() !== null) return;
-      const watch = this.liveDepth.watch(symbol);
+      const watch = this.liveDepth.watch(symbol, sourceId);
       untracked(() => this.live.set(watch));
       onCleanup(() => {
         watch.release();
@@ -261,9 +276,10 @@ export class DepthPanelComponent {
     effect(() => {
       const symbol = this.symbol();
       const head = this.asOfUtc();
+      const tick = this.tickReplayBook() !== undefined;
       untracked(() => {
         clearTimeout(this.replayTimer);
-        if (head === null) {
+        if (head === null || tick) {
           this.seq++;
           this.replayBook.set(null);
           this.replayError.set(null);

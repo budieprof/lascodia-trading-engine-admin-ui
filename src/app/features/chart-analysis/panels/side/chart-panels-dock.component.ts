@@ -1,3 +1,4 @@
+import type { OrderBookSnapshot } from './chart-panels.types';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 
 import { AccountStripComponent } from './account-strip.component';
@@ -40,7 +41,13 @@ const TITLES: Record<SidePanel, string> = {
         />
       }
       @case ('depth') {
-        <app-depth-panel [symbol]="symbol()" [digits]="digits()" [asOfUtc]="replayAt()" />
+        <app-depth-panel
+          [symbol]="symbol()"
+          [digits]="digits()"
+          [asOfUtc]="replayAt()"
+          [sourceId]="sourceId()"
+          [tickReplayBook]="tickReplayBook()"
+        />
       }
       @case ('sentiment') {
         <app-sentiment-panel [symbol]="symbol()" [timeZone]="timeZone()" />
@@ -87,6 +94,10 @@ export class ChartPanelsDockComponent {
   readonly timeZone = input<string | null>(null);
   /** Bar Replay's head (UTC ms): the depth panel shows the book as of then (OF-5); null when live. */
   readonly replayAt = input<number | null>(null);
+  /** The chart's market-data source pick (null = automatic). */
+  readonly sourceId = input<string | null>(null);
+  /** Tick replay's book at the head (undefined outside tick replay). */
+  readonly tickReplayBook = input<OrderBookSnapshot | null | undefined>(undefined);
   /** A note about another symbol asked for that symbol's chart. */
   readonly symbolSelected = output<string>();
 

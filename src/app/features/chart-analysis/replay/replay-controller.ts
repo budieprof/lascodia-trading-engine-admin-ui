@@ -14,6 +14,8 @@ import {
   stepCursor,
   type ReplayCursor,
 } from './replay-cursor';
+import type { MdHistory, MdHistoryRequest } from '@core/realtime/marketdata.types';
+import { TickReplay, tickReplayView } from './tick-replay';
 import {
   PaperBook,
   levelsProblem,
@@ -38,6 +40,16 @@ export interface ReplayDeps {
   symbolFacts: () => PaperSymbol;
   /** Intrabar bars at `resolution` opening in [`fromMs`, `toMs`], at most `count` of them, ascending. */
   fetchIntrabar: (resolution: TvResolution, fromMs: number, toMs: number, count: number) => Promise<readonly Bar[]>;
+  /**
+   * Tick + book replay (`tick-replay.ts`): the recorded stream from `md/history` (C5). Absent: no tick mode. The
+   * symbol and source come from the page; `now` caps the replay at the present.
+   */
+  tickData?: {
+    history: (req: MdHistoryRequest) => Promise<MdHistory>;
+    symbol: () => string;
+    sourceId: () => string | null;
+    now: () => number;
+  };
 }
 
 /** Most intrabar bars one request asks for (the candle endpoint pages 5,000 at most). */
@@ -97,12 +109,44 @@ export class ReplayController {
 
   readonly lookup = (barTime: number): readonly Bar[] | null => this.minutes().get(barTime) ?? null;
 
-  readonly cursor = computed<ReplayCursor>(() => clampCursor({ index: this.index(), sub: this.sub() }, this.deps.bars().length));
+  /** Tick + book replay below the intrabar step (null without `deps.tickData`). */
+  readonly tick: TickReplay | null;
+  /** The head steps through the recorded ticks and book events instead of bars. */
+  readonly tickMode = signal(false);
+
+  /** The tick-replay head (≤ 15 Hz signal) while in tick mode, else null. */
+  readonly tickHead = computed(() => (this.active() && this.tickMode() ? (this.tick?.head() ?? null) : null));
+
+  /** Playing — bars or ticks. */
+  readonly isPlaying = computed(() => (this.tickHead() !== null ? this.tick!.playing() : this.playing()));
+
+  /** Whole bars that ENDED by the tick head. */
+  private readonly tickClosed = computed(() => {
+    const head = this.tickHead();
+    if (head === null) return null;
+    const bars = this.deps.bars();
+    const res = this.deps.resolution();
+    let n = 0;
+    while (n < bars.length && barEndMs(bars, n, res) <= head) n++;
+    return Math.max(1, n);
+  });
+
+  readonly cursor = computed<ReplayCursor>(() => {
+    const closed = this.tickClosed();
+    if (closed !== null) return clampCursor({ index: closed, sub: null }, this.deps.bars().length);
+    return clampCursor({ index: this.index(), sub: this.sub() }, this.deps.bars().length);
+  });
 
   /** What the chart plots: the full series, or the replay's closed bars and the bar forming at its head. */
   readonly view = computed<Bar[]>(() => {
     const bars = this.deps.bars() as Bar[];
     if (!this.active()) return bars;
+    const head = this.tickHead();
+    if (head !== null) {
+      this.tick!.version();
+      const res = this.deps.resolution();
+      return tickReplayView(bars, head, (i) => barEndMs(bars, i, res), this.tick!.tape);
+    }
     return replayView(bars, this.cursor(), this.lookup);
   });
 
@@ -112,9 +156,20 @@ export class ReplayController {
     return this.deps.bars()[this.cursor().index - 1] ?? null;
   });
 
-  /** The last price unit revealed: the newest intrabar bar of the forming bar, else the last closed bar. */
+  /** The newest recorded tick at the tick head, as a bid "bar" with its true spread (MT5 points). */
+  readonly headTick = computed<Bar | null>(() => {
+    const head = this.tickHead();
+    if (head === null) return null;
+    this.tick!.version();
+    const q = this.tick!.tape?.lastTick(head);
+    if (!q) return null;
+    return { time: q.t, open: q.bid, high: q.bid, low: q.bid, close: q.bid, volume: 0, spreadPoints: (q.ask - q.bid) / 10 ** -this.deps.digits() };
+  });
+
+  /** The last price unit revealed: the newest tick (tick mode), the newest intrabar bar of the forming bar, else the last closed bar. */
   readonly headBar = computed<Bar | null>(() => {
     if (!this.active()) return null;
+    if (this.tickHead() !== null) return this.headTick();
     const bars = this.deps.bars();
     const c = this.cursor();
     if (c.sub !== null) {
@@ -124,18 +179,82 @@ export class ReplayController {
     return bars[c.index - 1] ?? null;
   });
 
-  readonly atEnd = computed(() => this.cursor().index >= this.deps.bars().length && this.cursor().sub === null);
+  readonly atEnd = computed(() =>
+    this.tickHead() !== null
+      ? (this.tickHead() ?? 0) >= (this.deps.tickData?.now() ?? Infinity)
+      : this.cursor().index >= this.deps.bars().length && this.cursor().sub === null,
+  );
 
   /** The intrabar resolution steps come from on this chart (null: a 1m chart). */
   readonly intrabarSource = computed(() => intrabarResolution(this.deps.resolution()));
 
-  constructor(private readonly deps: ReplayDeps) {}
+  constructor(private readonly deps: ReplayDeps) {
+    const td = deps.tickData;
+    this.tick = td
+      ? new TickReplay({
+          history: td.history,
+          symbol: td.symbol,
+          sourceId: td.sourceId,
+          now: td.now,
+          raf: (cb) => (typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame(cb) : (setTimeout(() => cb(Date.now()), 16) as unknown as number)),
+          caf: (id) => (typeof cancelAnimationFrame !== 'undefined' ? cancelAnimationFrame(id) : clearTimeout(id)),
+          wall: () => (typeof performance !== 'undefined' ? performance.now() : Date.now()),
+          moved: (from, to) => this.tickMoved(from, to),
+        })
+      : null;
+  }
+
+  // ── Tick + book replay ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Step the head through the recorded ticks and book events from where Bar Replay stands (the end of the last closed
+   * bar). Off: back to whole bars at the bar the tick head reached.
+   */
+  setTickMode(on: boolean): void {
+    if (!this.tick || !this.active()) return;
+    if (on === this.tickMode()) return;
+    this.pause();
+    if (on) {
+      const bars = this.deps.bars();
+      const c = this.cursor();
+      const start = c.index > 0 ? barEndMs(bars, c.index - 1, this.deps.resolution()) : (bars[0]?.time ?? 0);
+      this.sub.set(null);
+      this.tickMode.set(true);
+      void this.tick.start(start);
+    } else {
+      const closed = this.cursor().index;
+      this.tick.stop();
+      this.tickMode.set(false);
+      this.index.set(closed);
+      this.sub.set(null);
+    }
+  }
+
+  /** The tick head moved: the paper trades see every tick revealed (forward) or forget what was undone (back). */
+  private tickMoved(from: number, to: number): void {
+    const tape = this.tick?.tape;
+    if (!tape || !this.book.trades().length) return;
+    if (to > from) {
+      if (!this.book.open().length) return;
+      const units: PaperUnit[] = tape
+        .ticksIn(from, to)
+        .map((q) => ({ time: q.t, open: q.bid, high: q.bid, low: q.bid, close: q.bid, spread: q.ask - q.bid }));
+      if (units.length && this.book.advance(units).length) this.bumpPaper();
+    } else {
+      this.book.rewind(to);
+      this.bumpPaper();
+    }
+  }
 
   // ── Moving ───────────────────────────────────────────────────────────────────────────────────────
 
   /** Start (or restart) replay with the bar at `index` (whole bars shown) at the head. */
   start(index: number): void {
     this.pause();
+    if (this.tickMode()) {
+      this.tick?.stop();
+      this.tickMode.set(false);
+    }
     this.selecting.set(false);
     this.book.clear();
     this.bumpPaper();
@@ -152,6 +271,8 @@ export class ReplayController {
 
   exit(): void {
     this.pause();
+    this.tick?.stop();
+    this.tickMode.set(false);
     this.selecting.set(false);
     this.active.set(false);
     this.sub.set(null);
@@ -191,6 +312,10 @@ export class ReplayController {
 
   /** One step forward or back — with intrabar steps, after loading the next bar's intrabar bars when needed. */
   async step(dir: 1 | -1): Promise<void> {
+    if (this.tickMode() && this.tick) {
+      this.tick.step(dir);
+      return;
+    }
     if (!this.active() || this.stepping) return;
     this.stepping = true;
     try {
@@ -205,15 +330,30 @@ export class ReplayController {
 
   /** Jump to `index` whole bars shown (the scrubber, the assistant). */
   setIndex(index: number): void {
-    if (Number.isFinite(index)) this.moveTo({ index: Math.trunc(index), sub: null });
+    if (!Number.isFinite(index)) return;
+    if (this.tickMode() && this.tick) {
+      const bars = this.deps.bars();
+      const i = Math.max(1, Math.min(Math.trunc(index), bars.length));
+      void this.tick.seek(barEndMs(bars, i - 1, this.deps.resolution()));
+      return;
+    }
+    this.moveTo({ index: Math.trunc(index), sub: null });
   }
 
   togglePlay(): void {
+    if (this.tickMode() && this.tick) {
+      this.tick.togglePlay();
+      return;
+    }
     if (this.playing()) this.pause();
     else this.play();
   }
 
   play(): void {
+    if (this.tickMode() && this.tick) {
+      this.tick.play();
+      return;
+    }
     if (!this.active() || this.atEnd()) return;
     this.clearTimer();
     this.playing.set(true);
@@ -227,9 +367,14 @@ export class ReplayController {
   pause(): void {
     this.clearTimer();
     this.playing.set(false);
+    this.tick?.pause();
   }
 
   setSpeed(speed: number): void {
+    if (this.tickMode() && this.tick) {
+      this.tick.setSpeed(speed);
+      return;
+    }
     if (!Number.isFinite(speed) || speed <= 0) return;
     this.speed.set(speed);
     if (this.playing()) this.play();
@@ -252,6 +397,10 @@ export class ReplayController {
    * series containing `anchorMs` (the old head's instant), and the intrabar bars held are another series'.
    */
   reanchor(anchorMs: number): void {
+    if (this.tickMode()) {
+      this.tick?.stop();
+      this.tickMode.set(false);
+    }
     this.generation++;
     this.inFlight.clear();
     this.minutes.set(new Map());
@@ -343,6 +492,8 @@ export class ReplayController {
   readonly headUnit = computed<PaperUnit | null>(() => {
     const head = this.headBar();
     if (!head) return null;
+    // A recorded tick carries its own ask: the spread is exact, never a fallback.
+    if (this.tickHead() !== null) return unitOf(head, this.deps.digits(), null);
     return unitOf(head, this.deps.digits(), this.recordedSpreadBefore(head));
   });
 

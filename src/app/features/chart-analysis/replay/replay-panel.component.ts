@@ -2,6 +2,8 @@ import { ChangeDetectionStrategy, Component, computed, input, output, signal } f
 import { DecimalPipe } from '@angular/common';
 import { ChartIconComponent } from '../icons/chart-icon.component';
 import type { ReplayController } from './replay-controller';
+import { SPEEDS as TICK_SPEEDS } from './tick-replay';
+import { formatUtcMs } from '../orderflow/canvas-text';
 import type { PaperSide } from './paper-broker';
 
 /** Speeds offered, in steps per second. */
@@ -42,10 +44,10 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
         type="button"
         class="rp-btn"
         (click)="replay().togglePlay()"
-        [title]="replay().playing() ? 'Pause (Shift+↓)' : 'Play (Shift+↓)'"
-        [attr.aria-label]="replay().playing() ? 'Pause' : 'Play'"
+        [title]="replay().isPlaying() ? 'Pause (Shift+↓)' : 'Play (Shift+↓)'"
+        [attr.aria-label]="replay().isPlaying() ? 'Pause' : 'Play'"
       >
-        <app-chart-icon [name]="replay().playing() ? 'pause' : 'play'" [size]="18" />
+        <app-chart-icon [name]="replay().isPlaying() ? 'pause' : 'play'" [size]="18" />
       </button>
       <button type="button" class="rp-btn" (click)="replay().step(1)" title="Forward one step (Shift+→)" aria-label="Forward one step">
         <app-chart-icon name="step-forward" [size]="18" />
@@ -60,16 +62,46 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
         aria-label="Replay position"
       />
       <span class="rp-muted">{{ replay().cursor().index }} / {{ total() }}</span>
-      <span class="rp-head" data-testid="replay-head">{{ headLabel() }}</span>
-      <label class="rp-muted">
-        Speed
-        <select [value]="replay().speed()" (change)="replay().setSpeed(+$any($event.target).value)" aria-label="Steps per second">
-          @for (s of speeds; track s) {
-            <option [value]="s">{{ s }}/s</option>
-          }
-        </select>
-      </label>
-      @if (replay().intrabarSource(); as src) {
+      <span class="rp-head" data-testid="replay-head">{{ tickHeadLabel() ?? headLabel() }}</span>
+      @if (replay().tickHead() !== null && replay().tick; as tick) {
+        <label class="rp-muted" title="Replay speed against real time">
+          Speed
+          <select [value]="tick.speed()" (change)="replay().setSpeed(+$any($event.target).value)" aria-label="Replay speed">
+            @for (s of tickSpeeds; track s) {
+              <option [value]="s">{{ s }}×</option>
+            }
+          </select>
+        </label>
+      } @else {
+        <label class="rp-muted">
+          Speed
+          <select [value]="replay().speed()" (change)="replay().setSpeed(+$any($event.target).value)" aria-label="Steps per second">
+            @for (s of speeds; track s) {
+              <option [value]="s">{{ s }}/s</option>
+            }
+          </select>
+        </label>
+      }
+      @if (replay().tick) {
+        <button
+          type="button"
+          class="rp-btn"
+          [class.on]="replay().tickMode()"
+          (click)="replay().setTickMode(!replay().tickMode())"
+          data-testid="replay-ticks"
+          title="Step through every recorded tick and book change (the market-data store), or play them at 1×–100× real time"
+        >
+          Ticks
+        </button>
+      }
+      @if (replay().tickMode() && replay().tick; as tick) {
+        @if (tick.loading()) {
+          <span class="rp-muted">Loading ticks and book…</span>
+        } @else if (tick.buffering()) {
+          <span class="rp-muted">Buffering…</span>
+        }
+      }
+      @if (!replay().tickMode() && replay().intrabarSource(); as src) {
         <label class="rp-muted" [title]="'Step through each bar’s ' + (src === '1' ? '1-minute' : '1-hour') + ' bars'">
           <input type="checkbox" [checked]="replay().intrabar()" (change)="replay().setIntrabar($any($event.target).checked)" />
           {{ src === '1' ? '1m' : '1h' }} steps
@@ -82,6 +114,9 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
       <button type="button" class="rp-btn" (click)="exit.emit()" title="Leave Bar Replay (paper trades end with it)">Exit</button>
     </div>
     @if (replay().intrabarNote(); as note) {
+      <div class="rp-note" role="status">{{ note }}</div>
+    }
+    @if (replay().tickMode() && replay().tick?.note(); as note) {
       <div class="rp-note" role="status">{{ note }}</div>
     }
     <div class="rp-row rp-paper" aria-label="Paper trading">
@@ -266,6 +301,12 @@ export class ReplayPanelComponent {
   readonly exit = output<void>();
 
   readonly speeds = SPEEDS;
+  readonly tickSpeeds = TICK_SPEEDS;
+  /** In tick replay the head is an instant to the millisecond. */
+  readonly tickHeadLabel = computed(() => {
+    const h = this.replay().tickHead();
+    return h === null ? null : formatUtcMs(h);
+  });
   readonly lots = signal(0.1);
   readonly stopPips = signal<number | null>(null);
   readonly targetPips = signal<number | null>(null);

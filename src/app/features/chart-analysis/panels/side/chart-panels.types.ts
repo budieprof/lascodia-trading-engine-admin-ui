@@ -163,6 +163,11 @@ export interface OrderBookSnapshot {
   levelsJson: string | null;
   instanceId: string;
   capturedAt: string;
+  /**
+   * Set when the book came from the market-data hub (C4) instead of `order-book/latest`: the registry source id (then
+   * `instanceId` holds it too — the hub has no EA instance).
+   */
+  sourceId?: string;
 }
 
 export type SidePanel = 'notes' | 'depth' | 'sentiment' | 'account';

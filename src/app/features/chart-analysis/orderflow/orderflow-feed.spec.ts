@@ -3,6 +3,9 @@ import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthService } from '@core/auth/auth.service';
+import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
+import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
+import type { MdHistoryRequest } from '@core/realtime/marketdata.types';
 import { ensureTestBed } from '@core/testing/zoneless-test-bed';
 import type { Bar } from '../datafeed/candle-feed.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
@@ -90,6 +93,8 @@ describe('OrderFlowFeed', () => {
   let liveSnapshot: ReturnType<typeof signal<OrderBookSnapshot | null>>;
   let watch: ReturnType<typeof vi.fn>;
   let perms: Set<string>;
+  let md: { history: ReturnType<typeof vi.fn>; sources: ReturnType<typeof vi.fn> };
+  let gpu = false;
   const settings = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
   const view = signal<OrderFlowView | null>(null);
   const clip = signal<number | null>(null);
@@ -127,10 +132,46 @@ describe('OrderFlowFeed', () => {
       release: vi.fn(),
     }));
     perms = new Set(['access.operator']);
+    gpu = false;
+    md = {
+      history: vi.fn((r: MdHistoryRequest) =>
+        Promise.resolve({
+          sources: [
+            {
+              sourceId: 'mt5-metaquotes-demo',
+              book: [
+                { t: r.from + 1000, k: 'S', b: [[1.1, 1_000_000]], a: [[1.10002, 2_000_000]] },
+              ],
+              ticks: { t: [r.from + 1000], b: [1.1], a: [1.10002] },
+            },
+          ],
+          truncated: false,
+          message: null,
+        }),
+      ),
+      sources: vi.fn(() =>
+        Promise.resolve([
+          {
+            sourceId: 'mt5-metaquotes-demo',
+            kind: 'Mt5Broker',
+            displayName: 'MetaQuotes-Demo (MT5 broker)',
+            feedId: 'broker-ticks',
+            feeds: { ticks: 'broker-ticks', book: 'broker-dom' },
+            enabled: true,
+            sizeUnit: 'Lots',
+            contractSize: 0,
+            priceTransform: 'None',
+            symbolMap: {},
+          },
+        ]),
+      ),
+    };
     TestBed.configureTestingModule({
       providers: [
         { provide: ChartFlowService, useValue: api },
         { provide: LiveDepthService, useValue: { watch } },
+        { provide: MarketDataApiService, useValue: md },
+        { provide: MarketDataStreamService, useValue: { watch: () => null, usable: () => false } },
         { provide: AuthService, useValue: { hasPermission: (k: string) => perms.has(k) } },
       ],
     });
@@ -157,6 +198,7 @@ describe('OrderFlowFeed', () => {
           precision: () => 5,
           pipSize: () => 0.0001,
           now: () => NOW,
+          gpu: () => gpu,
         }),
     );
 
@@ -222,13 +264,14 @@ describe('OrderFlowFeed', () => {
     await settle();
     expect(api.heatmap).toHaveBeenCalledTimes(1);
     const m = feed.model()!;
-    expect(m.heatmap!.grid.columns).toHaveLength(1);
+    expect(m.heatmap!.grid!.columns).toHaveLength(1);
     expect(m.heatmap!.opacity).toBe(0.6);
     expect(m.captions[0]).toMatch(/^Broker DOM depth — LASC-1, sampled every .+ · live$/);
     expect(m.captions).toContain(
       'Depth history starts 21 Oct 06:00 UTC (order books are kept 7 days)',
     );
     expect(watch).toHaveBeenCalledWith('EURUSD');
+    expect(md.history).not.toHaveBeenCalled(); // a 23 h view is past the event-level layer's 2 h
     liveSnapshot.set({
       id: 1,
       symbol: 'EURUSD',
@@ -242,7 +285,50 @@ describe('OrderFlowFeed', () => {
       capturedAt: iso(NOW - 1000),
     });
     TestBed.tick();
-    expect(feed.model()!.heatmap!.grid.columns).toHaveLength(2);
+    expect(feed.model()!.heatmap!.grid!.columns).toHaveLength(2);
+  });
+
+  it('heatmap zoomed in with WebGL: every book event from md/history (C5), labelled with its source', async () => {
+    gpu = true;
+    settings.set({ ...DEFAULT_ORDER_FLOW, heatmap: true });
+    view.set({
+      fromUtc: NOW - 40 * 60_000,
+      toUtc: NOW - 60_000,
+      fromIndex: 0,
+      toIndex: 39,
+      widthPx: 900,
+      barSpacing: 20,
+      rightEdgeInView: false,
+      pricePerPx: 0.00001,
+    });
+    const feed = make();
+    await settle();
+    await settle();
+    expect(api.heatmap).not.toHaveBeenCalled();
+    expect(watch).not.toHaveBeenCalled();
+    expect(md.history).toHaveBeenCalledTimes(1);
+    expect(md.history.mock.calls[0][0]).toMatchObject({
+      symbol: 'EURUSD',
+      kinds: ['book', 'ticks'],
+    });
+    expect(feed.heatMode()).toBe('stream');
+    const m = feed.model()!;
+    expect(m.heatmap!.stream).toBeDefined();
+    expect(m.heatmap!.stream!.layer()).not.toBeNull();
+    expect(m.captions[0]).toBe(
+      'Broker depth — MetaQuotes-Demo, every book event (event-level, WebGL)',
+    );
+    expect(m.captions[1]).toMatch(/^Sizes as the source reports them \(registered unit: Lots\)/);
+  });
+
+  it('trades: says plainly when no entitled source publishes trades', async () => {
+    settings.set({ ...DEFAULT_ORDER_FLOW, trades: true });
+    const feed = make();
+    await settle();
+    expect(feed.model()!.captions).toContain(
+      'Trades: no source you are entitled to publishes trades for EURUSD (spot FX brokers have no tape; CME / venue feeds do)',
+    );
+    expect(feed.model()!.trades).toBeNull();
   });
 
   it('heatmap in replay: no live poll, nothing after the head', async () => {
@@ -254,7 +340,7 @@ describe('OrderFlowFeed', () => {
     const [, , to] = api.heatmap.mock.calls[0];
     expect(to).toBeLessThanOrEqual(T0 + 40 * H);
     // The answer's column was captured a second after the head: it is the future.
-    expect(feed.model()!.heatmap!.grid.columns).toHaveLength(0);
+    expect(feed.model()!.heatmap!.grid!.columns).toHaveLength(0);
   });
 
   it('footprint: zoomed out it asks nothing and says so; zoomed in it asks with a row height', async () => {

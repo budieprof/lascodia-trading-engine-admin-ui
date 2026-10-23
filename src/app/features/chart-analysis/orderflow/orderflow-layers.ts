@@ -23,6 +23,7 @@ import type { FillMark } from './fills';
 import { FootprintPrimitive, type FootprintLayerModel } from './footprint-primitive';
 import { FillsPrimitive } from './fills-primitive';
 import { HeatmapPrimitive, type HeatmapLayerModel } from './heatmap-primitive';
+import { TradeBubblesPrimitive, type TradeBubblesModel } from './trade-bubbles-primitive';
 import type { OrderFlowView, TickBarDto } from './orderflow.types';
 import { utcMs } from '../panels/fx-fundamentals';
 
@@ -45,6 +46,13 @@ export interface OrderFlowModel {
   cvd: FlowPaneModel | null;
   /** OF-4: the spread and tick-rate pane; null: no pane. */
   ribbon: FlowPaneModel | null;
+  /** Trade bubbles (sources with real trades); null: none drawn. */
+  trades?: TradeBubblesModel | null;
+  /**
+   * The stream layers (event-level heatmap, trades) advance without the model changing: the layers register here to
+   * redraw (called outside Angular, at most once per animation frame per source of change).
+   */
+  subscribeRedraw?: (fn: () => void) => () => void;
 }
 
 /** What the layers need of the chart host — read lazily, as the host replaces its chart and series. */
@@ -116,10 +124,29 @@ export class OrderFlowLayers {
     },
     dark: () => this.surface.dark(),
     precision: () => this.surface.precision(),
+    barTimes: () => this.barAxis().times,
+    barMs: () => this.barAxis().barMs,
   };
+  private axisCache: { bars: readonly Bar[]; times: number[]; barMs: number } | null = null;
+  /** The plotted bars' UTC opens and their typical spacing, cached per bars array. */
+  private barAxis(): { times: number[]; barMs: number } {
+    const bars = this.surface.plottedUtc();
+    if (this.axisCache?.bars === bars) return this.axisCache;
+    const times = bars.map((b) => b.time);
+    const gaps: number[] = [];
+    for (let i = Math.max(1, times.length - 200); i < times.length; i++)
+      gaps.push(times[i] - times[i - 1]);
+    gaps.sort((a, b) => a - b);
+    const barMs = gaps.length ? gaps[gaps.length >> 1] : 0;
+    this.axisCache = { bars, times, barMs };
+    return this.axisCache;
+  }
+  private unsubscribeRedraw: (() => void) | null = null;
+  private redrawFn: ((fn: () => void) => () => void) | null = null;
   private readonly heatmap = new HeatmapPrimitive(this.primitiveDeps);
   private readonly footprint = new FootprintPrimitive(this.primitiveDeps);
   private readonly fills = new FillsPrimitive(this.primitiveDeps);
+  private readonly bubbles = new TradeBubblesPrimitive(this.primitiveDeps);
   private readonly captions = new CaptionPrimitive('price', () => this.surface.dark());
 
   private chartRef: IChartApi | null = null;
@@ -130,13 +157,29 @@ export class OrderFlowLayers {
 
   constructor(private readonly surface: OrderFlowSurface) {
     // Through the host, so they are re-attached to every new price series (style switch, rebuilt chart).
-    for (const p of [this.heatmap, this.footprint, this.fills, this.captions])
+    for (const p of [this.heatmap, this.footprint, this.fills, this.bubbles, this.captions])
       surface.attachPricePrimitive(p);
   }
 
   setModel(model: OrderFlowModel | null): void {
     this.source = model;
     this.apply();
+    const sub = model?.subscribeRedraw ?? null;
+    if (sub !== this.redrawFn) {
+      this.unsubscribeRedraw?.();
+      this.unsubscribeRedraw = null;
+      this.redrawFn = sub;
+      if (sub)
+        this.unsubscribeRedraw = sub(() => {
+          this.heatmap.redraw();
+          this.bubbles.redraw();
+        });
+    }
+  }
+
+  /** The event-level heatmap's recent frame times (ms), for benchmarks / diagnostics. */
+  heatmapFrameStats() {
+    return this.heatmap.frameStats();
   }
 
   /**
@@ -163,6 +206,8 @@ export class OrderFlowLayers {
     this.model = model;
     this.footprint.setAlpha(a);
     this.fills.setAlpha(a);
+    this.bubbles.setAlpha(a);
+    this.bubbles.setModel(model?.trades ?? null);
     this.heatmap.setModel(model?.heatmap ?? null);
     this.footprint.setModel(model?.footprint ?? null);
     this.fills.setFills(model?.fills ?? []);
@@ -184,6 +229,8 @@ export class OrderFlowLayers {
 
   dispose(): void {
     clearTimeout(this.viewTimer);
+    this.unsubscribeRedraw?.();
+    this.unsubscribeRedraw = null;
     const chart = this.chartRef;
     if (chart) {
       this.removeCvd(chart);

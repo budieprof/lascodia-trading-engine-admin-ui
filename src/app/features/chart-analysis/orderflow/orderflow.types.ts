@@ -101,6 +101,15 @@ export interface OrderFlowSettings {
   ribbon: boolean;
   /** OF-6: fill markers with requested vs filled price. */
   fills: boolean;
+  /**
+   * Market-data source (C7 `md/sources` id) feeding the heatmap, the depth panel and the trade layer; null = automatic
+   * (the source holding the most book for the window).
+   */
+  sourceId: string | null;
+  /** Trade bubbles from a source that publishes real trades (CME / venues). */
+  trades: boolean;
+  /** Trades smaller than this (in the source's own size unit) are not drawn. */
+  tradeMinSize: number;
 }
 
 /** Every layer off by default. */
@@ -112,6 +121,9 @@ export const DEFAULT_ORDER_FLOW: OrderFlowSettings = {
   footprintRowPoints: null,
   ribbon: false,
   fills: false,
+  sourceId: null,
+  trades: false,
+  tradeMinSize: 0,
 };
 
 /** A saved layout's order-flow toggles, defaulted and clamped (layouts saved before this feature carry none). */
@@ -135,12 +147,21 @@ export function restoredOrderFlow(
         : null,
     ribbon: s.ribbon === true,
     fills: s.fills === true,
+    sourceId:
+      typeof s.sourceId === 'string' && /^[A-Za-z0-9._:-]{1,64}$/.test(s.sourceId)
+        ? s.sourceId
+        : null,
+    trades: s.trades === true,
+    tradeMinSize:
+      typeof s.tradeMinSize === 'number' && Number.isFinite(s.tradeMinSize) && s.tradeMinSize > 0
+        ? s.tradeMinSize
+        : 0,
   };
 }
 
 /** How many order-flow layers are on (the toolbar's overlay count). */
 export function orderFlowCount(s: OrderFlowSettings): number {
-  return [s.heatmap, s.cvd, s.footprint, s.ribbon, s.fills].filter(Boolean).length;
+  return [s.heatmap, s.cvd, s.footprint, s.ribbon, s.fills, s.trades].filter(Boolean).length;
 }
 
 // ── What the chart is showing (reported by the host's layers) ──────────────────

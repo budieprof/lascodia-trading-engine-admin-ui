@@ -78,3 +78,10 @@ export function formatUtcShort(ms: number): string {
 export function shortInstance(id: string): string {
   return id.length > 18 ? `${id.slice(0, 10)}…${id.slice(-6)}` : id;
 }
+
+/** "08:00:12.345 UTC" — an event-level instant (the market-data stream is millisecond-stamped). */
+export function formatUtcMs(ms: number): string {
+  const d = new Date(ms);
+  const p = (n: number, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}.${p(d.getUTCMilliseconds(), 3)} UTC`;
+}
