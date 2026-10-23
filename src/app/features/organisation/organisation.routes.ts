@@ -45,6 +45,14 @@ export const ORGANISATION_ROUTES: Routes = [
       import('./pages/terminals-page.component').then((m) => m.TerminalsPageComponent),
   },
   {
+    // The guided connection (engine enterprise onboarding): token, MT5 steps, live progress to the first heartbeat.
+    path: 'terminals/connect',
+    canActivate: [canAccessPath('organisation/terminals/connect')],
+    data: { breadcrumb: 'Guided connection' },
+    loadComponent: () =>
+      import('./connect/terminal-wizard-page.component').then((m) => m.TerminalWizardPageComponent),
+  },
+  {
     path: 'settings',
     canActivate: [canAccessPath('organisation/settings')],
     data: { breadcrumb: 'Settings' },

@@ -26,6 +26,7 @@ import { FooterVersionPillComponent } from './footer-version-pill/footer-version
 import { AuthService } from '@core/auth/auth.service';
 import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
 import { ImpersonationBannerComponent } from './impersonation-banner.component';
+import { ShowcaseBannerComponent } from '@features/demo/showcase-banner.component';
 import { TenantBrandingService } from '@core/branding/tenant-branding.service';
 import { OnboardingLandingService } from '@features/onboarding/onboarding-landing.service';
 
@@ -47,6 +48,7 @@ import { OnboardingLandingService } from '@features/onboarding/onboarding-landin
     FooterVersionPillComponent,
     StepUpBannerComponent,
     ImpersonationBannerComponent,
+    ShowcaseBannerComponent,
   ],
   template: `
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -74,6 +76,7 @@ import { OnboardingLandingService } from '@features/onboarding/onboarding-landin
         <app-kill-switch-banner />
         @if (bffMode) {
           <app-impersonation-banner />
+          <app-showcase-banner />
           <app-step-up-banner />
         }
         <app-paper-mode-banner />

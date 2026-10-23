@@ -58,6 +58,12 @@ import { SignInShellComponent } from '@shared/components/sign-in-shell/sign-in-s
               New to Lascodia? <a class="si-link" routerLink="/signup">Create an organisation</a>
             </p>
           }
+          @if (demoOffered()) {
+            <!-- The public demonstration (enterprise onboarding): only while the engine offers it. -->
+            <p class="si-foot">
+              <a class="si-link" routerLink="/demo">Watch the demo</a> — recorded market data, replayed.
+            </p>
+          }
         </div>
       } @else {
         <h1 class="si-title">Sign in</h1>
@@ -225,6 +231,12 @@ export class LoginComponent {
           next: (r) => this.signupOffered.set(r?.status === true && r.data?.available === true),
           error: () => {},
         });
+      inject(ApiService)
+        .get<ResponseData<{ available: boolean }>>('/demo', { silent: true })
+        .subscribe({
+          next: (r) => this.demoOffered.set(r?.status === true && r.data?.available === true),
+          error: () => {},
+        });
     }
   }
 
@@ -261,6 +273,8 @@ export class LoginComponent {
   private noteReturnUrl: string | null = null;
   /** Self-serve sign-up is on and can run (`GET onboarding/signup`; 404 while it is off). */
   readonly signupOffered = signal(false);
+  /** The engine serves the public recorded-data demo (`GET demo` → available). */
+  readonly demoOffered = signal(false);
 
   /**
    * BFF: explain how the person got here — a sign-in that did not complete (`signin_error`, from

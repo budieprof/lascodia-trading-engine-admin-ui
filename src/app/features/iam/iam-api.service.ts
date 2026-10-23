@@ -340,6 +340,13 @@ export class IamApiService {
   createTenant(body: CreateTenantBody): Observable<TenantDto> {
     return this.post<TenantDto>('/platform/tenants', body);
   }
+  /**
+   * Engine enterprise onboarding: invite the FIRST Owner of an organisation that has none
+   * (`platform.tenants.manage`). Same answer as an invitation: e-mailed, or a link (+ one-time password).
+   */
+  inviteFirstOwner(tenantId: number, email: string): Observable<CreateInvitationResult> {
+    return this.post<CreateInvitationResult>(`/platform/tenants/${tenantId}/owner-invitation`, { email });
+  }
   suspendTenant(id: number, reason: string): Observable<TenantDto> {
     return this.post<TenantDto>(`/platform/tenants/${id}/suspend`, { reason });
   }

@@ -8,8 +8,14 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText, memberLabel, reportable, when } from '@features/iam/iam.logic';
-import type { CreateTenantBody, IamMember, TenantDto } from '@features/iam/iam.types';
+import type {
+  CreateInvitationResult,
+  CreateTenantBody,
+  IamMember,
+  TenantDto,
+} from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { SecretOnceComponent } from '@features/iam/shared/secret-once.component';
 import { tenantErrors, tenantStatusAction } from '../platform.logic';
 import { TenantPlanPanelComponent } from '../components/tenant-plan-panel.component';
 import { UsageExportComponent } from '../components/usage-export.component';
@@ -28,6 +34,7 @@ import type { PlanDto } from '../plans.types';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    SecretOnceComponent,
     PageHeaderComponent,
     ConfirmDialogComponent,
     TenantPlanPanelComponent,
@@ -208,6 +215,15 @@ import type { PlanDto } from '../plans.types';
                           Plan &amp; usage
                         </button>
                       }
+                      @if (canInviteOwner(t)) {
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="startOwnerInvite(t)"
+                        >
+                          Invite first Owner
+                        </button>
+                      }
                       @if (action === 'suspend') {
                         <button
                           type="button"
@@ -238,6 +254,57 @@ import type { PlanDto } from '../plans.types';
                           @for (m of members(); track m.userId) {
                             <span class="sub">{{ label(m) }} — {{ m.status }}</span>
                           }
+                        }
+                      </td>
+                    </tr>
+                  }
+                  @if (ownerInviteFor()?.id === t.id) {
+                    <tr class="selected">
+                      <td colspan="7">
+                        @if (ownerInvite(); as r) {
+                          @if (r.acceptUrl) {
+                            <app-secret-once
+                              title="Invitation link — pass it to the new Owner"
+                              [value]="r.acceptUrl"
+                              warning="Shown once. It works once, for this person, for 7 days."
+                              (dismissed)="closeOwnerInvite()"
+                            />
+                          } @else {
+                            <p class="small">The new Owner was e-mailed a set-up link.</p>
+                          }
+                          @if (r.temporaryPassword) {
+                            <app-secret-once
+                              title="One-time password for their first sign-in"
+                              [value]="r.temporaryPassword"
+                              warning="Shown once. They must replace it when they first sign in."
+                            />
+                          }
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="closeOwnerInvite()">Done</button>
+                        } @else {
+                          <form class="actions-row" (ngSubmit)="inviteOwner()">
+                            <label class="field">
+                              <span class="label">Owner's e-mail address</span>
+                              <input
+                                class="input"
+                                type="email"
+                                name="ownerEmail"
+                                maxlength="256"
+                                [ngModel]="ownerEmail()"
+                                (ngModelChange)="ownerEmail.set($event)"
+                              />
+                            </label>
+                            <span class="small muted"
+                              >They become the organisation's Owner when they accept; they then invite everyone else.</span
+                            >
+                            <button type="button" class="btn btn-sm btn-secondary" (click)="closeOwnerInvite()">Cancel</button>
+                            <button
+                              type="submit"
+                              class="btn btn-sm btn-primary"
+                              [disabled]="busy() || !ownerEmail().includes('@')"
+                            >
+                              {{ busy() ? 'Inviting…' : 'Invite' }}
+                            </button>
+                          </form>
                         }
                       </td>
                     </tr>
@@ -389,6 +456,46 @@ export class OrganisationsPageComponent {
       error: (e) => {
         this.busy.set(false);
         if (reportable(e)) this.notify.error(errorText(e, 'The organisation was not created.'));
+      },
+    });
+  }
+
+  // ── First Owner (engine enterprise onboarding) ──
+  readonly ownerInviteFor = signal<TenantDto | null>(null);
+  readonly ownerEmail = signal('');
+  readonly ownerInvite = signal<CreateInvitationResult | null>(null);
+
+  /** Customer and Canary organisations that are active; the engine refuses one that already has an Owner. */
+  canInviteOwner(t: TenantDto): boolean {
+    return (t.kind === 'Customer' || t.kind === 'Canary') && t.status === 'Active';
+  }
+
+  startOwnerInvite(t: TenantDto): void {
+    this.ownerInvite.set(null);
+    this.ownerEmail.set('');
+    this.ownerInviteFor.set(this.ownerInviteFor()?.id === t.id ? null : t);
+  }
+
+  closeOwnerInvite(): void {
+    this.ownerInviteFor.set(null);
+    this.ownerInvite.set(null);
+    this.ownerEmail.set('');
+  }
+
+  inviteOwner(): void {
+    const t = this.ownerInviteFor();
+    const email = this.ownerEmail().trim();
+    if (!t || !email || this.busy()) return;
+    this.busy.set(true);
+    this.iam.inviteFirstOwner(t.id, email).subscribe({
+      next: (r) => {
+        this.busy.set(false);
+        this.ownerInvite.set(r);
+        this.notify.success(`${email} invited as the first Owner of ${t.name}.`);
+      },
+      error: (e) => {
+        this.busy.set(false);
+        if (reportable(e)) this.notify.error(errorText(e, 'The Owner was not invited.'));
       },
     });
   }
