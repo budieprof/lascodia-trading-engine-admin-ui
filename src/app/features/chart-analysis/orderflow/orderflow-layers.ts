@@ -136,6 +136,11 @@ export class OrderFlowLayers {
     this.fills.setFills(model?.fills ?? []);
     this.captions.setLines(model?.captions ?? []);
     this.syncPanes();
+    // The window is only tracked while a layer is on (every chart host carries these layers).
+    if (!model) {
+      clearTimeout(this.viewTimer);
+      this.view.set(null);
+    } else if (!this.view()) this.scheduleView();
   }
 
   /** The plotted bars changed (a tick, a new bar, history, the zone or style): re-place the panes' rows. */
@@ -386,6 +391,7 @@ export class OrderFlowLayers {
   // ── The view ─────────────────────────────────────────────────────────────
 
   private scheduleView(): void {
+    if (!this.model) return;
     clearTimeout(this.viewTimer);
     this.viewTimer = setTimeout(() => this.view.set(this.readView()), 250);
   }
