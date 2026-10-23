@@ -146,6 +146,7 @@ import {
   type ProfileExtrasSettings,
 } from '../overlays/profile-levels';
 import { provenanceOf } from '../overlays/provenance';
+import type { AlertableLevel } from '../overlays/overlay-hits';
 import {
   placeProvenanceTip,
   ProvenanceTipComponent,
@@ -2304,6 +2305,15 @@ export class ChartHostComponent implements OnDestroy {
   /** Price at a y offset inside the chart, for click-to-act features. */
   priceAtY(y: number): number | null {
     return this.price?.coordinateToPrice(y) ?? null;
+  }
+
+  /**
+   * The derived level — a profile's POC / VAH / VAL, a naked POC, a range edge — drawn under (x, y) of the
+   * chart area, with its exact price (PR-7: "Add alert at <level>"); null when the point is on none.
+   */
+  derivedLevelAt(x: number, y: number): AlertableLevel | null {
+    const left = this.scaleSide() === 'left' ? (this.chart?.priceScale('left').width() ?? 0) : 0;
+    return this.analysisRenderer.levelAt(x - left, y);
   }
 
   /**

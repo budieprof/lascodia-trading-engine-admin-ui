@@ -1628,6 +1628,11 @@
             <button type="button" (click)="openStudiesDialog(); closeContextMenu()">
               Add indicator…
             </button>
+            @if (cm.level; as lvl) {
+              <button type="button" (click)="createAlertAtLevel()" data-testid="alert-at-level">
+                Add alert at {{ lvl.label }} {{ lvl.price | number: '1.' + precision() + '-' + precision() }}
+              </button>
+            }
             @if (cm.price !== null) {
               <button type="button" (click)="createAlertHere()">
                 Add alert at {{ cm.price | number: '1.' + precision() + '-' + precision() }}

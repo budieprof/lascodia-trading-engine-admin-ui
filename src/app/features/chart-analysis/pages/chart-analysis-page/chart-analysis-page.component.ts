@@ -274,6 +274,7 @@ import {
   DEFAULT_PROFILE_EXTRAS,
   type ProfileExtrasSettings,
 } from '../../overlays/profile-levels';
+import type { AlertableLevel } from '../../overlays/overlay-hits';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import {
   closedTradeMarkers,
@@ -2006,7 +2007,13 @@ export class ChartAnalysisPageComponent {
   readonly timezones = CHART_TIMEZONES;
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
-  readonly contextMenu = signal<{ x: number; y: number; price: number | null } | null>(null);
+  readonly contextMenu = signal<{
+    x: number;
+    y: number;
+    price: number | null;
+    /** A derived level under the click (PR-7): its alert is offered at the level's exact price. */
+    level?: AlertableLevel | null;
+  } | null>(null);
   protected readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
   /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
@@ -6337,7 +6344,26 @@ export class ChartAnalysisPageComponent {
     // The price under the cursor is captured HERE, while the pointer position
     // is still meaningful. Reading it when the menu item is clicked would
     // measure wherever the pointer had drifted to by then.
-    this.contextMenu.set({ x: ev.clientX - host.left, y, price: this.host()?.priceAtY(y) ?? null });
+    const x = ev.clientX - host.left;
+    this.contextMenu.set({
+      x,
+      y,
+      price: this.host()?.priceAtY(y) ?? null,
+      level: this.host()?.derivedLevelAt(x, y) ?? null,
+    });
+  }
+
+  /**
+   * "Add alert at POC 1.16234" (PR-7): the right-clicked profile or structure level's exact price into the
+   * same alert form as "Add alert at …" — nothing is armed until the operator saves it.
+   */
+  createAlertAtLevel(): void {
+    const level = this.contextMenu()?.level;
+    this.contextMenu.set(null);
+    if (!level || !Number.isFinite(level.price) || level.price <= 0) return;
+    this.alertPreset.set(level.price);
+    this.alertDraft.set(null);
+    this.openMenu.set('alert');
   }
 
   // ── Chart alerts (alerts v2) ─────────────────────────────────────────────
