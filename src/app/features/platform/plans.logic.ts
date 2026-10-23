@@ -12,6 +12,7 @@ import type {
   UsageItem,
 } from './plans.types';
 import { PLAN_LIMIT_FIELDS } from './plans.types';
+import { invalidPlanFeeds } from '@features/market-data/entitlements/md-entitlements.logic';
 
 /** Same bounds as the engine's `PlanRules` (a guard against typos, not a commercial cap). */
 export const MAX_COUNT_LIMIT = 1_000_000;
@@ -58,6 +59,8 @@ export function emptyPlanDraft(): SavePlanBody {
     allowsSso: false,
     allowsScim: false,
     allowsPersonalAccessTokens: false,
+    // A new plan starts with the broker feeds every organisation reads by default; licensed feeds are added on purpose.
+    marketDataFeeds: 'broker-ticks,broker-dom',
     isDefault: false,
   };
 }
@@ -78,6 +81,7 @@ export function draftFromPlan(p: PlanDto): SavePlanBody {
     allowsSso: p.allowsSso,
     allowsScim: p.allowsScim,
     allowsPersonalAccessTokens: p.allowsPersonalAccessTokens,
+    marketDataFeeds: p.marketDataFeeds ?? null,
     isDefault: p.isDefault,
   };
 }
@@ -103,6 +107,11 @@ export function planErrors(d: SavePlanBody, creating: boolean): string[] {
       errors.push('That slug is reserved.');
     }
   }
+  const badFeeds = invalidPlanFeeds(d.marketDataFeeds);
+  if (badFeeds.length)
+    errors.push(
+      `Unknown market-data feed(s): ${badFeeds.join(', ')}. Use broker-ticks, broker-dom, cme-l2, cme-trades, venue:<id>, source:<id>, venue:* or source:*.`,
+    );
   if (!d.name.trim()) errors.push('Give the plan a name.');
   else if (d.name.trim().length > 128) errors.push('Names are at most 128 characters.');
   if ((d.description ?? '').length > 1000)
@@ -139,6 +148,8 @@ export function planBody(d: SavePlanBody, creating: boolean): SavePlanBody {
     ...d,
     name: d.name.trim(),
     description: d.description?.trim() ? d.description.trim() : null,
+    // Blank = every feed (null), as the engine reads it.
+    marketDataFeeds: d.marketDataFeeds?.trim() ? d.marketDataFeeds.trim() : null,
   };
   if (creating) body.slug = (d.slug ?? '').trim().toLowerCase();
   else delete body.slug;

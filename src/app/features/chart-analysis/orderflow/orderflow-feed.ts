@@ -37,6 +37,7 @@ import {
   tickBarsRequest,
   barEnd,
 } from './tick-flow';
+import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
 
 /** Styles whose bars are built from price, not time: no time-keyed flow can be laid on them. */
 export const PRICE_BASED_STYLES: ReadonlySet<string> = new Set([
@@ -95,6 +96,9 @@ const MIN_BAND_PX = 4;
 const MAX_DEBOUNCE_MS = 1_500;
 
 function errorText(e: unknown): string {
+  // Not entitled (engine C6, `-403-entitlement`): the engine's reason names the feed — a state, not a fault.
+  const notEntitled = entitlementRefusalMessage(e);
+  if (notEntitled) return `not entitled. ${notEntitled}`;
   const m = (e as { message?: unknown })?.message;
   return typeof m === 'string' && m ? m : 'the engine did not answer';
 }

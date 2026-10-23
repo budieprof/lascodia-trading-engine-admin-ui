@@ -57,6 +57,9 @@ export const ROUTE_ACCESS = {
   'risk-profiles': rule(P.RiskRead),
   'currency-pairs': rule(P.MarketdataRead),
   'market-data': rule(P.MarketdataRead),
+  // Market-data entitlements and the exchange usage report (market-data program C6): platform staff.
+  'market-data/entitlements': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/entitlements
+  'market-data/usage': { anyOf: [P.PlatformUsageRead], staffOnly: true }, // GET admin/md/usage
   'chart-analysis': rule(P.MarketdataRead),
   watchlist: rule(P.MarketdataRead),
   'spot-analysis': rule(P.AccessOperator),

@@ -3,6 +3,7 @@ import { firstValueFrom } from 'rxjs';
 
 import { ChartPanelsService } from '../panels/side/chart-panels.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
+import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
 
 /** How often the live book is read (the EA reports it about once a second). */
 export const LIVE_DEPTH_POLL_MS = 1_500;
@@ -83,11 +84,13 @@ export class LiveDepthService {
       if (n !== feed.seq) return;
       feed.snapshot.set(snap);
       feed.error.set(null);
-    } catch {
+    } catch (e: unknown) {
       if (n !== feed.seq) return;
       feed.snapshot.set(null);
+      // Not entitled to the broker DOM feed (engine C6): say so, not "no depth".
       feed.error.set(
-        `No depth for ${feed.symbol}: this broker does not publish market depth for it, or no EA is streaming it.`,
+        entitlementRefusalMessage(e) ??
+          `No depth for ${feed.symbol}: this broker does not publish market depth for it, or no EA is streaming it.`,
       );
     }
     feed.readAt.set(Date.now());

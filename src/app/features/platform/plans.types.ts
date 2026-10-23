@@ -20,6 +20,8 @@ export interface PlanDto {
   allowsSso: boolean;
   allowsScim: boolean;
   allowsPersonalAccessTokens: boolean;
+  /** Market-data feeds the plan includes (engine C6), comma-separated; null = every feed. */
+  marketDataFeeds?: string | null;
   isDefault: boolean;
   /** House's own plan: fixed, and never given to another organisation. */
   isHousePlan: boolean;
@@ -56,6 +58,8 @@ export interface SavePlanBody {
   allowsSso: boolean;
   allowsScim: boolean;
   allowsPersonalAccessTokens: boolean;
+  /** Market-data feeds (engine C6): comma-separated feed ids, `venue:*` / `source:*`; null = every feed. */
+  marketDataFeeds: string | null;
   isDefault: boolean;
 }
 
