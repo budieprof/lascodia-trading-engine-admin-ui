@@ -35,7 +35,7 @@ describe('provenance map (PR-4)', () => {
         for (const line of p.lines) {
           expect(line, key).not.toMatch(/undefined|NaN|\[object/);
           expect(line.trim().length, key).toBeGreaterThan(0);
-          expect(line, key).not.toMatch(/  /);
+          expect(line, key).not.toMatch(/ {2}/);
         }
       }
     }
