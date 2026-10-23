@@ -224,6 +224,17 @@ localhost rather than a blank page.
   export download navigates to the engine's single-use link (`LifecycleApiService.absolute`), never a
   cached URL.
 
+- **Market-data entitlements (engine market-data program C6; engine `docs/api/marketdata-entitlements.md`).**
+  Which organisation may read which feed (`broker-ticks`, `broker-dom`, `cme-l2`, `cme-trades`, `venue:{id}`) for
+  display / non-display. A read the organisation is not entitled to answers HTTP 403 `responseCode:
+"-403-entitlement"` with the reason in `message` — `core/market-data/entitlement-refusal.ts` reads it, and the error
+  interceptor, `iam.logic` `errorText`, the chart's order-flow notes and the DOM panel show it as "not entitled", never as
+  "permission denied". `MarketDataEntitlementsService` (`core/market-data`) caches `GET md/entitlements/me` for layers
+  that want to grey out a feed before asking (the live hub answers `denied` + `deniedReasons` on Subscribe and pushes
+  `mdRevoked` when a licence ends — call `refresh()` then). Staff pages: `/market-data/entitlements` (grants per
+  organisation + feed + validity, `platform.data.manage`) and `/market-data/usage` (monthly exchange usage report, CSV per
+  organisation or per user, `platform.usage.read`), both in the sidebar's Platform group; plans carry `marketDataFeeds`.
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with

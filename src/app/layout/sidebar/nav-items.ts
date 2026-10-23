@@ -196,6 +196,9 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Organisations', route: '/platform/organisations', icon: navIcon.BuildingComplex },
       { label: 'Plans', route: '/platform/plans', icon: navIcon.Layers },
       { label: 'Fleet health', route: '/platform/fleet', icon: navIcon.Globe },
+      // Market-data entitlements (C6): staff pages that live under /market-data.
+      { label: 'Data entitlements', route: '/market-data/entitlements', icon: navIcon.KeyRound },
+      { label: 'Data usage', route: '/market-data/usage', icon: navIcon.ChartColumnStacked },
       { label: 'Sign-ups', route: '/platform/signups', icon: navIcon.UserPlus },
       { label: 'Closed organisations', route: '/platform/closures', icon: navIcon.Archive },
       { label: 'Elevated access', route: '/platform/elevations', icon: navIcon.ChevronsUp },

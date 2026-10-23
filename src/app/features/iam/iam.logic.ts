@@ -4,6 +4,7 @@
  */
 import type { PermissionDefinition } from '@core/auth/permissions.generated';
 import { quotaRefusalMessage } from '@core/plans/quota-refusal';
+import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
 import type {
   AccessReviewEntry,
   ApprovalRequest,
@@ -465,6 +466,9 @@ export function errorText(err: unknown, fallback: string): string {
   // A plan quota refusal (`-403-quota`) says what the organisation's plan allows.
   const quota = quotaRefusalMessage(err);
   if (quota) return quota;
+  // A market-data entitlement refusal (`-403-entitlement`) names the feed the organisation lacks.
+  const entitlement = entitlementRefusalMessage(err);
+  if (entitlement) return entitlement;
   const e = err as { message?: unknown; error?: { message?: unknown } } | null;
   const fromBody = e?.error && typeof e.error.message === 'string' ? e.error.message : null;
   const own = typeof e?.message === 'string' && !/^Http failure/.test(e.message) ? e.message : null;

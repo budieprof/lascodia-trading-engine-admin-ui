@@ -6,6 +6,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { planFeedsText } from '@features/market-data/entitlements/md-entitlements.logic';
 import { PlansApiService } from '../plans-api.service';
 import {
   LIMIT_LABELS,
@@ -136,9 +137,23 @@ import {
                 />
               </label>
             </div>
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">Market-data feeds (empty = every feed)</span>
+                <input
+                  class="input"
+                  name="marketDataFeeds"
+                  placeholder="broker-ticks, broker-dom, cme-l2, cme-trades, venue:*"
+                  [ngModel]="draft().marketDataFeeds ?? ''"
+                  (ngModelChange)="patch({ marketDataFeeds: $event })"
+                />
+              </label>
+            </div>
             <p class="note">
-              The LLM budget applies once LLM spend is measured per organisation, and log retention
-              once per-organisation retention is switched on; both are recorded on the plan now.
+              Market-data feeds bound what the plan's organisations can be granted and are served
+              (House is never bounded). The LLM budget applies once LLM spend is measured per
+              organisation, and log retention once per-organisation retention is switched on; both
+              are recorded on the plan now.
             </p>
 
             <div class="row">
@@ -225,6 +240,7 @@ import {
                   <th>LLM / month</th>
                   <th>Retention</th>
                   <th>Features</th>
+                  <th>Data feeds</th>
                   <th>Organisations</th>
                   <th><span class="sr-only">Actions</span></th>
                 </tr>
@@ -256,6 +272,9 @@ import {
                       {{ p.logRetentionDays === null ? 'Platform' : p.logRetentionDays + ' d' }}
                     </td>
                     <td class="small">{{ features(p) }}</td>
+                    <td class="small">
+                      {{ p.isHousePlan ? 'Every feed' : feedsText(p.marketDataFeeds) }}
+                    </td>
                     <td class="small">{{ p.organisations }}</td>
                     <td class="actions">
                       @if (!p.isHousePlan) {
@@ -312,6 +331,7 @@ export class PlansPageComponent {
   protected readonly usd = usdText;
   protected readonly features = featureList;
   protected readonly parse = parseLimit;
+  protected readonly feedsText = planFeedsText;
 
   readonly plans = iamResource(() => this.api.plans(), [] as PlanDto[], 'Could not load plans.');
 

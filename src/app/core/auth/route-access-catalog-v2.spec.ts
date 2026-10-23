@@ -47,7 +47,18 @@ const BEFORE_CATALOG_V2: Record<string, RouteRule> = {
   'system-logs': { anyOf: [P.AccessOperator] },
   'worker-health': { anyOf: [P.AccessOperator] },
 };
-const TABLE_BEFORE: RouteTable = { ...ROUTE_ACCESS, ...BEFORE_CATALOG_V2 };
+/**
+ * Pages added after catalog v2 on a key it introduced: they had no "before", so the comparison leaves them out
+ * (and checks below that the key they ask for is the one they read).
+ */
+const ADDED_AFTER_CATALOG_V2: readonly string[] = [
+  // Market-data entitlements (market-data program C6): GET admin/md/entitlements needs platform.data.manage.
+  'market-data/entitlements',
+];
+const TABLE_NOW: RouteTable = Object.fromEntries(
+  Object.entries(ROUTE_ACCESS).filter(([path]) => !ADDED_AFTER_CATALOG_V2.includes(path)),
+);
+const TABLE_BEFORE: RouteTable = { ...TABLE_NOW, ...BEFORE_CATALOG_V2 };
 
 function subject(keys: readonly string[], bff: boolean, platformStaff: boolean): AccessSubject {
   const held = new Set(keys);
@@ -86,6 +97,10 @@ describe('route table after catalog v2', () => {
     // h8-harden: engine-wide reads of every organisation's free text (process log, worker errors).
     expect(table['system-logs'].anyOf).toEqual([P.PlatformInfrastructureManage]);
     expect(table['worker-health'].anyOf).toEqual([P.PlatformInfrastructureManage]);
+    expect(table['market-data/entitlements']).toEqual({
+      anyOf: [P.PlatformDataManage],
+      staffOnly: true,
+    });
     expect(table['platform/elevations']).toEqual({
       anyOf: [P.PlatformElevationRequest],
       staffOnly: true,
@@ -97,15 +112,13 @@ describe('route table after catalog v2', () => {
     'shows House %s exactly the pages it saw before',
     (role) => {
       const now = permissionsForLegacyRoles([role]);
-      expect(pages(now, ROUTE_ACCESS)).toEqual(
-        pages(without(now, ADDED_BY_CATALOG_V2), TABLE_BEFORE),
-      );
+      expect(pages(now, TABLE_NOW)).toEqual(pages(without(now, ADDED_BY_CATALOG_V2), TABLE_BEFORE));
     },
   );
 
   it('shows the super admin (every key) exactly the pages it saw before', () => {
     const all = PERMISSION_CATALOG.map((p) => p.key);
-    const seen = pages(all, ROUTE_ACCESS);
+    const seen = pages(all, TABLE_NOW);
     expect(seen).toEqual(pages(without(all, ADDED_BY_CATALOG_V2), TABLE_BEFORE));
     for (const page of Object.keys(BEFORE_CATALOG_V2)) {
       expect(

@@ -105,6 +105,19 @@ describe('plan form', () => {
     expect(planErrors({ ...ok, description: 'x'.repeat(1001) }, true)[0]).toContain('1,000');
   });
 
+  it('starts a new plan on the broker feeds, checks feed ids and sends blank as every feed', () => {
+    const ok = { ...emptyPlanDraft(), slug: 'pro', name: 'Pro' };
+    expect(ok.marketDataFeeds).toBe('broker-ticks,broker-dom');
+    expect(planErrors({ ...ok, marketDataFeeds: 'broker-ticks, cme-l2 venue:*' }, true)).toEqual(
+      [],
+    );
+    expect(planErrors({ ...ok, marketDataFeeds: 'broker-ticks, cme' }, true)[0]).toContain(
+      'Unknown market-data feed(s): cme',
+    );
+    expect(planBody({ ...ok, marketDataFeeds: '  ' }, true).marketDataFeeds).toBeNull();
+    expect(draftFromPlan(plan({ marketDataFeeds: 'cme-l2' })).marketDataFeeds).toBe('cme-l2');
+  });
+
   it('sends a trimmed body; the slug only on create', () => {
     const d = { ...emptyPlanDraft(), slug: ' Pro-Desk ', name: ' Pro ', description: '  ' };
     expect(planBody(d, true)).toMatchObject({ slug: 'pro-desk', name: 'Pro', description: null });
