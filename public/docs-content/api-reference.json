@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 982,
+  "endpointCount": 987,
   "groups": [
     {
       "name": "Admin auth",
@@ -6588,6 +6588,67 @@
             }
           ],
           "response": "ResponseData<ApiTokenDto>"
+        }
+      ]
+    },
+    {
+      "name": "Instruments",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instruments",
+          "summary": "Instruments, filtered by asset class (Fx|Future|Crypto|Equity|Index|Commodity|Etf), symbol/description search and exchange.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "assetClass",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "search",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "exchange",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "includeInactive",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<InstrumentDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instruments/{symbol}",
+          "summary": "One instrument by canonical symbol (EURUSD, ESZ6, BTC-USDT-PERP, BRK.B).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<InstrumentDto>"
         }
       ]
     },
@@ -15925,6 +15986,58 @@
           "summary": "Mints a short-lived JWT for the SignalR WebSocket handshake. Browsers can't attach HttpOnly cookies to cross-origin WebSocket upgrades in all transports, and the `access_token` query-string fallback requires a readable bearer — so we trade the cookie for a 60-second ticket here. Only usable during the handshake; once the connection is up, SignalR keeps it alive without re-presenting the ticket.",
           "access": "session",
           "parameters": []
+        }
+      ]
+    },
+    {
+      "name": "Trading calendar",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/calendars",
+          "summary": "Every trading calendar (fx-24x5, cme-globex, cme-equity-index, nyse, nasdaq, crypto-24x7, ice-us, eurex, and any stored).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "response": "ResponseData<List<TradingCalendarDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/calendars/{code}",
+          "summary": "One trading calendar: time zone, weekly sessions (local), holidays and early closes.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "code",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<TradingCalendarDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instruments/{symbol}/session-state",
+          "summary": "An instrument's session state at an instant (query `at`, UTC, default now): open, session kind, next open, next close and trading day, from the instrument's trading calendar.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "at",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            }
+          ],
+          "response": "ResponseData<InstrumentSessionStateDto>"
         }
       ]
     },
