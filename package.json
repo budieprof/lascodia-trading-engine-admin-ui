@@ -90,7 +90,7 @@
     "@tailwindcss/postcss": "^4.2.2",
     "@typescript-eslint/eslint-plugin": "^8.59.0",
     "@typescript-eslint/parser": "^8.59.0",
-    "@vitest/coverage-v8": "^4.1.11",
+    "@vitest/coverage-v8": "^5.0.5",
     "angular-eslint": "^22.5.0",
     "eslint": "^9.39.4",
     "husky": "^9.1.7",
