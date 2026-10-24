@@ -28,7 +28,7 @@ RUN if [ -n "$BUILD_SHA" ] || [ -n "$BUILD_TIME" ]; then \
 RUN npm run build -- --configuration production
 
 # ─── Stage 2: runtime ────────────────────────────────────────────
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 WORKDIR /usr/share/nginx/html
 
 # Clear nginx defaults and drop in our SPA-friendly config.
