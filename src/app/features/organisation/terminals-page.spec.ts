@@ -18,6 +18,20 @@ function apiStub() {
   return {
     enrollmentTokens: vi.fn(() => of([token])),
     machineCredentials: vi.fn(() => of([credential])),
+    latestEa: vi.fn(() =>
+      of({
+        id: 1,
+        version: '8.47.254',
+        numericVersion: 84954,
+        sha256: 'a'.repeat(64),
+        sizeBytes: 3_000_000,
+        builtAtUtc: null,
+        publishedAtUtc: '2026-10-24T09:00:00Z',
+        publishedBy: 'admin-user:1',
+        notes: null,
+        fileName: 'LascodiaEA.ex5',
+      }),
+    ),
     createEnrollmentToken: vi.fn(() =>
       of({
         id: 5,
@@ -114,6 +128,14 @@ describe('TerminalsPageComponent', () => {
     expect(api.enrollmentTokens).toHaveBeenCalledWith(false);
     expect(api.machineCredentials).toHaveBeenCalledWith(false);
     expect(p.groups().map((g) => g.title)).toEqual(['Main · 1001 @ B-Demo (Demo)']);
+  });
+
+  it('flags a terminal running an EA older than the latest published build', () => {
+    const p = page();
+    expect(api.latestEa).toHaveBeenCalled();
+    expect(p.updateAvailable('8.47.253')).toBe(true);
+    expect(p.updateAvailable('8.47.254')).toBe(false);
+    expect(p.updateAvailable(null)).toBe(false);
   });
 
   it('asks for used/expired tokens and revoked credentials only when asked', () => {

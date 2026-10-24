@@ -26,7 +26,11 @@ import { LABEL_MAX, LOGIN_MAX, SERVER_MAX } from '../terminals.logic';
 import {
   allowListEntry,
   connectBlocker,
+  eaDownloadErrorText,
+  eaUpdateAvailable,
   engineBaseUrl,
+  formatBytes,
+  sha256Matches,
   isInsecureRemote,
   nextPollMs,
   presetFileName,
@@ -52,6 +56,28 @@ import type { EnrollmentProgress, TerminalSetup } from './terminal-wizard.types'
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
+      .ea-download {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        margin-top: var(--space-2);
+      }
+      .ea-facts {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: var(--space-1) var(--space-3);
+        margin: 0;
+      }
+      .ea-facts dt {
+        color: var(--text-secondary);
+      }
+      .ea-facts dd {
+        margin: 0;
+        min-width: 0;
+      }
+      .sha {
+        word-break: break-all;
+      }
       .wizard {
         display: flex;
         flex-direction: column;
@@ -187,10 +213,59 @@ import type { EnrollmentProgress, TerminalSetup } from './terminal-wizard.types'
               <li>
                 The Lascodia EA, version {{ setup.value()?.eaMinimumVersion || '8.47.253' }} or
                 later.
-                @if (setup.value()?.eaDownloadUrl; as url) {
-                  <a [href]="url" target="_blank" rel="noopener noreferrer">Download the EA</a>.
-                } @else {
-                  Ask your platform contact for the EA file (LascodiaEA.ex5).
+                @switch (setup.value()?.eaDownloadSource) {
+                  @case ('external') {
+                    <a
+                      [href]="setup.value()!.eaDownloadUrl"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      >Download the EA</a
+                    >.
+                  }
+                  @case ('engine') {
+                    @if (setup.value()!.latestEa; as ea) {
+                      <div class="ea-download">
+                        @if (canDownload()) {
+                          <button
+                            type="button"
+                            class="btn btn-secondary btn-sm"
+                            [disabled]="downloading()"
+                            (click)="downloadEa()"
+                          >
+                            {{
+                              downloading()
+                                ? 'Downloading…'
+                                : 'Download the EA (' + ea.fileName + ')'
+                            }}
+                          </button>
+                        } @else {
+                          <span class="small"
+                            >Downloading the EA needs the permission to connect terminals — ask an
+                            administrator of your organisation.</span
+                          >
+                        }
+                        <dl class="ea-facts small">
+                          <dt>Version</dt>
+                          <dd>{{ ea.version }}</dd>
+                          <dt>Published</dt>
+                          <dd>{{ when(ea.publishedAtUtc) }}</dd>
+                          <dt>Size</dt>
+                          <dd>{{ size(ea.sizeBytes) }}</dd>
+                          <dt>SHA-256</dt>
+                          <dd>
+                            <code class="sha">{{ ea.sha256 }}</code>
+                          </dd>
+                        </dl>
+                        <span class="small"
+                          >Copy it to <code>MQL5/Experts/</code> in the MetaTrader 5 data folder
+                          (File → Open Data Folder), then refresh the Navigator.</span
+                        >
+                      </div>
+                    }
+                  }
+                  @default {
+                    Ask your platform contact for the EA file (LascodiaEA.ex5).
+                  }
                 }
               </li>
               <li>
@@ -366,6 +441,11 @@ import type { EnrollmentProgress, TerminalSetup } from './terminal-wizard.types'
                     }
                   }
                   · EA {{ p.eaVersion ?? '?' }}
+                  @if (updateAvailable(p.eaVersion)) {
+                    <span class="chip warn"
+                      >update available: {{ setup.value()?.latestEa?.version }}</span
+                    >
+                  }
                   @if (p.eaState) {
                     · {{ p.eaState }}
                   }
@@ -437,6 +517,10 @@ export class TerminalWizardPageComponent {
   readonly tokenInput = computed(
     () => this.setup.value()?.enrollmentTokenInput || 'InpEnrollmentToken',
   );
+  readonly canDownload = computed(() => this.auth.hasPermission(Permission.AccountsConnect));
+  readonly downloading = signal(false);
+  protected readonly size = formatBytes;
+
   readonly canCreate = computed(
     () => this.auth.hasPermission(Permission.AccountsConnect) && !this.blocker(),
   );
@@ -505,6 +589,43 @@ export class TerminalWizardPageComponent {
           if (msg) this.notify.error(msg);
         },
       });
+  }
+
+  /** Is a newer EA build published than `running`? */
+  updateAvailable(running: string | null | undefined): boolean {
+    return eaUpdateAvailable(running, this.setup.value()?.latestEa);
+  }
+
+  /** The signed-in EA download: fetched with the session, checked against the published SHA-256, then saved. */
+  downloadEa(): void {
+    const ea = this.setup.value()?.latestEa;
+    if (!ea || this.downloading()) return;
+    this.downloading.set(true);
+    this.api.downloadEa(ea.version).subscribe({
+      next: async (file) => {
+        try {
+          const expected = file.sha256 ?? ea.sha256;
+          const verdict = await sha256Matches(await file.blob.arrayBuffer(), expected);
+          if (verdict === false) {
+            this.notify.error(
+              'The downloaded file does not match the published SHA-256, so it was not saved. Try again.',
+            );
+            return;
+          }
+          saveBlob(file.blob, file.fileName);
+          this.notify.success(
+            `EA ${file.version ?? ea.version} downloaded` +
+              (verdict ? ' (SHA-256 checked).' : '. Compare its SHA-256 with the one shown.'),
+          );
+        } finally {
+          this.downloading.set(false);
+        }
+      },
+      error: (e) => {
+        this.downloading.set(false);
+        this.notify.error(eaDownloadErrorText(e));
+      },
+    });
   }
 
   downloadPreset(c: EnrollmentTokenCreated): void {

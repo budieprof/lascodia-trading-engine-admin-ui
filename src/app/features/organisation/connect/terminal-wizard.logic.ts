@@ -1,4 +1,9 @@
-import type { EnrollmentProgress, EnrollmentStage, TerminalSetup } from './terminal-wizard.types';
+import type {
+  EaReleaseInfo,
+  EnrollmentProgress,
+  EnrollmentStage,
+  TerminalSetup,
+} from './terminal-wizard.types';
 
 /** The engine's API path below its host. */
 export const API_PATH = '/api/v1/lascodia-trading-engine';
@@ -134,6 +139,69 @@ export function stageHeadline(stage: EnrollmentStage): {
     default:
       return { text: stage, tone: 'info' };
   }
+}
+
+/** Dotted numeric version comparison (`8.47.99` < `8.47.100`); unreadable → not older (as the engine). */
+export function isOlderVersion(
+  version: string | null | undefined,
+  than: string | null | undefined,
+): boolean {
+  const parse = (v: string | null | undefined): number[] | null => {
+    if (!v) return null;
+    const parts = v.trim().replace(/^[vV]/, '').split('.');
+    const nums = parts.map((p) => (/^\d+$/.test(p) ? Number(p) : NaN));
+    return nums.some((n) => Number.isNaN(n)) ? null : nums;
+  };
+  const a = parse(version);
+  const b = parse(than);
+  if (!a || !b) return false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/** A terminal running `running` should update: a newer build than it is published. */
+export function eaUpdateAvailable(
+  running: string | null | undefined,
+  latest: EaReleaseInfo | null | undefined,
+): boolean {
+  return !!running && !!latest && isOlderVersion(running, latest.version);
+}
+
+/** "3.2 MB" / "812 KB". */
+export function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '?';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Whether the downloaded bytes are what the engine published: compares the SHA-256 of `bytes` with
+ * `expected` (null when the browser cannot hash — non-secure context — or nothing to compare).
+ */
+export async function sha256Matches(
+  bytes: ArrayBuffer,
+  expected: string | null,
+): Promise<boolean | null> {
+  if (!expected || typeof crypto === 'undefined' || !crypto.subtle) return null;
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+  return hex === expected.trim().toLowerCase();
+}
+
+/** What a failed EA download means for the person (the body is a Blob, so the HTTP status decides). */
+export function eaDownloadErrorText(err: unknown): string {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 403)
+    return 'You may not download the EA here: it needs the permission to connect terminals, and the demonstration organisation cannot connect any.';
+  if (status === 404)
+    return 'No EA build has been published to the engine yet. Ask your platform contact.';
+  if (status === 429) return 'Too many downloads just now. Try again in a minute.';
+  return 'The EA could not be downloaded. Try again.';
 }
 
 /** Why the wizard cannot create a token for this organisation (null = it can). */

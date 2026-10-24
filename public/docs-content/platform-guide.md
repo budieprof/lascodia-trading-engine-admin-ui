@@ -66,11 +66,16 @@ Viewer grant to give them a read-only tour; the console shows a "Demonstration o
 
 ## Terminal wizard settings
 
-| Key                           | Meaning                                                                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------- |
-| `Onboarding:EngineBaseUrl`    | The engine address EAs are told to use (blank = the console's own origin + the API path) |
-| `Onboarding:EaDownloadUrl`    | An https link to the EA file the wizard offers (blank = "ask the platform operator")     |
-| `Onboarding:EaMinimumVersion` | Oldest EA that enrolls with a token (`8.47.253`)                                         |
+| Key                             | Meaning                                                                                  |
+| ------------------------------- | ---------------------------------------------------------------------------------------- |
+| `Onboarding:EngineBaseUrl`      | The engine address EAs are told to use (blank = the console's own origin + the API path) |
+| `Onboarding:EaDownloadUrl`      | Optional https override for the EA file (blank = the engine's own signed-in download)    |
+| `Onboarding:EaMinimumVersion`   | Oldest EA that enrolls with a token (`8.47.253`); never raised by publishing             |
+| `Onboarding:EaReleaseRetention` | Published EA builds the engine keeps (`5`)                                               |
+
+The EA file is published to the engine by every EA rollout (`make rollout`, step 3b, after the binary is verified on
+every host's disk) and downloaded by signed-in members from the connection wizard — never from a public link. Staff can
+list the published builds with `GET platform/ea/releases` (`platform.ea.releases.manage`).
 
 ## Closing organisations
 

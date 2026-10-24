@@ -14,6 +14,8 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { SecretOnceComponent } from '@features/iam/shared/secret-once.component';
 import { OrganisationApiService } from '../organisation-api.service';
 import { failureMessage } from '../organisation.logic';
+import { eaUpdateAvailable } from '../connect/terminal-wizard.logic';
+import type { EaReleaseInfo } from '../connect/terminal-wizard.types';
 import type {
   EnrollmentToken,
   EnrollmentTokenCreated,
@@ -385,7 +387,22 @@ import {
                     <tr>
                       <td>
                         <code>{{ c.instanceId }}</code>
-                        <span class="sub">#{{ c.id }} · {{ kindLabel(c.kind) }}</span>
+                        <span class="sub"
+                          >#{{ c.id }} · {{ kindLabel(c.kind)
+                          }}{{ c.eaVersion ? ' · EA ' + c.eaVersion : '' }}</span
+                        >
+                        @if (updateAvailable(c.eaVersion)) {
+                          <a
+                            class="chip warn"
+                            routerLink="/organisation/terminals/connect"
+                            [title]="
+                              'EA ' +
+                              latestEa.value()?.version +
+                              ' is published — download it from the connection page'
+                            "
+                            >update available</a
+                          >
+                        }
                       </td>
                       <td>{{ originLabel(c.origin) }}</td>
                       <td>
@@ -531,6 +548,12 @@ export class TerminalsPageComponent {
     'Could not load the machine credentials.',
   );
   readonly groups = computed(() => groupCredentials(this.credentials.value(), this.accounts()));
+  /** The latest EA build published to the engine (null = none), for the "update available" badge. */
+  readonly latestEa = iamResource<EaReleaseInfo | null>(
+    () => this.api.latestEa(),
+    null,
+    'Could not load the latest EA version.',
+  );
 
   readonly draft = signal<EnrollmentDraft>(emptyEnrollmentDraft());
   readonly problems = computed(() => enrollmentErrors(this.draft()));
@@ -557,6 +580,11 @@ export class TerminalsPageComponent {
   reload(): void {
     this.tokens.reload();
     this.credentials.reload();
+    this.latestEa.reload();
+  }
+
+  updateAvailable(running: string | null | undefined): boolean {
+    return eaUpdateAvailable(running, this.latestEa.value());
   }
 
   boundTo(t: Parameters<typeof boundTo>[0]): string {

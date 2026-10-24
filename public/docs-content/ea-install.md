@@ -10,8 +10,12 @@ steps 2–4 below with you and shows the engine's view of the terminal until its
 
 - MetaTrader 5 (Windows, or under Wine on macOS/Linux), signed in to the broker account to connect.
   Outside organisations may connect **demo** accounts only while the platform is demo-only.
-- The EA file `LascodiaEA.ex5`, version **8.47.253 or later** (earlier builds cannot enroll with a token). Your platform
-  operator publishes the download link, which the wizard shows; otherwise ask them for the file.
+- The EA file `LascodiaEA.ex5`, version **8.47.253 or later** (earlier builds cannot enroll with a token). Download it
+  from the connection wizard (**Organisation → Terminals → Guided connection**) while signed in — it needs the permission
+  to connect terminals and is never offered as a public link. The wizard shows the version, publication date and SHA-256
+  of the file and checks the download against it. Copy it to `MQL5/Experts/` (File → Open Data Folder). The Terminals
+  list marks a terminal **update available** when a newer build is published; install it the same way and attach the
+  EA again.
 - The engine's address, e.g. `https://app.example.com/api/v1/lascodia-trading-engine` (the wizard shows yours).
 
 ## 1. Allow the EA to reach the engine
