@@ -190,6 +190,18 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // Prop-firm module (enterprise program, prop-module): a plan add-on.
+    label: 'Prop firm',
+    items: [
+      { label: 'Firm console', route: '/prop/console', icon: navIcon.Siren },
+      { label: 'Programs', route: '/prop/programs', icon: navIcon.Target },
+      { label: 'Traders', route: '/prop/traders', icon: navIcon.Users },
+      { label: 'Enrolments', route: '/prop/enrollments', icon: navIcon.ClipboardList },
+      { label: 'Payouts', route: '/prop/payouts', icon: navIcon.Wallet },
+      { label: 'My challenge', route: '/prop/me', icon: navIcon.TrendingUp },
+    ],
+  },
+  {
     // Platform console (U3.6): platform staff only.
     label: 'Platform',
     items: [

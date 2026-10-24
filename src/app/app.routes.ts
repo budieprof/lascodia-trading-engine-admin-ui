@@ -644,6 +644,14 @@ export const routes: Routes = [
           ),
       },
       {
+        // Prop-firm module (enterprise program, prop-module): programs, traders, enrolments, dashboards,
+        // breach feed, leaderboard, payouts, and the trader's own "My challenge".
+        path: 'prop',
+        canActivate: [canAccessPath('prop')],
+        data: { breadcrumb: 'Prop firm' },
+        loadChildren: () => import('@features/prop/prop.routes').then((m) => m.PROP_ROUTES),
+      },
+      {
         // Platform console (multi-tenancy W3, U3.6): organisations, elevated access, impersonation.
         path: 'platform',
         canActivate: [canAccessPath('platform')],

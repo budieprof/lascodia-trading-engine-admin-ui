@@ -612,6 +612,42 @@
     "deprecated": false
   },
   {
+    "key": "prop.manage",
+    "category": "Prop firm",
+    "description": "Create and version prop programs, manage traders, enrol accounts, withdraw and advance enrolments, and prepare payout statements.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prop.payouts.approve",
+    "category": "Prop firm",
+    "description": "Approve or reject prepared payout statements (never one you prepared yourself while the platform requires a second person). Statements move no money. Needs a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prop.read",
+    "category": "Prop firm",
+    "description": "See the organisation's prop programs, traders, enrolments, every trader's dashboard, the live breach feed, the leaderboard and payout statements (and export them).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "prop.self",
+    "category": "Prop firm",
+    "description": "See your own prop challenge dashboard: the enrolments of the trading account you signed in with, or of the trader linked to your user.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "risk.loosen",
     "category": "Risk",
     "description": "Make a risk-loosening change (a lower floor, a higher cap, a gate to advisory). Needs a fresh MFA sign-in and, where two-person rules apply, a second person's approval; the change then waits out the cooling-off period.",

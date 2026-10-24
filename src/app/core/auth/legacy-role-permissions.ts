@@ -31,6 +31,8 @@ const VIEWER: readonly PermissionKey[] = [
   ...READS,
   // Multi-tenancy Phase 7 (c7-lifecycle): every member's console shows the organisation's look.
   P.TenantBrandingRead,
+  // Prop module: the person's (or account session's) own challenge dashboard.
+  P.PropSelf,
 ];
 
 const TRADER: readonly PermissionKey[] = [
@@ -84,6 +86,9 @@ const OPERATOR: readonly PermissionKey[] = [
   P.PlatformInfrastructureManage,
   // Multi-tenancy Phase 7: the organisation's plan and usage.
   P.TenantUsageRead,
+  // Prop module: run the organisation's programs.
+  P.PropRead,
+  P.PropManage,
 ];
 
 const ADMIN: readonly PermissionKey[] = [
@@ -115,6 +120,8 @@ const ADMIN: readonly PermissionKey[] = [
   // platform key (House only, as above).
   P.TenantBrandingManage,
   P.PlatformTenantsPurge,
+  // Prop module: approve payout statements.
+  P.PropPayoutsApprove,
 ];
 
 const EA: readonly PermissionKey[] = [

@@ -187,6 +187,15 @@ import {
               <label class="check">
                 <input
                   type="checkbox"
+                  name="prop"
+                  [ngModel]="draft().allowsPropModule"
+                  (ngModelChange)="patch({ allowsPropModule: $event })"
+                />
+                Prop-firm module
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
                   name="default"
                   [ngModel]="draft().isDefault"
                   [disabled]="e.wasDefault"
