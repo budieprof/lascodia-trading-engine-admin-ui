@@ -92,6 +92,7 @@ describe('grant form', () => {
       feedId: 'cme-l2',
       display: true,
       nonDisplay: true,
+      delayed: false,
       validFromUtc: null,
       validToUtc: '2027-01-01T00:00:00Z',
       reason: 'x',
@@ -99,6 +100,7 @@ describe('grant form', () => {
     expect(updateBody(d)).toEqual({
       display: true,
       nonDisplay: true,
+      delayed: false,
       validFromUtc: null,
       validToUtc: '2027-01-01T00:00:00Z',
       reason: 'x',

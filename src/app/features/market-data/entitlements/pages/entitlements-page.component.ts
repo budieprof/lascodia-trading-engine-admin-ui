@@ -145,7 +145,25 @@ import type {
                 />
                 Non-display — machines and algorithms consume it
               </label>
+              @if (feedHasDelayed()) {
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    name="delayed"
+                    [ngModel]="draft().delayed"
+                    (ngModelChange)="patch({ delayed: $event })"
+                  />
+                  Delayed data only — served {{ feedDelay() }} min late, no subscriber declaration
+                  needed
+                </label>
+              }
             </div>
+            @if (feedNeedsDeclaration() && !draft().delayed) {
+              <p class="muted small">
+                Real-time {{ feedFamilyName() }} data: each person must sign a professional /
+                non-professional subscriber declaration before they can view it.
+              </p>
+            }
             <div class="form-grid">
               <label class="field">
                 <span class="label">Starts (UTC day, empty = now)</span>
@@ -368,6 +386,17 @@ export class MarketDataEntitlementsPageComponent {
   readonly editing = signal<{ id: number | null; label: string } | null>(null);
   readonly draft = signal<GrantDraft>(emptyGrantDraft());
   readonly submitted = signal(false);
+  /** The catalog entry of the feed in the form (engine WS8 8.1). */
+  private readonly feedInfo = computed(() => {
+    const id = this.draft().feedId.trim().toLowerCase();
+    return this.catalog.value()?.feeds.find((f) => f.feedId === id) ?? null;
+  });
+  readonly feedHasDelayed = computed(
+    () => this.feedInfo()?.hasDelayedData === true || this.draft().delayed,
+  );
+  readonly feedDelay = computed(() => this.feedInfo()?.delayMinutes || 15);
+  readonly feedNeedsDeclaration = computed(() => this.feedInfo()?.requiresDeclaration === true);
+  readonly feedFamilyName = computed(() => this.feedInfo()?.exchangeFamilyName ?? 'exchange');
   readonly errors = computed(() => {
     const e = this.editing();
     return e ? grantErrors(this.draft(), e.id === null) : [];

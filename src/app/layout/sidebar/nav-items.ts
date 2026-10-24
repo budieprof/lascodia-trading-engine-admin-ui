@@ -52,6 +52,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Recommendations', route: '/trade-recommendations', icon: navIcon.SquareStack },
       { label: 'Pending Recs', route: '/pending-signal-recs', icon: navIcon.CirclePause },
       { label: 'Market Data', route: '/market-data', icon: navIcon.ChartCandlestick },
+      // A person's exchange subscriber declarations (multi-asset WS8 8.2).
+      { label: 'Data declarations', route: '/market-data/declarations', icon: navIcon.ScrollText },
       { label: 'Watchlist', route: '/watchlist', icon: navIcon.Eye },
     ],
   },
@@ -234,6 +236,12 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Data entitlements', route: '/market-data/entitlements', icon: navIcon.KeyRound },
       { label: 'Data usage', route: '/market-data/usage', icon: navIcon.ChartColumnStacked },
       { label: 'Data sources', route: '/market-data/sources', icon: navIcon.RadioTower },
+      // Subscriber declarations review (multi-asset WS8 8.2).
+      {
+        label: 'Data declarations',
+        route: '/market-data/declarations-review',
+        icon: navIcon.ClipboardCheck,
+      },
       { label: 'Sign-ups', route: '/platform/signups', icon: navIcon.UserPlus },
       { label: 'Closed organisations', route: '/platform/closures', icon: navIcon.Archive },
       { label: 'Elevated access', route: '/platform/elevations', icon: navIcon.ChevronsUp },

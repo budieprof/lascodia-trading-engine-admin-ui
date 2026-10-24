@@ -9,7 +9,7 @@ import { iamResource } from '@features/iam/shared/iam-resource';
 import { blobErrorText, exportMonths, monthLabel } from '@features/platform/plans.logic';
 import { saveBlob } from '@features/scripting/shared/download';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
-import { declarationOrder, usageLabel } from '../md-entitlements.logic';
+import { declarationOrder, subscriberTypeLabel, usageLabel } from '../md-entitlements.logic';
 import type { MarketDataUsageReport } from '../md-entitlements.types';
 
 /**
@@ -65,6 +65,14 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
         >
           CSV per user
         </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="download('exchanges')"
+          [disabled]="busy()"
+        >
+          CSV per exchange
+        </button>
       </app-page-header>
 
       @if (report.error(); as err) {
@@ -117,6 +125,58 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
             </div>
           }
         </section>
+
+        @if ((r.exchanges ?? []).length > 0) {
+          <section class="card">
+            <header class="card-head"><h3>Per exchange and subscriber type</h3></header>
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Exchange</th>
+                    <th>Subscriber type</th>
+                    <th>Use</th>
+                    <th>Data</th>
+                    <th>Subscribers</th>
+                    <th>Organisations</th>
+                    <th>Reads</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (
+                    x of r.exchanges ?? [];
+                    track x.family + x.subscriberType + x.usage + x.realTime
+                  ) {
+                    <tr>
+                      <td>
+                        {{ x.familyName }}
+                        <span class="sub"
+                          ><code>{{ x.feeds.join(' ') }}</code></span
+                        >
+                      </td>
+                      <td class="small">{{ subscriberType(x.subscriberType) }}</td>
+                      <td class="small">{{ use(x.usage) }}</td>
+                      <td class="small">
+                        @if (x.realTime) {
+                          Real time
+                        } @else {
+                          <span class="chip info">Delayed</span>
+                        }
+                      </td>
+                      <td class="small">{{ x.distinctSubscribers }}</td>
+                      <td class="small">{{ x.distinctTenants }}</td>
+                      <td class="small">{{ x.accessCount }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <p class="pad muted small">
+              People without a subscriber declaration for the exchange are counted as professional,
+              as the exchanges do. Delayed reads are listed apart: exchanges count real-time use.
+            </p>
+          </section>
+        }
 
         @if (r.tenants.length > 0) {
           <section class="card">
@@ -174,6 +234,7 @@ export class MarketDataUsagePageComponent {
   protected readonly months = exportMonths(new Date());
   protected readonly label = monthLabel;
   protected readonly use = usageLabel;
+  protected readonly subscriberType = subscriberTypeLabel;
   protected readonly at = when;
 
   /** Last month by default: the one a declaration is filed for. */
@@ -190,7 +251,7 @@ export class MarketDataUsagePageComponent {
     this.report.reload();
   }
 
-  async download(detail: 'tenants' | 'users'): Promise<void> {
+  async download(detail: 'tenants' | 'users' | 'exchanges'): Promise<void> {
     if (this.busy()) return;
     this.busy.set(true);
     try {

@@ -474,6 +474,21 @@ type Pending =
                 ></textarea>
               </label>
               <label class="field wide">
+                <span class="label"
+                  >Exchange fees per subscriber — one per exchange: family, professional,
+                  non-professional, non-display (per organisation), margin %. Charged per person who
+                  read the exchange's real-time data in the month; people without a declaration
+                  count as professional.</span
+                >
+                <textarea
+                  class="textarea"
+                  rows="3"
+                  placeholder="cme-group, 105, 3, 0, 0"
+                  [ngModel]="f.exchangeFees ?? ''"
+                  (ngModelChange)="patch({ exchangeFees: $event })"
+                ></textarea>
+              </label>
+              <label class="field wide">
                 <span class="label">Notes</span>
                 <textarea
                   class="textarea"

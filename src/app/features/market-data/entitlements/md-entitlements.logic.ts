@@ -5,16 +5,35 @@ import type {
   MarketDataEntitlementDto,
   UpdateEntitlementBody,
   UsageFeedRow,
+  DeclarationQuestion,
+  SubmitDeclarationBody,
 } from './md-entitlements.types';
 
 /** The fixed feeds, in the engine's order (`MdFeedCatalog.FixedFeeds`). */
 export const FIXED_FEEDS = ['broker-ticks', 'broker-dom', 'cme-l2', 'cme-trades'] as const;
 
-const PREFIXED = /^(?:venue|source):[a-z0-9](?:[a-z0-9._-]{0,46}[a-z0-9])?$/;
+/** The exchange catalog's fixed feeds (engine WS8 8.1, `ExchangeFeedCatalog.FixedFeeds`). */
+export const EXCHANGE_FEEDS = [
+  'cme-l1',
+  'ice-l1',
+  'ice-l2',
+  'ice-trades',
+  'eurex-l1',
+  'eurex-l2',
+  'eurex-trades',
+  'us-equities-nbbo',
+] as const;
+
+const PREFIXED =
+  /^(?:venue|source|crypto):[a-z0-9](?:[a-z0-9._-]{0,46}[a-z0-9])?$|^us-equities-depth:[a-z0-9]{2,8}$/;
 
 /** The engine's rule (`MdFeedCatalog.IsValidFeedId`) on a normalised id. */
 export function isValidFeedId(feedId: string): boolean {
-  return (FIXED_FEEDS as readonly string[]).includes(feedId) || PREFIXED.test(feedId);
+  return (
+    (FIXED_FEEDS as readonly string[]).includes(feedId) ||
+    (EXCHANGE_FEEDS as readonly string[]).includes(feedId) ||
+    PREFIXED.test(feedId)
+  );
 }
 
 /** Trimmed, lower-cased. */
@@ -24,7 +43,13 @@ export function normaliseFeed(feedId: string | null | undefined): string {
 
 /** A plan feed entry may also be a wildcard. */
 export function isValidPlanEntry(entry: string): boolean {
-  return entry === 'venue:*' || entry === 'source:*' || isValidFeedId(entry);
+  return (
+    entry === 'venue:*' ||
+    entry === 'source:*' ||
+    entry === 'crypto:*' ||
+    entry === 'us-equities-depth:*' ||
+    isValidFeedId(entry)
+  );
 }
 
 /** The entries of a plan's market-data feed list the engine would refuse ('' / null = every feed). */
@@ -49,6 +74,7 @@ export function emptyGrantDraft(tenantId: number | null = null): GrantDraft {
     feedId: '',
     display: true,
     nonDisplay: false,
+    delayed: false,
     validFrom: '',
     validTo: '',
     reason: '',
@@ -62,6 +88,7 @@ export function draftFromEntitlement(e: MarketDataEntitlementDto): GrantDraft {
     feedId: e.feedId,
     display: e.display,
     nonDisplay: e.nonDisplay,
+    delayed: e.delayed ?? false,
     validFrom: e.validFromUtc ? e.validFromUtc.slice(0, 10) : '',
     validTo: e.validToUtc ? e.validToUtc.slice(0, 10) : '',
     reason: e.reason ?? '',
@@ -81,7 +108,7 @@ export function grantErrors(d: GrantDraft, creating: boolean): string[] {
     if (!d.tenantId || d.tenantId <= 0) errors.push('Choose an organisation.');
     if (!isValidFeedId(normaliseFeed(d.feedId)))
       errors.push(
-        'Choose a feed: broker-ticks, broker-dom, cme-l2, cme-trades, venue:<id> or source:<id>.',
+        'Choose a feed: broker-ticks, broker-dom, cme-l1/l2/trades, ice-*, eurex-*, us-equities-nbbo, us-equities-depth:<venue>, venue:<id>, crypto:<exchange> or source:<id>.',
       );
   }
   if (!d.display && !d.nonDisplay)
@@ -103,6 +130,7 @@ export function grantBody(d: GrantDraft): GrantEntitlementBody {
     feedId: normaliseFeed(d.feedId),
     display: d.display,
     nonDisplay: d.nonDisplay,
+    delayed: d.delayed,
     validFromUtc: dayToUtc(d.validFrom),
     validToUtc: dayToUtc(d.validTo),
     reason: d.reason.trim(),
@@ -110,16 +138,100 @@ export function grantBody(d: GrantDraft): GrantEntitlementBody {
 }
 
 export function updateBody(d: GrantDraft): UpdateEntitlementBody {
-  const { display, nonDisplay, validFromUtc, validToUtc, reason } = grantBody(d);
-  return { display, nonDisplay, validFromUtc, validToUtc, reason };
+  const { display, nonDisplay, delayed, validFromUtc, validToUtc, reason } = grantBody(d);
+  return { display, nonDisplay, delayed, validFromUtc, validToUtc, reason };
 }
 
-/** "Display + non-display", "Display only", "Non-display only". */
-export function usagesText(e: Pick<MarketDataEntitlementDto, 'display' | 'nonDisplay'>): string {
-  if (e.display && e.nonDisplay) return 'Display + non-display';
-  if (e.display) return 'Display only';
-  if (e.nonDisplay) return 'Non-display only';
-  return 'None';
+/** "Display + non-display", "Display only", "Non-display only"; ", delayed 15 min" for a delayed-only licence. */
+export function usagesText(
+  e: Pick<MarketDataEntitlementDto, 'display' | 'nonDisplay' | 'delayed' | 'delayMinutes'>,
+): string {
+  const base =
+    e.display && e.nonDisplay
+      ? 'Display + non-display'
+      : e.display
+        ? 'Display only'
+        : e.nonDisplay
+          ? 'Non-display only'
+          : 'None';
+  return e.delayed ? `${base}, delayed ${e.delayMinutes ?? 15} min` : base;
+}
+
+/** "Professional", "Non-professional", "Undeclared (counted as professional)", "Non-display". */
+export function subscriberTypeLabel(type: string): string {
+  switch (type) {
+    case 'professional':
+    case 'Professional':
+      return 'Professional';
+    case 'nonProfessional':
+    case 'NonProfessional':
+      return 'Non-professional';
+    case 'undeclared':
+      return 'Undeclared (counted as professional)';
+    case 'nonDisplay':
+      return 'Non-display';
+    default:
+      return type;
+  }
+}
+
+/**
+ * The engine's classification (`SubscriberQuestionnaire.Classify`): non-professional only when every question is
+ * answered and none is a professional answer; null while a question is unanswered.
+ */
+export function classifyAnswers(
+  questions: readonly DeclarationQuestion[],
+  answers: Readonly<Record<string, boolean | null | undefined>>,
+  selfDeclaredProfessional: boolean,
+): 'Professional' | 'NonProfessional' | null {
+  let professional = selfDeclaredProfessional;
+  for (const q of questions) {
+    const a = answers[q.key];
+    if (a === null || a === undefined) return null;
+    if (a === q.professionalWhen) professional = true;
+  }
+  return professional ? 'Professional' : 'NonProfessional';
+}
+
+/** Problems before signing a declaration. */
+export function declarationErrors(
+  questions: readonly DeclarationQuestion[],
+  draft: {
+    answers: Record<string, boolean | null>;
+    selfDeclaredProfessional: boolean;
+    signedName: string;
+    attest: boolean;
+  },
+): string[] {
+  const errors: string[] = [];
+  if (classifyAnswers(questions, draft.answers, draft.selfDeclaredProfessional) === null)
+    errors.push('Answer every question.');
+  const name = draft.signedName.trim();
+  if (name.length < 2 || name.length > 200) errors.push('Type your full name as your signature.');
+  if (!draft.attest) errors.push('Confirm that the answers are true.');
+  return errors;
+}
+
+/** The body of `POST md/declarations` (answers must be complete — check `declarationErrors` first). */
+export function declarationBody(
+  family: string,
+  questions: readonly DeclarationQuestion[],
+  draft: {
+    answers: Record<string, boolean | null>;
+    selfDeclaredProfessional: boolean;
+    signedName: string;
+    attest: boolean;
+  },
+): SubmitDeclarationBody {
+  const answers: Record<string, boolean> = {};
+  for (const q of questions) answers[q.key] = draft.answers[q.key] === true;
+  return {
+    exchangeFamily: family,
+    answers,
+    selfDeclaredProfessional: draft.selfDeclaredProfessional,
+    signedName: draft.signedName.trim(),
+    attest: draft.attest,
+  };
 }
 
 /** "Always", "From 2026-11-01", "Until 2027-01-01", "2026-11-01 → 2027-01-01". */

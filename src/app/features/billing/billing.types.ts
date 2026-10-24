@@ -116,6 +116,15 @@ export interface FeedPrice {
   marginPct: number;
 }
 
+/** Exchange fee pass-through per subscriber (engine WS8 8.5). */
+export interface ExchangeFee {
+  family: string;
+  professionalMonthly: number;
+  nonProfessionalMonthly: number;
+  nonDisplayMonthly: number;
+  marginPct: number;
+}
+
 export interface PriceBook {
   id: number;
   planId: number;
@@ -134,6 +143,8 @@ export interface PriceBook {
   brokerModuleMonthly: number;
   fundModuleMonthly: number;
   feedPrices: FeedPrice[];
+  /** Engine WS8 8.5 (absent from older engines). */
+  exchangeFees?: ExchangeFee[];
   llmMarginPct: number | null;
   notes: string | null;
   inForce: boolean;
@@ -158,6 +169,7 @@ export interface PriceBookBody {
   brokerModuleMonthly: number;
   fundModuleMonthly: number;
   feedPrices: FeedPrice[];
+  exchangeFees: ExchangeFee[];
   llmMarginPct: number | null;
   notes: string | null;
 }

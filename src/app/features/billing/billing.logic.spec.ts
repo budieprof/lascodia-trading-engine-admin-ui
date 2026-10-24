@@ -181,3 +181,22 @@ describe('billing.logic', () => {
     expect(priceBookBody(f).body?.feedPrices).toEqual(book.feedPrices);
   });
 });
+
+describe('exchange fees (engine WS8 8.5)', () => {
+  it('parses, validates and round-trips exchange fee lines', async () => {
+    const { parseExchangeFees, formatExchangeFees } = await import('./billing.logic');
+    const ok = parseExchangeFees('CME-Group, 105, 3, 0, 10\n\nnasdaq, 76');
+    expect(ok.errors).toEqual([]);
+    expect(ok.fees[0]).toEqual({
+      family: 'cme-group',
+      professionalMonthly: 105,
+      nonProfessionalMonthly: 3,
+      nonDisplayMonthly: 0,
+      marginPct: 10,
+    });
+    expect(formatExchangeFees(ok.fees)).toBe('cme-group, 105, 3, 0, 10\nnasdaq, 76, 0, 0, 0');
+    expect(parseExchangeFees('crypto:binance, 1').errors).toHaveLength(1);
+    expect(parseExchangeFees('ice, 1\nice, 2').errors).toHaveLength(1);
+    expect(parseExchangeFees('eurex, -1').errors).toHaveLength(1);
+  });
+});

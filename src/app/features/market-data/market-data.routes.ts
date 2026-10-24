@@ -44,6 +44,26 @@ export const MARKET_DATA_ROUTES: Routes = [
       ),
   },
   {
+    // Subscriber declarations (engine WS8 8.2): a person's professional / non-professional status per exchange.
+    path: 'declarations',
+    canActivate: [canAccessPath('market-data/declarations')],
+    data: { breadcrumb: 'Subscriber declarations' },
+    loadComponent: () =>
+      import('./entitlements/pages/declarations-page.component').then(
+        (m) => m.MarketDataDeclarationsPageComponent,
+      ),
+  },
+  {
+    // Staff review of every organisation's subscriber declarations (engine WS8 8.2).
+    path: 'declarations-review',
+    canActivate: [canAccessPath('market-data/declarations-review')],
+    data: { breadcrumb: 'Declarations review' },
+    loadComponent: () =>
+      import('./entitlements/pages/declarations-review-page.component').then(
+        (m) => m.MarketDataDeclarationsReviewPageComponent,
+      ),
+  },
+  {
     path: 'coverage',
     data: { breadcrumb: 'Candle Coverage' },
     loadComponent: () =>
