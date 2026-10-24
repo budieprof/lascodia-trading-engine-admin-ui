@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 987,
+  "endpointCount": 994,
   "groups": [
     {
       "name": "Admin auth",
@@ -4100,6 +4100,55 @@
       ]
     },
     {
+      "name": "Crypto market data",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/md/crypto/derivatives",
+          "summary": "The latest derivatives values and the per-minute history (default the last 24 h, ≤ 7 days).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "sourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            }
+          ],
+          "response": "ResponseData<CryptoDerivativesDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/md/crypto/orderflow",
+          "summary": "Delta / CVD / footprint bars, trade bubbles, large lots, sweeps, iceberg-like levels and absorption.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "body": "GetCryptoOrderFlowQuery",
+          "response": "ResponseData<CmeOrderFlowDto>"
+        }
+      ]
+    },
+    {
       "name": "Currency pair",
       "endpoints": [
         {
@@ -5649,6 +5698,131 @@
           "permission": "fund.reports.read",
           "parameters": [],
           "response": "ResponseData<FundScopeDto>"
+        }
+      ]
+    },
+    {
+      "name": "Futures",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/futures/catalog",
+          "summary": "The futures roots the data sidecars stream: exchange, dataset, listing cycle, roll rule, nearby contracts now.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "Exchange",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Group",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Nearby",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<FuturesRootDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/futures/continuous",
+          "summary": "A continuous series (ES1!) stitched from the per-contract store streams; adjust = none | difference.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "Symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "From",
+              "in": "query",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "name": "To",
+              "in": "query",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "name": "SourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Adjust",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Kinds",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<ContinuousSeriesDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/futures/statistics",
+          "summary": "Exchange statistics per contract and trading date (root or contract; newest first).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "Root",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Contract",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "From",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "To",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "SourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<FutureStatisticDto>>"
         }
       ]
     },
@@ -8841,6 +9015,22 @@
       ]
     },
     {
+      "name": "Market data futures ingest",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/md/futures/statistics",
+          "summary": "Settlement / open interest / cleared volume / OHLC / VWAP per contract and trading date (≤ 2,000 rows).",
+          "access": "permission",
+          "permission": "marketdata.ingest",
+          "rateLimit": "ea",
+          "parameters": [],
+          "body": "IngestFutureStatisticsCommand",
+          "response": "ResponseData<FutureStatisticsIngestResult>"
+        }
+      ]
+    },
+    {
       "name": "Market data history",
       "endpoints": [
         {
@@ -8868,6 +9058,17 @@
           "parameters": [],
           "body": "IngestExternalMarketDataCommand",
           "response": "ResponseData<MdIngestResult>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/md/ingest/history",
+          "summary": "C3h — a history backfill of trades from an external source sidecar (machine credential): stored straight in the market-data store, only where the store holds none of that source's trades in the span.",
+          "access": "permission",
+          "permission": "marketdata.ingest",
+          "rateLimit": "ea",
+          "parameters": [],
+          "body": "IngestExternalHistoryCommand",
+          "response": "ResponseData<MdHistoryIngestResult>"
         },
         {
           "method": "GET",
