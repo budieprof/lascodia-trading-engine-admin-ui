@@ -291,6 +291,15 @@ localhost rather than a blank page.
   (`approval-policies.ts` mirrors the engine's loosening rule; a parked change is `-202-approval`, not a failure);
   `/iam/approvals` shows "k of n approvals" and who approved. The Investor role sees only `/fund/performance`.
 
+- **Usage & billing (enterprise program billing-metering; engine `docs/api/billing-api.md`).** `features/billing/`:
+  `/organisation/billing` (`tenant.billing.read`: metered days, month tiles, the ESTIMATE — never called an invoice —,
+  finalised invoices with PDF/CSV) and `/platform/billing` (staff; reads `platform.usage.read`, every change
+  `platform.billing.manage` behind `app-confirm-dialog`): Invoices (draft a finished month, review lines + notes,
+  finalise with a note, void with a reason, collect / payment status), Price books (draft → publish versions; feed
+  prices one per line `feed, monthly, per display user, margin %`), Usage (any organisation's month; audited). The page
+  always shows the payment-provider notice: no real provider exists (`none` or the `local-test` double). Shared views:
+  `components/usage-month-view`, `components/invoice-detail`; decisions in `billing.logic.ts` (spec).
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
