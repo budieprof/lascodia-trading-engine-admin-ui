@@ -79,6 +79,8 @@ export interface MachineCredential {
   revokedAtUtc: string | null;
   revokedReason: string | null;
   revokedBy: string | null;
+  /** The EA version this instance reports (its EAInstance row); null/absent = unknown (ea-download). */
+  eaVersion?: string | null;
 }
 
 // ── Layered settings (engine ConfigOverridesController, ADR-0012 addendum) ───────────────────

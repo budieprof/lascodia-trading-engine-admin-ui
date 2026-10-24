@@ -4,13 +4,45 @@
  * `GET machine/enrollments/{id}/progress` (both `accounts.read`).
  */
 
+export type EaDownloadSource = 'engine' | 'external' | 'none';
+
+/** `GET onboarding/ea/latest` (`accounts.read`): a published EA build, without its bytes. */
+export interface EaReleaseInfo {
+  id: number;
+  version: string;
+  numericVersion: number;
+  sha256: string;
+  sizeBytes: number;
+  builtAtUtc: string | null;
+  publishedAtUtc: string;
+  publishedBy: string;
+  notes: string | null;
+  fileName: string;
+}
+
+/** `GET onboarding/ea/download` (`accounts.connect`): the file and what the engine says it is. */
+export interface EaDownloadFile {
+  blob: Blob;
+  fileName: string;
+  /** `X-Content-SHA256`, lower-case hex (null when the header was not exposed). */
+  sha256: string | null;
+  version: string | null;
+}
+
 /** `GET onboarding/terminal-setup`. */
 export interface TerminalSetup {
   /** The engine API base URL for `InpEngineBaseUrl`; empty = the console's own origin + `apiPath`. */
   engineBaseUrl: string;
   apiPath: string;
-  /** Where the EA (.ex5) is downloaded; empty = ask the platform operator. */
+  /** An external https link to the EA (.ex5) that overrides the engine's own copy; empty = none. */
   eaDownloadUrl: string;
+  /**
+   * `engine` = the signed-in download (`GET onboarding/ea/download`), `external` = `eaDownloadUrl`,
+   * `none` = nothing published (ask the platform operator).
+   */
+  eaDownloadSource: EaDownloadSource;
+  /** The latest EA build published to the engine, or null. */
+  latestEa: EaReleaseInfo | null;
   eaMinimumVersion: string;
   enrollmentTokenInput: string;
   engineUrlInput: string;

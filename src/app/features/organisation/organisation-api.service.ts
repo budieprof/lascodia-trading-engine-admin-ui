@@ -1,7 +1,10 @@
+import { HttpClient, HttpContext, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, map, of, throwError } from 'rxjs';
 
-import { ApiService } from '@core/api/api.service';
+import { ApiService, SUPPRESS_ERROR_TOAST } from '@core/api/api.service';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
+import { fileNameFromContentDisposition } from '@features/scripting/shared/download';
 import { ApiError, type PagedData, type ResponseData } from '@core/api/api.types';
 import { queryString, rows } from '@features/iam/iam-api.service';
 import type {
@@ -28,7 +31,12 @@ import type {
   StrategySummary,
   TenantLlmKey,
 } from './organisation.types';
-import type { EnrollmentProgress, TerminalSetup } from './connect/terminal-wizard.types';
+import type {
+  EaDownloadFile,
+  EaReleaseInfo,
+  EnrollmentProgress,
+  TerminalSetup,
+} from './connect/terminal-wizard.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
 interface OverrideWriteResponse extends ResponseData<number> {
@@ -52,6 +60,12 @@ export function overrideResult(res: OverrideWriteResponse | null): OverrideWrite
     breakGlass: res.breakGlass === true,
     message: res.message,
   };
+}
+
+/** `onboarding/ea/latest` answered "nothing published" (`-14` / HTTP 404 — also an engine without the endpoint). */
+function isNothingPublished(e: unknown): boolean {
+  const x = e as { status?: unknown; code?: unknown } | null;
+  return x?.status === 404 || x?.code === '-14';
 }
 
 /** The pages say what went wrong themselves; session handling (step-up, CSRF, sign-in) still applies. */
@@ -81,6 +95,8 @@ export function settled<T>(source: Observable<ResponseData<T>>): Observable<T> {
 @Injectable({ providedIn: 'root' })
 export class OrganisationApiService {
   private readonly api = inject(ApiService);
+  private readonly http = inject(HttpClient);
+  private readonly baseUrl = `${inject(RUNTIME_CONFIG).apiBaseUrl}/api/v1/lascodia-trading-engine`;
 
   private get<T>(path: string): Observable<T> {
     return settled(this.api.get<ResponseData<T>>(path, SILENT));
@@ -117,6 +133,40 @@ export class OrganisationApiService {
    */
   terminalSetup(): Observable<TerminalSetup> {
     return this.get('/onboarding/terminal-setup');
+  }
+
+  /** `accounts.read`. The latest EA build published to the engine, or null when none is (`-14`). */
+  latestEa(): Observable<EaReleaseInfo | null> {
+    return this.get<EaReleaseInfo>('/onboarding/ea/latest').pipe(
+      catchError((e: unknown) => (isNothingPublished(e) ? of(null) : throwError(() => e))),
+    );
+  }
+
+  /**
+   * `accounts.connect`. The EA file (`LascodiaEA.ex5`), fetched with the session's credentials —
+   * the download is sign-in only, never a public link. `version` = a named build, else the latest.
+   */
+  downloadEa(version?: string): Observable<EaDownloadFile> {
+    let params = new HttpParams();
+    if (version) params = params.set('version', version);
+    return this.http
+      .get(`${this.baseUrl}/onboarding/ea/download`, {
+        params,
+        responseType: 'blob',
+        observe: 'response',
+        withCredentials: true,
+        context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true),
+      })
+      .pipe(
+        map((res) => ({
+          blob: res.body ?? new Blob([]),
+          fileName:
+            fileNameFromContentDisposition(res.headers.get('Content-Disposition')) ??
+            'LascodiaEA.ex5',
+          sha256: res.headers.get('X-Content-SHA256')?.toLowerCase() ?? null,
+          version: res.headers.get('X-Lascodia-EA-Version'),
+        })),
+      );
   }
 
   /** `accounts.read`. Where one enrollment token stands, with the troubleshooting hints. */
