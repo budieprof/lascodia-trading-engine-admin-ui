@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 994,
+  "endpointCount": 1001,
   "groups": [
     {
       "name": "Admin auth",
@@ -804,6 +804,57 @@
     {
       "name": "Admin market data entitlements",
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/md/declarations",
+          "summary": "Subscriber declarations across organisations (WS8 8.2): the staff review queue.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "tenantId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "family",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "includeHistory",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<List<SubscriberDeclarationDto>>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/admin/md/declarations/{id}/review",
+          "summary": "Accept, reject or reclassify a declaration.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "ReviewSubscriberDeclarationCommand",
+          "response": "ResponseData<SubscriberDeclarationDto>"
+        },
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/admin/md/entitlements",
@@ -4858,6 +4909,54 @@
             }
           ],
           "response": "ResponseData<EngineConfigDto>"
+        }
+      ]
+    },
+    {
+      "name": "Equity market data",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/md/equities/halts",
+          "summary": "Every instrument currently halted, LULD-paused or quote-only on any US equities source.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "response": "ResponseData<List<TradingStatusView>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/md/equities/status",
+          "summary": "One instrument's latest trading status on a source and its state changes (default the last 7 days, ≤ 31).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "sourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            }
+          ],
+          "response": "ResponseData<EquityTradingStatusDto>"
         }
       ]
     },
@@ -8997,6 +9096,46 @@
             }
           ],
           "response": "ResponseData<DispersionDto>"
+        }
+      ]
+    },
+    {
+      "name": "Market data declarations",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/md/declarations",
+          "summary": "Sign a declaration for one exchange family (supersedes the caller's previous one for it).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "body": "SubmitSubscriberDeclarationCommand",
+          "response": "ResponseData<SubscriberDeclarationDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/md/declarations/me",
+          "summary": "The caller's declarations per exchange family, which ones their organisation's licences need, and the questionnaire.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "response": "ResponseData<MyDeclarationsDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/md/declarations/{id}",
+          "summary": "Withdraw the caller's own declaration (real-time access to the family ends).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
         }
       ]
     },
