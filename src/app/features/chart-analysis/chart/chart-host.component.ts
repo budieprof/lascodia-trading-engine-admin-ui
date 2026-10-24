@@ -126,6 +126,7 @@ import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
 import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
 import { pipSizeFor } from '../datafeed/symbol-info';
+import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { MagnetMode } from '../drawings/drawing-ops';
@@ -428,7 +429,11 @@ interface ExternalLineSeries {
       </div>
     }
     @for (row of scriptPaneRows(); track row.key) {
-      <div class="script-status" [style.top.px]="(row.top ?? 0) + 4" [style.left.px]="scriptRowLeft()">
+      <div
+        class="script-status"
+        [style.top.px]="(row.top ?? 0) + 4"
+        [style.left.px]="scriptRowLeft()"
+      >
         <app-script-status-line [row]="row" (action)="scriptAction.emit($event)" />
       </div>
     }
@@ -1139,7 +1144,10 @@ export class ChartHostComponent implements OnDestroy {
   );
   private eventLane: { index: number; el: HTMLElement | null; pane: IPaneApi<Time> } | null = null;
   /** The volume series the lane's bottom margin was last applied to, and that margin. */
-  private laneMargin: { series: ISeriesApi<'Histogram'> | null; bottom: number } = { series: null, bottom: 0 };
+  private laneMargin: { series: ISeriesApi<'Histogram'> | null; bottom: number } = {
+    series: null,
+    bottom: 0,
+  };
   /** One renderer per active profile study, keyed by the study's uid. */
   private profileRenderers = new Map<string, ProfileRenderer>();
   /** Every active pattern study paints through this one renderer. */
@@ -1379,7 +1387,8 @@ export class ChartHostComponent implements OnDestroy {
           structure: effectiveOpacity(groups, 'structure'),
           profiles: effectiveOpacity(groups, 'profiles'),
         });
-        for (const r of this.profileRenderers.values()) r.setOpacity(effectiveOpacity(groups, 'profiles'));
+        for (const r of this.profileRenderers.values())
+          r.setOpacity(effectiveOpacity(groups, 'profiles'));
         this.eventRenderer.setOpacity(effectiveOpacity(groups, 'events'));
         this.eventLaneRenderer.setOpacity(effectiveOpacity(groups, 'events'));
         this.syncEventLane();
@@ -1424,7 +1433,8 @@ export class ChartHostComponent implements OnDestroy {
       if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceScaleId: side });
     // The compare overlays share the price's scale (CC-I12).
     for (const uid of this.priceExternal)
-      for (const l of this.externalSeries.get(uid) ?? []) l.api.applyOptions({ priceScaleId: side });
+      for (const l of this.externalSeries.get(uid) ?? [])
+        l.api.applyOptions({ priceScaleId: side });
     chart.priceScale(side).applyOptions({
       mode:
         mode === 'log'
@@ -1470,7 +1480,11 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /** The session breaks on the panes below the price pane, one renderer per pane (their element tells them apart). */
-  private paneBreaks: { el: HTMLElement | null; pane: IPaneApi<Time>; renderer: SessionBreaksRenderer }[] = [];
+  private paneBreaks: {
+    el: HTMLElement | null;
+    pane: IPaneApi<Time>;
+    renderer: SessionBreaksRenderer;
+  }[] = [];
 
   /**
    * Session breaks across the study and script panes, not only the price pane: a renderer on each pane below it,
@@ -1550,7 +1564,14 @@ export class ChartHostComponent implements OnDestroy {
       wantProfile ? profileExtras(bars, periods, mode, this.profileExtras(), dayOf) : null,
     );
     this.analysisRenderer.setLevels(wantLevels ? supportResistance(window) : []);
-    this.analysisRenderer.setStructure(wantStructure ? marketStructure(window) : null);
+    this.analysisRenderer.setStructure(
+      wantStructure
+        ? marketStructure(window, {
+            pipSize: this.pipSize(),
+            unitLabel: distanceUnitLabel(resolveInstrument(this.symbol())),
+          })
+        : null,
+    );
     this.analysisRenderer.setAuto(wantAuto && auto ? this.autoAnalysisOf(auto, window) : null);
   }
 
@@ -1937,7 +1958,9 @@ export class ChartHostComponent implements OnDestroy {
   private eventGroupAt(point: { x: number; y: number }, paneIndex?: number): EventMark[] | null {
     const index = paneIndex ?? 0;
     if (index === 0) return this.eventRenderer.hitGroup(point.x, point.y);
-    return this.eventLane?.index === index ? this.eventLaneRenderer.hitGroup(point.x, point.y) : null;
+    return this.eventLane?.index === index
+      ? this.eventLaneRenderer.hitGroup(point.x, point.y)
+      : null;
   }
 
   /** A pane's top in the container (px). */
@@ -1977,7 +2000,10 @@ export class ChartHostComponent implements OnDestroy {
       effectiveOpacity(untracked(this.layerGroups), 'events') > 0 &&
       height > 0;
     const bottom = reserve ? Math.min(0.15, (EVENT_LANE_HEIGHT + 2) / height) : 0;
-    if (this.volume && (this.laneMargin.series !== this.volume || this.laneMargin.bottom !== bottom)) {
+    if (
+      this.volume &&
+      (this.laneMargin.series !== this.volume || this.laneMargin.bottom !== bottom)
+    ) {
       this.volume.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom } });
       this.laneMargin = { series: this.volume, bottom };
     }
@@ -1997,9 +2023,14 @@ export class ChartHostComponent implements OnDestroy {
    * The provenance card of the derived layer under the pointer (PR-4) — structure, profiles, S/R, auto
    * analysis — on the price pane, unless an event's card is showing.
    */
-  private updateProvenanceTip(point: { x: number; y: number } | undefined, paneIndex?: number): void {
+  private updateProvenanceTip(
+    point: { x: number; y: number } | undefined,
+    paneIndex?: number,
+  ): void {
     const hit =
-      point && (paneIndex ?? 0) === 0 && !this.eventTip() ? this.analysisRenderer.hit(point.x, point.y) : null;
+      point && (paneIndex ?? 0) === 0 && !this.eventTip()
+        ? this.analysisRenderer.hit(point.x, point.y)
+        : null;
     if (!hit) {
       if (this.provenanceTip()) this.provenanceTip.set(null);
       return;
@@ -2073,7 +2104,10 @@ export class ChartHostComponent implements OnDestroy {
         textColor: p.text,
         panes: { separatorColor: p.border, separatorHoverColor: p.border },
       },
-      grid: { vertLines: { color: p.grid, visible: g.vert }, horzLines: { color: p.grid, visible: g.horz } },
+      grid: {
+        vertLines: { color: p.grid, visible: g.vert },
+        horzLines: { color: p.grid, visible: g.horz },
+      },
       rightPriceScale: { borderColor: p.border },
       leftPriceScale: { borderColor: p.border },
       timeScale: { borderColor: p.border },
@@ -2344,7 +2378,9 @@ export class ChartHostComponent implements OnDestroy {
     // ones below the legend.
     for (const pane of this.scriptTables())
       for (const placed of stackTables(
-        pane.tables.filter((t) => t.cells.length > 0).map((t) => placeTable(t, pane.width, pane.height, measure)),
+        pane.tables
+          .filter((t) => t.cells.length > 0)
+          .map((t) => placeTable(t, pane.width, pane.height, measure)),
         pane.tables.filter((t) => t.cells.length > 0).map((t) => String(t.position)),
         pane.width,
         pane.height,
@@ -2701,7 +2737,8 @@ export class ChartHostComponent implements OnDestroy {
   private ensurePriceSeries(style: ChartStyle): boolean {
     const chart = this.chart;
     const look = appearanceKey(this.appearance());
-    if (!chart || (this.price && this.seriesStyle === style && this.seriesLook === look)) return false;
+    if (!chart || (this.price && this.seriesStyle === style && this.seriesLook === look))
+      return false;
     const old = this.price;
     const next = this.createPriceSeries(chart, style);
     next.applyOptions({ priceScaleId: this.scaleSide() });
@@ -3222,7 +3259,11 @@ export class ChartHostComponent implements OnDestroy {
   }
 
   /** A study's new colours and widths, on its series as they are (no new series, no new pane). */
-  private repaintIndicatorSeries(target: IndicatorSeries, item: ActiveIndicator, def: IndicatorDef): void {
+  private repaintIndicatorSeries(
+    target: IndicatorSeries,
+    item: ActiveIndicator,
+    def: IndicatorDef,
+  ): void {
     const plots = new Map(def.plots.map((p) => [p.key, effectivePlot(p, item.style)]));
     for (const s of target.series) {
       const plot = plots.get(s.key);
@@ -3483,7 +3524,11 @@ export class ChartHostComponent implements OnDestroy {
     const byUid = new Map(panes.map((p) => [p.uid, p]));
     for (const [uid, lines] of [...this.externalSeries]) {
       const pane = byUid.get(uid);
-      if (pane && pane.lines.length === lines.length && (pane.target === 'price') === this.priceExternal.has(uid))
+      if (
+        pane &&
+        pane.lines.length === lines.length &&
+        (pane.target === 'price') === this.priceExternal.has(uid)
+      )
         continue;
       this.priceExternal.delete(uid);
       for (const l of lines) {
@@ -3648,7 +3693,10 @@ export class ChartHostComponent implements OnDestroy {
       const legendBottom =
         legendEnd === null
           ? 0
-          : Math.max(0, legendEnd - (this.hostEl.nativeElement as HTMLElement).offsetTop - topOf(0));
+          : Math.max(
+              0,
+              legendEnd - (this.hostEl.nativeElement as HTMLElement).offsetTop - topOf(0),
+            );
       const out: ReturnType<typeof this.scriptTables> = [];
       for (const [index, tables] of byPane) {
         if (!panes[index]) continue;
@@ -3935,7 +3983,8 @@ export class ChartHostComponent implements OnDestroy {
       };
       const swallowed = ['mousedown', 'mouseup', 'click', 'dblclick', 'touchstart', 'pointerup'];
       el.addEventListener('pointerdown', down, true);
-      for (const type of swallowed) el.addEventListener(type, swallow, { capture: true, passive: false });
+      for (const type of swallowed)
+        el.addEventListener(type, swallow, { capture: true, passive: false });
       document.addEventListener('keydown', key, true);
       this.pickOff = () => {
         el.removeEventListener('pointerdown', down, true);
@@ -3991,7 +4040,8 @@ export class ChartHostComponent implements OnDestroy {
     if (!chart) return;
     const need = this.scriptLayers.axisSides();
     const side = this.scaleSide();
-    const same = need.size === this.scriptAxes.size && [...need].every((s) => this.scriptAxes.has(s));
+    const same =
+      need.size === this.scriptAxes.size && [...need].every((s) => this.scriptAxes.has(s));
     if (same && !force) return;
     // Nothing needed now or before: the chart's own scale settings stand as they are.
     if (need.size === 0 && this.scriptAxes.size === 0) return;

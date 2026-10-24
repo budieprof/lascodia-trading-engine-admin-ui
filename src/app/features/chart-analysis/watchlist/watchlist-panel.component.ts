@@ -1,4 +1,6 @@
 import { PairIconComponent, pairFlags, pairName } from './pair-icon.component';
+import { InstrumentIconComponent } from './instrument-icon.component';
+import { resolveInstrument } from '@core/instruments/instrument-math';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -112,7 +114,10 @@ interface SectionView {
 }
 
 /** What the rows show: a list, a flag across every list, or a server-side hotlist. Only a list is editable. */
-type WatchView = { kind: 'list' } | { kind: 'flag'; flag: WatchFlag } | { kind: 'hotlist'; hot: HotlistKind };
+type WatchView =
+  | { kind: 'list' }
+  | { kind: 'flag'; flag: WatchFlag }
+  | { kind: 'hotlist'; hot: HotlistKind };
 
 /** The engine sends `assetClass` with every pair; the console's shared type does not declare it yet. */
 type PairMeta = CurrencyPairDto & { assetClass?: string | null };
@@ -127,8 +132,12 @@ type PairMeta = CurrencyPairDto & { assetClass?: string | null };
 function lastUpdateLabel(utc: string): string | null {
   const ms = Date.parse(utc);
   if (!Number.isFinite(ms)) return null;
-  return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'short' })
-    .format(ms);
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZoneName: 'short',
+  }).format(ms);
 }
 
 @Component({
@@ -137,6 +146,7 @@ function lastUpdateLabel(utc: string): string | null {
   imports: [
     DecimalPipe,
     PairIconComponent,
+    InstrumentIconComponent,
     ChartIconComponent,
     PerformanceTilesComponent,
     SeasonalsComponent,
@@ -188,6 +198,8 @@ export class WatchlistPanelComponent {
   readonly split = splitPrice;
   readonly tickParts = tickParts;
   readonly pairFlags = pairFlags;
+  /** A symbol the instrument catalogue says is not FX: it gets its asset-class badge, not a currency letter. */
+  readonly nonFx = (symbol: string): boolean => resolveInstrument(symbol).assetClass !== 'Fx';
   readonly allColumns = WATCH_COLUMNS;
   readonly hotlists = HOTLISTS;
   readonly countdown = formatCountdown;
@@ -252,7 +264,10 @@ export class WatchlistPanelComponent {
   });
   /** The row grid: flag, symbol, then one track per column (the dock scrolls sideways when they overflow). */
   readonly gridTemplate = computed(
-    () => `16px minmax(84px, 1fr) ${this.columns().map((c) => `${c.width}px`).join(' ')}`,
+    () =>
+      `16px minmax(84px, 1fr) ${this.columns()
+        .map((c) => `${c.width}px`)
+        .join(' ')}`,
   );
 
   private readonly pairBySymbol = computed(() => {
@@ -290,11 +305,19 @@ export class WatchlistPanelComponent {
 
   private row(item: WatchItem, sectionId: string, quote: WatchQuote | undefined): WatchRow {
     const sym = item.symbol;
-    return rowFor(item, sectionId, quote, this.liveBids()[sym], undefined, this.digitsBySymbol()[sym] ?? 5, {
-      ...this.rowContext(),
-      legs: this.legs(sym),
-      liveAsk: this.alerts.quote(sym)?.ask,
-    });
+    return rowFor(
+      item,
+      sectionId,
+      quote,
+      this.liveBids()[sym],
+      undefined,
+      this.digitsBySymbol()[sym] ?? 5,
+      {
+        ...this.rowContext(),
+        legs: this.legs(sym),
+        liveAsk: this.alerts.quote(sym)?.ask,
+      },
+    );
   }
 
   readonly sections = computed<SectionView[]>(() => {
@@ -308,7 +331,10 @@ export class WatchlistPanelComponent {
           id: `flag-${v.flag}`,
           name: `Flagged ${v.flag}`,
           collapsed: false,
-          rows: sortRows(items.map((it) => this.row(it, '', quotes[it.symbol])), sort),
+          rows: sortRows(
+            items.map((it) => this.row(it, '', quotes[it.symbol])),
+            sort,
+          ),
         },
       ];
     }
@@ -375,7 +401,10 @@ export class WatchlistPanelComponent {
     const legs = this.legs(sym);
     return {
       symbol: sym,
-      name: pair ? (pairName(pair.baseCurrency, pair.quoteCurrency) ?? `${pair.baseCurrency} / ${pair.quoteCurrency}`) : sym,
+      name: pair
+        ? (pairName(pair.baseCurrency, pair.quoteCurrency) ??
+          `${pair.baseCurrency} / ${pair.quoteCurrency}`)
+        : sym,
       // From the engine's asset class (SP-11): it said "Forex" for gold and indices alike.
       kind: instrumentKind(pair?.assetClass, sym, legs),
       quote: pair?.quoteCurrency ?? '',
@@ -453,7 +482,10 @@ export class WatchlistPanelComponent {
       const load = () =>
         this.calendar
           .upcoming({ currencies: ccys, minImpact: 'High' })
-          .subscribe({ next: (rows) => this.events.set(rows ?? []), error: () => this.events.set([]) });
+          .subscribe({
+            next: (rows) => this.events.set(rows ?? []),
+            error: () => this.events.set([]),
+          });
       untracked(load);
       const timer = setInterval(load, CONTEXT_REFRESH_MS);
       onCleanup(() => clearInterval(timer));
@@ -466,7 +498,9 @@ export class WatchlistPanelComponent {
       const load = () =>
         this.newsIntel.getPressure({ currencies: ccys, topItems: 1 }).subscribe({
           next: (rows) =>
-            this.newsScores.set(new Map((rows ?? []).map((r) => [r.currency.toUpperCase(), r.weightedScore]))),
+            this.newsScores.set(
+              new Map((rows ?? []).map((r) => [r.currency.toUpperCase(), r.weightedScore])),
+            ),
           // The module can be off, or the operator lack the permission: the column stays empty, not wrong.
           error: () => this.newsScores.set(null),
         });
@@ -480,7 +514,9 @@ export class WatchlistPanelComponent {
       if (!this.needs().has('positions') || this.hidden()) return;
       untracked(() => void this.loadPositions());
       const timer = setInterval(() => void this.loadPositions(), POSITIONS_REFRESH_MS);
-      const sub = this.realtime.on('positionLifecycleEvent').subscribe(() => void this.loadPositions());
+      const sub = this.realtime
+        .on('positionLifecycleEvent')
+        .subscribe(() => void this.loadPositions());
       onCleanup(() => {
         clearInterval(timer);
         sub.unsubscribe();
@@ -494,7 +530,8 @@ export class WatchlistPanelComponent {
         const next: Record<string, { dir: 'up' | 'down'; prev: number }> = {};
         for (const [sym, bid] of Object.entries(bids)) {
           const prev = this.lastBids[sym];
-          if (prev !== undefined && bid !== prev) next[sym] = { dir: bid > prev ? 'up' : 'down', prev };
+          if (prev !== undefined && bid !== prev)
+            next[sym] = { dir: bid > prev ? 'up' : 'down', prev };
         }
         this.lastBids = { ...bids };
         if (Object.keys(next).length) this.tick.update((t) => ({ ...t, ...next }));
@@ -550,7 +587,9 @@ export class WatchlistPanelComponent {
         this.hotlistError.set(null);
       }
     } catch (err) {
-      this.hotlistError.set(err instanceof Error ? err.message : 'The hotlist could not be loaded.');
+      this.hotlistError.set(
+        err instanceof Error ? err.message : 'The hotlist could not be loaded.',
+      );
     }
   }
 
@@ -689,10 +728,14 @@ export class WatchlistPanelComponent {
   toggleColumn(key: WatchColumnKey): void {
     const list = this.list();
     if (!list) return;
-    const columns = toggleColumn(this.columns().map((c) => c.key), key);
+    const columns = toggleColumn(
+      this.columns().map((c) => c.key),
+      key,
+    );
     const sort = this.sort();
     // A sort on a column that is no longer shown would order the rows by something invisible.
-    const keepSort = sort.key === 'none' || sort.key === 'symbol' || columns.includes(sort.key as WatchColumnKey);
+    const keepSort =
+      sort.key === 'none' || sort.key === 'symbol' || columns.includes(sort.key as WatchColumnKey);
     if (!keepSort) this.sort.set({ key: 'none', dir: 1 });
     this.saveSettings(columns, keepSort ? sort : { key: 'none', dir: 1 });
   }
@@ -701,18 +744,29 @@ export class WatchlistPanelComponent {
     const list = this.list();
     if (!list) return;
     this.sort.set({ key: 'none', dir: 1 });
-    this.store.setSettings(list.id, { columns: resolveColumns(null).map((c) => c.key), sort: null });
+    this.store.setSettings(list.id, {
+      columns: resolveColumns(null).map((c) => c.key),
+      sort: null,
+    });
   }
 
   sortBy(key: SortKey): void {
     const next = nextSort(this.sort(), key);
     this.sort.set(next);
-    if (this.view().kind === 'list') this.saveSettings(this.columns().map((c) => c.key), next);
+    if (this.view().kind === 'list')
+      this.saveSettings(
+        this.columns().map((c) => c.key),
+        next,
+      );
   }
 
   clearSort(): void {
     this.sort.set({ key: 'none', dir: 1 });
-    if (this.view().kind === 'list') this.saveSettings(this.columns().map((c) => c.key), this.sort());
+    if (this.view().kind === 'list')
+      this.saveSettings(
+        this.columns().map((c) => c.key),
+        this.sort(),
+      );
     this.moreMenuOpen.set(false);
   }
 
@@ -861,7 +915,10 @@ export class WatchlistPanelComponent {
     if (!symbol || !target) return;
     // A manual order only means something unsorted.
     this.sort.set({ key: 'none', dir: 1 });
-    this.saveSettings(this.columns().map((c) => c.key), this.sort());
+    this.saveSettings(
+      this.columns().map((c) => c.key),
+      this.sort(),
+    );
     this.edit((l) => moveSymbol(l, symbol, target.sectionId, target.before));
   }
 

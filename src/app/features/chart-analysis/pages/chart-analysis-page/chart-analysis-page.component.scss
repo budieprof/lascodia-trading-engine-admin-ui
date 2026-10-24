@@ -1984,3 +1984,27 @@ $strip-width: 46px;
 .script-alert-dialog::backdrop {
   background: rgba(0, 0, 0, 0.35);
 }
+
+// Asset-class chips in the symbol search (multi-asset WS7) — shown only when the catalogue holds more than FX.
+.symbol-classes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 10px 6px;
+
+  button {
+    padding: 2px 8px;
+    border: 1px solid var(--tv-line);
+    border-radius: 10px;
+    background: transparent;
+    color: var(--tv-ink);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+
+    &.on {
+      background: var(--tv-ink);
+      color: var(--tv-bg);
+    }
+  }
+}

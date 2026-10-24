@@ -3,6 +3,7 @@
  * cell — spread and ranges in pips, ADR used, ATR %, the next high-impact event, news pressure, open P&L and the FX
  * session. Kept apart from the component so every number is unit-tested.
  */
+import { distanceUnitOf } from '@core/instruments/instrument-math';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 
 export type WatchColumnKey =
@@ -41,7 +42,13 @@ export interface WatchColumn {
 export const WATCH_COLUMNS: readonly WatchColumn[] = [
   { key: 'last', label: 'Last', title: 'Last price (the bid)', sortable: true, width: 76 },
   { key: 'change', label: 'Chg', title: 'Change on the trading day', sortable: true, width: 64 },
-  { key: 'changePct', label: 'Chg%', title: 'Change on the trading day, %', sortable: true, width: 56 },
+  {
+    key: 'changePct',
+    label: 'Chg%',
+    title: 'Change on the trading day, %',
+    sortable: true,
+    width: 56,
+  },
   { key: 'bid', label: 'Bid', title: 'Live bid', sortable: true, width: 76 },
   { key: 'ask', label: 'Ask', title: 'Live ask', sortable: true, width: 76 },
   { key: 'spread', label: 'Spr', title: 'Live spread in pips', sortable: true, width: 44 },
@@ -87,7 +94,8 @@ export const WATCH_COLUMNS: readonly WatchColumn[] = [
   {
     key: 'news',
     label: 'News',
-    title: 'News pressure: base currency minus quote currency (−2 … +2; above 0 the news favours the base)',
+    title:
+      'News pressure: base currency minus quote currency (−2 … +2; above 0 the news favours the base)',
     sortable: true,
     width: 50,
     needs: 'news',
@@ -141,7 +149,10 @@ export function resolveColumns(saved: readonly string[] | null | undefined): Wat
 }
 
 /** Toggle one column in a list's column set, keeping the registry's order. */
-export function toggleColumn(current: readonly WatchColumnKey[], key: WatchColumnKey): WatchColumnKey[] {
+export function toggleColumn(
+  current: readonly WatchColumnKey[],
+  key: WatchColumnKey,
+): WatchColumnKey[] {
   const on = new Set(current);
   if (on.has(key)) on.delete(key);
   else on.add(key);
@@ -155,14 +166,13 @@ export function neededData(columns: readonly WatchColumn[]): Set<ColumnNeed> {
 
 // ── Pip maths ───────────────────────────────────────────────────────────────
 
-/** The quote's pip size, else the usual convention (JPY quotes 0.01, metals 0.1/0.01, else by digits). */
+/**
+ * The quote's pip size (the broker's, from the day snapshot), else the instrument's display unit (core/instruments:
+ * the FX pip from its digits; a point off FX — metals included, as the engine counts them).
+ */
 export function pipSizeOf(symbol: string, digits: number, quotedPip?: number | null): number {
   if (quotedPip && quotedPip > 0) return quotedPip;
-  const s = symbol.toUpperCase();
-  if (s.startsWith('XAU')) return 0.1;
-  if (s.startsWith('XAG')) return 0.01;
-  if (s.endsWith('JPY')) return 0.01;
-  return digits === 3 || digits === 5 ? 10 ** -(digits - 1) : 10 ** -digits;
+  return distanceUnitOf(symbol, { digits });
 }
 
 /** A price distance in pips, one decimal; null without both ends. */
@@ -183,7 +193,10 @@ export function adrUsedPct(
 }
 
 /** ATR as a % of price, two decimals. */
-export function atrPct(atr: number | null | undefined, price: number | null | undefined): number | null {
+export function atrPct(
+  atr: number | null | undefined,
+  price: number | null | undefined,
+): number | null {
   if (atr == null || price == null || !(price > 0)) return null;
   return Math.round((atr / price) * 10_000) / 100;
 }
@@ -196,11 +209,7 @@ export interface Legs {
 }
 
 /** Base / quote from the pair's columns, else a six-letter symbol; null for an index or energy CFD. */
-export function legsOf(
-  symbol: string,
-  base?: string | null,
-  quote?: string | null,
-): Legs | null {
+export function legsOf(symbol: string, base?: string | null, quote?: string | null): Legs | null {
   const b = (base ?? '').trim().toUpperCase();
   const q = (quote ?? '').trim().toUpperCase();
   if (b.length === 3 && q.length === 3) return { base: b, quote: q };
@@ -281,7 +290,10 @@ export function pnlBySymbol(
   const out = new Map<string, number>();
   for (const p of positions) {
     if (p.status && p.status !== 'Open') continue;
-    if (accountIds.size && (p.tradingAccountId === undefined || !accountIds.has(p.tradingAccountId)))
+    if (
+      accountIds.size &&
+      (p.tradingAccountId === undefined || !accountIds.has(p.tradingAccountId))
+    )
       continue;
     const sym = (p.symbol ?? '').toUpperCase();
     if (!sym) continue;
@@ -305,10 +317,38 @@ export interface FxSession {
 
 /** The four conventional FX sessions, each 08:00–17:00 local (Sydney 07:00–16:00), DST-correct via the zone. */
 export const FX_SESSIONS: readonly FxSession[] = [
-  { name: 'Sydney', short: 'SYD', zone: 'Australia/Sydney', open: 7, close: 16, home: ['AUD', 'NZD'] },
-  { name: 'Tokyo', short: 'TKY', zone: 'Asia/Tokyo', open: 9, close: 18, home: ['JPY', 'CNH', 'SGD', 'HKD'] },
-  { name: 'London', short: 'LDN', zone: 'Europe/London', open: 8, close: 17, home: ['GBP', 'EUR', 'CHF', 'SEK', 'NOK'] },
-  { name: 'New York', short: 'NY', zone: 'America/New_York', open: 8, close: 17, home: ['USD', 'CAD', 'MXN'] },
+  {
+    name: 'Sydney',
+    short: 'SYD',
+    zone: 'Australia/Sydney',
+    open: 7,
+    close: 16,
+    home: ['AUD', 'NZD'],
+  },
+  {
+    name: 'Tokyo',
+    short: 'TKY',
+    zone: 'Asia/Tokyo',
+    open: 9,
+    close: 18,
+    home: ['JPY', 'CNH', 'SGD', 'HKD'],
+  },
+  {
+    name: 'London',
+    short: 'LDN',
+    zone: 'Europe/London',
+    open: 8,
+    close: 17,
+    home: ['GBP', 'EUR', 'CHF', 'SEK', 'NOK'],
+  },
+  {
+    name: 'New York',
+    short: 'NY',
+    zone: 'America/New_York',
+    open: 8,
+    close: 17,
+    home: ['USD', 'CAD', 'MXN'],
+  },
 ];
 
 /** The sessions open at `nowMs` (local weekday Monday–Friday, local hour in [open, close)). */
@@ -331,7 +371,8 @@ export function sessionLabel(
   if (!marketOpen) return { text: 'Closed', home: false };
   const open = openSessions(nowMs);
   if (!open.length) return { text: 'Quiet', home: false };
-  const isHome = (s: FxSession) => !!legs && (s.home.includes(legs.base) || s.home.includes(legs.quote));
+  const isHome = (s: FxSession) =>
+    !!legs && (s.home.includes(legs.base) || s.home.includes(legs.quote));
   const ordered = [...open.filter(isHome), ...open.filter((s) => !isHome(s))];
   return { text: ordered.map((s) => s.short).join(' · '), home: ordered.some(isHome) };
 }
@@ -339,7 +380,11 @@ export function sessionLabel(
 // ── Sparkline ───────────────────────────────────────────────────────────────
 
 /** An SVG polyline `points` string for `values` in a `w`×`h` box (1px inset); '' with fewer than 2 points. */
-export function sparklinePoints(values: readonly number[] | null | undefined, w: number, h: number): string {
+export function sparklinePoints(
+  values: readonly number[] | null | undefined,
+  w: number,
+  h: number,
+): string {
   if (!values || values.length < 2) return '';
   let lo = Infinity;
   let hi = -Infinity;
@@ -350,14 +395,20 @@ export function sparklinePoints(values: readonly number[] | null | undefined, w:
   const span = hi - lo || 1;
   const step = (w - 2) / (values.length - 1);
   return values
-    .map((v, i) => `${(1 + i * step).toFixed(1)},${(1 + (h - 2) * (1 - (v - lo) / span)).toFixed(1)}`)
+    .map(
+      (v, i) => `${(1 + i * step).toFixed(1)},${(1 + (h - 2) * (1 - (v - lo) / span)).toFixed(1)}`,
+    )
     .join(' ');
 }
 
 // ── Instrument label (SP-11) ────────────────────────────────────────────────
 
 /** The details pane's instrument kind, from the engine's asset class (it was hard-coded "Forex"). */
-export function instrumentKind(assetClass: string | null | undefined, symbol: string, legs: Legs | null): string {
+export function instrumentKind(
+  assetClass: string | null | undefined,
+  symbol: string,
+  legs: Legs | null,
+): string {
   switch (assetClass) {
     case 'FxMajor':
       return 'Forex · major';

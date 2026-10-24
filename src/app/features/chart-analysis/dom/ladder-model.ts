@@ -1,3 +1,4 @@
+import { distanceUnitOf, fxPipSize } from '@core/instruments/instrument-math';
 import type { TicketDirection } from '../trading/manual-trading.types';
 
 /**
@@ -65,9 +66,12 @@ export function pointSize(digits: number): number {
   return 10 ** -Math.max(0, Math.min(10, Math.trunc(digits)));
 }
 
-/** A pip: 10 points on 5- and 3-digit symbols, else one point. */
-export function pipSizeOf(digits: number): number {
-  return digits === 5 || digits === 3 ? pointSize(digits - 1) : pointSize(digits);
+/**
+ * A pip (the display unit): the instrument's own when `symbol` is given (ticks / points off FX — core/instruments),
+ * else the FX rule from the digits — 10 points on 5- and 3-digit symbols, else one point.
+ */
+export function pipSizeOf(digits: number, symbol?: string | null): number {
+  return symbol ? distanceUnitOf(symbol, { digits }) : fxPipSize(digits);
 }
 
 /** Row index of `price` on a grid of `rowSize` (prices are binary floats: a tiny epsilon keeps x.5 rows stable). */
@@ -82,13 +86,22 @@ export function rowPrice(index: number, rowSize: number, digits: number): number
 }
 
 /** The centre row for the market now: the mid of the best prices, else whichever exists. */
-export function centreIndexFor(bid: number | null, ask: number | null, rowSize: number): number | null {
+export function centreIndexFor(
+  bid: number | null,
+  ask: number | null,
+  rowSize: number,
+): number | null {
   const mid = bid !== null && ask !== null ? (bid + ask) / 2 : (bid ?? ask);
   return mid === null || !(mid > 0) ? null : rowIndex(mid, rowSize);
 }
 
 /** True when the best prices have left the middle part of the view (auto re-centre). */
-export function needsRecentre(grid: LadderGrid, bid: number | null, ask: number | null, margin = 0.25): boolean {
+export function needsRecentre(
+  grid: LadderGrid,
+  bid: number | null,
+  ask: number | null,
+  margin = 0.25,
+): boolean {
   const idx = centreIndexFor(bid, ask, grid.rowSize);
   if (idx === null) return false;
   const limit = Math.max(1, Math.floor(grid.halfRows * (1 - margin)));
@@ -96,7 +109,11 @@ export function needsRecentre(grid: LadderGrid, bid: number | null, ask: number 
 }
 
 /** Adds one tick per bid price to the session's count (keyed by row index of `rowSize`). */
-export function addTicks(counts: Map<number, number>, bids: readonly number[], rowSize: number): void {
+export function addTicks(
+  counts: Map<number, number>,
+  bids: readonly number[],
+  rowSize: number,
+): void {
   for (const b of bids) {
     if (!(b > 0)) continue;
     const i = rowIndex(b, rowSize);
@@ -109,7 +126,10 @@ export function buildLadder(
   grid: LadderGrid,
   digits: number,
   /** Price → size per side, as the source reports sizes (the shared hub's `BookState` fits). */
-  book: { readonly bids: ReadonlyMap<number, number>; readonly asks: ReadonlyMap<number, number> } | null,
+  book: {
+    readonly bids: ReadonlyMap<number, number>;
+    readonly asks: ReadonlyMap<number, number>;
+  } | null,
   orders: readonly LadderOrder[],
   positions: readonly LadderPosition[],
   tickCounts: ReadonlyMap<number, number>,
@@ -203,10 +223,14 @@ export function ladderIntent(
     if (column === 'bid')
       return price < bestAsk
         ? { direction: 'Buy', kind: 'Limit', price }
-        : { problem: `A buy limit must be below the ask (${bestAsk}). Hold Shift in the ask column for a buy stop above the market.` };
+        : {
+            problem: `A buy limit must be below the ask (${bestAsk}). Hold Shift in the ask column for a buy stop above the market.`,
+          };
     return price > bestBid
       ? { direction: 'Sell', kind: 'Limit', price }
-      : { problem: `A sell limit must be above the bid (${bestBid}). Hold Shift in the bid column for a sell stop below the market.` };
+      : {
+          problem: `A sell limit must be above the bid (${bestBid}). Hold Shift in the bid column for a sell stop below the market.`,
+        };
   }
   if (column === 'ask')
     return price > bestAsk
@@ -227,10 +251,13 @@ export function dropProblem(
   if (bestBid === null || bestAsk === null) return 'No live bid and ask.';
   const buy = order.direction === 'Buy';
   const stop = order.kind.toLowerCase().includes('stop');
-  if (buy && !stop && !(price < bestAsk)) return `A buy limit must stay below the ask (${bestAsk}).`;
+  if (buy && !stop && !(price < bestAsk))
+    return `A buy limit must stay below the ask (${bestAsk}).`;
   if (buy && stop && !(price > bestAsk)) return `A buy stop must stay above the ask (${bestAsk}).`;
-  if (!buy && !stop && !(price > bestBid)) return `A sell limit must stay above the bid (${bestBid}).`;
-  if (!buy && stop && !(price < bestBid)) return `A sell stop must stay below the bid (${bestBid}).`;
+  if (!buy && !stop && !(price > bestBid))
+    return `A sell limit must stay above the bid (${bestBid}).`;
+  if (!buy && stop && !(price < bestBid))
+    return `A sell stop must stay below the bid (${bestBid}).`;
   return null;
 }
 

@@ -38,12 +38,27 @@
             (keydown.enter)="pickFirstSymbol()"
             autocomplete="off"
           />
+          @if (symbolClasses().length > 1) {
+            <div class="symbol-classes" role="group" aria-label="Asset class">
+              <button type="button" [class.on]="!symbolClass()" (click)="symbolClass.set(null)">
+                All
+              </button>
+              @for (c of symbolClasses(); track c) {
+                <button type="button" [class.on]="symbolClass() === c" (click)="symbolClass.set(c)">
+                  {{ assetClassLabel[c] }}
+                </button>
+              }
+            </div>
+          }
           <ul class="menu-list">
-            @for (p of filteredSymbols(); track p.id) {
+            @for (p of filteredSymbols(); track p.symbol) {
               <li>
-                <button type="button" (click)="selectSymbol(p.symbol ?? '')">
+                <button type="button" (click)="selectSymbol(p.symbol)">
+                  @if (p.assetClass !== 'Fx') {
+                    <app-instrument-icon [symbol]="p.symbol" [assetClass]="p.assetClass" />
+                  }
                   <span>{{ p.symbol }}</span>
-                  <span class="muted">{{ p.baseCurrency }}/{{ p.quoteCurrency }}</span>
+                  <span class="muted">{{ p.description }}</span>
                 </button>
               </li>
             } @empty {
@@ -361,7 +376,10 @@
       @if (openMenu() === 'overlays') {
         <div class="tb-menu tb-overlays-menu" role="menu" (click)="$event.stopPropagation()">
           <!-- PR-5: layer groups — show/hide and opacity per group, saved with the layout. -->
-          <app-layer-groups-menu [groups]="layerGroups()" (groupsChange)="layerGroups.set($event)" />
+          <app-layer-groups-menu
+            [groups]="layerGroups()"
+            (groupsChange)="layerGroups.set($event)"
+          />
           <div class="tb-menu-sep"></div>
           <div class="tb-menu-heading">Data</div>
           <button
@@ -610,7 +628,11 @@
             <app-chart-icon name="volume-profile" [size]="28" /> Liquidity heatmap (broker DOM)
           </button>
           @if (orderFlow().heatmap) {
-            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Heatmap opacity">
+            <label
+              class="tb-menu-chips"
+              style="align-items: center; font-size: 12px"
+              title="Heatmap opacity"
+            >
               Opacity
               <input
                 type="range"
@@ -642,7 +664,10 @@
             <app-chart-icon name="structure" [size]="28" /> Footprint (tick counts)
           </button>
           @if (orderFlow().footprint) {
-            <div class="tb-menu-chips" title="Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)">
+            <div
+              class="tb-menu-chips"
+              title="Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)"
+            >
               @for (r of footprintRowChoices; track r.label) {
                 <button
                   type="button"
@@ -686,7 +711,11 @@
             <app-chart-icon name="volume-profile" [size]="28" /> Trades (venue tape)
           </button>
           @if (orderFlow().trades) {
-            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Hide trades smaller than this (the source's own size unit)">
+            <label
+              class="tb-menu-chips"
+              style="align-items: center; font-size: 12px"
+              title="Hide trades smaller than this (the source's own size unit)"
+            >
               Min size
               <input
                 type="number"
@@ -709,8 +738,18 @@
           >
             <app-chart-icon name="volume-profile" [size]="28" /> CME order flow (futures)
           </button>
-          @if (orderFlow().heatmap || orderFlow().trades || orderFlow().cmeFlow || orderFlow().cvd || orderFlow().footprint) {
-            <label class="tb-menu-chips" style="align-items: center; font-size: 12px" title="Which market-data source feeds the heatmap, the depth panel and the trades — and, when it is a CME source, the real-delta CVD and footprint (only sources you are entitled to)">
+          @if (
+            orderFlow().heatmap ||
+            orderFlow().trades ||
+            orderFlow().cmeFlow ||
+            orderFlow().cvd ||
+            orderFlow().footprint
+          ) {
+            <label
+              class="tb-menu-chips"
+              style="align-items: center; font-size: 12px"
+              title="Which market-data source feeds the heatmap, the depth panel and the trades — and, when it is a CME source, the real-delta CVD and footprint (only sources you are entitled to)"
+            >
               Source
               <select
                 [value]="isConsolidatedPick() ? 'consolidated' : (orderFlow().sourceId ?? '')"
@@ -719,7 +758,9 @@
                 data-testid="of-source"
               >
                 <option value="">Automatic</option>
-                <option value="consolidated">Consolidated — all your sources (spot, base units)</option>
+                <option value="consolidated">
+                  Consolidated — all your sources (spot, base units)
+                </option>
                 @for (src of orderFlowFeed.mdSources() ?? []; track src.sourceId) {
                   @let refused = orderFlowFeed.sourceNotEntitled(src);
                   <option [value]="src.sourceId" [disabled]="!!refused">
@@ -729,10 +770,20 @@
               </select>
             </label>
             @if (isConsolidatedPick() && consolidatableSources().length > 1) {
-              <div class="tb-menu-chips" style="font-size: 12px; flex-wrap: wrap" role="group" aria-label="Sources in the consolidated heatmap" data-testid="of-consolidated-sources">
+              <div
+                class="tb-menu-chips"
+                style="font-size: 12px; flex-wrap: wrap"
+                role="group"
+                aria-label="Sources in the consolidated heatmap"
+                data-testid="of-consolidated-sources"
+              >
                 @for (src of consolidatableSources(); track src.sourceId) {
                   <label style="display: inline-flex; align-items: center; gap: 3px">
-                    <input type="checkbox" [checked]="consolidatedHas(src.sourceId)" (change)="toggleConsolidatedSource(src.sourceId)" />
+                    <input
+                      type="checkbox"
+                      [checked]="consolidatedHas(src.sourceId)"
+                      (change)="toggleConsolidatedSource(src.sourceId)"
+                    />
                     {{ src.displayName }}
                   </label>
                 }
@@ -1796,8 +1847,13 @@
               Add indicator…
             </button>
             @if (cm.level; as lvl) {
-              <button type="button" (click)="createAlertAtLevel($event)" data-testid="alert-at-level">
-                Add alert at {{ lvl.label }} {{ lvl.price | number: '1.' + precision() + '-' + precision() }}
+              <button
+                type="button"
+                (click)="createAlertAtLevel($event)"
+                data-testid="alert-at-level"
+              >
+                Add alert at {{ lvl.label }}
+                {{ lvl.price | number: '1.' + precision() + '-' + precision() }}
               </button>
             }
             @if (cm.price !== null) {
