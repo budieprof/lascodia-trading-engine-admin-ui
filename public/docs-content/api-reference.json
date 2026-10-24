@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 951,
+  "endpointCount": 970,
   "groups": [
     {
       "name": "Admin auth",
@@ -10160,6 +10160,250 @@
       ]
     },
     {
+      "name": "Platform billing",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [
+            {
+              "name": "month",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "tenantId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            }
+          ],
+          "response": "ResponseData<List<InvoiceDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/generate",
+          "summary": "Draft (or redraft) the invoices of a finished month — every metered organisation, or one.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [],
+          "body": "GenerateInvoicesCommand",
+          "response": "ResponseData<GenerateInvoicesResultDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}/collect",
+          "summary": "Hand a finalised invoice to the configured payment provider.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}/export",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}/finalise",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "FinaliseInvoiceCommand",
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}/refresh-payment",
+          "summary": "Ask the payment provider where the invoice's payment stands.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices/{invoiceId}/void",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "VoidInvoiceCommand",
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/payment-provider",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [],
+          "response": "ResponseData<PaymentProviderInfoDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [
+            {
+              "name": "planId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            }
+          ],
+          "response": "ResponseData<List<PriceBookDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books",
+          "summary": "A new draft version for a plan.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [],
+          "body": "CreatePriceBookCommand",
+          "response": "ResponseData<PriceBookDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books/{id}",
+          "summary": "Delete a draft.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books/{id}",
+          "summary": "Edit a draft (published versions are frozen).",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdatePriceBookCommand",
+          "response": "ResponseData<PriceBookDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books/{id}/publish",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<PriceBookDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/usage",
+          "summary": "One organisation's metered month (recorded in its audit log).",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "parameters": [
+            {
+              "name": "tenantId",
+              "in": "query",
+              "required": false,
+              "type": "long"
+            },
+            {
+              "name": "month",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BillingUsageMonthDto>"
+        }
+      ]
+    },
+    {
       "name": "Platform closures",
       "endpoints": [
         {
@@ -14498,6 +14742,71 @@
             }
           ],
           "response": "ResponseData<EngineLogPageDto>"
+        }
+      ]
+    },
+    {
+      "name": "Tenant billing",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/invoices",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [],
+          "response": "ResponseData<List<InvoiceDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/invoices/{invoiceId}",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<InvoiceDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/invoices/{invoiceId}/export",
+          "summary": "The invoice as CSV or PDF.",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [
+            {
+              "name": "invoiceId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/usage",
+          "summary": "Metered days of a month (default: the current one), month totals and the estimate on the price books in force.",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [
+            {
+              "name": "month",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BillingUsageMonthDto>"
         }
       ]
     },

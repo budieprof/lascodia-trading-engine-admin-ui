@@ -9,6 +9,7 @@ const PAGES: AccessPath[] = [
   'platform/organisations',
   'platform/plans',
   'platform/fleet',
+  'platform/billing',
   'platform/elevations',
   'platform/impersonation',
   'platform/signups',
@@ -45,6 +46,16 @@ export const PLATFORM_ROUTES: Routes = [
     canActivate: [canAccessPath('platform/fleet')],
     data: { breadcrumb: 'Fleet health' },
     loadComponent: () => import('./pages/fleet-page.component').then((m) => m.FleetPageComponent),
+  },
+  {
+    // Price books, invoices and every organisation's metered usage (enterprise program billing-metering).
+    path: 'billing',
+    canActivate: [canAccessPath('platform/billing')],
+    data: { breadcrumb: 'Billing' },
+    loadComponent: () =>
+      import('@features/billing/pages/platform-billing-page.component').then(
+        (m) => m.PlatformBillingPageComponent,
+      ),
   },
   {
     path: 'elevations',

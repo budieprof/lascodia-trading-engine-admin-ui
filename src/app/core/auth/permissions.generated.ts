@@ -511,6 +511,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.billing.manage',
+    category: 'Platform staff',
+    description:
+      "Platform staff: edit and publish plan price books, draft every organisation's monthly invoice from metering, review, finalise or void invoices and hand them to the payment provider.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.data.manage',
     category: 'Platform staff',
     description:
@@ -833,6 +843,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'tenant.billing.read',
+    category: 'Organisations',
+    description:
+      "See the organisation's metered usage (connected terminals, active users, modules, licensed feeds), its estimated charges for the month and its finalised invoices (and download them).",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'tenant.branding.manage',
     category: 'Organisations',
     description:
@@ -958,6 +978,7 @@ export const Permission = {
   OrdersIngest: 'orders.ingest',
   OrdersModify: 'orders.modify',
   OrdersRead: 'orders.read',
+  PlatformBillingManage: 'platform.billing.manage',
   PlatformDataManage: 'platform.data.manage',
   PlatformElevationApprove: 'platform.elevation.approve',
   PlatformElevationRequest: 'platform.elevation.request',
@@ -991,6 +1012,7 @@ export const Permission = {
   StrategiesEdit: 'strategies.edit',
   StrategiesLifecycle: 'strategies.lifecycle',
   StrategiesRead: 'strategies.read',
+  TenantBillingRead: 'tenant.billing.read',
   TenantBrandingManage: 'tenant.branding.manage',
   TenantBrandingRead: 'tenant.branding.read',
   TenantClose: 'tenant.close',

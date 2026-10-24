@@ -175,6 +175,8 @@ export const ROUTE_ACCESS = {
     P.TenantClose,
     P.IamApprovalsDecide,
     P.ApprovalsPolicyManage,
+    // Usage & billing (enterprise program billing-metering)
+    P.TenantBillingRead,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   // The guided connection (enterprise onboarding): GET onboarding/terminal-setup + machine/enrollments/{id}/progress.
@@ -186,6 +188,8 @@ export const ROUTE_ACCESS = {
   'organisation/strategies': rule(P.AccessOperator),
   'organisation/alerts': rule(P.AlertsManage), // GET alerts/channels
   'organisation/llm': rule(P.LlmUsageRead, P.LlmKeysManage), // GET llm/usage, llm/tenant-key
+  // Usage & billing (enterprise program billing-metering): GET tenant/billing/usage, tenant/billing/invoices.
+  'organisation/billing': rule(P.TenantBillingRead),
   // ── An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle) ──
   'organisation/branding': rule(P.TenantBrandingRead), // GET tenant/branding
   'organisation/data-export': rule(P.TenantDataExport), // GET tenant/exports
@@ -220,6 +224,8 @@ export const ROUTE_ACCESS = {
   // Plans, quotas and fleet health (multi-tenancy Phase 7): their APIs work with either sign-in.
   'platform/plans': { anyOf: [P.PlatformPlansManage], staffOnly: true },
   'platform/fleet': { anyOf: [P.PlatformFleetRead], staffOnly: true },
+  // Billing (enterprise program billing-metering): GET platform/billing/* reads; changes need platform.billing.manage.
+  'platform/billing': { anyOf: [P.PlatformUsageRead, P.PlatformBillingManage], staffOnly: true },
   // Self-serve sign-ups and closed organisations (Phase 7, c7-lifecycle): their APIs work with either sign-in.
   'platform/signups': { anyOf: [P.PlatformTenantsManage], staffOnly: true },
   'platform/closures': {
