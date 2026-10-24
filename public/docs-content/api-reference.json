@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 978,
+  "endpointCount": 982,
   "groups": [
     {
       "name": "Admin auth",
@@ -9790,6 +9790,35 @@
       ]
     },
     {
+      "name": "Onboarding ea",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/ea/download",
+          "summary": "Downloads `LascodiaEA.ex5` — the latest build, or `version`. Header `X-Content-SHA256` and `X-Lascodia-EA-Version`. For people who may connect terminals (`accounts.connect`); the showcase organisation is refused (403). Every download is audited.",
+          "access": "permission",
+          "permission": "accounts.connect",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "version",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/ea/latest",
+          "summary": "The latest published build: version, sha256, size, published at (no bytes). 404 when none is published.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": []
+        }
+      ]
+    },
+    {
       "name": "Operator role",
       "endpoints": [
         {
@@ -10557,6 +10586,59 @@
           ],
           "body": "ReopenTenantCommand",
           "response": "ResponseData<TenantClosureDto>"
+        }
+      ]
+    },
+    {
+      "name": "Platform ea releases",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/ea/releases",
+          "summary": "Every kept build (no bytes), highest version first.",
+          "access": "permission",
+          "permission": "platform.ea.releases.manage",
+          "parameters": [],
+          "response": "ResponseData<List<EaReleaseInfoDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/ea/releases",
+          "summary": "Publishes a build: the raw request body is the `.ex5` (`application/octet-stream`, ≤ 32 MB); query `version` (EA_VERSION), `sha256` (hex, recomputed by the engine — a mismatch is refused), optional `numericVersion`, `builtAtUtc`, `notes`. The same version + bytes again = 200 with `created:false`; the same version with other bytes = 409. Keeps the newest `Onboarding:EaReleaseRetention` builds. Audited.",
+          "access": "permission",
+          "permission": "platform.ea.releases.manage",
+          "parameters": [
+            {
+              "name": "version",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "sha256",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "numericVersion",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "builtAtUtc",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "notes",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
         }
       ]
     },
