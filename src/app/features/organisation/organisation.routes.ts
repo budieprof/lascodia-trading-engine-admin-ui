@@ -15,6 +15,7 @@ const PAGES: AccessPath[] = [
   'organisation/strategies',
   'organisation/alerts',
   'organisation/llm',
+  'organisation/billing',
   'organisation/branding',
   'organisation/data-export',
   'organisation/close',
@@ -84,6 +85,16 @@ export const ORGANISATION_ROUTES: Routes = [
     canActivate: [canAccessPath('organisation/llm')],
     data: { breadcrumb: 'LLM usage & key' },
     loadComponent: () => import('./pages/llm-page.component').then((m) => m.LlmPageComponent),
+  },
+  {
+    // Usage & billing (enterprise program billing-metering).
+    path: 'billing',
+    canActivate: [canAccessPath('organisation/billing')],
+    data: { breadcrumb: 'Usage & billing' },
+    loadComponent: () =>
+      import('@features/billing/pages/usage-billing-page.component').then(
+        (m) => m.UsageBillingPageComponent,
+      ),
   },
   {
     // Four-eyes policies (enterprise program, fund-module).

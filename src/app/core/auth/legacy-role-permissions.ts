@@ -90,6 +90,8 @@ const OPERATOR: readonly PermissionKey[] = [
   P.PlatformInfrastructureManage,
   // Multi-tenancy Phase 7: the organisation's plan and usage.
   P.TenantUsageRead,
+  // Billing (enterprise program billing-metering): metered usage, estimate and invoices.
+  P.TenantBillingRead,
   // Prop module: run the organisation's programs.
   P.PropRead,
   P.PropManage,
@@ -120,6 +122,8 @@ const ADMIN: readonly PermissionKey[] = [
   P.PlatformPlansManage,
   P.PlatformUsageRead,
   P.PlatformFleetRead,
+  // Billing (enterprise program billing-metering): price books and invoices (platform key — House only).
+  P.PlatformBillingManage,
   // An organisation's life cycle (Phase 7, c7-lifecycle): its console look; deleting closed organisations is a
   // platform key (House only, as above).
   P.TenantBrandingManage,

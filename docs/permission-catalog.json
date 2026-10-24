@@ -459,6 +459,15 @@
     "deprecated": false
   },
   {
+    "key": "tenant.billing.read",
+    "category": "Organisations",
+    "description": "See the organisation's metered usage (connected terminals, active users, modules, licensed feeds), its estimated charges for the month and its finalised invoices (and download them).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "tenant.branding.manage",
     "category": "Organisations",
     "description": "Change the organisation's console look: display name, primary colour, logo and favicon.",
@@ -507,6 +516,15 @@
     "key": "tenant.usage.read",
     "category": "Organisations",
     "description": "See the organisation's plan — what it allows — and how much of it is in use.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.billing.manage",
+    "category": "Platform staff",
+    "description": "Platform staff: edit and publish plan price books, draft every organisation's monthly invoice from metering, review, finalise or void invoices and hand them to the payment provider.",
     "scopeable": false,
     "stepUp": false,
     "twoPerson": false,

@@ -183,6 +183,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Strategy subscriptions', route: '/organisation/strategies', icon: navIcon.Rss },
       { label: 'Alert channels', route: '/organisation/alerts', icon: navIcon.BellRing },
       { label: 'LLM usage & key', route: '/organisation/llm', icon: navIcon.BrainCircuit },
+      { label: 'Usage & billing', route: '/organisation/billing', icon: navIcon.Coins },
       // An organisation's life cycle (multi-tenancy Phase 7, c7-lifecycle).
       { label: 'Get started', route: '/onboarding', icon: navIcon.Rocket },
       { label: 'Branding', route: '/organisation/branding', icon: navIcon.Palette },
@@ -228,6 +229,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Organisations', route: '/platform/organisations', icon: navIcon.BuildingComplex },
       { label: 'Plans', route: '/platform/plans', icon: navIcon.Layers },
       { label: 'Fleet health', route: '/platform/fleet', icon: navIcon.Globe },
+      { label: 'Billing', route: '/platform/billing', icon: navIcon.ClipboardList },
       // Market-data entitlements (C6): staff pages that live under /market-data.
       { label: 'Data entitlements', route: '/market-data/entitlements', icon: navIcon.KeyRound },
       { label: 'Data usage', route: '/market-data/usage', icon: navIcon.ChartColumnStacked },
