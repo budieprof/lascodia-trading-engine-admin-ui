@@ -1,4 +1,4 @@
-import type { FeedPrice, Invoice, PriceBook, PriceBookBody } from './billing.types';
+import type { ExchangeFee, FeedPrice, Invoice, PriceBook, PriceBookBody } from './billing.types';
 
 /** "1,234.50 USD" — invariant two decimals with grouping. */
 export function money(amount: number | null | undefined, currency: string): string {
@@ -118,6 +118,8 @@ export interface PriceBookForm {
   fundModuleMonthly: string;
   /** One line per feed: `feedId, monthly cost, per display user, margin %`. */
   feedPrices: string;
+  /** One line per exchange family: `family, professional, non-professional, non-display, margin %` (engine WS8 8.5). */
+  exchangeFees?: string;
   /** Blank = LLM spend is not invoiced. */
   llmMarginPct: string;
   notes: string;
@@ -158,6 +160,7 @@ export function formFrom(book: PriceBook, effectiveFrom?: string): PriceBookForm
     brokerModuleMonthly: String(book.brokerModuleMonthly),
     fundModuleMonthly: String(book.fundModuleMonthly),
     feedPrices: formatFeedPrices(book.feedPrices),
+    exchangeFees: formatExchangeFees(book.exchangeFees ?? []),
     llmMarginPct: book.llmMarginPct === null ? '' : String(book.llmMarginPct),
     notes: book.notes ?? '',
   };
@@ -171,6 +174,53 @@ export function formatFeedPrices(prices: readonly FeedPrice[]): string {
 
 const FEED_ID =
   /^(broker-ticks|broker-dom|cme-l2|cme-trades|venue:[a-z0-9][a-z0-9._-]*|source:[a-z0-9][a-z0-9._:-]*)$/;
+
+export function formatExchangeFees(fees: readonly ExchangeFee[]): string {
+  return fees
+    .map(
+      (f) =>
+        `${f.family}, ${f.professionalMonthly}, ${f.nonProfessionalMonthly}, ${f.nonDisplayMonthly}, ${f.marginPct}`,
+    )
+    .join('\n');
+}
+
+/** The exchange families a fee can name (engine `ExchangeFeedCatalog.DeclarationFamilies` + US venues `us-<mic>`). */
+const EXCHANGE_FAMILY = /^(cme-group|ice|eurex|us-sip|nasdaq|nyse|cboe|us-[a-z0-9]{2,8})$/;
+
+/** Parses the exchange fee lines; errors name the line. */
+export function parseExchangeFees(text: string): { fees: ExchangeFee[]; errors: string[] } {
+  const fees: ExchangeFee[] = [];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  text
+    .split('\n')
+    .map((l) => l.trim())
+    .forEach((line, i) => {
+      if (!line) return;
+      const parts = line.split(',').map((p) => p.trim());
+      const family = (parts[0] ?? '').toLowerCase();
+      const [pro, nonPro, nonDisplay, margin] = [parts[1], parts[2], parts[3], parts[4]].map((p) =>
+        p === undefined || p === '' ? 0 : Number(p),
+      );
+      if (!EXCHANGE_FAMILY.test(family))
+        errors.push(
+          `Exchange line ${i + 1}: '${parts[0]}' is not an exchange family (cme-group, ice, eurex, us-sip, nasdaq, nyse, cboe).`,
+        );
+      else if (seen.has(family))
+        errors.push(`Exchange line ${i + 1}: '${family}' is listed twice.`);
+      if ([pro, nonPro, nonDisplay, margin].some((n) => !Number.isFinite(n) || n < 0))
+        errors.push(`Exchange line ${i + 1}: fees and margin must be numbers ≥ 0.`);
+      seen.add(family);
+      fees.push({
+        family,
+        professionalMonthly: pro,
+        nonProfessionalMonthly: nonPro,
+        nonDisplayMonthly: nonDisplay,
+        marginPct: margin,
+      });
+    });
+  return { fees, errors };
+}
 
 /** Parses the feed lines; errors name the line. */
 export function parseFeedPrices(text: string): { prices: FeedPrice[]; errors: string[] } {
@@ -223,6 +273,8 @@ export function priceBookBody(form: PriceBookForm): {
   if (form.planId === null) errors.push('Choose the plan.');
   const feeds = parseFeedPrices(form.feedPrices);
   errors.push(...feeds.errors);
+  const exchange = parseExchangeFees(form.exchangeFees ?? '');
+  errors.push(...exchange.errors);
   let llm: number | null = null;
   if (form.llmMarginPct.trim() !== '') llm = num('LLM margin', form.llmMarginPct);
   const body: PriceBookBody = {
@@ -238,6 +290,7 @@ export function priceBookBody(form: PriceBookForm): {
     brokerModuleMonthly: num('Broker module', form.brokerModuleMonthly),
     fundModuleMonthly: num('Fund module', form.fundModuleMonthly),
     feedPrices: feeds.prices,
+    exchangeFees: exchange.fees,
     llmMarginPct: llm,
     notes: form.notes.trim() || null,
   };

@@ -234,6 +234,14 @@ localhost rather than a blank page.
   `mdRevoked` when a licence ends — call `refresh()` then). Staff pages: `/market-data/entitlements` (grants per
   organisation + feed + validity, `platform.data.manage`) and `/market-data/usage` (monthly exchange usage report, CSV per
   organisation or per user, `platform.usage.read`), both in the sidebar's Platform group; plans carry `marketDataFeeds`.
+  **Exchange licensing (multi-asset WS8, engine "Exchange licensing" section of that doc):** grants carry `delayed`
+  (delayed-only licence; the grant form offers it for feeds whose catalog entry `hasDelayedData`); the hub answers
+  `delayed {"source:kind": n}` and frames carry `delayedMinutes` — `MdWatchStatus.delayedCaption` ("Delayed 15 min",
+  shown on the DOM ladder) — and `md/history` answers `delayed {sourceId: n}` plus a "Delayed n min" note. A person's
+  real-time display of CME/ICE/Eurex/US equities needs a subscriber declaration: `/market-data/declarations`
+  (`marketdata.read`, self-service questionnaire + typed-name signature, yearly renewal) and staff review
+  `/market-data/declarations-review` (`platform.data.manage`). Usage report "Per exchange and subscriber type" + CSV
+  `detail=exchanges`; price books carry `exchangeFees` (billing form "Exchange fees per subscriber").
 - **Multibook (engine market-data program, multibook).** The hub's computed source `consolidated` (or
   `consolidated:a,b`) is the engine's consolidated book of every source the organisation may see: spot prices, sizes in
   BASE-CURRENCY units, each level's per-source shares in the frame's `consolidated` view. `MarketDataStreamCore` never

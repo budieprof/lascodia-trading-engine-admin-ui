@@ -44,6 +44,8 @@ export interface MdFrame {
   trades?: MdTradesWire | null;
   /** Multibook: on a `consolidated` source's frames, the whole consolidated view (≤ 10 Hz on change, else 1 Hz). */
   consolidated?: MdConsolidatedWire | null;
+  /** Engine WS8 8.3: the frame is DELAYED by this many minutes (a delayed-only licence); absent on real-time frames. */
+  delayedMinutes?: number | null;
 }
 
 // ── Multibook (engine `ConsolidatedBookService`): the consolidated pseudo-source ─────────────────────────────────
@@ -60,14 +62,27 @@ export function isConsolidatedId(id: string | null | undefined): boolean {
 /** The registry sources a consolidated id names (null = all entitled). */
 export function consolidatedSubset(id: string): string[] | null {
   if (id === CONSOLIDATED_SOURCE || !id.startsWith(CONSOLIDATED_PREFIX)) return null;
-  return [...new Set(id.slice(CONSOLIDATED_PREFIX.length).split(',').map((s) => s.trim()).filter(Boolean))].sort();
+  return [
+    ...new Set(
+      id
+        .slice(CONSOLIDATED_PREFIX.length)
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  ].sort();
 }
 
 /** "Consolidated — all your sources" / "Consolidated — A + B" (registry display names when known). */
-export function consolidatedLabel(id: string, sources: readonly Pick<MdSource, 'sourceId' | 'displayName'>[] | null): string {
+export function consolidatedLabel(
+  id: string,
+  sources: readonly Pick<MdSource, 'sourceId' | 'displayName'>[] | null,
+): string {
   const subset = consolidatedSubset(id);
   if (!subset) return 'Consolidated — all your sources';
-  const names = subset.map((s) => sourceLabel(sources?.find((x) => x.sourceId === s) ?? { sourceId: s, displayName: '' }));
+  const names = subset.map((s) =>
+    sourceLabel(sources?.find((x) => x.sourceId === s) ?? { sourceId: s, displayName: '' }),
+  );
   return `Consolidated — ${names.join(' + ')}`;
 }
 
@@ -192,6 +207,8 @@ export interface MdSubscribeResult {
   subscribed?: string[];
   unknown?: string[];
   error?: string | null;
+  /** Engine WS8 8.3: subscriptions served DELAYED (`sourceId:kind` → minutes) — a delayed-only licence. */
+  delayed?: Record<string, number> | null;
 }
 
 /** The server event that ends subscriptions whose feed the organisation lost (engine C6, additive to C4). */
@@ -254,6 +271,8 @@ export interface MdHistoryWire {
   sources: MdHistorySourceWire[];
   truncated: boolean;
   denied?: string[];
+  /** Engine WS8 8.3: sources served DELAYED (sourceId → minutes); their rows end at now minus the delay. */
+  delayed?: Record<string, number> | null;
 }
 
 /** C5 answer with the envelope's message (notes: missing keyframe, not entitled, truncated). */

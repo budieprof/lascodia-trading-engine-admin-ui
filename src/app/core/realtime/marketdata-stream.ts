@@ -1,4 +1,7 @@
-import { ENTITLEMENT_RESPONSE_CODE, entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
+import {
+  ENTITLEMENT_RESPONSE_CODE,
+  entitlementRefusalMessage,
+} from '@core/market-data/entitlement-refusal';
 
 import { BookState } from './md-book';
 import { TickRing, TradeRing } from './md-rings';
@@ -124,6 +127,10 @@ export interface MdWatchStatus {
   notEntitled: string | null;
   /** Set when the server revoked feeds mid-stream (`mdRevoked`). */
   revoked: { feeds: string[]; message: string } | null;
+  /** Engine WS8 8.3: `sourceId:kind` subscriptions served DELAYED → minutes (a delayed-only licence). */
+  delayed?: Record<string, number>;
+  /** "Delayed 15 min" when any subscription is delayed (the largest delay); null when everything is real time. */
+  delayedCaption?: string | null;
   /** Requested sources / kinds the hub does not know. */
   unknown: string[];
   error: string | null;
@@ -197,6 +204,8 @@ export class MarketDataStreamCore {
           deniedReasons: {},
           notEntitled: null,
           revoked: null,
+          delayed: {},
+          delayedCaption: null,
           unknown: [],
           error: null,
         },
@@ -385,7 +394,11 @@ export class MarketDataStreamCore {
       for (const k of s.kinds) kinds.add(k);
     }
     const virtual = [...computed].sort();
-    const list = all ? (virtual.length ? ['*', ...virtual] : null) : [...[...sources].sort(), ...virtual];
+    const list = all
+      ? virtual.length
+        ? ['*', ...virtual]
+        : null
+      : [...[...sources].sort(), ...virtual];
     return { sources: list, kinds: [...kinds].sort() };
   }
 
@@ -428,6 +441,8 @@ export class MarketDataStreamCore {
       notEntitled: notEntitledText(denied, deniedReasons),
       // A fresh answer replaces a revocation: if the feed is still lost it is in `denied` again.
       revoked: null,
+      delayed: { ...(r?.delayed ?? {}) },
+      delayedCaption: delayedCaption(Object.values(r?.delayed ?? {})),
       unknown: r?.unknown ?? [],
       error: r
         ? (r.error ?? (r.ok ? null : 'Nothing could be subscribed.'))
@@ -497,7 +512,9 @@ export class MarketDataStreamCore {
   private onRevoked(payload: unknown): void {
     const r = payload as Partial<MdRevokedWire> | null;
     if (!r || typeof r !== 'object') return;
-    const feeds = Array.isArray(r.feeds) ? r.feeds.filter((f): f is string => typeof f === 'string') : [];
+    const feeds = Array.isArray(r.feeds)
+      ? r.feeds.filter((f): f is string => typeof f === 'string')
+      : [];
     const message = typeof r.message === 'string' ? r.message : '';
     const touched = new Set<SymbolEntry>();
     for (const sub of Array.isArray(r.subscriptions) ? r.subscriptions : []) {
@@ -515,7 +532,8 @@ export class MarketDataStreamCore {
       }
       entry.status.subscribed = entry.status.subscribed.filter((s) => s !== `${sourceId}:${kind}`);
       // Nothing left that this source may stream here: forget it entirely.
-      if (stream && !entry.status.subscribed.some((s) => s.startsWith(`${sourceId}:`))) entry.streams.delete(sourceId);
+      if (stream && !entry.status.subscribed.some((s) => s.startsWith(`${sourceId}:`)))
+        entry.streams.delete(sourceId);
       touched.add(entry);
     }
     // Only the symbols whose subscriptions ended are refused; others never streamed the lost feed.
@@ -634,8 +652,20 @@ export class MarketDataStreamCore {
   }
 }
 
+/** "Delayed 15 min" for the largest of the given delays (minutes); null when there is none (real time). */
+export function delayedCaption(minutes: readonly (number | null | undefined)[]): string | null {
+  const max = Math.max(
+    0,
+    ...minutes.map((m) => (typeof m === 'number' && Number.isFinite(m) ? m : 0)),
+  );
+  return max > 0 ? `Delayed ${max} min` : null;
+}
+
 /** "Not entitled" for refused feeds, worded by the shared helper (the engine's reason, else its default sentence). */
-export function notEntitledText(denied: readonly string[], reasons: Readonly<Record<string, string>>): string | null {
+export function notEntitledText(
+  denied: readonly string[],
+  reasons: Readonly<Record<string, string>>,
+): string | null {
   if (!denied.length) return null;
   const reason = denied.map((f) => reasons[f]).find((m) => typeof m === 'string' && m.trim());
   return entitlementRefusalMessage({

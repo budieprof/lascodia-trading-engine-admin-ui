@@ -56,7 +56,12 @@ import {
   type LadderOrder,
   type LadderRow,
 } from './ladder-model';
-import { fxSessionStart, ladderOrdersFrom, ladderPositionsFrom, movedLevels } from './ladder-orders';
+import {
+  fxSessionStart,
+  ladderOrdersFrom,
+  ladderPositionsFrom,
+  movedLevels,
+} from './ladder-orders';
 
 /** Rows above and below the centre. */
 const HALF_ROWS = 20;
@@ -73,12 +78,26 @@ interface LadderView {
   quote: { bid: number | null; ask: number | null };
 }
 
-const NO_VIEW: LadderView = { mode: 'none', sourceId: null, book: null, quote: { bid: null, ask: null } };
+const NO_VIEW: LadderView = {
+  mode: 'none',
+  sourceId: null,
+  book: null,
+  quote: { bid: null, ask: null },
+};
 
 /** What the confirm dialog is about. */
 type LadderAction =
-  | { type: 'place'; request: ManualTradeRequest; intent: LadderIntent | null; preview: ManualTradePreview | null }
-  | { type: 'oco'; legs: [ManualTradeRequest, ManualTradeRequest]; previews: (ManualTradePreview | null)[] }
+  | {
+      type: 'place';
+      request: ManualTradeRequest;
+      intent: LadderIntent | null;
+      preview: ManualTradePreview | null;
+    }
+  | {
+      type: 'oco';
+      legs: [ManualTradeRequest, ManualTradeRequest];
+      previews: (ManualTradePreview | null)[];
+    }
   | { type: 'move'; order: LadderOrder; to: number; preview: OrderEntryMovePreview | null }
   | { type: 'cancel'; order: LadderOrder }
   | { type: 'arm' };
@@ -111,6 +130,9 @@ type LadderAction =
       @if (notEntitled(); as why) {
         <p class="lp-warn" data-testid="ladder-denied">{{ why }}</p>
       }
+      @if (delayedCaption(); as delayed) {
+        <p class="lp-note" data-testid="ladder-delayed">{{ delayed }}</p>
+      }
       <div class="lp-controls">
         <label>
           <span class="sr">Account</span>
@@ -121,23 +143,51 @@ type LadderAction =
           >
             <option value="">Account…</option>
             @for (a of accounts(); track a.id) {
-              <option [value]="a.id">{{ a.accountName || a.accountId }} ({{ a.accountType }})</option>
+              <option [value]="a.id">
+                {{ a.accountName || a.accountId }} ({{ a.accountType }})
+              </option>
             }
           </select>
         </label>
         <span class="lp-mode" role="group" aria-label="Mode">
-          <label><input type="radio" name="lp-mode" [checked]="mode() === 'Paper'" (change)="setMode('Paper')" /> Paper</label>
           <label
-            ><input type="radio" name="lp-mode" [checked]="mode() === 'Live'" (change)="setMode('Live')" data-testid="ladder-live" />
+            ><input
+              type="radio"
+              name="lp-mode"
+              [checked]="mode() === 'Paper'"
+              (change)="setMode('Paper')"
+            />
+            Paper</label
+          >
+          <label
+            ><input
+              type="radio"
+              name="lp-mode"
+              [checked]="mode() === 'Live'"
+              (change)="setMode('Live')"
+              data-testid="ladder-live"
+            />
             Live</label
           >
         </span>
       </div>
       <div class="lp-controls">
-        <button type="button" class="lp-mkt buy" [disabled]="!canPlace()" (click)="market('Buy')" data-testid="ladder-buy-mkt">
+        <button
+          type="button"
+          class="lp-mkt buy"
+          [disabled]="!canPlace()"
+          (click)="market('Buy')"
+          data-testid="ladder-buy-mkt"
+        >
           Buy MKT
         </button>
-        <button type="button" class="lp-mkt sell" [disabled]="!canPlace()" (click)="market('Sell')" data-testid="ladder-sell-mkt">
+        <button
+          type="button"
+          class="lp-mkt sell"
+          [disabled]="!canPlace()"
+          (click)="market('Sell')"
+          data-testid="ladder-sell-mkt"
+        >
           Sell MKT
         </button>
         <button
@@ -151,7 +201,13 @@ type LadderAction =
           OCO{{ ocoFirst() ? ' · leg 2…' : '' }}
         </button>
         @if (armedHere()) {
-          <button type="button" class="lp-armed" (click)="disarm()" data-testid="ladder-armed" title="Click to disarm">
+          <button
+            type="button"
+            class="lp-armed"
+            (click)="disarm()"
+            data-testid="ladder-armed"
+            title="Click to disarm"
+          >
             ARMED · one-click
           </button>
         } @else {
@@ -159,7 +215,11 @@ type LadderAction =
             type="button"
             [disabled]="!canArm()"
             (click)="askArm()"
-            [title]="mode() === 'Live' ? 'Send ladder clicks without a confirmation' : 'One-click trading is for live orders only'"
+            [title]="
+              mode() === 'Live'
+                ? 'Send ladder clicks without a confirmation'
+                : 'One-click trading is for live orders only'
+            "
             data-testid="ladder-arm"
           >
             One-click
@@ -169,24 +229,58 @@ type LadderAction =
       <div class="lp-controls lp-small">
         <label title="Stop distance of a ladder order, in ATRs (the ticket's default)"
           >SL
-          <input type="number" min="0.25" step="0.25" [value]="stopAtr()" (change)="setStopAtr($any($event.target).value)" />
+          <input
+            type="number"
+            min="0.25"
+            step="0.25"
+            [value]="stopAtr()"
+            (change)="setStopAtr($any($event.target).value)"
+          />
           ATR</label
         >
         <label title="Target of a ladder order, in R (0 = none)"
-          >TP <input type="number" min="0" step="0.5" [value]="targetR()" (change)="setTargetR($any($event.target).value)" /> R</label
+          >TP
+          <input
+            type="number"
+            min="0"
+            step="0.5"
+            [value]="targetR()"
+            (change)="setTargetR($any($event.target).value)"
+          />
+          R</label
         >
         <label title="Points per row">
-          ×<select [value]="rowTicks()" (change)="setRowTicks($any($event.target).value)" data-testid="ladder-zoom">
+          ×<select
+            [value]="rowTicks()"
+            (change)="setRowTicks($any($event.target).value)"
+            data-testid="ladder-zoom"
+          >
             @for (z of zooms; track z) {
               <option [value]="z">{{ z }}</option>
             }
           </select>
         </label>
-        <label><input type="checkbox" [checked]="autoCentre()" (change)="autoCentre.set($any($event.target).checked)" /> auto</label>
-        <button type="button" (click)="recentre()" title="Re-centre on the market (C)" data-testid="ladder-recentre">⌖</button>
+        <label
+          ><input
+            type="checkbox"
+            [checked]="autoCentre()"
+            (change)="autoCentre.set($any($event.target).checked)"
+          />
+          auto</label
+        >
+        <button
+          type="button"
+          (click)="recentre()"
+          title="Re-centre on the market (C)"
+          data-testid="ladder-recentre"
+        >
+          ⌖
+        </button>
       </div>
       @if (!permitted()) {
-        <p class="lp-warn">You can watch the ladder; trading from it needs the access.trader permission.</p>
+        <p class="lp-warn">
+          You can watch the ladder; trading from it needs the access.trader permission.
+        </p>
       }
       @if (hint(); as h) {
         <p class="lp-hint" data-testid="ladder-hint">{{ h }}</p>
@@ -206,7 +300,8 @@ type LadderAction =
       data-testid="ladder-grid"
     >
       <div class="lp-row lp-colhead" role="row">
-        <span>Buy</span><span>Bid</span><span>Price</span><span>Ask</span><span>Sell</span><span>Ticks</span>
+        <span>Buy</span><span>Bid</span><span>Price</span><span>Ask</span><span>Sell</span
+        ><span>Ticks</span>
       </div>
       @for (r of rows(); track r.index) {
         <div
@@ -226,21 +321,48 @@ type LadderAction =
                 [class.oco]="o.ocoGroupId !== null"
                 [title]="chipTitle(o)"
                 (pointerdown)="startDrag($event, o)"
-                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : '' }}<button type="button" class="x" (pointerdown)="$event.stopPropagation()" (click)="askCancel(o)" [attr.aria-label]="'Cancel ' + chipTitle(o)">×</button></i
+                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
+                }}<button
+                  type="button"
+                  class="x"
+                  (pointerdown)="$event.stopPropagation()"
+                  (click)="askCancel(o)"
+                  [attr.aria-label]="'Cancel ' + chipTitle(o)"
+                >
+                  ×
+                </button></i
               >
             }
           </span>
-          <span class="lp-cell bid" role="gridcell" tabindex="-1" (click)="onCell($event, 'bid', r)" (keydown.enter)="onCellKey($event, 'bid', r)" [attr.data-testid]="'bid-' + r.index">
-            <i class="bar" [style.width.%]="r.bidShare * 100"></i>{{ r.bidSize ? units(r.bidSize) : '' }}
+          <span
+            class="lp-cell bid"
+            role="gridcell"
+            tabindex="-1"
+            (click)="onCell($event, 'bid', r)"
+            (keydown.enter)="onCellKey($event, 'bid', r)"
+            [attr.data-testid]="'bid-' + r.index"
+          >
+            <i class="bar" [style.width.%]="r.bidShare * 100"></i
+            >{{ r.bidSize ? units(r.bidSize) : '' }}
           </span>
           <span class="lp-price" [class.avg]="r.positions.length > 0">
             {{ r.price | number: fmt() }}
             @for (p of r.positions; track $index) {
-              <small class="avg-tag" [class.long]="p.direction === 'Buy'">{{ p.direction === 'Buy' ? 'L' : 'S' }} {{ p.lots }}</small>
+              <small class="avg-tag" [class.long]="p.direction === 'Buy'"
+                >{{ p.direction === 'Buy' ? 'L' : 'S' }} {{ p.lots }}</small
+              >
             }
           </span>
-          <span class="lp-cell ask" role="gridcell" tabindex="-1" (click)="onCell($event, 'ask', r)" (keydown.enter)="onCellKey($event, 'ask', r)" [attr.data-testid]="'ask-' + r.index">
-            <i class="bar" [style.width.%]="r.askShare * 100"></i>{{ r.askSize ? units(r.askSize) : '' }}
+          <span
+            class="lp-cell ask"
+            role="gridcell"
+            tabindex="-1"
+            (click)="onCell($event, 'ask', r)"
+            (keydown.enter)="onCellKey($event, 'ask', r)"
+            [attr.data-testid]="'ask-' + r.index"
+          >
+            <i class="bar" [style.width.%]="r.askShare * 100"></i
+            >{{ r.askSize ? units(r.askSize) : '' }}
           </span>
           <span class="lp-mine">
             @for (o of r.sells; track o.id + (o.isSignal ? 's' : 'o')) {
@@ -250,36 +372,62 @@ type LadderAction =
                 [class.oco]="o.ocoGroupId !== null"
                 [title]="chipTitle(o)"
                 (pointerdown)="startDrag($event, o)"
-                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : '' }}<button type="button" class="x" (pointerdown)="$event.stopPropagation()" (click)="askCancel(o)" [attr.aria-label]="'Cancel ' + chipTitle(o)">×</button></i
+                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
+                }}<button
+                  type="button"
+                  class="x"
+                  (pointerdown)="$event.stopPropagation()"
+                  (click)="askCancel(o)"
+                  [attr.aria-label]="'Cancel ' + chipTitle(o)"
+                >
+                  ×
+                </button></i
               >
             }
           </span>
-          <span class="lp-vol"><i class="bar" [style.width.%]="r.tickShare * 100"></i>{{ r.ticks || '' }}</span>
+          <span class="lp-vol"
+            ><i class="bar" [style.width.%]="r.tickShare * 100"></i>{{ r.ticks || '' }}</span
+          >
         </div>
       }
     </div>
     <p class="lp-foot">
-      Ticks = {{ tickNote() }}. Bid column: buy limit (Shift: sell stop) · Ask column: sell limit (Shift: buy stop) · drag
-      a chip to move it · × cancels.
+      Ticks = {{ tickNote() }}. Bid column: buy limit (Shift: sell stop) · Ask column: sell limit
+      (Shift: buy stop) · drag a chip to move it · × cancels.
     </p>
 
     @if (action(); as a) {
-      <div class="lp-modal" role="dialog" aria-modal="true" appModalA11y (dismiss)="closeAction()" data-testid="ladder-dialog">
+      <div
+        class="lp-modal"
+        role="dialog"
+        aria-modal="true"
+        appModalA11y
+        (dismiss)="closeAction()"
+        data-testid="ladder-dialog"
+      >
         <div class="lp-dialog">
           @switch (a.type) {
             @case ('place') {
-              <h3>{{ a.request.mode }} {{ a.request.direction }} {{ a.intent?.kind ?? 'market' }} {{ symbol() }}</h3>
+              <h3>
+                {{ a.request.mode }} {{ a.request.direction }} {{ a.intent?.kind ?? 'market' }}
+                {{ symbol() }}
+              </h3>
               <p>
                 @if (a.request.entryPrice !== null) {
                   At {{ a.request.entryPrice | number: fmt() }} ·
                 }
-                SL {{ a.request.stopLoss === null ? 'none' : (a.request.stopLoss | number: fmt()) }} · TP
-                {{ a.request.takeProfit === null ? 'none' : (a.request.takeProfit | number: fmt()) }}
+                SL
+                {{ a.request.stopLoss === null ? 'none' : (a.request.stopLoss | number: fmt()) }} ·
+                TP
+                {{
+                  a.request.takeProfit === null ? 'none' : (a.request.takeProfit | number: fmt())
+                }}
               </p>
               @if (a.preview; as p) {
                 <p class="lp-facts">
                   {{ p.lotsAfterRiskCheck ?? p.lots ?? '—' }} lots · risk
-                  {{ p.riskMoney === null ? '—' : (p.riskMoney | number: '1.2-2') }} {{ p.account.currency }}
+                  {{ p.riskMoney === null ? '—' : (p.riskMoney | number: '1.2-2') }}
+                  {{ p.account.currency }}
                   @if (p.rewardRisk !== null) {
                     · {{ p.rewardRisk | number: '1.2-2' }}R
                   }
@@ -288,7 +436,9 @@ type LadderAction =
                 <ul class="lp-gates">
                   @for (g of p.gates; track g.key) {
                     @if (!g.passed) {
-                      <li [class.fail]="g.blocking">{{ g.blocking ? '✕' : '!' }} {{ g.name }}: {{ g.detail }}</li>
+                      <li [class.fail]="g.blocking">
+                        {{ g.blocking ? '✕' : '!' }} {{ g.name }}: {{ g.detail }}
+                      </li>
                     }
                   }
                 </ul>
@@ -298,7 +448,8 @@ type LadderAction =
               <h3>Live OCO pair · {{ symbol() }}</h3>
               @for (leg of a.legs; track $index) {
                 <p>
-                  Leg {{ $index + 1 }}: {{ leg.direction }} at {{ leg.entryPrice | number: fmt() }} · SL
+                  Leg {{ $index + 1 }}: {{ leg.direction }} at
+                  {{ leg.entryPrice | number: fmt() }} · SL
                   {{ leg.stopLoss | number: fmt() }}
                   @if (a.previews[$index]; as p) {
                     · {{ p.lotsAfterRiskCheck ?? p.lots ?? '—' }} lots
@@ -313,12 +464,16 @@ type LadderAction =
             @case ('move') {
               <h3>Move the working order</h3>
               <p>
-                {{ a.order.direction }} {{ a.order.kind }} {{ a.order.lots }}: {{ a.order.price | number: fmt() }} →
+                {{ a.order.direction }} {{ a.order.kind }} {{ a.order.lots }}:
+                {{ a.order.price | number: fmt() }} →
                 <strong>{{ a.to | number: fmt() }}</strong> (stop and target move with it)
               </p>
               @if (a.preview; as p) {
                 <p class="lp-facts">
-                  Stop {{ p.stopDistancePips | number: '1.1-1' }} pips ({{ p.stopDistanceAtr | number: '1.2-2' }} ATR)
+                  Stop {{ p.stopDistancePips | number: '1.1-1' }} pips ({{
+                    p.stopDistanceAtr | number: '1.2-2'
+                  }}
+                  ATR)
                 </p>
                 @if (!p.canApply) {
                   <p class="fail">{{ p.refusedReason }}</p>
@@ -326,7 +481,11 @@ type LadderAction =
               }
             }
             @case ('cancel') {
-              <h3>{{ a.order.ocoGroupId !== null ? 'Cancel the OCO pair' : 'Cancel the working order' }}</h3>
+              <h3>
+                {{
+                  a.order.ocoGroupId !== null ? 'Cancel the OCO pair' : 'Cancel the working order'
+                }}
+              </h3>
               <p>
                 {{ a.order.direction }} {{ a.order.kind }} at {{ a.order.price | number: fmt() }}
                 @if (a.order.ocoGroupId !== null) {
@@ -337,8 +496,10 @@ type LadderAction =
             @case ('arm') {
               <h3>Arm one-click trading?</h3>
               <p class="fail">
-                Until you disarm it (or reload the page), every click on this ladder sends a LIVE order on account
-                {{ accountLabel() }} for {{ symbol() }} without asking. The engine still checks every order.
+                Until you disarm it (or reload the page), every click on this ladder sends a LIVE
+                order on account
+                {{ accountLabel() }} for {{ symbol() }} without asking. The engine still checks
+                every order.
               </p>
             }
           }
@@ -701,7 +862,10 @@ export class LadderPanelComponent {
       };
     }
     const state = md.status().state;
-    return { ...NO_VIEW, mode: state === 'connecting' || state === 'reconnecting' ? 'connecting' : 'none' };
+    return {
+      ...NO_VIEW,
+      mode: state === 'connecting' || state === 'reconnecting' ? 'connecting' : 'none',
+    };
   });
 
   /**
@@ -709,6 +873,11 @@ export class LadderPanelComponent {
    * helper), the polled read's `-403-entitlement`, or — before anything is asked — `md/entitlements/me` saying the
    * broker DOM feed is not licensed.
    */
+  /** "Delayed 15 min" when the organisation's licence for this feed is delayed-only (engine WS8 8.3). */
+  readonly delayedCaption = computed<string | null>(
+    () => this.md()?.status().delayedCaption ?? null,
+  );
+
   readonly notEntitled = computed<string | null>(() => {
     const st = this.md()?.status();
     if (st?.notEntitled) return st.notEntitled;
@@ -854,7 +1023,13 @@ export class LadderPanelComponent {
       untracked(() => {
         const c = this.centre();
         if (c === null) return;
-        if (needsRecentre({ rowSize: this.rowSize(), centerIndex: c, halfRows: HALF_ROWS }, q.bid, q.ask))
+        if (
+          needsRecentre(
+            { rowSize: this.rowSize(), centerIndex: c, halfRows: HALF_ROWS },
+            q.bid,
+            q.ask,
+          )
+        )
           this.centre.set(centreIndexFor(q.bid, q.ask, this.rowSize()));
       });
     });
@@ -909,7 +1084,8 @@ export class LadderPanelComponent {
       const sources = h.sources ?? [];
       // The source with the most ticks (the one the ladder will most likely show).
       ticks = sources.reduce<{ b: readonly number[] } | null>(
-        (best, src) => ((src.ticks?.b?.length ?? 0) > (best?.b.length ?? 0) ? (src.ticks ?? null) : best),
+        (best, src) =>
+          (src.ticks?.b?.length ?? 0) > (best?.b.length ?? 0) ? (src.ticks ?? null) : best,
         null,
       );
     } catch {
@@ -918,9 +1094,13 @@ export class LadderPanelComponent {
     if (this.md() !== md) return;
     if (ticks?.b?.length) {
       addTicks(this.tickCounts, ticks.b, pointSize(this.digits()));
-      this.tickNote.set('tick count per price this session (since 17:00 New York; ticks, not traded volume)');
+      this.tickNote.set(
+        'tick count per price this session (since 17:00 New York; ticks, not traded volume)',
+      );
     } else {
-      this.tickNote.set('tick count per price since the panel opened (the session history was not available)');
+      this.tickNote.set(
+        'tick count per price since the panel opened (the session history was not available)',
+      );
     }
   }
 
@@ -1002,7 +1182,9 @@ export class LadderPanelComponent {
   }
 
   chipTitle(o: LadderOrder): string {
-    const what = o.isSignal ? `manual signal ${o.id} (${o.status}, not placed yet)` : `order ${o.id} ${o.kind} ${o.status}`;
+    const what = o.isSignal
+      ? `manual signal ${o.id} (${o.status}, not placed yet)`
+      : `order ${o.id} ${o.kind} ${o.status}`;
     const oco = o.ocoGroupId !== null ? ` · OCO pair #${o.ocoGroupId}` : '';
     return `${o.direction} ${what} at ${o.price}${oco}. ${o.isSignal ? '' : 'Drag to move · '}× to cancel.`;
   }
@@ -1012,11 +1194,17 @@ export class LadderPanelComponent {
   async onCell(e: MouseEvent, column: LadderColumn, row: LadderRow): Promise<void> {
     this.hint.set(null);
     if (!this.canPlace()) {
-      this.hint.set(this.accountId() === null ? 'Choose the account first.' : 'Trading needs the access.trader permission.');
+      this.hint.set(
+        this.accountId() === null
+          ? 'Choose the account first.'
+          : 'Trading needs the access.trader permission.',
+      );
       return;
     }
     if (this.mode() !== 'Live') {
-      this.hint.set('Orders at a price are live only (paper tickets fill at market). Switch the ladder to Live, or use Buy/Sell MKT.');
+      this.hint.set(
+        'Orders at a price are live only (paper tickets fill at market). Switch the ladder to Live, or use Buy/Sell MKT.',
+      );
       return;
     }
     const q = this.view().quote;
@@ -1030,7 +1218,9 @@ export class LadderPanelComponent {
       const first = this.ocoFirst();
       if (!first) {
         this.ocoFirst.set(intent);
-        this.hint.set(`OCO leg 1: ${intent.direction} ${intent.kind} at ${intent.price}. Now click the other leg.`);
+        this.hint.set(
+          `OCO leg 1: ${intent.direction} ${intent.kind} at ${intent.price}. Now click the other leg.`,
+        );
         return;
       }
       const problem = ocoPairProblem(first, intent);
@@ -1073,7 +1263,10 @@ export class LadderPanelComponent {
   }
 
   /** The ticket for a click: the account, the side, the price (null = market) and the default brackets from the ATR. */
-  private async requestFor(direction: 'Buy' | 'Sell', price: number | null): Promise<ManualTradeRequest | null> {
+  private async requestFor(
+    direction: 'Buy' | 'Sell',
+    price: number | null,
+  ): Promise<ManualTradeRequest | null> {
     const account = this.accountId();
     if (account === null) return null;
     const mode: TicketMode = price === null ? this.mode() : 'Live';
@@ -1089,9 +1282,20 @@ export class LadderPanelComponent {
     const q = this.view().quote;
     const entry = price ?? (direction === 'Buy' ? q?.ask : q?.bid) ?? null;
     const atr = await this.atrFor(base);
-    const b = entry === null ? null : ladderBrackets(direction, entry, atr, { stopAtr: this.stopAtr(), targetR: this.targetR() }, this.digits());
+    const b =
+      entry === null
+        ? null
+        : ladderBrackets(
+            direction,
+            entry,
+            atr,
+            { stopAtr: this.stopAtr(), targetR: this.targetR() },
+            this.digits(),
+          );
     if (!b) {
-      this.hint.set('No ATR for the default stop yet (the engine could not price the ticket) — try again in a moment.');
+      this.hint.set(
+        'No ATR for the default stop yet (the engine could not price the ticket) — try again in a moment.',
+      );
       return null;
     }
     return { ...base, stopLoss: b.stopLoss, takeProfit: b.takeProfit };
@@ -1100,9 +1304,12 @@ export class LadderPanelComponent {
   /** The ATR the engine's preview reports for the account and symbol (cached a few minutes). */
   private async atrFor(base: ManualTradeRequest): Promise<number | null> {
     const key = `${base.tradingAccountId}:${base.symbol}`;
-    if (this.atr && this.atr.key === key && Date.now() - this.atr.at < ATR_TTL_MS) return this.atr.value;
+    if (this.atr && this.atr.key === key && Date.now() - this.atr.at < ATR_TTL_MS)
+      return this.atr.value;
     try {
-      const res = await firstValueFrom(this.trading.preview({ ...base, mode: 'Paper', entryPrice: null }));
+      const res = await firstValueFrom(
+        this.trading.preview({ ...base, mode: 'Paper', entryPrice: null }),
+      );
       const v = res?.data?.atr?.value ?? null;
       if (v !== null && v > 0) this.atr = { key, value: v, at: Date.now() };
       return v;
@@ -1121,7 +1328,11 @@ export class LadderPanelComponent {
       if (res?.status && res.data) {
         this.action.set({ ...a, preview: res.data });
         if (!res.data.canSubmit)
-          this.actionError.set(firstRefusal(res.data.gates)?.detail ?? res.data.refusedReason ?? 'The engine would refuse it.');
+          this.actionError.set(
+            firstRefusal(res.data.gates)?.detail ??
+              res.data.refusedReason ??
+              'The engine would refuse it.',
+          );
       } else this.actionError.set(res?.message || 'The engine could not check the order.');
     } catch {
       this.actionError.set('The engine did not answer the check.');
@@ -1143,12 +1354,16 @@ export class LadderPanelComponent {
     this.openAction(action);
     this.busy.set(true);
     try {
-      const previews = await Promise.all(legs.map((l) => firstValueFrom(this.trading.preview(l)).catch(() => null)));
+      const previews = await Promise.all(
+        legs.map((l) => firstValueFrom(this.trading.preview(l)).catch(() => null)),
+      );
       if (this.action() !== action) return;
       this.action.set({ ...action, previews: previews.map((p) => (p?.status ? p.data : null)) });
       const refused = previews.findIndex((p) => !p?.status || !p.data?.canSubmit);
       if (refused >= 0)
-        this.actionError.set(`Leg ${refused + 1} would be refused: ${previews[refused]?.data?.refusedReason ?? previews[refused]?.message ?? 'no answer'}`);
+        this.actionError.set(
+          `Leg ${refused + 1} would be refused: ${previews[refused]?.data?.refusedReason ?? previews[refused]?.message ?? 'no answer'}`,
+        );
     } finally {
       this.busy.set(false);
     }
@@ -1170,7 +1385,9 @@ export class LadderPanelComponent {
     const d = this.drag;
     this.drag = null;
     if (!d) return;
-    const rowEl = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest('[data-index]');
+    const rowEl = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest(
+      '[data-index]',
+    );
     const index = rowEl ? Number(rowEl.getAttribute('data-index')) : NaN;
     if (!Number.isFinite(index)) return;
     const row = this.rows().find((r) => r.index === index);
@@ -1190,7 +1407,10 @@ export class LadderPanelComponent {
     this.busy.set(true);
     try {
       const res = await firstValueFrom(
-        this.trading.orderEntryMovePreview(d.order.id, movedLevels(d.order, row.price, this.digits())),
+        this.trading.orderEntryMovePreview(
+          d.order.id,
+          movedLevels(d.order, row.price, this.digits()),
+        ),
       );
       if (this.action() !== action) return;
       if (res?.status && res.data) this.action.set({ ...action, preview: res.data });
@@ -1209,7 +1429,9 @@ export class LadderPanelComponent {
       return;
     }
     if (o.isSignal && o.ocoGroupId === null) {
-      this.hint.set('A manual signal not placed yet is cancelled from the trade signals page (or it expires on its own).');
+      this.hint.set(
+        'A manual signal not placed yet is cancelled from the trade signals page (or it expires on its own).',
+      );
       return;
     }
     if (this.armedHere()) {
@@ -1295,10 +1517,16 @@ export class LadderPanelComponent {
     this.busy.set(true);
     try {
       const res = await firstValueFrom(
-        this.trading.moveOrderEntry(order.id, movedLevels(order, to, this.digits()), newCorrelationId()),
+        this.trading.moveOrderEntry(
+          order.id,
+          movedLevels(order, to, this.digits()),
+          newCorrelationId(),
+        ),
       );
       if (res?.status) {
-        this.notify.success(`Move of order ${order.id} to ${to} sent; the order changes when the EA confirms.`);
+        this.notify.success(
+          `Move of order ${order.id} to ${to} sent; the order changes when the EA confirms.`,
+        );
         this.closeActionNow();
         this.refreshOrders();
       } else this.fail(res?.message || 'The engine refused the move.');

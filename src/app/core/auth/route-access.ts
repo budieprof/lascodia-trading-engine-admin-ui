@@ -61,6 +61,9 @@ export const ROUTE_ACCESS = {
   'market-data/entitlements': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/entitlements
   'market-data/usage': { anyOf: [P.PlatformUsageRead], staffOnly: true }, // GET admin/md/usage
   'market-data/sources': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/sources
+  // Subscriber declarations (multi-asset WS8 8.2): a person's own (marketdata.read) and staff review.
+  'market-data/declarations': rule(P.MarketdataRead), // GET md/declarations/me
+  'market-data/declarations-review': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/declarations
   'chart-analysis': rule(P.MarketdataRead),
   watchlist: rule(P.MarketdataRead),
   'spot-analysis': rule(P.AccessOperator),

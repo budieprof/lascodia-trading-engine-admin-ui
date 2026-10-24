@@ -7,6 +7,10 @@ import { ApiError, type ResponseData } from '@core/api/api.types';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { fileNameFromContentDisposition } from '@features/scripting/shared/download';
 import type {
+  DeclarationDecision,
+  MyDeclarations,
+  SubmitDeclarationBody,
+  SubscriberDeclarationDto,
   GrantEntitlementBody,
   MarketDataEntitlementDto,
   MarketDataFeedCatalog,
@@ -109,7 +113,7 @@ export class MarketDataEntitlementsApiService {
   }
 
   /** The month's CSV (fetched with the session's credentials, then handed to the browser). */
-  exportUsage(month: string, detail: 'tenants' | 'users'): Observable<UsageCsvFile> {
+  exportUsage(month: string, detail: 'tenants' | 'users' | 'exchanges'): Observable<UsageCsvFile> {
     return this.http
       .get(`${this.baseUrl}/admin/md/usage/export`, {
         params: new HttpParams().set('month', month).set('detail', detail),
@@ -119,5 +123,53 @@ export class MarketDataEntitlementsApiService {
         context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true),
       })
       .pipe(map((res) => toUsageCsvFile(res, month, detail)));
+  }
+
+  // ── Subscriber declarations (engine WS8 8.2) ──────────────────────────────
+
+  /** The caller's own declarations (`marketdata.read`). */
+  myDeclarations(): Observable<MyDeclarations> {
+    return settled(this.api.get<ResponseData<MyDeclarations>>('/md/declarations/me', SILENT));
+  }
+
+  declare(body: SubmitDeclarationBody): Observable<SubscriberDeclarationDto> {
+    return settled(
+      this.api.post<ResponseData<SubscriberDeclarationDto>>('/md/declarations', body, SILENT),
+    );
+  }
+
+  withdrawDeclaration(id: number): Observable<boolean> {
+    return settled(this.api.delete<ResponseData<boolean>>(`/md/declarations/${id}`, SILENT));
+  }
+
+  /** Staff review queue (`platform.data.manage`). */
+  declarations(
+    filter: { status?: string | null; family?: string | null; includeHistory?: boolean } = {},
+  ): Observable<SubscriberDeclarationDto[]> {
+    const q = new URLSearchParams();
+    if (filter.status) q.set('status', filter.status);
+    if (filter.family) q.set('family', filter.family);
+    if (filter.includeHistory) q.set('includeHistory', 'true');
+    const qs = q.toString();
+    return settled(
+      this.api.get<ResponseData<SubscriberDeclarationDto[]>>(
+        `/admin/md/declarations${qs ? '?' + qs : ''}`,
+        SILENT,
+      ),
+    ).pipe(map((rows) => rows ?? []));
+  }
+
+  reviewDeclaration(
+    id: number,
+    decision: DeclarationDecision,
+    note: string,
+  ): Observable<SubscriberDeclarationDto> {
+    return settled(
+      this.api.put<ResponseData<SubscriberDeclarationDto>>(
+        `/admin/md/declarations/${id}/review`,
+        { decision, note: note.trim() || null },
+        SILENT,
+      ),
+    );
   }
 }
