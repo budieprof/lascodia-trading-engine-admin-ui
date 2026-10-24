@@ -38,6 +38,8 @@ export const FEATURE_NOUNS: Readonly<Record<string, string>> = {
   personalAccessTokens: 'personal access tokens',
   propModule: 'the prop-firm module',
   brokerModule: 'the broker dealing-desk module',
+  fundModule:
+    'the fund module (best-execution reports, performance statements and compliance exports)',
 };
 
 type Envelope = { responseCode?: unknown; message?: unknown; data?: unknown };

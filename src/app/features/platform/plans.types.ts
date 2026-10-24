@@ -24,6 +24,8 @@ export interface PlanDto {
   allowsPropModule?: boolean;
   /** Module: the broker dealing desk (enterprise program wave 2); absent from older engines. */
   allowsBrokerModule?: boolean;
+  /** Feature (fund-module): best-execution, performance statements, compliance exports. */
+  allowsFundModule?: boolean;
   /** Market-data feeds the plan includes (engine C6), comma-separated; null = every feed. */
   marketDataFeeds?: string | null;
   isDefault: boolean;
@@ -66,6 +68,8 @@ export interface SavePlanBody {
   allowsPropModule?: boolean;
   /** Module: the broker dealing desk. */
   allowsBrokerModule?: boolean;
+  /** Feature (fund-module). */
+  allowsFundModule?: boolean;
   /** Market-data feeds (engine C6): comma-separated feed ids, `venue:*` / `source:*`; null = every feed. */
   marketDataFeeds: string | null;
   isDefault: boolean;
@@ -106,6 +110,7 @@ export interface TenantUsage {
     personalAccessTokens: boolean;
     propModule?: boolean;
     brokerModule?: boolean;
+    fundModule?: boolean;
   };
   llm: {
     /** False until per-organisation LLM metering exists: no spend figure is shown then. */

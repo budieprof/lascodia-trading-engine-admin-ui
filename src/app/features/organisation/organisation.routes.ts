@@ -18,6 +18,7 @@ const PAGES: AccessPath[] = [
   'organisation/branding',
   'organisation/data-export',
   'organisation/close',
+  'organisation/approval-policies',
 ];
 
 /**
@@ -83,6 +84,16 @@ export const ORGANISATION_ROUTES: Routes = [
     canActivate: [canAccessPath('organisation/llm')],
     data: { breadcrumb: 'LLM usage & key' },
     loadComponent: () => import('./pages/llm-page.component').then((m) => m.LlmPageComponent),
+  },
+  {
+    // Four-eyes policies (enterprise program, fund-module).
+    path: 'approval-policies',
+    canActivate: [canAccessPath('organisation/approval-policies')],
+    data: { breadcrumb: 'Approval policies' },
+    loadComponent: () =>
+      import('./pages/approval-policies-page.component').then(
+        (m) => m.ApprovalPoliciesPageComponent,
+      ),
   },
   // An organisation's life cycle (c7-lifecycle): branding, data export, closing.
   ...ORGANISATION_LIFECYCLE_ROUTES,

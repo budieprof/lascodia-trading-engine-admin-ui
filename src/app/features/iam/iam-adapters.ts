@@ -154,6 +154,19 @@ export function toApproval(r: Raw): ApprovalRequest {
     status: str(r['status']) ?? 'Pending',
     decidedBy: str(r['decidedByDisplay']) ?? str(r['decidedBy']),
     decidedAtUtc: str(r['decidedAtUtc']),
+    policyKind: str(r['policyKind']),
+    requiredApprovals: num(r['requiredApprovals']) ?? 1,
+    approverRoles: Array.isArray(r['approverRoles'])
+      ? (r['approverRoles'] as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
+    approvals: Array.isArray(r['approvals'])
+      ? (r['approvals'] as Raw[]).map((a) => ({
+          decidedBy: str(a['decidedByDisplay']) ?? str(a['decidedBy']) ?? '',
+          decidedAtUtc: str(a['decidedAtUtc']),
+          note: str(a['note']),
+          qualifyingRole: str(a['qualifyingRole']),
+        }))
+      : [],
   };
 }
 

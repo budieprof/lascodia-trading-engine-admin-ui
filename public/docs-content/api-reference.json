@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 913,
+  "endpointCount": 951,
   "groups": [
     {
       "name": "Admin auth",
@@ -5349,6 +5349,310 @@
       ]
     },
     {
+      "name": "Fund",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows",
+          "summary": "The account's recorded deposits, withdrawals, fees and adjustments.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            }
+          ],
+          "response": "ResponseData<List<CashFlowDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows",
+          "summary": "Records a deposit (positive), withdrawal or fee (negative) or adjustment.",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "RecordCashFlowCommand",
+          "response": "ResponseData<CashFlowDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows/{id}",
+          "summary": "Removes a recorded cash flow.",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/best-execution",
+          "summary": "The best-execution evidence report for a period (≤ 366 days), every account the caller may see or one.",
+          "access": "permission",
+          "permission": "fund.bestex.read",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BestExecutionReportDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/best-execution/export",
+          "summary": "The same report as CSV or PDF.",
+          "access": "permission",
+          "permission": "fund.bestex.read",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports",
+          "summary": "The organisation's register of downloaded compliance exports.",
+          "access": "permission",
+          "permission": "compliance.export",
+          "parameters": [],
+          "response": "ResponseData<List<ComplianceExportRecordDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/download",
+          "summary": "Downloads the compliance export of a period (audit, orders, approvals; `format` json or csv = zip). Headers `X-Content-SHA256` and, when signed, `X-Lascodia-Signature` (v1=HMAC-SHA256) + `X-Lascodia-Signing-Key-Id`.",
+          "access": "permission",
+          "permission": "compliance.export",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "sections",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/verify",
+          "summary": "Was a file with this SHA-256 issued to this organisation? (`shasum -a 256 <file>`)",
+          "access": "permission",
+          "permission": "compliance.export",
+          "parameters": [
+            {
+              "name": "sha256",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<ComplianceVerificationDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/performance",
+          "summary": "The performance statement of one account or one account group (portfolio).",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "accountGroupId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "riskFreeRatePct",
+              "in": "query",
+              "required": false,
+              "type": "double"
+            }
+          ],
+          "response": "ResponseData<PerformanceStatementDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/performance/export",
+          "summary": "The statement as PDF or CSV.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "accountGroupId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "riskFreeRatePct",
+              "in": "query",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/scope",
+          "summary": "The accounts and account groups the caller may report on.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [],
+          "response": "ResponseData<FundScopeDto>"
+        }
+      ]
+    },
+    {
       "name": "Fx fundamentals",
       "endpoints": [
         {
@@ -5542,6 +5846,59 @@
             }
           ],
           "response": "ResponseData<AccountGroupDto>"
+        }
+      ]
+    },
+    {
+      "name": "Iam approval policies",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies",
+          "summary": "Every governable action with the acting organisation's policy (null = none).",
+          "access": "permission",
+          "permission": "iam.approvals.decide",
+          "parameters": [],
+          "response": "ResponseData<List<ApprovalPolicyRowDto>>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies/{kind}",
+          "summary": "Removes the policy for one action (a loosening when it was enabled: reason required).",
+          "access": "permission",
+          "permission": "approvals.policy.manage",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies/{kind}",
+          "summary": "Creates or changes the policy for one action. A loosening change needs `reason` and, when the organisation has an enabled `approvals.policy.change` policy, its approvers (HTTP 202 `-202-approval`).",
+          "access": "permission",
+          "permission": "approvals.policy.manage",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "SetApprovalPolicyCommand",
+          "response": "ResponseData<ApprovalPolicyDto>"
         }
       ]
     },
@@ -10864,6 +11221,432 @@
             }
           ],
           "response": "ResponseData<bool>"
+        }
+      ]
+    },
+    {
+      "name": "Prop",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/breaches",
+          "summary": "The live breach feed (poll with `afterId`).",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "afterId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "enrollmentId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "severity",
+              "in": "query",
+              "required": false,
+              "type": "PropBreachSeverity?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<PropBreachDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments",
+          "summary": "Enrolments, newest first (filter by state, program, trader, account).",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "state",
+              "in": "query",
+              "required": false,
+              "type": "PropEnrollmentState?"
+            },
+            {
+              "name": "programId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "traderId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<PropEnrollmentDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments",
+          "summary": "Enrols a trading account in a program phase.",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [],
+          "body": "EnrollPropAccountCommand",
+          "response": "ResponseData<PropEnrollmentDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments/{id}",
+          "summary": "One enrolment.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<PropEnrollmentDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments/{id}/advance",
+          "summary": "Moves a Passed enrolment to the program's next phase.",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "AdvancePropEnrollmentCommand",
+          "response": "ResponseData<PropEnrollmentDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments/{id}/dashboard",
+          "summary": "A trader's dashboard for one enrolment (equity curve vs rule lines, remaining limits, days, consistency).",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<PropDashboardDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/enrollments/{id}/withdraw",
+          "summary": "Ends a running enrolment without a breach (the account is not touched).",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "WithdrawPropEnrollmentCommand",
+          "response": "ResponseData<PropEnrollmentDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/leaderboard",
+          "summary": "The leaderboard of running and passed enrolments.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "programId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "includeEnded",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<PropLeaderboardRowDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/me",
+          "summary": "The caller's own challenge dashboards (trading-account session, or the trader linked to the user).",
+          "access": "permission",
+          "permission": "prop.self",
+          "parameters": [],
+          "response": "ResponseData<List<PropDashboardDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts",
+          "summary": "Payout statements, newest period first.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "PropPayoutStatus?"
+            },
+            {
+              "name": "enrollmentId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<PropPayoutDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts",
+          "summary": "Prepares (or with `preview: true` only computes) a statement for a funded enrolment and period.",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [],
+          "body": "PreparePropPayoutCommand",
+          "response": "ResponseData<PropPayoutDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts/export",
+          "summary": "Statements overlapping a period range as CSV.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "fromUtc",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "toUtc",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "PropPayoutStatus?"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts/{id}/approve",
+          "summary": "Approves a draft statement (not by its preparer while a second person is required). No money moves.",
+          "access": "permission",
+          "permission": "prop.payouts.approve",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "DecideNote",
+          "response": "ResponseData<PropPayoutDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts/{id}/pdf",
+          "summary": "One statement as PDF.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/payouts/{id}/reject",
+          "summary": "Rejects a draft statement (a note is required).",
+          "access": "permission",
+          "permission": "prop.payouts.approve",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "DecideNote",
+          "response": "ResponseData<PropPayoutDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/programs",
+          "summary": "The organisation's programs with their current rules.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "includeArchived",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<List<PropProgramDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/programs",
+          "summary": "Creates a program (rule version 1).",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [],
+          "body": "CreatePropProgramCommand",
+          "response": "ResponseData<PropProgramDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/programs/{id}",
+          "summary": "One program with its rule versions.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<PropProgramDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/prop/programs/{id}",
+          "summary": "Changes a program; changed rules become a new version (running enrolments keep theirs).",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdatePropProgramCommand",
+          "response": "ResponseData<PropProgramDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/programs/{id}/archive",
+          "summary": "Closes a program to new enrolments.",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<PropProgramDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/status",
+          "summary": "Whether the organisation's plan includes the prop module (the console's upgrade notice).",
+          "access": "permission",
+          "permission": "prop.self",
+          "parameters": [],
+          "response": "ResponseData<PropModuleStatusDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/traders",
+          "summary": "The organisation's traders.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [],
+          "response": "ResponseData<List<PropTraderDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/prop/traders",
+          "summary": "Creates a trader.",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [],
+          "body": "SavePropTraderCommand",
+          "response": "ResponseData<PropTraderDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/prop/traders/{id}",
+          "summary": "Changes a trader (name, contact, linked console user, active).",
+          "access": "permission",
+          "permission": "prop.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SavePropTraderCommand",
+          "response": "ResponseData<PropTraderDto>"
         }
       ]
     },

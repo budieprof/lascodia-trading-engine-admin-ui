@@ -41,6 +41,13 @@ export const DOC_GUIDES: readonly DocGuide[] = [
     audience: 'Administrators',
   },
   {
+    slug: 'fund-guide',
+    title: 'Fund module guide',
+    summary:
+      'Four-eyes approval policies, performance statements and investors, best-execution evidence, compliance exports.',
+    audience: 'Administrators',
+  },
+  {
     slug: 'platform-guide',
     title: 'Platform operator guide',
     summary:

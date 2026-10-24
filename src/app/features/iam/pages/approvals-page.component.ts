@@ -7,7 +7,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
-import { canDecide, errorText, reportable, when } from '../iam.logic';
+import { approvalProgress, canDecide, errorText, reportable, when } from '../iam.logic';
 import type { ApprovalRequest, ApprovalStatus } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
 
@@ -92,7 +92,16 @@ import { iamResource } from '../shared/iam-resource';
                       >
                         {{ r.status }}
                       </span>
-                      @if (r.decidedBy) {
+                      @if (progress(r); as p) {
+                        <span class="sub">{{ p }}</span>
+                      }
+                      @for (a of r.approvals ?? []; track $index) {
+                        <span class="sub"
+                          >✓ {{ a.decidedBy
+                          }}{{ a.qualifyingRole ? ' (' + a.qualifyingRole + ')' : '' }}</span
+                        >
+                      }
+                      @if (r.decidedBy && !r.approvals?.length) {
                         <span class="sub">by {{ r.decidedBy }}</span>
                       }
                     </td>
@@ -183,13 +192,21 @@ export class ApprovalsPageComponent {
     const d = this.deciding();
     if (!d) return '';
     const what = d.request.summary || this.describe(d.request.actionKey);
+    const required = d.request.requiredApprovals ?? 1;
+    const after = (d.request.approvals?.length ?? 0) + 1;
     return d.verdict === 'approve'
-      ? `${what} — requested by ${d.request.requestedBy || 'another member'}. The engine runs it as soon as you approve.`
+      ? after < required
+        ? `${what} — requested by ${d.request.requestedBy || 'another member'}. Your approval is ${after} of ${required}; it runs once ${required - after} more ${required - after === 1 ? 'person approves' : 'people approve'}.`
+        : `${what} — requested by ${d.request.requestedBy || 'another member'}. The engine runs it as soon as you approve.`
       : `${what} — it will not run.`;
   });
 
   constructor() {
     this.list.reload();
+  }
+
+  progress(r: ApprovalRequest): string | null {
+    return approvalProgress(r);
   }
 
   decide(r: ApprovalRequest) {
@@ -217,9 +234,13 @@ export class ApprovalsPageComponent {
       next: () => {
         this.busy.set(false);
         this.deciding.set(null);
+        const required = d.request.requiredApprovals ?? 1;
+        const recorded = (d.request.approvals?.length ?? 0) + 1;
         this.notify.success(
           d.verdict === 'approve'
-            ? `Request #${d.request.id} approved.`
+            ? recorded < required
+              ? `Approval recorded on request #${d.request.id} (${recorded} of ${required}).`
+              : `Request #${d.request.id} approved.`
             : `Request #${d.request.id} rejected.`,
         );
         this.list.reload();

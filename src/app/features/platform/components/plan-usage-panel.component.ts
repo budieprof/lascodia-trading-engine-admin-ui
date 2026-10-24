@@ -150,6 +150,9 @@ import type { TenantUsage, UsageItem } from '../plans.types';
           <span class="chip" [class.ok]="u.features.brokerModule"
             >Broker dealing desk {{ u.features.brokerModule ? 'included' : 'not included' }}</span
           >
+          <span class="chip" [class.ok]="u.features.fundModule"
+            >Fund module {{ u.features.fundModule ? 'included' : 'not included' }}</span
+          >
         </div>
         <div class="fact">
           <span class="label">LLM budget per month</span>

@@ -188,6 +188,25 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Branding', route: '/organisation/branding', icon: navIcon.Palette },
       { label: 'Export your data', route: '/organisation/data-export', icon: navIcon.Download },
       { label: 'Close the organisation', route: '/organisation/close', icon: navIcon.DoorClosed },
+      // Four-eyes policies (enterprise program, fund-module).
+      {
+        label: 'Approval policies',
+        route: '/organisation/approval-policies',
+        icon: navIcon.UsersRound,
+      },
+    ],
+  },
+  {
+    // The fund module (enterprise program): reporting and evidence for funds and their investors.
+    label: 'Fund',
+    items: [
+      {
+        label: 'Performance statements',
+        route: '/fund/performance',
+        icon: navIcon.ChartNoAxesCombined,
+      },
+      { label: 'Best execution', route: '/fund/best-execution', icon: navIcon.BadgeCheck },
+      { label: 'Compliance exports', route: '/fund/compliance', icon: navIcon.FileArchive },
     ],
   },
   {
