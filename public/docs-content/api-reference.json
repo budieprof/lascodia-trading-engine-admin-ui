@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 902,
+  "endpointCount": 913,
   "groups": [
     {
       "name": "Admin auth",
@@ -4242,6 +4242,120 @@
             }
           ],
           "response": "ResponseData<bool>"
+        }
+      ]
+    },
+    {
+      "name": "Dealing",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/ab-book-report",
+          "summary": "The ADVISORY A/B-book suggestion report.",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingAbBookReportQuery",
+          "response": "ResponseData<DealingAbBookReportDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/ab-book-report/export",
+          "summary": "The ADVISORY A/B-book suggestion report as CSV (UTF-8 with BOM; formula-safe cells).",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingAbBookReportQuery"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/alerts",
+          "summary": "The dealing desk's alerts for a window (computed on read).",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingAlertsQuery",
+          "response": "ResponseData<List<DealingAlertDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/clients",
+          "summary": "The client risk table of a window (≤ 92 days).",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingClientsQuery",
+          "response": "ResponseData<DealingClientsDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/clients/detail",
+          "summary": "One client: profile, per-symbol markouts, scalping histogram, fills, latency-arbitrage fills, open trades.",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingClientDetailQuery",
+          "response": "ResponseData<DealingClientDetailDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/dealing/feeds",
+          "summary": "The organisation's trade feeds.",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "response": "ResponseData<List<DealingTradeFeedDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/feeds",
+          "summary": "Registers a trade feed (a trade server and the gateway identities that may post it).",
+          "access": "permission",
+          "permission": "dealing.manage",
+          "parameters": [],
+          "body": "UpsertDealingFeedCommand",
+          "response": "ResponseData<DealingTradeFeedDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/dealing/feeds",
+          "summary": "Changes a trade feed (by `feedId` in the body): name, server, writers, price source, enabled.",
+          "access": "permission",
+          "permission": "dealing.manage",
+          "parameters": [],
+          "body": "UpsertDealingFeedCommand",
+          "response": "ResponseData<DealingTradeFeedDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/lp-analytics",
+          "summary": "LP / venue analytics of a symbol over ≤ 24 h from the tick store + multibook dispersion.",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingLpAnalyticsQuery",
+          "response": "ResponseData<DealingLpAnalyticsDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/markouts",
+          "summary": "Average markout curves per client / group / symbol / feed / leg.",
+          "access": "permission",
+          "permission": "dealing.read",
+          "parameters": [],
+          "body": "GetDealingMarkoutCurvesQuery",
+          "response": "ResponseData<DealingCurvesDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/dealing/trades/ingest",
+          "summary": "D1 — a trade-server gateway (daemon machine credential, listed as the feed's writer) posts ≤ 5,000 client trades.",
+          "access": "permission",
+          "permission": "dealing.ingest",
+          "rateLimit": "ea",
+          "parameters": [],
+          "body": "IngestDealingTradesCommand",
+          "response": "ResponseData<DealingIngestResult>"
         }
       ]
     },

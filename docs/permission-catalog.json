@@ -108,6 +108,33 @@
     "deprecated": false
   },
   {
+    "key": "dealing.ingest",
+    "category": "Dealing desk",
+    "description": "Machine path: a trade-server gateway (daemon credential) posts its client trades to a feed that lists it.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "dealing.manage",
+    "category": "Dealing desk",
+    "description": "Register and change the organisation's external client-trade feeds (MT5 trade servers) and which gateway identities may post them.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "dealing.read",
+    "category": "Dealing desk",
+    "description": "View the dealing desk: client-flow analytics, markouts, toxicity, latency-arbitrage and scalping profiles, advisory A/B-book suggestions, liquidity-provider analytics and alerts (needs the broker module in the organisation's plan).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "engine.config",
     "category": "Engine control",
     "description": "Read and change the organisation's own configuration: values for all of its accounts, or — granted on an account or account group — for those accounts. Risk-loosening values also need risk.loosen.",
