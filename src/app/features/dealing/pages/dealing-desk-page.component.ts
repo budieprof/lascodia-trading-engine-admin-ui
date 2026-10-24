@@ -39,14 +39,22 @@ const TAB_KEY = 'lascodia.dealing.tab';
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
-      .filters {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
+      /* Shared .filter-bar surface (styles.scss) laid out as a compact responsive grid: one row on a wide
+         screen, wrapping to as many columns as fit (two on a phone). */
+      .filter-bar {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+        gap: var(--space-2) var(--space-3);
         align-items: end;
+        padding: var(--space-3) var(--space-4);
       }
-      .filters .field {
-        min-width: 8rem;
+      .filter-bar .field {
+        min-width: 0;
+      }
+      @media (max-width: 480px) {
+        .filter-bar {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .tabs {
         display: flex;
@@ -90,73 +98,72 @@ const TAB_KEY = 'lascodia.dealing.tab';
           </div>
         </section>
       } @else {
-        <section class="card">
-          <div class="card-body filters">
-            <label class="field">
-              <span class="label">Window</span>
-              <select class="select" [ngModel]="store.preset()" (ngModelChange)="setPreset($event)">
-                <option value="24h">Last 24 hours</option>
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="90d">Last 90 days</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="label">Feed (blank = all, "own" = own accounts)</span>
-              <input
-                class="input"
-                [ngModel]="store.feedId()"
-                (change)="store.feedId.set(text($event))"
-              />
-            </label>
-            <label class="field">
-              <span class="label">Symbol</span>
-              <input
-                class="input"
-                [ngModel]="store.symbol()"
-                (change)="store.symbol.set(text($event))"
-              />
-            </label>
-            <label class="field">
-              <span class="label">Group</span>
-              <input
-                class="input"
-                [ngModel]="store.group()"
-                (change)="store.group.set(text($event))"
-              />
-            </label>
-            <label class="field">
-              <span class="label">Min fills</span>
-              <input
-                class="input"
-                type="number"
-                min="1"
-                [ngModel]="store.minFills()"
-                (change)="store.minFills.set(num($event))"
-              />
-            </label>
-            <label class="field">
-              <span class="label">A-book threshold</span>
-              <input
-                class="input"
-                type="number"
-                min="0"
-                max="100"
-                [ngModel]="store.aBookThreshold()"
-                (change)="store.aBookThreshold.set(num($event))"
-              />
-            </label>
-            <label class="field">
-              <span class="label">Short hold (s)</span>
-              <input
-                class="input"
-                type="number"
-                min="1"
-                [ngModel]="store.shortHoldSeconds()"
-                (change)="store.shortHoldSeconds.set(num($event))"
-              />
-            </label>
-          </div>
+        <section class="filter-bar" aria-label="Dealing desk filters">
+          <label class="field">
+            <span class="label">Window</span>
+            <select class="select" [ngModel]="store.preset()" (ngModelChange)="setPreset($event)">
+              <option value="24h">Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+              <option value="90d">Last 90 days</option>
+            </select>
+          </label>
+          <label class="field" title='Blank = every feed; "own" = your own accounts&apos; fills'>
+            <span class="label">Feed</span>
+            <input
+              class="input"
+              placeholder="all · own · feed id"
+              [ngModel]="store.feedId()"
+              (change)="store.feedId.set(text($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="label">Symbol</span>
+            <input
+              class="input"
+              [ngModel]="store.symbol()"
+              (change)="store.symbol.set(text($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="label">Group</span>
+            <input
+              class="input"
+              [ngModel]="store.group()"
+              (change)="store.group.set(text($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="label">Min fills</span>
+            <input
+              class="input"
+              type="number"
+              min="1"
+              [ngModel]="store.minFills()"
+              (change)="store.minFills.set(num($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="label">A-book threshold</span>
+            <input
+              class="input"
+              type="number"
+              min="0"
+              max="100"
+              [ngModel]="store.aBookThreshold()"
+              (change)="store.aBookThreshold.set(num($event))"
+            />
+          </label>
+          <label class="field">
+            <span class="label">Short hold (s)</span>
+            <input
+              class="input"
+              type="number"
+              min="1"
+              [ngModel]="store.shortHoldSeconds()"
+              (change)="store.shortHoldSeconds.set(num($event))"
+            />
+          </label>
         </section>
 
         <nav class="tabs" role="tablist" aria-label="Dealing desk">
