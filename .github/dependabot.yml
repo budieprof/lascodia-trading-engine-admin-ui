@@ -1,0 +1,19 @@
+# Dependency update PRs (security-controls). Advisories open PRs regardless of the schedule; version bumps are grouped.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+    open-pull-requests-limit: 5
+    groups:
+      angular:
+        patterns: ["@angular/*", "@angular-devkit/*", "@schematics/angular"]
+      dev-tooling-minor-patch:
+        dependency-type: development
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule: { interval: weekly, day: monday }
