@@ -37,6 +37,7 @@ export const FEATURE_NOUNS: Readonly<Record<string, string>> = {
   scim: 'SCIM provisioning',
   personalAccessTokens: 'personal access tokens',
   propModule: 'the prop-firm module',
+  brokerModule: 'the broker dealing-desk module',
 };
 
 type Envelope = { responseCode?: unknown; message?: unknown; data?: unknown };

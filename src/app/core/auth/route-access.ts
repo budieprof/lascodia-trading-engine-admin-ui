@@ -96,6 +96,9 @@ export const ROUTE_ACCESS = {
   'fleet-health': rule(P.AccessOperator),
   alerts: rule(P.AccessViewer),
   'execution-quality': rule(P.AccessOperator),
+  // Broker dealing desk (enterprise program wave 2): POST dealing/clients etc.; the plan feature gates the data.
+  dealing: rule(P.DealingRead),
+  'dealing/clients': rule(P.DealingRead),
   sentiment: rule(P.MarketdataRead),
   performance: rule(P.StrategiesRead),
   'drawdown-recovery': rule(P.RiskManage), // A4.1: GET drawdown-recovery/latest, /by-account

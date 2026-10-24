@@ -412,6 +412,14 @@ export const routes: Routes = [
         loadChildren: () => import('@features/alerts/alerts.routes').then((m) => m.ALERTS_ROUTES),
       },
       {
+        // Broker dealing desk (enterprise program wave 2, broker module — a plan feature).
+        path: 'dealing',
+        canActivate: [canAccessPath('dealing')],
+        data: { breadcrumb: 'Dealing Desk' },
+        loadChildren: () =>
+          import('@features/dealing/dealing.routes').then((m) => m.DEALING_ROUTES),
+      },
+      {
         path: 'execution-quality',
         canActivate: [canAccessPath('execution-quality')],
         data: { breadcrumb: 'Execution Quality' },

@@ -60,6 +60,7 @@ export function emptyPlanDraft(): SavePlanBody {
     allowsScim: false,
     allowsPersonalAccessTokens: false,
     allowsPropModule: false,
+    allowsBrokerModule: false,
     // A new plan starts with the broker feeds every organisation reads by default; licensed feeds are added on purpose.
     marketDataFeeds: 'broker-ticks,broker-dom',
     isDefault: false,
@@ -83,6 +84,7 @@ export function draftFromPlan(p: PlanDto): SavePlanBody {
     allowsScim: p.allowsScim,
     allowsPersonalAccessTokens: p.allowsPersonalAccessTokens,
     allowsPropModule: p.allowsPropModule === true,
+    allowsBrokerModule: p.allowsBrokerModule ?? false,
     marketDataFeeds: p.marketDataFeeds ?? null,
     isDefault: p.isDefault,
   };
@@ -177,12 +179,14 @@ export function featureList(p: {
   allowsScim: boolean;
   allowsPersonalAccessTokens: boolean;
   allowsPropModule?: boolean;
+  allowsBrokerModule?: boolean;
 }): string {
   const names = [
     p.allowsSso ? 'Single sign-on' : null,
     p.allowsScim ? 'SCIM' : null,
     p.allowsPersonalAccessTokens ? 'Access tokens' : null,
     p.allowsPropModule ? 'Prop-firm module' : null,
+    p.allowsBrokerModule ? 'Broker dealing desk' : null,
   ].filter((n): n is string => n !== null);
   return names.length ? names.join(', ') : 'None';
 }

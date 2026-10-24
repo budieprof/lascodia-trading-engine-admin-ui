@@ -129,6 +129,36 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'dealing.ingest',
+    category: 'Dealing desk',
+    description:
+      'Machine path: a trade-server gateway (daemon credential) posts its client trades to a feed that lists it.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'dealing.manage',
+    category: 'Dealing desk',
+    description:
+      "Register and change the organisation's external client-trade feeds (MT5 trade servers) and which gateway identities may post them.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'dealing.read',
+    category: 'Dealing desk',
+    description:
+      "View the dealing desk: client-flow analytics, markouts, toxicity, latency-arbitrage and scalping profiles, advisory A/B-book suggestions, liquidity-provider analytics and alerts (needs the broker module in the organisation's plan).",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'decisions.read',
     category: 'Audit',
     description:
@@ -848,6 +878,9 @@ export const Permission = {
   AccountsRead: 'accounts.read',
   AlertsManage: 'alerts.manage',
   AuditRead: 'audit.read',
+  DealingIngest: 'dealing.ingest',
+  DealingManage: 'dealing.manage',
+  DealingRead: 'dealing.read',
   DecisionsRead: 'decisions.read',
   DecisionsWrite: 'decisions.write',
   EngineConfig: 'engine.config',

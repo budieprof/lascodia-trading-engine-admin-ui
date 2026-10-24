@@ -24,6 +24,8 @@ const READS: readonly PermissionKey[] = [
   P.MarketdataRead,
   P.RiskRead,
   P.AccountsRead,
+  // Broker module (enterprise program wave 2): the dealing desk's reads (the plan feature still gates it).
+  P.DealingRead,
 ];
 
 const VIEWER: readonly PermissionKey[] = [
@@ -69,6 +71,8 @@ const OPERATOR: readonly PermissionKey[] = [
   P.EngineConfig,
   P.EngineKillswitch,
   P.EnginePaper,
+  // Broker module: the organisation's own trade-feed registrations.
+  P.DealingManage,
   P.RiskManage,
   P.AccountsManage,
   P.StrategiesEdit,

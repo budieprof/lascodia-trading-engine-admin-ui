@@ -196,6 +196,15 @@ import {
               <label class="check">
                 <input
                   type="checkbox"
+                  name="brokerModule"
+                  [ngModel]="draft().allowsBrokerModule ?? false"
+                  (ngModelChange)="patch({ allowsBrokerModule: $event })"
+                />
+                Broker dealing desk (module)
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
                   name="default"
                   [ngModel]="draft().isDefault"
                   [disabled]="e.wasDefault"
