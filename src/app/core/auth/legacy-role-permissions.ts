@@ -35,6 +35,8 @@ const VIEWER: readonly PermissionKey[] = [
   P.TenantBrandingRead,
   // Prop module: the person's (or account session's) own challenge dashboard.
   P.PropSelf,
+  // security-controls: the platform's release notes.
+  P.ReleasesRead,
 ];
 
 const TRADER: readonly PermissionKey[] = [

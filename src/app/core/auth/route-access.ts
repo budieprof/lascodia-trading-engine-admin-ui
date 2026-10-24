@@ -229,6 +229,10 @@ export const ROUTE_ACCESS = {
   // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
   'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },
+  // security-controls: GET platform/security/evidence-bundle (works with either sign-in).
+  'platform/security-evidence': { anyOf: [P.PlatformSecurityEvidence], staffOnly: true },
+  // security-controls: GET release-notes — every console user (Viewer and up, Billing).
+  releases: rule(P.ReleasesRead),
 } as const satisfies Record<string, RouteRule>;
 
 export type AccessPath = keyof typeof ROUTE_ACCESS;

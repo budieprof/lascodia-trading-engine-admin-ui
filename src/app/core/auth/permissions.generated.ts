@@ -267,6 +267,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'iam.access_review.signoff',
+    category: 'Identity and access',
+    description:
+      "Sign off the organisation's quarterly access review as its reviewer: your name, the time and your statement are recorded against the exact snapshot reviewed, which is frozen from then on. Needs a fresh MFA sign-in.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'iam.approvals.decide',
     category: 'Identity and access',
     description:
@@ -601,6 +611,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.releases.manage',
+    category: 'Platform staff',
+    description:
+      "Platform staff: publish (or replace) a release's notes, generated from its commits.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.research.manage',
     category: 'Platform staff',
     description:
@@ -615,6 +635,16 @@ export const PERMISSION_CATALOG = [
     category: 'Platform staff',
     description:
       'Platform staff: queue platform research — ML training and hyperparameter searches, shadow evaluations.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'platform.security.evidence',
+    category: 'Platform staff',
+    description:
+      'Platform staff: download the security evidence bundle — access reviews and their sign-offs, the audit-chain and anchor checks, backup/restore drill results, release change log and vulnerability-scan summaries (each download is audited).',
     scopeable: false,
     stepUp: false,
     twoPerson: false,
@@ -735,6 +765,15 @@ export const PERMISSION_CATALOG = [
     category: 'Prop firm',
     description:
       'See your own prop challenge dashboard: the enrolments of the trading account you signed in with, or of the trader linked to your user.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'releases.read',
+    category: 'Administration',
+    description: 'Read the release notes of the engine, console, Expert Advisor and CME feed.',
     scopeable: false,
     stepUp: false,
     twoPerson: false,
@@ -932,6 +971,7 @@ export const Permission = {
   FundBestexRead: 'fund.bestex.read',
   FundReportsRead: 'fund.reports.read',
   IamAccessReview: 'iam.access_review',
+  IamAccessReviewSignoff: 'iam.access_review.signoff',
   IamApprovalsDecide: 'iam.approvals.decide',
   IamGrantsManage: 'iam.grants.manage',
   IamInvitationsManage: 'iam.invitations.manage',
@@ -967,8 +1007,10 @@ export const Permission = {
   PlatformImpersonate: 'platform.impersonate',
   PlatformInfrastructureManage: 'platform.infrastructure.manage',
   PlatformPlansManage: 'platform.plans.manage',
+  PlatformReleasesManage: 'platform.releases.manage',
   PlatformResearchManage: 'platform.research.manage',
   PlatformResearchRun: 'platform.research.run',
+  PlatformSecurityEvidence: 'platform.security.evidence',
   PlatformTenantsManage: 'platform.tenants.manage',
   PlatformTenantsPurge: 'platform.tenants.purge',
   PlatformUsageRead: 'platform.usage.read',
@@ -981,6 +1023,7 @@ export const Permission = {
   PropPayoutsApprove: 'prop.payouts.approve',
   PropRead: 'prop.read',
   PropSelf: 'prop.self',
+  ReleasesRead: 'releases.read',
   RiskLoosen: 'risk.loosen',
   RiskManage: 'risk.manage',
   RiskRead: 'risk.read',

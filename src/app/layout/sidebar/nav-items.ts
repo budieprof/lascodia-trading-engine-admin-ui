@@ -236,6 +236,12 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Closed organisations', route: '/platform/closures', icon: navIcon.Archive },
       { label: 'Elevated access', route: '/platform/elevations', icon: navIcon.ChevronsUp },
       { label: 'Impersonation', route: '/platform/impersonation', icon: navIcon.VenetianMask },
+      // security-controls: the evidence bundle for the operator's auditor.
+      {
+        label: 'Security evidence',
+        route: '/platform/security-evidence',
+        icon: navIcon.FileArchive,
+      },
     ],
   },
   {
@@ -249,6 +255,8 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Access tokens', route: '/account/tokens', icon: navIcon.Ticket },
       // The documentation portal (enterprise onboarding).
       { label: 'Documentation', route: '/docs', icon: navIcon.BookOpen },
+      // Release notes (security-controls).
+      { label: 'Release notes', route: '/releases', icon: navIcon.ListChecks },
     ],
   },
 ];
