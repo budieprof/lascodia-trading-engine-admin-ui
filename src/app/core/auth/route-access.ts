@@ -184,6 +184,16 @@ export const ROUTE_ACCESS = {
   'organisation/close': rule(P.TenantClose), // GET tenant/closure
   onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
 
+  // ── Prop-firm module (enterprise program, prop-module; a plan add-on — each page shows the upgrade
+  //    notice itself when the organisation's plan lacks it) ──
+  prop: rule(P.PropRead, P.PropSelf),
+  'prop/console': rule(P.PropRead), // GET prop/breaches, prop/leaderboard
+  'prop/programs': rule(P.PropRead), // GET prop/programs
+  'prop/traders': rule(P.PropRead), // GET prop/traders
+  'prop/enrollments': rule(P.PropRead), // GET prop/enrollments, prop/enrollments/{id}/dashboard
+  'prop/payouts': rule(P.PropRead), // GET prop/payouts
+  'prop/me': rule(P.PropSelf), // GET prop/me
+
   // ── Platform console (U3.6) ──
   // Organisations use the tenant API that is live today, so they work in both modes (legacy: House
   // administrators holding platform.tenants.manage). Elevation and impersonation live in the BFF session.
