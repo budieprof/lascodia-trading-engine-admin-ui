@@ -13,6 +13,9 @@ import {
 } from './resolution';
 import { MAX_CHART_BARS, asBar, tailCount } from './session-bars';
 import type { SessionSpec } from './session-calendar';
+import { InstrumentsService } from '@core/instruments/instruments.service';
+import { resolveInstrument } from '@core/instruments/instrument-math';
+import { pineSessionFromCalendar } from '@core/instruments/calendar-session';
 
 /** One bar in TradingView's shape. `time` is the bar's open, in ms. */
 export interface Bar {
@@ -110,6 +113,16 @@ export class CandleFeedService {
    * counts UTC days.
    */
   private readonly sessions = signal<ReadonlyMap<string, SessionSpec>>(new Map());
+  /** The instrument catalogue + calendars (multi-asset WS2/WS7); optional so bare test injectors need not provide it. */
+  private readonly instruments = inject(InstrumentsService, { optional: true });
+  /**
+   * Sessions taken from a NON-FX instrument's trading calendar (`GET calendars/{code}`), by symbol: they win over the
+   * session `scripting/chart-bars` reports. FX keeps chart-bars' session (`1700-1700:23456` New York — what `fx-24x5`
+   * converts to as well), so FX charts are unchanged whether or not the engine serves calendars.
+   */
+  private readonly calendarSpecs = new Map<string, SessionSpec>();
+  private readonly calendarAsked = new Set<string>();
+
   /** {@link learnSession} requests in flight, by symbol. */
   private readonly learning = new Map<string, Promise<SessionSpec | null>>();
 
@@ -126,6 +139,7 @@ export class CandleFeedService {
    */
   learnSession(symbol: string): Promise<SessionSpec | null> {
     const key = symbol.toUpperCase();
+    this.askCalendar(key);
     const known = this.sessionOf(key);
     if (known) return Promise.resolve(known);
     let pending = this.learning.get(key);
@@ -149,6 +163,9 @@ export class CandleFeedService {
     const session = typeof res?.session === 'string' ? res.session.trim() : '';
     if (!session) return null;
     const key = symbol.toUpperCase();
+    this.askCalendar(key);
+    const fromCalendar = this.calendarSpecs.get(key);
+    if (fromCalendar) return fromCalendar;
     const zone = typeof res.timeZone === 'string' ? res.timeZone.trim() : '';
     const timeZone = zone || 'Etc/UTC';
     const held = this.sessions().get(key);
@@ -156,6 +173,27 @@ export class CandleFeedService {
     const spec: SessionSpec = { session, timeZone };
     this.sessions.update((m) => new Map(m).set(key, spec));
     return spec;
+  }
+
+  /**
+   * For a non-FX instrument with a trading calendar, ask the engine for it once (per page life; a calendar it does not
+   * serve is asked again on the next symbol switch) and, when it answers, use its session for the symbol's trading days.
+   */
+  private askCalendar(key: string): void {
+    if (!this.instruments || this.calendarAsked.has(key)) return;
+    const inst = resolveInstrument(key);
+    const code = inst.tradingCalendarCode;
+    if (inst.assetClass === 'Fx' || !code) return;
+    this.calendarAsked.add(key);
+    void this.instruments.calendar(code).then((cal) => {
+      const spec = pineSessionFromCalendar(cal);
+      if (!spec) {
+        this.calendarAsked.delete(key);
+        return;
+      }
+      this.calendarSpecs.set(key, spec);
+      this.sessions.update((m) => new Map(m).set(key, spec));
+    });
   }
 
   /** Drop cached bars. Call when the symbol's data is known to have changed. */

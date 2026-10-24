@@ -71,7 +71,6 @@ export function pineSessionFromCalendar(
   let bestN = 0;
   for (const [k, n] of counts) if (n > bestN) [best, bestN] = [k, n];
   const [open, close] = best.split('-').map(Number);
-  const overnight = open > close || (open === close && open !== 0);
 
   // Pine dates an overnight session by the day it CLOSES on.
   const digits = new Set<number>();
@@ -81,6 +80,5 @@ export function pineSessionFromCalendar(
     digits.add(closeDay + 1);
   }
   const days = [...digits].sort((a, b) => a - b).join('');
-  void overnight;
   return { session: `${hhmm(open)}-${hhmm(close)}:${days}`, timeZone };
 }

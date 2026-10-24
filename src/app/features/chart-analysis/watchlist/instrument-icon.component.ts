@@ -42,7 +42,7 @@ export const ASSET_CLASS_LABEL: Readonly<Record<InstrumentAssetClass, string>> =
       <span
         class="ii"
         [class.big]="big()"
-        [attr.data-ac]="assetClass()"
+        [attr.data-ac]="resolvedClass()"
         [title]="badge().title"
         role="img"
         [attr.aria-label]="badge().title"
@@ -77,19 +77,19 @@ export const ASSET_CLASS_LABEL: Readonly<Record<InstrumentAssetClass, string>> =
 export class InstrumentIconComponent {
   readonly symbol = input.required<string>();
   /** The asset class when the caller has the instrument; else resolved from the catalogue. */
-  readonly assetClassIn = input<InstrumentAssetClass | null>(null, { alias: 'assetClass' });
+  readonly assetClass = input<InstrumentAssetClass | null>(null);
   readonly big = input(false);
 
-  readonly assetClass = computed<InstrumentAssetClass>(
-    () => this.assetClassIn() ?? resolveInstrument(this.symbol()).assetClass,
+  readonly resolvedClass = computed<InstrumentAssetClass>(
+    () => this.assetClass() ?? resolveInstrument(this.symbol()).assetClass,
   );
   /**
    * FX always goes to `app-pair-icon` (flags, or nothing when a currency has no artwork — exactly as before); a metal
    * quoted in a currency (XAUUSD) keeps its flags; anything else gets its asset-class badge.
    */
   readonly flags = computed(() => {
-    const ac = this.assetClass();
+    const ac = this.resolvedClass();
     return ac === 'Fx' || (ac === 'Commodity' && !!pairFlags(this.symbol()));
   });
-  readonly badge = computed(() => ASSET_CLASS_BADGE[this.assetClass()] ?? ASSET_CLASS_BADGE.Fx);
+  readonly badge = computed(() => ASSET_CLASS_BADGE[this.resolvedClass()] ?? ASSET_CLASS_BADGE.Fx);
 }

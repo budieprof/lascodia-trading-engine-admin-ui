@@ -417,3 +417,68 @@ describe('CandleFeedService — the stored grid reports failures (CC-14) and for
     expect(listCandles.mock.calls.length).toBe(calls + 1);
   });
 });
+
+describe('CandleFeedService — sessions from the instrument calendar (multi-asset WS2/WS7)', () => {
+  it('a non-FX instrument takes its calendar session; FX keeps the one chart-bars reports', async () => {
+    const { setInstrumentCatalogue, normaliseInstrument } =
+      await import('@core/instruments/instrument-math');
+    const { InstrumentsService } = await import('@core/instruments/instruments.service');
+    setInstrumentCatalogue([
+      normaliseInstrument({
+        symbol: 'ESZ6',
+        assetClass: 'Future',
+        tickSize: 0.25,
+        priceDecimals: 2,
+        tradingCalendarCode: 'cme-globex',
+      })!,
+      normaliseInstrument({
+        symbol: 'EURUSD',
+        assetClass: 'Fx',
+        tickSize: 0.00001,
+        priceDecimals: 5,
+        tradingCalendarCode: 'fx-24x5',
+      })!,
+    ]);
+    const calendar = vi.fn(async (code: string) =>
+      code === 'cme-globex'
+        ? {
+            code,
+            timeZone: 'America/Chicago',
+            is24x7: false,
+            holidays: [],
+            sessions: [0, 1, 2, 3, 4].map((day) => ({
+              day,
+              open: '17:00',
+              close: '16:00',
+              kind: 'Regular' as const,
+            })),
+          }
+        : null,
+    );
+    const chartBars = vi.fn(() =>
+      of({ session: '1700-1700:23456', timeZone: 'America/New_York', bars: [], forming: null }),
+    );
+    const injector = Injector.create({
+      providers: [
+        { provide: ScriptingService, useValue: { chartBars } },
+        { provide: MarketDataService, useValue: { listCandles: vi.fn() } },
+        { provide: InstrumentsService, useValue: { calendar } },
+        { provide: CandleFeedService, useClass: CandleFeedService },
+      ],
+    });
+    const feed = runInInjectionContext(injector, () => injector.get(CandleFeedService));
+    await feed.learnSession('EURUSD');
+    expect(feed.sessionOf('EURUSD')).toEqual({
+      session: '1700-1700:23456',
+      timeZone: 'America/New_York',
+    });
+    await feed.learnSession('ESZ6');
+    await Promise.resolve();
+    expect(feed.sessionOf('ESZ6')).toEqual({
+      session: '1700-1600:23456',
+      timeZone: 'America/Chicago',
+    });
+    expect(calendar).toHaveBeenCalledTimes(1);
+    setInstrumentCatalogue([]);
+  });
+});
