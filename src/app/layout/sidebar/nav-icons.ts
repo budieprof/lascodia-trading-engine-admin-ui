@@ -35,6 +35,21 @@ export const navIcon = {
       ['path', { d: 'M20 17H4', key: 'h6l3hr' }],
     ],
   },
+  BadgeCheck: {
+    name: 'badge-check',
+    size: 24,
+    node: [
+      [
+        'path',
+        {
+          d: 'M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z',
+          key: '3c2336',
+        },
+      ],
+      ['path', { d: 'm16 9-5.5 5.5L8 12', key: 'xofnsj' }],
+    ],
+    aliases: ['verified'],
+  },
   Ban: {
     name: 'ban',
     size: 24,
@@ -245,6 +260,24 @@ export const navIcon = {
       ['rect', { x: '7', y: '8', width: '4', height: '9', rx: '1', key: 'sr5ea' }],
     ],
   },
+  ChartNoAxesCombined: {
+    name: 'chart-no-axes-combined',
+    size: 24,
+    node: [
+      ['path', { d: 'M12 16v5', key: 'zza2cw' }],
+      ['path', { d: 'M16 14.639V21', key: '1s85h0' }],
+      ['path', { d: 'M20 10.656V21', key: 'q45596' }],
+      [
+        'path',
+        {
+          d: 'm22 3-8.646 8.646a.5.5 0 0 1-.708 0L9.354 8.354a.5.5 0 0 0-.707 0L2 15',
+          key: '1fw8x9',
+        },
+      ],
+      ['path', { d: 'M4 18.463V21', key: '1otddq' }],
+      ['path', { d: 'M8 14.656V21', key: '1t2idw' }],
+    ],
+  },
   ChartPie: {
     name: 'chart-pie',
     size: 24,
@@ -435,6 +468,24 @@ export const navIcon = {
         },
       ],
       ['circle', { cx: '12', cy: '12', r: '3', key: '1v7zrd' }],
+    ],
+  },
+  FileArchive: {
+    name: 'file-archive',
+    size: 24,
+    node: [
+      [
+        'path',
+        {
+          d: 'M13.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v11.5',
+          key: '4pqfef',
+        },
+      ],
+      ['path', { d: 'M14 2v5a1 1 0 0 0 1 1h5', key: 'wfsgrz' }],
+      ['path', { d: 'M8 12v-1', key: '1ej8lb' }],
+      ['path', { d: 'M8 18v-2', key: 'qcmpov' }],
+      ['path', { d: 'M8 7V6', key: '1nbb54' }],
+      ['circle', { cx: '8', cy: '20', r: '2', key: 'ckkr5m' }],
     ],
   },
   FileClock: {
@@ -1539,6 +1590,16 @@ export const navIcon = {
       ['path', { d: 'M22 21v-2a4 4 0 0 0-3-3.87', key: 'kshegd' }],
       ['circle', { cx: '9', cy: '7', r: '4', key: 'nufk8' }],
     ],
+  },
+  UsersRound: {
+    name: 'users-round',
+    size: 24,
+    node: [
+      ['path', { d: 'M18 21a8 8 0 0 0-16 0', key: '3ypg7q' }],
+      ['circle', { cx: '10', cy: '8', r: '5', key: 'o932ke' }],
+      ['path', { d: 'M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3', key: '10s06x' }],
+    ],
+    aliases: ['users-2'],
   },
   VenetianMask: {
     name: 'venetian-mask',

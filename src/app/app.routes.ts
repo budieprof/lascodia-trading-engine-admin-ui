@@ -634,6 +634,13 @@ export const routes: Routes = [
           import('@features/organisation/organisation.routes').then((m) => m.ORGANISATION_ROUTES),
       },
       {
+        // Fund module (enterprise program): performance statements, best-execution evidence, compliance exports.
+        path: 'fund',
+        canActivate: [canAccessPath('fund')],
+        data: { breadcrumb: 'Fund' },
+        loadChildren: () => import('@features/fund/fund.routes').then((m) => m.FUND_ROUTES),
+      },
+      {
         // Getting a new organisation going (multi-tenancy Phase 7, c7-lifecycle).
         path: 'onboarding',
         canActivate: [canAccessPath('onboarding')],

@@ -403,6 +403,14 @@ export function canDecide(
   return { ok: true, why: '' };
 }
 
+/** "1 of 2 approvals" for a four-eyes request needing more than one approver; null for a plain one. */
+export function approvalProgress(r: ApprovalRequest): string | null {
+  const required = r.requiredApprovals ?? 1;
+  if (required <= 1 && !r.approverRoles?.length) return null;
+  const roles = r.approverRoles?.length ? ` · ${r.approverRoles.join(' or ')}` : '';
+  return `${r.approvals?.length ?? 0} of ${required} approval${required === 1 ? '' : 's'}${roles}`;
+}
+
 // ── Access review ─────────────────────────────────────────────────────
 
 /** Ids of every stale grant (the "select all stale" action). */

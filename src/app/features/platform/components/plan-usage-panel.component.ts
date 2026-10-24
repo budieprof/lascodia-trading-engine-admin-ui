@@ -144,6 +144,9 @@ import type { TenantUsage, UsageItem } from '../plans.types';
           <span class="chip" [class.ok]="u.features.personalAccessTokens"
             >Access tokens {{ u.features.personalAccessTokens ? 'included' : 'not included' }}</span
           >
+          <span class="chip" [class.ok]="u.features.fundModule"
+            >Fund module {{ u.features.fundModule ? 'included' : 'not included' }}</span
+          >
         </div>
         <div class="fact">
           <span class="label">LLM budget per month</span>

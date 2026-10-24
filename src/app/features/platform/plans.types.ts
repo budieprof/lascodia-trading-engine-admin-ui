@@ -20,6 +20,8 @@ export interface PlanDto {
   allowsSso: boolean;
   allowsScim: boolean;
   allowsPersonalAccessTokens: boolean;
+  /** Feature (fund-module): best-execution, performance statements, compliance exports. */
+  allowsFundModule?: boolean;
   /** Market-data feeds the plan includes (engine C6), comma-separated; null = every feed. */
   marketDataFeeds?: string | null;
   isDefault: boolean;
@@ -58,6 +60,8 @@ export interface SavePlanBody {
   allowsSso: boolean;
   allowsScim: boolean;
   allowsPersonalAccessTokens: boolean;
+  /** Feature (fund-module). */
+  allowsFundModule?: boolean;
   /** Market-data feeds (engine C6): comma-separated feed ids, `venue:*` / `source:*`; null = every feed. */
   marketDataFeeds: string | null;
   isDefault: boolean;
@@ -92,7 +96,7 @@ export interface TenantUsage {
     viaDefault: boolean;
   } | null;
   items: UsageItem[];
-  features: { sso: boolean; scim: boolean; personalAccessTokens: boolean };
+  features: { sso: boolean; scim: boolean; personalAccessTokens: boolean; fundModule?: boolean };
   llm: {
     /** False until per-organisation LLM metering exists: no spend figure is shown then. */
     available: boolean;

@@ -187,6 +187,15 @@ import {
               <label class="check">
                 <input
                   type="checkbox"
+                  name="fund"
+                  [ngModel]="draft().allowsFundModule === true"
+                  (ngModelChange)="patch({ allowsFundModule: $event })"
+                />
+                Fund module (best execution, performance statements, compliance exports)
+              </label>
+              <label class="check">
+                <input
+                  type="checkbox"
                   name="default"
                   [ngModel]="draft().isDefault"
                   [disabled]="e.wasDefault"

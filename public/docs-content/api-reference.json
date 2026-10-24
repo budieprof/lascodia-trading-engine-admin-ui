@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 902,
+  "endpointCount": 916,
   "groups": [
     {
       "name": "Admin auth",
@@ -5235,6 +5235,310 @@
       ]
     },
     {
+      "name": "Fund",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows",
+          "summary": "The account's recorded deposits, withdrawals, fees and adjustments.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            }
+          ],
+          "response": "ResponseData<List<CashFlowDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows",
+          "summary": "Records a deposit (positive), withdrawal or fee (negative) or adjustment.",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "RecordCashFlowCommand",
+          "response": "ResponseData<CashFlowDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/fund/accounts/{tradingAccountId}/cash-flows/{id}",
+          "summary": "Removes a recorded cash flow.",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/best-execution",
+          "summary": "The best-execution evidence report for a period (≤ 366 days), every account the caller may see or one.",
+          "access": "permission",
+          "permission": "fund.bestex.read",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BestExecutionReportDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/best-execution/export",
+          "summary": "The same report as CSV or PDF.",
+          "access": "permission",
+          "permission": "fund.bestex.read",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports",
+          "summary": "The organisation's register of downloaded compliance exports.",
+          "access": "permission",
+          "permission": "compliance.export",
+          "parameters": [],
+          "response": "ResponseData<List<ComplianceExportRecordDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/download",
+          "summary": "Downloads the compliance export of a period (audit, orders, approvals; `format` json or csv = zip). Headers `X-Content-SHA256` and, when signed, `X-Lascodia-Signature` (v1=HMAC-SHA256) + `X-Lascodia-Signing-Key-Id`.",
+          "access": "permission",
+          "permission": "compliance.export",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "sections",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/verify",
+          "summary": "Was a file with this SHA-256 issued to this organisation? (`shasum -a 256 <file>`)",
+          "access": "permission",
+          "permission": "compliance.export",
+          "parameters": [
+            {
+              "name": "sha256",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<ComplianceVerificationDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/performance",
+          "summary": "The performance statement of one account or one account group (portfolio).",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "accountGroupId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "riskFreeRatePct",
+              "in": "query",
+              "required": false,
+              "type": "double"
+            }
+          ],
+          "response": "ResponseData<PerformanceStatementDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/performance/export",
+          "summary": "The statement as PDF or CSV.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "accountGroupId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "riskFreeRatePct",
+              "in": "query",
+              "required": false,
+              "type": "double"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/scope",
+          "summary": "The accounts and account groups the caller may report on.",
+          "access": "permission",
+          "permission": "fund.reports.read",
+          "parameters": [],
+          "response": "ResponseData<FundScopeDto>"
+        }
+      ]
+    },
+    {
       "name": "Fx fundamentals",
       "endpoints": [
         {
@@ -5428,6 +5732,59 @@
             }
           ],
           "response": "ResponseData<AccountGroupDto>"
+        }
+      ]
+    },
+    {
+      "name": "Iam approval policies",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies",
+          "summary": "Every governable action with the acting organisation's policy (null = none).",
+          "access": "permission",
+          "permission": "iam.approvals.decide",
+          "parameters": [],
+          "response": "ResponseData<List<ApprovalPolicyRowDto>>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies/{kind}",
+          "summary": "Removes the policy for one action (a loosening when it was enabled: reason required).",
+          "access": "permission",
+          "permission": "approvals.policy.manage",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/iam/approval-policies/{kind}",
+          "summary": "Creates or changes the policy for one action. A loosening change needs `reason` and, when the organisation has an enabled `approvals.policy.change` policy, its approvers (HTTP 202 `-202-approval`).",
+          "access": "permission",
+          "permission": "approvals.policy.manage",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "SetApprovalPolicyCommand",
+          "response": "ResponseData<ApprovalPolicyDto>"
         }
       ]
     },

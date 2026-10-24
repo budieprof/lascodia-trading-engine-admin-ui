@@ -170,6 +170,8 @@ export const ROUTE_ACCESS = {
     P.TenantBrandingRead,
     P.TenantDataExport,
     P.TenantClose,
+    P.IamApprovalsDecide,
+    P.ApprovalsPolicyManage,
   ),
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   // The guided connection (enterprise onboarding): GET onboarding/terminal-setup + machine/enrollments/{id}/progress.
@@ -185,6 +187,14 @@ export const ROUTE_ACCESS = {
   'organisation/branding': rule(P.TenantBrandingRead), // GET tenant/branding
   'organisation/data-export': rule(P.TenantDataExport), // GET tenant/exports
   'organisation/close': rule(P.TenantClose), // GET tenant/closure
+  // Four-eyes policies (enterprise program, fund-module): GET iam/approval-policies; changes need approvals.policy.manage.
+  'organisation/approval-policies': rule(P.IamApprovalsDecide, P.ApprovalsPolicyManage),
+
+  // ── Fund module (enterprise program, fund-module; plan feature fundModule) ──
+  fund: rule(P.FundReportsRead, P.FundBestexRead, P.ComplianceExport),
+  'fund/performance': rule(P.FundReportsRead), // GET fund/scope, fund/performance
+  'fund/best-execution': rule(P.FundBestexRead), // GET fund/best-execution
+  'fund/compliance': rule(P.ComplianceExport), // GET fund/compliance-exports
   onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
   // The documentation portal (enterprise onboarding): static guides + the API reference; no engine read.
   docs: rule(),

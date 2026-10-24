@@ -268,6 +268,21 @@ export interface ApprovalRequest {
   status: ApprovalStatus | string;
   decidedBy?: string | null;
   decidedAtUtc?: string | null;
+  /** Four-eyes policy that shaped it (fund-module); null = a plain two-person request. */
+  policyKind?: string | null;
+  /** Distinct approvers needed, none the requester (1 = the two-person rule). */
+  requiredApprovals?: number;
+  /** Roles an approver must hold (empty = anyone holding the action's permission). */
+  approverRoles?: string[];
+  /** Approvals recorded so far. */
+  approvals?: ApprovalDecisionEntry[];
+}
+
+export interface ApprovalDecisionEntry {
+  decidedBy: string;
+  decidedAtUtc: string | null;
+  note: string | null;
+  qualifyingRole: string | null;
 }
 
 // ── Access review (C3.5: GET /iam/access-review, POST /iam/access-review/revoke {grantIds[]}) ──

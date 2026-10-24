@@ -144,6 +144,42 @@
     "deprecated": false
   },
   {
+    "key": "compliance.export",
+    "category": "Fund reporting",
+    "description": "Download the organisation's compliance export for a period — its audit log, order lifecycle and approvals as JSON or CSV with a SHA-256 hash and signature — and check a copy against the register.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "fund.bestex.read",
+    "category": "Fund reporting",
+    "description": "Read best-execution evidence reports (slippage against the arrival mid, spread paid, fill latency, markouts, broker comparison) and download them as CSV or PDF.",
+    "scopeable": true,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "fund.reports.read",
+    "category": "Fund reporting",
+    "description": "Read performance statements (time-weighted return, drawdown, Sharpe/Sortino, monthly returns) and download them as CSV or PDF — granted on an account or account group, for those accounts only (the Investor role).",
+    "scopeable": true,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "approvals.policy.manage",
+    "category": "Identity and access",
+    "description": "Set the organisation's four-eyes policies: which actions need how many approvers, with which roles, above which amount. Loosening a policy needs a reason and, when one is set, the approvers of the policy-change policy. Changes need a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "iam.access_review",
     "category": "Identity and access",
     "description": "Run access reviews and revoke grants that are no longer used; receives the monthly access-review notice.",
