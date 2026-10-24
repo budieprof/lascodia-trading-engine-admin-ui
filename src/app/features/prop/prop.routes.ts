@@ -27,42 +27,49 @@ export const PROP_ROUTES: Routes = [
     path: 'console',
     canActivate: [canAccessPath('prop/console')],
     data: { breadcrumb: 'Firm console' },
-    loadComponent: () => import('./pages/prop-console-page.component').then((m) => m.PropConsolePageComponent),
+    loadComponent: () =>
+      import('./pages/prop-console-page.component').then((m) => m.PropConsolePageComponent),
   },
   {
     path: 'programs',
     canActivate: [canAccessPath('prop/programs')],
     data: { breadcrumb: 'Programs' },
-    loadComponent: () => import('./pages/prop-programs-page.component').then((m) => m.PropProgramsPageComponent),
+    loadComponent: () =>
+      import('./pages/prop-programs-page.component').then((m) => m.PropProgramsPageComponent),
   },
   {
     path: 'traders',
     canActivate: [canAccessPath('prop/traders')],
     data: { breadcrumb: 'Traders' },
-    loadComponent: () => import('./pages/prop-traders-page.component').then((m) => m.PropTradersPageComponent),
+    loadComponent: () =>
+      import('./pages/prop-traders-page.component').then((m) => m.PropTradersPageComponent),
   },
   {
     path: 'enrollments',
     canActivate: [canAccessPath('prop/enrollments')],
     data: { breadcrumb: 'Enrolments' },
-    loadComponent: () => import('./pages/prop-enrollments-page.component').then((m) => m.PropEnrollmentsPageComponent),
+    loadComponent: () =>
+      import('./pages/prop-enrollments-page.component').then((m) => m.PropEnrollmentsPageComponent),
   },
   {
     path: 'enrollments/:id',
     canActivate: [canAccessPath('prop/enrollments')],
     data: { breadcrumb: 'Dashboard' },
-    loadComponent: () => import('./pages/prop-dashboard-page.component').then((m) => m.PropDashboardPageComponent),
+    loadComponent: () =>
+      import('./pages/prop-dashboard-page.component').then((m) => m.PropDashboardPageComponent),
   },
   {
     path: 'payouts',
     canActivate: [canAccessPath('prop/payouts')],
     data: { breadcrumb: 'Payouts' },
-    loadComponent: () => import('./pages/prop-payouts-page.component').then((m) => m.PropPayoutsPageComponent),
+    loadComponent: () =>
+      import('./pages/prop-payouts-page.component').then((m) => m.PropPayoutsPageComponent),
   },
   {
     path: 'me',
     canActivate: [canAccessPath('prop/me')],
     data: { breadcrumb: 'My challenge' },
-    loadComponent: () => import('./pages/prop-me-page.component').then((m) => m.PropMePageComponent),
+    loadComponent: () =>
+      import('./pages/prop-me-page.component').then((m) => m.PropMePageComponent),
   },
 ];

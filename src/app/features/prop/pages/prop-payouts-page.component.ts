@@ -14,7 +14,12 @@ import { failureMessage } from '@features/organisation/organisation.logic';
 import { PropGateComponent, PROP_DIALOG_STYLES } from '../components/prop-gate.component';
 import { PropApiService } from '../prop-api.service';
 import { dayStartUtc, money, optionalNumber } from '../prop.logic';
-import type { PropEnrollment, PropPayout, PropPayoutDeduction, PropPayoutStatus } from '../prop.types';
+import type {
+  PropEnrollment,
+  PropPayout,
+  PropPayoutDeduction,
+  PropPayoutStatus,
+} from '../prop.types';
 
 interface PrepareDraft {
   enrollmentId: number | null;
@@ -32,23 +37,52 @@ interface PrepareDraft {
   selector: 'app-prop-payouts-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, LscCanDirective, ModalA11yDirective, MfaHintComponent, PageHeaderComponent, PropGateComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    LscCanDirective,
+    ModalA11yDirective,
+    MfaHintComponent,
+    PageHeaderComponent,
+    PropGateComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [PROP_DIALOG_STYLES],
   template: `
     <div class="page">
-      <app-page-header title="Payouts" subtitle="Profit-split statements of funded traders. The platform moves no money.">
+      <app-page-header
+        title="Payouts"
+        subtitle="Profit-split statements of funded traders. The platform moves no money."
+      >
         <app-mfa-hint [permission]="P.PropPayoutsApprove" />
-        <button type="button" class="btn btn-secondary" (click)="list.reload()" [disabled]="list.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="list.reload()"
+          [disabled]="list.loading()"
+        >
           {{ list.loading() ? 'Loading…' : 'Refresh' }}
         </button>
-        <button *lscCan="P.PropManage" type="button" class="btn btn-primary" (click)="openPrepare()">Prepare a statement</button>
+        <button
+          *lscCan="P.PropManage"
+          type="button"
+          class="btn btn-primary"
+          (click)="openPrepare()"
+        >
+          Prepare a statement
+        </button>
       </app-page-header>
       <app-prop-gate (ready)="list.reload()">
         <section class="card">
           <header class="card-head">
-            <label class="row small">Status
-              <select class="select" name="status" [ngModel]="status()" (ngModelChange)="status.set($event); list.reload()">
+            <label class="row small"
+              >Status
+              <select
+                class="select"
+                name="status"
+                [ngModel]="status()"
+                (ngModelChange)="status.set($event); list.reload()"
+              >
                 <option [ngValue]="null">Any</option>
                 <option [ngValue]="'Draft'">Waiting for approval</option>
                 <option [ngValue]="'Approved'">Approved</option>
@@ -56,9 +90,15 @@ interface PrepareDraft {
               </select>
             </label>
             <span class="spacer"></span>
-            <label class="row small">From <input class="input" type="date" name="ef" [(ngModel)]="exportFrom" /></label>
-            <label class="row small">To <input class="input" type="date" name="et" [(ngModel)]="exportTo" /></label>
-            <button type="button" class="btn btn-sm btn-secondary" (click)="exportCsv()">Export CSV</button>
+            <label class="row small"
+              >From <input class="input" type="date" name="ef" [(ngModel)]="exportFrom"
+            /></label>
+            <label class="row small"
+              >To <input class="input" type="date" name="et" [(ngModel)]="exportTo"
+            /></label>
+            <button type="button" class="btn btn-sm btn-secondary" (click)="exportCsv()">
+              Export CSV
+            </button>
           </header>
           @if (list.error(); as err) {
             <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
@@ -66,34 +106,76 @@ interface PrepareDraft {
           <div class="table-wrap">
             <table class="grid">
               <thead>
-                <tr><th>Trader / account</th><th>Period (UTC)</th><th class="num">Gross</th><th class="num">Split</th><th class="num">Deductions</th><th class="num">Net to trader</th><th>Status</th><th></th></tr>
+                <tr>
+                  <th>Trader / account</th>
+                  <th>Period (UTC)</th>
+                  <th class="num">Gross</th>
+                  <th class="num">Split</th>
+                  <th class="num">Deductions</th>
+                  <th class="num">Net to trader</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
               </thead>
               <tbody>
                 @for (p of list.value(); track p.id) {
                   <tr>
-                    <td><a [routerLink]="['/prop/enrollments', p.enrollmentId]">{{ p.traderName }}</a><span class="sub">{{ p.accountLabel }}</span></td>
+                    <td>
+                      <a [routerLink]="['/prop/enrollments', p.enrollmentId]">{{ p.traderName }}</a
+                      ><span class="sub">{{ p.accountLabel }}</span>
+                    </td>
                     <td class="small">{{ when(p.periodStartUtc) }} – {{ when(p.periodEndUtc) }}</td>
-                    <td class="num" [class.pos]="p.grossProfit > 0" [class.neg]="p.grossProfit < 0">{{ money(p.grossProfit, p.currency) }}</td>
+                    <td class="num" [class.pos]="p.grossProfit > 0" [class.neg]="p.grossProfit < 0">
+                      {{ money(p.grossProfit, p.currency) }}
+                    </td>
                     <td class="num">{{ p.traderSharePct }}%</td>
                     <td class="num">{{ money(p.deductionsTotal) }}</td>
-                    <td class="num"><strong>{{ money(p.netPayout, p.currency) }}</strong></td>
+                    <td class="num">
+                      <strong>{{ money(p.netPayout, p.currency) }}</strong>
+                    </td>
                     <td>
-                      <span class="chip" [class.ok]="p.status === 'Approved'" [class.bad]="p.status === 'Rejected'" [class.info]="p.status === 'Draft'">{{ p.status }}</span>
-                      <span class="sub">by {{ p.preparedBy }}{{ p.decidedBy ? ' · ' + p.decidedBy : '' }}</span>
-                      @if (p.consistencyMet === false) { <span class="sub">consistency rule not met</span> }
+                      <span
+                        class="chip"
+                        [class.ok]="p.status === 'Approved'"
+                        [class.bad]="p.status === 'Rejected'"
+                        [class.info]="p.status === 'Draft'"
+                        >{{ p.status }}</span
+                      >
+                      <span class="sub"
+                        >by {{ p.preparedBy }}{{ p.decidedBy ? ' · ' + p.decidedBy : '' }}</span
+                      >
+                      @if (p.consistencyMet === false) {
+                        <span class="sub">consistency rule not met</span>
+                      }
                     </td>
                     <td class="actions">
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="pdf(p)">PDF</button>
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="pdf(p)">
+                        PDF
+                      </button>
                       @if (p.status === 'Draft') {
                         <ng-container *lscCan="P.PropPayoutsApprove">
-                          <button type="button" class="btn btn-sm btn-primary" (click)="deciding.set({ payout: p, approve: true, note: '' })">Approve</button>
-                          <button type="button" class="btn btn-sm btn-danger" (click)="deciding.set({ payout: p, approve: false, note: '' })">Reject</button>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            (click)="deciding.set({ payout: p, approve: true, note: '' })"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-danger"
+                            (click)="deciding.set({ payout: p, approve: false, note: '' })"
+                          >
+                            Reject
+                          </button>
                         </ng-container>
                       }
                     </td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="8" class="muted">No statement.</td></tr>
+                  <tr>
+                    <td colspan="8" class="muted">No statement.</td>
+                  </tr>
                 }
               </tbody>
             </table>
@@ -103,47 +185,131 @@ interface PrepareDraft {
 
       @if (draft(); as d) {
         <div class="overlay" role="presentation" (click)="closePrepare()">
-          <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="prop-payout-title" tabindex="-1"
-               appModalA11y (dismiss)="closePrepare()" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+          <div
+            class="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prop-payout-title"
+            tabindex="-1"
+            appModalA11y
+            (dismiss)="closePrepare()"
+            (click)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
+          >
             <form class="card-body" (ngSubmit)="prepare(false)">
               <h3 id="prop-payout-title">Prepare a payout statement</h3>
               <div class="form-grid">
-                <label class="field"><span class="label">Funded enrolment</span>
-                  <select class="select" name="enr" [(ngModel)]="d.enrollmentId" (ngModelChange)="preview.set(null)">
+                <label class="field"
+                  ><span class="label">Funded enrolment</span>
+                  <select
+                    class="select"
+                    name="enr"
+                    [(ngModel)]="d.enrollmentId"
+                    (ngModelChange)="preview.set(null)"
+                  >
                     <option [ngValue]="null">Choose…</option>
-                    @for (e of funded(); track e.id) { <option [ngValue]="e.id">{{ e.traderName }} — {{ e.accountLabel }}</option> }
+                    @for (e of funded(); track e.id) {
+                      <option [ngValue]="e.id">{{ e.traderName }} — {{ e.accountLabel }}</option>
+                    }
                   </select>
                 </label>
-                <label class="field"><span class="label">From (UTC day, inclusive)</span>
-                  <input class="input" type="date" name="from" [(ngModel)]="d.from" (ngModelChange)="preview.set(null)" />
+                <label class="field"
+                  ><span class="label">From (UTC day, inclusive)</span>
+                  <input
+                    class="input"
+                    type="date"
+                    name="from"
+                    [(ngModel)]="d.from"
+                    (ngModelChange)="preview.set(null)"
+                  />
                 </label>
-                <label class="field"><span class="label">To (UTC day, exclusive)</span>
-                  <input class="input" type="date" name="to" [(ngModel)]="d.to" (ngModelChange)="preview.set(null)" />
+                <label class="field"
+                  ><span class="label">To (UTC day, exclusive)</span>
+                  <input
+                    class="input"
+                    type="date"
+                    name="to"
+                    [(ngModel)]="d.to"
+                    (ngModelChange)="preview.set(null)"
+                  />
                 </label>
               </div>
               <span class="label">Deductions</span>
               @for (x of d.deductions; track $index; let i = $index) {
                 <div class="row">
-                  <input class="input" style="flex: 2" [name]="'dl-' + i" placeholder="What for" [(ngModel)]="x.label" (ngModelChange)="preview.set(null)" />
-                  <input class="input" style="flex: 1" [name]="'da-' + i" inputmode="decimal" placeholder="Amount" [(ngModel)]="x.amount" (ngModelChange)="preview.set(null)" />
-                  <button type="button" class="btn btn-sm btn-secondary" (click)="d.deductions.splice(i, 1); preview.set(null)">Remove</button>
+                  <input
+                    class="input"
+                    style="flex: 2"
+                    [name]="'dl-' + i"
+                    placeholder="What for"
+                    [(ngModel)]="x.label"
+                    (ngModelChange)="preview.set(null)"
+                  />
+                  <input
+                    class="input"
+                    style="flex: 1"
+                    [name]="'da-' + i"
+                    inputmode="decimal"
+                    placeholder="Amount"
+                    [(ngModel)]="x.amount"
+                    (ngModelChange)="preview.set(null)"
+                  />
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    (click)="d.deductions.splice(i, 1); preview.set(null)"
+                  >
+                    Remove
+                  </button>
                 </div>
               }
-              <div class="row"><button type="button" class="btn btn-sm btn-secondary" (click)="d.deductions.push({ label: '', amount: '' })">Add a deduction</button></div>
-              <label class="field"><span class="label">Note</span><input class="input" name="note" [(ngModel)]="d.note" maxlength="1000" /></label>
+              <div class="row">
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary"
+                  (click)="d.deductions.push({ label: '', amount: '' })"
+                >
+                  Add a deduction
+                </button>
+              </div>
+              <label class="field"
+                ><span class="label">Note</span
+                ><input class="input" name="note" [(ngModel)]="d.note" maxlength="1000"
+              /></label>
               @if (preview(); as p) {
                 <p class="note">
-                  {{ p.positionsClosed }} position(s) closed in the period · gross {{ money(p.grossProfit, p.currency) }} ·
-                  {{ p.traderSharePct }}% to the trader = {{ money(p.traderShare) }} · deductions {{ money(p.deductionsTotal) }} ·
+                  {{ p.positionsClosed }} position(s) closed in the period · gross
+                  {{ money(p.grossProfit, p.currency) }} · {{ p.traderSharePct }}% to the trader =
+                  {{ money(p.traderShare) }} · deductions {{ money(p.deductionsTotal) }} ·
                   <strong>net {{ money(p.netPayout, p.currency) }}</strong>
-                  @if (p.consistencyMet === false) { · the consistency rule is not met over the period }
+                  @if (p.consistencyMet === false) {
+                    · the consistency rule is not met over the period
+                  }
                 </p>
               }
-              @if (error(); as err) { <p class="errors" role="alert">{{ err }}</p> }
+              @if (error(); as err) {
+                <p class="errors" role="alert">{{ err }}</p>
+              }
               <div class="actions-row">
-                <button type="button" class="btn btn-secondary" (click)="closePrepare()" data-autofocus>Cancel</button>
-                <button type="button" class="btn btn-secondary" [disabled]="busy()" (click)="prepare(true)">Preview</button>
-                <button type="submit" class="btn btn-primary" [disabled]="busy() || !preview()">{{ busy() ? 'Working…' : 'Prepare' }}</button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="closePrepare()"
+                  data-autofocus
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  [disabled]="busy()"
+                  (click)="prepare(true)"
+                >
+                  Preview
+                </button>
+                <button type="submit" class="btn btn-primary" [disabled]="busy() || !preview()">
+                  {{ busy() ? 'Working…' : 'Prepare' }}
+                </button>
               </div>
             </form>
           </div>
@@ -152,22 +318,53 @@ interface PrepareDraft {
 
       @if (deciding(); as x) {
         <div class="overlay" role="presentation" (click)="deciding.set(null)">
-          <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="prop-decide-title" tabindex="-1"
-               appModalA11y (dismiss)="deciding.set(null)" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+          <div
+            class="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="prop-decide-title"
+            tabindex="-1"
+            appModalA11y
+            (dismiss)="deciding.set(null)"
+            (click)="$event.stopPropagation()"
+            (keydown)="$event.stopPropagation()"
+          >
             <form class="card-body" (ngSubmit)="decide()">
-              <h3 id="prop-decide-title">{{ x.approve ? 'Approve' : 'Reject' }} the statement of {{ x.payout.traderName }}?</h3>
+              <h3 id="prop-decide-title">
+                {{ x.approve ? 'Approve' : 'Reject' }} the statement of {{ x.payout.traderName }}?
+              </h3>
               <p>
-                Net to the trader {{ money(x.payout.netPayout, x.payout.currency) }} for {{ when(x.payout.periodStartUtc) }} –
-                {{ when(x.payout.periodEndUtc) }}. Approving records the decision; paying the trader is done outside the platform.
+                Net to the trader {{ money(x.payout.netPayout, x.payout.currency) }} for
+                {{ when(x.payout.periodStartUtc) }} – {{ when(x.payout.periodEndUtc) }}. Approving
+                records the decision; paying the trader is done outside the platform.
               </p>
-              <label class="field"><span class="label">{{ x.approve ? 'Note (optional)' : 'Why it is rejected' }}</span>
+              <label class="field"
+                ><span class="label">{{
+                  x.approve ? 'Note (optional)' : 'Why it is rejected'
+                }}</span>
                 <input class="input" name="note" [(ngModel)]="x.note" maxlength="1000" />
               </label>
-              @if (error(); as err) { <p class="errors" role="alert">{{ err }}</p> }
+              @if (error(); as err) {
+                <p class="errors" role="alert">{{ err }}</p>
+              }
               <div class="actions-row">
-                <button type="button" class="btn btn-secondary" (click)="deciding.set(null)" data-autofocus>Cancel</button>
-                <button type="submit" class="btn" [class.btn-primary]="x.approve" [class.btn-danger]="!x.approve"
-                        [disabled]="busy() || (!x.approve && !x.note.trim())">{{ x.approve ? 'Approve' : 'Reject' }}</button>
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="deciding.set(null)"
+                  data-autofocus
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  class="btn"
+                  [class.btn-primary]="x.approve"
+                  [class.btn-danger]="!x.approve"
+                  [disabled]="busy() || (!x.approve && !x.note.trim())"
+                >
+                  {{ x.approve ? 'Approve' : 'Reject' }}
+                </button>
               </div>
             </form>
           </div>
@@ -185,9 +382,19 @@ export class PropPayoutsPageComponent {
   protected readonly money = money;
 
   readonly status = signal<PropPayoutStatus | null>(null);
-  readonly list = iamResource<PropPayout[]>(() => this.api.payouts(this.status()), [], 'Could not load the statements.');
-  readonly enrollments = iamResource<PropEnrollment[]>(() => this.api.enrollments({}), [], 'Could not load the enrolments.');
-  readonly funded = computed(() => this.enrollments.value().filter((e) => e.phaseKind === 'Funded'));
+  readonly list = iamResource<PropPayout[]>(
+    () => this.api.payouts(this.status()),
+    [],
+    'Could not load the statements.',
+  );
+  readonly enrollments = iamResource<PropEnrollment[]>(
+    () => this.api.enrollments({}),
+    [],
+    'Could not load the enrolments.',
+  );
+  readonly funded = computed(() =>
+    this.enrollments.value().filter((e) => e.phaseKind === 'Funded'),
+  );
 
   readonly draft = signal<PrepareDraft | null>(null);
   readonly preview = signal<PropPayout | null>(null);
@@ -229,7 +436,14 @@ export class PropPayoutsPageComponent {
     this.busy.set(true);
     this.error.set(null);
     this.api
-      .preparePayout({ enrollmentId: d.enrollmentId, periodStartUtc: from, periodEndUtc: to, deductions, note: d.note.trim() || null, preview: previewOnly })
+      .preparePayout({
+        enrollmentId: d.enrollmentId,
+        periodStartUtc: from,
+        periodEndUtc: to,
+        deductions,
+        note: d.note.trim() || null,
+        preview: previewOnly,
+      })
       .subscribe({
         next: (p) => {
           this.busy.set(false);
@@ -254,7 +468,10 @@ export class PropPayoutsPageComponent {
     this.busy.set(true);
     this.error.set(null);
     const note = x.note.trim() || null;
-    (x.approve ? this.api.approvePayout(x.payout.id, note) : this.api.rejectPayout(x.payout.id, note ?? '')).subscribe({
+    (x.approve
+      ? this.api.approvePayout(x.payout.id, note)
+      : this.api.rejectPayout(x.payout.id, note ?? '')
+    ).subscribe({
       next: () => {
         this.busy.set(false);
         this.deciding.set(null);
@@ -271,7 +488,10 @@ export class PropPayoutsPageComponent {
   }
 
   async exportCsv(): Promise<void> {
-    const blob = await this.api.exportPayoutsCsv(dayStartUtc(this.exportFrom), dayStartUtc(this.exportTo));
+    const blob = await this.api.exportPayoutsCsv(
+      dayStartUtc(this.exportFrom),
+      dayStartUtc(this.exportTo),
+    );
     if (!blob) {
       this.notify.error('The export could not be downloaded.');
       return;

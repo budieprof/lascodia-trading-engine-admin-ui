@@ -19,33 +19,76 @@ import type { PropProgram } from '../prop.types';
   selector: 'app-prop-programs-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [LscCanDirective, PageHeaderComponent, ConfirmDialogComponent, PropGateComponent, ProgramEditorComponent],
+  imports: [
+    LscCanDirective,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    PropGateComponent,
+    ProgramEditorComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [PROP_DIALOG_STYLES, `ul.rules { margin: 0; padding-left: var(--space-5); font-size: var(--text-xs); }`],
+  styles: [
+    PROP_DIALOG_STYLES,
+    `
+      ul.rules {
+        margin: 0;
+        padding-left: var(--space-5);
+        font-size: var(--text-xs);
+      }
+    `,
+  ],
   template: `
     <div class="page">
-      <app-page-header title="Challenge programs" subtitle="Phases and rules your traders are evaluated against.">
-        <button type="button" class="btn btn-secondary" (click)="programs.reload()" [disabled]="programs.loading()">
+      <app-page-header
+        title="Challenge programs"
+        subtitle="Phases and rules your traders are evaluated against."
+      >
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="programs.reload()"
+          [disabled]="programs.loading()"
+        >
           {{ programs.loading() ? 'Loading…' : 'Refresh' }}
         </button>
-        <button *lscCan="P.PropManage" type="button" class="btn btn-primary" (click)="editor()?.open(null)">New program</button>
+        <button
+          *lscCan="P.PropManage"
+          type="button"
+          class="btn btn-primary"
+          (click)="editor()?.open(null)"
+        >
+          New program
+        </button>
       </app-page-header>
       <app-prop-gate (ready)="programs.reload()">
         @if (programs.error(); as err) {
-          <section class="card"><p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p></section>
+          <section class="card">
+            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+          </section>
         }
         @for (p of programs.value(); track p.id) {
           <section class="card">
             <header class="card-head">
               <h3>{{ p.name }}</h3>
               <span class="chip" [class.ok]="p.status === 'Active'">{{ p.status }}</span>
-              <span class="muted small">version {{ p.currentVersion }} · {{ p.rules.profitSplit.traderSharePct }}% to the trader · day resets {{ p.rules.tradingDay.resetTime }} {{ p.rules.tradingDay.timeZone }}</span>
+              <span class="muted small"
+                >version {{ p.currentVersion }} · {{ p.rules.profitSplit.traderSharePct }}% to the
+                trader · day resets {{ p.rules.tradingDay.resetTime }}
+                {{ p.rules.tradingDay.timeZone }}</span
+              >
               <span class="spacer"></span>
-              <span class="muted small">{{ p.runningEnrollments }} running · {{ p.passedEnrollments }} passed · {{ p.failedEnrollments }} failed</span>
+              <span class="muted small"
+                >{{ p.runningEnrollments }} running · {{ p.passedEnrollments }} passed ·
+                {{ p.failedEnrollments }} failed</span
+              >
               <ng-container *lscCan="P.PropManage">
-                <button type="button" class="btn btn-sm btn-secondary" (click)="editor()?.open(p)">Edit</button>
+                <button type="button" class="btn btn-sm btn-secondary" (click)="editor()?.open(p)">
+                  Edit
+                </button>
                 @if (p.status === 'Active') {
-                  <button type="button" class="btn btn-sm btn-danger" (click)="archiving.set(p)">Archive</button>
+                  <button type="button" class="btn btn-sm btn-danger" (click)="archiving.set(p)">
+                    Archive
+                  </button>
                 }
               </ng-container>
             </header>
@@ -66,11 +109,17 @@ import type { PropProgram } from '../prop.types';
                 }
               </div>
               <p class="small muted">
-                {{ p.rules.haltOnBreach ? 'A breach halts the account (kill switch, no new orders).' : 'A breach is recorded; the account is not halted.' }}
+                {{
+                  p.rules.haltOnBreach
+                    ? 'A breach halts the account (kill switch, no new orders).'
+                    : 'A breach is recorded; the account is not halted.'
+                }}
                 {{ p.rules.haltOnPass ? 'A pass halts the account too.' : '' }}
                 Versions:
                 @for (v of p.versions; track v.id) {
-                  <span title="{{ v.changeNote ?? '' }}">v{{ v.version }} ({{ when(v.createdAtUtc) }}){{ $last ? '' : ', ' }}</span>
+                  <span title="{{ v.changeNote ?? '' }}"
+                    >v{{ v.version }} ({{ when(v.createdAtUtc) }}){{ $last ? '' : ', ' }}</span
+                  >
                 }
               </p>
             </div>
@@ -103,7 +152,11 @@ export class PropProgramsPageComponent {
   protected readonly when = when;
   protected readonly summary = phaseSummary;
   readonly editor = viewChild(ProgramEditorComponent);
-  readonly programs = iamResource<PropProgram[]>(() => this.api.programs(true), [], 'Could not load the programs.');
+  readonly programs = iamResource<PropProgram[]>(
+    () => this.api.programs(true),
+    [],
+    'Could not load the programs.',
+  );
   readonly archiving = signal<PropProgram | null>(null);
   readonly busy = signal(false);
 

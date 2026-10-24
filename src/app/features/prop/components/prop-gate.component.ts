@@ -60,8 +60,8 @@ export const PROP_DIALOG_STYLES = `
           </header>
           <div class="card-body">
             <p>
-              Challenge programs, rule evaluation with automatic account halts, trader dashboards and
-              payout statements are a separate module.
+              Challenge programs, rule evaluation with automatic account halts, trader dashboards
+              and payout statements are a separate module.
             </p>
             <p class="note">
               {{

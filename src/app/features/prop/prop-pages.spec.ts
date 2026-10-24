@@ -15,17 +15,55 @@ import type { PropBreach, PropEnrollment, PropPayout } from './prop.types';
 ensureTestBed();
 
 const breach = (id: number): PropBreach => ({
-  id, enrollmentId: 7, tradingAccountId: 101, accountLabel: 'Challenge A', traderId: 1, traderName: 'Ada',
-  rule: 'MaxDailyLoss', severity: 'Breach', value: 600, limit: 500, occurredAtUtc: '2026-10-05T05:00:00Z', detail: 'x',
+  id,
+  enrollmentId: 7,
+  tradingAccountId: 101,
+  accountLabel: 'Challenge A',
+  traderId: 1,
+  traderName: 'Ada',
+  rule: 'MaxDailyLoss',
+  severity: 'Breach',
+  value: 600,
+  limit: 500,
+  occurredAtUtc: '2026-10-05T05:00:00Z',
+  detail: 'x',
 });
 
 const enrollment = (over: Partial<PropEnrollment> = {}): PropEnrollment => ({
-  id: 7, tradingAccountId: 101, accountLabel: 'Challenge A', traderId: 1, traderName: 'Ada', programId: 3,
-  programName: '10k', programVersion: 1, phaseIndex: 2, phaseName: 'Funded', phaseKind: 'Funded', state: 'Funded',
-  startedAtUtc: '2026-09-01T00:00:00Z', endedAtUtc: null, initialBalance: 10000, lastBalance: 10500, lastEquity: 10500,
-  profitPct: 5, tradingDays: 4, failedRule: null, failedValue: null, failedLimit: null, failedAtUtc: null,
-  failedDetail: null, passedAtUtc: null, haltRequired: false, haltAppliedAtUtc: null, haltLastError: null,
-  lastEvaluatedAtUtc: null, lastDataAtUtc: null, previousEnrollmentId: null, canAdvance: false, note: null, ...over,
+  id: 7,
+  tradingAccountId: 101,
+  accountLabel: 'Challenge A',
+  traderId: 1,
+  traderName: 'Ada',
+  programId: 3,
+  programName: '10k',
+  programVersion: 1,
+  phaseIndex: 2,
+  phaseName: 'Funded',
+  phaseKind: 'Funded',
+  state: 'Funded',
+  startedAtUtc: '2026-09-01T00:00:00Z',
+  endedAtUtc: null,
+  initialBalance: 10000,
+  lastBalance: 10500,
+  lastEquity: 10500,
+  profitPct: 5,
+  tradingDays: 4,
+  failedRule: null,
+  failedValue: null,
+  failedLimit: null,
+  failedAtUtc: null,
+  failedDetail: null,
+  passedAtUtc: null,
+  haltRequired: false,
+  haltAppliedAtUtc: null,
+  haltLastError: null,
+  lastEvaluatedAtUtc: null,
+  lastDataAtUtc: null,
+  previousEnrollmentId: null,
+  canAdvance: false,
+  note: null,
+  ...over,
 });
 
 let api: Record<string, ReturnType<typeof vi.fn>>;
@@ -33,7 +71,13 @@ let notify: { error: ReturnType<typeof vi.fn>; success: ReturnType<typeof vi.fn>
 
 function setup(available = true) {
   api = {
-    status: vi.fn(() => of({ available, plan: available ? null : 'Trial', message: available ? null : 'Your plan (Trial) does not include the prop-firm module.' })),
+    status: vi.fn(() =>
+      of({
+        available,
+        plan: available ? null : 'Trial',
+        message: available ? null : 'Your plan (Trial) does not include the prop-firm module.',
+      }),
+    ),
     breaches: vi.fn(() => of([breach(2), breach(1)])),
     leaderboard: vi.fn(() => of([])),
     programs: vi.fn(() => of([])),
@@ -44,7 +88,8 @@ function setup(available = true) {
     withdraw: vi.fn(() => of(enrollment({ state: 'Withdrawn' }))),
     payouts: vi.fn(() => of([])),
     preparePayout: vi.fn((body: { preview: boolean }) =>
-      of({ id: body.preview ? 0 : 9, netPayout: 400, grossProfit: 500 } as PropPayout)),
+      of({ id: body.preview ? 0 : 9, netPayout: 400, grossProfit: 500 } as PropPayout),
+    ),
     approvePayout: vi.fn(() => of({} as PropPayout)),
     rejectPayout: vi.fn(() => of({} as PropPayout)),
   };
@@ -53,7 +98,15 @@ function setup(available = true) {
     providers: [
       { provide: PropApiService, useValue: api },
       { provide: NotificationService, useValue: notify },
-      { provide: ActivatedRoute, useValue: { snapshot: { queryParamMap: convertToParamMap({}), paramMap: convertToParamMap({ id: '7' }) } } },
+      {
+        provide: ActivatedRoute,
+        useValue: {
+          snapshot: {
+            queryParamMap: convertToParamMap({}),
+            paramMap: convertToParamMap({ id: '7' }),
+          },
+        },
+      },
     ],
   });
 }
@@ -116,14 +169,35 @@ describe('PropEnrollmentsPageComponent', () => {
     expect(api['enrol']).not.toHaveBeenCalled();
     expect(page.error()).toContain('Choose');
 
-    page.dialog.set({ kind: 'enrol', accountId: 101, traderId: 1, programId: 3, phaseIndex: 0, initial: '-5', note: '' });
+    page.dialog.set({
+      kind: 'enrol',
+      accountId: 101,
+      traderId: 1,
+      programId: 3,
+      phaseIndex: 0,
+      initial: '-5',
+      note: '',
+    });
     page.confirm();
     expect(page.error()).toContain('positive');
 
-    page.dialog.set({ kind: 'enrol', accountId: 101, traderId: 1, programId: 3, phaseIndex: 0, initial: '', note: ' ' });
+    page.dialog.set({
+      kind: 'enrol',
+      accountId: 101,
+      traderId: 1,
+      programId: 3,
+      phaseIndex: 0,
+      initial: '',
+      note: ' ',
+    });
     page.confirm();
     expect(api['enrol']).toHaveBeenCalledWith({
-      tradingAccountId: 101, traderId: 1, programId: 3, phaseIndex: 0, initialBalance: null, note: null,
+      tradingAccountId: 101,
+      traderId: 1,
+      programId: 3,
+      phaseIndex: 0,
+      initialBalance: null,
+      note: null,
     });
     expect(page.dialog()).toBeNull();
   });
@@ -135,11 +209,21 @@ describe('PropPayoutsPageComponent', () => {
   it('previews before preparing and sends UTC day bounds and the deductions', () => {
     const page = TestBed.runInInjectionContext(() => new PropPayoutsPageComponent());
     page.openPrepare();
-    page.draft.set({ enrollmentId: 7, from: '2026-09-01', to: '2026-10-01', deductions: [{ label: 'Fee', amount: '50' }], note: '' });
+    page.draft.set({
+      enrollmentId: 7,
+      from: '2026-09-01',
+      to: '2026-10-01',
+      deductions: [{ label: 'Fee', amount: '50' }],
+      note: '',
+    });
     page.prepare(true);
     expect(api['preparePayout']).toHaveBeenCalledWith({
-      enrollmentId: 7, periodStartUtc: '2026-09-01T00:00:00.000Z', periodEndUtc: '2026-10-01T00:00:00.000Z',
-      deductions: [{ label: 'Fee', amount: 50 }], note: null, preview: true,
+      enrollmentId: 7,
+      periodStartUtc: '2026-09-01T00:00:00.000Z',
+      periodEndUtc: '2026-10-01T00:00:00.000Z',
+      deductions: [{ label: 'Fee', amount: 50 }],
+      note: null,
+      preview: true,
     });
     expect(page.preview()?.netPayout).toBe(400);
     expect(page.draft()).not.toBeNull();
@@ -152,7 +236,13 @@ describe('PropPayoutsPageComponent', () => {
   it('refuses a deduction without a label', () => {
     const page = TestBed.runInInjectionContext(() => new PropPayoutsPageComponent());
     page.openPrepare();
-    page.draft.set({ enrollmentId: 7, from: '2026-09-01', to: '2026-10-01', deductions: [{ label: '', amount: '5' }], note: '' });
+    page.draft.set({
+      enrollmentId: 7,
+      from: '2026-09-01',
+      to: '2026-10-01',
+      deductions: [{ label: '', amount: '5' }],
+      note: '',
+    });
     page.prepare(true);
     expect(api['preparePayout']).not.toHaveBeenCalled();
     expect(page.error()).toContain('label');

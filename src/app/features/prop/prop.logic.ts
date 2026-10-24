@@ -87,14 +87,18 @@ export function ruleErrors(rules: PropProgramRules): string[] {
       out.push(`${label}: the time limit must be 1–3650 days.`);
     if (p.minTradingDays !== null && !(p.minTradingDays >= 0 && p.minTradingDays <= 365))
       out.push(`${label}: minimum trading days must be 0–365.`);
-    if (!p.weekendHoldingAllowed && (!TIME.test(p.weekend.startTime) || !TIME.test(p.weekend.endTime)))
+    if (
+      !p.weekendHoldingAllowed &&
+      (!TIME.test(p.weekend.startTime) || !TIME.test(p.weekend.endTime))
+    )
       out.push(`${label}: the weekend window times must be HH:mm.`);
   });
   return out;
 }
 
 function pctCheck(out: string[], label: string, what: string, v: number | null, max: number): void {
-  if (v !== null && !(v > 0 && v <= max)) out.push(`${label}: the ${what} must be above 0 and at most ${max}%.`);
+  if (v !== null && !(v > 0 && v <= max))
+    out.push(`${label}: the ${what} must be above 0 and at most ${max}%.`);
 }
 
 /** An editor number box: '' or null = not set; anything else as a number (NaN when not one). */
@@ -172,25 +176,39 @@ export function phaseSummary(p: PropPhaseRules): string[] {
     );
   if (p.minTradingDays) lines.push(`At least ${p.minTradingDays} trading days`);
   if (p.maxLotsPerPosition !== null)
-    lines.push(`≤ ${p.maxLotsPerPosition} lots per position${p.lotsAction === 'Warn' ? ' (warn)' : ''}`);
+    lines.push(
+      `≤ ${p.maxLotsPerPosition} lots per position${p.lotsAction === 'Warn' ? ' (warn)' : ''}`,
+    );
   if (p.maxTotalOpenLots !== null)
-    lines.push(`≤ ${p.maxTotalOpenLots} lots open in total${p.lotsAction === 'Warn' ? ' (warn)' : ''}`);
+    lines.push(
+      `≤ ${p.maxTotalOpenLots} lots open in total${p.lotsAction === 'Warn' ? ' (warn)' : ''}`,
+    );
   if (!p.newsTradingAllowed)
-    lines.push(`No trading ±${p.newsWindowMinutes} min of high-impact news${p.newsAction === 'Warn' ? ' (warn)' : ''}`);
+    lines.push(
+      `No trading ±${p.newsWindowMinutes} min of high-impact news${p.newsAction === 'Warn' ? ' (warn)' : ''}`,
+    );
   if (!p.weekendHoldingAllowed)
     lines.push(`No weekend holding${p.weekendAction === 'Warn' ? ' (warn)' : ''}`);
-  if (p.consistencyMaxBestDayPct !== null) lines.push(`Best day ≤ ${p.consistencyMaxBestDayPct}% of profit`);
-  if (p.kind !== 'Funded' && p.timeLimitDays !== null) lines.push(`${p.timeLimitDays} day time limit`);
+  if (p.consistencyMaxBestDayPct !== null)
+    lines.push(`Best day ≤ ${p.consistencyMaxBestDayPct}% of profit`);
+  if (p.kind !== 'Funded' && p.timeLimitDays !== null)
+    lines.push(`${p.timeLimitDays} day time limit`);
   return lines;
 }
 
 /** The dashboard's headline figures in words. */
-export function limitTiles(m: PropRuleMetrics): { label: string; value: string; hint: string; tone: 'ok' | 'warn' | 'bad' | '' }[] {
-  const tiles: { label: string; value: string; hint: string; tone: 'ok' | 'warn' | 'bad' | '' }[] = [];
+export function limitTiles(
+  m: PropRuleMetrics,
+): { label: string; value: string; hint: string; tone: 'ok' | 'warn' | 'bad' | '' }[] {
+  const tiles: { label: string; value: string; hint: string; tone: 'ok' | 'warn' | 'bad' | '' }[] =
+    [];
   tiles.push({
     label: 'Profit',
     value: pct(m.profitPct),
-    hint: m.profitTargetPct !== null ? `target ${pct(m.profitTargetPct, 1)} → ${money(m.profitTargetBalance)}` : 'funded — no target',
+    hint:
+      m.profitTargetPct !== null
+        ? `target ${pct(m.profitTargetPct, 1)} → ${money(m.profitTargetBalance)}`
+        : 'funded — no target',
     tone: m.profitTargetMet ? 'ok' : '',
   });
   if (m.dailyLossLimit !== null && m.dailyLossRemaining !== null) {
@@ -268,7 +286,11 @@ export function curveOption(d: PropDashboard, dark: boolean): EChartsOption {
     type: 'line' as const,
     showSymbol: false,
     step: dashed ? ('end' as const) : undefined,
-    lineStyle: { width: dashed ? 1.5 : 2, type: dashed ? ('dashed' as const) : ('solid' as const), color },
+    lineStyle: {
+      width: dashed ? 1.5 : 2,
+      type: dashed ? ('dashed' as const) : ('solid' as const),
+      color,
+    },
     itemStyle: { color },
     data: d.curve.filter((p) => pick(p) !== null).map((p) => [at(p.atUtc), pick(p)]),
   });

@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  output,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
@@ -51,11 +58,14 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
           (keydown)="$event.stopPropagation()"
         >
           <form class="card-body" (ngSubmit)="save()">
-            <h3 id="prop-program-title">{{ editing() ? 'Edit ' + editing()!.name : 'New program' }}</h3>
+            <h3 id="prop-program-title">
+              {{ editing() ? 'Edit ' + editing()!.name : 'New program' }}
+            </h3>
             @if (editing(); as p) {
               <p class="note">
                 Changed rules are saved as version {{ p.currentVersion + 1 }} for new enrolments.
-                The {{ p.runningEnrollments }} running enrolment(s) keep the rules they started with.
+                The {{ p.runningEnrollments }} running enrolment(s) keep the rules they started
+                with.
               </p>
             }
             <div class="form-grid">
@@ -65,7 +75,13 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
               </label>
               <label class="field">
                 <span class="label">Account currency</span>
-                <input class="input" name="currency" [(ngModel)]="currency" [disabled]="!!editing()" maxlength="10" />
+                <input
+                  class="input"
+                  name="currency"
+                  [(ngModel)]="currency"
+                  [disabled]="!!editing()"
+                  maxlength="10"
+                />
               </label>
               <label class="field">
                 <span class="label">Trading day resets at (HH:mm)</span>
@@ -73,11 +89,23 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
               </label>
               <label class="field">
                 <span class="label">Time zone (IANA)</span>
-                <input class="input" name="tz" [(ngModel)]="rules().tradingDay.timeZone" placeholder="America/New_York" />
+                <input
+                  class="input"
+                  name="tz"
+                  [(ngModel)]="rules().tradingDay.timeZone"
+                  placeholder="America/New_York"
+                />
               </label>
               <label class="field">
                 <span class="label">Trader's profit share (%)</span>
-                <input class="input" type="number" name="split" min="0" max="100" [(ngModel)]="rules().profitSplit.traderSharePct" />
+                <input
+                  class="input"
+                  type="number"
+                  name="split"
+                  min="0"
+                  max="100"
+                  [(ngModel)]="rules().profitSplit.traderSharePct"
+                />
               </label>
             </div>
             <label class="field">
@@ -86,7 +114,8 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
             </label>
             <label class="check">
               <input type="checkbox" name="haltOnBreach" [(ngModel)]="rules().haltOnBreach" />
-              On a breach, engage the account's kill switch (no new orders; open positions are not closed)
+              On a breach, engage the account's kill switch (no new orders; open positions are not
+              closed)
             </label>
             <label class="check">
               <input type="checkbox" name="haltOnPass" [(ngModel)]="rules().haltOnPass" />
@@ -98,14 +127,35 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                 <div class="row">
                   <h4>Phase {{ i + 1 }}</h4>
                   <span class="spacer"></span>
-                  <button type="button" class="btn btn-sm btn-secondary" [disabled]="i === 0" (click)="move(i, -1)">Up</button>
-                  <button type="button" class="btn btn-sm btn-secondary" [disabled]="i === rules().phases.length - 1" (click)="move(i, 1)">Down</button>
-                  <button type="button" class="btn btn-sm btn-danger" (click)="removePhase(i)">Remove</button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    [disabled]="i === 0"
+                    (click)="move(i, -1)"
+                  >
+                    Up
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    [disabled]="i === rules().phases.length - 1"
+                    (click)="move(i, 1)"
+                  >
+                    Down
+                  </button>
+                  <button type="button" class="btn btn-sm btn-danger" (click)="removePhase(i)">
+                    Remove
+                  </button>
                 </div>
                 <div class="form-grid">
                   <label class="field">
                     <span class="label">Name</span>
-                    <input class="input" [name]="'ph-name-' + i" [(ngModel)]="ph.name" maxlength="64" />
+                    <input
+                      class="input"
+                      [name]="'ph-name-' + i"
+                      [(ngModel)]="ph.name"
+                      maxlength="64"
+                    />
                   </label>
                   <label class="field">
                     <span class="label">Kind</span>
@@ -118,24 +168,48 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                   @if (ph.kind !== 'Funded') {
                     <label class="field">
                       <span class="label">Profit target (%)</span>
-                      <input class="input" type="number" [name]="'ph-target-' + i" [(ngModel)]="ph.profitTargetPct" />
+                      <input
+                        class="input"
+                        type="number"
+                        [name]="'ph-target-' + i"
+                        [(ngModel)]="ph.profitTargetPct"
+                      />
                     </label>
                     <label class="field">
                       <span class="label">Time limit (days, empty = none)</span>
-                      <input class="input" type="number" [name]="'ph-time-' + i" [(ngModel)]="ph.timeLimitDays" />
+                      <input
+                        class="input"
+                        type="number"
+                        [name]="'ph-time-' + i"
+                        [(ngModel)]="ph.timeLimitDays"
+                      />
                     </label>
                     <label class="field">
                       <span class="label">Minimum trading days</span>
-                      <input class="input" type="number" [name]="'ph-days-' + i" [(ngModel)]="ph.minTradingDays" />
+                      <input
+                        class="input"
+                        type="number"
+                        [name]="'ph-days-' + i"
+                        [(ngModel)]="ph.minTradingDays"
+                      />
                     </label>
                   }
                   <label class="field">
                     <span class="label">Max daily loss (%)</span>
-                    <input class="input" type="number" [name]="'ph-daily-' + i" [(ngModel)]="ph.maxDailyLossPct" />
+                    <input
+                      class="input"
+                      type="number"
+                      [name]="'ph-daily-' + i"
+                      [(ngModel)]="ph.maxDailyLossPct"
+                    />
                   </label>
                   <label class="field">
                     <span class="label">Daily loss measured from</span>
-                    <select class="select" [name]="'ph-dref-' + i" [(ngModel)]="ph.dailyLossReference">
+                    <select
+                      class="select"
+                      [name]="'ph-dref-' + i"
+                      [(ngModel)]="ph.dailyLossReference"
+                    >
                       <option value="StartOfDayBalance">Day-start balance</option>
                       <option value="StartOfDayEquity">Day-start equity</option>
                       <option value="HigherOfBalanceAndEquity">Higher of the two</option>
@@ -143,14 +217,23 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                   </label>
                   <label class="field">
                     <span class="label">Daily loss % of</span>
-                    <select class="select" [name]="'ph-dof-' + i" [(ngModel)]="ph.dailyLossAmountOf">
+                    <select
+                      class="select"
+                      [name]="'ph-dof-' + i"
+                      [(ngModel)]="ph.dailyLossAmountOf"
+                    >
                       <option value="InitialBalance">Initial balance</option>
                       <option value="DayReference">The day reference</option>
                     </select>
                   </label>
                   <label class="field">
                     <span class="label">Max overall drawdown (%)</span>
-                    <input class="input" type="number" [name]="'ph-dd-' + i" [(ngModel)]="ph.maxOverallDrawdownPct" />
+                    <input
+                      class="input"
+                      type="number"
+                      [name]="'ph-dd-' + i"
+                      [(ngModel)]="ph.maxOverallDrawdownPct"
+                    />
                   </label>
                   <label class="field">
                     <span class="label">Drawdown</span>
@@ -170,11 +253,23 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                   }
                   <label class="field">
                     <span class="label">Max lots per position</span>
-                    <input class="input" type="number" step="0.01" [name]="'ph-lots-' + i" [(ngModel)]="ph.maxLotsPerPosition" />
+                    <input
+                      class="input"
+                      type="number"
+                      step="0.01"
+                      [name]="'ph-lots-' + i"
+                      [(ngModel)]="ph.maxLotsPerPosition"
+                    />
                   </label>
                   <label class="field">
                     <span class="label">Max total open lots</span>
-                    <input class="input" type="number" step="0.01" [name]="'ph-tlots-' + i" [(ngModel)]="ph.maxTotalOpenLots" />
+                    <input
+                      class="input"
+                      type="number"
+                      step="0.01"
+                      [name]="'ph-tlots-' + i"
+                      [(ngModel)]="ph.maxTotalOpenLots"
+                    />
                   </label>
                   <label class="field">
                     <span class="label">Lot limits</span>
@@ -185,42 +280,91 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                   </label>
                   <label class="field">
                     <span class="label">Consistency: best day ≤ % of profit</span>
-                    <input class="input" type="number" [name]="'ph-cons-' + i" [(ngModel)]="ph.consistencyMaxBestDayPct" />
+                    <input
+                      class="input"
+                      type="number"
+                      [name]="'ph-cons-' + i"
+                      [(ngModel)]="ph.consistencyMaxBestDayPct"
+                    />
                   </label>
                 </div>
                 @if (ph.drawdownMode === 'Trailing') {
                   <label class="check">
-                    <input type="checkbox" [name]="'ph-lock-' + i" [(ngModel)]="ph.trailingLocksAtInitialBalance" />
+                    <input
+                      type="checkbox"
+                      [name]="'ph-lock-' + i"
+                      [(ngModel)]="ph.trailingLocksAtInitialBalance"
+                    />
                     The trailing floor stops at the initial balance
                   </label>
                 }
                 @if (ph.kind !== 'Funded') {
                   <label class="check">
-                    <input type="checkbox" [name]="'ph-flat-' + i" [(ngModel)]="ph.profitTargetRequiresFlat" />
+                    <input
+                      type="checkbox"
+                      [name]="'ph-flat-' + i"
+                      [(ngModel)]="ph.profitTargetRequiresFlat"
+                    />
                     The target counts only with no open position
                   </label>
                 }
                 <div class="row">
                   <label class="check">
-                    <input type="checkbox" [name]="'ph-news-' + i" [ngModel]="!ph.newsTradingAllowed" (ngModelChange)="ph.newsTradingAllowed = !$event" />
+                    <input
+                      type="checkbox"
+                      [name]="'ph-news-' + i"
+                      [ngModel]="!ph.newsTradingAllowed"
+                      (ngModelChange)="ph.newsTradingAllowed = !$event"
+                    />
                     No trading within
                   </label>
-                  <input class="input" style="width: 80px" type="number" [name]="'ph-nw-' + i" [(ngModel)]="ph.newsWindowMinutes" />
+                  <input
+                    class="input"
+                    style="width: 80px"
+                    type="number"
+                    [name]="'ph-nw-' + i"
+                    [(ngModel)]="ph.newsWindowMinutes"
+                  />
                   <span class="small">min of a high-impact release</span>
-                  <select class="select" style="width: auto" [name]="'ph-na-' + i" [(ngModel)]="ph.newsAction">
+                  <select
+                    class="select"
+                    style="width: auto"
+                    [name]="'ph-na-' + i"
+                    [(ngModel)]="ph.newsAction"
+                  >
                     <option value="Fail">fails</option>
                     <option value="Warn">warns</option>
                   </select>
                 </div>
                 <div class="row">
                   <label class="check">
-                    <input type="checkbox" [name]="'ph-wk-' + i" [ngModel]="!ph.weekendHoldingAllowed" (ngModelChange)="ph.weekendHoldingAllowed = !$event" />
+                    <input
+                      type="checkbox"
+                      [name]="'ph-wk-' + i"
+                      [ngModel]="!ph.weekendHoldingAllowed"
+                      (ngModelChange)="ph.weekendHoldingAllowed = !$event"
+                    />
                     No holding from {{ ph.weekend.startDay }}
                   </label>
-                  <input class="input" style="width: 80px" [name]="'ph-ws-' + i" [(ngModel)]="ph.weekend.startTime" />
+                  <input
+                    class="input"
+                    style="width: 80px"
+                    [name]="'ph-ws-' + i"
+                    [(ngModel)]="ph.weekend.startTime"
+                  />
                   <span class="small">to {{ ph.weekend.endDay }}</span>
-                  <input class="input" style="width: 80px" [name]="'ph-we-' + i" [(ngModel)]="ph.weekend.endTime" />
-                  <select class="select" style="width: auto" [name]="'ph-wa-' + i" [(ngModel)]="ph.weekendAction">
+                  <input
+                    class="input"
+                    style="width: 80px"
+                    [name]="'ph-we-' + i"
+                    [(ngModel)]="ph.weekend.endTime"
+                  />
+                  <select
+                    class="select"
+                    style="width: auto"
+                    [name]="'ph-wa-' + i"
+                    [(ngModel)]="ph.weekendAction"
+                  >
                     <option value="Fail">fails</option>
                     <option value="Warn">warns</option>
                   </select>
@@ -228,9 +372,23 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
               </div>
             }
             <div class="row">
-              <button type="button" class="btn btn-sm btn-secondary" (click)="addPhase('Evaluation')">Add evaluation phase</button>
-              <button type="button" class="btn btn-sm btn-secondary" (click)="addPhase('Verification')">Add verification phase</button>
-              <button type="button" class="btn btn-sm btn-secondary" (click)="addPhase('Funded')">Add funded phase</button>
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                (click)="addPhase('Evaluation')"
+              >
+                Add evaluation phase
+              </button>
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                (click)="addPhase('Verification')"
+              >
+                Add verification phase
+              </button>
+              <button type="button" class="btn btn-sm btn-secondary" (click)="addPhase('Funded')">
+                Add funded phase
+              </button>
             </div>
             @if (editing()) {
               <label class="field">
@@ -249,8 +407,12 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
               <p class="errors" role="alert">{{ err }}</p>
             }
             <div class="actions-row">
-              <button type="button" class="btn btn-secondary" (click)="close()" data-autofocus>Cancel</button>
-              <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Saving…' : 'Save' }}</button>
+              <button type="button" class="btn btn-secondary" (click)="close()" data-autofocus>
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                {{ busy() ? 'Saving…' : 'Save' }}
+              </button>
             </div>
           </form>
         </div>

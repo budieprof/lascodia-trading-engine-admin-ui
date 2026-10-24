@@ -19,14 +19,24 @@ import type { PropDashboard } from '../prop.types';
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
-      <app-page-header title="My challenge" subtitle="Your progress against every rule of your program.">
-        <button type="button" class="btn btn-secondary" (click)="mine.reload()" [disabled]="mine.loading()">
+      <app-page-header
+        title="My challenge"
+        subtitle="Your progress against every rule of your program."
+      >
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="mine.reload()"
+          [disabled]="mine.loading()"
+        >
           {{ mine.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
       <app-prop-gate (ready)="mine.reload()">
         @if (mine.error(); as err) {
-          <section class="card"><p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p></section>
+          <section class="card">
+            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+          </section>
         }
         @for (d of mine.value(); track d.enrollment.id) {
           <app-prop-dashboard-view [dashboard]="d" />
@@ -34,8 +44,8 @@ import type { PropDashboard } from '../prop.types';
           @if (mine.loaded() && !mine.error()) {
             <section class="card">
               <p class="pad muted">
-                No prop challenge is linked to you. Sign in with your challenge account, or ask the firm to link
-                your user to your trader record.
+                No prop challenge is linked to you. Sign in with your challenge account, or ask the
+                firm to link your user to your trader record.
               </p>
             </section>
           }
@@ -46,5 +56,9 @@ import type { PropDashboard } from '../prop.types';
 })
 export class PropMePageComponent {
   private readonly api = inject(PropApiService);
-  readonly mine = iamResource<PropDashboard[]>(() => this.api.myDashboards(), [], 'Could not load your challenge.');
+  readonly mine = iamResource<PropDashboard[]>(
+    () => this.api.myDashboards(),
+    [],
+    'Could not load your challenge.',
+  );
 }

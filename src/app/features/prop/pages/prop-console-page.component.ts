@@ -44,14 +44,25 @@ export const FEED_POLL_SECONDS = 15;
           <div class="table-wrap">
             <table class="grid">
               <thead>
-                <tr><th>When</th><th></th><th>Rule</th><th>Trader / account</th><th>What happened</th></tr>
+                <tr>
+                  <th>When</th>
+                  <th></th>
+                  <th>Rule</th>
+                  <th>Trader / account</th>
+                  <th>What happened</th>
+                </tr>
               </thead>
               <tbody>
                 @for (b of feed(); track b.id) {
                   <tr>
                     <td class="small">{{ when(b.occurredAtUtc) }}</td>
                     <td>
-                      <span class="chip" [class.bad]="b.severity === 'Breach'" [class.warn]="b.severity === 'Warning'">{{ b.severity }}</span>
+                      <span
+                        class="chip"
+                        [class.bad]="b.severity === 'Breach'"
+                        [class.warn]="b.severity === 'Warning'"
+                        >{{ b.severity }}</span
+                      >
                     </td>
                     <td>{{ ruleLabel(b.rule) }}</td>
                     <td>
@@ -61,7 +72,9 @@ export const FEED_POLL_SECONDS = 15;
                     <td class="small">{{ b.detail }}</td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="5" class="muted">No breach or warning yet.</td></tr>
+                  <tr>
+                    <td colspan="5" class="muted">No breach or warning yet.</td>
+                  </tr>
                 }
               </tbody>
             </table>
@@ -74,7 +87,12 @@ export const FEED_POLL_SECONDS = 15;
             <span class="spacer"></span>
             <label class="row small">
               Program
-              <select class="select" name="program" [ngModel]="programId()" (ngModelChange)="pickProgram($event)">
+              <select
+                class="select"
+                name="program"
+                [ngModel]="programId()"
+                (ngModelChange)="pickProgram($event)"
+              >
                 <option [ngValue]="null">All programs</option>
                 @for (p of programs.value(); track p.id) {
                   <option [ngValue]="p.id">{{ p.name }}</option>
@@ -89,8 +107,13 @@ export const FEED_POLL_SECONDS = 15;
             <table class="grid">
               <thead>
                 <tr>
-                  <th>#</th><th>Trader</th><th>Program · phase</th><th>State</th>
-                  <th class="num">Profit</th><th class="num">Drawdown used</th><th class="num">Days</th>
+                  <th>#</th>
+                  <th>Trader</th>
+                  <th>Program · phase</th>
+                  <th>State</th>
+                  <th class="num">Profit</th>
+                  <th class="num">Drawdown used</th>
+                  <th class="num">Days</th>
                 </tr>
               </thead>
               <tbody>
@@ -102,7 +125,11 @@ export const FEED_POLL_SECONDS = 15;
                       <span class="sub">{{ r.accountLabel }}</span>
                     </td>
                     <td>{{ r.programName }} · {{ r.phaseName }}</td>
-                    <td><span class="chip" [class]="'chip ' + stateClass(r.state)">{{ r.state }}</span></td>
+                    <td>
+                      <span class="chip" [class]="'chip ' + stateClass(r.state)">{{
+                        r.state
+                      }}</span>
+                    </td>
                     <td class="num" [class.pos]="r.profitPct > 0" [class.neg]="r.profitPct < 0">
                       {{ pct(r.profitPct) }}
                       @if (r.profitTargetPct !== null) {
@@ -113,7 +140,9 @@ export const FEED_POLL_SECONDS = 15;
                     <td class="num">{{ r.tradingDays }}</td>
                   </tr>
                 } @empty {
-                  <tr><td colspan="7" class="muted">No running or passed enrolment.</td></tr>
+                  <tr>
+                    <td colspan="7" class="muted">No running or passed enrolment.</td>
+                  </tr>
                 }
               </tbody>
             </table>
@@ -136,7 +165,11 @@ export class PropConsolePageComponent {
   readonly feed = signal<PropBreach[]>([]);
   readonly feedError = signal<string | null>(null);
   readonly programId = signal<number | null>(null);
-  readonly programs = iamResource<PropProgram[]>(() => this.api.programs(true), [], 'Could not load the programs.');
+  readonly programs = iamResource<PropProgram[]>(
+    () => this.api.programs(true),
+    [],
+    'Could not load the programs.',
+  );
   readonly board = iamResource<PropLeaderboardRow[]>(
     () => this.api.leaderboard(this.programId()),
     [],
@@ -158,7 +191,8 @@ export class PropConsolePageComponent {
     this.board.reload();
     this.pollFeed();
     this.timer = setInterval(() => {
-      if (typeof document === 'undefined' || document.visibilityState === 'visible') this.pollFeed();
+      if (typeof document === 'undefined' || document.visibilityState === 'visible')
+        this.pollFeed();
     }, FEED_POLL_SECONDS * 1000);
   }
 

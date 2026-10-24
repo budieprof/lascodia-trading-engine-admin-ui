@@ -101,7 +101,9 @@ describe('prop rules', () => {
     p.consistencyMaxBestDayPct = 30;
     const lines = phaseSummary(p);
     expect(lines).toContain('Profit target 10% (flat)');
-    expect(lines.some((l) => l.startsWith('Trailing drawdown 10% (equity, locks at initial balance)'))).toBe(true);
+    expect(
+      lines.some((l) => l.startsWith('Trailing drawdown 10% (equity, locks at initial balance)')),
+    ).toBe(true);
     expect(lines).toContain('No trading ±2 min of high-impact news');
     expect(lines).toContain('Best day ≤ 30% of profit');
   });
@@ -135,11 +137,11 @@ describe('prop words and numbers', () => {
     expect(dd.value).toBe('1,100.00');
     expect(dd.tone).toBe('ok');
     expect(tiles.find((t) => t.label.startsWith('Consistency'))!.tone).toBe('warn');
-    expect(limitTiles(metrics({ dailyLossLimit: null, consistencyMaxBestDayPct: null })).map((t) => t.label)).toEqual([
-      'Profit',
-      'Distance to drawdown limit',
-      'Trading days',
-    ]);
+    expect(
+      limitTiles(metrics({ dailyLossLimit: null, consistencyMaxBestDayPct: null })).map(
+        (t) => t.label,
+      ),
+    ).toEqual(['Profit', 'Distance to drawdown limit', 'Trading days']);
   });
 });
 
@@ -157,13 +159,33 @@ describe('equity chart', () => {
   it('draws equity, balance and only the rule lines the phase has', () => {
     const d = {
       curve: [
-        { atUtc: '2026-10-05T01:00:00Z', equity: 10000, balance: 10000, drawdownFloor: 9000, dailyLossFloor: 9500, profitTarget: 11000 },
-        { atUtc: '2026-10-05T02:00:00Z', equity: 10100, balance: 10000, drawdownFloor: 9000, dailyLossFloor: 9500, profitTarget: 11000 },
+        {
+          atUtc: '2026-10-05T01:00:00Z',
+          equity: 10000,
+          balance: 10000,
+          drawdownFloor: 9000,
+          dailyLossFloor: 9500,
+          profitTarget: 11000,
+        },
+        {
+          atUtc: '2026-10-05T02:00:00Z',
+          equity: 10100,
+          balance: 10000,
+          drawdownFloor: 9000,
+          dailyLossFloor: 9500,
+          profitTarget: 11000,
+        },
       ],
     } as unknown as PropDashboard;
     const option = curveOption(d, false);
     const names = (option.series as { name: string }[]).map((s) => s.name);
-    expect(names).toEqual(['Equity', 'Balance', 'Drawdown floor', 'Daily loss floor', 'Profit target']);
+    expect(names).toEqual([
+      'Equity',
+      'Balance',
+      'Drawdown floor',
+      'Daily loss floor',
+      'Profit target',
+    ]);
 
     const funded = {
       curve: d.curve.map((p) => ({ ...p, profitTarget: null, dailyLossFloor: null })),

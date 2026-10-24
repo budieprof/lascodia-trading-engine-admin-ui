@@ -104,7 +104,9 @@ export class PropApiService {
     return this.get(`/breaches${queryString({ afterId, take })}`);
   }
   leaderboard(programId: number | null, includeEnded = false): Observable<PropLeaderboardRow[]> {
-    return this.get(`/leaderboard${queryString({ programId, includeEnded: includeEnded || null })}`);
+    return this.get(
+      `/leaderboard${queryString({ programId, includeEnded: includeEnded || null })}`,
+    );
   }
 
   payouts(status: PropPayoutStatus | null): Observable<PropPayout[]> {
