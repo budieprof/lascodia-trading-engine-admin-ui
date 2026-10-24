@@ -275,6 +275,15 @@ localhost rather than a blank page.
   `try_files` never mistakes the `/docs` route for a directory. Platform → Organisations has **Invite first Owner**
   (`POST platform/tenants/{id}/owner-invitation`).
 
+- **Fund module and four-eyes approvals (enterprise program fund-module; engine `docs/api/fund-module-api.md`,
+  `docs/api/four-eyes-approvals.md`).** `features/fund/` (sidebar group "Fund"): `/fund/performance` (statement per account
+  or account group, cash-flow ledger, PDF/CSV), `/fund/best-execution`, `/fund/compliance` (download shows the
+  `X-Content-SHA256` / signature headers; register + "check a copy"). Plan feature `fundModule`: a `-403-quota` answer is
+  shown as the upgrade notice (`isUpgradeNotice`), never an error. Downloads go through `FundApiService.download` (blob +
+  `blobError` turns a failed body back into the envelope). `/organisation/approval-policies` edits four-eyes policies
+  (`approval-policies.ts` mirrors the engine's loosening rule; a parked change is `-202-approval`, not a failure);
+  `/iam/approvals` shows "k of n approvals" and who approved. The Investor role sees only `/fund/performance`.
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
