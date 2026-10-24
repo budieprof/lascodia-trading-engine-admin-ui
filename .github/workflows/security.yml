@@ -1,0 +1,172 @@
+name: Security scans
+
+# Engineering security controls (enterprise program, security-controls; engine repo docs/security/README.md):
+#   dependencies  npm audit --omit=dev (what ships in the bundle)                        gate: high+
+#                 npm audit incl. dev tooling (build/test/storybook; never shipped)       report only, triaged
+#   SAST          Semgrep registry rules p/typescript + p/javascript + p/dockerfile        gate: new findings on PRs
+#   secrets       gitleaks over the whole history, baseline = .gitleaksignore             gate: any
+#   SBOM          CycloneDX of the production dependency closure + of the built image     artifact
+#   image         Trivy vulnerability scan of the built image, triage = .trivyignore.yaml gate: high+ with a fix
+# The `security-summary` artifact (tools/security/summarize_scans.py) is what the engine's evidence bundle collects.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '23 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  GITLEAKS_VERSION: 8.30.1
+  TRIVY_VERSION: 0.76.1
+  SEMGREP_VERSION: 1.182.0
+
+jobs:
+  dependencies:
+    name: Dependencies (npm audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+      - name: npm audit
+        run: |
+          mkdir -p out
+          # Reads package-lock.json against the advisory database; installs nothing.
+          npm audit --omit=dev --json > out/npm-audit-prod.json || true
+          npm audit --json > out/npm-audit-all.json || true
+      - name: SBOM of the production dependency closure
+        run: |
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz -C /tmp trivy
+          /tmp/trivy fs --quiet --format cyclonedx -o out/sbom-ui-deps.cdx.json package-lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scan-dependencies
+          path: out/
+          retention-days: 90
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Semgrep
+        run: |
+          pip install --quiet "semgrep==${SEMGREP_VERSION}"
+          mkdir -p out
+          args=(--metrics=off --config p/typescript --config p/javascript --config p/dockerfile
+                --exclude node_modules --exclude dist --exclude e2e --exclude '*.spec.ts')
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            semgrep scan "${args[@]}" --baseline-commit "${{ github.event.pull_request.base.sha }}" --error --json -o out/semgrep.json
+          else
+            semgrep scan "${args[@]}" --json -o out/semgrep.json
+          fi
+          semgrep scan "${args[@]}" --sarif -o out/semgrep.sarif || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-sast
+          path: out/
+          retention-days: 90
+      - name: Upload SARIF to code scanning (needs Advanced Security on private repos)
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: out/semgrep.sarif
+          category: semgrep
+
+  secrets:
+    name: Secrets (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks (whole history, baseline .gitleaksignore)
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" | tar -xz -C /tmp gitleaks
+          mkdir -p out
+          /tmp/gitleaks git . --no-banner --redact -f json -r out/gitleaks.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-secrets
+          path: out/gitleaks.json
+          retention-days: 90
+
+  image:
+    name: Image (Trivy) + SBOM (CycloneDX)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the console image (not pushed)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: lascodia-admin-ui:scan
+          build-args: BUILD_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy scan + SBOM
+        run: |
+          curl -fsSL "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" | tar -xz -C /tmp trivy
+          mkdir -p out
+          /tmp/trivy image --quiet --format cyclonedx -o out/sbom-ui-image.cdx.json lascodia-admin-ui:scan
+          /tmp/trivy image --quiet --scanners vuln --ignorefile .trivyignore.yaml --format json -o out/trivy-image-all.json lascodia-admin-ui:scan
+          /tmp/trivy image --quiet --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml --format json -o out/trivy-image.json lascodia-admin-ui:scan
+          /tmp/trivy config --quiet --severity HIGH,CRITICAL --ignorefile .trivyignore.yaml --format json -o out/trivy-config.json .
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scan-image
+          path: out/
+          retention-days: 90
+
+  summary:
+    name: Summary + gate
+    runs-on: ubuntu-latest
+    needs: [dependencies, sast, secrets, image]
+    if: always()
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: scans
+          pattern: scan-*
+          merge-multiple: true
+      - name: Summarize
+        run: |
+          python3 -I tools/security/summarize_scans.py --repo lascodia-trading-engine-admin-ui --commit "${GITHUB_SHA}" --ref "${GITHUB_REF}" \
+            --npm scans/npm-audit-prod.json --npm-dev scans/npm-audit-all.json --semgrep scans/semgrep.json \
+            --gitleaks scans/gitleaks.json --trivy-image scans/trivy-image.json --trivy-fs scans/trivy-config.json \
+            --sbom scans/sbom-ui-deps.cdx.json --sbom scans/sbom-ui-image.cdx.json \
+            --out out/security-summary.json --markdown "$GITHUB_STEP_SUMMARY" --fail-on high
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-summary
+          path: |
+            out/security-summary.json
+            scans/sbom-ui-deps.cdx.json
+            scans/sbom-ui-image.cdx.json
+          retention-days: 400

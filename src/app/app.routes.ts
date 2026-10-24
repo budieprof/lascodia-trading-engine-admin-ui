@@ -649,6 +649,16 @@ export const routes: Routes = [
         loadChildren: () => import('@features/fund/fund.routes').then((m) => m.FUND_ROUTES),
       },
       {
+        // Release notes of every platform component (enterprise program, security-controls).
+        path: 'releases',
+        canActivate: [canAccessPath('releases')],
+        data: { breadcrumb: 'Release notes' },
+        loadComponent: () =>
+          import('@features/security/pages/release-notes-page.component').then(
+            (m) => m.ReleaseNotesPageComponent,
+          ),
+      },
+      {
         // Getting a new organisation going (multi-tenancy Phase 7, c7-lifecycle).
         path: 'onboarding',
         canActivate: [canAccessPath('onboarding')],

@@ -14,6 +14,7 @@ const PAGES: AccessPath[] = [
   'platform/impersonation',
   'platform/signups',
   'platform/closures',
+  'platform/security-evidence',
 ];
 
 /** Platform console (U3.6): platform staff only (`/bff/session` → isPlatformStaff). */
@@ -90,5 +91,15 @@ export const PLATFORM_ROUTES: Routes = [
     data: { breadcrumb: 'Impersonation' },
     loadComponent: () =>
       import('./pages/impersonation-page.component').then((m) => m.ImpersonationPageComponent),
+  },
+  {
+    // The security evidence bundle (enterprise program, security-controls).
+    path: 'security-evidence',
+    canActivate: [canAccessPath('platform/security-evidence')],
+    data: { breadcrumb: 'Security evidence' },
+    loadComponent: () =>
+      import('@features/security/pages/security-evidence-page.component').then(
+        (m) => m.SecurityEvidencePageComponent,
+      ),
   },
 ];

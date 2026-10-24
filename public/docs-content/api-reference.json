@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 970,
+  "endpointCount": 978,
   "groups": [
     {
       "name": "Admin auth",
@@ -5730,6 +5730,83 @@
       ]
     },
     {
+      "name": "Iam access review campaigns",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/iam/access-review/campaigns",
+          "summary": "The organisation's quarterly campaigns, newest first (at most 40).",
+          "access": "permission",
+          "permission": "iam.access_review",
+          "parameters": [],
+          "response": "ResponseData<List<AccessReviewCampaignSummaryDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/iam/access-review/campaigns",
+          "summary": "Takes this quarter's snapshot (or retakes it while the campaign is open; refused once signed off).",
+          "access": "permission",
+          "permission": "iam.access_review",
+          "parameters": [],
+          "response": "ResponseData<AccessReviewCampaignSummaryDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/iam/access-review/campaigns/{id}",
+          "summary": "One campaign with its full snapshot (people, grants, roles, machine identities, tokens, findings).",
+          "access": "permission",
+          "permission": "iam.access_review",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<AccessReviewCampaignDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/iam/access-review/campaigns/{id}/export",
+          "summary": "The campaign as a file: `format=csv` (default; one row per reviewed item) or `json`. Audited.",
+          "access": "permission",
+          "permission": "iam.access_review",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/iam/access-review/campaigns/{id}/sign-off",
+          "summary": "The reviewer's sign-off: `{snapshotSha256, notes}` — the hash of the snapshot reviewed (refused if it was refreshed since) and what was checked and decided. Freezes the campaign. Needs a fresh MFA sign-in.",
+          "access": "permission",
+          "permission": "iam.access_review.signoff",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SignOffAccessReviewCampaignCommand",
+          "response": "ResponseData<AccessReviewCampaignSummaryDto>"
+        }
+      ]
+    },
+    {
       "name": "Iam account groups",
       "endpoints": [
         {
@@ -10695,6 +10772,48 @@
       ]
     },
     {
+      "name": "Platform release notes",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/release-notes",
+          "summary": "Publishes the document `tools/release-notes/generate.py` wrote; the same component + version replaces it.",
+          "access": "permission",
+          "permission": "platform.releases.manage",
+          "parameters": [],
+          "body": "PublishReleaseNoteCommand",
+          "response": "ResponseData<ReleaseNoteDto>"
+        }
+      ]
+    },
+    {
+      "name": "Platform security",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/security/evidence-bundle",
+          "summary": "A zip of the period's evidence (default: the last 365 days; at most 800): access reviews and sign-offs, audit-chain and anchor checks, backup/restore drill reports, release notes, CI vulnerability-scan summaries, with a manifest of SHA-256s. Headers `X-Content-SHA256` and, when signed, `X-Lascodia-Signature` + `X-Lascodia-Signing-Key-Id`. Evidence for the operator's auditor, not a certification. Audited.",
+          "access": "permission",
+          "permission": "platform.security.evidence",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Platform signups",
       "endpoints": [
         {
@@ -11912,6 +12031,33 @@
             }
           ],
           "response": "ResponseData<ApiQuotaStatusDto>"
+        }
+      ]
+    },
+    {
+      "name": "Release notes",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/release-notes",
+          "summary": "Newest first; `component` = engine | console | ea | cme-feed (optional), `take` 1–100 (default 30).",
+          "access": "permission",
+          "permission": "releases.read",
+          "parameters": [
+            {
+              "name": "component",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<ReleaseNoteDto>>"
         }
       ]
     },

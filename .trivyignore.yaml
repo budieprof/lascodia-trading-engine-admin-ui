@@ -1,0 +1,12 @@
+# Trivy triage (security-controls, 2026-10-24) — every entry is reviewed in docs/security/scan-triage.md.
+# Add an entry only with a statement and, for vulnerabilities, an expiry; never ignore a finding to make a build green.
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - "Dockerfile"
+    statement: >-
+      T-2: the GHCR staging image runs nginx:1.27-alpine as root on :80 and its entrypoint rewrites config.json at
+      start. Production does not use it: the live console is a release bundle served by Caddy (scripts/release.sh) and
+      Kubernetes serves the bundle from the engine repo's unprivileged image (deploy/ui/Dockerfile, uid 101, :8080).
+      Moving this image to nginx-unprivileged changes its port, a contract for whoever pulls :staging — owner decision.
+vulnerabilities: []

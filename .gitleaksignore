@@ -1,0 +1,8 @@
+# gitleaks baseline (ui) — reviewed 2026-10-24 by the security-controls change (docs/security/scan-triage.md).
+# Every fingerprint below is a TEST FIXTURE, example value or image tag, never a live credential:
+# unit/integration-test keys and JWT secrets, MQL5 harness tokens, a Keycloak image tag. A new finding is NOT
+# added here without the same review; a real secret is rotated first (docs/security/secret-rotation.md), then removed.
+7ed793f507ce1d8eeae0d6797e4a1b6a097ac6dc:src/app/features/organisation/alerts-page.spec.ts:generic-api-key:63
+7ed793f507ce1d8eeae0d6797e4a1b6a097ac6dc:src/app/features/organisation/alerts.logic.spec.ts:generic-api-key:143
+7ed793f507ce1d8eeae0d6797e4a1b6a097ac6dc:src/app/features/organisation/alerts.logic.spec.ts:generic-api-key:154
+f58d74e6b636369d15aea88f85190519ae6e64e3:src/app/features/organisation/terminals.logic.spec.ts:generic-api-key:179

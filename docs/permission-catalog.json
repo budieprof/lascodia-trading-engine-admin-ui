@@ -54,6 +54,15 @@
     "deprecated": true
   },
   {
+    "key": "releases.read",
+    "category": "Administration",
+    "description": "Read the release notes of the engine, console, Expert Advisor and CME feed.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "roles.manage",
     "category": "Administration",
     "description": "Create roles and assign/update their permissions. Changes need a fresh MFA sign-in.",
@@ -212,6 +221,15 @@
     "description": "Run access reviews and revoke grants that are no longer used; receives the monthly access-review notice.",
     "scopeable": false,
     "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "iam.access_review.signoff",
+    "category": "Identity and access",
+    "description": "Sign off the organisation's quarterly access review as its reviewer: your name, the time and your statement are recorded against the exact snapshot reviewed, which is frozen from then on. Needs a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
     "twoPerson": false,
     "deprecated": false
   },
@@ -612,6 +630,15 @@
     "deprecated": false
   },
   {
+    "key": "platform.releases.manage",
+    "category": "Platform staff",
+    "description": "Platform staff: publish (or replace) a release's notes, generated from its commits.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "platform.research.manage",
     "category": "Platform staff",
     "description": "Platform staff: steer platform research — activate and roll back ML models, CompositeML overrides, experiments, strategy generation, LLM strategy proposals, the algo-engineer.",
@@ -624,6 +651,15 @@
     "key": "platform.research.run",
     "category": "Platform staff",
     "description": "Platform staff: queue platform research — ML training and hyperparameter searches, shadow evaluations.",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
+    "key": "platform.security.evidence",
+    "category": "Platform staff",
+    "description": "Platform staff: download the security evidence bundle — access reviews and their sign-offs, the audit-chain and anchor checks, backup/restore drill results, release change log and vulnerability-scan summaries (each download is audited).",
     "scopeable": false,
     "stepUp": false,
     "twoPerson": false,

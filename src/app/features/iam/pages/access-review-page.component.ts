@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { AccessReviewCampaignsComponent } from '@features/security/pages/access-review-campaigns.component';
 import { IamApiService } from '../iam-api.service';
 import { errorText, reportable, scopeLabel, staleGrantIds, toggled, when } from '../iam.logic';
 import type { AccessReviewEntry, AccessReviewReport } from '../iam.types';
@@ -12,13 +13,18 @@ import { iamResource } from '../shared/iam-resource';
 /**
  * Access review (U3.4, ADR-0031 §7): every grant in the organisation with when it was last used;
  * grants unused for the review window (90 days) are flagged. Revoke what nobody needs in one action
- * (`iam.access_review`).
+ * (`iam.access_review`). Above it, the quarterly review the reviewer signs off (security-controls).
  */
 @Component({
   selector: 'app-iam-access-review-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    AccessReviewCampaignsComponent,
+  ],
   styleUrl: '../shared/iam-page.scss',
   template: `
     <div class="page">
@@ -35,6 +41,9 @@ import { iamResource } from '../shared/iam-resource';
           {{ report.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <!-- security-controls: the quarterly campaign a reviewer signs off (engine AccessReviewCampaign). -->
+      <app-access-review-campaigns />
 
       <section class="card">
         <header class="card-head">

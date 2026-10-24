@@ -290,6 +290,14 @@ localhost rather than a blank page.
   `blobError` turns a failed body back into the envelope). `/organisation/approval-policies` edits four-eyes policies
   (`approval-policies.ts` mirrors the engine's loosening rule; a parked change is `-202-approval`, not a failure);
   `/iam/approvals` shows "k of n approvals" and who approved. The Investor role sees only `/fund/performance`.
+- **Security controls (enterprise program security-controls; engine `docs/api/security-controls-api.md`).**
+  `features/security/`: the quarterly access review (`AccessReviewCampaignsComponent`, embedded at the top of
+  `/iam/access-review`: snapshot counts, findings, people / terminal credentials / API tokens, CSV/JSON export, and the
+  reviewer's sign-off form — `iam.access_review.signoff`, step-up, bound to the snapshot SHA-256 it shows; a signed-off
+  quarter is frozen), `/releases` (release notes, `releases.read`), `/platform/security-evidence` (the evidence bundle,
+  `platform.security.evidence`, download headers shown). The evidence page says it is NOT a certification — keep that.
+  The UI `Dockerfile` (GHCR `:staging`) still runs nginx as root on :80 — triaged in the engine's
+  `docs/security/scan-triage.md` (T-2); production serves the release bundle.
 
 - **Usage & billing (enterprise program billing-metering; engine `docs/api/billing-api.md`).** `features/billing/`:
   `/organisation/billing` (`tenant.billing.read`: metered days, month tiles, the ESTIMATE — never called an invoice —,
