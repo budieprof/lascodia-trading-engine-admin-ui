@@ -113,6 +113,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Prompt templates', route: '/prompt-templates', icon: navIcon.FileText },
       { label: 'Performance', route: '/performance', icon: navIcon.TrendingUp },
       { label: 'Execution Quality', route: '/execution-quality', icon: navIcon.Timer },
+      { label: 'Dealing Desk', route: '/dealing', icon: navIcon.Briefcase },
       { label: 'Sentiment', route: '/sentiment', icon: navIcon.Thermometer },
       { label: 'Ensemble', route: '/strategy-ensemble', icon: navIcon.Scale },
       { label: 'Portfolio', route: '/strategy-portfolio', icon: navIcon.ChartPie },

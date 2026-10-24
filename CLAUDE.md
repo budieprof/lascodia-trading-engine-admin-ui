@@ -275,6 +275,14 @@ localhost rather than a blank page.
   `try_files` never mistakes the `/docs` route for a directory. Platform → Organisations has **Invite first Owner**
   (`POST platform/tenants/{id}/owner-invitation`).
 
+- **Dealing desk (enterprise program wave 2, broker module).** `/dealing` (`features/dealing/`, `dealing.read`; feed
+  changes `dealing.manage`): Clients (risk table → `/dealing/clients/:feedId/:login`), Markouts (curves + 95 % band),
+  A/B suggestions (ADVISORY ONLY — the disclaimer stays on screen and in the CSV), Alerts (computed on read), Liquidity
+  (LP stats of one symbol ≤ 24 h, on request), Trade feeds. Window + filters live in `DealingFiltersStore` (provided by the
+  routes); a `-403-quota` with feature `brokerModule` sets `moduleMissing` and the page shows the upgrade notice instead of
+  errors (`isModuleNotInPlan`). Markouts are pips, POSITIVE = the price moved in the client's favour. The engine serves
+  `dealing/*` from the research process (Caddy `@scripting`). Plans carry `allowsBrokerModule` (plans page checkbox).
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
