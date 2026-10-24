@@ -3,6 +3,7 @@
  * (no silent fallback to the first active one), and the default stop is ATR-based from real closed candles — not a
  * fixed 30 pips, which was 0.3 ATR on GBPJPY H1 and 3 ATR on EURCHF.
  */
+import { distanceUnitOf, fxPipSize } from '@core/instruments/instrument-math';
 import type { CandleDto, StrategyDto } from '@core/api/api.types';
 import { atr, type Ohlc } from '@features/chart-analysis/indicators/math';
 
@@ -18,7 +19,14 @@ export const ATR_CANDLES = 60;
 export function atrFromCandles(candles: readonly CandleDto[], period = ATR_PERIOD): number | null {
   const bars: Ohlc[] = candles
     .filter((c) => c.isClosed !== false)
-    .map((c) => ({ time: Date.parse(c.timestamp), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume }))
+    .map((c) => ({
+      time: Date.parse(c.timestamp),
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+      volume: c.volume,
+    }))
     .filter((b) => Number.isFinite(b.time))
     .sort((a, b) => a.time - b.time);
   if (bars.length < period + 1) return null;
@@ -50,9 +58,12 @@ export function atrLevels(
   };
 }
 
-/** One pip for the pair: 10 points on a 3/5-digit quote, else one point. */
-export function pipSizeFor(digits: number): number {
-  return digits === 3 || digits === 5 ? 10 ** -(digits - 1) : 10 ** -digits;
+/**
+ * One display unit for the symbol (core/instruments): with `symbol` the instrument's own (the pip for FX, ticks /
+ * points otherwise); without, the FX pip — 10 points on a 3/5-digit quote, else one point.
+ */
+export function pipSizeFor(digits: number, symbol?: string | null): number {
+  return symbol ? distanceUnitOf(symbol, { digits }) : fxPipSize(digits);
 }
 
 /** The candles' timeframe for the ATR: the strategy's own, else H1. */
@@ -64,7 +75,10 @@ export function atrTimeframe(strategy: Pick<StrategyDto, 'timeframe'> | null | u
  * Strategies in pick order: those trading the signal's symbol first (by id), then the rest — every one selectable, so
  * the operator decides; a mismatch is warned about, not prevented.
  */
-export function orderStrategies<T extends Pick<StrategyDto, 'id' | 'symbol'>>(list: readonly T[], symbol: string): T[] {
+export function orderStrategies<T extends Pick<StrategyDto, 'id' | 'symbol'>>(
+  list: readonly T[],
+  symbol: string,
+): T[] {
   const sym = symbol.trim().toUpperCase();
   const matches = (s: T) => !!sym && (s.symbol ?? '').toUpperCase() === sym;
   return [...list].sort((a, b) => Number(matches(b)) - Number(matches(a)) || a.id - b.id);

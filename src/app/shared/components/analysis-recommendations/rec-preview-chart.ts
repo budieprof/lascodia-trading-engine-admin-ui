@@ -1,9 +1,13 @@
+import { priceDecimalsOf } from '@core/instruments/instrument-math';
 import type { EChartsOption } from 'echarts';
 import type { CandleDto, MarketAnalysisRecommendationDto } from '@core/api/api.types';
 
-/** Price decimals for a symbol (JPY pairs quote to 3, everything else 5). */
+/**
+ * Price decimals for a symbol — core/instruments (the catalogue's quote decimals; without a row the engine's rule: FX
+ * JPY 3, other FX 5, anything else 2).
+ */
 export function priceDecimals(symbol: string): number {
-  return symbol.includes('JPY') ? 3 : 5;
+  return priceDecimalsOf(symbol);
 }
 
 /**
@@ -36,8 +40,8 @@ export function buildRecPreviewChartOption(
   const originalTp = rec.originalTakeProfit ?? null;
   const showShrinkage = originalTp !== null && originalTp !== tp;
 
-  const isJpy = symbol.includes('JPY');
-  const fmt = (n: number) => n.toFixed(isJpy ? 3 : 5);
+  const dp = priceDecimals(symbol);
+  const fmt = (n: number) => n.toFixed(dp);
 
   const lows = candles.map((c) => c.low);
   const highs = candles.map((c) => c.high);

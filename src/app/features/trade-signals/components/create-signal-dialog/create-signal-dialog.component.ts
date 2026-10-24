@@ -1,3 +1,4 @@
+import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
 import {
   AfterViewInit,
   ChangeDetectionStrategy,
@@ -101,7 +102,9 @@ export interface SignalPrefill {
             <h4 class="section-title">Source</h4>
             <div class="row">
               <label class="field span-2">
-                <span class="label">Strategy <span class="hint">credited with this trade</span></span>
+                <span class="label"
+                  >Strategy <span class="hint">credited with this trade</span></span
+                >
                 <select
                   [ngModel]="strategyId()"
                   (ngModelChange)="strategyId.set($event)"
@@ -109,7 +112,9 @@ export interface SignalPrefill {
                   required
                   data-testid="signal-strategy"
                 >
-                  <option [ngValue]="null" disabled>— choose the strategy this trade belongs to —</option>
+                  <option [ngValue]="null" disabled>
+                    — choose the strategy this trade belongs to —
+                  </option>
                   @for (s of orderedStrategies(); track s.id) {
                     <option [ngValue]="s.id">
                       #{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.name }}
@@ -280,12 +285,14 @@ export interface SignalPrefill {
             <div class="auto-actions">
               @switch (atrState().status) {
                 @case ('loading') {
-                  <small class="muted">reading {{ atrState().timeframe }} candles for the ATR…</small>
+                  <small class="muted"
+                    >reading {{ atrState().timeframe }} candles for the ATR…</small
+                  >
                 }
                 @case ('none') {
                   <small class="muted"
-                    >No closed {{ atrState().timeframe }} candles for {{ symbol().toUpperCase() }} to size the stop
-                    — enter it.</small
+                    >No closed {{ atrState().timeframe }} candles for
+                    {{ symbol().toUpperCase() }} to size the stop — enter it.</small
                   >
                 }
               }
@@ -620,7 +627,11 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly tpDirty = signal(false);
 
   /** The ATR the default stop is sized from: reading, found, or no candles to size it. */
-  readonly atrState = signal<{ status: 'idle' | 'loading' | 'ok' | 'none'; atr?: number; timeframe?: string }>({
+  readonly atrState = signal<{
+    status: 'idle' | 'loading' | 'ok' | 'none';
+    atr?: number;
+    timeframe?: string;
+  }>({
     status: 'idle',
   });
 
@@ -666,7 +677,9 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly activeStrategies = computed(() => this.strategies_());
 
   /** The symbol's strategies first, then the rest — the operator chooses; nothing is picked for them. */
-  readonly orderedStrategies = computed(() => orderStrategies(this.activeStrategies(), this.symbol()));
+  readonly orderedStrategies = computed(() =>
+    orderStrategies(this.activeStrategies(), this.symbol()),
+  );
 
   readonly resolvedStrategy = computed(() => {
     const id = this.strategyId();
@@ -692,9 +705,12 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
   readonly atrHint = computed<{ text: string; title: string } | null>(() => {
     const st = this.atrState();
     if (st.status !== 'ok' || st.atr === undefined) return null;
-    const pips = Math.round(((st.atr * ATR_STOP_MULTIPLE) / pipSizeFor(this.digits())) * 10) / 10;
+    const sym = this.symbol();
+    const pips =
+      Math.round(((st.atr * ATR_STOP_MULTIPLE) / pipSizeFor(this.digits(), sym)) * 10) / 10;
+    const unit = distanceUnitLabel(resolveInstrument(sym, { digits: this.digits() }));
     return {
-      text: `${ATR_STOP_MULTIPLE} × ATR(${ATR_PERIOD}, ${st.timeframe}) = ${pips} pips`,
+      text: `${ATR_STOP_MULTIPLE} × ATR(${ATR_PERIOD}, ${st.timeframe}) = ${pips} ${unit}`,
       title: `ATR(${ATR_PERIOD}) of the last closed ${st.timeframe} candles: ${roundTo(st.atr, this.digits() + 1)}`,
     };
   });
@@ -877,7 +893,11 @@ export class CreateSignalDialogComponent implements AfterViewInit, OnDestroy {
         .pipe(catchError(() => of(null)))
         .subscribe((res) => {
           const value = atrFromCandles(res?.data?.data ?? []);
-          this.atrState.set(value === null ? { status: 'none', timeframe: tf } : { status: 'ok', atr: value, timeframe: tf });
+          this.atrState.set(
+            value === null
+              ? { status: 'none', timeframe: tf }
+              : { status: 'ok', atr: value, timeframe: tf },
+          );
         });
       onCleanup(() => sub.unsubscribe());
     });

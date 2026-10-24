@@ -1,3 +1,4 @@
+import { distanceUnitOf } from '@core/instruments/instrument-math';
 import {
   Component,
   ChangeDetectionStrategy,
@@ -2369,14 +2370,12 @@ const SLIPPAGE_OUTLIER_PIPS = 50;
  * 0.0001) turned a $2 move on gold into 20,000 "pips" and made index and
  * crypto slippage meaningless.
  */
+/**
+ * One display unit of the symbol, in price — core/instruments (the pip for FX; the engine's point for an index or a
+ * metal, where this page used to guess 1 / 0.1). FX values are unchanged (golden spec `instrument-golden.spec.ts`).
+ */
 function pipSizeFor(symbol: string | null): number {
-  const s = (symbol ?? '').toUpperCase();
-  if (!s) return 0.0001;
-  if (s.startsWith('XAU') || s.startsWith('GOLD')) return 0.1;
-  if (s.startsWith('XAG') || s.startsWith('SILVER')) return 0.01;
-  if (/^(US30|US500|SPX|NAS|USTEC|GER|DE40|UK100|JP225|BTC|ETH)/.test(s)) return 1;
-  if (s.includes('JPY')) return 0.01;
-  return 0.0001;
+  return distanceUnitOf(symbol);
 }
 
 /** Signed fill slippage in pips; positive = filled worse than the order price. */

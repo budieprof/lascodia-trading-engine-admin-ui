@@ -42,7 +42,8 @@ describe('watchlist columns (SP-I6)', () => {
     expect(pipSizeOf('EURUSD', 5, 0.0001)).toBe(0.0001);
     expect(pipSizeOf('EURUSD', 5)).toBeCloseTo(0.0001);
     expect(pipSizeOf('USDJPY', 3)).toBe(0.01);
-    expect(pipSizeOf('XAUUSD', 2)).toBe(0.1);
+    // Gold is not FX: its unit is the engine's point (0.01 on a 2-decimal quote), no longer the 0.1 guess (multi-asset WS7).
+    expect(pipSizeOf('XAUUSD', 2)).toBe(0.01);
     expect(pips(0.00023, 0.0001)).toBe(2.3);
     expect(pips(null, 0.0001)).toBeNull();
   });

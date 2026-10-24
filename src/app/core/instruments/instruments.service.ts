@@ -44,10 +44,11 @@ export class InstrumentsService {
   /** Which endpoint the catalogue came from (null until loaded). */
   readonly source = this.sourceState.asReadonly();
 
-  /** Every instrument, sorted by symbol. */
-  readonly all = computed(() =>
-    [...instrumentCatalogue().values()].sort((a, b) => a.symbol.localeCompare(b.symbol)),
-  );
+  /**
+   * Every instrument, in the engine's order (for the FX fallback: the currency-pair list's order, so the chart's symbol
+   * search lists pairs exactly as it did).
+   */
+  readonly all = computed(() => [...instrumentCatalogue().values()]);
 
   /** The asset classes the catalogue holds, in a stable order. */
   readonly assetClasses = computed<InstrumentAssetClass[]>(() => {

@@ -1,4 +1,8 @@
-import { consolidatedId, consolidatedSubset, isConsolidatedId } from '@core/realtime/marketdata.types';
+import {
+  consolidatedId,
+  consolidatedSubset,
+  isConsolidatedId,
+} from '@core/realtime/marketdata.types';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -73,6 +77,13 @@ import { liveTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { pipSizeFor, priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
+import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
+import { InstrumentsService } from '@core/instruments/instruments.service';
+import type { InstrumentAssetClass } from '@core/instruments/instrument.types';
+import {
+  ASSET_CLASS_LABEL,
+  InstrumentIconComponent,
+} from '../../watchlist/instrument-icon.component';
 import { changeText, formatVolume } from '../../chart/legend-format';
 import { DataWindowComponent } from '../../chart/data-window.component';
 import { toCsv } from '../../chart/snapshot';
@@ -271,10 +282,7 @@ import {
   type VolumeProfileMode,
 } from '../../overlays/analysis-overlays';
 import { marketStructure } from '../../overlays/market-structure';
-import {
-  DEFAULT_PROFILE_EXTRAS,
-  type ProfileExtrasSettings,
-} from '../../overlays/profile-levels';
+import { DEFAULT_PROFILE_EXTRAS, type ProfileExtrasSettings } from '../../overlays/profile-levels';
 import type { AlertableLevel } from '../../overlays/overlay-hits';
 import {
   DEFAULT_LAYER_GROUPS,
@@ -651,6 +659,7 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    InstrumentIconComponent,
     DecimalPipe,
     ModalA11yDirective,
     ChartHostComponent,
@@ -708,6 +717,8 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
 })
 export class ChartAnalysisPageComponent {
   private readonly pairs = inject(CurrencyPairsService);
+  /** The instrument catalogue (multi-asset WS7): the symbol search lists every asset class it holds. */
+  private readonly instruments = inject(InstrumentsService);
   private readonly feed = inject(CandleFeedService);
   private readonly realtime = inject(RealtimeService);
   private readonly route = inject(ActivatedRoute);
@@ -1744,7 +1755,9 @@ export class ChartAnalysisPageComponent {
 
   // ── Order flow (orderflow/): broker DOM heatmap, tick delta, footprint, spread ribbon, fills ──
   readonly orderFlow = signal<OrderFlowSettings>(DEFAULT_ORDER_FLOW);
-  toggleOrderFlow(layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades' | 'cmeFlow'): void {
+  toggleOrderFlow(
+    layer: 'heatmap' | 'cvd' | 'footprint' | 'ribbon' | 'fills' | 'trades' | 'cmeFlow',
+  ): void {
     this.orderFlow.update((s) => ({ ...s, [layer]: !s[layer] }));
   }
   /** The market-data source for the heatmap / depth / trades ('' = automatic). */
@@ -1765,7 +1778,9 @@ export class ChartAnalysisPageComponent {
   toggleConsolidatedSource(sourceId: string): void {
     const all = this.consolidatableSources().map((s) => s.sourceId);
     const current = all.filter((s) => this.consolidatedHas(s));
-    const next = current.includes(sourceId) ? current.filter((s) => s !== sourceId) : [...current, sourceId];
+    const next = current.includes(sourceId)
+      ? current.filter((s) => s !== sourceId)
+      : [...current, sourceId];
     if (!next.length) return;
     this.setOrderFlowSource(consolidatedId(all, next));
   }
@@ -2422,7 +2437,36 @@ export class ChartAnalysisPageComponent {
     return this.host()?.visibleWindow() ?? this.bars();
   }
 
-  readonly filteredSymbols = computed(() => rankSymbols(this.symbols(), this.symbolQuery()));
+  /** The search's asset-class filter (null = all); the chips show only when the catalogue holds more than FX. */
+  readonly symbolClass = signal<InstrumentAssetClass | null>(null);
+  readonly symbolClasses = computed(() =>
+    // Only once the engine serves its instrument master: in front of today's engine the menu is unchanged.
+    this.instruments.source() === 'instruments' ? this.instruments.assetClasses() : [],
+  );
+  readonly assetClassLabel = ASSET_CLASS_LABEL;
+
+  /**
+   * What the symbol search lists: every tradable instrument of the catalogue (FX derived from the currency pairs while
+   * the engine has no instrument master — the same active pairs as before), else the pairs themselves.
+   */
+  private readonly searchable = computed(() => {
+    const all = this.instruments.all().filter((i) => i.status !== 'Inactive');
+    if (all.length) return all;
+    return this.symbols().map((p) => ({
+      symbol: (p.symbol ?? '').toUpperCase(),
+      description:
+        p.baseCurrency && p.quoteCurrency
+          ? `${p.baseCurrency}/${p.quoteCurrency}`
+          : (p.symbol ?? ''),
+      assetClass: resolveInstrument(p.symbol, { assetClass: p.assetClass ?? null }).assetClass,
+    }));
+  });
+
+  readonly filteredSymbols = computed(() => {
+    const cls = this.symbolClass();
+    const rows = cls ? this.searchable().filter((i) => i.assetClass === cls) : this.searchable();
+    return rankSymbols(rows, this.symbolQuery());
+  });
 
   /** Enter in the symbol search: the first (best) match, as on TradingView (CC-I13). */
   pickFirstSymbol(): void {
@@ -2871,7 +2915,11 @@ export class ChartAnalysisPageComponent {
       showStructure: this.showStructure,
       // The window on screen — what the chart's own overlays describe (CC-21: these read every
       // loaded bar while the chart drew the visible ones, so the assistant quoted other levels).
-      structureSummary: () => marketStructure(this.visibleBars()).summary,
+      structureSummary: () =>
+        marketStructure(this.visibleBars(), {
+          pipSize: this.pipSize(),
+          unitLabel: distanceUnitLabel(resolveInstrument(this.symbol())),
+        }).summary,
       // Computed on demand rather than held in a signal: the assistant asks rarely, and a
       // second copy of this would be a second thing that can disagree with the chart.
       srLevels: () => supportResistance(this.visibleBars()),
@@ -3557,6 +3605,7 @@ export class ChartAnalysisPageComponent {
   }
 
   private loadSymbols(): void {
+    void this.instruments.load();
     this.pairs
       .list({ currentPage: 1, itemCountPerPage: 200, filter: {} })
       .pipe(takeUntilDestroyed(this.destroyRef))

@@ -31,7 +31,9 @@
     type="button"
     class="wl-icon"
     title="More"
-    (click)="moreMenuOpen.set(!moreMenuOpen()); columnsMenuOpen.set(false); $event.stopPropagation()"
+    (click)="
+      moreMenuOpen.set(!moreMenuOpen()); columnsMenuOpen.set(false); $event.stopPropagation()
+    "
   >
     <app-chart-icon name="more" [size]="22" />
   </button>
@@ -136,8 +138,12 @@
           <button type="button" [disabled]="c.added" (click)="add(c.symbol)">
             @if (pairFlags(c.symbol)) {
               <app-pair-icon [symbol]="c.symbol" />
+            } @else if (nonFx(c.symbol)) {
+              <app-instrument-icon [symbol]="c.symbol" />
             } @else {
-              <span class="wl-badge" [attr.data-ccy]="c.symbol.slice(0, 3)">{{ c.symbol.slice(0, 1) }}</span>
+              <span class="wl-badge" [attr.data-ccy]="c.symbol.slice(0, 3)">{{
+                c.symbol.slice(0, 1)
+              }}</span>
             }
             <span class="wl-add-symbol">{{ c.symbol }}</span>
             <span class="muted">{{ c.name }}</span>
@@ -277,8 +283,12 @@
             <span class="col-symbol">
               @if (pairFlags(r.symbol)) {
                 <app-pair-icon [symbol]="r.symbol" />
+              } @else if (nonFx(r.symbol)) {
+                <app-instrument-icon [symbol]="r.symbol" />
               } @else {
-                <span class="wl-badge" [attr.data-ccy]="r.symbol.slice(0, 3)">{{ r.symbol.slice(0, 1) }}</span>
+                <span class="wl-badge" [attr.data-ccy]="r.symbol.slice(0, 3)">{{
+                  r.symbol.slice(0, 1)
+                }}</span>
               }
               <span class="wl-symbol">{{ r.symbol }}</span>
               <span
@@ -297,14 +307,23 @@
                 @case ('last') {
                   @let t = tick()[r.symbol];
                   @let parts = tickParts(r.last, r.digits, t?.prev ?? null);
-                  <span class="col-num wl-last" [class.up]="t?.dir === 'up'" [class.down]="t?.dir === 'down'"
+                  <span
+                    class="col-num wl-last"
+                    [class.up]="t?.dir === 'up'"
+                    [class.down]="t?.dir === 'down'"
                     >{{ parts.head }}<span class="wl-chg">{{ parts.changed }}</span
                     ><sup [class.wl-chg]="parts.pipChanged">{{ parts.pip }}</sup></span
                   >
                 }
                 @case ('change') {
-                  <span class="col-num" [class.up]="(r.change ?? 0) > 0" [class.down]="(r.change ?? 0) < 0">
-                    {{ r.change === null ? '' : (r.change | number: '1.' + r.digits + '-' + r.digits) }}
+                  <span
+                    class="col-num"
+                    [class.up]="(r.change ?? 0) > 0"
+                    [class.down]="(r.change ?? 0) < 0"
+                  >
+                    {{
+                      r.change === null ? '' : (r.change | number: '1.' + r.digits + '-' + r.digits)
+                    }}
                   </span>
                 }
                 @case ('changePct') {
@@ -327,7 +346,9 @@
                   }}</span>
                 }
                 @case ('spread') {
-                  <span class="col-num">{{ r.spread === null ? '' : (r.spread | number: '1.1-1') }}</span>
+                  <span class="col-num">{{
+                    r.spread === null ? '' : (r.spread | number: '1.1-1')
+                  }}</span>
                 }
                 @case ('dayRange') {
                   <span class="col-num">{{
@@ -360,17 +381,27 @@
                   >
                 }
                 @case ('news') {
-                  <span class="col-num" [class.up]="(r.news ?? 0) > 0" [class.down]="(r.news ?? 0) < 0">{{
-                    r.news === null ? '' : (r.news > 0 ? '+' : '') + (r.news | number: '1.2-2')
-                  }}</span>
+                  <span
+                    class="col-num"
+                    [class.up]="(r.news ?? 0) > 0"
+                    [class.down]="(r.news ?? 0) < 0"
+                    >{{
+                      r.news === null ? '' : (r.news > 0 ? '+' : '') + (r.news | number: '1.2-2')
+                    }}</span
+                  >
                 }
                 @case ('pnl') {
-                  <span class="col-num" [class.up]="(r.pnl ?? 0) > 0" [class.down]="(r.pnl ?? 0) < 0">{{
-                    r.pnl === null ? '' : (r.pnl | number: '1.2-2')
-                  }}</span>
+                  <span
+                    class="col-num"
+                    [class.up]="(r.pnl ?? 0) > 0"
+                    [class.down]="(r.pnl ?? 0) < 0"
+                    >{{ r.pnl === null ? '' : (r.pnl | number: '1.2-2') }}</span
+                  >
                 }
                 @case ('session') {
-                  <span class="col-num wl-session" [class.home]="r.homeSession">{{ r.session }}</span>
+                  <span class="col-num wl-session" [class.home]="r.homeSession">{{
+                    r.session
+                  }}</span>
                 }
                 @case ('sparkline') {
                   <span class="col-num wl-spark">
@@ -457,7 +488,12 @@
 }
 
 @if (alertFor(); as a) {
-  <dialog #alertDialog class="wl-alert-dialog" (close)="alertFor.set(null)" (click)="$event.stopPropagation()">
+  <dialog
+    #alertDialog
+    class="wl-alert-dialog"
+    (close)="alertFor.set(null)"
+    (click)="$event.stopPropagation()"
+  >
     <app-chart-alert-form
       [symbol]="a.symbol"
       [timeframe]="timeframe() || '60'"
@@ -478,18 +514,29 @@
   <div class="wl-d-head">
     @if (pairFlags(d.symbol)) {
       <app-pair-icon [symbol]="d.symbol" [big]="true" />
+    } @else if (nonFx(d.symbol)) {
+      <app-instrument-icon [symbol]="d.symbol" [big]="true" />
     } @else {
-      <span class="wl-badge big" [attr.data-ccy]="d.symbol.slice(0, 3)">{{ d.symbol.slice(0, 1) }}</span>
+      <span class="wl-badge big" [attr.data-ccy]="d.symbol.slice(0, 3)">{{
+        d.symbol.slice(0, 1)
+      }}</span>
     }
     <strong>{{ d.symbol }}</strong>
   </div>
-  <div class="wl-d-name" data-testid="watchlist-detail-kind">{{ d.name }}<span class="muted"> · {{ d.kind }}</span></div>
+  <div class="wl-d-name" data-testid="watchlist-detail-kind">
+    {{ d.name }}<span class="muted"> · {{ d.kind }}</span>
+  </div>
   <div class="wl-d-price">
     <span class="wl-d-last" [class.up]="dt?.dir === 'up'" [class.down]="dt?.dir === 'down'"
-      >{{ dp.head }}<span class="wl-chg">{{ dp.changed }}</span><sup [class.wl-chg]="dp.pipChanged">{{ dp.pip }}</sup></span
+      >{{ dp.head }}<span class="wl-chg">{{ dp.changed }}</span
+      ><sup [class.wl-chg]="dp.pipChanged">{{ dp.pip }}</sup></span
     >
     <span class="muted wl-d-ccy">{{ d.quote }}</span>
-    <span class="wl-d-change" [class.up]="(d.row.change ?? 0) > 0" [class.down]="(d.row.change ?? 0) < 0">
+    <span
+      class="wl-d-change"
+      [class.up]="(d.row.change ?? 0) > 0"
+      [class.down]="(d.row.change ?? 0) < 0"
+    >
       @if (d.row.change !== null) {
         {{
           (d.row.change > 0 ? '+' : '') +
@@ -505,7 +552,11 @@
     @if (d.asOf) {
       <span
         class="muted"
-        [title]="d.tradingDay ? 'Day figures are for the trading day ' + d.tradingDay + ' (17:00 New York for FX)' : ''"
+        [title]="
+          d.tradingDay
+            ? 'Day figures are for the trading day ' + d.tradingDay + ' (17:00 New York for FX)'
+            : ''
+        "
         >· Last update at {{ d.asOf }}</span
       >
     } @else if (d.tradingDay) {

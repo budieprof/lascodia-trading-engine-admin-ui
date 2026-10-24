@@ -1,3 +1,4 @@
+import { distanceUnitOf } from '@core/instruments/instrument-math';
 import {
   Component,
   ChangeDetectionStrategy,
@@ -2634,9 +2635,12 @@ const TIME_AXIS = {
   splitLine: { show: false },
 };
 
+/**
+ * One display unit of the symbol, in price — core/instruments (the pip for FX: the engine's rule; a point off FX).
+ * FX values are unchanged except USDNGN, now 0.01 as the engine and broker quote it (golden spec).
+ */
 function pipSizeFor(symbol: string | null): number {
-  if (!symbol) return 0.0001;
-  return symbol.toUpperCase().includes('JPY') ? 0.01 : 0.0001;
+  return distanceUnitOf(symbol);
 }
 
 /** Client-side page a fully-filtered+sorted array into the DataTable's PagedData shape. */

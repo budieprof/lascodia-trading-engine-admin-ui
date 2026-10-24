@@ -1,4 +1,16 @@
 import type { CurrencyPairDto } from '@core/api/api.types';
+import { pineSessionFromCalendar } from '@core/instruments/calendar-session';
+import {
+  assetClassFromEngine,
+  fxPipSize,
+  instrumentFromCurrencyPair,
+  normaliseDecimals,
+} from '@core/instruments/instrument-math';
+import type {
+  InstrumentAssetClass,
+  InstrumentDto,
+  TradingCalendarDto,
+} from '@core/instruments/instrument.types';
 import { SUPPORTED_RESOLUTIONS } from './resolution';
 
 /**
@@ -14,9 +26,10 @@ export interface LascodiaSymbolInfo {
   name: string;
   ticker: string;
   description: string;
-  type: 'forex';
+  type: LibrarySymbolType;
   session: string;
-  timezone: 'Etc/UTC';
+  /** IANA zone of `session` (`Etc/UTC` for FX, as always). */
+  timezone: string;
   exchange: string;
   listed_exchange: string;
   format: 'price';
@@ -28,6 +41,26 @@ export interface LascodiaSymbolInfo {
   volume_precision: number;
   data_status: 'streaming';
 }
+
+/** TradingView's `LibrarySymbolInfo.type` values the console uses. */
+export type LibrarySymbolType =
+  | 'forex'
+  | 'futures'
+  | 'crypto'
+  | 'stock'
+  | 'index'
+  | 'commodity'
+  | 'fund';
+
+const LIBRARY_TYPE: Record<InstrumentAssetClass, LibrarySymbolType> = {
+  Fx: 'forex',
+  Future: 'futures',
+  Crypto: 'crypto',
+  Equity: 'stock',
+  Etf: 'fund',
+  Index: 'index',
+  Commodity: 'commodity',
+};
 
 /**
  * FX trades continuously from Sunday's open to Friday's close, so the session is
@@ -65,11 +98,10 @@ export function priceScaleFor(decimalPlaces: number): number {
  * crypto) a pip is the point. An unknown asset class counts as FX, as the engine counts it.
  */
 export function pipSizeFor(decimalPlaces: number, assetClass?: string | null): number {
-  const digits =
-    Number.isFinite(decimalPlaces) && decimalPlaces >= 0 ? Math.trunc(decimalPlaces) : 5;
-  const point = 10 ** -digits;
-  const fx = !assetClass || /^fx/i.test(assetClass) || assetClass === 'Unknown';
-  return fx && digits >= 3 && digits % 2 === 1 ? point * 10 : point;
+  // One rule book (core/instruments): FX → the FX pip, anything else → the point.
+  return assetClassFromEngine(assetClass) === 'Fx'
+    ? fxPipSize(decimalPlaces)
+    : 10 ** -normaliseDecimals(decimalPlaces);
 }
 
 /**
@@ -95,23 +127,43 @@ export function rankSymbols<T extends { symbol: string | null }>(
   return [...exact, ...prefix, ...contains];
 }
 
-export function toSymbolInfo(pair: CurrencyPairDto): LascodiaSymbolInfo {
-  const symbol = pair.symbol ?? '';
+/**
+ * The library's symbol info for an instrument (or today's currency pair, read as its FX instrument), its session from
+ * the instrument's trading calendar when one is given.
+ *
+ * FX is unchanged: an `fx-24x5` instrument keeps the library's UTC weekday session ({@link FOREX_SESSION} in `Etc/UTC`)
+ * the chart has always declared — the calendar's own form (`1700-1700:23456` New York) is what the day-based studies
+ * use (`session-calendar.ts`), but moving the library's bar boundaries is not part of this change. Without a calendar a
+ * non-FX instrument is declared 24×7 in UTC (a closed market then shows as missing bars, never as a shifted axis).
+ */
+export function toSymbolInfo(
+  source: CurrencyPairDto | InstrumentDto,
+  calendar?: TradingCalendarDto | null,
+): LascodiaSymbolInfo {
+  const inst: InstrumentDto = 'tickSize' in source ? source : instrumentFromCurrencyPair(source);
+  const symbol = inst.symbol;
   const description =
-    pair.baseCurrency && pair.quoteCurrency ? `${pair.baseCurrency}/${pair.quoteCurrency}` : symbol;
+    inst.baseCurrency && inst.quoteCurrency
+      ? `${inst.baseCurrency}/${inst.quoteCurrency}`
+      : inst.description || symbol;
+  const fx24x5 = inst.assetClass === 'Fx' && (inst.tradingCalendarCode ?? 'fx-24x5') === 'fx-24x5';
+  const fromCalendar = fx24x5 ? null : pineSessionFromCalendar(calendar);
+  const exchange = inst.exchange || 'Lascodia';
+  const pricescale = priceScaleFor(inst.priceDecimals);
 
   return {
     name: symbol,
     ticker: symbol,
     description,
-    type: 'forex',
-    session: FOREX_SESSION,
-    timezone: 'Etc/UTC',
-    exchange: 'Lascodia',
-    listed_exchange: 'Lascodia',
+    type: LIBRARY_TYPE[inst.assetClass] ?? 'forex',
+    session: fromCalendar?.session ?? (fx24x5 || inst.assetClass === 'Fx' ? FOREX_SESSION : '24x7'),
+    timezone: fromCalendar?.timeZone ?? 'Etc/UTC',
+    exchange,
+    listed_exchange: exchange,
     format: 'price',
-    minmov: 1,
-    pricescale: priceScaleFor(pair.decimalPlaces),
+    // The tick in price-scale steps: 1 for FX (tick = point), 25 for a 0.25-tick future at 2 decimals.
+    minmov: Math.max(1, Math.round((inst.tickSize || 0) * pricescale)),
+    pricescale,
     has_intraday: true,
     has_weekly_and_monthly: true,
     supported_resolutions: SUPPORTED_RESOLUTIONS,

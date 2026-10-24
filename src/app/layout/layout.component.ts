@@ -28,6 +28,7 @@ import { StepUpBannerComponent } from '@core/auth/step-up-banner.component';
 import { ImpersonationBannerComponent } from './impersonation-banner.component';
 import { ShowcaseBannerComponent } from '@features/demo/showcase-banner.component';
 import { TenantBrandingService } from '@core/branding/tenant-branding.service';
+import { InstrumentsService } from '@core/instruments/instruments.service';
 import { OnboardingLandingService } from '@features/onboarding/onboarding-landing.service';
 
 @Component({
@@ -248,6 +249,9 @@ export class LayoutComponent {
     void branding.start();
     inject(DestroyRef).onDestroy(() => branding.clear());
     void inject(OnboardingLandingService).maybeLand();
+    // The instrument catalogue (multi-asset WS7): every pip / price / quantity helper resolves through it. Silent; in
+    // front of an engine without `instruments` it is derived from the currency pairs (FX values unchanged).
+    void inject(InstrumentsService).load();
 
     // Close the mobile drawer on any navigation.
     this.router.events

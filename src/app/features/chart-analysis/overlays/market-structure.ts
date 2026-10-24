@@ -85,11 +85,20 @@ export interface StructureOptions {
   climaxMult?: number;
   /** How far beyond the range stops are assumed to rest, in ATR. */
   poolAtr?: number;
+  /** The instrument's pip / display unit in price (core/instruments); absent = guessed from the price. */
+  pipSize?: number | null;
+  /** Its unit's name for the labels (`pips` by default; `points` / `ticks` off FX). */
+  unitLabel?: string | null;
 }
 
-/** Pip size for the label — 0.0001 on most pairs, 0.01 on JPY crosses. */
-function pipSize(price: number): number {
-  return price < 20 ? 0.0001 : 0.01;
+/**
+ * Pip size for the label: the instrument's (`opts.pipSize`, from core/instruments — the chart passes it), else the old
+ * guess from the price (0.0001 below 20, else 0.01), which equals it for every live FX pair.
+ */
+const UNIT_SHORT: Record<string, string> = { pips: 'p', points: 'pt', ticks: 't' };
+
+function pipSize(price: number, instrumentPip?: number | null): number {
+  return instrumentPip && instrumentPip > 0 ? instrumentPip : price < 20 ? 0.0001 : 0.01;
 }
 
 /**
@@ -176,12 +185,12 @@ export function marketStructure(
   let summary: string | null = null;
   if (balance) {
     const span = balance.high - balance.low;
-    const pips = Math.round(span / pipSize(balance.high));
+    const pips = Math.round(span / pipSize(balance.high, opts.pipSize));
     const count = bars.length - balance.fromIndex;
     zones.push({
       from: balance.low,
       to: balance.high,
-      label: `Balance — ${pips} pips, ${count} bars`,
+      label: `Balance — ${pips} ${opts.unitLabel || 'pips'}, ${count} bars`,
       kind: 'balance',
     });
     levels.push(
@@ -198,7 +207,7 @@ export function marketStructure(
     );
 
     summary =
-      `Balancing ${pips} pips over ${count} bars, ` +
+      `Balancing ${pips} ${opts.unitLabel || 'pips'} over ${count} bars, ` +
       `${balance.low.toFixed(5)}–${balance.high.toFixed(5)}.`;
 
     // A spring undercuts the range low and closes back inside; an upthrust is the mirror.
@@ -254,11 +263,11 @@ export function marketStructure(
     if (meanRange === null || meanVolume === null || meanRange <= 0 || meanVolume <= 0) continue;
     if (ranges[i] > meanRange * mult && volumes[i] > meanVolume * mult) {
       const down = bars[i].close < bars[i].open;
-      const pips = Math.round(ranges[i] / pipSize(bars[i].high));
+      const pips = Math.round(ranges[i] / pipSize(bars[i].high, opts.pipSize));
       markers.push({
         time: bars[i].time,
         price: down ? bars[i].low : bars[i].high,
-        label: `${down ? 'Selling' : 'Buying'} climax — ${pips}p, ${Math.round(volumes[i] / 1000)}k vol`,
+        label: `${down ? 'Selling' : 'Buying'} climax — ${pips}${UNIT_SHORT[opts.unitLabel || 'pips'] ?? 'p'}, ${Math.round(volumes[i] / 1000)}k vol`,
         kind: 'climax',
       });
     }
@@ -273,7 +282,7 @@ export function marketStructure(
   const basis: StructureBasis = {
     bars: bars.length,
     atr: atrValue,
-    pip: pipSize(bars[bars.length - 1].close),
+    pip: pipSize(bars[bars.length - 1].close, opts.pipSize),
     balanceAtr,
     minBalanceBars,
     poolAtr,
