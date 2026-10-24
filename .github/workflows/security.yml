@@ -85,7 +85,7 @@ jobs:
       - name: Upload SARIF to code scanning (needs Advanced Security on private repos)
         if: always()
         continue-on-error: true
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: out/semgrep.sarif
           category: semgrep
