@@ -36,6 +36,7 @@ export const FEATURE_NOUNS: Readonly<Record<string, string>> = {
   sso: 'single sign-on',
   scim: 'SCIM provisioning',
   personalAccessTokens: 'personal access tokens',
+  propModule: 'the prop-firm module',
 };
 
 type Envelope = { responseCode?: unknown; message?: unknown; data?: unknown };

@@ -631,6 +631,46 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'prop.manage',
+    category: 'Prop firm',
+    description:
+      'Create and version prop programs, manage traders, enrol accounts, withdraw and advance enrolments, and prepare payout statements.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'prop.payouts.approve',
+    category: 'Prop firm',
+    description:
+      'Approve or reject prepared payout statements (never one you prepared yourself while the platform requires a second person). Statements move no money. Needs a fresh MFA sign-in.',
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'prop.read',
+    category: 'Prop firm',
+    description:
+      "See the organisation's prop programs, traders, enrolments, every trader's dashboard, the live breach feed, the leaderboard and payout statements (and export them).",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'prop.self',
+    category: 'Prop firm',
+    description:
+      'See your own prop challenge dashboard: the enrolments of the trading account you signed in with, or of the trader linked to your user.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'risk.loosen',
     category: 'Risk',
     description:
@@ -860,6 +900,10 @@ export const Permission = {
   PrompttemplateEdit: 'prompttemplate.edit',
   PrompttemplatePromote: 'prompttemplate.promote',
   PrompttemplateView: 'prompttemplate.view',
+  PropManage: 'prop.manage',
+  PropPayoutsApprove: 'prop.payouts.approve',
+  PropRead: 'prop.read',
+  PropSelf: 'prop.self',
   RiskLoosen: 'risk.loosen',
   RiskManage: 'risk.manage',
   RiskRead: 'risk.read',
