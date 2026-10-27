@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1024,
+  "endpointCount": 1025,
   "groups": [
     {
       "name": "Admin auth",
@@ -12878,6 +12878,16 @@
           "parameters": [],
           "body": "CreateMarginRequirementCommand",
           "response": "ResponseData<MarginRequirementDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/reference/margin-requirements/import",
+          "summary": "Imports margin requirement rows from a CSV file (`MarginRequirementCsv` layout): all or nothing, insert-only (an existing kind/symbol/venue/start/floor is left as it is), `dryRun` validates without writing. One audit record per import.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [],
+          "body": "ImportMarginRequirementsCommand",
+          "response": "ResponseData<MarginRequirementImportResult>"
         },
         {
           "method": "DELETE",
