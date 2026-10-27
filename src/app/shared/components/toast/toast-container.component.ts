@@ -1,10 +1,12 @@
 import { Component, inject, ChangeDetectionStrategy } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { NotificationService } from '@core/notifications/notification.service';
 
 @Component({
   selector: 'app-toast-container',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterLink],
   template: `
     <div class="toast-container">
       @for (toast of notifications.toasts(); track toast.id) {
@@ -20,7 +22,17 @@ import { NotificationService } from '@core/notifications/notification.service';
           <div class="toast-accent"></div>
           <div class="toast-content">
             <div class="toast-icon">{{ getIcon(toast.type) }}</div>
-            <p class="toast-message">{{ toast.message }}</p>
+            <p class="toast-message">
+              {{ toast.message }}
+              @if (toast.link; as l) {
+                <a
+                  class="toast-link"
+                  [routerLink]="l.route"
+                  (click)="notifications.dismiss(toast.id); $event.stopPropagation()"
+                  >{{ l.label }}</a
+                >
+              }
+            </p>
             <button
               class="toast-close"
               (click)="notifications.dismiss(toast.id); $event.stopPropagation()"
@@ -98,6 +110,13 @@ import { NotificationService } from '@core/notifications/notification.service';
         margin: 0;
         flex: 1;
         line-height: 1.4;
+      }
+
+      .toast-link {
+        margin-left: var(--space-1);
+        color: var(--accent);
+        text-decoration: underline;
+        white-space: nowrap;
       }
 
       .toast-close {

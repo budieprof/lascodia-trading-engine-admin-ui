@@ -157,6 +157,27 @@ export interface VenueTicketPreviewRequest {
   takeProfitTicks?: number | null;
 }
 
+/**
+ * `POST trade-signal/venue-ticket` (engine exec-polish, `SubmitVenueTicketCommand`): the preview body with the venue
+ * execution account REQUIRED. `leverage` / `marginMode` are accepted for shape parity but preview-only (the dispatcher
+ * applies the account's `Risk:MultiAsset:Crypto:*`).
+ */
+export interface VenueTicketSendRequest extends Omit<
+  VenueTicketPreviewRequest,
+  'executionAccountId' | 'tradingAccountId'
+> {
+  executionAccountId: number;
+}
+
+/** `VenueTicketResultDto`: `-11` refused (reason in `message`), `-14` account not found, `00` placed. */
+export interface VenueTicketResult {
+  placed: boolean;
+  message: string;
+  tradeSignalId: number | null;
+  manualStrategyId: number | null;
+  preview: VenueTicketPreview | null;
+}
+
 export interface VenueTicketCheck {
   name: string;
   ok: boolean;
