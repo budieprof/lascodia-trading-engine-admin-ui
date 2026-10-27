@@ -50,8 +50,20 @@ interface Editing {
         title="Fee schedules"
         subtitle="Futures, crypto and equity fees the cost models and the venue ticket use — FX / CFD costs stay the broker's."
       >
-        <button *lscCan="'platform.data.manage'" type="button" class="btn btn-secondary" (click)="startCreate()">Add a row</button>
-        <button type="button" class="btn btn-secondary" (click)="rows.reload()" [disabled]="rows.loading()">
+        <button
+          *lscCan="'platform.data.manage'"
+          type="button"
+          class="btn btn-secondary"
+          (click)="startCreate()"
+        >
+          Add a row
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="rows.reload()"
+          [disabled]="rows.loading()"
+        >
           {{ rows.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -60,7 +72,12 @@ interface Editing {
         <div class="card-body row">
           <label class="field">
             <span class="label">Asset class</span>
-            <select class="select" name="f-ac" [ngModel]="filterClass()" (ngModelChange)="filterClass.set($event); rows.reload()">
+            <select
+              class="select"
+              name="f-ac"
+              [ngModel]="filterClass()"
+              (ngModelChange)="filterClass.set($event); rows.reload()"
+            >
               <option value="">All</option>
               @for (c of classes; track c) {
                 <option [value]="c">{{ c }}</option>
@@ -69,10 +86,21 @@ interface Editing {
           </label>
           <label class="field">
             <span class="label">Search (code, scope, notes)</span>
-            <input class="input search" name="f-q" [ngModel]="search()" (ngModelChange)="search.set($event)" (keydown.enter)="rows.reload()" />
+            <input
+              class="input search"
+              name="f-q"
+              [ngModel]="search()"
+              (ngModelChange)="search.set($event)"
+              (keydown.enter)="rows.reload()"
+            />
           </label>
           <label class="check">
-            <input type="checkbox" name="f-del" [ngModel]="includeDeleted()" (ngModelChange)="includeDeleted.set($event); rows.reload()" />
+            <input
+              type="checkbox"
+              name="f-del"
+              [ngModel]="includeDeleted()"
+              (ngModelChange)="includeDeleted.set($event); rows.reload()"
+            />
             Show deleted
           </label>
         </div>
@@ -80,16 +108,29 @@ interface Editing {
 
       @if (editing(); as e) {
         <section class="card" aria-label="Fee schedule row">
-          <header class="card-head"><h3>{{ e.id ? 'Edit ' + e.fields.code : 'New fee schedule row' }}</h3></header>
+          <header class="card-head">
+            <h3>{{ e.id ? 'Edit ' + e.fields.code : 'New fee schedule row' }}</h3>
+          </header>
           <form class="card-body" (ngSubmit)="save()">
             <div class="form-grid">
               <label class="field">
                 <span class="label">Code (e.g. cme:ES, binance:perp)</span>
-                <input class="input" name="e-code" maxlength="64" [(ngModel)]="e.fields.code" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  name="e-code"
+                  maxlength="64"
+                  [(ngModel)]="e.fields.code"
+                  (ngModelChange)="touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Asset class</span>
-                <select class="select" name="e-ac" [(ngModel)]="e.fields.assetClass" (ngModelChange)="touch()">
+                <select
+                  class="select"
+                  name="e-ac"
+                  [(ngModel)]="e.fields.assetClass"
+                  (ngModelChange)="touch()"
+                >
                   @for (c of classes; track c) {
                     <option [value]="c">{{ c }}</option>
                   }
@@ -97,37 +138,86 @@ interface Editing {
               </label>
               <label class="field">
                 <span class="label">Venue (cme, binance, us-equities…)</span>
-                <input class="input" name="e-venue" maxlength="32" [(ngModel)]="e.fields.venue" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  name="e-venue"
+                  maxlength="32"
+                  [(ngModel)]="e.fields.venue"
+                  (ngModelChange)="touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Scope (root, spot / perp, or empty = venue default)</span>
-                <input class="input" name="e-scope" maxlength="32" [ngModel]="e.fields.scope ?? ''" (ngModelChange)="e.fields.scope = $event || null; touch()" />
+                <input
+                  class="input"
+                  name="e-scope"
+                  maxlength="32"
+                  [ngModel]="e.fields.scope ?? ''"
+                  (ngModelChange)="e.fields.scope = $event || null; touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Currency</span>
-                <input class="input" name="e-ccy" maxlength="8" [(ngModel)]="e.fields.currency" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  name="e-ccy"
+                  maxlength="8"
+                  [(ngModel)]="e.fields.currency"
+                  (ngModelChange)="touch()"
+                />
               </label>
               @for (k of numericFields(); track k) {
                 <label class="field">
                   <span class="label">{{ labels[k] }}</span>
-                  <input class="input" type="number" step="any" [name]="'e-' + k" [ngModel]="num(e.fields, k)" (ngModelChange)="setNum(k, $event)" />
+                  <input
+                    class="input"
+                    type="number"
+                    step="any"
+                    [name]="'e-' + k"
+                    [ngModel]="num(e.fields, k)"
+                    (ngModelChange)="setNum(k, $event)"
+                  />
                 </label>
               }
               <label class="field">
                 <span class="label">In force from (UTC date)</span>
-                <input class="input" type="date" name="e-from" [(ngModel)]="e.from" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  type="date"
+                  name="e-from"
+                  [(ngModel)]="e.from"
+                  (ngModelChange)="touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Until (exclusive, empty = still in force)</span>
-                <input class="input" type="date" name="e-to" [(ngModel)]="e.to" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  type="date"
+                  name="e-to"
+                  [(ngModel)]="e.to"
+                  (ngModelChange)="touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Source (URL and date read, or operator)</span>
-                <input class="input" name="e-src" maxlength="500" [(ngModel)]="e.fields.source" (ngModelChange)="touch()" />
+                <input
+                  class="input"
+                  name="e-src"
+                  maxlength="500"
+                  [(ngModel)]="e.fields.source"
+                  (ngModelChange)="touch()"
+                />
               </label>
               <label class="field">
                 <span class="label">Notes</span>
-                <input class="input" name="e-notes" maxlength="1000" [ngModel]="e.fields.notes ?? ''" (ngModelChange)="e.fields.notes = $event || null" />
+                <input
+                  class="input"
+                  name="e-notes"
+                  maxlength="1000"
+                  [ngModel]="e.fields.notes ?? ''"
+                  (ngModelChange)="e.fields.notes = $event || null"
+                />
               </label>
               <label class="field">
                 <span class="label">Reason (audit log)</span>
@@ -138,12 +228,26 @@ interface Editing {
               <p class="note warn">{{ p }}</p>
             }
             <p class="note">
-              A changed fee changes the cost-model key of every symbol it prices: backtests priced with the old row stop
-              counting as promotion evidence (they are re-run), as for any cost-model change.
+              A changed fee changes the cost-model key of every symbol it prices: backtests priced
+              with the old row stop counting as promotion evidence (they are re-run), as for any
+              cost-model change.
             </p>
             <div class="actions-row">
-              <button type="button" class="btn btn-secondary" data-autofocus (click)="editing.set(null)">Cancel</button>
-              <button type="submit" class="btn btn-primary" [disabled]="busy() || problems().length > 0">{{ busy() ? 'Saving…' : 'Save' }}</button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-autofocus
+                (click)="editing.set(null)"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary"
+                [disabled]="busy() || problems().length > 0"
+              >
+                {{ busy() ? 'Saving…' : 'Save' }}
+              </button>
             </div>
           </form>
         </section>
@@ -168,23 +272,51 @@ interface Editing {
             <tbody>
               @for (f of shown(); track f.id) {
                 <tr [class.muted]="f.isDeleted">
-                  <td><code>{{ f.code }}</code><span class="sub">{{ f.notes }}</span></td>
-                  <td class="small">{{ f.assetClass }} · {{ f.venue }}{{ f.scope ? ' · ' + f.scope : '' }}</td>
+                  <td>
+                    <code style="white-space: nowrap">{{ f.code }}</code
+                    ><span class="sub">{{ f.notes }}</span>
+                  </td>
+                  <td class="small">
+                    {{ f.assetClass }} · {{ f.venue }}{{ f.scope ? ' · ' + f.scope : '' }}
+                  </td>
                   <td class="small">{{ summary(f) }}</td>
                   <td class="small">
-                    <span class="chip" [class.ok]="f.inForce" [class.bad]="f.isDeleted">{{ f.isDeleted ? 'deleted' : f.inForce ? 'yes' : 'no' }}</span>
-                    <span class="sub">{{ f.effectiveFromUtc.slice(0, 10) }} → {{ f.effectiveToUtc ? f.effectiveToUtc.slice(0, 10) : '…' }}</span>
+                    <span class="chip" [class.ok]="f.inForce" [class.bad]="f.isDeleted">{{
+                      f.isDeleted ? 'deleted' : f.inForce ? 'yes' : 'no'
+                    }}</span>
+                    <span class="sub"
+                      >{{ f.effectiveFromUtc.slice(0, 10) }} →
+                      {{ f.effectiveToUtc ? f.effectiveToUtc.slice(0, 10) : '…' }}</span
+                    >
                   </td>
-                  <td class="small">{{ f.source }}<span class="sub">{{ when(f.updatedAtUtc) }}</span></td>
+                  <td class="small">
+                    {{ f.source }}<span class="sub">{{ when(f.updatedAtUtc) }}</span>
+                  </td>
                   <td class="actions">
                     @if (!f.isDeleted) {
-                      <button *lscCan="'platform.data.manage'" type="button" class="btn btn-sm btn-secondary" (click)="startEdit(f)">Edit</button>
-                      <button *lscCan="'platform.data.manage'" type="button" class="btn btn-sm btn-danger" (click)="deleting.set({ row: f, reason: '' })">Delete</button>
+                      <button
+                        *lscCan="'platform.data.manage'"
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        (click)="startEdit(f)"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        *lscCan="'platform.data.manage'"
+                        type="button"
+                        class="btn btn-sm btn-danger"
+                        (click)="deleting.set({ row: f, reason: '' })"
+                      >
+                        Delete
+                      </button>
                     }
                   </td>
                 </tr>
               } @empty {
-                <tr><td colspan="6" class="muted">No fee schedule rows.</td></tr>
+                <tr>
+                  <td colspan="6" class="muted">No fee schedule rows.</td>
+                </tr>
               }
             </tbody>
           </table>
@@ -217,14 +349,22 @@ export class FeeSchedulesPageComponent {
   readonly search = signal('');
   readonly includeDeleted = signal(false);
   readonly rows = iamResource<FeeSchedule[]>(
-    () => this.api.feeSchedules({ assetClass: this.filterClass() || undefined, includeDeleted: this.includeDeleted() }),
+    () =>
+      this.api.feeSchedules({
+        assetClass: this.filterClass() || undefined,
+        includeDeleted: this.includeDeleted(),
+      }),
     [],
     'Could not load the fee schedules.',
   );
   readonly shown = computed(() => {
     const q = this.search().trim().toLowerCase();
     return q
-      ? this.rows.value().filter((f) => `${f.code} ${f.scope ?? ''} ${f.notes ?? ''} ${f.venue}`.toLowerCase().includes(q))
+      ? this.rows
+          .value()
+          .filter((f) =>
+            `${f.code} ${f.scope ?? ''} ${f.notes ?? ''} ${f.venue}`.toLowerCase().includes(q),
+          )
       : this.rows.value();
   });
   readonly editing = signal<Editing | null>(null);
@@ -267,13 +407,20 @@ export class FeeSchedulesPageComponent {
   setNum(k: keyof FeeScheduleFields, v: number | string | null): void {
     const e = this.editing();
     if (!e) return;
-    (e.fields as unknown as Record<string, number | null>)[k] = v === null || v === '' ? null : Number(v);
+    (e.fields as unknown as Record<string, number | null>)[k] =
+      v === null || v === '' ? null : Number(v);
     this.touch();
   }
 
   startCreate(): void {
     const fields = emptyFee('Future');
-    this.editing.set({ id: null, fields, from: dateOnly(fields.effectiveFromUtc), to: '', reason: '' });
+    this.editing.set({
+      id: null,
+      fields,
+      from: dateOnly(fields.effectiveFromUtc),
+      to: '',
+      reason: '',
+    });
   }
 
   startEdit(f: FeeSchedule): void {
@@ -282,11 +429,21 @@ export class FeeSchedulesPageComponent {
     void updatedAtUtc;
     void isDeleted;
     void inForce;
-    this.editing.set({ id, fields: { ...fields }, from: dateOnly(f.effectiveFromUtc), to: dateOnly(f.effectiveToUtc), reason: '' });
+    this.editing.set({
+      id,
+      fields: { ...fields },
+      from: dateOnly(f.effectiveFromUtc),
+      to: dateOnly(f.effectiveToUtc),
+      reason: '',
+    });
   }
 
   private fieldsOf(e: Editing): FeeScheduleFields {
-    return { ...e.fields, effectiveFromUtc: isoMidnight(e.from) ?? e.fields.effectiveFromUtc, effectiveToUtc: e.to ? isoMidnight(e.to) : null };
+    return {
+      ...e.fields,
+      effectiveFromUtc: isoMidnight(e.from) ?? e.fields.effectiveFromUtc,
+      effectiveToUtc: e.to ? isoMidnight(e.to) : null,
+    };
   }
 
   save(): void {
