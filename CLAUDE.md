@@ -323,8 +323,15 @@ localhost rather than a blank page.
   `venues.logic.spec.ts`, `trading/chart-trading-venue.component.spec.ts`). Exchange-traded symbols get
   `app-venue-order-ticket` (quantity in the instrument's unit on its step, price on its tick grid, TIF, post-only /
   reduce-only, leverage + margin mode for crypto derivatives, bracket in ticks; the engine's dry run
-  `execution-console/ticket/preview` shows margin / liquidation / risk / fees — **it sends no order**: venue entries
-  are the engine's signal path), the DOM ladder on the instrument's tick whose clicks open that ticket prefilled
+  `execution-console/ticket/preview` shows margin / liquidation / risk / fees). **Send** (ticket-send) posts
+  `trade-signal/venue-ticket` (`access.trader`; body = the preview request + required `executionAccountId`) only after a
+  confirm step (order as sent + four-eyes notice); the picker offers the venue (non-`mt5-ea`) execution accounts of the
+  chosen trading account; the button is disabled with the engine's own sentence while `Execution:Router/Entries`
+  (from `execution-console/health`) or `Risk:MultiAsset` (the preview's `multiAssetRiskEnabled`) is off, and while the
+  shown preview is not the dry run of the CURRENT ticket (`previewKey`). Decisions in `trading/venue-ticket-send.ts`;
+  a `-202-approval` answer is pending, not failed; a placed ticket toasts a link to `/trade-signals/{id}`
+  (`NotificationService.success(msg, { label, route })`). The engine still makes the placement (manual signal → Tier 1 →
+  venue entry path); the ticket never talks to a venue. The DOM ladder on the instrument's tick whose clicks open that ticket prefilled
   (`VenueTicketBus`; no one-click / OCO there) and the rail's **Fundamentals** panel (term structure, funding / OI /
   basis, dividends). Pages: `/connections` (execution accounts; credentials WRITE-ONLY — the form is dropped as it is
   sent, only the fingerprint is shown, the withdrawal-rights refusal in the engine's words; `accounts.read` / `.manage`
@@ -333,7 +340,8 @@ localhost rather than a blank page.
   Prop program editor: presets FX (default, unchanged) / futures (contracts) / crypto (coins) in `prop/prop-presets.ts`.
   Exec-gateway DTO enums arrive as numbers: read them through `orderTypeName` / `tifName` / `driftKindName`.
   Write-blocked check on a stubbed local build: `node tools/visual-review/venue-console-check.js` (nothing leaves the
-  browser; every non-GET except two read-POSTs is aborted).
+  browser; every non-GET except two read-POSTs is aborted); the Send path: `node tools/visual-review/venue-ticket-send-check.js`
+  (the Send click is asserted from the intercepted, ABORTED `POST trade-signal/venue-ticket` — exits 1 unless it passes).
 
 ## Verifying in a browser
 

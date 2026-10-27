@@ -7,7 +7,10 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import type { CurrencyPairDto } from '@core/api/api.types';
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
-import { instrumentFromCurrencyPair, setInstrumentCatalogue } from '@core/instruments/instrument-math';
+import {
+  instrumentFromCurrencyPair,
+  setInstrumentCatalogue,
+} from '@core/instruments/instrument-math';
 import type { InstrumentDto } from '@core/instruments/instrument.types';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
@@ -19,7 +22,19 @@ import { VenueOrderTicketComponent } from './venue-order-ticket.component';
 import { VenueTicketBus } from './venue-ticket-bus.service';
 
 declareSignalIo(ChartTradingComponent, {
-  inputs: ['host', 'symbol', 'precision', 'pipSize', 'quote', 'lotStep', 'positions', 'orders', 'accountIds', 'open', 'prefill'],
+  inputs: [
+    'host',
+    'symbol',
+    'precision',
+    'pipSize',
+    'quote',
+    'lotStep',
+    'positions',
+    'orders',
+    'accountIds',
+    'open',
+    'prefill',
+  ],
   outputs: ['submitted', 'changed', 'openChange'],
 });
 declareSignalIo(OrderTicketComponent, {
@@ -27,12 +42,21 @@ declareSignalIo(OrderTicketComponent, {
   outputs: ['closed', 'submitted', 'previewChange'],
 });
 // `state` is a model(): its change event is the model signal itself (the parent binds [(state)]).
-(Output as unknown as (alias?: string) => PropertyDecorator)('stateChange')(OrderTicketComponent.prototype, 'state');
-declareSignalIo(VenueOrderTicketComponent, { inputs: ['instrument', 'quote', 'prefill'], outputs: ['closed'] });
+(Output as unknown as (alias?: string) => PropertyDecorator)('stateChange')(
+  OrderTicketComponent.prototype,
+  'state',
+);
+declareSignalIo(VenueOrderTicketComponent, {
+  inputs: ['instrument', 'quote', 'prefill'],
+  outputs: ['closed'],
+});
 declareSignalIo(ModalA11yDirective, { outputs: ['dismiss'] });
 
 /** The 26 live MT5 symbols (golden fixture, read-only SELECT 2026-10-24), as the engine's instruments endpoint serves them. */
-const LIVE = 'AUDCAD AUDNZD AUDUSD CADJPY DE40 EURAUD EURCAD EURGBP EURJPY EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NAS100 NZDJPY NZDUSD US500 USDCAD USDCHF USDCNH USDJPY USDNGN XAUUSD'.split(' ');
+const LIVE =
+  'AUDCAD AUDNZD AUDUSD CADJPY DE40 EURAUD EURCAD EURGBP EURJPY EURUSD GBPAUD GBPCAD GBPCHF GBPJPY GBPNZD GBPUSD NAS100 NZDJPY NZDUSD US500 USDCAD USDCHF USDCNH USDJPY USDNGN XAUUSD'.split(
+    ' ',
+  );
 
 const ES: InstrumentDto = {
   symbol: 'ESZ6',
@@ -51,7 +75,14 @@ const ES: InstrumentDto = {
   displayDistance: 'Ticks',
   tradingCalendarCode: 'cme-globex',
   status: 'Active',
-  future: { root: 'ES', contractCode: 'ESZ6', expiry: null, lastTradeDate: null, isFront: true, continuousSymbol: 'ES1!' },
+  future: {
+    root: 'ES',
+    contractCode: 'ESZ6',
+    expiry: null,
+    lastTradeDate: null,
+    isFront: true,
+    continuousSymbol: 'ES1!',
+  },
 };
 
 /**
@@ -67,7 +98,14 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
   beforeEach(() => {
     setInstrumentCatalogue([
       ...LIVE.map((symbol, i) => ({
-        ...instrumentFromCurrencyPair({ id: i + 1, symbol, baseCurrency: symbol.slice(0, 3), quoteCurrency: symbol.slice(3), decimalPlaces: 5, contractSize: 100000 } as unknown as CurrencyPairDto),
+        ...instrumentFromCurrencyPair({
+          id: i + 1,
+          symbol,
+          baseCurrency: symbol.slice(0, 3),
+          quoteCurrency: symbol.slice(3),
+          decimalPlaces: 5,
+          contractSize: 100000,
+        } as unknown as CurrencyPairDto),
         future: null,
         crypto: null,
         equity: null,
@@ -89,7 +127,9 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
   });
 
   afterEach(() => {
-    http.match(() => true).forEach((r) => r.flush({ data: [], status: true, message: 'ok', responseCode: '00' }));
+    http
+      .match(() => true)
+      .forEach((r) => r.flush({ data: [], status: true, message: 'ok', responseCode: '00' }));
     fixture.destroy();
     setInstrumentCatalogue([]);
   });
@@ -111,7 +151,9 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
 
   it('an exchange-traded contract gets the venue ticket', () => {
     expect(render('ESZ6')).toEqual({ fx: false, venue: true });
-    expect((fixture.nativeElement as HTMLElement).textContent).toContain('Preview only');
+    expect((fixture.nativeElement as HTMLElement).textContent).toContain(
+      'Send creates a manual signal',
+    );
   });
 
   it('a ladder click on the contract opens the ticket prefilled; a click for another symbol does not', () => {
@@ -125,7 +167,9 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
     fixture.detectChanges();
     fixture.detectChanges();
     expect(fixture.componentInstance.open()).toBe(true);
-    const price = (fixture.nativeElement as HTMLElement).querySelector('input[aria-label="Limit price"]') as HTMLInputElement;
+    const price = (fixture.nativeElement as HTMLElement).querySelector(
+      'input[aria-label="Limit price"]',
+    ) as HTMLInputElement;
     expect(Number(price.value)).toBe(6001);
   });
 });

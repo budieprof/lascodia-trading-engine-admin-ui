@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1023,
+  "endpointCount": 1024,
   "groups": [
     {
       "name": "Admin auth",
@@ -16336,6 +16336,16 @@
           "parameters": [],
           "body": "AnalyzeSignalSensitivityQuery",
           "response": "ResponseData<AnalyzeSignalSensitivityResultDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/trade-signal/venue-ticket",
+          "summary": "Sends an exchange-traded order ticket for a VENUE execution account (exec-polish, multi-asset WS7 7.5) — the body is the `execution-console/ticket/preview` request plus `executionAccountId`. Refused (-11, reason in `message`) unless Execution:Router:Enabled + Execution:Entries:Enabled + Risk:MultiAsset:Enabled are on, the account is an Active venue route and the preview passes. Creates a manual TradeSignal carrying the venue terms; Tier 1, then Tier 2 (Risk:MultiAsset) at the venue entry path, place it. Four-eyes applies at the organisation's notional threshold. MT5 accounts keep `POST trade-signal/manual`.",
+          "access": "permission",
+          "permission": "access.trader",
+          "parameters": [],
+          "body": "SubmitVenueTicketCommand",
+          "response": "ResponseData<VenueTicketResultDto>"
         },
         {
           "method": "POST",
