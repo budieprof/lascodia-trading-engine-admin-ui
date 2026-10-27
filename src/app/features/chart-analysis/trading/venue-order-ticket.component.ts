@@ -4,6 +4,7 @@ import {
   ChangeDetectionStrategy,
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   effect,
   inject,
@@ -11,6 +12,7 @@ import {
   output,
   signal,
   untracked,
+  viewChild,
 } from '@angular/core';
 
 import { RouterLink } from '@angular/router';
@@ -171,7 +173,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
           aria-label="Order type"
         >
           @for (t of orderTypes; track t) {
-            <option [value]="t">{{ t === 'StopLimit' ? 'Stop limit' : t }}</option>
+            <option [value]="t" [selected]="t === state().orderType">
+              {{ t === 'StopLimit' ? 'Stop limit' : t }}
+            </option>
           }
         </select>
         <select
@@ -180,7 +184,7 @@ const PREVIEW_DEBOUNCE_MS = 350;
           aria-label="Time in force"
         >
           @for (t of tifs(); track t) {
-            <option [value]="t">{{ t.toUpperCase() }}</option>
+            <option [value]="t" [selected]="t === state().tif">{{ t.toUpperCase() }}</option>
           }
         </select>
       </div>
@@ -278,8 +282,10 @@ const PREVIEW_DEBOUNCE_MS = 350;
             aria-label="Margin mode"
           >
             <option value="">{{ preview()?.accountMarginMode ?? 'Account' }} (account)</option>
-            <option value="Isolated">Isolated</option>
-            <option value="Cross">Cross</option>
+            <option value="Isolated" [selected]="state().marginMode === 'Isolated'">
+              Isolated
+            </option>
+            <option value="Cross" [selected]="state().marginMode === 'Cross'">Cross</option>
           </select>
         </div>
       }
@@ -396,7 +402,7 @@ const PREVIEW_DEBOUNCE_MS = 350;
 
       <footer class="ticket-foot">
         @if (confirm(); as c) {
-          <div class="ticket-confirm" data-testid="venue-ticket-confirm-step">
+          <div class="ticket-confirm" data-testid="venue-ticket-confirm-step" #confirmStep>
             <strong>Send this order?</strong>
             <dl class="ticket-facts">
               @for (l of c.lines; track l.label) {
@@ -690,6 +696,7 @@ export class VenueOrderTicketComponent {
     seq: number;
   } | null>(null);
   readonly closed = output<void>();
+  private readonly confirmStep = viewChild<ElementRef<HTMLElement>>('confirmStep');
 
   protected readonly orderTypes: VenueOrderType[] = ['Market', 'Limit', 'Stop', 'StopLimit'];
 
@@ -744,19 +751,29 @@ export class VenueOrderTicketComponent {
   readonly selectedAccount = computed(
     () => this.venueAccounts().find((a) => a.id === this.state().executionAccountId) ?? null,
   );
+  /** The ticket as the engine would receive it; a preview counts only for the key it was computed for. */
+  private readonly ticketKey = computed(() =>
+    JSON.stringify(previewRequestOf(this.instrument().symbol, this.state())),
+  );
+  private readonly previewKey = signal<string | null>(null);
+  /** The dry run of THIS ticket (never a stale one of an earlier edit, shown while the new one loads). */
+  private readonly currentPreview = computed(() =>
+    this.previewKey() === this.ticketKey() ? this.preview() : null,
+  );
   readonly blockedReason = computed(() =>
     sendBlockedReason({
       canSend: this.canSend(),
       off: switchesOff(this.switches(), this.preview()?.multiAssetRiskEnabled ?? null),
       account: this.selectedAccount(),
       problems: this.problems(),
-      preview: this.preview(),
-      loading: this.loading(),
+      preview: this.currentPreview(),
+      loading:
+        this.loading() || (this.previewKey() !== this.ticketKey() && this.previewError() === null),
       submitting: this.submitting(),
     }),
   );
   readonly confirm = computed(() => {
-    const pv = this.preview();
+    const pv = this.currentPreview();
     const acct = this.selectedAccount();
     if (!this.confirming() || !pv || !acct) return null;
     return {
@@ -811,6 +828,7 @@ export class VenueOrderTicketComponent {
 
   private timer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
+  private lastKey: string | null = null;
 
   constructor() {
     // A new instrument is a new ticket.
@@ -828,11 +846,15 @@ export class VenueOrderTicketComponent {
       untracked(() => this.patch(prefillPatch(this.instrument(), pf)));
     });
     // Every change of the ticket asks for a new dry run (debounced); a ticket with shape problems is not sent.
+    // A re-commit of the same values (an input's change event on blur, as the Send button is pressed) is not a change.
     effect(() => {
       const s = this.state();
       const inst = this.instrument();
       const bad = this.problems().length > 0;
+      const key = this.ticketKey();
       untracked(() => {
+        if (key === this.lastKey) return;
+        this.lastKey = key;
         // A changed ticket is a different order: the confirm step (if open) belonged to the previous one.
         this.confirming.set(false);
         this.schedulePreview(inst.symbol, s, bad);
@@ -855,12 +877,10 @@ export class VenueOrderTicketComponent {
       this.api
         .accounts()
         .subscribe({ next: (a) => this.accounts.set(a), error: () => this.accounts.set([]) });
-      this.api
-        .health()
-        .subscribe({
-          next: (h) => this.switches.set(h?.switches ?? {}),
-          error: () => this.switches.set(null),
-        });
+      this.api.health().subscribe({
+        next: (h) => this.switches.set(h?.switches ?? {}),
+        error: () => this.switches.set(null),
+      });
     }
     this.destroyRef.onDestroy(() => {
       if (this.timer) clearTimeout(this.timer);
@@ -891,6 +911,8 @@ export class VenueOrderTicketComponent {
     if (this.blockedReason()) return;
     this.result.set(null);
     this.confirming.set(true);
+    // The ticket scrolls; bring the confirm step (and its Send button) into view once it is rendered.
+    setTimeout(() => this.confirmStep()?.nativeElement.scrollIntoView?.({ block: 'nearest' }));
   }
 
   send(): void {
@@ -923,7 +945,10 @@ export class VenueOrderTicketComponent {
               executionAccountId: keep,
             });
           } else if (out.kind === 'refused') {
-            if (out.preview) this.preview.set(out.preview);
+            if (out.preview) {
+              this.preview.set(out.preview);
+              this.previewKey.set(this.ticketKey());
+            }
             this.notify.error(out.message);
           }
           // 'approval': the approval interceptor already announced it (one toast, not two).
@@ -992,16 +1017,20 @@ export class VenueOrderTicketComponent {
     }
     this.timer = setTimeout(() => {
       this.loading.set(true);
-      this.api.previewTicket(previewRequestOf(symbol, s)).subscribe({
+      const request = previewRequestOf(symbol, s);
+      const key = JSON.stringify(request);
+      this.api.previewTicket(request).subscribe({
         next: (pv) => {
           if (mine !== this.generation) return;
           this.preview.set(pv);
+          this.previewKey.set(key);
           this.previewError.set(null);
           this.loading.set(false);
         },
         error: (e) => {
           if (mine !== this.generation) return;
           this.preview.set(null);
+          this.previewKey.set(null);
           this.previewError.set(errorText(e, 'The engine could not preview this ticket.'));
           this.loading.set(false);
         },

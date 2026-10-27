@@ -351,6 +351,29 @@ describe('VenueOrderTicketComponent — Send', () => {
     );
   });
 
+  it('re-committing the same values (an input blurred as Send is pressed) keeps the confirm step', async () => {
+    await ready();
+    q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.click();
+    fixture.detectChanges();
+    fixture.componentInstance.patch({ price: 6000 });
+    fixture.detectChanges();
+    expect(q('[data-testid="venue-ticket-confirm-step"]')).not.toBeNull();
+  });
+
+  it('a stale dry run of an earlier edit never enables Send', async () => {
+    await ready();
+    fixture.componentInstance.patch({ quantity: 3 });
+    fixture.detectChanges();
+    // The old preview is still on screen while the new one is debounced, but Send waits for it.
+    expect(q('[data-testid="venue-ticket-preview"]')).not.toBeNull();
+    expect(q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.disabled).toBe(true);
+    expect(q('[data-testid="venue-ticket-why"]')?.textContent).toContain('Waiting for the engine');
+    await wait(400);
+    http.expectOne(`${BASE}/execution-console/ticket/preview`).flush(ok(preview()));
+    fixture.detectChanges();
+    expect(q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.disabled).toBe(false);
+  });
+
   it('changing the ticket closes the confirm step', async () => {
     await ready();
     q<HTMLButtonElement>('[data-testid="venue-ticket-submit"]')!.click();

@@ -197,6 +197,12 @@ function num(v: number | null | undefined, digits = 2): string {
     : v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: digits });
 }
 
+/** A bracket level as the engine will use it: its price, with the ticket's tick distance when one was set. */
+function level(price: number | null, ticks: number | null, d: number): string {
+  if (price === null) return 'none';
+  return ticks === null ? num(price, d) : `${num(price, d)} (${ticks} ticks)`;
+}
+
 /** What the confirm step shows: the order exactly as it will be sent, valued by the engine's last dry run. */
 export function confirmLines(
   symbol: string,
@@ -223,11 +229,7 @@ export function confirmLines(
   if (flags.length) lines.push({ label: 'Flags', value: flags.join(', ') });
   lines.push({
     label: 'Stop / target',
-    value: `${pv.stopLossPrice === null ? 'none' : `${num(pv.stopLossPrice, d)} (${s.stopLossTicks} ticks)`} / ${
-      pv.takeProfitPrice === null
-        ? 'none'
-        : `${num(pv.takeProfitPrice, d)} (${s.takeProfitTicks} ticks)`
-    }`,
+    value: `${level(pv.stopLossPrice, s.stopLossTicks, d)} / ${level(pv.takeProfitPrice, s.takeProfitTicks, d)}`,
   });
   lines.push({
     label: 'Reference',

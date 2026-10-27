@@ -334,6 +334,15 @@ describe('venue ticket send — request and answer', () => {
     expect(byLabel['Type']).toBe('Limit · GTC');
     expect(byLabel['Limit']).toBe('6,000');
     expect(byLabel['Stop / target']).toBe('5,995 (20 ticks) / 6,010 (40 ticks)');
+    expect(
+      confirmLines(
+        'ESZ6',
+        'contract',
+        { ...s, takeProfitTicks: null },
+        preview(),
+        acct({ id: 3 }),
+      ).find((l) => l.label === 'Stop / target')?.value,
+    ).toBe('5,995 (20 ticks) / 6,010');
     expect(byLabel['Account']).toBe('CQG paper · CME · Paper (#3)');
     expect(fourEyesNotice(preview())).toContain('300,000 USD');
     expect(fourEyesNotice(preview())).toContain('second authorised person');
