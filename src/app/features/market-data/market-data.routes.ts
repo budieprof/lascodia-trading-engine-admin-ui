@@ -64,6 +64,16 @@ export const MARKET_DATA_ROUTES: Routes = [
       ),
   },
   {
+    // The non-FX instrument candle builder's state (multi-asset md-candles; WS7 7.10).
+    path: 'instrument-candles',
+    canActivate: [canAccessPath('market-data/instrument-candles')],
+    data: { breadcrumb: 'Instrument candles' },
+    loadComponent: () =>
+      import('@features/venues/pages/instrument-candles-page.component').then(
+        (m) => m.InstrumentCandlesPageComponent,
+      ),
+  },
+  {
     path: 'coverage',
     data: { breadcrumb: 'Candle Coverage' },
     loadComponent: () =>

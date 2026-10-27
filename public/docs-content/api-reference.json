@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1001,
+  "endpointCount": 1023,
   "groups": [
     {
       "name": "Admin auth",
@@ -4961,6 +4961,140 @@
       ]
     },
     {
+      "name": "Execution accounts",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts",
+          "summary": "The organisation's execution accounts (credential status and fingerprint only).",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<List<ExecutionAccountDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts",
+          "summary": "Creates an execution account (Disabled until a verified credential is stored and it is activated).",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [],
+          "body": "CreateExecutionAccountCommand",
+          "response": "ResponseData<ExecutionAccountDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts/{id}/credential",
+          "summary": "Erases the account's credential (and disables the account).",
+          "access": "permission",
+          "permission": "accounts.connect",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts/{id}/credential",
+          "summary": "Stores or replaces the account's API credential (`{ fields: { apiKey, apiSecret, … } }`). Write-only.",
+          "access": "permission",
+          "permission": "accounts.connect",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SaveExecutionCredentialCommand",
+          "response": "ResponseData<ExecutionCredentialStatusDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts/{id}/status",
+          "summary": "Activates, disables or suspends an execution account.",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SetExecutionAccountStatusCommand",
+          "response": "ResponseData<ExecutionAccountDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/accounts/{id}/verify",
+          "summary": "Signs in to the venue with the stored credential and records what it may do; refuses (and erases) a key with withdrawal or transfer rights.",
+          "access": "permission",
+          "permission": "accounts.connect",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<ExecutionCredentialStatusDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/adapters",
+          "summary": "The execution adapters this build can route to, with their capabilities.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<List<ExecutionAdapterDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/reconciliation",
+          "summary": "The latest read-only reconciliation of the organisation's accounts against their adapters (empty unless `Execution:Reconciliation:Enabled`).",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<List<ExecutionAccountReconciliation>>"
+        }
+      ]
+    },
+    {
+      "name": "Execution console",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution-console/health",
+          "summary": "Per execution account: credential state (never the secret), last connect, outbox, fills, protective legs; plus the execution switches and workers.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<ExecutionHealthDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution-console/ticket/preview",
+          "summary": "Dry run of an exchange-traded ticket: grid / step checks, margin, liquidation, risk at the stop, fees. Writes nothing.",
+          "access": "permission",
+          "permission": "orders.create",
+          "parameters": [],
+          "body": "VenueTicketPreviewQuery",
+          "response": "ResponseData<VenueTicketPreviewDto>"
+        }
+      ]
+    },
+    {
       "name": "Execution quality",
       "endpoints": [
         {
@@ -6861,6 +6995,104 @@
             }
           ],
           "response": "ResponseData<ApiTokenDto>"
+        }
+      ]
+    },
+    {
+      "name": "Instrument candles",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-candles/state",
+          "summary": "Cursors (status, built span, lag, counts) and recent rolls; `?symbol=` prefix, `?status=`.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "Symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Status",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<InstrumentCandleStateDto>"
+        }
+      ]
+    },
+    {
+      "name": "Instrument fundamentals",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-fundamentals/crypto/{symbol}",
+          "summary": "A crypto market's funding, open interest, basis and liquidations on one exchange (`?sourceId=crypto-binance`).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "sourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<CryptoFundamentalsDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-fundamentals/equity/{symbol}",
+          "summary": "An equity's or ETF's dividends, splits and trailing yield (no earnings source exists — said so).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<EquityFundamentalsDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-fundamentals/futures/{root}",
+          "summary": "A futures root's term structure (root, contract or continuous symbol; `?sourceId=&contracts=`).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "root",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "sourceId",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "contracts",
+              "in": "query",
+              "required": false,
+              "type": "int?"
+            }
+          ],
+          "response": "ResponseData<FuturesTermStructureDto>"
         }
       ]
     },
@@ -12514,6 +12746,177 @@
             }
           ],
           "response": "ResponseData<ApiQuotaStatusDto>"
+        }
+      ]
+    },
+    {
+      "name": "Reference data",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/reference/fee-schedules",
+          "summary": "Fee schedules (filters: assetClass Future|Crypto|Equity|Etf, venue, search, includeDeleted).",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [
+            {
+              "name": "AssetClass",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Venue",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Search",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "IncludeDeleted",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<List<FeeScheduleDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/reference/fee-schedules",
+          "summary": "Adds a fee schedule row (a dated row supersedes an older one of the same code at its start).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [],
+          "body": "CreateFeeScheduleCommand",
+          "response": "ResponseData<FeeScheduleDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/reference/fee-schedules/{id}",
+          "summary": "Soft-deletes a fee schedule row (`?reason=` is recorded in the audit log).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/reference/fee-schedules/{id}",
+          "summary": "Edits a fee schedule row in place.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdateFeeScheduleCommand",
+          "response": "ResponseData<FeeScheduleDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/reference/margin-requirements",
+          "summary": "Margin requirements (filters: kind FuturesContract|CryptoLeverageTier|Equity, symbol prefix, venue, includeDeleted).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "Kind",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "Venue",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "IncludeDeleted",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<List<MarginRequirementDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/reference/margin-requirements",
+          "summary": "Adds a margin requirement row (futures contract / root, crypto leverage tier, equity house rate).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [],
+          "body": "CreateMarginRequirementCommand",
+          "response": "ResponseData<MarginRequirementDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/reference/margin-requirements/{id}",
+          "summary": "Soft-deletes a margin requirement row (the models refuse the instrument again if it was its only row).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "reason",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/reference/margin-requirements/{id}",
+          "summary": "Edits a margin requirement row in place.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdateMarginRequirementCommand",
+          "response": "ResponseData<MarginRequirementDto>"
         }
       ]
     },

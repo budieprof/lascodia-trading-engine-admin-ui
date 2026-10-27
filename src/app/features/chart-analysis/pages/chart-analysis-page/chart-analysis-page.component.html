@@ -1455,6 +1455,19 @@
       >
         <app-chart-icon name="multibook" [size]="28" />
       </button>
+      @if (venueInstrument()) {
+        <!-- Multi-asset WS7 7.9: futures / crypto / equity fundamentals — only for exchange-traded symbols. -->
+        <button
+          type="button"
+          class="strip-btn"
+          [class.active]="chartPanels.open() === 'fundamentals'"
+          (click)="openPanel('fundamentals')"
+          title="Fundamentals: term structure, funding and open interest, dividends"
+          data-testid="fundamentals-button"
+        >
+          <app-chart-icon name="fundamentals" [size]="28" />
+        </button>
+      }
       <button
         type="button"
         class="strip-btn"

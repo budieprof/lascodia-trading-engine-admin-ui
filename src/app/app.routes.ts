@@ -155,6 +155,22 @@ export const routes: Routes = [
           import('@features/market-data/market-data.routes').then((m) => m.MARKET_DATA_ROUTES),
       },
       {
+        // Multi-asset WS7 7.7: execution accounts at venues, write-only credentials, adapter health, drift.
+        path: 'connections',
+        canActivate: [canAccessPath('connections')],
+        data: { breadcrumb: 'Connections' },
+        loadChildren: () =>
+          import('@features/venues/venues.routes').then((m) => m.CONNECTIONS_ROUTES),
+      },
+      {
+        // Multi-asset WS7 7.10: exchange reference data (fee schedules, margin requirements).
+        path: 'reference',
+        canActivate: [canAccessPath('reference')],
+        data: { breadcrumb: 'Reference data' },
+        loadChildren: () =>
+          import('@features/venues/venues.routes').then((m) => m.REFERENCE_ROUTES),
+      },
+      {
         path: 'chart-analysis',
         canActivate: [canAccessPath('chart-analysis')],
         data: { breadcrumb: 'Charts' },
