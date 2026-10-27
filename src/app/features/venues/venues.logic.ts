@@ -117,7 +117,7 @@ export function credentialFieldsFor(kind: string): CredentialField[] {
       { name: 'apiSecret', label: 'Private key (EC PEM)', multiline: true },
     ];
   if (k.startsWith('binance'))
-    return [key, secret, { name: 'privateKeyPem', label: 'Ed25519 private key (PEM, optional)', multiline: true, optional: true }];
+    return [key, secret, { name: 'privateKeyPem', label: 'Ed25519 private key (PEM)', multiline: true, optional: true }];
   if (k === 'tradovate')
     return [
       { name: 'apiKey', label: 'User name' },

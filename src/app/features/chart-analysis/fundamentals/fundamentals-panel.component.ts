@@ -160,6 +160,7 @@ import { fundingTone, sessionText, slopeWord } from './fundamentals.logic';
       .fp {
         padding: 0 10px 10px;
         font-size: 12px;
+        overflow-x: auto;
       }
       .fp h4 {
         margin: 8px 0 4px;

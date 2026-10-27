@@ -319,7 +319,7 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
                       <button *lscCan="'accounts.connect'" type="button" class="btn btn-sm btn-secondary" (click)="startCredential(r.account)">
                         {{ r.account.credential ? 'Replace key' : 'Add key' }}
                       </button>
-                      @if (r.account.credential && r.account.credential.status !== 'Revoked') {
+                      @if (hasStoredKey(r.account)) {
                         <button *lscCan="'accounts.connect'" type="button" class="btn btn-sm btn-secondary" (click)="ask({ kind: 'verify', account: r.account })">
                           Verify
                         </button>
@@ -496,6 +496,12 @@ export class ConnectionsPageComponent {
 
   constructor() {
     if (this.auth.hasPermission(Permission.AccountsRead)) this.data.reload();
+  }
+
+  /** A key is stored (refused and revoked keys were erased by the engine: nothing to verify or revoke). */
+  hasStoredKey(a: ExecutionAccount): boolean {
+    const s = a.credential?.status;
+    return s === 'Unverified' || s === 'Verified' || s === 'Rejected';
   }
 
   outboxKeys(h: ExecutionAccountHealth): string[] {

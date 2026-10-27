@@ -316,6 +316,25 @@ localhost rather than a blank page.
   always shows the payment-provider notice: no real provider exists (`none` or the `local-test` double). Shared views:
   `components/usage-month-view`, `components/invoice-detail`; decisions in `billing.logic.ts` (spec).
 
+- **Venue trading console (multi-asset WS7 7.5–7.10; engine `ma/console-api`, CLAUDE.md "Multi-asset console APIs").**
+  `features/venues/` + chart pieces. ONE rule decides everything: `venueInstrumentFor(symbol)` (`venues.logic.ts`) is
+  non-null only for a catalogue instrument with `future` / `crypto` / `equity` detail — every MT5 symbol (FX, index /
+  metal / crypto CFDs) gets null and keeps today's ticket, ladder and rail (golden specs over the 26 live pairs:
+  `venues.logic.spec.ts`, `trading/chart-trading-venue.component.spec.ts`). Exchange-traded symbols get
+  `app-venue-order-ticket` (quantity in the instrument's unit on its step, price on its tick grid, TIF, post-only /
+  reduce-only, leverage + margin mode for crypto derivatives, bracket in ticks; the engine's dry run
+  `execution-console/ticket/preview` shows margin / liquidation / risk / fees — **it sends no order**: venue entries
+  are the engine's signal path), the DOM ladder on the instrument's tick whose clicks open that ticket prefilled
+  (`VenueTicketBus`; no one-click / OCO there) and the rail's **Fundamentals** panel (term structure, funding / OI /
+  basis, dividends). Pages: `/connections` (execution accounts; credentials WRITE-ONLY — the form is dropped as it is
+  sent, only the fingerprint is shown, the withdrawal-rights refusal in the engine's words; `accounts.read` / `.manage`
+  / `.connect`), `/connections/drift`, `/reference/fee-schedules` (`marketdata.read`), `/reference/margin-requirements`
+  (`risk.read`) — writes `platform.data.manage` behind `app-confirm-dialog` for deletes —, `/market-data/instrument-candles`.
+  Prop program editor: presets FX (default, unchanged) / futures (contracts) / crypto (coins) in `prop/prop-presets.ts`.
+  Exec-gateway DTO enums arrive as numbers: read them through `orderTypeName` / `tifName` / `driftKindName`.
+  Write-blocked check on a stubbed local build: `node tools/visual-review/venue-console-check.js` (nothing leaves the
+  browser; every non-GET except two read-POSTs is aborted).
+
 ## Verifying in a browser
 
 A green `ng build` only proves it typechecks. `.claude/skills/browser-verify` drives the app with
