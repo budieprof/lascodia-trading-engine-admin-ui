@@ -12,6 +12,7 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { failureMessage } from '@features/organisation/organisation.logic';
 import { PropApiService } from '../prop-api.service';
 import { cloneRules, defaultRules, newPhase, ruleErrors } from '../prop.logic';
+import { PROP_PRESETS, presetById, sizeLabels, type PropPresetId } from '../prop-presets';
 import type { PropPhaseKind, PropPhaseRules, PropProgram, PropProgramRules } from '../prop.types';
 import { PROP_DIALOG_STYLES } from './prop-gate.component';
 
@@ -67,6 +68,23 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                 The {{ p.runningEnrollments }} running enrolment(s) keep the rules they started
                 with.
               </p>
+            } @else {
+              <!-- Multi-asset WS7 7.8: start from an FX, futures (contracts) or crypto (coins) preset. -->
+              <label class="field">
+                <span class="label">Start from</span>
+                <select
+                  class="select"
+                  name="preset"
+                  [ngModel]="presetId()"
+                  (ngModelChange)="applyPreset($event)"
+                  data-testid="prop-preset"
+                >
+                  @for (pr of presets; track pr.id) {
+                    <option [value]="pr.id">{{ pr.label }}</option>
+                  }
+                </select>
+              </label>
+              <p class="note">{{ preset().description }}</p>
             }
             <div class="form-grid">
               <label class="field">
@@ -252,7 +270,7 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                     </label>
                   }
                   <label class="field">
-                    <span class="label">Max lots per position</span>
+                    <span class="label">{{ sizeLabel().perPosition }}</span>
                     <input
                       class="input"
                       type="number"
@@ -262,7 +280,7 @@ import { PROP_DIALOG_STYLES } from './prop-gate.component';
                     />
                   </label>
                   <label class="field">
-                    <span class="label">Max total open lots</span>
+                    <span class="label">{{ sizeLabel().total }}</span>
                     <input
                       class="input"
                       type="number"
@@ -426,6 +444,11 @@ export class ProgramEditorComponent {
   readonly saved = output<PropProgram>();
 
   protected readonly kinds: PropPhaseKind[] = ['Evaluation', 'Verification', 'Funded'];
+  protected readonly presets = PROP_PRESETS;
+  /** The preset a NEW program starts from (multi-asset WS7 7.8); size rules are read in its unit. */
+  readonly presetId = signal<PropPresetId>('fx-two-step');
+  readonly preset = computed(() => presetById(this.presetId()));
+  readonly sizeLabel = computed(() => sizeLabels(this.editing() ? 'lots' : this.preset().unit));
 
   readonly opened = signal(false);
   readonly editing = signal<PropProgram | null>(null);
@@ -449,6 +472,7 @@ export class ProgramEditorComponent {
 
   open(program: PropProgram | null): void {
     this.editing.set(program);
+    this.presetId.set('fx-two-step');
     this.rules.set(program ? cloneRules(program.rules) : defaultRules());
     this.name = program?.name ?? '';
     this.description = program?.description ?? '';
@@ -462,6 +486,13 @@ export class ProgramEditorComponent {
   close(): void {
     if (this.busy()) return;
     this.opened.set(false);
+  }
+
+  applyPreset(id: PropPresetId): void {
+    if (this.editing()) return;
+    this.presetId.set(id);
+    this.rules.set(presetById(id).rules());
+    this.version.update((v) => v + 1);
   }
 
   addPhase(kind: PropPhaseKind): void {

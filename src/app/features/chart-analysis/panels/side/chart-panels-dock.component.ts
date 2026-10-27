@@ -6,6 +6,7 @@ import { ChartPanelsState } from './chart-panels-state.service';
 import { DepthPanelComponent } from './depth-panel.component';
 import { LadderPanelComponent } from '../../dom/ladder-panel.component';
 import { MultibookPanelComponent } from '../../multibook/multibook-panel.component';
+import { FundamentalsPanelComponent } from '../../fundamentals/fundamentals-panel.component';
 import { NotesPanelComponent } from './notes-panel.component';
 import { SentimentPanelComponent } from './sentiment-panel.component';
 import type { SidePanel } from './chart-panels.types';
@@ -17,6 +18,7 @@ const TITLES: Record<SidePanel, string> = {
   multibook: 'Multibook (all sources)',
   sentiment: 'Sentiment',
   account: 'Account',
+  fundamentals: 'Fundamentals',
 };
 
 /**
@@ -34,6 +36,7 @@ const TITLES: Record<SidePanel, string> = {
     MultibookPanelComponent,
     SentimentPanelComponent,
     AccountStripComponent,
+    FundamentalsPanelComponent,
   ],
   template: `
     <div class="cpd-title">
@@ -71,6 +74,9 @@ const TITLES: Record<SidePanel, string> = {
       }
       @case ('account') {
         <app-account-strip [symbol]="symbol()" [digits]="digits()" [timeZone]="timeZone()" />
+      }
+      @case ('fundamentals') {
+        <app-fundamentals-panel [symbol]="symbol()" />
       }
     }
   `,

@@ -63,6 +63,16 @@ export const ROUTE_ACCESS = {
   'market-data/sources': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/sources
   // Subscriber declarations (multi-asset WS8 8.2): a person's own (marketdata.read) and staff review.
   'market-data/declarations': rule(P.MarketdataRead), // GET md/declarations/me
+  // Multi-asset WS7 7.10: the non-FX candle builder's state.
+  'market-data/instrument-candles': rule(P.MarketdataRead), // GET instrument-candles/state
+  // Multi-asset WS7 7.7: execution accounts + adapter health; drift report. Writes gated on the page
+  // (accounts.manage / accounts.connect).
+  connections: rule(P.AccountsRead), // GET execution/accounts, execution-console/health
+  'connections/drift': rule(P.AccountsRead), // GET execution/reconciliation
+  // Multi-asset WS7 7.10: exchange reference data. A parent with either child's read; writes are platform.data.manage.
+  reference: rule(P.MarketdataRead, P.RiskRead),
+  'reference/fee-schedules': rule(P.MarketdataRead), // GET reference/fee-schedules
+  'reference/margin-requirements': rule(P.RiskRead), // GET reference/margin-requirements
   'market-data/declarations-review': { anyOf: [P.PlatformDataManage], staffOnly: true }, // GET admin/md/declarations
   'chart-analysis': rule(P.MarketdataRead),
   watchlist: rule(P.MarketdataRead),

@@ -31,6 +31,9 @@ import type {
 } from './manual-trading.types';
 import { ocoLines, ocoOrderIndex } from './oco-lines';
 import { OrderTicketComponent } from './order-ticket.component';
+import { VenueOrderTicketComponent } from './venue-order-ticket.component';
+import { VenueTicketBus, type VenueTicketRequest } from './venue-ticket-bus.service';
+import { venueInstrumentFor } from '@features/venues/venues.logic';
 import {
   actionableLines,
   dragSideProblem,
@@ -105,20 +108,32 @@ type ChartAction =
   selector: 'app-chart-trading',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [OrderTicketComponent, DecimalPipe],
+  imports: [OrderTicketComponent, VenueOrderTicketComponent, DecimalPipe],
   template: `
     @if (open()) {
-      <app-order-ticket
-        class="ticket-dock"
-        [symbol]="symbol()"
-        [precision]="precision()"
-        [pipSize]="pipSize()"
-        [quote]="quote()"
-        [(state)]="ticket"
-        (previewChange)="ticketPreview.set($event)"
-        (submitted)="onSubmitted($event)"
-        (closed)="open.set(false)"
-      />
+      @if (venueInstrument(); as vi) {
+        <!-- Multi-asset WS7 7.5: an EXCHANGE-TRADED instrument (futures / crypto / equities) gets the venue ticket.
+             Every MT5 symbol (FX and CFDs) has no venue instrument and keeps the ticket below, unchanged. -->
+        <app-venue-order-ticket
+          class="ticket-dock"
+          [instrument]="vi"
+          [quote]="quote()"
+          [prefill]="venuePrefill()"
+          (closed)="open.set(false)"
+        />
+      } @else {
+        <app-order-ticket
+          class="ticket-dock"
+          [symbol]="symbol()"
+          [precision]="precision()"
+          [pipSize]="pipSize()"
+          [quote]="quote()"
+          [(state)]="ticket"
+          (previewChange)="ticketPreview.set($event)"
+          (submitted)="onSubmitted($event)"
+          (closed)="open.set(false)"
+        />
+      }
     }
 
     <dialog
@@ -436,6 +451,15 @@ export class ChartTradingComponent {
   readonly ticket = signal<TicketState>({ ...DEFAULT_TICKET });
   readonly ticketPreview = signal<ManualTradePreview | null>(null);
 
+  private readonly venueBus = inject(VenueTicketBus);
+  /** The symbol's exchange-traded instrument (venue ticket), or null for every MT5 symbol (today's ticket). */
+  readonly venueInstrument = computed(() => venueInstrumentFor(this.symbol()));
+  /** The DOM ladder's latest request for THIS symbol (multi-asset WS7 7.6). */
+  readonly venuePrefill = computed<VenueTicketRequest | null>(() => {
+    const r = this.venueBus.request();
+    return r && r.symbol.toUpperCase() === this.symbol().toUpperCase() ? r : null;
+  });
+
   readonly action = signal<ChartAction | null>(null);
   readonly changePreview = signal<PositionChangePreview | null>(null);
   /** The engine's check of a working order's entry move (move-preview). */
@@ -532,6 +556,15 @@ export class ChartTradingComponent {
       onCleanup(host.attachPricePrimitive(this.lines));
     });
     effect(() => this.lines.setLines(this.allLines()));
+
+    // A ladder click on an exchange-traded symbol opens the venue ticket (never on an MT5 symbol: no venue instrument).
+    let consumed = this.venueBus.request()?.seq ?? 0;
+    effect(() => {
+      const r = this.venuePrefill();
+      if (!r || r.seq <= consumed || !this.venueInstrument()) return;
+      consumed = r.seq;
+      untracked(() => this.open.set(true));
+    });
 
     // A new symbol is a new ticket: brackets priced for EURUSD mean nothing on USDJPY.
     effect(() => {

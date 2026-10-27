@@ -107,6 +107,8 @@ export const UI_ICONS: Record<string, string> = {
   // Multibook: one ladder, levels split into per-source segments.
   multibook:
     '<path d="M6.5 7.5h6M12.5 7.5h5M6.5 11.5h4M10.5 11.5h8M6.5 16.5h7M13.5 16.5h3M6.5 20.5h5M11.5 20.5h9"/><path d="M5.5 14h17" stroke-width="2.4"/>',
+  // Fundamentals (multi-asset WS7 7.9): a term-structure curve over a baseline.
+  fundamentals: '<path d="M5.5 22.5h17"/><path d="M6.5 18.5c3-1 5-6 8-7s5 1 7-2"/>' + DOT(14.5, 11.5, 1.4),
   trades: '<path d="M5.5 20l5-6 4 3 7-8.5"/><path d="M8 8.5h4M10 6.5v4"/>' + DOT(21.5, 8.5, 1.4),
   alert:
     '<path d="M14 5.5a5.5 5.5 0 0 0-5.5 5.5v4.5L6.5 19h15l-2-3.5V11A5.5 5.5 0 0 0 14 5.5z"/><path d="M12 21.5a2 2 0 0 0 4 0"/>',

@@ -4,7 +4,15 @@ import type { SidePanel } from './chart-panels.types';
 import { appStorage } from '@core/storage/app-storage';
 
 const KEY = 'lascodia.chart.sidePanel';
-const PANELS: readonly SidePanel[] = ['notes', 'depth', 'ladder', 'multibook', 'sentiment', 'account'];
+const PANELS: readonly SidePanel[] = [
+  'notes',
+  'depth',
+  'ladder',
+  'multibook',
+  'sentiment',
+  'account',
+  'fundamentals',
+];
 
 /**
  * Which of the SP-I9 side panels is open on the chart (notes, broker depth, sentiment, account), remembered per

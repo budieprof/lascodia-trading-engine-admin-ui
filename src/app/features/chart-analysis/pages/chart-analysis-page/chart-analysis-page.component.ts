@@ -79,6 +79,7 @@ import { tradingDateLabel } from '../../chart/trading-date';
 import { pipSizeFor, priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
 import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
 import { InstrumentsService } from '@core/instruments/instruments.service';
+import { venueInstrumentFor } from '@features/venues/venues.logic';
 import type { InstrumentAssetClass } from '@core/instruments/instrument.types';
 import {
   ASSET_CLASS_LABEL,
@@ -1934,6 +1935,8 @@ export class ChartAnalysisPageComponent {
   });
   /** The SP-I9 side panels (notes, broker depth, sentiment, account), one at a time beside the page's own panes. */
   readonly chartPanels = inject(ChartPanelsState);
+  /** The symbol's exchange-traded instrument (fundamentals rail button), or null for every MT5 symbol. */
+  protected readonly venueInstrument = computed(() => venueInstrumentFor(this.symbol()));
 
   // ── Technicals view ("More technicals") ──────────────────────────────────
   // Laid over the chart area rather than replacing it, so the chart stays

@@ -35,6 +35,8 @@ import type {
 import { DEFAULT_STOP_ATR, DEFAULT_TARGET_R, firstRefusal } from '../trading/ticket-model';
 import { newCorrelationId } from '../trading/position-lines';
 import { LadderArmingService } from './ladder-arming.service';
+import { VenueTicketBus } from '../trading/venue-ticket-bus.service';
+import { unitWord, venueInstrumentFor } from '@features/venues/venues.logic';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { MarketDataStreamService, type MdWatch } from '@core/realtime/marketdata-stream.service';
 import { LiveDepthService, type LiveDepth } from '../orderflow/live-depth.service';
@@ -132,6 +134,14 @@ type LadderAction =
       }
       @if (delayedCaption(); as delayed) {
         <p class="lp-note" data-testid="ladder-delayed">{{ delayed }}</p>
+      }
+      @if (venue(); as v) {
+        <!-- Multi-asset WS7 7.6: an exchange-traded instrument — rows on its tick, sizes in its unit, and a click opens
+             the venue ticket at that price (the MT5 manual-signal path below does not apply to it). -->
+        <p class="lp-note" data-testid="ladder-venue">
+          {{ v.exchange || 'Exchange' }} · tick {{ v.tickSize }} · sizes in {{ venueUnit() }}. A click opens the order
+          ticket at that price (bid column: buy, ask column: sell; Shift: stop). One-click and OCO are off here.
+        </p>
       }
       <div class="lp-controls">
         <label>
@@ -828,7 +838,14 @@ export class LadderPanelComponent {
     return a ? `${a.accountName || a.accountId} (${a.accountType})` : '—';
   });
   readonly fmt = computed(() => `1.${this.digits()}-${this.digits()}`);
-  readonly rowSize = computed(() => pointSize(this.digits()) * this.rowTicks());
+  private readonly venueBus = inject(VenueTicketBus);
+  /** The symbol's exchange-traded instrument, or null for every MT5 symbol (today's ladder, unchanged). */
+  readonly venue = computed(() => venueInstrumentFor(this.symbol()));
+  readonly venueUnit = computed(() => unitWord(this.venue()?.quantityUnit));
+  readonly rowSize = computed(() => {
+    const v = this.venue();
+    return v && v.tickSize > 0 ? v.tickSize * this.rowTicks() : pointSize(this.digits()) * this.rowTicks();
+  });
   /**
    * The ladder's market: the shared hub's freshest book (every change) while the hub delivers one, else the shared
    * live-depth poll (its own fallback while the hub is not delivering), else nothing. Re-read at the hub's ≤ 4 Hz.
@@ -1167,13 +1184,17 @@ export class LadderPanelComponent {
   }
 
   toggleOco(): void {
+    if (this.venue()) {
+      this.hint.set('OCO pairs are for MT5 symbols; use the order ticket on an exchange-traded instrument.');
+      return;
+    }
     this.ocoMode.update((v) => !v);
     this.ocoFirst.set(null);
     this.hint.set(this.ocoMode() ? 'OCO: click the first leg’s price.' : null);
   }
 
   askArm(): void {
-    if (!this.canArm()) return;
+    if (!this.canArm() || this.venue()) return;
     this.openAction({ type: 'arm' });
   }
 
@@ -1193,6 +1214,10 @@ export class LadderPanelComponent {
 
   async onCell(e: MouseEvent, column: LadderColumn, row: LadderRow): Promise<void> {
     this.hint.set(null);
+    if (this.venue()) {
+      this.openVenueTicket(column, row, e.shiftKey);
+      return;
+    }
     if (!this.canPlace()) {
       this.hint.set(
         this.accountId() === null
@@ -1250,7 +1275,29 @@ export class LadderPanelComponent {
     void this.onCell(new MouseEvent('click', { shiftKey: k.shiftKey }), column, row);
   }
 
+  /** Exchange-traded instrument: the click becomes a prefilled venue ticket (the ladder itself sends nothing). */
+  private openVenueTicket(column: LadderColumn, row: LadderRow, stop: boolean): void {
+    const q = this.view().quote;
+    const intent = ladderIntent(column, row.price, q.bid, q.ask, stop);
+    if ('problem' in intent) {
+      this.hint.set(intent.problem);
+      return;
+    }
+    this.venueBus.open({
+      symbol: this.symbol(),
+      side: intent.direction,
+      orderType: intent.kind === 'Stop' ? 'Stop' : 'Limit',
+      price: intent.price,
+    });
+    this.hint.set(`Opened the order ticket: ${intent.direction} ${intent.kind} at ${intent.price}.`);
+  }
+
   async market(direction: 'Buy' | 'Sell'): Promise<void> {
+    if (this.venue()) {
+      this.venueBus.open({ symbol: this.symbol(), side: direction, orderType: 'Market', price: null });
+      this.hint.set(`Opened the order ticket: ${direction} at market.`);
+      return;
+    }
     if (!this.canPlace()) return;
     const request = await this.requestFor(direction, null);
     if (!request) return;
