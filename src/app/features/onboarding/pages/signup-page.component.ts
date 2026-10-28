@@ -287,8 +287,13 @@ type RequestReason = 'off' | 'unavailable' | 'error';
     }
     .su-row {
       display: grid;
-      grid-template-columns: 1.4fr 1fr;
+      grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
       gap: 12px;
+    }
+    .su-row .si-input {
+      width: 100%;
+      min-width: 0;
+      box-sizing: border-box;
     }
     @media (max-width: 420px) {
       .su-row {
@@ -321,6 +326,7 @@ type RequestReason = 'off' | 'unavailable' | 'error';
     .su-steps {
       margin: 4px 0 0;
       padding-left: 20px;
+      list-style: decimal;
       display: grid;
       gap: 6px;
       font-size: 13px;
