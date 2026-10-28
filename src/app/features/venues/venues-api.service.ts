@@ -16,6 +16,7 @@ import type {
   FeeScheduleFields,
   FuturesTermStructure,
   InstrumentCandleState,
+  MarginImportResult,
   MarginRequirement,
   MarginRequirementFields,
   VenueTicketPreview,
@@ -223,6 +224,24 @@ export class VenuesApiService {
     return settled(
       this.api.put<ResponseData<MarginRequirement>>(
         `/reference/margin-requirements/${id}`,
+        body,
+        SILENT,
+      ),
+    );
+  }
+
+  /**
+   * Loads margin rows from a CSV file (`platform.data.manage`). All or nothing: a file with errors answers `-11` and the
+   * error carries the result (`marginImportFromError`), so the caller can list every bad line. `dryRun` writes nothing.
+   */
+  importMarginRequirements(body: {
+    csv: string;
+    dryRun: boolean;
+    reason?: string | null;
+  }): Observable<MarginImportResult> {
+    return settled(
+      this.api.post<ResponseData<MarginImportResult>>(
+        '/reference/margin-requirements/import',
         body,
         SILENT,
       ),

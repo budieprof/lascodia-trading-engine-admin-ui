@@ -130,6 +130,124 @@
     }
   },
   {
+    "name": "ma-margin-import",
+    "route": "/reference/margin-requirements",
+    "stub": [
+      {
+        "method": "POST",
+        "path": "/reference/margin-requirements/import$",
+        "json": {
+          "data": {
+            "dryRun": true,
+            "inserted": 2,
+            "alreadyPresent": 0,
+            "errors": [],
+            "rows": [
+              {
+                "id": 0,
+                "kind": "FuturesContract",
+                "symbol": "6E",
+                "venue": null,
+                "currency": "USD",
+                "initialMargin": 2900,
+                "maintenanceMargin": 2650,
+                "intradayInitialMargin": null,
+                "intradayMaintenanceMargin": null,
+                "notionalFloor": null,
+                "notionalCap": null,
+                "maxLeverage": null,
+                "initialMarginRate": null,
+                "maintenanceMarginRate": null,
+                "maintenanceAmount": null,
+                "effectiveFromUtc": "2026-11-02T00:00:00Z",
+                "source": "CME margins page read 2026-11-02",
+                "createdAtUtc": "2026-10-28T00:00:00Z",
+                "updatedAtUtc": "2026-10-28T00:00:00Z",
+                "isDeleted": false,
+                "inForce": false
+              },
+              {
+                "id": 0,
+                "kind": "FuturesContract",
+                "symbol": "ES",
+                "venue": null,
+                "currency": "USD",
+                "initialMargin": 24000,
+                "maintenanceMargin": 22000,
+                "intradayInitialMargin": null,
+                "intradayMaintenanceMargin": null,
+                "notionalFloor": null,
+                "notionalCap": null,
+                "maxLeverage": null,
+                "initialMarginRate": null,
+                "maintenanceMarginRate": null,
+                "maintenanceAmount": null,
+                "effectiveFromUtc": "2026-11-02T00:00:00Z",
+                "source": "CME margins page read 2026-11-02",
+                "createdAtUtc": "2026-10-28T00:00:00Z",
+                "updatedAtUtc": "2026-10-28T00:00:00Z",
+                "isDeleted": false,
+                "inForce": false
+              }
+            ]
+          },
+          "status": true,
+          "message": "Successful",
+          "responseCode": "00"
+        }
+      }
+    ],
+    "steps": [
+      {
+        "clickText": "Import CSV",
+        "exact": true
+      },
+      {
+        "wait": 400
+      },
+      {
+        "fill": [
+          "textarea[name='i-csv']",
+          "Kind,Symbol,Venue,Currency,EffectiveFromUtc,InitialMargin,MaintenanceMargin,Source\nFuturesContract,6E,,USD,2026-11-02,2900,2650,\"CME margins page read 2026-11-02\"\nFuturesContract,ES,,USD,2026-11-02,24000,22000,\"CME margins page read 2026-11-02\"\n"
+        ]
+      },
+      {
+        "fill": ["input[name='i-reason']", "CME margins 2026-11"]
+      },
+      {
+        "click": "[data-testid=margin-import-check]"
+      },
+      {
+        "waitFor": "[data-testid=margin-import-result]"
+      },
+      {
+        "wait": 300
+      }
+    ],
+    "crop": {
+      "sel": "section[aria-label='Import margin rows from a CSV file']",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=margin-import-file]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=margin-import-check]",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=margin-import-result]",
+        "n": 3
+      },
+      {
+        "sel": "[data-testid=margin-import-submit]",
+        "n": 4
+      }
+    ]
+  },
+  {
     "name": "ma-fees",
     "route": "/reference/fee-schedules",
     "marks": [

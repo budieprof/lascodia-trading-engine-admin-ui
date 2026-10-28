@@ -25,6 +25,7 @@ One JSON file per guide in `shots/<guide slug>.json`, an array of:
 | `viewport` | `[width, height]`, default `[1440, 900]`. Use `[390, 844]` for a phone. |
 | `settle` | Milliseconds to wait after the page loads (default 2500; charts need ~6000). |
 | `steps` | Things to do first, in order: `{ "click": "css" }`, `{ "clickText": "Buy", "exact": true }`, `{ "clickRole": ["button", "Buy"] }`, `{ "hover": "css" }`, `{ "fill": ["css", "text"] }`, `{ "select": ["css", 1] }` (option by position; or a label string), `{ "press": "Escape" }`, `{ "scroll": "css" }`, `{ "scrollY": 400 }`, `{ "wait": 500 }`, `{ "waitFor": "css" }`. |
+| `stub` | Requests answered by the tool itself, never sent to the engine: `[{ "method": "POST", "path": "regex on the path after the base URL", "json": { …the response… } }]`. Use it to show how a page answers a write (an import's dry run) without sending the write; the response must be what the engine would send, envelope included. |
 | `marks` | Numbered outlines: `{ "sel": "css", "text": "starts with", "nth": 0, "n": 1, "label": "optional words", "pad": 4 }`. `text` picks the innermost visible element under `sel` whose text starts with it. Number them in the order the guide's steps use them, and refer to them in the text as `((1))`. |
 | `spotlight` | `true` dims everything except the FIRST mark. |
 | `crop` | `{ "sel": "css", "pad": 24 }`: capture only that element (a dialog, a panel, a card) — sharper and easier to read than a whole page. |

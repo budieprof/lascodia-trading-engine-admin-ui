@@ -17,10 +17,31 @@ import {
   isoMidnight,
   marginBody,
   marginFieldsFor,
+  marginImportFromError,
+  marginImportText,
   marginProblems,
   marginSummary,
 } from '../venues.logic';
-import type { MarginKind, MarginRequirement, MarginRequirementFields } from '../venues.types';
+import type {
+  MarginImportResult,
+  MarginKind,
+  MarginRequirement,
+  MarginRequirementFields,
+} from '../venues.types';
+
+interface Importing {
+  csv: string;
+  fileName: string | null;
+  reason: string;
+  /** The last check (dry run) and the exact text it checked: Import is offered only for that text. */
+  result: MarginImportResult | null;
+  checked: string | null;
+}
+
+/** The longest file the engine takes (`MarginRequirementCsv.MaxChars`). */
+const MAX_CSV_CHARS = 2_000_000;
+const SHOWN_ERRORS = 50;
+const SHOWN_ROWS = 20;
 
 interface Editing {
   id: number | null;
@@ -61,6 +82,15 @@ const KIND_LABEL: Record<MarginKind, string> = {
           (click)="startCreate()"
         >
           Add a row
+        </button>
+        <button
+          *lscCan="'platform.data.manage'"
+          type="button"
+          class="btn btn-secondary"
+          data-testid="margin-import-open"
+          (click)="startImport()"
+        >
+          Import CSV
         </button>
         <button
           type="button"
@@ -233,6 +263,139 @@ const KIND_LABEL: Record<MarginKind, string> = {
         </section>
       }
 
+      @if (importing(); as im) {
+        <section class="card" aria-label="Import margin rows from a CSV file">
+          <header class="card-head">
+            <h3>Import rows from a CSV file</h3>
+          </header>
+          <div class="card-body">
+            <p class="note">
+              A spreadsheet saved as CSV, with a header row. Check the file first: nothing is saved
+              until you import it. One bad line stops the whole file, rows already loaded are never
+              overwritten, and a file holds at most 5,000 rows. Required columns:
+              <code>Kind, Symbol, EffectiveFromUtc, Source</code>
+            </p>
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">CSV file</span>
+                <input
+                  class="input"
+                  type="file"
+                  accept=".csv,text/csv,text/plain"
+                  data-testid="margin-import-file"
+                  (change)="pickFile($event)"
+                />
+              </label>
+              <label class="field">
+                <span class="label">Reason (audit log)</span>
+                <input
+                  class="input"
+                  name="i-reason"
+                  maxlength="500"
+                  [ngModel]="im.reason"
+                  (ngModelChange)="patchImport({ reason: $event })"
+                />
+              </label>
+            </div>
+            <label class="field">
+              <span class="label">{{
+                im.fileName ? 'Contents of ' + im.fileName : '…or paste the file here'
+              }}</span>
+              <textarea
+                class="textarea"
+                name="i-csv"
+                rows="6"
+                spellcheck="false"
+                data-testid="margin-import-csv"
+                [ngModel]="im.csv"
+                (ngModelChange)="patchImport({ csv: $event })"
+              ></textarea>
+            </label>
+            @if (im.result; as r) {
+              <p
+                class="note"
+                [class.warn]="r.errors.length > 0"
+                role="status"
+                data-testid="margin-import-result"
+              >
+                {{ importText(r) }}
+              </p>
+              @if (r.errors.length) {
+                <ul class="errors">
+                  @for (err of r.errors.slice(0, shownErrors); track $index) {
+                    <li>{{ err }}</li>
+                  }
+                  @if (r.errors.length > shownErrors) {
+                    <li>…and {{ r.errors.length - shownErrors }} more.</li>
+                  }
+                </ul>
+              } @else if (r.rows.length) {
+                <div class="table-wrap">
+                  <table class="grid">
+                    <thead>
+                      <tr>
+                        <th>Symbol</th>
+                        <th>Kind · venue</th>
+                        <th>Terms</th>
+                        <th>From</th>
+                        <th>Source</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (m of r.rows.slice(0, shownRows); track $index) {
+                        <tr>
+                          <td>
+                            <code style="white-space: nowrap">{{ m.symbol }}</code>
+                          </td>
+                          <td class="small">
+                            {{ kindLabel[m.kind] }}{{ m.venue ? ' · ' + m.venue : '' }}
+                          </td>
+                          <td class="small">{{ summary(m) }}</td>
+                          <td class="small">{{ m.effectiveFromUtc.slice(0, 10) }}</td>
+                          <td class="small">{{ m.source }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+                @if (r.rows.length > shownRows) {
+                  <p class="note">…and {{ r.rows.length - shownRows }} more rows.</p>
+                }
+              }
+            }
+            <p class="note warn">
+              Lower margins let larger exchange-traded positions pass the risk check. Import the
+              venue's published terms, not estimates.
+            </p>
+            <div class="actions-row">
+              <button type="button" class="btn btn-secondary" (click)="importing.set(null)">
+                Cancel
+              </button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-testid="margin-import-check"
+                [disabled]="busy() || !im.csv.trim()"
+                (click)="checkImport()"
+              >
+                {{ busy() && !confirmingImport() ? 'Checking…' : 'Check file' }}
+              </button>
+              <button
+                type="button"
+                class="btn btn-primary"
+                data-testid="margin-import-submit"
+                [disabled]="busy() || !canImport()"
+                (click)="confirmingImport.set(true)"
+              >
+                Import {{ canImport() ? im.result!.inserted : '' }} row{{
+                  im.result?.inserted === 1 ? '' : 's'
+                }}
+              </button>
+            </div>
+          </div>
+        </section>
+      }
+
       <section class="card">
         @if (rows.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
@@ -310,6 +473,16 @@ const KIND_LABEL: Record<MarginKind, string> = {
         (confirm)="remove()"
         (cancelled)="deleting.set(null)"
       />
+
+      <app-confirm-dialog
+        [open]="confirmingImport()"
+        title="Import the margin rows"
+        [message]="importMessage()"
+        confirmLabel="Import"
+        [loading]="busy()"
+        (confirm)="runImport()"
+        (cancelled)="confirmingImport.set(false)"
+      />
     </div>
   `,
 })
@@ -322,6 +495,9 @@ export class MarginRequirementsPageComponent {
   protected readonly kindLabel = KIND_LABEL;
   protected readonly labels = MARGIN_LABELS as Record<string, string>;
   protected readonly summary = marginSummary;
+  protected readonly importText = marginImportText;
+  protected readonly shownErrors = SHOWN_ERRORS;
+  protected readonly shownRows = SHOWN_ROWS;
 
   readonly filterKind = signal<MarginKind | ''>('');
   readonly symbol = signal('');
@@ -338,6 +514,24 @@ export class MarginRequirementsPageComponent {
   );
   readonly editing = signal<Editing | null>(null);
   readonly deleting = signal<MarginRequirement | null>(null);
+  readonly importing = signal<Importing | null>(null);
+  readonly confirmingImport = signal(false);
+  /** Import is offered only after a clean check of exactly the text in the box, and only when it adds rows. */
+  readonly canImport = computed(() => {
+    const im = this.importing();
+    return (
+      !!im?.result &&
+      im.checked === im.csv &&
+      im.result.errors.length === 0 &&
+      im.result.inserted > 0
+    );
+  });
+  readonly importMessage = computed(() => {
+    const r = this.importing()?.result;
+    return r
+      ? `${r.inserted} new margin row${r.inserted === 1 ? '' : 's'} will be added and used by the risk check from their start dates. Rows already loaded stay as they are. Deletes are possible afterwards, one row at a time.`
+      : '';
+  });
   readonly busy = signal(false);
   private readonly version = signal(0);
 
@@ -382,11 +576,13 @@ export class MarginRequirementsPageComponent {
   }
 
   startCreate(): void {
+    this.importing.set(null);
     const fields = emptyMargin('FuturesContract');
     this.editing.set({ id: null, fields, from: dateOnly(fields.effectiveFromUtc), reason: '' });
   }
 
   startEdit(m: MarginRequirement): void {
+    this.importing.set(null);
     const { id, createdAtUtc, updatedAtUtc, isDeleted, inForce, ...fields } = m;
     void createdAtUtc;
     void updatedAtUtc;
@@ -421,6 +617,88 @@ export class MarginRequirementsPageComponent {
         if (reportable(err)) this.notify.error(errorText(err, 'The row was not saved.'));
       },
     });
+  }
+
+  startImport(): void {
+    this.editing.set(null);
+    this.importing.set({ csv: '', fileName: null, reason: '', result: null, checked: null });
+  }
+
+  /** Any change to the text forgets the last check, so Import never sends a file that was not checked. */
+  patchImport(patch: Partial<Pick<Importing, 'csv' | 'reason'>>): void {
+    const im = this.importing();
+    if (!im) return;
+    const csvChanged = patch.csv !== undefined && patch.csv !== im.csv;
+    this.importing.set({
+      ...im,
+      ...patch,
+      ...(csvChanged ? { result: null, checked: null, fileName: null } : {}),
+    });
+  }
+
+  pickFile(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > MAX_CSV_CHARS * 4) {
+      this.notify.error('The file is too large: a file holds at most 5,000 rows.');
+      input.value = '';
+      return;
+    }
+    file.text().then(
+      (csv) => {
+        const im = this.importing();
+        if (!im) return;
+        if (csv.length > MAX_CSV_CHARS) {
+          this.notify.error('The file is too large: a file holds at most 5,000 rows.');
+          return;
+        }
+        this.importing.set({ ...im, csv, fileName: file.name, result: null, checked: null });
+      },
+      () => this.notify.error('The file could not be read.'),
+    );
+  }
+
+  checkImport(): void {
+    this.sendImport(true);
+  }
+
+  runImport(): void {
+    if (!this.canImport()) return;
+    this.sendImport(false);
+  }
+
+  private sendImport(dryRun: boolean): void {
+    const im = this.importing();
+    if (!im || this.busy() || !im.csv.trim()) return;
+    const csv = im.csv;
+    this.busy.set(true);
+    this.api.importMarginRequirements({ csv, dryRun, reason: im.reason.trim() || null }).subscribe({
+      next: (result) => {
+        this.busy.set(false);
+        this.confirmingImport.set(false);
+        if (dryRun) {
+          this.keepResult(csv, result);
+          return;
+        }
+        this.importing.set(null);
+        this.notify.success(marginImportText(result));
+        this.rows.reload();
+      },
+      error: (err) => {
+        this.busy.set(false);
+        this.confirmingImport.set(false);
+        const result = marginImportFromError(err);
+        if (result) this.keepResult(csv, { ...result, dryRun });
+        else if (reportable(err))
+          this.notify.error(errorText(err, 'The file could not be checked or imported.'));
+      },
+    });
+  }
+
+  private keepResult(csv: string, result: MarginImportResult): void {
+    const im = this.importing();
+    if (im && im.csv === csv) this.importing.set({ ...im, result, checked: csv });
   }
 
   remove(): void {

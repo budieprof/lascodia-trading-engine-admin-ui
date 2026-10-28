@@ -17,6 +17,8 @@ import {
   isExchangeTraded,
   lagText,
   marginBody,
+  marginImportFromError,
+  marginImportText,
   marginProblems,
   orderTypeName,
   quantityUnitName,
@@ -200,5 +202,31 @@ describe('drift', () => {
       { adapterKind: 'mt5-ea', executionAccountId: null, tradingAccountId: 17, atUtc: '', enginePositions: 0, venuePositions: 0, engineOrders: 0, venueOrders: 0, drift: [], skipped: 'no snapshot' },
     ]);
     expect(s).toEqual({ accounts: 2, withDrift: 1, drifts: 1, skipped: 1 });
+  });
+});
+
+describe('margin CSV import', () => {
+  const ok = { dryRun: true, inserted: 2, alreadyPresent: 1, errors: [], rows: [] };
+
+  it('says what a dry run would do, then what the import did', () => {
+    expect(marginImportText(ok)).toBe(
+      'The file is fine: 2 new rows would be added. 1 row is already loaded and stays as it is.',
+    );
+    expect(marginImportText({ ...ok, inserted: 0, alreadyPresent: 3 })).toBe(
+      'Nothing new in this file: every row is already loaded.',
+    );
+    expect(marginImportText({ ...ok, dryRun: false, alreadyPresent: 0 })).toBe('2 rows added.');
+    expect(marginImportText({ ...ok, errors: ['line 3: x'] })).toBe(
+      '1 problem found. Nothing was imported; fix the file and check it again.',
+    );
+  });
+
+  it('reads the result a refused file carries, and nothing else', () => {
+    const bad = { ...ok, errors: ['line 3: Symbol is required.'] };
+    expect(marginImportFromError({ status: 400, error: { data: bad, responseCode: '-11' } })).toEqual(bad);
+    expect(marginImportFromError({ response: { data: bad } })).toEqual(bad);
+    expect(marginImportFromError({ response: { data: null } })).toBeNull();
+    expect(marginImportFromError(new Error('network'))).toBeNull();
+    expect(marginImportFromError(null)).toBeNull();
   });
 });

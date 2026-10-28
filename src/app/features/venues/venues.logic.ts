@@ -7,6 +7,7 @@ import type {
   FeeAssetClass,
   FeeScheduleFields,
   MarginKind,
+  MarginImportResult,
   MarginRequirementFields,
 } from './venues.types';
 
@@ -473,6 +474,35 @@ export function marginSummary(m: MarginRequirementFields): string {
     default:
       return `initial ${m.initialMarginRate ?? '—'}, maintenance ${m.maintenanceMarginRate ?? '—'}`;
   }
+}
+
+/**
+ * The import result an engine refusal carries (a file with bad lines answers HTTP 400 `-11` with the full result), or
+ * null. The envelope is on `error` for an HTTP error and on `response` for an `ApiError`.
+ */
+export function marginImportFromError(err: unknown): MarginImportResult | null {
+  const e = err as { error?: { data?: unknown }; response?: { data?: unknown } } | null;
+  const data = (e?.error?.data ?? e?.response?.data) as
+    | Partial<MarginImportResult>
+    | null
+    | undefined;
+  return data && Array.isArray(data.errors) ? (data as MarginImportResult) : null;
+}
+
+/** One plain sentence for a margin import (dry run or real). */
+export function marginImportText(r: MarginImportResult): string {
+  if (r.errors.length)
+    return `${r.errors.length} problem${r.errors.length === 1 ? '' : 's'} found. Nothing was imported; fix the file and check it again.`;
+  const kept = r.alreadyPresent
+    ? r.alreadyPresent === 1
+      ? ' 1 row is already loaded and stays as it is.'
+      : ` ${r.alreadyPresent} rows are already loaded and stay as they are.`
+    : '';
+  if (r.dryRun)
+    return r.inserted
+      ? `The file is fine: ${r.inserted} new row${r.inserted === 1 ? '' : 's'} would be added.${kept}`
+      : `Nothing new in this file: every row is already loaded.`;
+  return `${r.inserted} row${r.inserted === 1 ? '' : 's'} added.${kept}`;
 }
 
 /** `yyyy-MM-dd` of an ISO instant (for date inputs) and back to an ISO UTC midnight. */

@@ -126,7 +126,8 @@ function scrub({ extra, keepMoney }) {
 /**
  * Runs in the page: numbered outlines (and an optional spotlight) over the marked elements. A number sits
  * just left of its outline, centred on it, so it never covers the field's label above; when that spot is
- * outside the picture or on top of another outline it falls back to the outline's top-left corner.
+ * outside the picture, on top of another outline or on another control (a neighbouring button, say) it
+ * falls back to the outline's top-left corner.
  */
 function drawMarks({ marks, spotlight, bounds }) {
   const layer = document.createElement('div');
@@ -142,6 +143,12 @@ function drawMarks({ marks, spotlight, bounds }) {
     return { l: r.left - pad, t: r.top - pad, r: r.right + pad, b: r.bottom + pad };
   });
   const badges = [];
+  // Visible controls a number must not cover (the marked elements themselves excepted).
+  const controls = [...document.querySelectorAll('button, a[href], input, select, textarea')]
+    .filter((c) => !els.some((el) => el && (el === c || el.contains(c) || c.contains(el))))
+    .map((c) => c.getBoundingClientRect())
+    .filter((r) => r.width > 0 && r.height > 0)
+    .map((r) => ({ l: r.left, t: r.top, r: r.right, b: r.bottom }));
   const overlaps = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
   const inside = (a) =>
     a.l >= bounds.x + 2 &&
@@ -164,7 +171,8 @@ function drawMarks({ marks, spotlight, bounds }) {
         !m.label &&
         inside(beside) &&
         !boxes.some((o, j) => o && j !== i && overlaps(beside, o)) &&
-        !badges.some((o) => overlaps(beside, o));
+        !badges.some((o) => overlaps(beside, o)) &&
+        !controls.some((o) => overlaps(beside, o));
       const left = clear ? beside.l : Math.max(4, bx.l - 14);
       const top = clear ? beside.t : Math.max(4, bx.t - 14);
       badges.push({ l: left, t: top, r: left + SIZE, b: top + SIZE });
@@ -277,6 +285,13 @@ async function toWebp(convPage, png, width) {
         }
         // Closing the chart's own script sessions is let through: blocked, they would linger until the
         // engine's idle timeout and count against the operator's per-person session cap.
+        // A shot's stubs answer matching requests here, so they never reach the engine: how a page shows the
+        // answer to a write (an import's dry run, say) can be captured without the write being sent.
+        const stub = (shot.stub || []).find(
+          (x) =>
+            (x.method || 'GET') === req.method() && new RegExp(x.path).test(p.replace(BASE, '')),
+        );
+        if (stub) return route.fulfill({ status: stub.status || 200, json: stub.json });
         const closesScriptSession =
           req.method() === 'DELETE' && /\/scripting\/sessions\/[0-9a-f]+$/.test(p);
         if (
