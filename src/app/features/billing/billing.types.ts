@@ -192,3 +192,50 @@ export interface BillingFile {
   blob: Blob;
   fileName: string;
 }
+
+// ── Self-serve plans (Stripe Checkout + billing portal) ──
+
+/** One plan an organisation can be on (`GET billing/plans/public`, and `offers` of the subscription). */
+export interface PlanOffer {
+  slug: string;
+  name: string;
+  description: string | null;
+  /** In the currency's major unit (49 = $49). 0 = the free default plan. */
+  priceAmount: number;
+  currency: string | null;
+  interval: 'month' | 'year' | null;
+  /** A null limit is unlimited. */
+  maxTradingAccounts: number | null;
+  maxActiveEaInstances: number | null;
+  maxMembers: number | null;
+  maxStrategies: number | null;
+  isDefault: boolean;
+  isCurrent: boolean;
+}
+
+export type SubscriptionStatus =
+  | 'none'
+  | 'active'
+  | 'trialing'
+  | 'past_due'
+  | 'canceled'
+  | 'incomplete'
+  | 'unpaid';
+
+/** `GET tenant/billing/subscription` (`tenant.billing.read`). */
+export interface BillingSubscription {
+  selfServeEnabled: boolean;
+  currentPlan: { slug: string; name: string } | null;
+  status: SubscriptionStatus;
+  cancelAtPeriodEnd: boolean;
+  currentPeriodEndUtc: string | null;
+  /** The engine's own answer: the person may change the plan (the console also needs `tenant.billing.manage`). */
+  canManage: boolean;
+  hasBillingAccount: boolean;
+  offers: PlanOffer[];
+}
+
+/** `POST tenant/billing/checkout` / `POST tenant/billing/portal`: where to send the browser. */
+export interface BillingRedirect {
+  url: string;
+}

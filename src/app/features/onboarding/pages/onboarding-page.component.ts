@@ -124,6 +124,9 @@ import type { OnboardingItem, TenantOnboarding } from '../onboarding.types';
         <p class="note">
           Your organisation is on the Trial plan and uses demo accounts only.
           <a routerLink="/iam/plan">See your plan</a>.
+          @if (canSeePlans) {
+            Need more? <a routerLink="/organisation/billing">See plans</a>.
+          }
         </p>
       }
     </div>
@@ -134,6 +137,8 @@ export class OnboardingPageComponent {
   private readonly auth = inject(AuthService);
 
   protected readonly progress = progressText;
+  /** The plans (and self-serve upgrade) live on Usage & billing, for whoever may read it. */
+  protected readonly canSeePlans = this.auth.canSeePath('organisation/billing');
 
   readonly checklist = iamResource<TenantOnboarding | null>(
     () => this.api.onboarding(),

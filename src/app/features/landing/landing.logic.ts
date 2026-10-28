@@ -3,6 +3,10 @@
  * seeded random walk — decoration, never market data — so everything here is deterministic and testable.
  */
 
+import type { PlanOffer } from '@features/billing/billing.types';
+import { isPaid, limitPoints, planPrice } from '@features/billing/plan-price';
+import type { Plan } from './landing.content';
+
 export interface Candle {
   o: number;
   h: number;
@@ -153,6 +157,54 @@ export type PrimaryCta = { label: string; route: string; kind: 'signup' | 'reque
 export function primaryCta(signup: { available: boolean } | null | undefined): PrimaryCta {
   if (signup?.available) return { label: 'Start free', route: '/signup', kind: 'signup' };
   return { label: 'Get started', route: '/signup', kind: 'request' };
+}
+
+/** Cards whose copy never takes an engine price: the Trial is always "Free", Enterprise always "Talk to us". */
+const FIXED_PLAN_SLUGS = new Set(['trial', 'enterprise']);
+
+/**
+ * The plan cards with the engine's real prices (`GET billing/plans/public`). With no paid offer — the call failed,
+ * self-serve billing is off, or only the free default plan exists — the static cards come back untouched, so the
+ * page never shows a price the engine did not send. A paid offer fills the card with its slug; a paid offer with
+ * no card gets one of its own (its limits as the points), placed before Enterprise. Paid cards lead to sign-up.
+ */
+export function mergePlanOffers(
+  plans: readonly Plan[],
+  offers: readonly PlanOffer[] | null | undefined,
+): readonly Plan[] {
+  const paid = (offers ?? []).filter(
+    (o): o is PlanOffer => !!o && typeof o.slug === 'string' && !!o.name && isPaid(o),
+  );
+  if (paid.length === 0) return plans;
+
+  const bySlug = new Map(paid.map((o) => [o.slug.toLowerCase(), o]));
+  const merged: Plan[] = plans.map((p) => {
+    const o = FIXED_PLAN_SLUGS.has(p.slug) ? undefined : bySlug.get(p.slug);
+    return o ? { ...p, name: o.name, ...offerPriceParts(o), cta: 'upgrade' } : p;
+  });
+
+  const shown = new Set(plans.map((p) => p.slug));
+  const extra: Plan[] = paid
+    .filter((o) => !shown.has(o.slug.toLowerCase()))
+    .map((o) => ({
+      slug: o.slug,
+      name: o.name,
+      ...offerPriceParts(o),
+      blurb: o.description ?? '',
+      points: limitPoints(o),
+      cta: 'upgrade',
+    }));
+  if (extra.length === 0) return merged;
+
+  const enterprise = merged.findIndex((p) => p.slug === 'enterprise');
+  const at = enterprise === -1 ? merged.length : enterprise;
+  return [...merged.slice(0, at), ...extra, ...merged.slice(at)];
+}
+
+/** "$49" over "per month" — the card's big price and its small note. */
+function offerPriceParts(o: PlanOffer): { price: string; priceNote: string } {
+  const priceNote = o.interval === 'month' ? 'per month' : o.interval === 'year' ? 'per year' : '';
+  return { price: planPrice(o.priceAmount, o.currency, null), priceNote };
 }
 
 export function formatPrice(p: number): string {

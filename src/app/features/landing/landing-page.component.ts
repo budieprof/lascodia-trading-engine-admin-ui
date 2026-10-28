@@ -11,6 +11,8 @@ import { Meta, Title } from '@angular/platform-browser';
 import { RouterLink } from '@angular/router';
 
 import { ThemeService } from '@core/theme/theme.service';
+import type { PlanOffer } from '@features/billing/billing.types';
+import { PublicPlansApiService } from '@features/billing/public-plans-api.service';
 import { DemoApiService } from '@features/demo/demo-api.service';
 import { OnboardingApiService } from '@features/onboarding/onboarding-api.service';
 import type { PublicSignupAvailability } from '@features/onboarding/onboarding.types';
@@ -43,7 +45,8 @@ const PAGE_DESCRIPTION =
 /**
  * The public landing page (`/` for visitors who are not signed in, and `/welcome` for anyone). Outside the
  * console layout and session handling: the only engine calls are the anonymous sign-up and demo availability
- * probes, which decide what the buttons offer. Copy lives in `landing.content.ts`.
+ * probes, which decide what the buttons offer, and the public plans (`GET billing/plans/public`), which fill in
+ * real prices when there are paid plans. Copy lives in `landing.content.ts`.
  */
 @Component({
   selector: 'app-landing-page',
@@ -74,6 +77,8 @@ export class LandingPageComponent {
 
   protected readonly signup = signal<PublicSignupAvailability | null>(null);
   protected readonly demoAvailable = signal(false);
+  /** The engine's public plans; null until (or unless) it answers — the plan cards then keep their static copy. */
+  protected readonly planOffers = signal<readonly PlanOffer[] | null>(null);
   protected readonly cta = computed(() => primaryCta(this.signup()));
   protected readonly scrolled = signal(false);
   protected readonly menuOpen = signal(false);
@@ -102,6 +107,13 @@ export class LandingPageComponent {
       .subscribe({
         next: (s) => this.demoAvailable.set(s?.available === true),
         error: () => this.demoAvailable.set(false),
+      });
+    // Fails closed too: no answer, no prices — the cards stay exactly as written.
+    inject(PublicPlansApiService)
+      .plans()
+      .subscribe({
+        next: (offers) => this.planOffers.set(offers),
+        error: () => this.planOffers.set(null),
       });
 
     this.onScroll();

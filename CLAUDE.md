@@ -315,6 +315,14 @@ localhost rather than a blank page.
   prices one per line `feed, monthly, per display user, margin %`), Usage (any organisation's month; audited). The page
   always shows the payment-provider notice: no real provider exists (`none` or the `local-test` double). Shared views:
   `components/usage-month-view`, `components/invoice-detail`; decisions in `billing.logic.ts` (spec).
+  **Self-serve plans (Stripe Checkout):** "Your plan" at the top of `/organisation/billing`
+  (`components/your-plan`, `GET tenant/billing/subscription`): Upgrade → `POST tenant/billing/checkout`, Switch /
+  Manage billing → `POST tenant/billing/portal` (both `tenant.billing.manage` AND the engine's `canManage`; a live
+  subscription switches in the portal), then `BrowserLocation.assign` to the returned link (https / same-origin /
+  local http only). `?checkout=success` polls every 2 s for up to 30 s; the query is stripped. Self-serve off:
+  current plan + the sales address. The landing page reads `GET billing/plans/public` (`PublicPlansApiService`,
+  anonymous) and `mergePlanOffers` prices only cards the engine sent a PAID offer for — no paid offer, no change.
+  Decisions in `plan-offers.logic.ts` / `plan-price.ts` (spec).
 
 - **Venue trading console (multi-asset WS7 7.5–7.10; engine `ma/console-api`, CLAUDE.md "Multi-asset console APIs").**
   `features/venues/` + chart pieces. ONE rule decides everything: `venueInstrumentFor(symbol)` (`venues.logic.ts`) is

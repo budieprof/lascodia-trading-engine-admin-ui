@@ -486,6 +486,15 @@
     "deprecated": false
   },
   {
+    "key": "tenant.billing.manage",
+    "category": "Organisations",
+    "description": "Change the organisation's plan by itself: start a card checkout for a paid plan and open the billing portal (switch plan, update the card, cancel).",
+    "scopeable": false,
+    "stepUp": false,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "tenant.branding.manage",
     "category": "Organisations",
     "description": "Change the organisation's console look: display name, primary colour, logo and favicon.",

@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
 
+import type { PlanOffer } from '@features/billing/billing.types';
 import { FAQS, PLANS, SALES_EMAIL, SECURITY } from '../landing.content';
-import type { PrimaryCta } from '../landing.logic';
+import { mergePlanOffers, type PrimaryCta } from '../landing.logic';
 import { RevealDirective } from '../reveal.directive';
 import { LandingIconComponent } from './landing-icon.component';
 
@@ -40,13 +41,20 @@ import { LandingIconComponent } from './landing-icon.component';
         <header class="lp-head" lpReveal>
           <p class="lp-eyebrow">Plans</p>
           <h2 class="lp-h2" id="lp-plans-title">Start free. Scale when you’re ready.</h2>
-          <p class="lp-lede">
-            Every organisation starts on the Trial. When you need more accounts, people or modules,
-            we size a plan around your desk.
-          </p>
+          @if (selfServe()) {
+            <p class="lp-lede">
+              Every organisation starts on the Trial. Upgrade by card from the console whenever you
+              need more — or talk to us about a plan sized around your desk.
+            </p>
+          } @else {
+            <p class="lp-lede">
+              Every organisation starts on the Trial. When you need more accounts, people or
+              modules, we size a plan around your desk.
+            </p>
+          }
         </header>
-        <div class="pl">
-          @for (p of plans; track p.name; let i = $index) {
+        <div class="pl" [class.pl--many]="plans().length > 3">
+          @for (p of plans(); track p.slug; let i = $index) {
             <article
               class="lp-card pl__card"
               [class.pl__card--featured]="p.featured"
@@ -61,7 +69,16 @@ import { LandingIconComponent } from './landing-icon.component';
                 <b>{{ p.price }}</b
                 ><small>{{ p.priceNote }}</small>
               </p>
-              @if (p.cta === 'contact' && salesEmail) {
+              @if (p.cta === 'upgrade') {
+                <a
+                  class="lp-btn pl__btn"
+                  [class.lp-btn--primary]="p.featured"
+                  [class.lp-btn--ghost]="!p.featured"
+                  [routerLink]="cta().route"
+                >
+                  {{ cta().kind === 'signup' ? 'Start free, upgrade anytime' : 'Request access' }}
+                </a>
+              } @else if (p.cta === 'contact' && salesEmail) {
                 <a
                   class="lp-btn lp-btn--ghost pl__btn"
                   [href]="'mailto:' + salesEmail + '?subject=Lascodia%20' + p.name"
@@ -140,6 +157,9 @@ import { LandingIconComponent } from './landing-icon.component';
         grid-template-columns: repeat(3, 1fr);
         gap: 20px;
         align-items: stretch;
+      }
+      .pl--many {
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
       }
       .pl__card {
         display: flex;
@@ -303,9 +323,13 @@ import { LandingIconComponent } from './landing-icon.component';
 })
 export class LandingTrustComponent {
   readonly cta = input.required<PrimaryCta>();
+  /** The engine's public offers (`GET billing/plans/public`); null = no answer, so the static cards stand. */
+  readonly offers = input<readonly PlanOffer[] | null>(null);
 
   protected readonly security = SECURITY;
-  protected readonly plans = PLANS;
+  protected readonly plans = computed(() => mergePlanOffers(PLANS, this.offers()));
+  /** A real paid plan can be bought by card. */
+  protected readonly selfServe = computed(() => this.plans().some((p) => p.cta === 'upgrade'));
   protected readonly faqs = FAQS;
   protected readonly salesEmail = SALES_EMAIL;
 }
