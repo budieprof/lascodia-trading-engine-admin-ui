@@ -439,6 +439,13 @@ const WINDOW_OPTIONS = [
         <div class="status error">{{ errorMessage() }}</div>
       }
 
+      @if (result() && autoRan()) {
+        <div class="status hint auto-note">
+          Showing the default analysis, run when the page opened: last {{ windowDays() }} days of
+          the selected sources at TP × 1 / SL × 1. Change the filters and press <b>Analyse</b> to
+          rerun.
+        </div>
+      }
       @if (result(); as r) {
         <section class="window-meta">
           {{ r.fromUtc | date: 'short' : watOffset }} →
@@ -1951,10 +1958,16 @@ const WINDOW_OPTIONS = [
         opacity: 0.65;
         margin: 0.5rem 0 0;
       }
+      /* minmax(0, …): a wide breakdown table scrolls inside its card instead of pushing the
+         third card past the page edge. */
       .breakdown-grid {
         display: grid;
-        grid-template-columns: 1.6fr 1fr 1fr;
+        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
         gap: 1rem;
+      }
+      .breakdown-grid > * {
+        min-width: 0;
+        overflow-x: auto;
       }
       @media (max-width: 1100px) {
         .breakdown-grid {
@@ -2572,6 +2585,8 @@ export class SignalSensitivityPageComponent implements OnInit {
   readonly loading = signal(false);
   readonly errorMessage = signal<string | null>(null);
   readonly result = signal<AnalyzeSignalSensitivityResultDto | null>(null);
+  /** True when the result on screen is the default analysis run on open, not one the operator asked for. */
+  readonly autoRan = signal(false);
 
   /**
    * Handle on the martingale simulator so the per-signal table can show each trade's ladder
@@ -3119,6 +3134,10 @@ export class SignalSensitivityPageComponent implements OnInit {
           this.availableSymbols.set(symbols);
         }
       });
+
+    // Open on real figures: run the analysis once with the defaults (or the deep link's filters).
+    // It is a read-only replay (~2 s for 30 days); the best-cell dialog stays closed for it.
+    this.run({ auto: true });
   }
 
   toggleSource(s: string) {
@@ -3214,8 +3233,10 @@ export class SignalSensitivityPageComponent implements OnInit {
     return hours.toFixed(1);
   }
 
-  run() {
+  /** `auto` = the default analysis the page runs on open: no best-cell dialog pops up. */
+  run(opts: { auto?: boolean } = {}) {
     if (this.loading()) return;
+    this.autoRan.set(!!opts.auto);
     this.loading.set(true);
     this.errorMessage.set(null);
 
@@ -3319,7 +3340,7 @@ export class SignalSensitivityPageComponent implements OnInit {
           // Surface the per-symbol best-cell picks for confirmation. The
           // dialog stays closed when the cohort had no signals (the picks
           // array is empty in that case).
-          this.openAutoConfigDialog(res.data.perSymbolBest ?? []);
+          if (!opts.auto) this.openAutoConfigDialog(res.data.perSymbolBest ?? []);
         } else if (res && !res.status)
           this.errorMessage.set(res.message ?? 'Query returned failure.');
       });

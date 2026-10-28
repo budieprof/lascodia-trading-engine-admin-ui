@@ -9,10 +9,10 @@ import {
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
-import { map } from 'rxjs';
+import { catchError, map, of } from 'rxjs';
 
 import { MLModelsService } from '@core/services/ml-models.service';
-import type { ActiveMLTrainingRunDto } from '@core/api/api.types';
+import type { ActiveMLTrainingRunDto, MLTrainingRunDto } from '@core/api/api.types';
 import { unwrapResponse } from '@core/api/api.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -21,8 +21,11 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { ConfigService } from '@core/services/config.service';
+import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
+
+import { failureCategory, summariseRuns } from './training-history.logic';
 
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
@@ -49,7 +52,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
+    FeatureStateComponent,
     RelativeTimePipe,
     RefreshButtonComponent,
   ],
@@ -158,9 +161,19 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         </section>
 
         @if (runs().length === 0) {
-          <app-empty-state
-            title="Nothing queued or running"
-            description="No active training runs. Trigger one from the ML Models page or wait for an auto-degrading retrain."
+          <app-feature-state
+            title="ML training worker"
+            summary="The training worker picks up queued runs one pair at a time: a retrain is queued automatically when a live model degrades or drifts, on schedule, or by hand from the ML Models page. Each run must pass the quality gates before its model can be promoted."
+            [kind]="workerOn() === false ? 'off' : 'on'"
+            [stateLabel]="workerOn() === false ? 'Off' : 'On · nothing queued'"
+            switchKey="Workers:MLTrainingWorker:Enabled"
+            [detail]="idleDetail()"
+            [requirements]="idleRequirements()"
+            [links]="[
+              { label: 'ML models (trigger training)', route: '/ml-models' },
+              { label: 'Overfit watchlist', route: '/ml-models/overfit-watchlist' },
+              { label: 'Worker health', route: '/worker-health' },
+            ]"
           />
         } @else {
           <section class="card">
@@ -241,6 +254,81 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
             </table>
           </section>
         }
+
+        @if (history(); as h) {
+          @if (h.total > 0) {
+            <section class="card">
+              <header class="card-head">
+                <h3>Recently finished</h3>
+                <span class="sub">
+                  Last {{ h.total }} runs since {{ h.oldestUtc | date: 'd MMM' : 'UTC' }}:
+                  {{ h.completed }} completed · {{ h.failed }} failed · {{ h.cancelled }} cancelled
+                  @if (lastCompleted(); as lc) {
+                    · last model trained {{ lc.completedAt | relativeTime }} ({{ lc.symbol }}
+                    {{ lc.timeframe }})
+                  }
+                </span>
+              </header>
+              @if (h.reasons.length) {
+                <div class="reasons" aria-label="Why runs did not complete">
+                  @for (r of h.reasons.slice(0, 6); track r.reason) {
+                    <span class="reason-chip"
+                      ><strong>{{ r.count }}</strong> {{ r.reason }}</span
+                    >
+                  }
+                </div>
+              }
+              <table class="queue-table">
+                <thead>
+                  <tr>
+                    <th>Id</th>
+                    <th>Pair</th>
+                    <th>Result</th>
+                    <th>Trigger</th>
+                    <th>Architecture</th>
+                    <th>Finished</th>
+                    <th class="num">Took</th>
+                    <th>Why</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of recentRows(); track r.id) {
+                    <tr>
+                      <td class="mono">#{{ r.id }}</td>
+                      <td>
+                        <span class="mono symbol">{{ r.symbol }}</span>
+                        <span class="muted small"> · {{ r.timeframe }}</span>
+                      </td>
+                      <td>
+                        <span class="chip" [attr.data-state]="('' + r.status).toLowerCase()">{{
+                          r.status
+                        }}</span>
+                      </td>
+                      <td class="mono small">{{ r.triggerType }}</td>
+                      <td class="mono small">{{ r.learnerArchitecture }}</td>
+                      <td
+                        class="time"
+                        [title]="
+                          r.completedAt ? (r.completedAt | date: 'yyyy-MM-dd HH:mm:ss UTC') : ''
+                        "
+                      >
+                        {{ r.completedAt ? (r.completedAt | relativeTime) : '—' }}
+                      </td>
+                      <td class="num mono small">{{ took(r) }}</td>
+                      <td class="reason">
+                        @if (r.errorMessage) {
+                          <span [title]="r.errorMessage">{{ category(r.errorMessage) }}</span>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </section>
+          }
+        }
       }
     </div>
   `,
@@ -262,6 +350,36 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         .kpis {
           grid-template-columns: repeat(2, 1fr);
         }
+      }
+      .card-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-1) var(--space-3);
+        padding: var(--space-3) var(--space-4) var(--space-2);
+      }
+      .card-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .card-head .sub {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .reasons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        padding: 0 var(--space-4) var(--space-3);
+      }
+      .reason-chip {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        padding: 2px 10px;
       }
       .card {
         background: var(--bg-secondary);
@@ -469,6 +587,111 @@ export class TrainingQueuePageComponent {
       refreshOn: ['mlModelActivated', 'mlModelRetired', 'mlDriftRecoveryTriggered'],
     },
   );
+
+  private readonly config = inject(ConfigService);
+
+  /** The newest 100 runs of any status — what the worker has been doing lately. */
+  protected readonly recent = createPolledResource(
+    () =>
+      this.ml
+        .listTrainingRuns({
+          currentPage: 1,
+          itemCountPerPage: 100,
+          sortBy: 'Id',
+          sortDirection: 'desc',
+          filter: null,
+        })
+        .pipe(
+          map((res) => (res.data?.data ?? []) as MLTrainingRunDto[]),
+          catchError(() => of(null)),
+        ),
+    { intervalMs: 300_000 },
+  );
+  /** The newest COMPLETED run, which may be older than the 100 above. */
+  protected readonly lastCompletedRes = createPolledResource(
+    () =>
+      this.ml
+        .listTrainingRuns({
+          currentPage: 1,
+          itemCountPerPage: 1,
+          sortBy: 'Id',
+          sortDirection: 'desc',
+          filter: { status: 'Completed' },
+        })
+        .pipe(
+          map((res) => ((res.data?.data ?? [])[0] ?? null) as MLTrainingRunDto | null),
+          catchError(() => of(null)),
+        ),
+    { intervalMs: 600_000 },
+  );
+  protected readonly workerSwitch = createPolledResource(
+    () =>
+      this.config.getByKey('Workers:MLTrainingWorker:Enabled', { silent: true }).pipe(
+        map((r) => (r.status && r.data ? (r.data.value ?? '').trim().toLowerCase() : null)),
+        catchError(() => of(null)),
+      ),
+    { intervalMs: 600_000 },
+  );
+
+  protected readonly history = computed(() => {
+    const rows = this.recent.value();
+    return rows ? summariseRuns(rows) : null;
+  });
+  protected readonly recentRows = computed(() => (this.recent.value() ?? []).slice(0, 20));
+  protected readonly lastCompleted = computed(() => this.lastCompletedRes.value() ?? null);
+  protected readonly workerOn = computed(() => {
+    const v = this.workerSwitch.value();
+    return v === 'true' ? true : v === 'false' ? false : null;
+  });
+  protected readonly idleDetail = computed(() => {
+    const h = this.history();
+    if (!h || h.total === 0) return 'Nothing is queued or running right now.';
+    const last = h.newestFinishedUtc ? new Date(h.newestFinishedUtc) : null;
+    const when = last ? `${last.toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'unknown';
+    return `Nothing is queued or running right now. The last run finished ${when}; the recent history is below.`;
+  });
+  protected readonly idleRequirements = computed(() => {
+    const on = this.workerOn();
+    const lc = this.lastCompleted();
+    const h = this.history();
+    return [
+      {
+        label: 'Training worker switched on',
+        ok: on,
+        detail:
+          on === null
+            ? 'no setting — code default applies'
+            : `Workers:MLTrainingWorker:Enabled = ${on}`,
+        route: '/engine-config',
+        query: { search: 'MLTrainingWorker' },
+      },
+      {
+        label: 'A recent run passed the quality gates',
+        ok: lc ? Date.now() - Date.parse(lc.completedAt ?? lc.startedAt) < 14 * 86_400_000 : false,
+        detail: lc
+          ? `last completed run #${lc.id} (${lc.symbol} ${lc.timeframe}) finished ${(lc.completedAt ?? lc.startedAt).slice(0, 10)}`
+          : 'no completed run found',
+      },
+      ...(h && h.reasons.length
+        ? [
+            {
+              label: 'Most common reason runs stop',
+              ok: null,
+              detail: `${h.reasons[0].reason} (${h.reasons[0].count} of the last ${h.total} runs)`,
+            },
+          ]
+        : []),
+    ];
+  });
+
+  protected category(msg: string): string {
+    return failureCategory(msg);
+  }
+  protected took(r: MLTrainingRunDto): string {
+    if (!r.completedAt || !r.startedAt) return '—';
+    const min = Math.round((Date.parse(r.completedAt) - Date.parse(r.startedAt)) / 60_000);
+    return min < 60 ? `${min} min` : `${(min / 60).toFixed(1)} h`;
+  }
 
   protected readonly runs = computed(() => this.resource.value() ?? []);
   protected readonly loading = computed(() => this.resource.loading() && this.runs().length === 0);
