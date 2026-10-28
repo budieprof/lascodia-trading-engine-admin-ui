@@ -4,6 +4,10 @@ import { describe, expect, it } from 'vitest';
 
 import { blobError, fundQuery, toDownloadedFile } from './fund-api.service';
 import {
+  bestExTiles,
+  enumWords,
+  shareOfMax,
+  liveScopeAccounts,
   day,
   defaultPeriod,
   isSha256,
@@ -119,5 +123,65 @@ describe('fund logic', () => {
       code: '-403-quota',
       message: 'upgrade',
     });
+  });
+});
+
+describe('bestExTiles', () => {
+  it('reads the All-fills row and picks the 60 s markout', () => {
+    const tiles = bestExTiles({
+      fillsMeasured: 44,
+      markoutHorizons: ['1s', '5s', '30s', '60s', '5m'],
+      overall: {
+        key: 'All fills',
+        fills: 44,
+        lots: 196.7,
+        withArrivalBenchmark: 44,
+        meanSlippagePips: -1.2886,
+        medianSlippagePips: 0,
+        p95AbsSlippagePips: 4.15,
+        priceImprovementShare: 0.3636,
+        meanSlippageBps: -0.65,
+        meanVsRequestedPips: 0.0023,
+        meanQuotedSpreadPips: 0.0391,
+        meanEffectiveSpreadPips: 0.5,
+        meanLatencyMs: 0,
+        medianLatencyMs: 0,
+        p95LatencyMs: 0,
+        meanMarkoutPips: [1, 2, 3, 15.075, -8],
+        favourableMarkoutShare: [0.3, 0.2, 0.5, 0.2692, 0.38],
+        markoutSamples: [26, 26, 26, 26, 26],
+        commission: 1372.9,
+      },
+    });
+    expect(tiles[0]).toMatchObject({ label: 'Fills measured', value: '44' });
+    expect(tiles[1]).toMatchObject({ value: '-1.29 pips', tone: 'pos' }); // negative slippage = better than arrival
+    expect(tiles[2].value).toBe('36 %');
+    expect(tiles[3].tone).toBe('neg'); // a positive spread is a cost
+    expect(tiles[5]).toMatchObject({ label: 'Markout 60s', value: '15.08 pips', tone: 'pos' });
+    expect(tiles[5].hint).toContain('n=26');
+    expect(tiles[6].value).toBe('1,372.90');
+  });
+});
+
+describe('liveScopeAccounts', () => {
+  const scope = [{ id: 5 }, { id: 17 }, { id: 18 }, { id: 23 }];
+  it('keeps the active ones in scope order, capped', () => {
+    expect(liveScopeAccounts(scope, [23, 17, 99]).map((a) => a.id)).toEqual([17, 23]);
+    expect(liveScopeAccounts(scope, [23, 17], 1).map((a) => a.id)).toEqual([17]);
+  });
+  it('without an active list takes the scope', () => {
+    expect(liveScopeAccounts(scope, null, 3).map((a) => a.id)).toEqual([5, 17, 18]);
+  });
+});
+
+describe('shareOfMax / enumWords', () => {
+  it('scales to the largest', () => {
+    expect(shareOfMax([0, 5, 10])).toEqual([0, 50, 100]);
+    expect(shareOfMax([0, 0])).toEqual([0, 0]);
+    expect(shareOfMax([])).toEqual([]);
+  });
+  it('words', () => {
+    expect(enumWords('PartiallyFilled')).toBe('Partially filled');
+    expect(enumWords('Trading')).toBe('Trading');
   });
 });

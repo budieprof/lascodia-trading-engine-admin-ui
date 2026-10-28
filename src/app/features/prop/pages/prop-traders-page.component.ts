@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
@@ -10,6 +10,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { failureMessage } from '@features/organisation/organisation.logic';
 import { PropGateComponent, PROP_DIALOG_STYLES } from '../components/prop-gate.component';
+import { PropSetupComponent } from '../components/prop-setup.component';
 import { PropApiService } from '../prop-api.service';
 import { optionalNumber } from '../prop.logic';
 import type { PropTrader, SavePropTraderBody } from '../prop.types';
@@ -29,9 +30,36 @@ import type { PropTrader, SavePropTraderBody } from '../prop.types';
     ModalA11yDirective,
     PageHeaderComponent,
     PropGateComponent,
+    PropSetupComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [PROP_DIALOG_STYLES],
+  styles: [
+    PROP_DIALOG_STYLES,
+    `
+      .gate-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      ol.steps {
+        margin: 0;
+        padding-left: var(--space-5);
+        font-size: var(--text-xs);
+        line-height: 1.6;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -50,62 +78,107 @@ import type { PropTrader, SavePropTraderBody } from '../prop.types';
           New trader
         </button>
       </app-page-header>
-      <app-prop-gate (ready)="traders.reload()">
-        <section class="card">
-          @if (traders.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          }
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Trader</th>
-                  <th>E-mail</th>
-                  <th>Reference</th>
-                  <th>Console user</th>
-                  <th class="num">Running</th>
-                  <th class="num">All</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (t of traders.value(); track t.id) {
-                  <tr>
-                    <td>
-                      {{ t.displayName }}
-                      @if (!t.isActive) {
-                        <span class="chip">inactive</span>
-                      }
-                    </td>
-                    <td>{{ t.email ?? '—' }}</td>
-                    <td>{{ t.externalRef ?? '—' }}</td>
-                    <td>{{ t.adminUserId ? '#' + t.adminUserId : '—' }}</td>
-                    <td class="num">
-                      <a [routerLink]="['/prop/enrollments']" [queryParams]="{ traderId: t.id }">{{
-                        t.runningEnrollments
-                      }}</a>
-                    </td>
-                    <td class="num">{{ t.totalEnrollments }}</td>
-                    <td class="actions">
-                      <button
-                        *lscCan="P.PropManage"
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        (click)="edit(t)"
-                      >
-                        Edit
-                      </button>
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td colspan="7" class="muted">No trader yet.</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+      <app-prop-gate (ready)="start()">
+        <div class="gate-body">
+          <app-prop-setup
+            [intro]="intro"
+            [showChecklist]="traders.loaded() && !traders.value().length"
+          />
+          <div class="split">
+            <section class="card">
+              @if (traders.error(); as err) {
+                <p class="pad" role="alert">
+                  <span class="chip bad">Could not load</span> {{ err }}
+                </p>
+              }
+              <div class="table-wrap">
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>Trader</th>
+                      <th>E-mail</th>
+                      <th>Reference</th>
+                      <th>Console user</th>
+                      <th class="num">Running</th>
+                      <th class="num">All</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (t of traders.value(); track t.id) {
+                      <tr>
+                        <td>
+                          {{ t.displayName }}
+                          @if (!t.isActive) {
+                            <span class="chip">inactive</span>
+                          }
+                        </td>
+                        <td>{{ t.email ?? '—' }}</td>
+                        <td>{{ t.externalRef ?? '—' }}</td>
+                        <td>{{ t.adminUserId ? '#' + t.adminUserId : '—' }}</td>
+                        <td class="num">
+                          <a
+                            [routerLink]="['/prop/enrollments']"
+                            [queryParams]="{ traderId: t.id }"
+                            >{{ t.runningEnrollments }}</a
+                          >
+                        </td>
+                        <td class="num">{{ t.totalEnrollments }}</td>
+                        <td class="actions">
+                          <button
+                            *lscCan="P.PropManage"
+                            type="button"
+                            class="btn btn-sm btn-secondary"
+                            (click)="edit(t)"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td colspan="7" class="muted">
+                          No trader yet. Add the person who will trade a challenge account — a name
+                          is enough; e-mail and your own reference (e.g. a CRM id) are optional.
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card">
+              <header class="card-head"><h3>How traders work</h3></header>
+              <div class="card-body">
+                <ol class="steps">
+                  <li>
+                    <strong>Add a trader</strong> — the person, not the account. One trader can hold
+                    several accounts over time (one per phase).
+                  </li>
+                  <li>
+                    <strong>Link a console user</strong> (optional) — a member of your organisation;
+                    that person then sees their own progress on
+                    <a routerLink="/prop/me">My challenge</a> and nothing else.
+                  </li>
+                  <li>
+                    <strong>Enrol an account</strong> for them on
+                    <a routerLink="/prop/enrollments">Enrolments</a> — the account is judged against
+                    the program from that moment.
+                  </li>
+                  <li>
+                    <strong>Advance or fund</strong> — when a phase is passed, advance them to the
+                    next phase; funded traders get
+                    <a routerLink="/prop/payouts">payout statements</a>.
+                  </li>
+                </ol>
+                <p class="note">
+                  A trader can be made inactive but never deleted: their enrolments, breaches and
+                  payout statements stay on record.
+                </p>
+              </div>
+            </section>
           </div>
-        </section>
+        </div>
       </app-prop-gate>
 
       @if (draft(); as d) {
@@ -185,6 +258,15 @@ import type { PropTrader, SavePropTraderBody } from '../prop.types';
   `,
 })
 export class PropTradersPageComponent {
+  readonly setup = viewChild(PropSetupComponent);
+  protected readonly intro =
+    'Traders are the people who take your challenges. Add them here, then enrol one of your trading accounts for each in a program.';
+
+  start(): void {
+    this.traders.reload();
+    this.setup()?.load();
+  }
+
   private readonly api = inject(PropApiService);
   private readonly notify = inject(NotificationService);
 

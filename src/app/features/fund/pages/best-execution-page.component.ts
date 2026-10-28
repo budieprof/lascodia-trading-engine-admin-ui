@@ -8,6 +8,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 
 import { FundApiService } from '../fund-api.service';
 import {
+  bestExTiles,
   day,
   defaultPeriod,
   isUpgradeNotice,
@@ -112,7 +113,41 @@ import type { BestExecutionReport, FillGroupStats, FundScope } from '../fund.typ
           }
         </section>
 
+        @if (!report() && loading()) {
+          <section class="card"><p class="pad muted">Measuring the period's fills…</p></section>
+        }
         @if (report(); as r) {
+          <section class="card">
+            <div class="card-head">
+              <strong>Execution quality, {{ day(r.fromUtc) }} → {{ day(r.toUtc) }}</strong>
+              <span class="muted small"
+                >{{ r.tradingAccountId ? 'one account' : 'every account you may see'
+                }}{{ r.symbol ? ' · ' + r.symbol : '' }}</span
+              >
+            </div>
+            @if (r.fillsMeasured === 0) {
+              <p class="pad muted">
+                No live fill in this period. A fill is measured when an EA reports an execution of a
+                live (not paper) order; widen the period or pick another account.
+              </p>
+            } @else {
+              <div class="tiles">
+                @for (t of summary(r); track t.label) {
+                  <div class="tile">
+                    <div class="tile-label">{{ t.label }}</div>
+                    <div
+                      class="tile-value"
+                      [class.pos]="t.tone === 'pos'"
+                      [class.neg]="t.tone === 'neg'"
+                    >
+                      {{ t.value }}
+                    </div>
+                    <div class="tile-label">{{ t.hint }}</div>
+                  </div>
+                }
+              </div>
+            }
+          </section>
           <section class="card">
             <div class="card-head">
               <strong>{{ r.fillsMeasured }} fill(s)</strong>
@@ -271,8 +306,17 @@ export class BestExecutionPageComponent {
   readonly error = signal<string | null>(null);
   readonly upgrade = signal<string | null>(null);
 
+  protected readonly summary = bestExTiles;
+
   constructor() {
-    this.fund.scope().subscribe({ next: (s) => this.scope.set(s), error: (e) => this.fail(e) });
+    // Open on the default question (every account you may see, last 30 days) instead of a blank page.
+    this.fund.scope().subscribe({
+      next: (s) => {
+        this.scope.set(s);
+        this.load();
+      },
+      error: (e) => this.fail(e),
+    });
   }
 
   tables(r: BestExecutionReport): { title: string; rows: FillGroupStats[] }[] {

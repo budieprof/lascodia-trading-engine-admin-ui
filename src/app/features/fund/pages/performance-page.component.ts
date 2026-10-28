@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { catchError, forkJoin, map, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
@@ -15,6 +16,7 @@ import {
   day,
   defaultPeriod,
   isUpgradeNotice,
+  liveScopeAccounts,
   money,
   monthlyGrid,
   num,
@@ -23,7 +25,19 @@ import {
   signedAmount,
   sparkline,
 } from '../fund.logic';
-import type { CashFlow, CashFlowKind, FundScope, PerformanceStatement } from '../fund.types';
+import type {
+  CashFlow,
+  CashFlowKind,
+  FundScope,
+  FundScopeAccount,
+  PerformanceStatement,
+} from '../fund.types';
+
+interface GlanceRow {
+  account: FundScopeAccount;
+  statement: PerformanceStatement | null;
+  error: string | null;
+}
 
 /**
  * Performance statements (fund module): one account or one account group (portfolio) over a period —
@@ -37,6 +51,27 @@ import type { CashFlow, CashFlowKind, FundScope, PerformanceStatement } from '..
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
   styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss'],
+  styles: [
+    `
+      tr.pick {
+        cursor: pointer;
+      }
+      tr.pick:hover td,
+      tr.picked td {
+        background: var(--bg-tertiary);
+      }
+      .spark {
+        width: 120px;
+        height: 28px;
+        display: block;
+      }
+      .spark polyline {
+        fill: none;
+        stroke: var(--accent, #2563eb);
+        stroke-width: 1.5;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -136,6 +171,82 @@ import type { CashFlow, CashFlowKind, FundScope, PerformanceStatement } from '..
             <p class="pad muted">You have no accounts to report on.</p>
           }
         </section>
+
+        @if (glance().length) {
+          <section class="card">
+            <div class="card-head">
+              <strong>Live accounts at a glance</strong>
+              <span class="muted small"
+                >{{ glancePeriod() }} · time-weighted, deposits and withdrawals taken out · click a
+                row for its statement</span
+              >
+            </div>
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th class="num">Equity now</th>
+                    <th class="num">Return</th>
+                    <th class="num">Max drawdown</th>
+                    <th class="num">In drawdown now</th>
+                    <th class="num">Sharpe</th>
+                    <th class="num">Worst day</th>
+                    <th>Growth of 1</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (g of glance(); track g.account.id) {
+                    <tr
+                      class="pick"
+                      [class.picked]="subject() === 'a:' + g.account.id"
+                      (click)="pick(g.account.id)"
+                    >
+                      <td>
+                        {{ g.account.accountId }} · {{ g.account.accountName }}
+                        <div class="small muted">
+                          {{ g.account.broker }} · {{ g.account.accountType }}
+                        </div>
+                      </td>
+                      @if (g.statement; as st) {
+                        <td class="num">{{ money(st.endEquity) }} {{ st.currency }}</td>
+                        <td
+                          class="num"
+                          [class.pos]="(st.timeWeightedReturn ?? 0) > 0"
+                          [class.neg]="(st.timeWeightedReturn ?? 0) < 0"
+                        >
+                          {{ pct(st.timeWeightedReturn) }}
+                        </td>
+                        <td class="num neg">{{ pct(st.maxDrawdown) }}</td>
+                        <td class="num">{{ pct(st.currentDrawdown) }}</td>
+                        <td class="num">{{ num(st.sharpe) }}</td>
+                        <td class="num">{{ pct(st.worstDay) }}</td>
+                        <td>
+                          <svg
+                            class="spark"
+                            viewBox="0 0 120 28"
+                            preserveAspectRatio="none"
+                            aria-hidden="true"
+                          >
+                            <polyline [attr.points]="spark(st)" />
+                          </svg>
+                        </td>
+                      } @else {
+                        <td colspan="7" class="small muted">{{ g.error ?? 'Loading…' }}</td>
+                      }
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            @if (otherAccounts() > 0) {
+              <p class="pad small muted">
+                {{ otherAccounts() }} more account(s) in your scope are inactive (no recent equity
+                record) — pick one in the list above to see its history.
+              </p>
+            }
+          </section>
+        }
 
         @if (statement(); as s) {
           <section class="card">
@@ -474,6 +585,12 @@ export class PerformancePageComponent {
   readonly confirmFlow = signal(false);
   readonly removing = signal<CashFlow | null>(null);
 
+  readonly glance = signal<GlanceRow[]>([]);
+  readonly glancePeriod = signal('');
+  readonly otherAccounts = computed(() =>
+    Math.max(0, this.scope().accounts.length - this.glance().length),
+  );
+
   readonly accountId = computed(() => {
     const s = this.subject();
     return s?.startsWith('a:') ? Number(s.slice(2)) : null;
@@ -500,19 +617,53 @@ export class PerformancePageComponent {
   );
 
   constructor() {
+    // Open on the live accounts: a glance table of each one's statement, and the first one's full statement.
     this.fund.scope().subscribe({
       next: (s) => {
         this.scope.set(s);
         this.scopeLoaded.set(true);
-        const first = s.accounts[0]
-          ? `a:${s.accounts[0].id}`
-          : s.groups[0]
-            ? `g:${s.groups[0].id}`
-            : null;
-        this.subject.set(first);
+        this.fund.activeAccountIds().subscribe((ids) => {
+          const live = liveScopeAccounts(s.accounts, ids);
+          const first = live[0] ?? s.accounts[0];
+          this.subject.set(first ? `a:${first.id}` : s.groups[0] ? `g:${s.groups[0].id}` : null);
+          if (this.subject()) this.load();
+          this.loadGlance(live);
+        });
       },
       error: (e) => this.fail(e),
     });
+  }
+
+  private loadGlance(accounts: FundScopeAccount[]): void {
+    const period = periodQuery(this.from(), this.to());
+    if ('problem' in period || !accounts.length) return;
+    this.glancePeriod.set(`${period.from.slice(0, 10)} → ${period.to.slice(0, 10)}`);
+    this.glance.set(accounts.map((account) => ({ account, statement: null, error: null })));
+    forkJoin(
+      accounts.map((account) =>
+        this.fund
+          .performance({ tradingAccountId: account.id, from: period.from, to: period.to })
+          .pipe(
+            map((statement): GlanceRow => ({ account, statement, error: null })),
+            catchError((e) =>
+              of<GlanceRow>({ account, statement: null, error: errorText(e, 'No statement.') }),
+            ),
+          ),
+      ),
+    ).subscribe((rows) => this.glance.set(rows));
+  }
+
+  pick(accountId: number): void {
+    this.subject.set(`a:${accountId}`);
+    this.load();
+  }
+
+  spark(st: PerformanceStatement): string {
+    return sparkline(
+      st.days.map((d) => d.index),
+      120,
+      28,
+    );
   }
 
   private params() {

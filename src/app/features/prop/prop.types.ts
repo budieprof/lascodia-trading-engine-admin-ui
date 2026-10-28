@@ -329,3 +329,123 @@ export interface AccountOption {
   label: string;
   balance: number | null;
 }
+
+// ── Overview + account fit (engine `GET prop/overview`, `GET prop/account-fit`) ─────────────────────
+
+export interface PropSetting {
+  key: string;
+  value: string;
+  meaning: string;
+}
+
+export interface PropOverviewAccount {
+  id: number;
+  label: string;
+  accountType: string;
+  currency: string;
+  balance: number;
+  equity: number;
+  lastSyncedAtUtc: string;
+  /** Balance and equity are recent enough for the evaluator to judge equity rules on. */
+  fresh: boolean;
+  runningEnrollmentId: number | null;
+  runningProgram: string | null;
+}
+
+/** The module at a glance. `source: 'lists'` = built in the console from the list endpoints (older engine). */
+export interface PropOverview {
+  source: 'engine' | 'lists';
+  generatedAtUtc: string | null;
+  evaluationEnabled: boolean | null;
+  enforcementEnabled: boolean | null;
+  evaluationIntervalSeconds: number | null;
+  staleAccountSeconds: number | null;
+  requireDistinctPayoutApprover: boolean | null;
+  settings: PropSetting[];
+  activePrograms: number;
+  archivedPrograms: number;
+  activeTraders: number;
+  traders: number;
+  linkedTraders: number;
+  enrollmentsByState: Record<string, number>;
+  breaches24h: number;
+  warnings24h: number;
+  breaches7d: number;
+  breachesTotal: number | null;
+  payoutsByStatus: Record<string, number>;
+  approvedNetPayouts: number;
+  lastEvaluatedAtUtc: string | null;
+  payoutApprovalPolicy: boolean | null;
+  equityReportsLastHour: number | null;
+  highImpactEventsNext7d: number | null;
+  accounts: PropOverviewAccount[];
+}
+
+export interface PropReplayDay {
+  day: string;
+  startEquity: number;
+  minEquity: number;
+  endEquity: number;
+  reference: number;
+  loss: number;
+  lossPct: number;
+  realizedPnl: number;
+  positionsOpened: number;
+  traded: boolean;
+}
+
+export type PropReplayOutcome = 'Passed' | 'Failed' | 'Running' | 'NoData';
+
+export interface PropReplay {
+  outcome: PropReplayOutcome;
+  measuredFromUtc: string | null;
+  measuredToUtc: string | null;
+  points: number;
+  initialBalance: number;
+  endEquity: number;
+  endBalance: number;
+  decidedAtUtc: string | null;
+  failedRule: PropRuleKind | null;
+  failedValue: number | null;
+  failedLimit: number | null;
+  failedDetail: string | null;
+  profitTargetReachedAtUtc: string | null;
+  timeLimitEndsAtUtc: string | null;
+  profitPct: number;
+  profitTargetPct: number | null;
+  worstDayLossPct: number;
+  worstDay: string | null;
+  dailyLossLimitPct: number | null;
+  maxDrawdownFromInitialPct: number;
+  maxDrawdownFromPeakPct: number;
+  drawdownLimitPct: number | null;
+  drawdownMode: PropDrawdownMode;
+  tradingDays: number;
+  minTradingDays: number | null;
+  warnings: number;
+  days: PropReplayDay[];
+  curve: { atUtc: string; equity: number }[];
+  notes: string[];
+}
+
+export interface PropAccountFit {
+  tradingAccountId: number;
+  accountLabel: string;
+  accountType: string;
+  currency: string;
+  runningEnrollmentId: number | null;
+  replay: PropReplay;
+}
+
+export interface PropAccountFitReport {
+  generatedAtUtc: string;
+  windowStartUtc: string;
+  days: number;
+  programId: number | null;
+  rulesName: string;
+  phaseIndex: number;
+  phase: PropPhaseRules;
+  tradingDay: { resetTime: string; timeZone: string };
+  accounts: PropAccountFit[];
+  methodology: string[];
+}
