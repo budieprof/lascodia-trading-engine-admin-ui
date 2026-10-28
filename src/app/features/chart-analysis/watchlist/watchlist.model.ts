@@ -174,20 +174,26 @@ export function rowFor(
   fallbackDigits: number,
   ctx: RowContext = {},
 ): WatchRow {
-  const last = liveBid ?? quote?.last ?? quote?.bid ?? null;
+  // A live tick whose bid is implausible against its live ask (a corrupt broker feed: bid 0.00013 vs ask 0.83) is not
+  // a price — the row keeps the quote's values instead of showing it as Last. Judged against the LIVE ask only: the
+  // quote's ask can be 30 s old, and a fast market moves more than the spread rule allows in that time.
+  const liveOk = liveBid !== undefined && plausibleQuote(liveBid, ctx.liveAsk);
+  const live = liveOk ? liveBid : undefined;
+  const liveAsk = liveOk ? ctx.liveAsk : undefined;
+  const last = live ?? quote?.last ?? quote?.bid ?? null;
   const prev = quote?.prevClose ?? null;
   const change = last !== null && prev !== null ? last - prev : null;
   const changePct = change !== null && prev ? (change / prev) * 100 : null;
   const tick =
-    liveBid === undefined || prevTick === undefined || liveBid === prevTick
+    live === undefined || prevTick === undefined || live === prevTick
       ? null
-      : liveBid > prevTick
+      : live > prevTick
         ? 'up'
         : 'down';
   const digits = quote?.digits || fallbackDigits;
   const pipSize = pipSizeOf(item.symbol, digits, quote?.pipSize);
-  const bid = liveBid ?? quote?.bid ?? null;
-  const ask = ctx.liveAsk ?? quote?.ask ?? null;
+  const bid = live ?? quote?.bid ?? null;
+  const ask = liveAsk ?? quote?.ask ?? null;
   // The live tick extends the day's range the same way the engine extends it with its cached tick.
   const high = quote?.dayHigh != null && last !== null ? Math.max(quote.dayHigh, last) : (quote?.dayHigh ?? null);
   const low = quote?.dayLow != null && last !== null ? Math.min(quote.dayLow, last) : (quote?.dayLow ?? null);
@@ -222,6 +228,20 @@ export function rowFor(
     session: session.text,
     homeSession: session.home,
   };
+}
+
+/**
+ * Most (ask − bid) / mid a live quote may carry and still be shown (the engine's MarketData:Ingest:MaxSpreadFraction
+ * default). The widest real quote on record is XAUUSD at rollover, ~1.1%.
+ */
+export const MAX_PLAUSIBLE_SPREAD_FRACTION = 0.02;
+
+/** False for a non-finite / non-positive bid, an ask below the bid, or a spread wider than 2% of mid. True without an ask to judge by. */
+export function plausibleQuote(bid: number, ask: number | null | undefined): boolean {
+  if (!Number.isFinite(bid) || bid <= 0) return false;
+  if (ask == null || !Number.isFinite(ask) || ask <= 0) return true;
+  if (ask < bid) return false;
+  return ask - bid <= MAX_PLAUSIBLE_SPREAD_FRACTION * ((ask + bid) / 2);
 }
 
 /** The value a row sorts by for `key`. */

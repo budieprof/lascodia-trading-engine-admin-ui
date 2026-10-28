@@ -52,4 +52,25 @@ describe('broker depth (SP-I9)', () => {
     expect(snapshotAgeSeconds('2026-10-09T04:11:11Z', Date.parse('2026-10-09T04:11:14Z'))).toBe(3);
     expect(snapshotAgeSeconds('nope', 0)).toBeNull();
   });
+
+  it('drops wrapped MT5 volumes (≈1.84e11) and never formats a non-size (corrupt feed, 2026-10-27)', () => {
+    const wrapped =
+      '{"bids":[{"P":1.1123,"V":200000},{"P":1.11229,"V":184467240737.096},{"P":1.11228,"V":100000}],' +
+      '"asks":[{"P":1.11241,"V":100000},{"P":1.11239,"V":184467340737.096}]}';
+    const d = parseDepth(snap(wrapped));
+    expect(d.bids.map((l) => l.price)).toEqual([1.1123, 1.11228]);
+    expect(d.asks.map((l) => l.price)).toEqual([1.11241]);
+    expect(d.bids.at(-1)!.cumulative).toBe(300_000);
+
+    const top = parseDepth(snap(null, { bidVolume: 184467240737.096, askPrice: 1.3242 }));
+    expect(top.bids).toEqual([]);
+    expect(top.asks).toHaveLength(1);
+
+    expect(formatUnits(184467240737.096)).toBe('—');
+    expect(formatUnits(1e10)).toBe('—');
+    expect(formatUnits(Number.NaN)).toBe('—');
+    expect(formatUnits(Number.POSITIVE_INFINITY)).toBe('—');
+    expect(formatUnits(-5)).toBe('—');
+    expect(formatUnits(10_100_000)).toBe('10.1M');
+  });
 });

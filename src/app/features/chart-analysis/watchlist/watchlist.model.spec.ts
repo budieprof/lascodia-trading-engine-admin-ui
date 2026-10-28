@@ -10,6 +10,7 @@ import {
   locate,
   moveSymbol,
   neighbour,
+  plausibleQuote,
   nextSort,
   removeSection,
   removeSymbol,
@@ -78,6 +79,24 @@ describe('watchlist model', () => {
     expect(flat.last).toBe(1.1);
     expect(flat.change).toBeNull();
     expect(flat.tick).toBeNull();
+  });
+
+  it('ignores a live bid that is implausible against its live ask (corrupt broker feed)', () => {
+    // MetaQuotes-Demo, 2026-10-27: USDCHF bid 0.00013 against ask 0.83.
+    const bad = rowFor({ symbol: 'USDCHF', flag: null }, 'a', quote({ last: 0.83, bid: 0.83, ask: 0.8301 }), 0.00013, 0.83, 5, {
+      liveAsk: 0.83012,
+    });
+    expect(bad.last).toBe(0.83);
+    expect(bad.bid).toBe(0.83);
+    expect(bad.ask).toBe(0.8301); // the live pair is dropped together
+    expect(bad.tick).toBeNull();
+    // A crossed pair (bid 48356 / ask 0.006) is dropped too; a sane live pair still wins.
+    expect(rowFor({ symbol: 'USDJPY', flag: null }, 'a', quote({ last: 151 }), 48356.197, undefined, 3, { liveAsk: 0.006 }).last).toBe(151);
+    expect(rowFor({ symbol: 'EURUSD', flag: null }, 'a', quote(), 1.1002, 1.1, 5, { liveAsk: 1.1003 }).last).toBe(1.1002);
+    // XAUUSD at rollover (1.05% wide) is real.
+    expect(plausibleQuote(2650, 2678)).toBe(true);
+    expect(plausibleQuote(1.10304, 1.13341)).toBe(false);
+    expect(plausibleQuote(1.1, undefined)).toBe(true);
   });
 
   it('sorts with nulls last and cycles headers like TradingView', () => {

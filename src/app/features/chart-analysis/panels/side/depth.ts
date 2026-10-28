@@ -28,6 +28,16 @@ export interface DepthLadder {
   hasLevels: boolean;
 }
 
+/**
+ * A level size at or above this is not a size: MT5 returns a corrupt negative DOM volume as ≈ 1.84e11
+ * (184466440737) — the engine's MarketData:Ingest:MaxBookLevelSize default. Real MT5 levels stay below ~1e7.
+ */
+export const MAX_PLAUSIBLE_UNITS = 1e10;
+
+function plausibleUnits(v: number): boolean {
+  return Number.isFinite(v) && v >= 0 && v < MAX_PLAUSIBLE_UNITS;
+}
+
 interface RawLevel {
   P?: number;
   V?: number;
@@ -37,7 +47,7 @@ function levels(raw: unknown): { price: number; volume: number }[] {
   if (!Array.isArray(raw)) return [];
   return (raw as RawLevel[])
     .map((l) => ({ price: Number(l?.P), volume: Number(l?.V) }))
-    .filter((l) => Number.isFinite(l.price) && l.price > 0 && Number.isFinite(l.volume) && l.volume >= 0);
+    .filter((l) => Number.isFinite(l.price) && l.price > 0 && plausibleUnits(l.volume));
 }
 
 function cumulate(side: { price: number; volume: number }[]): DepthLevel[] {
@@ -63,8 +73,8 @@ export function parseDepth(snapshot: OrderBookSnapshot | null, maxLevels = 10): 
   const hasLevels = bidsRaw.length > 0 || asksRaw.length > 0;
   // Top of book only: show the best bid / ask the snapshot carries.
   if (!hasLevels) {
-    bidsRaw = snapshot.bidPrice > 0 ? [{ price: snapshot.bidPrice, volume: snapshot.bidVolume }] : [];
-    asksRaw = snapshot.askPrice > 0 ? [{ price: snapshot.askPrice, volume: snapshot.askVolume }] : [];
+    bidsRaw = snapshot.bidPrice > 0 && plausibleUnits(snapshot.bidVolume) ? [{ price: snapshot.bidPrice, volume: snapshot.bidVolume }] : [];
+    asksRaw = snapshot.askPrice > 0 && plausibleUnits(snapshot.askVolume) ? [{ price: snapshot.askPrice, volume: snapshot.askVolume }] : [];
   }
   const bids = cumulate(bidsRaw.slice(0, maxLevels));
   const asks = cumulate(asksRaw.slice(0, maxLevels));
@@ -81,8 +91,9 @@ export function parseDepth(snapshot: OrderBookSnapshot | null, maxLevels = 10): 
   };
 }
 
-/** `1.2M`, `350K`, `800` units. */
+/** `1.2M`, `350K`, `800` units; `—` for a value that is not a size (non-finite, negative, ≥ 1e10). */
 export function formatUnits(v: number): string {
+  if (!plausibleUnits(v)) return '—';
   if (v >= 1_000_000) return `${(Math.round(v / 100_000) / 10).toString()}M`;
   if (v >= 1_000) return `${Math.round(v / 1_000)}K`;
   return String(Math.round(v));
