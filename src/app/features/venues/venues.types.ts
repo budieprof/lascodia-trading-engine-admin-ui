@@ -304,6 +304,18 @@ export interface MarginRequirement extends MarginRequirementFields {
   inForce: boolean;
 }
 
+/** `POST reference/margin-requirements/import` — all or nothing; existing rows are never overwritten. */
+export interface MarginImportResult {
+  dryRun: boolean;
+  /** Rows added (dry run: rows that would be added). */
+  inserted: number;
+  /** Rows whose kind, symbol, venue, start and notional floor already exist (live or deleted) — left alone. */
+  alreadyPresent: number;
+  /** One line per problem ("line 4: …"); any error means nothing was imported. */
+  errors: string[];
+  rows: MarginRequirement[];
+}
+
 // ── instrument-candles/state ──────────────────────────────────────────────────────────────────────
 
 export interface InstrumentCandleCursor {

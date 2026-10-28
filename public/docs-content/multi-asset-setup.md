@@ -171,7 +171,7 @@ To add a single row:
 
 ### Importing many rows from a file
 
-Loading hundreds of tiers by hand is slow, so the engine also takes a CSV file (a spreadsheet saved as text). There is no button for this on the page yet; it is one call to the engine. It needs the `platform.data.manage` permission.
+Loading hundreds of tiers by hand is slow, so the page also takes a CSV file (a spreadsheet saved as text). It needs the `platform.data.manage` permission.
 
 The file has a header row. Required columns: `Kind`, `Symbol`, `EffectiveFromUtc`, `Source`. Optional: `Venue`, `Currency` (default USD), `InitialMargin`, `MaintenanceMargin`, `IntradayInitialMargin`, `IntradayMaintenanceMargin`, `NotionalFloor`, `NotionalCap`, `MaxLeverage`, `InitialMarginRate`, `MaintenanceMarginRate`, `MaintenanceAmount`. Rates are fractions: `0.005` means 0.5%.
 
@@ -183,22 +183,23 @@ FuturesContract,6E,,USD,2026-11-02,<initial>,<maintenance>,,,,,"<CME page> read 
 CryptoLeverageTier,BTC-USDT-PERP,bybit-linear,USDT,2026-11-02,,,0,<cap>,<max>,<rate>,"<venue page> read 2026-11-02"
 ```
 
-1. Send the file with `"dryRun": true` first. Nothing is saved; the answer lists every row it would add and every error.
+1. Click {{Import CSV}} at the top of the page.
+2. Choose the file ((1)), or paste its contents into the box below. Add a **Reason** for the audit log.
+3. Click {{Check file}} ((2)). Nothing is saved yet. The answer ((3)) lists the rows that would be added, or every line with a problem.
+4. If the check found problems, fix the file, then pick or paste it again and check it again.
+5. When the check is clean, click {{Import}} ((4)) and confirm.
 
-   ```bash
-   jq -n --rawfile csv margins.csv '{csv: $csv, dryRun: true, reason: "CME margins 2026-11"}' |
-   curl -s -X POST "https://<your-engine-host>/api/v1/lascodia-trading-engine/reference/margin-requirements/import" \
-     -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" --data-binary @-
-   ```
-
-2. When the dry run shows no errors, send the same file with `"dryRun": false`.
+![Importing margin rows: ((1)) choose the file, ((2)) check it, ((3)) what the check found, ((4)) import](ma-margin-import "/reference/margin-requirements")
 
 > [!SUCCESS]
-> The answer shows `inserted` (rows added) and `alreadyPresent` (rows that were already there). The new rows appear on the page, and one audit record is written.
+> A message says how many rows were added and how many were already there. The new rows appear on the page, and one audit record is written.
+
+> [!NOTE]
+> The **Import** button only works for the exact text you checked. Change one character and you must check the file again.
 
 Rules worth knowing:
 
-- **All or nothing.** One bad row stops the whole file. Fix it and send it again.
+- **All or nothing.** One bad line stops the whole file. Fix it and check it again.
 - **Never overwrites.** A row with the same kind, symbol, venue and start date that already exists is left alone. To change numbers, add new rows with a later `EffectiveFromUtc`; the latest one in force wins.
 - At most 5,000 rows per file.
 
