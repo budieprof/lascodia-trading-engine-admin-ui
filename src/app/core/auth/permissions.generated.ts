@@ -541,6 +541,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.ea.releases.manage',
+    category: 'Platform staff',
+    description:
+      'Platform staff: publish a build of the Lascodia Expert Advisor (.ex5) that organisation members download from the terminal connection wizard (the EA rollout does this after verifying the binary), and list the published builds.',
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.elevation.approve',
     category: 'Platform staff',
     description:
@@ -885,7 +895,7 @@ export const PERMISSION_CATALOG = [
     key: 'tenant.billing.manage',
     category: 'Organisations',
     description:
-      "Change the organisation's plan by itself: start a card checkout for a paid plan and open the billing portal (switch plan, update the card, cancel).",
+      "Change the organisation's plan and pay for it by card; open the card-payment portal.",
     scopeable: false,
     stepUp: false,
     twoPerson: false,
@@ -1030,6 +1040,7 @@ export const Permission = {
   OrdersRead: 'orders.read',
   PlatformBillingManage: 'platform.billing.manage',
   PlatformDataManage: 'platform.data.manage',
+  PlatformEaReleasesManage: 'platform.ea.releases.manage',
   PlatformElevationApprove: 'platform.elevation.approve',
   PlatformElevationRequest: 'platform.elevation.request',
   PlatformEngineManage: 'platform.engine.manage',
