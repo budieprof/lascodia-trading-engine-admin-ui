@@ -1,0 +1,22 @@
+// Shared by the help portal's front page (docs-home.scss) and guide page (docs.scss).
+
+:host {
+  --doc-tint: color-mix(in srgb, var(--accent) 9%, transparent);
+  --doc-tint-strong: color-mix(in srgb, var(--accent) 16%, transparent);
+  --doc-card: var(--bg-secondary);
+  --doc-ok: var(--tone-green);
+  --doc-warn: var(--tone-amber);
+  --doc-bad: var(--tone-red);
+  --doc-info: var(--tone-blue);
+  --doc-purple: var(--tone-purple);
+  display: block;
+}
+
+.docs {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.muted {
+  color: var(--text-secondary);
+}

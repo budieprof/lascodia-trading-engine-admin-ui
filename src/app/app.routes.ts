@@ -47,7 +47,7 @@ export const routes: Routes = [
         // The documentation portal (engine enterprise onboarding): any signed-in person.
         path: 'docs',
         canActivate: [canAccessPath('docs')],
-        data: { breadcrumb: 'Documentation' },
+        data: { breadcrumb: 'Help & guides' },
         loadChildren: () => import('@features/docs/docs.routes').then((m) => m.DOCS_ROUTES),
       },
       {

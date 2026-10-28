@@ -1,0 +1,144 @@
+[
+  {
+    "name": "gs-signin",
+    "route": "/login",
+    "noAuth": true
+  },
+  {
+    "name": "gs-onboarding",
+    "route": "/onboarding",
+    "marks": [
+      {
+        "sel": "li.step",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": ".card-head .chip",
+        "n": 2
+      },
+      {
+        "sel": "a.btn",
+        "text": "Open",
+        "n": 3
+      }
+    ],
+    "replace": [
+      [
+        "\\bHouse\\b",
+        "Example Trading"
+      ]
+    ]
+  },
+  {
+    "name": "gs-invite",
+    "route": "/iam/invitations",
+    "crop": {
+      "sel": "section.card, .card",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "input",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": ".card select",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Send invitation",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "gs-second-factor",
+    "route": "/iam/security",
+    "crop": {
+      "sel": ".card",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "label",
+        "text": "Require a second factor",
+        "n": 1
+      },
+      {
+        "sel": "button",
+        "text": "Save policy",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "gs-connect",
+    "route": "/organisation/terminals/connect",
+    "marks": [
+      {
+        "sel": "button, a",
+        "text": "Download the EA",
+        "n": 1
+      },
+      {
+        "sel": "input",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Create token",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "gs-chart",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "marks": [
+      {
+        "sel": "main button",
+        "text": "EURUSD",
+        "n": 1
+      },
+      {
+        "sel": "main button",
+        "text": "1h",
+        "n": 2
+      },
+      {
+        "sel": "main *",
+        "text": "Watchlist",
+        "n": 3
+      },
+      {
+        "sel": "[aria-label=\"Symbol details\"]",
+        "n": 4,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "gs-strategies",
+    "route": "/organisation/strategies",
+    "marks": [
+      {
+        "sel": "section.card, .card",
+        "nth": 1,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "button",
+        "text": "Subscribe",
+        "n": 2
+      }
+    ]
+  }
+]
