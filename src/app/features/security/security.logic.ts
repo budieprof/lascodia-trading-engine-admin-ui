@@ -107,3 +107,44 @@ export function evidencePeriodProblem(from: string, to: string): string | null {
   if (days > 800) return 'A bundle covers at most 800 days.';
   return null;
 }
+
+/** Dotted versions compared part by part as numbers ("8.47.256" > "8.47.99"); unparseable parts count as 0. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/** How many connected terminals run each EA version, newest first, judged against the latest and minimum builds. */
+export interface VersionCount {
+  version: string;
+  terminals: number;
+  isLatest: boolean;
+  /** Older than the engine's minimum (`Onboarding:EaMinimumVersion`): the connection wizard flags it. */
+  belowMinimum: boolean;
+}
+
+export function terminalsByVersion(
+  instances: readonly { eaVersion: string | null; status: string }[],
+  latest: string | null,
+  minimum: string | null,
+): VersionCount[] {
+  const counts = new Map<string, number>();
+  for (const i of instances) {
+    if (i.status !== 'Active') continue;
+    const v = (i.eaVersion ?? '').trim() || 'unknown';
+    counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([version, terminals]) => ({
+      version,
+      terminals,
+      isLatest: latest !== null && version === latest,
+      belowMinimum: version !== 'unknown' && !!minimum && compareVersions(version, minimum) < 0,
+    }))
+    .sort((a, b) => compareVersions(b.version, a.version));
+}

@@ -1,19 +1,35 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { catchError, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { BrowserLocation } from '@core/browser/browser-location';
-import { Permission } from '@core/auth/permissions.generated';
+import { Permission, permissionDefinition } from '@core/auth/permissions.generated';
 import { DEFAULT_POST_LOGIN_ROUTE } from '@core/auth/return-url';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText, filterMembers, memberLabel, reportable } from '@features/iam/iam.logic';
-import type { IamMember, TenantDto } from '@features/iam/iam.types';
+import type { AccessElevation, IamMember, TenantDto } from '@features/iam/iam.types';
+import { ago, plural } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
 
 /**
  * Impersonation (U3.6, ADR-0031 §6): platform staff view the console as another user to see what
@@ -24,13 +40,63 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
   selector: 'app-platform-impersonation-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    MfaHintComponent,
+    StatTilesComponent,
+    FeatureStateComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+      .rules {
+        list-style: disc;
+        margin: 0;
+        padding-left: var(--space-5);
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
         title="Impersonation"
         subtitle="See the console as another user, read-only. Recorded in their organisation's audit log."
+      />
+
+      <app-stat-tiles [tiles]="tiles()" label="Impersonation summary" />
+
+      <app-feature-state
+        title="View as another person"
+        summary="Shows you the console exactly as the chosen person sees it — their organisation, their permissions, their pages — so you can see what they report. Nothing can be changed while viewing unless an approved elevation allows it."
+        [kind]="ready() ? 'on' : 'partial'"
+        [stateLabel]="ready() ? 'Ready' : 'Not available to you'"
+        [requirements]="requirements()"
+        [links]="[
+          { label: 'Elevated access', route: '/platform/elevations' },
+          {
+            label: 'Audit log',
+            route: '/admin/audit',
+            query: { action: 'platform.impersonation.' },
+          },
+          { label: 'Platform operator guide', route: '/docs/platform-guide' },
+        ]"
       />
 
       <section class="card">
@@ -63,14 +129,31 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
         } @else if (membersError(); as e) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ e }}</p>
         } @else if (shown().length === 0) {
-          <p class="pad muted">No active members.</p>
+          <p class="pad small muted">
+            {{
+              members().length
+                ? 'No one else is an active member here — you cannot view yourself, and suspended or invited people have no console to see.'
+                : 'This organisation has no members yet.'
+            }}
+          </p>
         } @else {
           <table class="grid">
+            <thead>
+              <tr>
+                <th>Person</th>
+                <th>Membership</th>
+                <th><span class="sr-only">View</span></th>
+              </tr>
+            </thead>
             <tbody>
               @for (m of shown(); track m.userId) {
                 <tr>
                   <td>
                     {{ label(m) }}<span class="sub">{{ m.email || '' }}</span>
+                  </td>
+                  <td class="small">
+                    {{ m.status }}
+                    <span class="sub">{{ memberSince(m) }}</span>
                   </td>
                   <td class="actions">
                     <button
@@ -88,6 +171,42 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
           </table>
         }
       </section>
+
+      <div class="cols">
+        <section class="card">
+          <header class="card-head"><h3>The rules</h3></header>
+          <div class="card-body small">
+            <ul class="rules">
+              <li>
+                Read-only: every change is refused while you view, unless an approved elevation for
+                that organisation is active (<a routerLink="/platform/elevations"
+                  >elevated access</a
+                >
+                — {{ activeElevations() }} active now).
+              </li>
+              <li>
+                Who may: platform staff holding <code>platform.impersonate</code> ({{
+                  impersonateText()
+                }}).
+              </li>
+              <li>
+                It switches your console session; a banner stays on every page until you end it. It
+                works only in a console session signed in through the identity provider.
+              </li>
+              <li>
+                The start, the reason you give and the end are written to the viewed organisation's
+                audit log with your name.
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <app-audit-trail
+          heading="Impersonation history"
+          [actions]="['platform.impersonation.']"
+          empty="No one has viewed the console as another person yet. Each start (with its reason) and each end is recorded here and in the viewed organisation's audit log."
+        />
+      </div>
 
       <app-confirm-dialog
         [open]="target() !== null"
@@ -128,6 +247,78 @@ export class ImpersonationPageComponent {
         : of([] as TenantDto[]),
     [] as TenantDto[],
   );
+  readonly elevations = iamResource(
+    () =>
+      this.auth.hasPermission(Permission.PlatformElevationRequest)
+        ? this.iam.elevations().pipe(catchError(() => of([] as AccessElevation[])))
+        : of([] as AccessElevation[]),
+    [] as AccessElevation[],
+  );
+  readonly canImpersonate = computed(() => this.auth.hasPermission(Permission.PlatformImpersonate));
+  readonly bffSession = this.auth.mode === 'bff';
+  readonly ready = computed(() => this.canImpersonate() && this.bffSession);
+  readonly activeElevations = computed(
+    () => this.elevations.value().filter((e) => e.status === 'Active').length,
+  );
+  readonly requirements = computed<FeatureRequirement[]>(() => [
+    {
+      label: 'You hold platform.impersonate',
+      ok: this.canImpersonate(),
+      detail: this.canImpersonate()
+        ? 'Granted to you as platform staff.'
+        : 'Only platform staff (PlatformAdmin / PlatformSupport, or House admins) hold it.',
+    },
+    {
+      label: 'Console signed in through the identity provider',
+      ok: this.bffSession,
+      detail: this.bffSession
+        ? 'This console uses identity-provider sessions, which impersonation switches.'
+        : 'This console signs in with the older password form; the engine refuses impersonation from it.',
+    },
+    {
+      label: 'An approved elevation, to change anything',
+      ok: this.activeElevations() > 0 ? true : null,
+      detail:
+        this.activeElevations() > 0
+          ? `${plural(this.activeElevations(), 'elevation')} active — changes allowed in that organisation.`
+          : 'None active — viewing stays read-only, which is enough to see what someone sees.',
+      route: '/platform/elevations',
+    },
+  ]);
+  readonly tiles = computed<StatTile[]>(() => {
+    const tenants = this.tenants.value();
+    const people = this.shown().length;
+    return [
+      {
+        label: 'Organisations',
+        value: String(tenants.length),
+        caption: tenants.length === 1 ? `only ${tenants[0].name}` : 'whose members you can view',
+        route: '/platform/organisations',
+      },
+      {
+        label: 'People you could view',
+        value: this.tenantId() === null ? '—' : String(people),
+        caption:
+          this.tenantId() === null ? 'choose an organisation' : 'active members, yourself excluded',
+      },
+      {
+        label: 'Elevations active',
+        value: String(this.activeElevations()),
+        caption: this.activeElevations()
+          ? 'changes allowed while they last'
+          : 'viewing is read-only',
+        route: '/platform/elevations',
+      },
+      {
+        label: 'Your access',
+        value: this.ready() ? 'Can view' : 'Cannot view',
+        caption: this.canImpersonate()
+          ? 'you hold platform.impersonate'
+          : 'needs platform.impersonate',
+        tone: this.ready() ? 'good' : 'warn',
+      },
+    ];
+  });
   readonly tenantId = signal<number | null>(null);
   readonly members = signal<IamMember[]>([]);
   readonly membersError = signal<string | null>(null);
@@ -146,6 +337,28 @@ export class ImpersonationPageComponent {
 
   constructor() {
     this.tenants.reload();
+    this.elevations.reload();
+    // One organisation (the usual single-install case): list its people straight away.
+    effect(() => {
+      const list = this.tenants.value();
+      if (list.length === 1 && untracked(this.tenantId) === null) {
+        untracked(() => this.pickTenant(list[0].id));
+      }
+    });
+  }
+
+  memberSince(m: IamMember): string {
+    const parts: string[] = [];
+    if (m.roles?.length) parts.push(m.roles.join(', '));
+    parts.push(m.lastSignInAtUtc ? `signed in ${ago(m.lastSignInAtUtc)}` : 'never signed in');
+    return parts.join(' · ');
+  }
+
+  impersonateText(): string {
+    const d = permissionDefinition(Permission.PlatformImpersonate);
+    return d?.stepUp
+      ? 'a fresh second-factor sign-in is asked for at the start'
+      : 'no extra sign-in step';
   }
 
   label(m: IamMember): string {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  compareVersions,
   countBySeverity,
   evidencePeriodProblem,
   filterReleases,
@@ -9,6 +10,7 @@ import {
   signOffProblem,
   sortFindings,
   staleTotal,
+  terminalsByVersion,
 } from './security.logic';
 import type { AccessReviewCampaign, ReleaseNote, ReviewFinding } from './security.types';
 
@@ -101,5 +103,32 @@ describe('security logic', () => {
     expect(evidencePeriodProblem('2026-12-31', '2026-01-01')).toMatch(/before/);
     expect(evidencePeriodProblem('2023-01-01', '2026-01-01')).toMatch(/800/);
     expect(evidencePeriodProblem('', '2026-01-01')).toMatch(/both/);
+  });
+});
+
+describe('EA versions', () => {
+  it('compares dotted versions numerically', () => {
+    expect(compareVersions('8.47.256', '8.47.99')).toBeGreaterThan(0);
+    expect(compareVersions('8.47.253', '8.47.253')).toBe(0);
+    expect(compareVersions('8.46', '8.47.1')).toBeLessThan(0);
+  });
+
+  it('counts active terminals per version against the latest and minimum', () => {
+    const out = terminalsByVersion(
+      [
+        { eaVersion: '8.47.256', status: 'Active' },
+        { eaVersion: '8.47.256', status: 'Active' },
+        { eaVersion: '8.47.250', status: 'Active' },
+        { eaVersion: '8.47.256', status: 'Disconnected' },
+        { eaVersion: '', status: 'Active' },
+      ],
+      '8.47.256',
+      '8.47.253',
+    );
+    expect(out).toEqual([
+      { version: '8.47.256', terminals: 2, isLatest: true, belowMinimum: false },
+      { version: '8.47.250', terminals: 1, isLatest: false, belowMinimum: true },
+      { version: 'unknown', terminals: 1, isLatest: false, belowMinimum: false },
+    ]);
   });
 });

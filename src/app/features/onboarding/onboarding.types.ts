@@ -58,6 +58,20 @@ export interface SignupStatus {
   linkHours: number;
   reasons: string[];
   pending: number;
+  /** Every requirement with its state, the flag included (engine pages program; absent on older engines). */
+  checks?: SignupCheck[];
+  maxPerIpPerDay?: number;
+  maxPerDomainPerDay?: number;
+  expiryDays?: number;
+  deniedDomainCount?: number;
+}
+
+/** One requirement of self-serve sign-up; `ok` null = the engine could not check it. */
+export interface SignupCheck {
+  key: string;
+  label: string;
+  ok: boolean | null;
+  detail: string;
 }
 
 /** One step of the onboarding checklist (`GET tenant/onboarding`). */
