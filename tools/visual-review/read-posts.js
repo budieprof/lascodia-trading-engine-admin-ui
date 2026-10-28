@@ -21,6 +21,10 @@ const READ_POST = new RegExp(
     String.raw`/trade-signal/preview$`, // PreviewManualTradeQuery — the manual ticket's dry run
     String.raw`/execution-console/ticket/preview$`, // VenueTicketPreviewQuery — the venue ticket's dry run
     String.raw`/md/history$`, // GetMarketDataHistoryQuery — ladder/heatmap history
+    // Dealing desk reads (DealingController; each sends a Get…Query whose handler takes only
+    // IReadApplicationDbContext / the tick store — verified 2026-10-28). `dealing/feeds` (POST/PUT)
+    // and `dealing/trades/ingest` are commands and stay blocked.
+    String.raw`/dealing/(clients|clients/detail|markouts|ab-book-report|ab-book-report/export|alerts|lp-analytics)$`,
   ].join('|'),
   'i',
 );
