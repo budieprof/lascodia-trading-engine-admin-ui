@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { NotificationService } from '@core/notifications/notification.service';
@@ -18,22 +18,30 @@ import {
 import type { BillingUsageMonth, Invoice } from '../billing.types';
 import { InvoiceDetailComponent } from '../components/invoice-detail.component';
 import { UsageMonthViewComponent } from '../components/usage-month-view.component';
+import { YourPlanComponent } from '../components/your-plan.component';
 
 /**
- * The organisation's "Usage & billing" (engine billing-metering, `tenant.billing.read`): what was
- * metered each day, the month's estimate on the price books in force, and its finalised invoices.
+ * The organisation's "Usage & billing" (engine billing-metering, `tenant.billing.read`): its plan (self-serve
+ * upgrades through Stripe Checkout — `components/your-plan`), what was metered each day, the month's estimate
+ * on the price books in force, and its finalised invoices.
  */
 @Component({
   selector: 'app-usage-billing-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, UsageMonthViewComponent, InvoiceDetailComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    YourPlanComponent,
+    UsageMonthViewComponent,
+    InvoiceDetailComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
       <app-page-header
         title="Usage & billing"
-        subtitle="Metered usage per UTC day, this month's estimate and your invoices."
+        subtitle="Your plan, metered usage per UTC day, this month's estimate and your invoices."
       >
         <select
           class="select"
@@ -54,6 +62,8 @@ import { UsageMonthViewComponent } from '../components/usage-month-view.componen
           {{ usage.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-billing-your-plan />
 
       @if (usage.error(); as err) {
         <section class="card">
@@ -146,6 +156,7 @@ export class UsageBillingPageComponent {
 
   readonly month = signal(this.months[0]);
   readonly selected = signal<Invoice | null>(null);
+  private readonly plan = viewChild(YourPlanComponent);
 
   readonly usage = iamResource<BillingUsageMonth | null>(
     () => this.api.myUsage(this.month()),
@@ -164,6 +175,7 @@ export class UsageBillingPageComponent {
   }
 
   refresh(): void {
+    this.plan()?.reload();
     this.usage.reload();
     this.invoices.reload();
   }

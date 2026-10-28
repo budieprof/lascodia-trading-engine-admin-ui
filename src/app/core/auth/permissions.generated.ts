@@ -882,6 +882,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'tenant.billing.manage',
+    category: 'Organisations',
+    description:
+      "Change the organisation's plan by itself: start a card checkout for a paid plan and open the billing portal (switch plan, update the card, cancel).",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'tenant.billing.read',
     category: 'Organisations',
     description:
@@ -1055,6 +1065,7 @@ export const Permission = {
   StrategiesEdit: 'strategies.edit',
   StrategiesLifecycle: 'strategies.lifecycle',
   StrategiesRead: 'strategies.read',
+  TenantBillingManage: 'tenant.billing.manage',
   TenantBillingRead: 'tenant.billing.read',
   TenantBrandingManage: 'tenant.branding.manage',
   TenantBrandingRead: 'tenant.branding.read',

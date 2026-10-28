@@ -8,6 +8,8 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { fileNameFromContentDisposition } from '@features/scripting/shared/download';
 import type {
   BillingFile,
+  BillingRedirect,
+  BillingSubscription,
   BillingUsageMonth,
   GenerateInvoicesResult,
   Invoice,
@@ -70,6 +72,29 @@ export class BillingApiService {
       `/tenant/billing/invoices/${id}/export`,
       format,
       `invoice-${id}.${format}`,
+    );
+  }
+
+  // ── The organisation's plan (self-serve: Stripe Checkout + billing portal) ──
+  subscription(): Observable<BillingSubscription> {
+    return settled(
+      this.api.get<ResponseData<BillingSubscription>>('/tenant/billing/subscription', SILENT),
+    ).pipe(map((s) => ({ ...s, offers: s?.offers ?? [] })));
+  }
+  /** `tenant.billing.manage`: a Checkout session for `planSlug`; the caller sends the browser to `url`. */
+  checkout(planSlug: string): Observable<BillingRedirect> {
+    return settled(
+      this.api.post<ResponseData<BillingRedirect>>(
+        '/tenant/billing/checkout',
+        { planSlug },
+        SILENT,
+      ),
+    );
+  }
+  /** `tenant.billing.manage`: the billing portal (switch plan, card, cancel). */
+  portal(): Observable<BillingRedirect> {
+    return settled(
+      this.api.post<ResponseData<BillingRedirect>>('/tenant/billing/portal', {}, SILENT),
     );
   }
 

@@ -274,18 +274,25 @@ export const SECURITY: { icon: IconName; title: string; body: string }[] = [
 export { SALES_EMAIL } from '@core/branding/contact';
 
 export interface Plan {
+  /** The engine plan this card stands for — a paid offer from `GET billing/plans/public` with this slug fills its price. */
+  slug: string;
   name: string;
   price: string;
   priceNote: string;
   blurb: string;
   points: string[];
-  cta: 'primary' | 'contact';
+  /** `upgrade`: a real paid offer — the main button ("Start free, upgrade anytime"). */
+  cta: 'primary' | 'contact' | 'upgrade';
   featured?: boolean;
 }
 
-/** Plan limits are set per organisation by Lascodia; only the Trial is self-serve, so only it shows a price. */
+/**
+ * Plan limits are set per organisation by Lascodia; only the Trial shows a price here. Real prices come only from
+ * the engine's public offers (`mergePlanOffers` in `landing.logic.ts`) — never typed into this file.
+ */
 export const PLANS: Plan[] = [
   {
+    slug: 'trial',
     name: 'Trial',
     price: 'Free',
     priceNote: 'No card required',
@@ -299,6 +306,7 @@ export const PLANS: Plan[] = [
     cta: 'primary',
   },
   {
+    slug: 'team',
     name: 'Team',
     price: 'Tailored',
     priceNote: 'Limits sized to your desk',
@@ -313,6 +321,7 @@ export const PLANS: Plan[] = [
     featured: true,
   },
   {
+    slug: 'enterprise',
     name: 'Enterprise',
     price: 'Tailored',
     priceNote: 'For firms, brokers and funds',
