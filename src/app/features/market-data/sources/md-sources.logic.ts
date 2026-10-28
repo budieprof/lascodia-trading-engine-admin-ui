@@ -1,4 +1,8 @@
-import type { MarketDataSourceAdmin, UpdateMarketDataSourceBody } from './md-sources.types';
+import type {
+  MarketDataSourceAdmin,
+  StoreCoverageSource,
+  UpdateMarketDataSourceBody,
+} from './md-sources.types';
 
 /** The engine's writer id rule (machine instance ids). */
 const WRITER = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -65,6 +69,10 @@ export function kindLabel(kind: string): string {
       return 'CME futures';
     case 'FixVenue':
       return 'FX venue (FIX)';
+    case 'CryptoExchange':
+      return 'Crypto exchange';
+    case 'ExchangeFeed':
+      return 'Stock exchange feed';
     default:
       return kind;
   }
@@ -107,4 +115,36 @@ export function changes(
   if (Number.isFinite(edit.contractSize) && edit.contractSize !== row.contractSize)
     body.contractSize = edit.contractSize;
   return body;
+}
+
+/** Where a source stands, judged from the store when its coverage is known (pages program). */
+export type SourceGroup = 'receiving' | 'stored' | 'waiting' | 'enabled' | 'disabled' | 'off';
+
+export const SOURCE_GROUPS: { group: SourceGroup; title: string; hint: string }[] = [
+  { group: 'receiving', title: 'Receiving today', hint: 'stored data today (UTC)' },
+  { group: 'waiting', title: 'Enabled — nothing arriving', hint: 'enabled, but the store got nothing from it today' },
+  { group: 'stored', title: 'Disabled — history kept', hint: 'disabled; earlier data is still in the store' },
+  { group: 'disabled', title: 'Disabled — nothing stored', hint: 'registered for later; never stored anything' },
+  // Without the store's coverage (older engine) nothing is claimed about arrival:
+  { group: 'enabled', title: 'Enabled', hint: 'what the store holds is not reported by this engine yet' },
+  { group: 'off', title: 'Disabled', hint: 'registered, not enabled' },
+];
+
+export function sourceGroup(
+  s: Pick<MarketDataSourceAdmin, 'enabled'>,
+  cov: Pick<StoreCoverageSource, 'lastDay'> | null | undefined,
+  today: string,
+  known = true,
+): SourceGroup {
+  if (!known) return s.enabled ? 'enabled' : 'off';
+  if (cov?.lastDay === today) return 'receiving';
+  if (s.enabled) return 'waiting';
+  return cov?.lastDay ? 'stored' : 'disabled';
+}
+
+/** "3 symbols · 2026-09-01 → today" from the store, or what the registry alone can say. */
+export function storedText(cov: StoreCoverageSource | null | undefined, today: string): string {
+  if (!cov || !cov.lastDay) return 'nothing stored';
+  const to = cov.lastDay === today ? 'today' : cov.lastDay;
+  return `${cov.symbolCount} symbol${cov.symbolCount === 1 ? '' : 's'} · ${cov.firstDay} → ${to}`;
 }

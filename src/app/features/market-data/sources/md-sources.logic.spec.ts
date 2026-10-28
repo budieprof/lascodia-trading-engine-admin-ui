@@ -9,6 +9,8 @@ import {
   parseSymbolMap,
   parseWriters,
   readiness,
+  sourceGroup,
+  storedText,
 } from './md-sources.logic';
 import type { MarketDataSourceAdmin } from './md-sources.types';
 
@@ -86,5 +88,23 @@ describe('market-data sources', () => {
     expect(isVenueId('lmax')).toBe(true);
     expect(isVenueId('LMAX')).toBe(false);
     expect(isVenueId('-lmax')).toBe(false);
+  });
+});
+
+describe('sourceGroup / storedText (store coverage)', () => {
+  const today = '2026-10-28';
+  it('groups by what the store holds, not the enabled flag alone', () => {
+    expect(sourceGroup({ enabled: true }, { lastDay: today }, today)).toBe('receiving');
+    expect(sourceGroup({ enabled: true }, null, today)).toBe('waiting');
+    expect(sourceGroup({ enabled: false }, { lastDay: '2026-10-01' }, today)).toBe('stored');
+    expect(sourceGroup({ enabled: false }, undefined, today)).toBe('disabled');
+    expect(sourceGroup({ enabled: true }, null, today, false)).toBe('enabled');
+    expect(sourceGroup({ enabled: false }, null, today, false)).toBe('off');
+  });
+  it('describes the stored span', () => {
+    expect(storedText(null, today)).toBe('nothing stored');
+    expect(
+      storedText({ sourceId: 'a', symbolCount: 3, firstDay: '2026-09-01', lastDay: today, symbolsOnLastDay: 3, symbols: [] }, today),
+    ).toBe('3 symbols · 2026-09-01 → today');
   });
 });

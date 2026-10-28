@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { catchError, of } from 'rxjs';
 import { RouterLink } from '@angular/router';
 
 import { NotificationService } from '@core/notifications/notification.service';
@@ -17,8 +18,15 @@ import {
   parseSymbolMap,
   parseWriters,
   readiness,
+  SOURCE_GROUPS,
+  sourceGroup,
+  storedText,
 } from '../md-sources.logic';
-import type { MarketDataSourceAdmin } from '../md-sources.types';
+import type {
+  MarketDataSourceAdmin,
+  MarketDataStoreCoverage,
+  StoreCoverageSource,
+} from '../md-sources.types';
 
 interface EditState {
   row: MarketDataSourceAdmin;
@@ -43,18 +51,13 @@ interface EditState {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, RouterLink, PageHeaderComponent],
-  styleUrl: '../../../iam/shared/iam-page.scss',
+  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
   styles: [
     `
       textarea.input {
         min-height: 72px;
         font-family: var(--font-mono, monospace);
         font-size: var(--text-xs);
-      }
-      .chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
       }
     `,
   ],
@@ -71,7 +74,7 @@ interface EditState {
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="sources.reload()"
+          (click)="sources.reload(); coverage.reload()"
           [disabled]="sources.loading()"
         >
           {{ sources.loading() ? 'Loading…' : 'Refresh' }}
@@ -252,84 +255,153 @@ interface EditState {
         </section>
       }
 
-      <section class="card">
-        @if (sources.error(); as err) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-        }
-        @if (sources.value().length) {
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Source</th>
-                  <th>Kind</th>
-                  <th>Feed</th>
-                  <th>State</th>
-                  <th>Writers</th>
-                  <th>Symbols</th>
-                  <th>Updated</th>
-                  <th><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of sources.value(); track s.sourceId) {
-                  <tr>
-                    <td>
-                      <code>{{ s.sourceId }}</code>
-                      <span class="sub">{{ s.displayName }}</span>
-                    </td>
-                    <td class="small">
-                      {{ kind(s.kind) }}
-                      <span class="sub"
-                        >{{ s.sizeUnit }}{{ s.contractSize ? ' × ' + s.contractSize : ''
-                        }}{{ s.priceTransform === 'Invert' ? ' · inverted' : '' }}</span
-                      >
-                    </td>
-                    <td>
-                      <code>{{ s.feedId }}</code>
-                    </td>
-                    <td>
-                      <span class="chip" [class]="ready(s).tone">{{ ready(s).text }}</span>
-                    </td>
-                    <td class="small">
-                      @if (s.kind === 'Mt5Broker') {
-                        <span class="muted">trusted EAs</span>
-                      } @else if (s.writerInstanceIds.length) {
-                        <div class="chips">
-                          @for (w of s.writerInstanceIds; track w) {
-                            <code>{{ w }}</code>
-                          }
-                        </div>
-                      } @else {
-                        <span class="muted">none</span>
-                      }
-                    </td>
-                    <td class="small">{{ symbolCount(s) }}</td>
-                    <td class="small">{{ when(s.updatedAtUtc) }}</td>
-                    <td class="actions">
-                      @if (editable(s)) {
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-secondary"
-                          (click)="startEdit(s)"
-                        >
-                          Edit
-                        </button>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+      @if (sources.error(); as err) {
+        <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+      }
+
+      <div class="tiles" aria-label="Summary">
+        <div class="tile">
+          <span class="t-label">Sources registered</span>
+          <span class="t-value">{{ sources.value().length }}</span>
+          <span class="t-hint">{{ kindSummary() }}</span>
+        </div>
+        <div class="tile" [attr.data-tone]="counts().receiving ? 'ok' : null">
+          <span class="t-label">Receiving today</span>
+          <span class="t-value">{{ coverage.value() ? counts().receiving : '—' }}</span>
+          <span class="t-hint">{{ coverage.value() ? 'stored data today (UTC)' : 'needs the engine update (store coverage)' }}</span>
+        </div>
+        @if (coverage.value()) {
+          <div class="tile" [attr.data-tone]="counts().waiting ? 'warn' : null">
+            <span class="t-label">Enabled, nothing arriving</span>
+            <span class="t-value">{{ counts().waiting }}</span>
+            <span class="t-hint">enabled sources the store got nothing from today</span>
           </div>
-        } @else if (sources.loaded() && !sources.error()) {
-          <p class="pad muted">No market-data source is registered yet.</p>
+        } @else {
+          <div class="tile">
+            <span class="t-label">Enabled</span>
+            <span class="t-value">{{ counts().enabled }}</span>
+            <span class="t-hint">MT5 servers stream from the EAs; others from their writers</span>
+          </div>
         }
-        <p class="note">
-          MT5 broker sources are created by the engine the first time a trusted EA streams from a
-          new broker server; which EAs are trusted is the market-data source trust setting, not this
-          page. External sources are written only by the machine ids listed as their writers.
-        </p>
+        <div class="tile">
+          <span class="t-label">Disabled</span>
+          <span class="t-value">{{ counts().stored + counts().disabled }}</span>
+          <span class="t-hint">{{ coverage.value() ? counts().stored + ' with history kept · ' + counts().disabled + ' never stored' : 'registered, not enabled' }}</span>
+        </div>
+        <div class="tile">
+          <span class="t-label">Symbols stored</span>
+          <span class="t-value">{{ coverage.value() ? storedSymbols() : '—' }}</span>
+          <span class="t-hint">source × symbol pairs in the market-data store</span>
+        </div>
+      </div>
+
+      @for (g of groups(); track g.group) {
+        <section class="card" [attr.aria-label]="g.title">
+          <header class="card-head">
+            <h3>{{ g.title }}</h3>
+            <span class="chip" [class.ok]="g.group === 'receiving' || g.group === 'enabled'" [class.warn]="g.group === 'waiting'">{{ g.rows.length }}</span>
+            <span class="muted small">{{ g.hint }}</span>
+            @if (g.group === 'disabled' || g.group === 'off') {
+              <span class="spacer"></span>
+              <button type="button" class="btn btn-sm btn-secondary" (click)="showDisabled.set(!showDisabled())">
+                {{ showDisabled() ? 'Hide' : 'Show' }}
+              </button>
+            }
+          </header>
+          @if ((g.group === 'disabled' || g.group === 'off') && !showDisabled()) {
+            <p class="pad muted small">{{ disabledSummary() }}</p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Source</th>
+                    <th>Kind</th>
+                    <th>Feed</th>
+                    <th>State</th>
+                    <th>Writers</th>
+                    <th>Symbols mapped</th>
+                    <th title="What the market-data store holds for this source">Stored</th>
+                    <th><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of g.rows; track s.sourceId) {
+                    <tr>
+                      <td>
+                        <code>{{ s.sourceId }}</code>
+                        <span class="sub">{{ s.displayName }}</span>
+                      </td>
+                      <td class="small">
+                        {{ kind(s.kind) }}
+                        <span class="sub"
+                          >{{ s.sizeUnit }}{{ s.contractSize ? ' × ' + s.contractSize : ''
+                          }}{{ s.priceTransform === 'Invert' ? ' · inverted' : '' }}</span
+                        >
+                      </td>
+                      <td>
+                        <code>{{ s.feedId }}</code>
+                      </td>
+                      <td>
+                        <span class="chip" [class]="ready(s).tone">{{ ready(s).text }}</span>
+                      </td>
+                      <td class="small">
+                        @if (s.kind === 'Mt5Broker') {
+                          <span class="muted">trusted EAs</span>
+                        } @else if (s.writerInstanceIds.length) {
+                          <div class="chips">
+                            @for (w of s.writerInstanceIds; track w) {
+                              <code>{{ w }}</code>
+                            }
+                          </div>
+                        } @else {
+                          <span class="muted">none</span>
+                        }
+                      </td>
+                      <td class="small">{{ symbolCount(s) }}</td>
+                      <td class="small">
+                        @if (coverage.value()) {
+                          {{ stored(covFor(s.sourceId), today()) }}
+                          @if (covFor(s.sourceId); as c) {
+                            <span class="sub">{{ c.symbolsOnLastDay }} on the last day · {{ topSymbols(c) }}</span>
+                          }
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td class="actions">
+                        @if (editable(s)) {
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="startEdit(s)">Edit</button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+      }
+      @if (sources.loaded() && !sources.error() && !sources.value().length) {
+        <p class="pad muted">No market-data source is registered yet.</p>
+      }
+
+      <section class="card" aria-label="How sources work">
+        <div class="card-body">
+          <p class="note">
+            MT5 broker sources are created by the engine the first time a trusted EA streams from a new broker server;
+            which EAs are trusted is the market-data source trust setting, not this page. External sources (CME, crypto,
+            stocks, FX venues) are written only by the machine ids listed as their writers — a sidecar feed process
+            (compose profiles <code>crypto</code>, <code>venues</code>, <code>equities</code>) signs in as that id.
+            Enabling a source starts storing what its writers send; who may READ it is the entitlements page.
+          </p>
+          <nav class="links-row" aria-label="Related">
+            <a routerLink="/market-data/entitlements">Entitlements (who may read each feed)</a>
+            <a routerLink="/market-data/usage">Usage this month</a>
+            <a routerLink="/market-data/instrument-candles">Instrument candles (built from these trades)</a>
+            <a routerLink="/docs/platform-guide">Guide: data sources</a>
+          </nav>
+        </div>
       </section>
     </div>
   `,
@@ -348,6 +420,59 @@ export class MarketDataSourcesPageComponent {
     [],
     'Could not load the market-data sources.',
   );
+  /** Null = the engine has no coverage endpoint yet (404) or the read failed. */
+  readonly coverage = iamResource<MarketDataStoreCoverage | null>(
+    () => this.api.coverage().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly showDisabled = signal(false);
+  protected readonly stored = storedText;
+  readonly today = computed(
+    () => this.coverage.value()?.todayUtc ?? new Date().toISOString().slice(0, 10),
+  );
+  private readonly covById = computed(
+    () => new Map((this.coverage.value()?.sources ?? []).map((c) => [c.sourceId, c])),
+  );
+  readonly grouped = computed(() => {
+    const today = this.today();
+    const by = new Map<string, MarketDataSourceAdmin[]>();
+    for (const s of this.sources.value()) {
+      const g = sourceGroup(s, this.covById().get(s.sourceId), today, this.coverage.value() !== null);
+      by.set(g, [...(by.get(g) ?? []), s]);
+    }
+    return by;
+  });
+  readonly groups = computed(() =>
+    SOURCE_GROUPS.map((g) => ({ ...g, rows: this.grouped().get(g.group) ?? [] })).filter(
+      (g) => g.rows.length > 0,
+    ),
+  );
+  readonly counts = computed(() => ({
+    receiving: this.grouped().get('receiving')?.length ?? 0,
+    waiting: this.grouped().get('waiting')?.length ?? 0,
+    stored: this.grouped().get('stored')?.length ?? 0,
+    disabled: (this.grouped().get('disabled')?.length ?? 0) + (this.grouped().get('off')?.length ?? 0),
+    enabled: this.sources.value().filter((x) => x.enabled).length,
+  }));
+  readonly storedSymbols = computed(() =>
+    (this.coverage.value()?.sources ?? []).reduce((a, c) => a + c.symbolCount, 0),
+  );
+  readonly kindSummary = computed(() => {
+    const n = new Map<string, number>();
+    for (const s of this.sources.value()) n.set(kindLabel(s.kind), (n.get(kindLabel(s.kind)) ?? 0) + 1);
+    return [...n.entries()].map(([k, v]) => `${v} ${k}`).join(' · ') || 'none';
+  });
+  readonly disabledSummary = computed(() => {
+    const rows = [...(this.grouped().get('disabled') ?? []), ...(this.grouped().get('off') ?? [])];
+    const n = new Map<string, string[]>();
+    for (const s of rows) n.set(kindLabel(s.kind), [...(n.get(kindLabel(s.kind)) ?? []), s.sourceId]);
+    return (
+      [...n.entries()].map(([k, ids]) => `${k}: ${ids.join(', ')}`).join(' · ') +
+      (this.coverage.value()
+        ? '. Registered and ready to enable; none has ever stored anything. Show them to edit.'
+        : '. Registered and ready to enable. Show them to edit.')
+    );
+  });
   readonly busy = signal(false);
   readonly editing = signal<EditState | null>(null);
   readonly venue = signal<{
@@ -387,6 +512,16 @@ export class MarketDataSourcesPageComponent {
 
   constructor() {
     this.sources.reload();
+    this.coverage.reload();
+  }
+
+  covFor(sourceId: string): StoreCoverageSource | null {
+    return this.covById().get(sourceId) ?? null;
+  }
+
+  topSymbols(c: StoreCoverageSource): string {
+    const names = c.symbols.slice(0, 5).map((x) => x.symbol);
+    return names.join(', ') + (c.symbolCount > names.length ? ` +${c.symbolCount - names.length}` : '');
   }
 
   symbolCount(s: MarketDataSourceAdmin): string {

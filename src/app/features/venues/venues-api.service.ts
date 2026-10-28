@@ -16,6 +16,8 @@ import type {
   FeeScheduleFields,
   FuturesTermStructure,
   InstrumentCandleState,
+  InstrumentCandleReadiness,
+  FuturesCatalogRoot,
   MarginImportResult,
   MarginRequirement,
   MarginRequirementFields,
@@ -268,6 +270,19 @@ export class VenuesApiService {
         SILENT,
       ),
     );
+  }
+
+  /** Engine pages program; a 404 (older engine) is the caller's to absorb. */
+  instrumentCandleReadiness(): Observable<InstrumentCandleReadiness> {
+    return settled(
+      this.api.get<ResponseData<InstrumentCandleReadiness>>('/instrument-candles/readiness', SILENT),
+    );
+  }
+
+  futuresCatalog(): Observable<FuturesCatalogRoot[]> {
+    return settled(
+      this.api.get<ResponseData<FuturesCatalogRoot[]>>('/futures/catalog', SILENT),
+    ).pipe(map((r) => r ?? []));
   }
 
   equityFundamentals(symbol: string): Observable<EquityFundamentals> {
