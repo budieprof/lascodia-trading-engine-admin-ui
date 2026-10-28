@@ -157,16 +157,35 @@ describe('SignupPageComponent', () => {
     return TestBed.runInInjectionContext(() => new SignupPageComponent());
   }
 
-  it('says sign-up is not offered while it is off', () => {
+  it('asks for access while sign-up is off', () => {
     const p = page({ signupAvailability: () => of(null) });
-    expect(p.state()).toBe('off');
+    expect(p.state()).toBe('request');
+    expect(p.reason()).toBe('off');
   });
 
-  it('says it is not available while the engine cannot run it', () => {
+  it('asks for access while the engine cannot run sign-up', () => {
     const p = page({
       signupAvailability: () => of({ available: false, requiresApproval: true, linkHours: 24 }),
     });
-    expect(p.state()).toBe('unavailable');
+    expect(p.state()).toBe('request');
+    expect(p.reason()).toBe('unavailable');
+  });
+
+  it('asks for access while the engine cannot be reached', () => {
+    const p = page({ signupAvailability: () => throwError(() => new Error('offline')) });
+    expect(p.state()).toBe('request');
+    expect(p.reason()).toBe('error');
+  });
+
+  it('checks the access request before opening the mail app', () => {
+    const p = page({ signupAvailability: () => of(null) });
+    p.sendRequest();
+    expect(p.state()).toBe('request');
+    expect(p.reqProblems()).toContain('Enter your name.');
+    p.patch('name', 'Ada');
+    p.patch('email', 'ada@example.com');
+    p.patch('organisation', 'Ada Capital');
+    expect(p.reqProblems()).toEqual([]);
   });
 
   it('checks the form, sends it and shows the e-mail message', () => {

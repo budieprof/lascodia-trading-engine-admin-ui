@@ -270,11 +270,8 @@ export const SECURITY: { icon: IconName; title: string; body: string }[] = [
   },
 ];
 
-/**
- * Where "Talk to us" goes on the Team and Enterprise plans. Empty: those plans offer the Trial instead, so the
- * page never shows a contact link that leads nowhere. Set it to a sales address to switch the buttons over.
- */
-export const SALES_EMAIL: string = 'sales@codiapay.com';
+/** Where "Talk to us" goes on the Team and Enterprise plans (empty: those plans offer the main button instead). */
+export { SALES_EMAIL } from '@core/branding/contact';
 
 export interface Plan {
   name: string;

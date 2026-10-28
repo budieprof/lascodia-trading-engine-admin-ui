@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  accessRequestMailto,
+  accessRequestProblems,
   canDecide,
   isPlausibleEmail,
   isValidSlug,
@@ -116,5 +118,26 @@ describe('the approval queue', () => {
   it('says how far along the checklist is', () => {
     expect(progressText(1, 4)).toBe('1 of 4 done');
     expect(progressText(4, 4)).toBe('All done');
+  });
+
+  it('checks and composes an access request', () => {
+    const blank = { name: '', email: '', organisation: '', role: '', terminals: '', message: '' };
+    expect(accessRequestProblems(blank)).toHaveLength(3);
+    const req = {
+      ...blank,
+      name: ' Ada ',
+      email: 'ada@example.com',
+      organisation: 'Ada & Co',
+      role: 'A prop firm',
+    };
+    expect(accessRequestProblems(req)).toEqual([]);
+    const href = accessRequestMailto('sales@example.com', req);
+    expect(href).toMatch(
+      /^mailto:sales@example\.com\?subject=Access%20request%3A%20Ada%20%26%20Co&body=/,
+    );
+    const body = decodeURIComponent(href.split('&body=')[1]);
+    expect(body).toContain('Name: Ada\r\n');
+    expect(body).toContain('I am: A prop firm');
+    expect(body).not.toContain('terminals');
   });
 });

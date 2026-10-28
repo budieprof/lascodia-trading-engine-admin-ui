@@ -22,7 +22,7 @@ import { LandingOnboardingComponent } from './components/landing-onboarding.comp
 import { LandingSafetyComponent } from './components/landing-safety.component';
 import { LandingTradePathComponent } from './components/landing-trade-path.component';
 import { LandingTrustComponent } from './components/landing-trust.component';
-import { STATS } from './landing.content';
+import { SALES_EMAIL, STATS } from './landing.content';
 import { primaryCta } from './landing.logic';
 import { RevealDirective } from './reveal.directive';
 
@@ -70,6 +70,7 @@ export class LandingPageComponent {
   protected readonly nav = NAV;
   protected readonly stats = STATS;
   protected readonly year = new Date().getFullYear();
+  protected readonly salesEmail = SALES_EMAIL;
 
   protected readonly signup = signal<PublicSignupAvailability | null>(null);
   protected readonly demoAvailable = signal(false);
@@ -92,7 +93,7 @@ export class LandingPageComponent {
       meta.removeTag("property='og:description'");
     });
 
-    // Both probes fail closed: no answer means the page offers sign-in and hides the demo link.
+    // Both probes fail closed: no answer means the main button asks for access and the demo link stays hidden.
     inject(OnboardingApiService)
       .signupAvailability()
       .subscribe({ next: (a) => this.signup.set(a), error: () => this.signup.set(null) });

@@ -76,9 +76,11 @@ import { LandingIconComponent } from './landing-icon.component';
                   [routerLink]="cta().route"
                 >
                   {{
-                    p.cta === 'primary' || cta().kind !== 'signup'
-                      ? cta().label
-                      : 'Start with the Trial'
+                    cta().kind !== 'signup'
+                      ? 'Request access'
+                      : p.cta === 'primary'
+                        ? cta().label
+                        : 'Start with the Trial'
                   }}
                 </a>
               }

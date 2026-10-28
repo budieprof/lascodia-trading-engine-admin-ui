@@ -54,9 +54,7 @@
           </svg>
         }
       </button>
-      @if (cta().kind === 'signup') {
-        <a class="nav__signin" routerLink="/login">Sign in</a>
-      }
+      <a class="nav__signin" routerLink="/login">Sign in</a>
       <a class="lp-btn lp-btn--primary lp-btn--sm nav__cta" [routerLink]="cta().route">{{
         cta().label
       }}</a>
@@ -80,9 +78,7 @@
       }
       <div class="nav__mobilecta">
         <a class="lp-btn lp-btn--primary" [routerLink]="cta().route">{{ cta().label }}</a>
-        @if (cta().kind === 'signup') {
-          <a class="lp-btn lp-btn--ghost" routerLink="/login">Sign in</a>
-        }
+        <a class="lp-btn lp-btn--ghost" routerLink="/login">Sign in</a>
       </div>
     </nav>
   }
@@ -187,11 +183,13 @@
         </p>
         <div class="final__ctas">
           <a class="lp-btn final__primary" [routerLink]="cta().route">
-            {{ cta().kind === 'signup' ? 'Create your organisation' : cta().label }}
+            {{ cta().kind === 'signup' ? 'Create your organisation' : 'Request access' }}
             <span class="lp-arrow" aria-hidden="true">→</span>
           </a>
           @if (demoAvailable()) {
             <a class="lp-btn final__ghost" routerLink="/demo">Explore the demo</a>
+          } @else {
+            <a class="lp-btn final__ghost" routerLink="/login">Sign in</a>
           }
         </div>
       </div>
@@ -226,10 +224,13 @@
       </nav>
       <nav class="foot__col" aria-label="Get started">
         <h3>Get started</h3>
-        @if (cta().kind === 'signup') {
-          <a routerLink="/signup">Create an organisation</a>
-        }
+        <a routerLink="/signup">{{
+          cta().kind === 'signup' ? 'Create an organisation' : 'Request access'
+        }}</a>
         <a routerLink="/login">Sign in</a>
+        @if (salesEmail) {
+          <a [href]="'mailto:' + salesEmail">Talk to sales</a>
+        }
         @if (demoAvailable()) {
           <a routerLink="/demo">Demo</a>
         }

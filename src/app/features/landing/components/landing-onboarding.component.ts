@@ -65,7 +65,7 @@ import { RevealDirective } from '../reveal.directive';
 
         <div class="ob__cta" lpReveal>
           <a class="lp-btn lp-btn--primary" [routerLink]="cta().route">
-            {{ cta().kind === 'signup' ? 'Create your organisation' : cta().label }}
+            {{ cta().kind === 'signup' ? 'Create your organisation' : 'Request access' }}
             <span class="lp-arrow" aria-hidden="true">→</span>
           </a>
           @if (demoAvailable()) {

@@ -76,6 +76,56 @@ export function signupRefusal(
   }
 }
 
+/** What a person asking for access tells Lascodia while self-serve sign-up is off. */
+export interface AccessRequest {
+  name: string;
+  email: string;
+  organisation: string;
+  role: string;
+  terminals: string;
+  message: string;
+}
+
+/** Who is asking: the choices the request-access form offers. */
+export const ACCESS_ROLES = [
+  'Trading my own accounts',
+  'A trading desk or team',
+  'A prop firm',
+  'A broker',
+  'A fund or asset manager',
+  'Something else',
+] as const;
+
+export function accessRequestProblems(r: AccessRequest): string[] {
+  const problems: string[] = [];
+  if (!r.name.trim()) problems.push('Enter your name.');
+  if (!isPlausibleEmail(r.email)) problems.push('Enter a valid e-mail address.');
+  if (r.organisation.trim().length < 2)
+    problems.push('Enter your organisation (or your own name if you trade alone).');
+  return problems;
+}
+
+/**
+ * The request as an e-mail to `to`, ready in the person's mail app. The engine has nowhere public to store a
+ * lead, so the request travels as a message the person sends themselves — nothing is submitted on their behalf.
+ */
+export function accessRequestMailto(to: string, r: AccessRequest): string {
+  const lines = [
+    'Hello Lascodia team,',
+    '',
+    'I would like access to Lascodia.',
+    '',
+    `Name: ${r.name.trim()}`,
+    `E-mail: ${r.email.trim()}`,
+    `Organisation: ${r.organisation.trim()}`,
+  ];
+  if (r.role.trim()) lines.push(`I am: ${r.role.trim()}`);
+  if (r.terminals.trim()) lines.push(`MetaTrader 5 terminals to connect: ${r.terminals.trim()}`);
+  if (r.message.trim()) lines.push('', r.message.trim());
+  const subject = `Access request: ${r.organisation.trim()}`;
+  return `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\r\n'))}`;
+}
+
 export function signupStatusLabel(s: TenantSignup): string {
   if (s.expired && (s.status === 'Pending' || s.status === 'Approved'))
     return 'Lapsed (address never verified)';

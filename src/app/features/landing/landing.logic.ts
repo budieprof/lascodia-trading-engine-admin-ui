@@ -143,15 +143,16 @@ export function illustrationCid(rnd: () => number): string {
     .padStart(6, '0');
 }
 
-export type PrimaryCta = { label: string; route: string; kind: 'signup' | 'signin' };
+export type PrimaryCta = { label: string; route: string; kind: 'signup' | 'request' };
 
 /**
- * What the main button offers. Self-serve sign-up exists only while the engine answers `GET onboarding/signup`
- * with `available`; otherwise the page invites people to sign in (organisations are then created by invitation).
+ * What the main button offers. It always leads to `/signup`: while the engine answers `GET onboarding/signup` with
+ * `available` that page creates an organisation ("Start free"); otherwise it is a request-access form, because
+ * organisations are then created by invitation ("Get started"). Sign-in is always a separate link.
  */
 export function primaryCta(signup: { available: boolean } | null | undefined): PrimaryCta {
   if (signup?.available) return { label: 'Start free', route: '/signup', kind: 'signup' };
-  return { label: 'Sign in', route: '/login', kind: 'signin' };
+  return { label: 'Get started', route: '/signup', kind: 'request' };
 }
 
 export function formatPrice(p: number): string {

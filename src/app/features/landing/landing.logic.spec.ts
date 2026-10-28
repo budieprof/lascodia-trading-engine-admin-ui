@@ -87,8 +87,13 @@ describe('landing logic', () => {
   });
 
   it('primary call to action follows sign-up availability', () => {
-    expect(primaryCta({ available: true }).route).toBe('/signup');
-    expect(primaryCta({ available: false }).route).toBe('/login');
-    expect(primaryCta(null).kind).toBe('signin');
+    expect(primaryCta({ available: true })).toEqual({
+      label: 'Start free',
+      route: '/signup',
+      kind: 'signup',
+    });
+    // Sign-up off or unavailable: still a way in — /signup then asks for access.
+    expect(primaryCta({ available: false }).route).toBe('/signup');
+    expect(primaryCta(null)).toEqual({ label: 'Get started', route: '/signup', kind: 'request' });
   });
 });
