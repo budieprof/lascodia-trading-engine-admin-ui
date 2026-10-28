@@ -18,6 +18,18 @@ import { LifecycleRationaleDto, RationaleCoverageDto } from '@core/api/api.types
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import {
+  FeatureLink,
+  FeatureStateComponent,
+} from '@shared/components/feedback/feature-state.component';
+import {
+  ageText,
+  entryHistory,
+  eventLabel,
+  latestAnyType,
+  rationaleRequirements,
+  rationaleStateKind,
+} from './rationales.logic';
 
 @Component({
   selector: 'app-llm-rationales-page',
@@ -31,6 +43,7 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
     RouterLink,
     PageHeaderComponent,
     MetricCardComponent,
+    FeatureStateComponent,
   ],
   template: `
     <div class="page">
@@ -47,104 +60,118 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
       </app-page-header>
 
       <!-- ── KPI strip ──────────────────────────────────────────────────
-           Collapsed to one line when nothing fired: six zero tiles and a
-           grid of dashed "0" cards say the same thing as one sentence. -->
+           Always shown: an empty window is the NORMAL state here (rationales are
+           written only for four rare lifecycle events), so the all-time figures
+           carry the page while the window is quiet. -->
       @if (coverage(); as c) {
-        @if (c.totalRationales > 0) {
-          <div class="kpi-strip">
-            <app-metric-card
-              label="Rationales"
-              [value]="c.totalRationales"
-              format="number"
-              dotColor="#0071E3"
-            />
+        <div class="kpi-strip">
+          <app-metric-card
+            [label]="'Rationales (' + windowLabel() + ')'"
+            [value]="c.totalRationales"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            label="Rationales (all time)"
+            [value]="allTimeTotal()"
+            format="number"
+            dotColor="#5AC8FA"
+          />
+          <app-metric-card
+            label="Last rationale"
+            [value]="null"
+            [displayValue]="lastRationaleText()"
+            dotColor="#AF52DE"
+          />
+          <app-metric-card
+            label="Event types wired"
+            [value]="coverageTotalTypes()"
+            format="number"
+            dotColor="#34C759"
+          />
+          <app-metric-card
+            label="Handlers switched on"
+            [value]="null"
+            [displayValue]="handlersOnText()"
+            [dotColor]="c.layerEnabled === false ? '#FF3B30' : '#34C759'"
+          />
+          @if (c.totalRationales > 0) {
             <app-metric-card
               label="Avg confidence (0–1)"
               [value]="c.averageConfidence"
               format="number"
-              dotColor="#34C759"
-            />
-            <app-metric-card
-              label="Low-confidence (<0.4)"
-              [value]="c.lowConfidenceCount"
-              format="number"
               [dotColor]="c.lowConfidenceCount > 0 ? '#FF9500' : '#34C759'"
             />
+          } @else {
             <app-metric-card
-              label="LLM cost (window)"
+              [label]="'LLM cost (' + windowLabel() + ')'"
               [value]="c.totalCostUsd"
               format="currency"
-              dotColor="#AF52DE"
-            />
-            <app-metric-card
-              label="Event types wired"
-              [value]="coverageTotalTypes()"
-              format="number"
-              dotColor="#5AC8FA"
-            />
-            <app-metric-card
-              label="Types that fired"
-              [value]="coverageActiveTypes()"
-              format="number"
               dotColor="#FF9500"
             />
-          </div>
-        } @else {
-          <div class="note quiet">
-            No rationale fired in the last {{ windowLabel() }} across
-            {{ c.byEventType.length }} wired event type(s). Widen the window to see older
-            rationales, or check the narrative layer is enabled in
-            <a routerLink="/llm/settings">Settings</a>.
-          </div>
-        }
-      }
+          }
+        </div>
 
-      <!-- ── Coverage matrix ────────────────────────────────────────── -->
-      @if (coverage(); as c) {
-        @if (c.totalRationales > 0) {
-          <section class="card">
-            <header class="card-head">
-              <h3>Event-Type Coverage</h3>
-              <span class="muted small"
-                >Last {{ windowLabel() }} · {{ coverageActiveTypes() }} of
-                {{ c.byEventType.length }} event type(s) fired</span
-              >
-            </header>
-            <div class="coverage-grid">
-              @for (e of c.byEventType; track e.eventType) {
-                <article class="coverage-card" [class.empty]="e.count === 0">
-                  <header class="cov-head">
-                    <span class="event-pill">{{ e.eventType }}</span>
-                    <span class="cov-count" [class.zero]="e.count === 0">
-                      {{ e.count }}
-                    </span>
-                  </header>
-                  <p class="cov-desc">{{ e.description }}</p>
-                  <footer class="cov-foot">
-                    @if (e.count > 0) {
-                      <span class="cov-meta">
-                        avg conf
-                        <strong>{{ e.averageConfidence ?? 0 | number: '1.2-2' }}</strong>
-                      </span>
-                      <span class="cov-meta">
-                        latest <strong>{{ e.latestAt | date: 'MMM d, HH:mm' }}</strong>
-                      </span>
-                      <button
-                        type="button"
-                        class="cov-filter-btn"
-                        (click)="filterToEventType(e.eventType)"
-                      >
-                        View →
-                      </button>
-                    } @else {
-                      <span class="cov-meta muted">No rationale fired in window.</span>
-                    }
-                  </footer>
-                </article>
-              }
-            </div>
-          </section>
+        @if (c.totalRationales === 0) {
+          <app-feature-state
+            title="Lifecycle rationales"
+            summary="When the engine activates a strategy, approves an optimisation, flattens everything in an emergency or sees a CompositeML drift alert, an LLM writes a 2–3 sentence explanation of why, attached to that event. Nothing else produces a rationale."
+            [kind]="stateKind()"
+            [stateLabel]="stateLabel()"
+            switchKey="LifecycleRationaleOptions:Enabled"
+            [detail]="quietDetail()"
+            [requirements]="requirements()"
+            [links]="stateLinks"
+          />
         }
+
+        <section class="card">
+          <header class="card-head">
+            <h3>Event-type coverage</h3>
+            <span class="muted small"
+              >Last {{ windowLabel() }} · {{ coverageActiveTypes() }} of
+              {{ c.byEventType.length }} event type(s) fired · all-time count beside each</span
+            >
+          </header>
+          <div class="coverage-grid">
+            @for (e of c.byEventType; track e.eventType) {
+              <article class="coverage-card" [class.empty]="e.count === 0">
+                <header class="cov-head">
+                  <span class="event-pill" [title]="e.eventType">{{ label(e.eventType) }}</span>
+                  <span class="cov-switch" [attr.data-on]="e.enabled">
+                    {{
+                      e.enabled === true ? 'handler on' : e.enabled === false ? 'handler off' : ''
+                    }}
+                  </span>
+                  <span class="cov-count" [class.zero]="e.count === 0" title="In the window">
+                    {{ e.count }}
+                  </span>
+                </header>
+                <p class="cov-desc">{{ e.description }}</p>
+                <footer class="cov-foot">
+                  @if (e.count > 0) {
+                    <span class="cov-meta">
+                      avg conf
+                      <strong>{{ e.averageConfidence ?? 0 | number: '1.2-2' }}</strong>
+                    </span>
+                  }
+                  <span class="cov-meta" [title]="(e.allTimeLatestAt ?? e.latestAt ?? '') + ''">
+                    {{ history(e) }}
+                  </span>
+                  @if ((e.allTimeCount ?? e.count) > 0) {
+                    <button
+                      type="button"
+                      class="cov-filter-btn"
+                      (click)="filterToEventType(e.eventType)"
+                    >
+                      View →
+                    </button>
+                  }
+                </footer>
+              </article>
+            }
+          </div>
+        </section>
       }
 
       <!-- Filters -->
@@ -195,31 +222,30 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
             check the layer is enabled in <a routerLink="/llm/settings">Settings</a>.
           </div>
         }
+        @if (recent().length > 0) {
+          <section class="card">
+            <header class="card-head">
+              <h3>Most recent rationales (any date)</h3>
+              <span class="muted small"
+                >{{ recent().length }} newest of {{ allTimeTotal() ?? recent().length }} — older
+                than the {{ windowLabel() }} window, shown so the page is never blank</span
+              >
+            </header>
+            <div class="feed feed--inset">
+              @for (r of recent(); track r.id) {
+                <ng-container
+                  *ngTemplateOutlet="rationaleCard; context: { $implicit: r }"
+                ></ng-container>
+              }
+            </div>
+          </section>
+        }
       } @else {
         <div class="feed">
           @for (r of rationales(); track r.id) {
-            <article class="rationale-card" [class.low-conf]="r.confidence < 0.4">
-              <header class="rationale-head">
-                <span class="event-pill">{{ r.eventType }}</span>
-                <span class="muted">#{{ r.eventId }}</span>
-                <span class="dot">·</span>
-                <span class="muted">{{ r.createdAt | date: 'MMM d, HH:mm' }}</span>
-                <span class="spacer"></span>
-                <span class="conf-badge" [class.low]="r.confidence < 0.4">
-                  conf {{ r.confidence | number: '1.2-2' }}
-                </span>
-                @if (r.llmProvider) {
-                  <span class="provider-tag mono">{{ r.llmProvider }} / {{ r.llmModel }}</span>
-                }
-              </header>
-              <p class="rationale-body">{{ r.rationaleText }}</p>
-              @if (r.keyMetricReferenced) {
-                <footer class="rationale-foot">
-                  <span class="metric-label">Key metric</span>
-                  <span class="metric-value mono">{{ r.keyMetricReferenced }}</span>
-                </footer>
-              }
-            </article>
+            <ng-container
+              *ngTemplateOutlet="rationaleCard; context: { $implicit: r }"
+            ></ng-container>
           }
         </div>
         <footer class="pager">
@@ -244,6 +270,37 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
           </div>
         </footer>
       }
+
+      <ng-template #rationaleCard let-r>
+        <article class="rationale-card" [class.low-conf]="r.confidence < 0.4">
+          <header class="rationale-head">
+            <span class="event-pill" [title]="r.eventType">{{ label(r.eventType) }}</span>
+            <span class="muted">event #{{ r.eventId }}</span>
+            <span class="dot">·</span>
+            <span class="muted" [title]="r.createdAt">{{
+              r.createdAt | date: 'MMM d y, HH:mm'
+            }}</span>
+            <span class="spacer"></span>
+            <span
+              class="conf-badge"
+              [class.low]="r.confidence < 0.4"
+              title="How sure the LLM was of its explanation (0–1)"
+            >
+              conf {{ r.confidence | number: '1.2-2' }}
+            </span>
+            @if (r.llmProvider) {
+              <span class="provider-tag mono">{{ r.llmProvider }} / {{ r.llmModel }}</span>
+            }
+          </header>
+          <p class="rationale-body">{{ r.rationaleText }}</p>
+          @if (r.keyMetricReferenced) {
+            <footer class="rationale-foot">
+              <span class="metric-label">Key metric</span>
+              <span class="metric-value mono">{{ r.keyMetricReferenced }}</span>
+            </footer>
+          }
+        </article>
+      </ng-template>
     </div>
   `,
   styles: [
@@ -539,6 +596,23 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
         opacity: 0.4;
         cursor: not-allowed;
       }
+      .small {
+        font-size: var(--text-xs);
+      }
+      .cov-switch {
+        margin-left: auto;
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .cov-switch[data-on='true'] {
+        color: var(--profit);
+      }
+      .cov-switch[data-on='false'] {
+        color: var(--loss);
+      }
+      .feed--inset {
+        padding: var(--space-4) var(--space-5);
+      }
       .note {
         padding: var(--space-5);
         text-align: center;
@@ -593,6 +667,87 @@ export class LlmRationalesPageComponent implements OnInit {
     this.resetAndReload();
   }
 
+  /** Newest rationales of any date — shown when the window is empty so the page never goes blank. */
+  readonly recent = signal<LifecycleRationaleDto[]>([]);
+  private readonly recentTotal = signal<number | null>(null);
+
+  readonly allTimeTotal = computed<number | null>(
+    () => this.coverage()?.allTimeTotal ?? this.recentTotal(),
+  );
+
+  readonly lastRationaleText = computed(() => {
+    const c = this.coverage();
+    const at = c?.allTimeLatestAt ?? latestAnyType(c)?.at ?? this.recent()[0]?.createdAt ?? null;
+    return at ? ageText(at) : 'never';
+  });
+
+  readonly handlersOnText = computed(() => {
+    const c = this.coverage();
+    if (!c) return '—';
+    if (c.layerEnabled === false) return 'layer off';
+    const known = c.byEventType.filter((e) => e.enabled != null);
+    if (known.length === 0) return c.layerEnabled ? 'layer on' : '—';
+    return `${known.filter((e) => e.enabled).length} of ${known.length}`;
+  });
+
+  readonly stateKind = computed(() => rationaleStateKind(this.coverage()));
+  readonly stateLabel = computed(() => {
+    switch (this.stateKind()) {
+      case 'off':
+        return 'Off';
+      case 'partial':
+        return 'Partly on';
+      case 'waiting':
+        return 'On · quiet';
+      default:
+        return 'On';
+    }
+  });
+  readonly requirements = computed(() => {
+    const c = this.coverage();
+    return c ? rationaleRequirements(c) : [];
+  });
+  readonly quietDetail = computed(() => {
+    const c = this.coverage();
+    if (!c) return null;
+    const last = latestAnyType(c);
+    const total = this.allTimeTotal();
+    const lastPart = last
+      ? `The last one explained a ${eventLabel(last.eventType).toLowerCase()} event ${ageText(last.at)} (${new Date(last.at).toUTCString().slice(5, 16)})`
+      : this.recent()[0]
+        ? `The last one was written ${ageText(this.recent()[0].createdAt)}`
+        : 'None has been written yet';
+    return `Nothing in the last ${this.windowLabel()}: none of the four events happened. ${lastPart}${total != null ? `; ${total} written in all` : ''}. Each rationale costs one quick LLM call.`;
+  });
+  readonly stateLinks: FeatureLink[] = [
+    { label: 'Strategies (activations)', route: '/strategies' },
+    { label: 'Optimisations', route: '/optimizations' },
+    { label: 'Kill switches (emergency flatten)', route: '/kill-switches' },
+    { label: 'LLM settings', route: '/llm/settings' },
+  ];
+
+  label(eventType: string): string {
+    return eventLabel(eventType);
+  }
+
+  history(e: Parameters<typeof entryHistory>[0]): string {
+    return entryHistory(e);
+  }
+
+  private loadRecent(eventType: string | null = null): void {
+    this.llm
+      .listRationales({ currentPage: 1, itemCountPerPage: 5, filter: { eventType } })
+      .pipe(
+        catchError(() => of(null)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        this.recent.set(res?.status ? (res.data?.data ?? []) : []);
+        if (!eventType)
+          this.recentTotal.set(res?.status ? (res.data?.pager?.totalItemCount ?? null) : null);
+      });
+  }
+
   readonly coverageTotalTypes = computed(() => this.coverage()?.byEventType.length ?? 0);
   readonly coverageActiveTypes = computed(
     () => this.coverage()?.byEventType.filter((e) => e.count > 0).length ?? 0,
@@ -617,12 +772,17 @@ export class LlmRationalesPageComponent implements OnInit {
       )
       .subscribe((res) => {
         this.coverage.set(res?.data ?? null);
+        // A quiet window is the normal state; fetch the newest rationales of any date once.
+        if ((res?.data?.totalRationales ?? 0) === 0 && this.recent().length === 0)
+          this.loadRecent();
       });
   }
 
   filterToEventType(eventType: string): void {
     this.filterEventType = eventType;
     this.resetAndReload();
+    // Its rationales may all be older than the window — show its newest of any date beneath.
+    this.loadRecent(eventType);
   }
 
   /** Any list filter beyond the window is set. */

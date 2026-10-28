@@ -13,6 +13,11 @@ import { catchError, of } from 'rxjs';
 
 import { SpotAnalysisService } from '@core/services/spot-analysis.service';
 import { TradeSignalsService } from '@core/services/trade-signals.service';
+import { ConfigService } from '@core/services/config.service';
+import {
+  FeatureRequirement,
+  FeatureStateComponent,
+} from '@shared/components/feedback/feature-state.component';
 import {
   SpotAnalysisListItemDto,
   SpotAnalysisSummaryDto,
@@ -75,6 +80,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
     MetricCardComponent,
     ChartCardComponent,
     SpotRecChartComponent,
+    FeatureStateComponent,
   ],
   template: `
     <div class="page">
@@ -107,6 +113,28 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
           </button>
         </div>
       </app-page-header>
+
+      @if (widenedNote(); as note) {
+        <p class="widened-note">{{ note }}</p>
+      }
+
+      @if (producersLoaded() && !anyProducerOn()) {
+        <app-feature-state
+          title="Where spot analyses come from"
+          summary="A spot analysis is one LLM read of a symbol and timeframe that can recommend trades. Three things start one: the scheduled spot-analysis worker, the Spot Sweep loop, and an operator asking for one by hand (chart page, Conversations → New analysis, Patient Trader). Both automatic producers are deliberately off, so new rows appear only when someone asks."
+          kind="off"
+          stateLabel="Automatic analysis off"
+          switchKey="SpotAnalysisWorker:Enabled · SpotSweep:Enabled"
+          [detail]="producerDetail()"
+          [requirements]="producerRequirements()"
+          [links]="[
+            { label: 'Spot Sweep', route: '/spot-sweep' },
+            { label: 'Conversations (run one by hand)', route: '/conversations' },
+            { label: 'Patient Trader', route: '/patient-trader' },
+            { label: 'Prompt templates', route: '/prompt-templates' },
+          ]"
+        />
+      }
 
       <!-- Funnel: where setups die. Counts + conversion % between stages. -->
       <div class="funnel" role="group" aria-label="Analysis funnel">
@@ -679,6 +707,15 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
   `,
   styles: [
     `
+      .widened-note {
+        margin: 0;
+        padding: 0.6rem 0.9rem;
+        border-radius: var(--radius-md);
+        border: 1px solid var(--border);
+        background: var(--bg-secondary);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
       /* The shell already pads the content area; a second inset set this page in from every
          sibling's left edge. */
       .page {
@@ -1373,11 +1410,98 @@ export class SpotAnalysisReportPageComponent implements OnInit {
 
   private symbolDebounce: ReturnType<typeof setTimeout> | null = null;
 
+  private readonly config = inject(ConfigService);
+
+  /** Set when the page widened an empty default window on first load — says so on screen. */
+  readonly widenedNote = signal<string | null>(null);
+  private autoWiden = true;
+
+  /** Real switch values of the two automatic producers (null = row missing / unreadable). */
+  readonly workerEnabled = signal<boolean | null>(null);
+  readonly workerGeneratesSignals = signal<boolean | null>(null);
+  readonly sweepEnabled = signal<boolean | null>(null);
+  readonly producersLoaded = signal(false);
+  readonly anyProducerOn = computed(
+    () => this.workerEnabled() === true || this.sweepEnabled() === true,
+  );
+  /** Newest analysis of any date + the all-time count. */
+  readonly lastAnalysis = signal<{ at: string; symbol: string; total: number } | null>(null);
+
+  readonly producerDetail = computed(() => {
+    const last = this.lastAnalysis();
+    if (!last) return null;
+    const days = Math.floor((Date.now() - new Date(last.at).getTime()) / 86_400_000);
+    return `The newest analysis is ${last.symbol} on ${new Date(last.at).toUTCString().slice(5, 22)} UTC (${days <= 0 ? 'today' : `${days} day(s) ago`}); ${last.total.toLocaleString()} analyses are on record in all.`;
+  });
+
+  readonly producerRequirements = computed<FeatureRequirement[]>(() => [
+    {
+      label: 'Scheduled spot-analysis worker',
+      ok: this.workerEnabled(),
+      detail:
+        this.workerEnabled() === null
+          ? 'setting not found'
+          : this.workerEnabled()
+            ? 'on'
+            : 'off — operator choice (SpotAnalysisWorker:Enabled = false); signal generation ' +
+              (this.workerGeneratesSignals() ? 'on' : 'off'),
+      route: '/engine-config',
+      query: { search: 'SpotAnalysisWorker:' },
+    },
+    {
+      label: 'Spot Sweep loop',
+      ok: this.sweepEnabled(),
+      detail:
+        this.sweepEnabled() === null
+          ? 'setting not found'
+          : this.sweepEnabled()
+            ? 'on'
+            : 'off — operator choice (SpotSweep:Enabled = false)',
+      route: '/spot-sweep',
+    },
+    {
+      label: 'Analysis on request',
+      ok: true,
+      detail: 'always available — chart page, Conversations, Patient Trader',
+      route: '/conversations',
+    },
+  ]);
+
+  private loadProducers(): void {
+    const flag = (key: string, set: (v: boolean | null) => void) =>
+      this.config
+        .getByKey(key, { silent: true })
+        .pipe(catchError(() => of(null)))
+        .subscribe((res) => {
+          const v = res?.status ? res.data?.value?.trim().toLowerCase() : null;
+          set(v === 'true' ? true : v === 'false' ? false : null);
+          this.producersLoaded.set(true);
+        });
+    flag('SpotAnalysisWorker:Enabled', (v) => this.workerEnabled.set(v));
+    flag('SpotAnalysisWorker:GenerateSignals', (v) => this.workerGeneratesSignals.set(v));
+    flag('SpotSweep:Enabled', (v) => this.sweepEnabled.set(v));
+    this.service
+      .list({ currentPage: 1, itemCountPerPage: 1, filter: {} })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const row = res?.status ? res.data?.items?.[0] : null;
+        if (row)
+          this.lastAnalysis.set({
+            at: row.invokedAt,
+            symbol: row.symbol,
+            total: res?.data?.totalItems ?? 0,
+          });
+      });
+  }
+
   ngOnInit(): void {
     this.load();
+    this.loadProducers();
   }
 
   setWindow(hours: number): void {
+    this.autoWiden = false;
+    this.widenedNote.set(null);
     if (this.windowHours() === hours) return;
     this.windowHours.set(hours);
     this.currentPage.set(1);
@@ -1560,6 +1684,22 @@ export class SpotAnalysisReportPageComponent implements OnInit {
       .subscribe((res) => {
         this.loading.set(false);
         if (res?.status && res.data) {
+          // First load only: an empty default window widens itself (7d → 30d → all) and says so,
+          // instead of opening on a page of zeros while thousands of analyses exist.
+          if (this.autoWiden && (res.data.totalItems ?? 0) === 0 && !this.symbolFilter().trim()) {
+            const next = hours === 168 ? 720 : hours === 720 ? 0 : null;
+            if (next !== null) {
+              this.widenedNote.set(
+                next === 720
+                  ? 'No spot analysis ran in the last 7 days — showing the last 30 days.'
+                  : 'No spot analysis ran in the last 30 days — showing every analysis on record.',
+              );
+              this.windowHours.set(next);
+              this.load();
+              return;
+            }
+          }
+          this.autoWiden = false;
           this.items.set(res.data.items ?? []);
           this.summary.set(res.data.summary ?? EMPTY_SUMMARY);
           this.timeSeries.set(res.data.timeSeries ?? []);

@@ -9,7 +9,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { catchError, map, of } from 'rxjs';
+import { catchError, forkJoin, map, of } from 'rxjs';
 
 import { TradeSignalsService } from '@core/services/trade-signals.service';
 import { OrderDto, TradeSignalDto } from '@core/api/api.types';
@@ -23,6 +23,12 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { NotificationService } from '@core/notifications/notification.service';
+import { SignalStoryPanelComponent } from '../../components/signal-story/signal-story-panel.component';
+import type { SignalStory } from '../../components/signal-story/signal-story.types';
+import {
+  missingSignalSentence,
+  SignalRange,
+} from '../../components/signal-story/signal-story.logic';
 
 /**
  * Per-signal detail surface. Two panels:
@@ -54,12 +60,13 @@ import { NotificationService } from '@core/notifications/notification.service';
     PageHeaderComponent,
     ErrorStateComponent,
     ConfirmDialogComponent,
+    SignalStoryPanelComponent,
   ],
   template: `
     <div class="page">
       <app-page-header
         [title]="'Signal #' + (signalId() ?? '—')"
-        subtitle="Cross-account attempts for this signal — every EA that polled it, every rejection it hit, and every engine / broker outcome that followed."
+        subtitle="Everything the engine recorded about this signal — where it came from, the gates it met, every account and EA that handled it, and how it ended."
       >
         <!-- Kept outside the @if: nodes inside a control-flow block do not
              match ng-content selectors, so the slot wrapper is always
@@ -122,52 +129,97 @@ import { NotificationService } from '@core/notifications/notification.service';
       </app-confirm-dialog>
 
       @if (signalId() !== null) {
-        @if (signal(); as s) {
-          <!-- Chart pane — renders only when the signal has resolvable
-               symbol + actionable prices. Hold-only / malformed signals
-               skip the chart silently. -->
-          @if (canChart(s)) {
-            <section class="chart-section">
-              <header class="section-head">
-                <h2>Chart — Entry / SL / TP overlay</h2>
-                <div class="section-sub muted">
-                  <!-- Formatted IN UTC: the pipe's default is the browser zone, so the
-                       line printed local time beside a "UTC" suffix (07:01 for 06:01Z). -->
-                  {{ s.symbol }} · {{ tfLabel() }} · generated
-                  {{ s.generatedAt | date: 'MMM d, HH:mm' : 'UTC' }} UTC · entry
-                  <span class="mono">{{ s.entryPrice | number: priceFormat(s) }}</span> · SL
-                  <span class="mono">{{ s.stopLoss | number: priceFormat(s) }}</span> · TP
-                  <span class="mono">{{ s.takeProfit | number: priceFormat(s) }}</span>
-                  @if (outcomeLabel(s); as t) {
-                    ·
-                    <span [class.warn]="t.tone === 'warn'" [class.ok]="t.tone === 'ok'">{{
-                      t.text
-                    }}</span>
-                  }
-                </div>
-              </header>
-              <app-spot-rec-chart
-                [symbol]="s.symbol ?? ''"
-                [timeframe]="tfLabel()"
-                [asOfUtc]="s.generatedAt"
-                [recommendations]="chartRecs()"
-                [exitMarker]="exitMarker()"
-              />
-            </section>
-          }
-        } @else if (chartLoading()) {
-          <section class="chart-section">
-            <p class="muted">Loading signal…</p>
+        @if (missing(); as m) {
+          <!-- The id does not exist: say which ids do, instead of an error over an
+               empty "no account attempts" card. -->
+          <section class="missing" role="status">
+            <h2>No signal #{{ signalId() }}</h2>
+            <p>{{ m.sentence }}</p>
+            @if (m.range.totalSignals != null) {
+              <p class="muted small">
+                The engine holds {{ m.range.totalSignals | number }} signal(s).
+              </p>
+            }
+            <nav class="missing-links">
+              @if (m.range.previousId) {
+                <a class="btn btn-secondary" [routerLink]="['/trade-signals', m.range.previousId]"
+                  >← Signal #{{ m.range.previousId }}</a
+                >
+              }
+              @if (m.range.nextId) {
+                <a class="btn btn-secondary" [routerLink]="['/trade-signals', m.range.nextId]"
+                  >Signal #{{ m.range.nextId }} →</a
+                >
+              }
+              @if (m.range.latestId && m.range.latestId !== m.range.nextId) {
+                <a class="btn btn-secondary" [routerLink]="['/trade-signals', m.range.latestId]"
+                  >Newest (#{{ m.range.latestId }})</a
+                >
+              }
+              <a class="btn btn-secondary" routerLink="/trade-signals">All signals</a>
+              <a class="btn btn-secondary" routerLink="/trade-signals/feedback">Signal exits</a>
+            </nav>
           </section>
-        } @else if (chartError(); as e) {
-          <app-error-state title="Could not load signal" [message]="e" (retry)="load()" />
-        }
+        } @else {
+          @if (signal(); as s) {
+            @if (story(); as st) {
+              <app-signal-story-panel [story]="st" [signal]="s" />
+            }
+            <!-- Chart pane — renders only when the signal has resolvable
+                 symbol + actionable prices. Hold-only / malformed signals
+                 skip the chart silently. -->
+            @if (canChart(s)) {
+              <section class="chart-section">
+                <header class="section-head">
+                  <h2>Chart — Entry / SL / TP overlay</h2>
+                  <div class="section-sub muted">
+                    <!-- Formatted IN UTC: the pipe's default is the browser zone, so the
+                         line printed local time beside a "UTC" suffix (07:01 for 06:01Z). -->
+                    {{ s.symbol }} · {{ tfLabel() }} · generated
+                    {{ s.generatedAt | date: 'MMM d, HH:mm' : 'UTC' }} UTC · entry
+                    <span class="mono">{{ s.entryPrice | number: priceFormat(s) }}</span> · SL
+                    <span class="mono">{{ s.stopLoss | number: priceFormat(s) }}</span> · TP
+                    <span class="mono">{{ s.takeProfit | number: priceFormat(s) }}</span>
+                    @if (outcomeLabel(s); as t) {
+                      ·
+                      <span [class.warn]="t.tone === 'warn'" [class.ok]="t.tone === 'ok'">{{
+                        t.text
+                      }}</span>
+                    }
+                  </div>
+                </header>
+                <app-spot-rec-chart
+                  [symbol]="s.symbol ?? ''"
+                  [timeframe]="tfLabel()"
+                  [asOfUtc]="s.generatedAt"
+                  [recommendations]="chartRecs()"
+                  [exitMarker]="exitMarker()"
+                />
+              </section>
+            }
+          } @else if (chartLoading()) {
+            <section class="chart-section">
+              <p class="muted">Loading signal…</p>
+            </section>
+          } @else if (chartError(); as e) {
+            <app-error-state title="Could not load signal" [message]="e" (retry)="load()" />
+          }
 
-        <app-account-attempts
-          [signalId]="signalId()"
-          [signal]="signal()"
-          (ordersLoaded)="orders.set($event)"
-        />
+          @if (quietAttempts()) {
+            <!-- No account ever saw it: the story above already says why; a full empty
+                 attempts card added nothing. -->
+            <p class="quiet-line muted">
+              Account attempts: none — no EA polled this signal and no account created an order from
+              it{{ story()?.counts?.engineRejections ? ' (the engine refused it first)' : '' }}.
+            </p>
+          } @else if (signal()) {
+            <app-account-attempts
+              [signalId]="signalId()"
+              [signal]="signal()"
+              (ordersLoaded)="orders.set($event)"
+            />
+          }
+        }
       } @else {
         <p class="empty muted">Invalid signal id — route is missing the numeric segment.</p>
       }
@@ -298,6 +350,37 @@ import { NotificationService } from '@core/notifications/notification.service';
       .muted {
         color: var(--text-secondary);
       }
+      .missing {
+        padding: var(--space-5);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+      }
+      .missing h2 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-lg);
+      }
+      .missing p {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+      .missing-links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+        margin-top: var(--space-3);
+      }
+      .small {
+        font-size: var(--text-xs);
+      }
+      .quiet-line {
+        font-size: var(--text-sm);
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
       .empty {
         font-size: var(--text-sm);
         padding: var(--space-3) 0;
@@ -371,6 +454,17 @@ export class SignalDetailPageComponent {
     { initialValue: null as number | null },
   );
 
+  /** GET trade-signal/{id}/story — null until loaded, or when the engine lacks the endpoint. */
+  readonly story = signal<SignalStory | null>(null);
+  /** Set when the id does not exist: the sentence + the range that does. */
+  readonly missing = signal<{ sentence: string; range: SignalRange } | null>(null);
+
+  /** The story says nothing reached an account: collapse the attempts card to one line. */
+  readonly quietAttempts = computed(() => {
+    const c = this.story()?.counts;
+    return !!c && c.accountAttempts === 0 && c.orders === 0 && c.eaRejections === 0;
+  });
+
   /** The fetched TradeSignal — null while loading / on error. */
   readonly signal = signal<TradeSignalDto | null>(null);
   readonly chartLoading = signal(false);
@@ -443,6 +537,20 @@ export class SignalDetailPageComponent {
   private fetch(id: number): void {
     this.chartLoading.set(true);
     this.chartError.set(null);
+    this.missing.set(null);
+    this.story.set(null);
+    this.signalsService
+      .story(id)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const st = res?.status ? res.data : null;
+        if (!st) return;
+        if (st.exists) {
+          this.story.set(st);
+        } else {
+          this.missing.set({ sentence: missingSignalSentence(id, st), range: st });
+        }
+      });
     this.signalsService
       .getById(id)
       .pipe(
@@ -455,10 +563,38 @@ export class SignalDetailPageComponent {
         this.chartLoading.set(false);
         if (res?.status && res.data) {
           this.signal.set(res.data);
-        } else if (!this.chartError()) {
-          this.chartError.set(res?.message ?? 'Signal not found.');
+        } else {
+          this.signal.set(null);
+          if (!this.chartError()) this.chartError.set(res?.message ?? 'Signal not found.');
+          if (/not found/i.test(this.chartError() ?? '')) this.loadRangeFallback(id);
         }
       });
+  }
+
+  /**
+   * An engine without the story endpoint: work out the id range from the list instead, so a
+   * missing id still gets an explanation. Skipped once the story has answered.
+   */
+  private loadRangeFallback(id: number): void {
+    const one = (sortDirection: 'asc' | 'desc', filter?: object) =>
+      this.signalsService
+        .list({ currentPage: 1, itemCountPerPage: 1, sortBy: 'id', sortDirection, filter })
+        .pipe(catchError(() => of(null)));
+    forkJoin([one('asc'), one('desc')]).subscribe(([asc, desc]) => {
+      if (this.missing() || this.story()) return;
+      const first = asc?.data?.data?.[0] ?? null;
+      const last = desc?.data?.data?.[0] ?? null;
+      if (!asc?.status || !desc?.status) return;
+      const range: SignalRange = {
+        totalSignals: asc.data?.pager?.totalItemCount ?? null,
+        earliestId: first?.id ?? null,
+        earliestGeneratedAt: first?.generatedAt ?? null,
+        latestId: last?.id ?? null,
+        previousId: null,
+        nextId: first && id < first.id ? first.id : null,
+      };
+      this.missing.set({ sentence: missingSignalSentence(id, range), range });
+    });
   }
 
   /**

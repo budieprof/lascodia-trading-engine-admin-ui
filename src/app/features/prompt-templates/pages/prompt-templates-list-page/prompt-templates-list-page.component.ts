@@ -21,6 +21,13 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
+import {
+  FeatureRequirement,
+  FeatureStateComponent,
+} from '@shared/components/feedback/feature-state.component';
+import { PromptTemplateStatus } from '@core/services/prompt-template.service';
+import { defaultDiffPair, templateCounts, versionEvents } from '../../utils/prompt-templates.logic';
 
 /**
  * Seeded prompt-template `Name` values. Phase 3 only ships
@@ -54,12 +61,79 @@ const DEFAULT_PAGE_SIZE = 25;
     PageHeaderComponent,
     RefreshButtonComponent,
     ModalA11yDirective,
+    MetricCardComponent,
+    FeatureStateComponent,
   ],
   template: `
     <div class="page">
       <app-page-header
         title="Prompt templates"
         subtitle="Versioned LLM system prompts — fork, promote, and diff against the live spot-analysis path."
+      >
+        @if (diffPair(); as d) {
+          <a
+            class="btn-secondary"
+            routerLink="/prompt-templates/diff"
+            [queryParams]="{ left: d.left, right: d.right }"
+            >Diff active vs previous</a
+          >
+        }
+      </app-page-header>
+
+      <div class="kpi-strip">
+        <app-metric-card
+          label="Live prompt comes from"
+          [value]="null"
+          [displayValue]="liveSourceText()"
+          [dotColor]="status()?.liveSource === 'database' ? '#34C759' : '#FF9500'"
+        />
+        <app-metric-card
+          label="Active version"
+          [value]="null"
+          [displayValue]="counts().active ? '#' + counts().active!.id : 'none'"
+          dotColor="#0071E3"
+        />
+        <app-metric-card
+          label="Versions · drafts · archived"
+          [value]="null"
+          [displayValue]="counts().versions + ' · ' + counts().drafts + ' · ' + counts().archived"
+          dotColor="#5AC8FA"
+        />
+        <app-metric-card
+          label="Spot-analysis calls (7d · 30d)"
+          [value]="null"
+          [displayValue]="
+            status() ? status()!.callsLast7Days + ' · ' + status()!.callsLast30Days : '—'
+          "
+          dotColor="#AF52DE"
+        />
+        <app-metric-card
+          label="Last live call"
+          [value]="null"
+          [displayValue]="lastCallText()"
+          dotColor="#8E8E93"
+        />
+      </div>
+
+      <app-feature-state
+        title="Database-backed prompt"
+        summary="This table versions the system prompt sent with every spot analysis. It only becomes the LIVE prompt when the switch below is on — otherwise the engine sends the prompt built into its code, and the table is a reviewed reference copy you can fork, diff and backtest."
+        [kind]="status()?.useDbBackedPromptTemplate ? 'on' : 'off'"
+        [stateLabel]="
+          status()
+            ? status()!.useDbBackedPromptTemplate
+              ? 'Live from table'
+              : 'Reference only'
+            : null
+        "
+        switchKey="Llm:UseDbBackedPromptTemplate"
+        [detail]="stateDetail()"
+        [requirements]="requirements()"
+        [links]="[
+          { label: 'LLM settings', route: '/llm/settings' },
+          { label: 'LLM backtests (try a version)', route: '/llm-backtest/new' },
+          { label: 'Spot analysis report', route: '/spot-analysis' },
+        ]"
       />
 
       <div class="filters">
@@ -80,156 +154,183 @@ const DEFAULT_PAGE_SIZE = 25;
         <app-refresh-button variant="outline" [refreshing]="loading()" (refresh)="refresh()" />
       </div>
 
-      <section class="card">
-        @if (loading() && rows().length === 0) {
-          <div class="empty">Loading templates…</div>
-        } @else if (loadError() && rows().length === 0) {
-          <div class="empty load-error" role="alert">{{ loadError() }}</div>
-        } @else if (rows().length === 0) {
-          <div class="empty">
-            No templates for <strong>{{ nameFilter }}</strong>
-            @if (!showArchived) {
-              <small class="muted">(toggle "Show archived" to include archived rows)</small>
+      <div class="layout">
+        <section class="card">
+          @if (loading() && rows().length === 0) {
+            <div class="empty">Loading templates…</div>
+          } @else if (loadError() && rows().length === 0) {
+            <div class="empty load-error" role="alert">{{ loadError() }}</div>
+          } @else if (rows().length === 0) {
+            <div class="empty">
+              No templates for <strong>{{ nameFilter }}</strong>
+              @if (!showArchived) {
+                <small class="muted">(toggle "Show archived" to include archived rows)</small>
+              }
+            </div>
+          } @else {
+            @if (loadError(); as err) {
+              <p class="load-error inline" role="alert">
+                {{ err }} — showing the last list that loaded.
+              </p>
             }
-          </div>
-        } @else {
-          @if (loadError(); as err) {
-            <p class="load-error inline" role="alert">
-              {{ err }} — showing the last list that loaded.
-            </p>
-          }
-          <div class="table-scroll">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Name</th>
-                  <th>Version</th>
-                  <th>Status</th>
-                  <th>Notes</th>
-                  <th>Created by</th>
-                  <th>Created</th>
-                  <th>Promoted</th>
-                  <th>Archived</th>
-                  <th class="num">Length</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of rows(); track row.id) {
-                  <tr
-                    class="tpl-row"
-                    [class.tpl-row--active]="row.isActive"
-                    [class.tpl-row--archived]="row.isArchived"
-                  >
-                    <td class="mono">#{{ row.id }}</td>
-                    <td class="mono nowrap">{{ row.name }}</td>
-                    <td class="mono version" [title]="row.version">{{ row.version }}</td>
-                    <td>
-                      <span
-                        class="pill"
-                        [class.pill--active]="row.isActive && !isNotLive(row)"
-                        [class.pill--not-live]="row.isActive && isNotLive(row)"
-                        [class.pill--archived]="row.isArchived"
-                        [class.pill--draft]="!row.isActive && !row.isArchived"
-                        [title]="
-                          isNotLive(row)
-                            ? 'Active in the DB, but not the live prompt while UseDbBackedPromptTemplate = false'
-                            : ''
-                        "
-                      >
-                        {{ statusLabel(row) }}
-                      </span>
-                    </td>
-                    <td class="notes" [title]="row.notes ?? ''">
-                      {{ row.notes ? truncate(row.notes, 80) : '—' }}
-                    </td>
-                    <td class="nowrap">{{ row.createdBy }}</td>
-                    <td class="nowrap">{{ row.createdAt | date: 'yyyy-MM-dd HH:mm' }}</td>
-                    <td class="nowrap">
-                      {{ row.promotedAt ? (row.promotedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
-                    </td>
-                    <td class="nowrap">
-                      {{ row.archivedAt ? (row.archivedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
-                    </td>
-                    <td class="num nowrap">
-                      {{ row.systemPromptLength | number }}
-                      <button
-                        type="button"
-                        class="copy-btn"
-                        (click)="copyVersionSlug(row, $event)"
-                        title="Copy version slug to clipboard"
-                        aria-label="Copy version slug"
-                      >
-                        📋
-                      </button>
-                    </td>
-                    <td class="actions-cell">
-                      <div class="actions-inner">
-                        <a
-                          class="btn-secondary btn-small"
-                          [routerLink]="['/prompt-templates', row.id]"
-                        >
-                          View
-                        </a>
-                        @if (canEdit()) {
-                          <button
-                            type="button"
-                            class="btn-secondary btn-small"
-                            (click)="openForkModal(row)"
-                          >
-                            Fork
-                          </button>
-                        }
-                        @if (canPromote() && isDraft(row)) {
-                          <button
-                            type="button"
-                            class="btn-primary btn-small"
-                            (click)="openPromoteModal(row)"
-                          >
-                            Promote
-                          </button>
-                        }
-                        @if (canEdit() && isDraft(row)) {
-                          <button
-                            type="button"
-                            class="btn-danger btn-small"
-                            (click)="openArchiveModal(row)"
-                          >
-                            Archive
-                          </button>
-                        }
-                      </div>
-                    </td>
+            <div class="table-scroll">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Version</th>
+                    <th>Status</th>
+                    <th>Notes</th>
+                    <th>Created by</th>
+                    <th>Created</th>
+                    <th>Promoted</th>
+                    <th>Archived</th>
+                    <th class="num">Length</th>
+                    <th></th>
                   </tr>
-                }
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  @for (row of rows(); track row.id) {
+                    <tr
+                      class="tpl-row"
+                      [class.tpl-row--active]="row.isActive"
+                      [class.tpl-row--archived]="row.isArchived"
+                    >
+                      <td class="mono">#{{ row.id }}</td>
+                      <td class="mono nowrap">{{ row.name }}</td>
+                      <td class="mono version" [title]="row.version">{{ row.version }}</td>
+                      <td>
+                        <span
+                          class="pill"
+                          [class.pill--active]="row.isActive && !isNotLive(row)"
+                          [class.pill--not-live]="row.isActive && isNotLive(row)"
+                          [class.pill--archived]="row.isArchived"
+                          [class.pill--draft]="!row.isActive && !row.isArchived"
+                          [title]="
+                            isNotLive(row)
+                              ? 'Active in the DB, but not the live prompt while UseDbBackedPromptTemplate = false'
+                              : ''
+                          "
+                        >
+                          {{ statusLabel(row) }}
+                        </span>
+                      </td>
+                      <td class="notes" [title]="row.notes ?? ''">
+                        {{ row.notes ? truncate(row.notes, 80) : '—' }}
+                      </td>
+                      <td class="nowrap">{{ row.createdBy }}</td>
+                      <td class="nowrap">{{ row.createdAt | date: 'yyyy-MM-dd HH:mm' }}</td>
+                      <td class="nowrap">
+                        {{ row.promotedAt ? (row.promotedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+                      </td>
+                      <td class="nowrap">
+                        {{ row.archivedAt ? (row.archivedAt | date: 'yyyy-MM-dd HH:mm') : '—' }}
+                      </td>
+                      <td class="num nowrap">
+                        {{ row.systemPromptLength | number }}
+                        <button
+                          type="button"
+                          class="copy-btn"
+                          (click)="copyVersionSlug(row, $event)"
+                          title="Copy version slug to clipboard"
+                          aria-label="Copy version slug"
+                        >
+                          📋
+                        </button>
+                      </td>
+                      <td class="actions-cell">
+                        <div class="actions-inner">
+                          <a
+                            class="btn-secondary btn-small"
+                            [routerLink]="['/prompt-templates', row.id]"
+                          >
+                            View
+                          </a>
+                          @if (canEdit()) {
+                            <button
+                              type="button"
+                              class="btn-secondary btn-small"
+                              (click)="openForkModal(row)"
+                            >
+                              Fork
+                            </button>
+                          }
+                          @if (canPromote() && isDraft(row)) {
+                            <button
+                              type="button"
+                              class="btn-primary btn-small"
+                              (click)="openPromoteModal(row)"
+                            >
+                              Promote
+                            </button>
+                          }
+                          @if (canEdit() && isDraft(row)) {
+                            <button
+                              type="button"
+                              class="btn-danger btn-small"
+                              (click)="openArchiveModal(row)"
+                            >
+                              Archive
+                            </button>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
 
-          <div class="pager">
-            <button
-              type="button"
-              class="btn-secondary"
-              (click)="prevPage()"
-              [disabled]="page() <= 1 || loading()"
-            >
-              ‹ Prev
-            </button>
-            <span class="pager-info">
-              Page {{ page() }} of {{ totalPages() }} — {{ totalItems() }} row(s)
-            </span>
-            <button
-              type="button"
-              class="btn-secondary"
-              (click)="nextPage()"
-              [disabled]="page() >= totalPages() || loading()"
-            >
-              Next ›
-            </button>
-          </div>
-        }
-      </section>
+            <div class="pager">
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="prevPage()"
+                [disabled]="page() <= 1 || loading()"
+              >
+                ‹ Prev
+              </button>
+              <span class="pager-info">
+                Page {{ page() }} of {{ totalPages() }} — {{ totalItems() }} row(s)
+              </span>
+              <button
+                type="button"
+                class="btn-secondary"
+                (click)="nextPage()"
+                [disabled]="page() >= totalPages() || loading()"
+              >
+                Next ›
+              </button>
+            </div>
+          }
+        </section>
+
+        <aside class="card history">
+          <header class="history-head">
+            <h3>Version history</h3>
+            <span class="muted">{{ events().length }} change(s)</span>
+          </header>
+          @if (events().length === 0) {
+            <p class="muted history-empty">No versions recorded for {{ nameFilter }}.</p>
+          } @else {
+            <ol class="history-list">
+              @for (e of events(); track $index) {
+                <li [attr.data-kind]="e.kind">
+                  <span class="h-dot" aria-hidden="true"></span>
+                  <div>
+                    <a [routerLink]="['/prompt-templates', e.id]" class="mono">#{{ e.id }}</a>
+                    <span class="h-text">{{ e.text }}</span>
+                    <div class="muted h-meta" [title]="e.version">
+                      {{ e.at | date: 'MMM d y, HH:mm' }} · {{ e.version }}
+                    </div>
+                  </div>
+                </li>
+              }
+            </ol>
+          }
+        </aside>
+      </div>
 
       <!-- Fork modal ------------------------------------------------------- -->
       @if (forkTarget(); as src) {
@@ -724,6 +825,87 @@ const DEFAULT_PAGE_SIZE = 25;
         padding: 0.75rem 1.25rem;
         border-top: 1px solid var(--border);
       }
+      .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-3, 0.75rem);
+      }
+      @media (max-width: 1100px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 320px;
+        gap: 1rem;
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+      .history {
+        padding: 0;
+      }
+      .history-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid var(--border);
+      }
+      .history-head h3 {
+        margin: 0;
+        font-size: 0.95rem;
+      }
+      .history-empty {
+        padding: 0.75rem 1rem;
+        margin: 0;
+      }
+      .history-list {
+        list-style: none;
+        margin: 0;
+        padding: 0.75rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.65rem;
+        font-size: 0.85rem;
+      }
+      .history-list li {
+        display: grid;
+        grid-template-columns: 10px minmax(0, 1fr);
+        gap: 0.5rem;
+      }
+      .h-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-top: 5px;
+        background: var(--text-tertiary);
+      }
+      li[data-kind='promoted'] .h-dot {
+        background: var(--profit);
+      }
+      li[data-kind='archived'] .h-dot {
+        background: var(--loss);
+      }
+      li[data-kind='forked'] .h-dot {
+        background: var(--accent);
+      }
+      .h-text {
+        margin-left: 0.35rem;
+      }
+      .h-meta {
+        font-size: 0.75rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .history-list a {
+        color: var(--accent);
+      }
       code {
         background: var(--bg-tertiary);
         padding: 0.1rem 0.3rem;
@@ -743,7 +925,8 @@ export class PromptTemplatesListPageComponent implements OnInit {
 
   // ── Filter + paging state ──────────────────────────────────────────────
   nameFilter = KNOWN_NAMES[0];
-  showArchived = false;
+  /** On by default: with one active row and the rest archived, hiding archived showed a one-row table. */
+  showArchived = true;
   readonly page = signal(1);
   readonly pageSize = DEFAULT_PAGE_SIZE;
   readonly rows = signal<PromptTemplateSummary[]>([]);
@@ -766,10 +949,88 @@ export class PromptTemplatesListPageComponent implements OnInit {
   readonly canEdit = computed(() => this.auth.hasPermission('prompttemplate.edit'));
   readonly canPromote = computed(() => this.auth.hasPermission('prompttemplate.promote'));
 
+  /** Every version of the selected name (archived included) — feeds the tiles and the history. */
+  readonly allRows = signal<PromptTemplateSummary[]>([]);
+  readonly status = signal<PromptTemplateStatus | null>(null);
+  readonly counts = computed(() => templateCounts(this.allRows()));
+  readonly events = computed(() => versionEvents(this.allRows()));
+  readonly diffPair = computed(() => defaultDiffPair(this.allRows()));
+
+  readonly liveSourceText = computed(() => {
+    const st = this.status();
+    if (st) return st.liveSource === 'database' ? `table (#${st.activeId})` : 'built-in code';
+    // Older engine: all that is known is the active row's own "NOT LIVE" note.
+    const a = this.counts().active;
+    return a && this.isNotLive(a) ? 'built-in code (per note)' : 'unknown';
+  });
+
+  readonly lastCallText = computed(() => {
+    const at = this.status()?.lastCallAt;
+    if (!at) return this.status() ? 'never' : '—';
+    const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+    return days <= 0 ? 'today' : `${days} day(s) ago`;
+  });
+
+  readonly stateDetail = computed(() => {
+    const st = this.status();
+    if (!st) return null;
+    const parts = [
+      st.useDbBackedPromptTemplate
+        ? `The active row (#${st.activeId}, ${st.activeVersion}) is sent with every spot analysis.`
+        : 'Editing or promoting a row changes nothing live until the switch is turned on; prompt changes ship through code review and a deploy.',
+      `${st.callsAllTime.toLocaleString()} live spot-analysis call(s) so far` +
+        (st.lastCallAt
+          ? `, the last on ${new Date(st.lastCallAt).toUTCString().slice(5, 16)}`
+          : '') +
+        `; ${st.backtestCallsAllTime.toLocaleString()} backtest call(s) — backtests can try any version.`,
+    ];
+    if (st.callsLast7Days === 0)
+      parts.push(
+        'No live spot analysis ran this week: the scheduled worker and SpotSweep are deliberately off, so only analyses started by hand use this prompt.',
+      );
+    return parts.join(' ');
+  });
+
+  readonly requirements = computed<FeatureRequirement[]>(() => {
+    const st = this.status();
+    const c = this.counts();
+    return [
+      {
+        label: 'An active version exists',
+        ok: c.active != null,
+        detail: c.active
+          ? `#${c.active.id} ${c.active.version}`
+          : 'promote a draft to make one active',
+      },
+      {
+        label: 'Llm:UseDbBackedPromptTemplate is on',
+        ok: st ? st.useDbBackedPromptTemplate : null,
+        detail: st
+          ? st.useDbBackedPromptTemplate
+            ? 'the table is the live prompt'
+            : 'off — operator decision 2026-09-02: prompt changes go through code review + deploy'
+          : 'not reported by this engine build',
+        route: '/llm/settings',
+      },
+    ];
+  });
+
+  private loadOverview(): void {
+    this.svc
+      .list({ currentPage: 1, itemCountPerPage: 50, name: this.nameFilter, includeArchived: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => this.allRows.set(res?.status ? (res.data?.data ?? []) : []));
+    this.svc
+      .status(this.nameFilter)
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => this.status.set(res?.status ? res.data : null));
+  }
+
   readonly totalPages = computed(() => Math.max(1, Math.ceil(this.totalItems() / this.pageSize)));
 
   ngOnInit(): void {
     this.refresh();
+    this.loadOverview();
   }
 
   refresh(): void {
@@ -815,6 +1076,7 @@ export class PromptTemplatesListPageComponent implements OnInit {
   onFilterChange(): void {
     this.page.set(1);
     this.refresh();
+    this.loadOverview();
   }
 
   prevPage(): void {

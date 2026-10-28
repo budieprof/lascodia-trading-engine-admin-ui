@@ -10,6 +10,10 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { SpotSweepService } from '@core/services/spot-sweep.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
+import {
+  FeatureRequirement,
+  FeatureStateComponent,
+} from '@shared/components/feedback/feature-state.component';
 import { createPolledResource } from '@core/polling/polled-resource';
 import {
   ALL_WEEK_DAYS,
@@ -37,6 +41,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
     SignalExposureControlsComponent,
     SymbolCapControlsComponent,
     ConfirmDialogComponent,
+    FeatureStateComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -64,6 +69,25 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
           </div>
         }
       </header>
+
+      @if (config(); as cfg) {
+        @if (!cfg.enabled) {
+          <app-feature-state
+            title="Spot Sweep is off"
+            summary="When on, the sweep asks the LLM for a spot analysis of each selected pair in turn, skips pairs that already carry exposure, and turns viable recommendations into signals (auto-approved or held for you, per the settings below). It is off by the operator's choice — it changes how the live accounts trade, so it is not switched on from here without a decision."
+            kind="off"
+            stateLabel="Off — operator choice"
+            switchKey="SpotSweep:Enabled"
+            [detail]="sweepOffDetail()"
+            [requirements]="sweepRequirements()"
+            [links]="[
+              { label: 'Spot analysis report', route: '/spot-analysis' },
+              { label: 'Patient Trader (generation-only)', route: '/patient-trader' },
+              { label: 'Pending recs', route: '/pending-signal-recs' },
+            ]"
+          />
+        }
+      }
 
       @if (error(); as e) {
         <div class="banner error">{{ e }}</div>
@@ -1869,6 +1893,46 @@ export class SpotSweepPageComponent implements OnDestroy {
   readonly barPositions: SweepBarPosition[] = ['closed', 'mid_25', 'mid_50', 'mid_75'];
 
   readonly config = signal<SpotSweepConfig | null>(null);
+
+  /** When the sweep last produced anything, from its own history (newest first). */
+  readonly sweepOffDetail = computed(() => {
+    const h = this.history();
+    const last = h && h.length ? h[0] : null;
+    if (!last) return 'The sweep has no recorded runs yet.';
+    const days = Math.floor((Date.now() - new Date(last.at).getTime()) / 86_400_000);
+    const signals = (h ?? []).filter((r) => r.signalId != null).length;
+    return `Its last run analysed ${last.symbol} on ${new Date(last.at).toUTCString().slice(5, 22)} UTC (${days} day(s) ago); ${signals} of the ${h!.length} most recent runs below produced a signal. The configuration is kept, so turning it back on resumes with these settings.`;
+  });
+
+  readonly sweepRequirements = computed<FeatureRequirement[]>(() => {
+    const cfg = this.config();
+    const st = this.status();
+    return [
+      {
+        label: 'SpotSweep:Enabled',
+        ok: cfg ? cfg.enabled : null,
+        detail: cfg?.enabled ? 'on' : 'off — the operator keeps the sweep off',
+      },
+      {
+        label: 'Pairs selected',
+        ok: cfg ? cfg.pairs.length > 0 : null,
+        detail: cfg ? `${cfg.pairs.length} pair(s): ${cfg.pairs.slice(0, 6).join(', ')}` : null,
+      },
+      {
+        label: 'Kill switch clear',
+        ok: st ? !st.killSwitchActive : null,
+        detail: st?.killSwitchActive ? 'kill switch active — the sweep would stay halted' : 'clear',
+        route: '/kill-switches',
+      },
+      {
+        label: 'Worker reporting',
+        ok: st ? !st.statusStale : null,
+        detail: st?.reportedByRole
+          ? `the ${st.reportedByRole} process reports status`
+          : 'no status report yet',
+      },
+    ];
+  });
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
