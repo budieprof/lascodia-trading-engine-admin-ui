@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { LayoutComponent } from './layout/layout.component';
 import { LoginComponent } from '@core/auth/login/login.component';
+import { anonymousOnlyGuard } from '@core/auth/anonymous-only.guard';
 import { authGuard } from '@core/auth/auth.guard';
 import { canAccessPath } from '@core/auth/can-access.guard';
 import { mustChangePasswordGuard } from '@core/auth/must-change-password.guard';
@@ -35,6 +36,20 @@ export const routes: Routes = [
     path: 'demo',
     loadComponent: () =>
       import('@features/demo/demo-page.component').then((m) => m.DemoPageComponent),
+  },
+  {
+    // The public landing page (marketing, sales, onboarding): always at /welcome, and at / for a visitor who is
+    // not signed in. A signed-in person at / matches the console below and lands on the dashboard as before.
+    path: 'welcome',
+    loadComponent: () =>
+      import('@features/landing/landing-page.component').then((m) => m.LandingPageComponent),
+  },
+  {
+    path: '',
+    pathMatch: 'full',
+    canMatch: [anonymousOnlyGuard],
+    loadComponent: () =>
+      import('@features/landing/landing-page.component').then((m) => m.LandingPageComponent),
   },
   {
     path: '',

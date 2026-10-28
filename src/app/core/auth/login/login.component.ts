@@ -65,6 +65,9 @@ import { SignInShellComponent } from '@shared/components/sign-in-shell/sign-in-s
               replayed.
             </p>
           }
+          <p class="si-foot">
+            <a class="si-link" routerLink="/welcome">What is Lascodia?</a>
+          </p>
         </div>
       } @else {
         <h1 class="si-title">Sign in</h1>

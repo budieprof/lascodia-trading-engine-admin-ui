@@ -1,0 +1,287 @@
+// Public landing page (`/`, `/welcome`; features/landing). Shared primitives only — section layouts live in
+// their components. Everything is scoped under `.lp` or prefixed `lp-`, so none of it reaches the console.
+
+.lp {
+  --lp-bg: #fbfbfd;
+  --lp-bg-alt: #f2f3f7;
+  --lp-card: #ffffff;
+  --lp-card-2: rgba(255, 255, 255, 0.7);
+  --lp-ink: #0b0b10;
+  --lp-ink-2: #4b4b55;
+  --lp-ink-3: #86868b;
+  --lp-line: rgba(10, 20, 40, 0.08);
+  --lp-line-strong: rgba(10, 20, 40, 0.14);
+  --lp-blue: #0a6cff;
+  --lp-cyan: #13c2e8;
+  --lp-violet: #7b5cff;
+  --lp-green: #1fbf75;
+  --lp-red: #ff4d5e;
+  --lp-grad: linear-gradient(110deg, #0a6cff 0%, #13c2e8 45%, #7b5cff 100%);
+  --lp-shadow: 0 1px 2px rgba(10, 20, 40, 0.04), 0 12px 32px -12px rgba(10, 20, 40, 0.12);
+  --lp-shadow-lg: 0 2px 6px rgba(10, 20, 40, 0.05), 0 40px 80px -24px rgba(10, 30, 80, 0.28);
+  --lp-gutter: 24px;
+  --lp-max: 1180px;
+
+  display: block;
+  min-height: 100vh;
+  background: var(--lp-bg);
+  color: var(--lp-ink);
+  font-family: 'Inter', var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+
+  @media (max-width: 640px) {
+    --lp-gutter: 16px;
+  }
+}
+
+[data-theme='dark'] .lp {
+  --lp-bg: #050608;
+  --lp-bg-alt: #0b0d12;
+  --lp-card: #101218;
+  --lp-card-2: rgba(22, 24, 32, 0.66);
+  --lp-ink: #f5f5f7;
+  --lp-ink-2: #b4b4bd;
+  --lp-ink-3: #7c7c86;
+  --lp-line: rgba(255, 255, 255, 0.08);
+  --lp-line-strong: rgba(255, 255, 255, 0.14);
+  --lp-blue: #3d8bff;
+  --lp-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px -12px rgba(0, 0, 0, 0.6);
+  --lp-shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 40px 90px -24px rgba(0, 40, 120, 0.45);
+}
+
+// In-page jumps land below the sticky nav; the jumped-to section is focused for screen readers, without a ring.
+.lp [id] {
+  scroll-margin-top: 76px;
+}
+.lp section:focus,
+.lp main:focus {
+  outline: none;
+}
+
+.lp-container {
+  width: 100%;
+  max-width: calc(var(--lp-max) + var(--lp-gutter) * 2);
+  margin: 0 auto;
+  padding: 0 var(--lp-gutter);
+}
+
+.lp-section {
+  position: relative;
+  padding: clamp(80px, 11vw, 140px) 0;
+}
+
+.lp-section--alt {
+  background: var(--lp-bg-alt);
+}
+
+.lp-head {
+  max-width: 760px;
+  margin: 0 auto clamp(40px, 6vw, 72px);
+  text-align: center;
+}
+
+.lp-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--lp-blue);
+}
+
+.lp-h2 {
+  margin: 0;
+  font-size: clamp(32px, 4.8vw, 56px);
+  line-height: 1.05;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.lp-lede {
+  margin: 20px auto 0;
+  max-width: 640px;
+  font-size: clamp(17px, 1.6vw, 20px);
+  line-height: 1.55;
+  color: var(--lp-ink-2);
+  text-wrap: pretty;
+}
+
+.lp-grad-text {
+  background: var(--lp-grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 24px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    transform 0.2s var(--ease-out-soft),
+    box-shadow 0.2s var(--ease-out-soft),
+    background-color 0.2s var(--ease-out-soft);
+
+  &:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--lp-blue) 45%, transparent);
+    outline-offset: 3px;
+  }
+  &:active {
+    transform: scale(0.98);
+  }
+}
+
+.lp-btn--primary {
+  background: var(--lp-blue);
+  color: #fff;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.25) inset,
+    0 10px 30px -10px color-mix(in srgb, var(--lp-blue) 80%, transparent);
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow:
+      0 1px 0 rgba(255, 255, 255, 0.25) inset,
+      0 16px 40px -12px color-mix(in srgb, var(--lp-blue) 90%, transparent);
+  }
+}
+
+.lp-btn--ghost {
+  background: var(--lp-card-2);
+  border-color: var(--lp-line-strong);
+  color: var(--lp-ink);
+  backdrop-filter: blur(12px);
+
+  &:hover {
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--lp-blue) 40%, var(--lp-line-strong));
+  }
+}
+
+.lp-btn--sm {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.lp-arrow {
+  transition: transform 0.2s var(--ease-out-soft);
+}
+.lp-btn:hover .lp-arrow {
+  transform: translateX(3px);
+}
+
+.lp-card {
+  position: relative;
+  background: var(--lp-card);
+  border: 1px solid var(--lp-line);
+  border-radius: 24px;
+  box-shadow: var(--lp-shadow);
+}
+
+.lp-icon-tile {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  color: var(--lp-blue);
+  background: color-mix(in srgb, var(--lp-blue) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--lp-blue) 18%, transparent);
+}
+
+.lp-checks {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+
+  li {
+    position: relative;
+    padding-left: 28px;
+    font-size: 15px;
+    line-height: 1.5;
+    color: var(--lp-ink-2);
+  }
+  li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 3px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--lp-green) 16%, transparent)
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231fbf75' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12.5 4 4 8-9'/%3E%3C/svg%3E")
+      center / 12px no-repeat;
+  }
+}
+
+// Above the fold (the hero): an entrance that starts on first paint, never waiting for a scroll observer.
+.lp-enter {
+  animation: lp-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--lp-delay, 0ms);
+}
+@keyframes lp-enter {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
+// Scroll reveal (RevealDirective). Off entirely when the person asks for less motion.
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.8s var(--ease-out-soft),
+    transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  transition-delay: var(--lp-delay, 0ms);
+
+  &.is-in {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-enter {
+    animation: none;
+  }
+  .lp-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .lp *,
+  .lp *::before,
+  .lp *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+@media print {
+  .lp-reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
