@@ -3,6 +3,8 @@
 // BASE defaults to the live release on :8080 (Caddy proxies /api to the engine), so no dev server is needed.
 const { chromium } = require('@playwright/test');
 const { isReadPost } = require('./read-posts');
+const density = require('./density');
+const { answerBff, wsShim } = require('./bff-session');
 const fs = require('fs');
 
 (async () => {
@@ -35,7 +37,9 @@ const fs = require('fs');
   // matches a tab-ish selector, and on 2026-10-19 that included /alerts' "Test all delivering" and
   // "Send test" buttons: two real Telegram test messages went out from an unblocked crawl.
   const blockedWrites = [];
-  await ctx.route('**/*', (route) => {
+  await ctx.route('**/*', async (route) => {
+    // Signed in as the console signs people in today (BFF session) — see bff-session.js.
+    if (await answerBff(route, BASE, token)) return;
     const req = route.request(),
       path = req.url().split('?')[0];
     if (
@@ -46,8 +50,11 @@ const fs = require('fs');
       blockedWrites.push(`${req.method()} ${short(path)}`);
       return route.abort('blockedbyclient');
     }
+    if (isApi(path))
+      return route.continue({ headers: { ...req.headers(), authorization: `Bearer ${token}` } });
     return route.continue();
   });
+  await ctx.addInitScript(wsShim);
   await ctx.addInitScript(
     ({ token, user, perms, theme }) => {
       try {
@@ -122,6 +129,7 @@ const fs = require('fs');
         };
       });
       Object.assign(entry, facts);
+      entry.density = await page.evaluate(density).catch(() => null);
       entry.consoleErrors = [
         ...new Set(consoleErrors.map((s) => s.replace(/\s+/g, ' ').slice(0, 160))),
       ].slice(0, 6);
@@ -173,6 +181,7 @@ const fs = require('fs');
               height: de.scrollHeight,
             };
           });
+          tf.density = await page.evaluate(density).catch(() => null);
           const tname = `${name}.tab${i}`;
           await page.screenshot({
             path: `${out}/${tname}.png`,
