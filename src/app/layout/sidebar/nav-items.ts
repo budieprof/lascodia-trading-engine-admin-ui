@@ -269,7 +269,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Sessions & devices', route: '/account/sessions', icon: navIcon.Laptop },
       { label: 'Access tokens', route: '/account/tokens', icon: navIcon.Ticket },
       // The documentation portal (enterprise onboarding).
-      { label: 'Documentation', route: '/docs', icon: navIcon.BookOpen },
+      { label: 'Help & guides', route: '/docs', icon: navIcon.BookOpen },
       // Release notes (security-controls).
       { label: 'Release notes', route: '/releases', icon: navIcon.ListChecks },
     ],

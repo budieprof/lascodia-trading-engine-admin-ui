@@ -4,7 +4,7 @@ import { Routes } from '@angular/router';
 export const DOCS_ROUTES: Routes = [
   {
     path: '',
-    loadComponent: () => import('./pages/docs-page.component').then((m) => m.DocsPageComponent),
+    loadComponent: () => import('./pages/docs-home.component').then((m) => m.DocsHomeComponent),
   },
   {
     path: 'api',
@@ -14,6 +14,7 @@ export const DOCS_ROUTES: Routes = [
   },
   {
     path: ':slug',
+    data: { breadcrumb: 'Guide' },
     loadComponent: () => import('./pages/docs-page.component').then((m) => m.DocsPageComponent),
   },
 ];

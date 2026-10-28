@@ -52,8 +52,20 @@ app.get('/config.json', (_req, res) => {
     environmentLabel: 'verify',
   });
 });
-app.use(express.static(ROOT, { index: false }));
-app.use((_req, res) => res.sendFile(path.join(ROOT, 'index.html')));
+// DOCS_LIVE=1: serve the help guides straight from public/docs-content, so a guide edit (or a fresh
+// screenshot) shows on /docs on the next page load without rebuilding.
+if (process.env.DOCS_LIVE) {
+  app.use(
+    '/docs-content',
+    express.static(path.resolve(__dirname, '../../public/docs-content'), {
+      dotfiles: 'allow',
+      setHeaders: (res) => res.set('Cache-Control', 'no-store'),
+    }),
+  );
+}
+// dotfiles: 'allow' — a worktree under a dot-directory (e.g. .docs-program/wt/…) is otherwise a 404.
+app.use(express.static(ROOT, { index: false, dotfiles: 'allow' }));
+app.use((_req, res) => res.sendFile(path.join(ROOT, 'index.html'), { dotfiles: 'allow' }));
 
 const server = app.listen(PORT, () => console.log(`serving ${ROOT} on http://localhost:${PORT}`));
 server.on('upgrade', (req, socket, head) => {

@@ -1,0 +1,52 @@
+[
+  {
+    "name": "api-tokens",
+    "route": "/account/tokens",
+    "marks": [
+      {
+        "sel": "input[name='name']",
+        "n": 1
+      },
+      {
+        "sel": "select[name='days']",
+        "n": 2
+      },
+      {
+        "sel": "fieldset.matrix legend",
+        "n": 3
+      }
+    ],
+    "clip": [280, 80, 1160, 330]
+  },
+  {
+    "name": "api-reference",
+    "route": "/docs/api",
+    "settle": 3500,
+    "viewport": [1600, 900],
+    "steps": [
+      {
+        "fill": ["input", "order/list"]
+      },
+      {
+        "wait": 800
+      }
+    ],
+    "marks": [
+      {
+        "sel": "input",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": ".page select",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "td.small code",
+        "nth": 0,
+        "n": 3
+      }
+    ]
+  }
+]

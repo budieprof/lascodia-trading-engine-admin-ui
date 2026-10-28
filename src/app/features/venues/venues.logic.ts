@@ -131,6 +131,8 @@ export function credentialFieldsFor(kind: string): CredentialField[] {
       { name: 'apiSecret', label: 'Password' },
     ];
   if (k === 'ib') return [{ name: 'apiKey', label: 'Client Portal access token' }];
+  // Tradier signs every call with one bearer access token; there is no secret.
+  if (k === 'tradier') return [{ name: 'apiKey', label: 'Access token' }];
   return [key, secret];
 }
 

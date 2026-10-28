@@ -1,0 +1,5 @@
+[
+ {"name":"zz-phone-home","route":"/docs","viewport":[390,844],"settle":3000},
+ {"name":"zz-phone-guide","route":"/docs/trading-guide","viewport":[390,844],"settle":3000,"steps":[{"scrollY":1400},{"wait":800}]},
+ {"name":"zz-phone-guide2","route":"/docs/getting-started","viewport":[390,844],"settle":3000,"steps":[{"scrollY":2600},{"wait":800}]}
+]

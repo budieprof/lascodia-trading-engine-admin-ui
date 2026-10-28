@@ -1,0 +1,157 @@
+[
+  {
+    "name": "conn-overview",
+    "route": "/connections",
+    "viewport": [1440, 1100],
+    "settle": 4000,
+    "marks": [
+      {
+        "sel": "button",
+        "text": "Add account",
+        "n": 1
+      },
+      {
+        "sel": "section.card[aria-label='Execution switches']",
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "section.card[aria-label='Execution accounts']",
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "section.card[aria-label='Adapters']",
+        "n": 4,
+        "pad": 2
+      }
+    ],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  },
+  {
+    "name": "conn-add",
+    "route": "/connections",
+    "settle": 4000,
+    "steps": [
+      {
+        "clickRole": ["button", "Add account"]
+      },
+      {
+        "waitFor": "section[aria-label='Add an execution account']"
+      },
+      {
+        "fill": ["input[name=c-name]", "Binance practice"]
+      },
+      {
+        "fill": ["input[name=c-venue]", "binance"]
+      }
+    ],
+    "crop": {
+      "sel": "section[aria-label='Add an execution account']",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": "input[name=c-name]",
+        "n": 1
+      },
+      {
+        "sel": "select[name=c-kind]",
+        "n": 2
+      },
+      {
+        "sel": "input[name=c-venue]",
+        "n": 3
+      },
+      {
+        "sel": "select[name=c-mode]",
+        "n": 4
+      },
+      {
+        "sel": "button",
+        "text": "Add (disabled)",
+        "n": 5
+      }
+    ],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  },
+  {
+    "name": "conn-switches",
+    "route": "/connections",
+    "settle": 4000,
+    "crop": {
+      "sel": "section.card[aria-label='Execution switches']",
+      "pad": 12
+    },
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  },
+  {
+    "name": "conn-adapters",
+    "route": "/connections",
+    "settle": 4000,
+    "crop": {
+      "sel": "section.card[aria-label='Adapters']",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": "tbody td",
+        "text": "binance",
+        "n": 1
+      },
+      {
+        "sel": "th",
+        "text": "Stops at venue",
+        "n": 2
+      },
+      {
+        "sel": "th",
+        "text": "Unit",
+        "n": 3
+      }
+    ],
+    "viewport": [1440, 1700],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  },
+  {
+    "name": "conn-drift",
+    "route": "/connections/drift",
+    "settle": 4000,
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  }
+]

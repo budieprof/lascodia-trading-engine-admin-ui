@@ -1,0 +1,569 @@
+[
+  {
+    "name": "admin-members",
+    "route": "/iam/members",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-invite",
+    "route": "/iam/invitations",
+    "crop": {
+      "sel": "section.card",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": "input",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "section.card select",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Add another role",
+        "n": 3
+      },
+      {
+        "sel": "button",
+        "text": "Send invitation",
+        "n": 4
+      }
+    ],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-roles",
+    "route": "/iam/roles",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "marks": [
+      {
+        "sel": "button",
+        "text": "New role",
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "admin-grants",
+    "route": "/iam/grants",
+    "viewport": [1440, 1100],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "marks": [
+      {
+        "sel": "section.card",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 1,
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 2,
+        "n": 3,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "admin-teams",
+    "route": "/iam/teams",
+    "viewport": [1440, 900],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-security",
+    "route": "/iam/security",
+    "crop": {
+      "sel": ".card",
+      "pad": 12
+    },
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "marks": [
+      {
+        "sel": "label",
+        "text": "Require a second factor",
+        "n": 1
+      },
+      {
+        "sel": "textarea",
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Save policy",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "admin-sso",
+    "route": "/iam/sso",
+    "viewport": [1440, 1100],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-approvals",
+    "route": "/iam/approvals",
+    "viewport": [1440, 900],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-access-review",
+    "route": "/iam/access-review",
+    "viewport": [1440, 1400],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-plan",
+    "route": "/iam/plan",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-settings",
+    "route": "/organisation/settings",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-risk",
+    "route": "/organisation/risk",
+    "viewport": [1440, 1800],
+    "marks": [
+      {
+        "sel": "section.card",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 1,
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "section.card.danger",
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 3,
+        "n": 4,
+        "pad": 2
+      }
+    ],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-kill-engage",
+    "route": "/organisation/risk",
+    "steps": [
+      {
+        "clickText": "Engage…",
+        "exact": true
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": ".dialog",
+      "pad": 12
+    },
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-flatten",
+    "route": "/organisation/risk",
+    "steps": [
+      {
+        "clickText": "Flatten the organisation…",
+        "exact": true
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": ".dialog",
+      "pad": 12
+    },
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-alerts",
+    "route": "/organisation/alerts",
+    "viewport": [1440, 1400],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "hide": [".card-head .chip.info", ".card-head .muted.small", "form.card-body > p.note"],
+    "mask": [".card-head .muted.small"]
+  },
+  {
+    "name": "admin-llm",
+    "route": "/organisation/llm",
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "crop": {
+      "sel": "section.card:nth-of-type(2)",
+      "pad": 12
+    }
+  },
+  {
+    "name": "admin-billing",
+    "route": "/organisation/billing",
+    "viewport": [1440, 1100],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ],
+    "mask": ["tbody td:nth-child(2)"]
+  },
+  {
+    "name": "admin-branding",
+    "route": "/organisation/branding",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-export",
+    "route": "/organisation/data-export",
+    "viewport": [1440, 900],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-close",
+    "route": "/organisation/close",
+    "viewport": [1440, 1000],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  },
+  {
+    "name": "admin-audit",
+    "route": "/admin/audit",
+    "viewport": [1440, 900],
+    "replace": [
+      ["Oluwasegun", "Jordan"],
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["Olabode", "Office"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"],
+      ["House is the platform operator's organisation and is never closed or deleted\\.", ""],
+      [
+        "House is the platform operator and is not invoiced; its usage is metered for the record\\.",
+        ""
+      ],
+      ["The platform operator's own organisation: no limits, every feature\\.", ""],
+      ["\\bHouse\\b", "Example Trading"],
+      ["\\(house\\)", "(example-trading)"]
+    ]
+  }
+]

@@ -1,0 +1,90 @@
+[
+  {
+    "name": "int-sources",
+    "route": "/market-data/sources",
+    "marks": [
+      {
+        "sel": "td",
+        "text": "cme-cqg",
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "int-register-venue",
+    "route": "/market-data/sources",
+    "steps": [
+      {
+        "clickText": "Register a venue",
+        "exact": true
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": "section[aria-label='Register an FX venue']",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "input[name='venueId']",
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "int-webhook",
+    "route": "/organisation/alerts",
+    "crop": {
+      "sel": "section.card:has(input[name='url'])",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "input[name='url']",
+        "n": 1
+      },
+      {
+        "sel": "input[name='secret']",
+        "n": 2
+      }
+    ],
+    "mask": ["input[name='url']"]
+  },
+  {
+    "name": "int-webhook-help",
+    "route": "/organisation/alerts",
+    "steps": [
+      {
+        "click": "details summary"
+      },
+      {
+        "wait": 400
+      }
+    ],
+    "crop": {
+      "sel": "section.card:has(details)",
+      "pad": 16
+    }
+  },
+  {
+    "name": "int-tokens",
+    "route": "/account/tokens",
+    "marks": [
+      {
+        "sel": "input[name='name']",
+        "n": 1
+      },
+      {
+        "sel": "select[name='days']",
+        "n": 2
+      },
+      {
+        "sel": "fieldset.matrix legend",
+        "n": 3
+      }
+    ],
+    "clip": [280, 80, 1160, 330]
+  }
+]
