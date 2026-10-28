@@ -10,6 +10,8 @@ import { createPolledResource } from '@core/polling/polled-resource';
 
 import { OptionsHealthCardComponent } from '../../components/options-health-card/options-health-card.component';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { ageText, type PipelineState } from '../../composite-ml-pipeline.logic';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -35,6 +37,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
     ErrorStateComponent,
     OptionsHealthCardComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -59,7 +62,52 @@ type TierFilter = 'all' | 'live' | 'coldstart';
           message="Engine returned an error. Verify the engine is reachable and the CompositeML controller is wired."
           (retry)="resource.refresh()"
         />
+      } @else if (policies().length === 0) {
+        <!-- No active snapshot exists at all (not a filter miss): show what the pipeline holds and
+             why nothing was activated, instead of four zero tiles over an empty table. -->
+        <div class="kpis">
+          <app-metric-card
+            label="Active partitions"
+            [value]="0"
+            format="number"
+            dotColor="#8E8E93"
+          />
+          <app-metric-card
+            label="Policy snapshots ever written"
+            [value]="dataset('policySnapshots')?.rows ?? null"
+            format="number"
+            dotColor="#8E8E93"
+          />
+          <app-metric-card
+            [label]="'Generation decisions' + newest('generationAudits')"
+            [value]="dataset('generationAudits')?.rows ?? null"
+            format="number"
+            dotColor="#0071E3"
+          />
+          <app-metric-card
+            [label]="
+              'CompositeML strategies remaining' +
+              (pipeline()?.strategiesEverGenerated
+                ? ' (of ' + pipeline()!.strategiesEverGenerated + ' generated)'
+                : '')
+            "
+            [value]="pipeline()?.datasets?.length ? pipeline()!.strategiesLive : null"
+            format="number"
+            dotColor="#FF9500"
+          />
+        </div>
+        <app-composite-ml-pipeline-state
+          variant="full"
+          [focus]="['policySnapshots', 'generationAudits']"
+          pageSummary="A policy snapshot is the set of scoring weights the CompositeML generator uses for one symbol and timeframe (or globally). The policy trainer writes one from the generator's matured decisions and activates it once it beats the current one; this tab lists the active ones. None is active right now."
+          (stateChange)="pipeline.set($event)"
+        />
       } @else {
+        <app-composite-ml-pipeline-state
+          variant="compact"
+          [focus]="['policySnapshots']"
+          (stateChange)="pipeline.set($event)"
+        />
         <div class="kpis">
           <app-metric-card
             label="Active partitions"
@@ -127,14 +175,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
             </span>
           </header>
 
-          @if (policies().length === 0) {
-            <!-- Not a filter miss: the engine holds no active snapshot at all,
-                 and "adjust the filters" sent operators hunting for one. -->
-            <app-empty-state
-              title="No active CompositeML policies"
-              description="The engine has not activated any policy snapshot yet, so there is no lineage to walk or diff. Policies appear here after the CompositeML trainer activates its first snapshot."
-            />
-          } @else if (filteredPolicies().length === 0) {
+          @if (filteredPolicies().length === 0) {
             <app-empty-state
               title="No matching policies"
               description="No active policy matches these filters. Clear the symbol or pick another tier or trainer."
@@ -438,6 +479,16 @@ export class ActivePoliciesPageComponent {
       refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
     },
   );
+
+  protected readonly pipeline = signal<PipelineState | null>(null);
+
+  protected dataset(key: string) {
+    return this.pipeline()?.datasets.find((d) => d.key === key) ?? null;
+  }
+  protected newest(key: string): string {
+    const d = this.dataset(key);
+    return d?.latestUtc ? ` · newest ${ageText(d.latestUtc, Date.now())}` : '';
+  }
 
   protected readonly tierFilter = signal<TierFilter>('all');
   protected readonly trainerFilter = signal<string>('all');

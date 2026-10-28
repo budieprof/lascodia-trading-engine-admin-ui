@@ -13,10 +13,10 @@ import { createPolledResource } from '@core/polling/polled-resource';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 @Component({
   selector: 'app-trainer-skill-page',
@@ -28,9 +28,9 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
     FormsModule,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
     RelativeTimePipe,
     ModalA11yDirective,
   ],
@@ -55,24 +55,25 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
           (retry)="resource.refresh()"
         />
       } @else {
-        <section class="kpi-strip">
-          <span class="kpi"
-            ><strong>{{ snapshots().length }}</strong> snapshots</span
-          >
-          <span class="kpi"
-            ><strong>{{ distinctTrainers().length }}</strong> distinct trainers</span
-          >
-          <span class="kpi" [class.warn]="autoDisabledCount() > 0">
-            <strong>{{ autoDisabledCount() }}</strong> auto-suppressed
-          </span>
-        </section>
-
         @if (snapshots().length === 0) {
-          <app-empty-state
-            title="No active trainer-skill snapshots"
-            description="The trainer evaluator hasn't recorded any skill snapshots yet."
+          <app-composite-ml-pipeline-state
+            variant="full"
+            [focus]="['trainerSkill', 'policySnapshots']"
+            pageSummary="Trainer skill compares the policy trainers (ridge, REINFORCE, discrete) by the reward their policy snapshots earned, per symbol and timeframe, so the generator can weight the better trainer and suppress a poor one for a while. It is computed from policy snapshots and the decisions made under them. No active trainer-skill snapshot exists — the checklist below shows which inputs are missing."
           />
         } @else {
+          <app-composite-ml-pipeline-state variant="compact" [focus]="['trainerSkill']" />
+          <section class="kpi-strip">
+            <span class="kpi"
+              ><strong>{{ snapshots().length }}</strong> snapshots</span
+            >
+            <span class="kpi"
+              ><strong>{{ distinctTrainers().length }}</strong> distinct trainers</span
+            >
+            <span class="kpi" [class.warn]="autoDisabledCount() > 0">
+              <strong>{{ autoDisabledCount() }}</strong> auto-suppressed
+            </span>
+          </section>
           <section class="card">
             <table class="skill-table">
               <thead>
