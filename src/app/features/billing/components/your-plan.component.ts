@@ -24,7 +24,9 @@ import {
   canChangePlan,
   checkoutPollOutcome,
   checkoutReturn,
+  freeOfferHint,
   isFollowableRedirect,
+  noPaidOffers,
   offerAction,
   offerPrice,
   planLimits,
@@ -191,6 +193,9 @@ type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
                       <dd>{{ l.value }}</dd>
                     }
                   </dl>
+                  @if (freeHint(o, s); as hint) {
+                    <p class="small muted">{{ hint }}</p>
+                  }
                   @if (action(o, s); as a) {
                     <button
                       type="button"
@@ -205,6 +210,17 @@ type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
                 </article>
               }
             </div>
+          }
+
+          @if (noPaid() && canChange()) {
+            <p class="small muted">
+              There are no paid plans to choose from yet.
+              @if (salesEmail) {
+                To change your plan, write to
+                <a [href]="'mailto:' + salesEmail">{{ salesEmail }}</a
+                >.
+              }
+            </p>
           }
 
           @if (!s.selfServeEnabled) {
@@ -258,7 +274,7 @@ export class YourPlanComponent {
   });
   readonly notices = computed(() => {
     const s = this.sub.value();
-    return s ? planNotices(s) : [];
+    return s ? planNotices(s, this.manageBilling()) : [];
   });
   readonly canChange = computed(() => {
     const s = this.sub.value();
@@ -267,6 +283,15 @@ export class YourPlanComponent {
   readonly manageBilling = computed(() => {
     const s = this.sub.value();
     return !!s && showManageBilling(s, this.holdsManageKey());
+  });
+  readonly noPaid = computed(() => {
+    const s = this.sub.value();
+    return !!s && noPaidOffers(s);
+  });
+  /** Just paid at Checkout and the plan has not caught up: no new checkout (it would be a second subscription). */
+  readonly paymentPending = computed(() => {
+    const r = this.returned();
+    return r === 'waiting' || r === 'late';
   });
   /** Self-serve off: the current plan only. */
   readonly shownOffers = computed<PlanOffer[]>(() => {
@@ -290,7 +315,11 @@ export class YourPlanComponent {
   }
 
   action(offer: PlanOffer, s: BillingSubscription) {
-    return offerAction(offer, s, this.holdsManageKey());
+    return offerAction(offer, s, this.holdsManageKey(), this.paymentPending());
+  }
+
+  freeHint(offer: PlanOffer, s: BillingSubscription): string | null {
+    return freeOfferHint(offer, s, this.holdsManageKey());
   }
 
   choose(offer: PlanOffer, s: BillingSubscription): void {

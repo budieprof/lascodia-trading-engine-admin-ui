@@ -91,6 +91,11 @@ import { Component, input, ChangeDetectionStrategy } from '@angular/core';
           flex-direction: column;
           align-items: stretch;
         }
+        /* In a column the 320px flex-basis is a HEIGHT: it left a ~250px blank band between the
+           subtitle and the actions on every phone-width page (seen on Usage & billing). */
+        .header-left {
+          flex: 0 0 auto;
+        }
         .header-actions {
           flex-shrink: 1;
           flex-wrap: wrap;
