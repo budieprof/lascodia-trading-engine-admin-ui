@@ -547,6 +547,11 @@
     background: var(--bg-secondary);
     font-weight: var(--font-semibold);
   }
+  // The chat bubbles' `.md a { overflow-wrap: anywhere }` would split a linked word in a narrow column
+  // ("Sprea|d"); a guide link breaks only where it must.
+  a {
+    overflow-wrap: break-word;
+  }
   th,
   td {
     padding: 10px 14px;
@@ -652,7 +657,7 @@
 
   // Screenshots: a browser-window frame when the page address is given; click to enlarge.
   figure.shot {
-    margin: 1.6em 0;
+    margin: 1.6em auto;
   }
   .shot-zoom {
     display: block;

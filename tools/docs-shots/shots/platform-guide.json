@@ -1,0 +1,243 @@
+[
+  {
+    "name": "plat-orgs",
+    "route": "/platform/organisations",
+    "marks": [
+      {
+        "sel": "button",
+        "text": "New organisation",
+        "n": 1
+      },
+      {
+        "sel": "button",
+        "text": "Members",
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Plan & usage",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "plat-new-org",
+    "route": "/platform/organisations",
+    "steps": [
+      {
+        "clickText": "New organisation",
+        "exact": true
+      },
+      {
+        "wait": 500
+      }
+    ],
+    "crop": {
+      "sel": "section.card",
+      "pad": 16
+    }
+  },
+  {
+    "name": "plat-signups",
+    "route": "/platform/signups",
+    "marks": [
+      {
+        "sel": "section.card",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 1,
+        "n": 2,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-plans",
+    "route": "/platform/plans",
+    "marks": [
+      {
+        "sel": "button",
+        "text": "New plan",
+        "n": 1
+      },
+      {
+        "sel": ".chip",
+        "text": "Default",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-fleet",
+    "route": "/platform/fleet",
+    "settle": 4000,
+    "marks": [
+      {
+        "sel": ".page select",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "section.card",
+        "nth": 0,
+        "n": 2,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-billing",
+    "route": "/platform/billing",
+    "settle": 3500,
+    "marks": [
+      {
+        "sel": "button",
+        "text": "Invoices",
+        "n": 1
+      },
+      {
+        "sel": "button",
+        "text": "Draft invoices",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-entitlements",
+    "route": "/market-data/entitlements",
+    "marks": [
+      {
+        "sel": "p.note",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "button",
+        "text": "Grant a feed",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-grant",
+    "route": "/market-data/entitlements",
+    "steps": [
+      {
+        "clickText": "Grant a feed",
+        "exact": true
+      },
+      {
+        "wait": 500
+      }
+    ],
+    "crop": {
+      "sel": "section.card:has(form)",
+      "pad": 16
+    }
+  },
+  {
+    "name": "plat-usage",
+    "route": "/market-data/usage",
+    "marks": [
+      {
+        "sel": ".page select",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "button",
+        "text": "CSV per organisation",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-sources",
+    "route": "/market-data/sources",
+    "marks": [
+      {
+        "sel": "button",
+        "text": "Register a venue",
+        "n": 1
+      },
+      {
+        "sel": "td",
+        "text": "cme-cqg",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-declarations",
+    "route": "/market-data/declarations-review"
+  },
+  {
+    "name": "plat-closures",
+    "route": "/platform/closures"
+  },
+  {
+    "name": "plat-elevations",
+    "route": "/platform/elevations",
+    "marks": [
+      {
+        "sel": ".page select",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "fieldset legend",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "label",
+        "text": "For how long",
+        "n": 3
+      },
+      {
+        "sel": "input[placeholder^='e.g.']",
+        "nth": 0,
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "plat-impersonation",
+    "route": "/platform/impersonation",
+    "marks": [
+      {
+        "sel": ".page select",
+        "nth": 0,
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "plat-evidence",
+    "route": "/platform/security-evidence",
+    "marks": [
+      {
+        "sel": "input[type='date']",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "button",
+        "text": "Download evidence bundle",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "plat-demo",
+    "route": "/demo",
+    "noAuth": true,
+    "settle": 5000,
+    "clip": [0, 0, 1440, 240]
+  }
+]

@@ -126,7 +126,7 @@ export const DOC_GUIDES: readonly DocGuide[] = [
     slug: 'platform-guide',
     title: 'Platform operator guide',
     summary:
-      'Organisations and sign-ups, market-data sources and licences, the public demo, fleet health.',
+      'Organisations, plans and billing, data sources and licences, staff access, fleet health.',
     audience: 'Platform staff',
     icon: 'server',
     updated: '2026-10-28',

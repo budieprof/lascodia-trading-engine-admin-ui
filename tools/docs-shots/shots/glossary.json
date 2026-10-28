@@ -1,0 +1,35 @@
+[
+  {
+    "name": "glossary-order-book",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "viewport": [1440, 1100],
+    "steps": [
+      {
+        "click": "[data-testid=ladder-button]"
+      },
+      {
+        "wait": 14000
+      }
+    ],
+    "crop": {
+      "sel": "aside.side-pane",
+      "pad": 4
+    },
+    "marks": [
+      {
+        "sel": ".lp-colhead span",
+        "text": "Bid",
+        "n": 1,
+        "pad": 3
+      },
+      {
+        "sel": ".lp-colhead span",
+        "text": "Ask",
+        "n": 2,
+        "pad": 3
+      }
+    ],
+    "replace": [["\\b18446\\d\\.\\dM\\b", ""]]
+  }
+]

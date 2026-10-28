@@ -171,7 +171,7 @@ When the platform runs it, a **demo** (`/demo`, linked from the sign-in page) sh
    Your role is not allowed to do that step. Ask someone in your organisation with the **Admin** or **Owner** role.
 
 ?? I lost my phone with the authenticator app.
-   Ask an Admin or Owner in your organisation to reset your second factor. If you are the only Owner, contact the platform team.
+   Contact the platform team: they can reset your second factor so you can set up a new one at your next sign-in. Owners and Admins cannot do this from the console. Tell an Admin or Owner in your organisation too, so they know why you are locked out.
 
 ?? The guided connection never turns green.
    The [Connect MetaTrader 5](/docs/ea-install#if-something-goes-wrong) guide lists every message the page can show, and what to do about each.

@@ -1,0 +1,190 @@
+[
+  {
+    "name": "ma-config-search",
+    "route": "/engine-config",
+    "settle": 3500,
+    "steps": [
+      {
+        "fill": ["input[aria-label='Search keys or descriptions']", "Execution:"]
+      },
+      {
+        "wait": 800
+      }
+    ],
+    "marks": [
+      {
+        "sel": "input[aria-label='Search keys or descriptions']",
+        "n": 1
+      },
+      {
+        "sel": "td.col-value",
+        "nth": 0,
+        "n": 2
+      },
+      {
+        "sel": "button.save-btn.small",
+        "nth": 0,
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "ma-config-review",
+    "route": "/engine-config",
+    "settle": 3500,
+    "steps": [
+      {
+        "fill": [
+          "input[aria-label='Search keys or descriptions']",
+          "Risk:MultiAsset:Crypto:Leverage"
+        ]
+      },
+      {
+        "wait": 800
+      },
+      {
+        "fill": ["tr:has(code[title='Risk:MultiAsset:Crypto:Leverage']) input.config-input", "5"]
+      },
+      {
+        "wait": 300
+      },
+      {
+        "click": "tr:has(code[title='Risk:MultiAsset:Crypto:Leverage']) button.save-btn.small"
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": ".review",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": ".review-field textarea",
+        "n": 1
+      },
+      {
+        "sel": ".review-ack",
+        "n": 2
+      },
+      {
+        "sel": ".review-actions .save-btn",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "ma-margins",
+    "route": "/reference/margin-requirements",
+    "steps": [
+      {
+        "fill": ["input[name='f-sym']", "*"]
+      },
+      {
+        "press": "Enter"
+      },
+      {
+        "wait": 1500
+      }
+    ],
+    "marks": [
+      {
+        "sel": "select[name='f-kind']",
+        "n": 1
+      },
+      {
+        "sel": "p.note",
+        "nth": 0,
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "table.grid tbody tr",
+        "nth": 0,
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "button",
+        "text": "Add a row",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "ma-margin-form",
+    "route": "/reference/margin-requirements",
+    "steps": [
+      {
+        "clickText": "Add a row",
+        "exact": true
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": "section[aria-label='Margin requirement row']",
+      "pad": 16
+    }
+  },
+  {
+    "name": "ma-fees",
+    "route": "/reference/fee-schedules",
+    "marks": [
+      {
+        "sel": "table.grid tbody tr td",
+        "nth": 2,
+        "n": 1
+      },
+      {
+        "sel": "table.grid tbody tr td",
+        "nth": 4,
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Add a row",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "ma-switches",
+    "route": "/connections",
+    "crop": {
+      "sel": "section[aria-label='Execution switches']",
+      "pad": 16
+    }
+  },
+  {
+    "name": "ma-candles",
+    "route": "/market-data/instrument-candles",
+    "marks": [
+      {
+        "sel": ".chip",
+        "text": "builder",
+        "n": 1
+      },
+      {
+        "sel": "section[aria-label='Cursors']",
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "section[aria-label='Continuous futures rolls']",
+        "n": 3,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "ma-drift",
+    "route": "/connections/drift",
+    "crop": {
+      "sel": ".page",
+      "pad": 8
+    }
+  }
+]

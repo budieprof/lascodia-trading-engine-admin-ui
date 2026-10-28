@@ -1,0 +1,524 @@
+[
+  {
+    "name": "chart-overview",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "replace": [["\\s*\\[AlgoChief\\]", ""]],
+    "marks": [
+      {
+        "sel": "header.toolbar",
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "[aria-label=\"Drawing tools\"]",
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "app-watchlist-panel",
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "nav.right-strip",
+        "n": 4,
+        "pad": 2
+      },
+      {
+        "sel": "app-chart-bottom-bar",
+        "n": 5,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-toolbar",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "viewport": [1920, 900],
+    "crop": {
+      "sel": "header.toolbar",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": ".symbol-button",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=interval-button]",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=style-button]",
+        "n": 3
+      },
+      {
+        "sel": "[data-testid=open-studies]",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "chart-toolbar-actions",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "viewport": [1920, 900],
+    "crop": {
+      "sel": "header.toolbar",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "button[title='Create price alert']",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=open-ticket]",
+        "n": 2
+      },
+      {
+        "sel": "button[title='Bar replay']",
+        "n": 3
+      },
+      {
+        "sel": ".tb-layout-name",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "chart-symbol-search",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": ".symbol-button"
+      },
+      {
+        "wait": 1200
+      },
+      {
+        "fill": [".menu-search", "EUR"]
+      },
+      {
+        "wait": 800
+      }
+    ],
+    "crop": {
+      "sel": ".symbol-menu",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": ".menu-search",
+        "n": 1
+      },
+      {
+        "sel": ".symbol-classes",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-intervals",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=interval-button]"
+      },
+      {
+        "wait": 1000
+      }
+    ],
+    "crop": {
+      "sel": ".tb-menu",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": ".tb-menu-field input",
+        "n": 1
+      },
+      {
+        "sel": ".tb-menu-x",
+        "nth": 0,
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-watchlist",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "crop": {
+      "sel": "aside.watch-dock",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "button[title='Add symbol']",
+        "n": 1
+      },
+      {
+        "sel": ".wl-row",
+        "nth": 1,
+        "n": 2,
+        "pad": 1
+      },
+      {
+        "sel": "[aria-label=\"Symbol details\"]",
+        "n": 3,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-indicators",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=open-studies]"
+      },
+      {
+        "wait": 2000
+      }
+    ],
+    "crop": {
+      "sel": "app-indicators-dialog .dialog",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "app-indicators-dialog .search",
+        "n": 1
+      },
+      {
+        "sel": "app-indicators-dialog .tabs",
+        "n": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-studies-legend",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "replace": [["\\s*\\[AlgoChief\\]", ""]],
+    "marks": [
+      {
+        "sel": "app-script-chip button[title='Settings']",
+        "n": 1
+      },
+      {
+        "sel": "app-script-chip button[title='Source code']",
+        "n": 2
+      },
+      {
+        "sel": "app-script-chip button[title='Create an alert on this script']",
+        "n": 3
+      }
+    ],
+    "crop": {
+      "sel": "aside.studies",
+      "pad": 8
+    }
+  },
+  {
+    "name": "chart-drawing-tools",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "crop": {
+      "sel": "[aria-label=\"Drawing tools\"]",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "[aria-label=\"Drawing tools\"] button[title='Cursor (Esc)']",
+        "n": 1,
+        "pad": 3
+      },
+      {
+        "sel": "[aria-label=\"Drawing tools\"] button[title='Magnet mode']",
+        "n": 2,
+        "pad": 3
+      },
+      {
+        "sel": "[aria-label=\"Drawing tools\"] button[title='Remove all drawings on this chart']",
+        "n": 3,
+        "pad": 3
+      }
+    ]
+  },
+  {
+    "name": "chart-ladder",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=ladder-button]"
+      },
+      {
+        "wait": 9000
+      }
+    ],
+    "crop": {
+      "sel": "aside.side-pane",
+      "pad": 4
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=ladder-source]",
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "[data-testid=ladder-account]",
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": ".lp-mode",
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": ".lp-colhead",
+        "n": 4,
+        "pad": 2
+      }
+    ],
+    "viewport": [1440, 1100],
+    "replace": [["\\b18446\\d\\.\\dM\\b", ""]]
+  },
+  {
+    "name": "chart-multibook",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=multibook-button]"
+      },
+      {
+        "wait": 5000
+      }
+    ],
+    "replace": [
+      ["Exness-MT5Real9", "Broker source 1"],
+      ["Exness-MT5Trial10", "Broker source 2"],
+      ["Exness-MT5Trial9", "Broker source 3"],
+      ["Exness", "Broker"]
+    ],
+    "crop": {
+      "sel": "aside.side-pane",
+      "pad": 4
+    },
+    "viewport": [1440, 1100]
+  },
+  {
+    "name": "chart-alert",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "button[title='Create price alert']"
+      },
+      {
+        "wait": 1500
+      }
+    ],
+    "crop": {
+      "sel": "[data-testid=chart-alert-popover]",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=caf-direction]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=caf-side]",
+        "n": 2
+      },
+      {
+        "sel": ".caf-row input",
+        "nth": 0,
+        "n": 3
+      },
+      {
+        "sel": "[data-testid=caf-frequency]",
+        "n": 4
+      },
+      {
+        "sel": ".caf-channels",
+        "n": 5
+      }
+    ]
+  },
+  {
+    "name": "chart-alert-manager",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=alert-manager-button]"
+      },
+      {
+        "wait": 2500
+      }
+    ],
+    "crop": {
+      "sel": "app-chart-alert-manager",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "app-chart-alert-manager button",
+        "text": "Script alerts",
+        "n": 1
+      },
+      {
+        "sel": "app-chart-alert-manager button",
+        "text": "+ New alert",
+        "n": 2
+      }
+    ],
+    "viewport": [1440, 560]
+  },
+  {
+    "name": "chart-replay",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "steps": [
+      {
+        "click": "button[title='Bar replay']"
+      },
+      {
+        "wait": 3000
+      },
+      {
+        "press": "Escape"
+      },
+      {
+        "wait": 800
+      }
+    ],
+    "crop": {
+      "sel": "app-replay-panel",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "app-replay-panel button",
+        "text": "Select bar",
+        "n": 1
+      },
+      {
+        "sel": "app-replay-panel button[aria-label='Play']",
+        "n": 2
+      },
+      {
+        "sel": "app-replay-panel button[aria-label='Forward one step']",
+        "n": 3
+      },
+      {
+        "sel": "app-replay-panel .rp-paper",
+        "n": 4,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "chart-pine-editor",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "steps": [
+      {
+        "clickText": "Pine Editor",
+        "exact": true
+      },
+      {
+        "wait": 3500
+      }
+    ],
+    "replace": [["\\s*\\[AlgoChief\\]", ""]],
+    "hide": [".layout-status"],
+    "crop": {
+      "sel": "app-script-editor-panel",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "app-script-editor-panel button",
+        "text": "Compile",
+        "n": 1
+      },
+      {
+        "sel": "app-script-editor-panel button",
+        "text": "Save",
+        "n": 2
+      },
+      {
+        "sel": "app-script-editor-panel button",
+        "text": "Update on chart",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "chart-strategy-tester",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "steps": [
+      {
+        "clickText": "Strategy Tester",
+        "exact": true
+      },
+      {
+        "wait": 3000
+      }
+    ],
+    "hide": [".layout-status"],
+    "crop": {
+      "sel": "section.tester-empty",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "section.tester-empty button.tb-primary",
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "chart-layouts",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": ".tb-layout-name"
+      },
+      {
+        "wait": 1200
+      }
+    ],
+    "crop": {
+      "sel": ".layout-menu",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": ".layout-menu .menu-action",
+        "text": "New layout",
+        "n": 1
+      },
+      {
+        "sel": ".layout-menu .menu-action",
+        "text": "Save studies as template",
+        "n": 2
+      }
+    ]
+  }
+]

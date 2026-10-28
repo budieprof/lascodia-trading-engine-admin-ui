@@ -123,25 +123,51 @@ function scrub({ extra, keepMoney }) {
   }
 }
 
-/** Runs in the page: numbered outlines (and an optional spotlight) over the marked elements. */
-function drawMarks({ marks, spotlight }) {
+/**
+ * Runs in the page: numbered outlines (and an optional spotlight) over the marked elements. A number sits
+ * just left of its outline, centred on it, so it never covers the field's label above; when that spot is
+ * outside the picture or on top of another outline it falls back to the outline's top-left corner.
+ */
+function drawMarks({ marks, spotlight, bounds }) {
   const layer = document.createElement('div');
   layer.id = '__docmarks';
   layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
+  const SIZE = 28;
   const found = [];
-  marks.forEach((m, i) => {
-    const el = findEl(m);
-    if (!el) return found.push(false);
-    found.push(true);
+  const els = marks.map((m) => findEl(m));
+  const boxes = els.map((el, i) => {
+    if (!el) return null;
     const r = el.getBoundingClientRect();
-    const pad = m.pad ?? 4;
+    const pad = marks[i].pad ?? 4;
+    return { l: r.left - pad, t: r.top - pad, r: r.right + pad, b: r.bottom + pad };
+  });
+  const badges = [];
+  const overlaps = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const inside = (a) =>
+    a.l >= bounds.x + 2 &&
+    a.t >= bounds.y + 2 &&
+    a.r <= bounds.x + bounds.width - 2 &&
+    a.b <= bounds.y + bounds.height - 2;
+  marks.forEach((m, i) => {
+    const bx = boxes[i];
+    if (!bx) return found.push(false);
+    found.push(true);
     const box = document.createElement('div');
-    box.style.cssText = `position:fixed;left:${r.left - pad}px;top:${r.top - pad}px;width:${r.width + pad * 2}px;height:${r.height + pad * 2}px;border:3px solid #ff5a1f;border-radius:10px;box-shadow:0 0 0 4px rgba(255,90,31,.22)${spotlight && i === 0 ? ',0 0 0 9999px rgba(10,12,20,.42)' : ''};`;
+    box.style.cssText = `position:fixed;left:${bx.l}px;top:${bx.t}px;width:${bx.r - bx.l}px;height:${bx.b - bx.t}px;border:3px solid #ff5a1f;border-radius:10px;box-shadow:0 0 0 4px rgba(255,90,31,.22)${spotlight && i === 0 ? ',0 0 0 9999px rgba(10,12,20,.42)' : ''};`;
     layer.appendChild(box);
     if (m.n != null) {
       const b = document.createElement('div');
-      const left = Math.max(4, r.left - pad - 14);
-      const top = Math.max(4, r.top - pad - 14);
+      const beside = { l: bx.l - SIZE - 8, t: (bx.t + bx.b) / 2 - SIZE / 2 };
+      beside.r = beside.l + SIZE;
+      beside.b = beside.t + SIZE;
+      const clear =
+        !m.label &&
+        inside(beside) &&
+        !boxes.some((o, j) => o && j !== i && overlaps(beside, o)) &&
+        !badges.some((o) => overlaps(beside, o));
+      const left = clear ? beside.l : Math.max(4, bx.l - 14);
+      const top = clear ? beside.t : Math.max(4, bx.t - 14);
+      badges.push({ l: left, t: top, r: left + SIZE, b: top + SIZE });
       b.textContent = String(m.n);
       b.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:28px;height:28px;border-radius:50%;background:#ff5a1f;color:#fff;font:700 15px/28px -apple-system,system-ui,sans-serif;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35);border:2px solid #fff;`;
       layer.appendChild(b);
@@ -182,6 +208,14 @@ async function runStep(page, s) {
     await page.getByRole(s.clickRole[0], { name: s.clickRole[1] }).first().click({ timeout: 8000 });
   if (s.hover) await page.locator(s.hover).first().hover({ timeout: 8000 });
   if (s.fill) await page.locator(s.fill[0]).first().fill(s.fill[1], { timeout: 8000 });
+  // A number picks the option at that position (so a shot need not name a real account); text picks by label.
+  if (s.select) {
+    const [sel, opt] = s.select;
+    await page
+      .locator(sel)
+      .first()
+      .selectOption(typeof opt === 'number' ? { index: opt } : { label: opt }, { timeout: 8000 });
+  }
   if (s.press) await page.keyboard.press(s.press);
   if (s.scroll) await page.locator(s.scroll).first().scrollIntoViewIfNeeded({ timeout: 8000 });
   if (s.scrollY != null) await page.evaluate((y) => window.scrollTo(0, y), s.scrollY);
@@ -336,9 +370,25 @@ async function toWebp(convPage, png, width) {
             .catch(() => {});
         }
         if (shot.marks?.length) {
+          // The area that will end up in the picture, so badges are placed where they stay visible.
+          let bounds = { x: 0, y: 0, width: w, height: h };
+          const cropBox = target ? await page.locator(target).first().boundingBox() : null;
+          if (cropBox) {
+            const pad = shot.crop.pad ?? 24;
+            bounds = {
+              x: cropBox.x - pad,
+              y: cropBox.y - pad,
+              width: cropBox.width + pad * 2,
+              height: cropBox.height + pad * 2,
+            };
+          } else if (shot.clip) {
+            const [x, y, width, height] = shot.clip;
+            bounds = { x, y, width, height };
+          }
           const found = await page.evaluate(drawMarks, {
             marks: shot.marks,
             spotlight: !!shot.spotlight,
+            bounds,
           });
           found.forEach(
             (ok, i) =>

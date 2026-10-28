@@ -153,6 +153,7 @@ describe('credentials', () => {
   it('names the fields each adapter reads and never sends a missing required one', () => {
     expect(credentialFieldsFor('okx-swap').map((f) => f.name)).toEqual(['apiKey', 'apiSecret', 'passphrase']);
     expect(credentialFieldsFor('tradovate').map((f) => f.name)).toEqual(['apiKey', 'password', 'cid', 'apiSecret']);
+    expect(credentialFieldsFor('tradier')).toEqual([{ name: 'apiKey', label: 'Access token' }]);
     const binance = credentialFieldsFor('binance-usdm');
     expect(credentialBody(binance, { apiKey: ' k ', apiSecret: 's', privateKeyPem: '' })).toEqual({ apiKey: 'k', apiSecret: 's' });
     expect(credentialBody(binance, { apiKey: 'k', apiSecret: ' ' })).toBeNull();

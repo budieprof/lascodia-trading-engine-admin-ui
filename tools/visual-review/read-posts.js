@@ -17,6 +17,10 @@ const READ_POST = new RegExp(
     String.raw`/strategy-feedback/\d+/snapshots$`, // GetPagedStrategySnapshotsQuery
     String.raw`/strategy/(\d+/rejection-distribution|health/recent|runs/latest)$`, // Get… queries
     String.raw`/trade-signal/sensitivity-analysis$`, // AnalyzeSignalSensitivityQuery
+    // Verified 2026-10-28 the same way (handlers write nothing):
+    String.raw`/trade-signal/preview$`, // PreviewManualTradeQuery — the manual ticket's dry run
+    String.raw`/execution-console/ticket/preview$`, // VenueTicketPreviewQuery — the venue ticket's dry run
+    String.raw`/md/history$`, // GetMarketDataHistoryQuery — ladder/heatmap history
   ].join('|'),
   'i',
 );

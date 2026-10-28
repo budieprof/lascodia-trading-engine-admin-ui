@@ -1,0 +1,285 @@
+[
+  {
+    "name": "trade-open-ticket",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "viewport": [1920, 900],
+    "crop": {
+      "sel": "header.toolbar",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=open-ticket]",
+        "n": 1
+      }
+    ]
+  },
+  {
+    "name": "trade-ticket",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "steps": [
+      {
+        "click": "[data-testid=open-ticket]"
+      },
+      {
+        "wait": 3000
+      }
+    ],
+    "crop": {
+      "sel": "[data-testid=order-ticket]",
+      "pad": 10
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=ticket-account]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=order-ticket] .ticket-sides",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=order-ticket] .ticket-row label.inline",
+        "nth": 0,
+        "n": 3,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "trade-ticket-send",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "steps": [
+      {
+        "click": "[data-testid=open-ticket]"
+      },
+      {
+        "wait": 3000
+      }
+    ],
+    "crop": {
+      "sel": "[data-testid=order-ticket]",
+      "pad": 10
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=ticket-stop]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=ticket-target]",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=order-ticket] [aria-label=Mode] label.inline",
+        "nth": 0,
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "[data-testid=ticket-submit]",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "trade-ticket-preview",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 9000,
+    "viewport": [1440, 1400],
+    "steps": [
+      {
+        "click": "[data-testid=open-ticket]"
+      },
+      {
+        "wait": 2500
+      },
+      {
+        "select": ["[data-testid=ticket-account]", 1]
+      },
+      {
+        "waitFor": "[data-testid=ticket-gates]"
+      },
+      {
+        "wait": 1500
+      }
+    ],
+    "crop": {
+      "sel": "[data-testid=order-ticket]",
+      "pad": 44
+    },
+    "replace": [
+      ["Sam Morgan", "Practice account"],
+      ["Unrestricted - Account 17 \\(order everything\\)", "Standard risk"]
+    ],
+    "marks": [
+      {
+        "sel": "[data-testid=ticket-facts]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=ticket-gates]",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=ticket-submit]",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "trade-ladder",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "viewport": [1440, 900],
+    "steps": [
+      {
+        "click": "[data-testid=ladder-button]"
+      },
+      {
+        "wait": 9000
+      }
+    ],
+    "crop": {
+      "sel": "app-ladder-panel .lp-head",
+      "pad": 10
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=ladder-account]",
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": ".lp-mode label",
+        "nth": 1,
+        "n": 2,
+        "pad": 3
+      },
+      {
+        "sel": "[data-testid=ladder-buy-mkt]",
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "[data-testid=ladder-oco]",
+        "n": 4,
+        "pad": 2
+      },
+      {
+        "sel": "[data-testid=ladder-arm]",
+        "n": 5,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "trade-ladder-brackets",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "steps": [
+      {
+        "click": "[data-testid=ladder-button]"
+      },
+      {
+        "wait": 9000
+      }
+    ],
+    "crop": {
+      "sel": "app-ladder-panel .lp-head",
+      "pad": 8
+    },
+    "marks": [
+      {
+        "sel": "app-ladder-panel .lp-small input",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": "app-ladder-panel .lp-small input",
+        "nth": 1,
+        "n": 2,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "trade-venue-ticket",
+    "route": "/chart-analysis/6EZ6",
+    "settle": 8000,
+    "viewport": [1440, 1400],
+    "steps": [
+      {
+        "click": "[data-testid=open-ticket]"
+      },
+      {
+        "wait": 4000
+      }
+    ],
+    "crop": {
+      "sel": "[data-testid=venue-order-ticket]",
+      "pad": 10
+    },
+    "marks": [
+      {
+        "sel": "[data-testid=venue-ticket-trading-account]",
+        "n": 1
+      },
+      {
+        "sel": "[data-testid=venue-ticket-account]",
+        "n": 2
+      },
+      {
+        "sel": "[data-testid=venue-order-ticket] .ticket-row select",
+        "nth": 2,
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "[data-testid=venue-ticket-qty]",
+        "n": 4
+      },
+      {
+        "sel": "[data-testid=venue-ticket-submit]",
+        "n": 5
+      }
+    ]
+  },
+  {
+    "name": "trade-account-panel",
+    "route": "/chart-analysis/EURUSD",
+    "settle": 8000,
+    "viewport": [1440, 1000],
+    "steps": [
+      {
+        "click": "[data-testid=account-button]"
+      },
+      {
+        "wait": 4000
+      }
+    ],
+    "crop": {
+      "sel": "aside.side-pane",
+      "pad": 4
+    }
+  },
+  {
+    "name": "trade-orders",
+    "route": "/orders",
+    "settle": 4000
+  },
+  {
+    "name": "trade-positions",
+    "route": "/positions",
+    "settle": 4000,
+    "replace": [
+      ["Alex Morgan Exness Pro", "Pro account 2"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ]
+  }
+]

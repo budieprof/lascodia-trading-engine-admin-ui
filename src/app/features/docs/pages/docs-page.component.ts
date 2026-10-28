@@ -218,7 +218,22 @@ export class DocsPageComponent {
       const f = this.fragment();
       if (this.html() !== null && f) untracked(() => setTimeout(() => this.scrollTo(f, 'auto')));
     });
-    inject(DestroyRef).onDestroy(() => this.zoomed.set(null));
+    // Screenshots are captured at 2x, so one is never shown wider than half its pixel width: a small crop
+    // (a menu, a ladder) keeps its real size instead of being blown up to the column width. `load` does not
+    // bubble, so listen in the capture phase.
+    const fit = (event: Event) => {
+      const img = event.target;
+      if (!(img instanceof HTMLImageElement) || !img.classList.contains('shot-img')) return;
+      if (img.src.endsWith('.svg') || !img.naturalWidth) return;
+      const fig = img.closest('figure.shot');
+      if (fig instanceof HTMLElement) fig.style.maxWidth = `${Math.round(img.naturalWidth / 2)}px`;
+    };
+    const el = this.host.nativeElement as HTMLElement;
+    el.addEventListener('load', fit, true);
+    inject(DestroyRef).onDestroy(() => {
+      el.removeEventListener('load', fit, true);
+      this.zoomed.set(null);
+    });
   }
 
   private load(slug: string | null): void {

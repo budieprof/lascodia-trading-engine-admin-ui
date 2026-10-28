@@ -24,12 +24,7 @@
         "n": 3
       }
     ],
-    "replace": [
-      [
-        "\\bHouse\\b",
-        "Example Trading"
-      ]
-    ]
+    "replace": [["\\bHouse\\b", "Example Trading"]]
   },
   {
     "name": "gs-invite",

@@ -1,0 +1,222 @@
+[
+  {
+    "name": "ea-wizard",
+    "route": "/organisation/terminals/connect",
+    "viewport": [1440, 1200],
+    "replace": [["http://localhost:8080", "https://app.example.com"]],
+    "marks": [
+      {
+        "sel": ".wizard > section",
+        "nth": 0,
+        "n": 1,
+        "pad": 2
+      },
+      {
+        "sel": ".wizard > section",
+        "nth": 1,
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": ".wizard > section",
+        "nth": 2,
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": ".wizard > section",
+        "nth": 3,
+        "n": 4,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "ea-download",
+    "route": "/organisation/terminals/connect",
+    "replace": [["http://localhost:8080", "https://app.example.com"]],
+    "crop": {
+      "sel": ".wizard > section:nth-child(1)",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "button",
+        "text": "Download the EA",
+        "n": 1
+      },
+      {
+        "sel": ".ea-facts",
+        "n": 2,
+        "pad": 4
+      },
+      {
+        "sel": ".wizard li code",
+        "text": "http",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "ea-token",
+    "route": "/organisation/terminals/connect",
+    "steps": [
+      {
+        "fill": ["input[name=label]", "Office PC — EURUSD chart"]
+      }
+    ],
+    "crop": {
+      "sel": ".wizard > section:nth-child(2)",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "input[name=label]",
+        "n": 1
+      },
+      {
+        "sel": "input[name=login]",
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Create token",
+        "n": 3
+      }
+    ]
+  },
+  {
+    "name": "ea-mt5-steps",
+    "route": "/organisation/terminals/connect",
+    "replace": [["http://localhost:8080", "https://app.example.com"]],
+    "crop": {
+      "sel": ".wizard > section:nth-child(3)",
+      "pad": 16
+    },
+    "marks": [
+      {
+        "sel": "pre.copy",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": "ol.how > li",
+        "nth": 1,
+        "n": 2
+      },
+      {
+        "sel": "pre.copy",
+        "nth": 1,
+        "n": 3
+      },
+      {
+        "sel": "ol.how > li",
+        "nth": 3,
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "ea-waiting",
+    "route": "/organisation/terminals/connect",
+    "crop": {
+      "sel": ".wizard > section:nth-child(4)",
+      "pad": 16
+    }
+  },
+  {
+    "name": "ea-terminals",
+    "route": "/organisation/terminals",
+    "viewport": [1440, 1300],
+    "replace": [
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ],
+    "marks": [
+      {
+        "sel": "a.btn",
+        "text": "Guided connection",
+        "n": 1
+      },
+      {
+        "sel": "section.card",
+        "nth": 0,
+        "n": 2,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 1,
+        "n": 3,
+        "pad": 2
+      },
+      {
+        "sel": "section.card",
+        "nth": 2,
+        "n": 4,
+        "pad": 2
+      }
+    ]
+  },
+  {
+    "name": "ea-credentials",
+    "route": "/organisation/terminals",
+    "replace": [
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ],
+    "crop": {
+      "sel": "section.card:nth-of-type(3)",
+      "pad": 12
+    },
+    "marks": [
+      {
+        "sel": "tbody td:nth-child(4)",
+        "nth": 0,
+        "n": 1
+      },
+      {
+        "sel": ".chip",
+        "text": "Active",
+        "n": 2
+      },
+      {
+        "sel": "button",
+        "text": "Rotate",
+        "n": 3
+      },
+      {
+        "sel": "button",
+        "text": "Revoke",
+        "n": 4
+      }
+    ]
+  },
+  {
+    "name": "ea-revoke-dialog",
+    "route": "/organisation/terminals",
+    "replace": [
+      ["olabodes-macbook-pro-mac", "office-mac"],
+      ["olabode", "office"],
+      ["Sam Morgan", "Main account"],
+      ["Exness", "Broker"]
+    ],
+    "steps": [
+      {
+        "clickText": "Revoke",
+        "exact": true
+      },
+      {
+        "wait": 600
+      }
+    ],
+    "crop": {
+      "sel": ".dialog",
+      "pad": 12
+    }
+  }
+]

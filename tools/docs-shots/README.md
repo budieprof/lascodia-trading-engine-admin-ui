@@ -24,7 +24,7 @@ One JSON file per guide in `shots/<guide slug>.json`, an array of:
 | `route` | The console address to open, e.g. `/chart-analysis/EURUSD`. |
 | `viewport` | `[width, height]`, default `[1440, 900]`. Use `[390, 844]` for a phone. |
 | `settle` | Milliseconds to wait after the page loads (default 2500; charts need ~6000). |
-| `steps` | Things to do first, in order: `{ "click": "css" }`, `{ "clickText": "Buy", "exact": true }`, `{ "clickRole": ["button", "Buy"] }`, `{ "hover": "css" }`, `{ "fill": ["css", "text"] }`, `{ "press": "Escape" }`, `{ "scroll": "css" }`, `{ "scrollY": 400 }`, `{ "wait": 500 }`, `{ "waitFor": "css" }`. |
+| `steps` | Things to do first, in order: `{ "click": "css" }`, `{ "clickText": "Buy", "exact": true }`, `{ "clickRole": ["button", "Buy"] }`, `{ "hover": "css" }`, `{ "fill": ["css", "text"] }`, `{ "select": ["css", 1] }` (option by position; or a label string), `{ "press": "Escape" }`, `{ "scroll": "css" }`, `{ "scrollY": 400 }`, `{ "wait": 500 }`, `{ "waitFor": "css" }`. |
 | `marks` | Numbered outlines: `{ "sel": "css", "text": "starts with", "nth": 0, "n": 1, "label": "optional words", "pad": 4 }`. `text` picks the innermost visible element under `sel` whose text starts with it. Number them in the order the guide's steps use them, and refer to them in the text as `((1))`. |
 | `spotlight` | `true` dims everything except the FIRST mark. |
 | `crop` | `{ "sel": "css", "pad": 24 }`: capture only that element (a dialog, a panel, a card) — sharper and easier to read than a whole page. |
