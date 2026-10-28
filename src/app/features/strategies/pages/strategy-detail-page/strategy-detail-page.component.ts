@@ -56,6 +56,7 @@ import { StrategyVariantsTabComponent } from '../../components/strategy-variants
 import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
+import { StrategyActivityContextComponent } from '../../components/strategy-activity-context/strategy-activity-context.component';
 import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
 import { StrategyScriptCardComponent } from '@features/scripting/components/strategy-script-card/strategy-script-card.component';
 // ADR-0027 script strategies: execution (bindings + policy), live session, alerts, backtests.
@@ -108,6 +109,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     StrategyCapacityCardComponent,
     StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
+    StrategyActivityContextComponent,
     RationaleInlineComponent,
     StrategyExecutionPanelComponent,
     ScriptLivePanelComponent,
@@ -563,12 +565,47 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
 
           <!-- Signals Tab -->
           @if (activeTab() === 'signals') {
-            <app-data-table [columnDefs]="signalColumns" [fetchData]="fetchSignals" />
+            <!-- A strategy that never signalled gets the reasons, not an empty grid. -->
+            @if (totalSignals() === 0 && strategy(); as s) {
+              <app-strategy-activity-context
+                [strategy]="s"
+                lead="No signals generated yet"
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            } @else {
+              <app-data-table
+                [columnDefs]="signalColumns"
+                [fetchData]="fetchSignals"
+                emptyTitle="No signals match"
+                emptyDescription="Clear the search to see every signal of this strategy."
+              />
+            }
           }
 
           <!-- Orders Tab -->
           @if (activeTab() === 'orders') {
-            <app-data-table [columnDefs]="orderColumns" [fetchData]="fetchOrders" />
+            @if (totalOrders() === 0 && strategy(); as s) {
+              <app-strategy-activity-context
+                [strategy]="s"
+                [lead]="
+                  (totalSignals() ?? 0) > 0
+                    ? 'No orders placed yet — ' +
+                      totalSignals() +
+                      ' signal(s), none reached an account'
+                    : 'No orders placed yet'
+                "
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            } @else {
+              <app-data-table
+                [columnDefs]="orderColumns"
+                [fetchData]="fetchOrders"
+                emptyTitle="No orders match"
+                emptyDescription="Clear the search to see every order of this strategy."
+              />
+            }
           }
 
           <!-- Optimization Tab — PE-I4 workbench: search space, runs, results, heatmap, trial ledger. -->
@@ -615,6 +652,14 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
           <!-- Capacity Profile Tab — AUM-vs-Sharpe sweep with sizing guidance. -->
           @if (activeTab() === 'capacity') {
             <app-strategy-capacity-card [strategyId]="strategyId" />
+            @if ((totalOrders() ?? 0) === 0 && strategy(); as s) {
+              <app-strategy-activity-context
+                [strategy]="s"
+                lead="Its evidence and why it is not trading"
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            }
           }
 
           <!-- Promotion Reviews Tab — bull/bear/judge advisory pipeline output. -->
@@ -1677,6 +1722,12 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   }
 
   /** The execution policy and the account bindings are changed on the Execution tab. */
+  /** A reason in the activity context asked for a tab; "rejections" is the per-gate drawer here. */
+  onContextTab(tab: string): void {
+    if (tab === 'rejections') this.showRejectionDrawer.set(true);
+    else this.requestTab(tab);
+  }
+
   openExecutionTab(): void {
     this.showEditForm.set(false);
     this.updateError.set(null);

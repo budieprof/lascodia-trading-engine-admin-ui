@@ -18,7 +18,11 @@ import type { StrategyCapacityProfileDto } from '@core/api/api.types';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
+import { ConfigService } from '@core/services/config.service';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 /**
@@ -37,7 +41,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ChartCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
+    FeatureStateComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -63,7 +67,24 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
           (retry)="load()"
         />
       } @else if (!profile() || profile()!.tiers.length === 0) {
-        <app-empty-state title="No capacity profile yet" [description]="emptyDescription()" />
+        <!-- Capacity profiles come from the optimization validator's capacity sweep; say whether that
+             sweep is on (real config read) instead of a bare "nothing yet". -->
+        <app-feature-state
+          [kind]="sweepEnabled() === true ? 'waiting' : 'off'"
+          title="No capacity profile for this strategy"
+          switchKey="CapacitySweep:Enabled"
+          summary="A capacity profile replays the strategy's evidence at growing account sizes (AUM tiers) and marks where its Sharpe falls below the floor, so you know how much capital it can carry. The sweep runs inside optimization validation, for strategies an optimization re-validates."
+          [detail]="emptyDescription()"
+          [requirements]="sweepRequirements()"
+          [links]="[
+            {
+              label: 'Capacity settings',
+              route: '/engine-config',
+              query: { search: 'CapacitySweep' },
+            },
+            { label: 'Optimizations', route: '/optimizations' },
+          ]"
+        />
       } @else {
         <div class="meta-strip">
           <span class="meta">
@@ -274,11 +295,54 @@ export class StrategyCapacityCardComponent {
     () => this.profile()?.tiers.filter((t) => t.meetsFloor).length ?? 0,
   );
 
+  private readonly config = inject(ConfigService);
+  /** CapacitySweep:Enabled — true/false from its row; null = no row (engine default: off); undefined = unread. */
+  protected readonly sweepEnabled = signal<boolean | null | undefined>(undefined);
+  private readonly sweepTiers = signal<string | null>(null);
+
+  protected readonly sweepRequirements = computed<FeatureRequirement[]>(() => {
+    const on = this.sweepEnabled();
+    return [
+      {
+        label: 'Capacity sweep switched on',
+        ok: on === undefined ? null : on === true,
+        detail:
+          on === undefined
+            ? 'reading the setting…'
+            : on === null
+              ? 'not set — the engine default is off'
+              : `CapacitySweep:Enabled = ${on}`,
+        route: '/engine-config',
+        query: { search: 'CapacitySweep' },
+      },
+      {
+        label: 'Re-validated by an optimization since',
+        ok: null,
+        detail: this.sweepTiers()
+          ? `tiers swept: ${this.sweepTiers()}`
+          : 'a profile is written when an optimization run of this strategy is validated',
+        route: '/optimizations',
+      },
+    ];
+  });
+
   constructor() {
     effect(() => {
       const id = this.strategyId();
       if (id) this.load(id);
     });
+    this.config
+      .getByKey('CapacitySweep:Enabled', { silent: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((r) =>
+        this.sweepEnabled.set(
+          r?.status && r.data ? String(r.data.value).toLowerCase() === 'true' : null,
+        ),
+      );
+    this.config
+      .getByKey('CapacitySweep:AumTiers', { silent: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((r) => this.sweepTiers.set(r?.status && r.data ? String(r.data.value) : null));
   }
 
   protected load(idOverride?: number): void {

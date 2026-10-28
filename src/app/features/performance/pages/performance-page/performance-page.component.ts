@@ -13,9 +13,9 @@ import { MetricCardComponent } from '@shared/components/metric-card/metric-card.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
+import { AccountPerformancePanelComponent } from '../../components/account-performance-panel.component';
 
 /**
  * One leaderboard row: the attribution record joined with the latest
@@ -54,8 +54,8 @@ const DD_CAP = 100;
     ChartCardComponent,
     PageHeaderComponent,
     TabsComponent,
-    EmptyStateComponent,
     ErrorStateComponent,
+    AccountPerformancePanelComponent,
     CardSkeletonComponent,
   ],
   template: `
@@ -75,9 +75,10 @@ const DD_CAP = 100;
             (retry)="refresh()"
           />
         } @else if (rows().length === 0) {
-          <app-empty-state
-            title="No performance snapshots available"
-            description="The engine has not yet evaluated any active strategies, or none closed a position inside the feedback window."
+          <!-- No strategy has a health snapshot (today: every Active strategy is a sentinel the health
+               worker never scores) — say why, and show the account performance the engine does record. -->
+          <app-account-performance-panel
+            [view]="activeTab() === 'attribution' ? 'attribution' : 'overview'"
           />
         } @else if (activeTab() === 'overview') {
           <div class="perf-kpis">

@@ -8,7 +8,6 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
@@ -24,7 +23,6 @@ import type {
   OptimizationRunDto,
   PagedData,
   PagerRequest,
-  StrategyCapacityProfileDto,
   StrategyDto,
   StrategyPerformanceSnapshotDto,
   StrategyRejectionDistributionDto,
@@ -39,6 +37,8 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { StrategyActivityContextComponent } from '../../components/strategy-activity-context/strategy-activity-context.component';
+import { StrategyCapacityCardComponent } from '../../components/strategy-capacity-card/strategy-capacity-card.component';
 
 /**
  * Strategy analytics deep-dive — the seven-tab page sketched in the dashboard
@@ -62,8 +62,9 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
     DataTableComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
-    DecimalPipe,
     RelativeTimePipe,
+    StrategyActivityContextComponent,
+    StrategyCapacityCardComponent,
   ],
   template: `
     <div class="page">
@@ -73,6 +74,14 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
       >
         <button class="btn-ghost" (click)="goBack()">← Detail</button>
       </app-page-header>
+
+      <!-- A strategy with no live history: what it would do and why it has not, above every tab. -->
+      @if (!perfLoading() && !perfChartOptions() && strategy(); as s) {
+        <app-strategy-activity-context
+          [strategy]="s"
+          lead="No live performance history — its evidence and why it is quiet"
+        />
+      }
 
       <ui-tabs [tabs]="tabs" [activeTab]="activeTab()" (activeTabChange)="onTabChange($event)">
         @if (activeTab() === 'performance') {
@@ -86,10 +95,7 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
               height="380px"
             />
           } @else {
-            <app-empty-state
-              title="No performance history yet"
-              description="Health snapshots are written every 60 s once the strategy is active and has trades to score."
-            />
+            <app-empty-state title="No performance history yet" [description]="perfEmptyText()" />
           }
         }
 
@@ -99,6 +105,8 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
             [columnDefs]="backtestColumns"
             [fetchData]="fetchBacktests"
             stateKey="strategy-backtests"
+            emptyTitle="No backtest of this strategy"
+            emptyDescription="Queue one from the strategy's Backtests tab — promotion needs a completed run on its own symbol and timeframe at current costs."
           />
         }
 
@@ -108,41 +116,15 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
             [columnDefs]="optimizationColumns"
             [fetchData]="fetchOptimizations"
             stateKey="strategy-optimizations"
+            emptyTitle="No optimization run for this strategy"
+            emptyDescription="The optimizer queues a run when an Active strategy's health turns Critical; you can also start a parameter search from the strategy's Optimization tab."
           />
         }
 
         @if (activeTab() === 'capacity') {
-          @if (capacityLoading()) {
-            <app-card-skeleton [lines]="6" />
-          } @else if (capacityProfile(); as p) {
-            <div class="capacity-meta">
-              <div>
-                <span class="meta-label">Baseline AUM</span>
-                <span class="meta-value">\${{ p.baselineAum | number: '1.0-0' }}</span>
-              </div>
-              <div>
-                <span class="meta-label">Baseline Sharpe</span>
-                <span class="meta-value">{{ p.baselineSharpe.toFixed(2) }}</span>
-              </div>
-              <div>
-                <span class="meta-label">Capacity floor</span>
-                <span class="meta-value">\${{ p.capacityFloorAum | number: '1.0-0' }}</span>
-              </div>
-            </div>
-            @if (capacityChartOptions(); as opts) {
-              <app-chart-card
-                title="Sharpe vs AUM"
-                subtitle="Capacity floor marked where Sharpe drops below the threshold"
-                [options]="opts"
-                height="360px"
-              />
-            }
-          } @else {
-            <app-empty-state
-              title="No capacity profile yet"
-              description="The capacity sweep runs periodically once the strategy has enough live evidence; nothing has been profiled for it so far."
-            />
-          }
+          <!-- Same card as the detail page's Capacity tab: chart when profiled, the sweep's real
+               switch state when not. -->
+          <app-strategy-capacity-card [strategyId]="strategyId" />
         }
 
         @if (activeTab() === 'variants') {
@@ -226,7 +208,7 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
           } @else {
             <app-empty-state
               title="No regime breakdown available"
-              description="Snapshots don't carry a regime tag yet — load the Performance tab first or wait for the next worker cycle."
+              [description]="regimeEmptyText()"
             />
           }
         }
@@ -287,7 +269,11 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
             } @else {
               <app-empty-state
                 title="No rejections recorded"
-                description="This strategy has no pipeline rejections in the audit window — every signal cleared every gate."
+                [description]="
+                  strategy()?.lastSignalAt
+                    ? 'This strategy has no pipeline rejections in the audit window — every signal cleared every gate.'
+                    : 'Nothing was rejected because it has never produced a signal to reject.'
+                "
               />
             }
           } @else {
@@ -323,21 +309,6 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
         color: var(--text-primary);
       }
 
-      .capacity-meta {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: var(--space-4);
-        padding: var(--space-4) var(--space-5);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--space-4);
-      }
-      .capacity-meta div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
       .meta-label {
         font-size: var(--text-xs);
         text-transform: uppercase;
@@ -499,62 +470,26 @@ export class StrategyAnalyticsPageComponent {
 
   readonly activeTab = signal('performance');
   readonly strategyName = signal<string | null>(null);
+  readonly strategy = signal<StrategyDto | null>(null);
+
+  protected readonly regimeEmptyText = computed(() =>
+    this.regimeSampleSize() === 0
+      ? "The breakdown groups this strategy's health snapshots by the market regime they were taken in. It has no snapshots yet (see above for why)."
+      : `None of its ${this.regimeSampleSize()} snapshots carries a regime tag yet; the next health cycle adds one.`,
+  );
+
+  protected readonly perfEmptyText = computed(() => {
+    const s = this.strategy();
+    if (!s)
+      return 'Health snapshots are written every 60 s for Active strategies that have closed trades.';
+    if (s.status !== 'Active')
+      return `Health snapshots are written every 60 s for Active strategies with closed trades — this one is ${s.status} (${s.lifecycleStage}).`;
+    return 'It is Active but has no closed trade to score yet; the first snapshot follows its first closed position.';
+  });
 
   // ── Performance tab ─────────────────────────────────────────────────────
   readonly perfLoading = signal(true);
   private readonly perfSnapshots = signal<StrategyPerformanceSnapshotDto[]>([]);
-
-  // ── Capacity tab ────────────────────────────────────────────────────────
-  readonly capacityLoading = signal(false);
-  readonly capacityProfile = signal<StrategyCapacityProfileDto | null>(null);
-
-  readonly capacityChartOptions = computed<EChartsOption | null>(() => {
-    const p = this.capacityProfile();
-    if (!p || p.tiers.length === 0) return null;
-    const tiers = p.tiers.slice().sort((a, b) => a.aumTier - b.aumTier);
-    return {
-      grid: { left: 64, right: 24, top: 40, bottom: 56 },
-      tooltip: { trigger: 'axis' },
-      legend: { data: ['Sharpe @ tier', 'Profit factor @ tier'] },
-      xAxis: {
-        type: 'category',
-        name: 'AUM ($)',
-        data: tiers.map((t) => t.aumTier.toLocaleString()),
-        axisLabel: { rotate: 30 },
-      },
-      yAxis: { type: 'value', name: 'Score' },
-      series: [
-        {
-          name: 'Sharpe @ tier',
-          type: 'line',
-          smooth: true,
-          data: tiers.map((t) => +t.sharpeAtTier.toFixed(3)),
-          color: '#0071E3',
-          markLine: {
-            symbol: 'none',
-            label: { formatter: 'Floor', position: 'end' },
-            data: [
-              {
-                xAxis:
-                  tiers
-                    .filter((t) => t.aumTier <= p.capacityFloorAum)
-                    .at(-1)
-                    ?.aumTier.toLocaleString() ?? '',
-                lineStyle: { color: '#FF9500', type: 'dashed' },
-              },
-            ],
-          },
-        },
-        {
-          name: 'Profit factor @ tier',
-          type: 'line',
-          smooth: true,
-          data: tiers.map((t) => +t.profitFactorAtTier.toFixed(3)),
-          color: '#34C759',
-        },
-      ],
-    };
-  });
 
   // ── Variants tab ────────────────────────────────────────────────────────
   readonly variantsLoading = signal(false);
@@ -823,6 +758,9 @@ export class StrategyAnalyticsPageComponent {
       );
 
   constructor() {
+    // Deep links (e.g. the activity context's "Pipeline rejections" tile) open a tab with ?tab=.
+    const tab = this.route.snapshot.queryParamMap.get('tab');
+    if (tab && this.tabs.some((t) => t.value === tab)) this.onTabChange(tab);
     this.loadStrategyName();
     this.loadPerformance();
 
@@ -848,17 +786,6 @@ export class StrategyAnalyticsPageComponent {
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => this.optimizationsTable()?.loadData());
-
-    // Capacity events are cycle-scoped (whole portfolio) — refresh the
-    // Capacity tab if the user has it loaded so the Sharpe-vs-AUM curve
-    // picks up the new estimate. Skip if the tab was never opened (no
-    // unsolicited fetch).
-    this.realtime
-      .on('strategyCapacityProfileUpdated')
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        if (this.capacityProfile() !== null) this.loadCapacity();
-      });
 
     // Variant promotion may originate from another tab/user — refresh the
     // variants list when a promotion event lands for THIS strategy. Variants
@@ -901,29 +828,12 @@ export class StrategyAnalyticsPageComponent {
    */
   protected onTabChange(value: string): void {
     this.activeTab.set(value);
-    if (value === 'capacity' && this.capacityProfile() === null && !this.capacityLoading()) {
-      this.loadCapacity();
-    }
     if (value === 'variants' && this.variants().length === 0 && !this.variantsLoading()) {
       this.loadVariants();
     }
     if (value === 'rejections' && this.rejections() === null && !this.rejectionsLoading()) {
       this.loadRejections();
     }
-  }
-
-  private loadCapacity(): void {
-    this.capacityLoading.set(true);
-    this.strategiesService.getCapacityProfile(this.strategyId).subscribe({
-      next: (res) => {
-        this.capacityProfile.set(res?.data ?? null);
-        this.capacityLoading.set(false);
-      },
-      error: () => {
-        this.capacityProfile.set(null);
-        this.capacityLoading.set(false);
-      },
-    });
   }
 
   private loadVariants(): void {
@@ -963,6 +873,7 @@ export class StrategyAnalyticsPageComponent {
       next: (res) => {
         const s = res?.data as StrategyDto | undefined;
         if (s?.name) this.strategyName.set(s.name);
+        if (s) this.strategy.set(s);
       },
       error: () => {
         /* Title falls back to "#<id>" — survivable. */
