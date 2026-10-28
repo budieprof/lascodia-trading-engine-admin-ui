@@ -51,21 +51,59 @@ export function periodEndLabel(utc: string | null | undefined): string | null {
       });
 }
 
-/** Sentences shown under the current plan: a failed payment, a plan that is ending. */
-export function planNotices(sub: BillingSubscription): { text: string; tone: 'warn' | 'info' }[] {
+/**
+ * Sentences shown under the current plan: a failed payment, an unfinished checkout, a plan that is ending.
+ * `mayManageBilling` = the person sees Manage billing, so the sentence can say where to fix it.
+ */
+export function planNotices(
+  sub: BillingSubscription,
+  mayManageBilling = false,
+): { text: string; tone: 'warn' | 'info' }[] {
   const out: { text: string; tone: 'warn' | 'info' }[] = [];
+  const fix = mayManageBilling ? 'update your card in Manage billing' : 'update your card';
   if (sub.status === 'past_due')
-    out.push({ text: 'Your last payment failed — update your card.', tone: 'warn' });
+    out.push({ text: `Your last payment failed — ${fix}.`, tone: 'warn' });
   if (sub.status === 'unpaid')
-    out.push({ text: 'Your plan is unpaid — update your card to keep it.', tone: 'warn' });
+    out.push({ text: `Your plan is unpaid — ${fix} to keep it.`, tone: 'warn' });
+  if (sub.status === 'incomplete')
+    out.push({
+      text: 'Your last payment was not finished, so your plan has not changed.',
+      tone: 'info',
+    });
   if (sub.cancelAtPeriodEnd) {
     const end = periodEndLabel(sub.currentPeriodEndUtc);
+    const name = sub.currentPlan?.name;
+    const what = name ? `Your ${name} plan ends` : 'Your plan ends';
+    const fallback = sub.offers.find((o) => o.isDefault && o.slug !== sub.currentPlan?.slug);
     out.push({
-      text: end ? `Ends on ${end}.` : 'Ends at the end of this billing period.',
+      text:
+        (end ? `${what} on ${end}.` : `${what} at the end of this billing period.`) +
+        (fallback ? ` After that you are on ${fallback.name}.` : ''),
       tone: 'info',
     });
   }
   return out;
+}
+
+/** Self-serve is on but the engine offers no paid plan to buy (no Stripe prices set up yet). */
+export function noPaidOffers(sub: BillingSubscription): boolean {
+  return sub.selfServeEnabled && !sub.offers.some(isPaid);
+}
+
+/**
+ * The line on the free plan's card while a paid subscription is live: going back to it is a cancellation in
+ * the billing portal, so say so instead of leaving the card without a way there. Null otherwise.
+ */
+export function freeOfferHint(
+  offer: PlanOffer,
+  sub: BillingSubscription,
+  holdsManageKey: boolean,
+): string | null {
+  if (!showManageBilling(sub, holdsManageKey) || !hasLiveSubscription(sub.status)) return null;
+  // Already cancelled: the plan notice says when it ends and that the free plan follows.
+  if (sub.cancelAtPeriodEnd) return null;
+  if (isPaid(offer) || offer.isCurrent || offer.slug === sub.currentPlan?.slug) return null;
+  return `To go back to ${offer.name}, cancel your plan in Manage billing.`;
 }
 
 /** The person may change the plan here: self-serve is on, the engine says so and they hold the key. */
@@ -79,17 +117,21 @@ export type OfferAction = { kind: 'checkout' | 'portal'; label: string };
  * The button on one plan card, or null: none on the current plan, the free plan (leaving a paid plan is a
  * cancellation, in the portal) or for someone who may not change the plan. With a live subscription the
  * switch happens in the billing portal; without one it is a new checkout.
+ *
+ * `paymentPending`: the person has just paid at Checkout and the engine has not heard from Stripe yet (the
+ * page is waiting, or gave up waiting). The plan still reads as the old one, so a new checkout would be a
+ * second subscription — no Upgrade then.
  */
 export function offerAction(
   offer: PlanOffer,
   sub: BillingSubscription,
   holdsManageKey: boolean,
+  paymentPending = false,
 ): OfferAction | null {
   if (!canChangePlan(sub, holdsManageKey)) return null;
   if (offer.isCurrent || offer.slug === sub.currentPlan?.slug || !isPaid(offer)) return null;
-  return hasLiveSubscription(sub.status)
-    ? { kind: 'portal', label: 'Switch' }
-    : { kind: 'checkout', label: 'Upgrade' };
+  if (hasLiveSubscription(sub.status)) return { kind: 'portal', label: 'Switch' };
+  return paymentPending ? null : { kind: 'checkout', label: 'Upgrade' };
 }
 
 /** "Manage billing" (the portal) needs a billing account at the provider. */
@@ -142,14 +184,34 @@ export function isFollowableRedirect(url: string | null | undefined): url is str
   }
 }
 
-/** A refused checkout or portal call in plain words, preferring the engine's own sentence. */
+/**
+ * A refused checkout or portal call in plain words, preferring the engine's own sentence. The engine answers
+ * these refusals with an HTTP error status (400 / 404 / 503) and the envelope as the body, so the code and
+ * sentence are read from there as well as from an `ApiError` (an HTTP 200 envelope with `status: false`).
+ */
 export function billingRefusal(err: unknown, fallback: string): string {
-  const code = err instanceof ApiError ? err.code : null;
-  const own = err instanceof ApiError && err.message && err.message !== 'Request failed';
+  const body =
+    err instanceof ApiError
+      ? { code: err.code, message: err.message }
+      : envelopeOf((err as { error?: unknown } | null)?.error);
+  const own = !!body?.message && body.message !== 'Request failed';
   if (!own) {
-    if (code === '-11')
+    if (body?.code === '-11')
       return 'This organisation already has a subscription — use Manage billing to change it.';
-    if (code === '-14') return 'That plan or billing account could not be found.';
+    if (body?.code === '-14') return 'That plan or billing account could not be found.';
+    if (body?.code === '-503')
+      return 'Card payment is not available just now. Please try again later.';
+    // The generic envelope sentence says nothing; never show it.
+    if (body?.message === 'Request failed') return fallback;
   }
   return errorText(err, fallback);
+}
+
+function envelopeOf(body: unknown): { code: string | null; message: string | null } | null {
+  if (!body || typeof body !== 'object') return null;
+  const b = body as { responseCode?: unknown; message?: unknown };
+  return {
+    code: typeof b.responseCode === 'string' ? b.responseCode : null,
+    message: typeof b.message === 'string' ? b.message : null,
+  };
 }

@@ -1,3 +1,4 @@
+import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it } from 'vitest';
 
 import { ApiError } from '@core/api/api.types';
@@ -7,8 +8,10 @@ import {
   canChangePlan,
   checkoutPollOutcome,
   checkoutReturn,
+  freeOfferHint,
   isFollowableRedirect,
   limitPoints,
+  noPaidOffers,
   offerAction,
   offerPrice,
   periodEndLabel,
@@ -110,16 +113,43 @@ describe('status', () => {
       planNotices(
         sub({
           status: 'active',
+          currentPlan: { slug: 'pro', name: 'Pro' },
           cancelAtPeriodEnd: true,
           currentPeriodEndUtc: '2026-11-28T00:00:00Z',
         }),
       ),
-    ).toEqual([{ text: 'Ends on 28 November 2026.', tone: 'info' }]);
+    ).toEqual([
+      {
+        text: 'Your Pro plan ends on 28 November 2026. After that you are on Trial.',
+        tone: 'info',
+      },
+    ]);
     expect(planNotices(sub({ cancelAtPeriodEnd: true }))[0].text).toBe(
-      'Ends at the end of this billing period.',
+      'Your Trial plan ends at the end of this billing period.',
     );
     expect(periodEndLabel('garbage')).toBeNull();
     expect(planNotices(sub())).toEqual([]);
+  });
+
+  it('says where to fix a failed payment when Manage billing is shown', () => {
+    expect(planNotices(sub({ status: 'past_due' }), true)[0].text).toBe(
+      'Your last payment failed — update your card in Manage billing.',
+    );
+    expect(planNotices(sub({ status: 'unpaid' }), true)[0].text).toBe(
+      'Your plan is unpaid — update your card in Manage billing to keep it.',
+    );
+  });
+
+  it('explains an unfinished checkout', () => {
+    expect(planNotices(sub({ status: 'incomplete' }))).toEqual([
+      { text: 'Your last payment was not finished, so your plan has not changed.', tone: 'info' },
+    ]);
+  });
+
+  it('knows when self-serve has no paid plan to sell', () => {
+    expect(noPaidOffers(sub({ offers: [{ ...TRIAL, isCurrent: true }] }))).toBe(true);
+    expect(noPaidOffers(sub())).toBe(false);
+    expect(noPaidOffers(sub({ selfServeEnabled: false, offers: [TRIAL] }))).toBe(false);
   });
 });
 
@@ -154,6 +184,30 @@ describe('which button a plan card shows', () => {
     expect(offerAction(offer(), sub({ selfServeEnabled: false }), true)).toBeNull();
     expect(canChangePlan(sub(), true)).toBe(true);
     expect(canChangePlan(sub({ canManage: false }), true)).toBe(false);
+  });
+
+  it('no new checkout while a payment just made is still being confirmed', () => {
+    expect(offerAction(offer(), sub(), true, true)).toBeNull();
+    // A live subscription still switches in the portal.
+    const live = sub({ status: 'active', currentPlan: { slug: 'desk', name: 'Desk' } });
+    expect(offerAction(offer(), live, true, true)?.kind).toBe('portal');
+  });
+
+  it('the free plan says how to go back to it while a subscription is live', () => {
+    const live = sub({
+      status: 'active',
+      hasBillingAccount: true,
+      currentPlan: { slug: 'pro', name: 'Pro' },
+      offers: [TRIAL, offer({ isCurrent: true })],
+    });
+    expect(freeOfferHint(TRIAL, live, true)).toBe(
+      'To go back to Trial, cancel your plan in Manage billing.',
+    );
+    expect(freeOfferHint(TRIAL, live, false)).toBeNull();
+    expect(freeOfferHint(TRIAL, { ...live, cancelAtPeriodEnd: true }, true)).toBeNull();
+    expect(freeOfferHint(offer(), live, true)).toBeNull();
+    expect(freeOfferHint(TRIAL, { ...live, status: 'canceled' }, true)).toBeNull();
+    expect(freeOfferHint(TRIAL, sub({ hasBillingAccount: true }), true)).toBeNull();
   });
 
   it('Manage billing needs a billing account as well', () => {
@@ -217,6 +271,26 @@ describe('redirects and refusals', () => {
     const bare14 = new ApiError('-14', '', {} as never);
     expect(billingRefusal(bare14, 'x')).toMatch(/could not be found/);
     expect(billingRefusal({ status: 0, message: 'Http failure response' }, 'Could not open.')).toBe(
+      'Could not open.',
+    );
+  });
+
+  it('reads the envelope of an HTTP error answer (how the engine refuses)', () => {
+    const http = (status: number, responseCode: string, message: string) =>
+      new HttpErrorResponse({
+        status,
+        error: { status: false, data: null, responseCode, message },
+        url: '/api/v1/lascodia-trading-engine/tenant/billing/checkout',
+      });
+    expect(billingRefusal(http(400, '-11', 'Request failed'), 'x')).toMatch(
+      /already has a subscription/,
+    );
+    expect(billingRefusal(http(404, '-14', ''), 'x')).toMatch(/could not be found/);
+    expect(billingRefusal(http(503, '-503', ''), 'x')).toMatch(/not available just now/);
+    expect(billingRefusal(http(503, '-503', 'Paying by card is not available.'), 'x')).toBe(
+      'Paying by card is not available.',
+    );
+    expect(billingRefusal(http(400, '-99', 'Request failed'), 'Could not open.')).toBe(
       'Could not open.',
     );
   });
