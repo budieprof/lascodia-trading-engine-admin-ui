@@ -147,7 +147,7 @@ describe('bestExTiles', () => {
         meanLatencyMs: 0,
         medianLatencyMs: 0,
         p95LatencyMs: 0,
-        meanMarkoutPips: [1, 2, 3, 15.075, -8],
+        meanMarkoutPips: [1, 2, 3, 15.08, -8],
         favourableMarkoutShare: [0.3, 0.2, 0.5, 0.2692, 0.38],
         markoutSamples: [26, 26, 26, 26, 26],
         commission: 1372.9,
