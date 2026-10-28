@@ -17,6 +17,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceFloorsComponent } from '../../components/evidence-floors/evidence-floors.component';
 
 @Component({
   selector: 'app-layer-skill-page',
@@ -29,6 +30,7 @@ import { CompositeMlPipelineStateComponent } from '../../components/pipeline-sta
     PageHeaderComponent,
     CompositeMlNavComponent,
     CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceFloorsComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     RelativeTimePipe,
@@ -60,6 +62,10 @@ import { CompositeMlPipelineStateComponent } from '../../components/pipeline-sta
             variant="full"
             [focus]="['layerSkill', 'generationAudits']"
             pageSummary="Layer skill measures what each of the generator's scoring layers is worth: the reward of strategies generated with the layer on is compared with shadow decisions made with it switched off, per symbol and timeframe. A layer that hurts is switched off automatically for a while, and an operator can override that here. No active layer-skill snapshot exists — the checklist below shows which inputs are missing."
+          />
+          <app-composite-ml-evidence-floors
+            [prefixes]="['LayerSkillEvaluator.']"
+            title="Evidence the layer-skill evaluator needs"
           />
         } @else {
           <app-composite-ml-pipeline-state variant="compact" [focus]="['layerSkill']" />

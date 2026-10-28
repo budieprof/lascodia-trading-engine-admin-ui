@@ -292,6 +292,7 @@ interface LayerHealthResult {
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
+        overflow-x: auto;
       }
       .layers-table {
         width: 100%;

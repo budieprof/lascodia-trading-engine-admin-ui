@@ -17,6 +17,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceFloorsComponent } from '../../components/evidence-floors/evidence-floors.component';
 
 @Component({
   selector: 'app-trainer-skill-page',
@@ -29,6 +30,7 @@ import { CompositeMlPipelineStateComponent } from '../../components/pipeline-sta
     PageHeaderComponent,
     CompositeMlNavComponent,
     CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceFloorsComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     RelativeTimePipe,
@@ -60,6 +62,10 @@ import { CompositeMlPipelineStateComponent } from '../../components/pipeline-sta
             variant="full"
             [focus]="['trainerSkill', 'policySnapshots']"
             pageSummary="Trainer skill compares the policy trainers (ridge, REINFORCE, discrete) by the reward their policy snapshots earned, per symbol and timeframe, so the generator can weight the better trainer and suppress a poor one for a while. It is computed from policy snapshots and the decisions made under them. No active trainer-skill snapshot exists — the checklist below shows which inputs are missing."
+          />
+          <app-composite-ml-evidence-floors
+            [prefixes]="['TrainerSkillEvaluator.']"
+            title="Evidence the trainer-skill evaluator needs"
           />
         } @else {
           <app-composite-ml-pipeline-state variant="compact" [focus]="['trainerSkill']" />

@@ -11,6 +11,7 @@ import { createPolledResource } from '@core/polling/polled-resource';
 import { OptionsHealthCardComponent } from '../../components/options-health-card/options-health-card.component';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceFloorsComponent } from '../../components/evidence-floors/evidence-floors.component';
 import { ageText, type PipelineState } from '../../composite-ml-pipeline.logic';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -38,6 +39,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
     OptionsHealthCardComponent,
     CompositeMlNavComponent,
     CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceFloorsComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -101,6 +103,10 @@ type TierFilter = 'all' | 'live' | 'coldstart';
           [focus]="['policySnapshots', 'generationAudits']"
           pageSummary="A policy snapshot is the set of scoring weights the CompositeML generator uses for one symbol and timeframe (or globally). The policy trainer writes one from the generator's matured decisions and activates it once it beats the current one; this tab lists the active ones. None is active right now."
           (stateChange)="pipeline.set($event)"
+        />
+        <app-composite-ml-evidence-floors
+          [prefixes]="['PolicyTraining.']"
+          title="Evidence the policy trainers need before a snapshot can activate"
         />
       } @else {
         <app-composite-ml-pipeline-state

@@ -7,10 +7,11 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { Observable, catchError, map, of, timeout } from 'rxjs';
+import { Observable, catchError, map, of, switchMap, timeout } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 
 import { CalibrationService } from '@core/services/calibration.service';
+import { ConfigService } from '@core/services/config.service';
 import type {
   CalibrationTrendReportDto,
   CalibrationTrendRowDto,
@@ -270,11 +271,14 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
             <!-- Backtest screening failures are a different stream from the
                  per-signal viability rejections on the Trend tab, so the two
                  tabs can legitimately disagree; say so where the reader is. -->
+            @if (generatorNote(); as note) {
+              <div class="widened-note" role="status">{{ note }}</div>
+            }
             <p class="tab-note muted">
               Strategy-generation screening failures (in-sample / out-of-sample / Monte Carlo gates)
               over the last {{ g.lookbackDays }} day{{ g.lookbackDays === 1 ? '' : 's' }} —
-              {{ g.windowStart | date: 'MMM d' }}–{{ g.windowEnd | date: 'MMM d' }}. Distinct from
-              the per-signal viability rejections on the Trend tab.
+              {{ g.windowStart | date: 'MMM d, y' }}–{{ g.windowEnd | date: 'MMM d, y' }}. Distinct
+              from the per-signal viability rejections on the Trend tab.
             </p>
 
             @if (g.totalFailures === 0 || g.rows.length === 0) {
@@ -283,9 +287,14 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
                   <strong>No screening-gate failures recorded in this window.</strong>
                   <span class="muted">
                     The binding report classifies which gate is bindingly tight only once
-                    strategy-generation backtests have failed a gate. Either no candidates were
-                    screened in the last {{ g.lookbackDays }} days, or the failure log is not being
-                    written — check the strategy-generation worker.
+                    strategy-generation backtests have failed a gate. No failure was recorded in the
+                    last {{ g.lookbackDays }} days either
+                    @if (generatorOff()) {
+                      — the strategy generators are switched off (operator's choice), so no
+                      candidates are screened.
+                    } @else {
+                      — check the strategy-generation worker.
+                    }
                   </span>
                 </div>
               </section>
@@ -669,6 +678,16 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
         .kpi-strip {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+      }
+      .widened-note {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border);
+        border-left: 4px solid var(--warning);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        margin-bottom: var(--space-3);
       }
       .tab-note {
         margin: var(--space-3) 0 0;
@@ -1232,6 +1251,24 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
 })
 export class CalibrationPageComponent {
   private readonly service = inject(CalibrationService);
+  private readonly config = inject(ConfigService);
+
+  /** Set when the 30-day window was empty and the tab widened to show the last recorded failures. */
+  readonly gatesWidenedFrom = signal<number | null>(null);
+  /** `Workers:StrategyGenerationWorker:Enabled` row — why nothing is screened lately. */
+  readonly generatorSwitch = signal<{ value: string; at: string } | null>(null);
+  readonly generatorOff = computed(
+    () => this.generatorSwitch()?.value.trim().toLowerCase() === 'false',
+  );
+  readonly generatorNote = computed(() => {
+    const from = this.gatesWidenedFrom();
+    if (from === null) return null;
+    const sw = this.generatorSwitch();
+    const off = this.generatorOff()
+      ? ` The strategy generator has been switched off since ${sw!.at.slice(0, 10)} (Workers:StrategyGenerationWorker:Enabled = false, operator's choice), so nothing new is screened.`
+      : '';
+    return `No screening failures in the last ${from} days — showing the last ${this.gates()?.lookbackDays ?? 365} days instead, which holds the most recent ones.${off}`;
+  });
 
   @ViewChild('rejectionsTable')
   rejectionsTable?: DataTableComponent<SignalRejectionEntryDto>;
@@ -1348,14 +1385,37 @@ export class CalibrationPageComponent {
         this.trendLoading.set(false);
       });
 
-    this.service
-      .getScreeningGateBinding()
-      .pipe(
+    this.config
+      .getByKey('Workers:StrategyGenerationWorker:Enabled', { silent: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((r) => {
+        if (r?.status && r.data)
+          this.generatorSwitch.set({ value: r.data.value ?? '', at: r.data.lastUpdatedAt ?? '' });
+      });
+
+    // The default 30-day window is empty while the generators are off; widen once to a year so
+    // the tab shows the last real screening results (and says so) instead of an empty box.
+    const loadGates = (days?: number) =>
+      this.service.getScreeningGateBinding(days).pipe(
         map((r) => r.data ?? null),
         catchError(() => of(null as ScreeningGateBindingReportDto | null)),
+      );
+    loadGates()
+      .pipe(
+        switchMap((data) => {
+          if (!data || data.totalFailures > 0) return of({ data, widened: false });
+          return loadGates(365).pipe(
+            map((wide) =>
+              wide && wide.totalFailures > 0
+                ? { data: wide, widened: true }
+                : { data, widened: false },
+            ),
+          );
+        }),
       )
-      .subscribe((data) => {
+      .subscribe(({ data, widened }) => {
         this.gates.set(data);
+        if (widened) this.gatesWidenedFrom.set(30);
         this.gatesLoading.set(false);
       });
 
