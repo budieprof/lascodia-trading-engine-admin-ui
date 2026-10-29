@@ -22,6 +22,7 @@ import { csrfInterceptor } from '@core/auth/csrf.interceptor';
 import { approvalInterceptor } from '@core/auth/approval.interceptor';
 import { AuthService } from '@core/auth/auth.service';
 import { serverClockInterceptor } from '@core/time/server-clock';
+import { pageApiActivityInterceptor } from '@core/assistant/page-api-activity';
 import { errorInterceptor } from '@core/auth/error.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
 import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
@@ -108,6 +109,8 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
           errorInterceptor,
           approvalInterceptor,
           serverClockInterceptor,
+          // Which engine calls the current page made — the assistant's map of where its data comes from.
+          pageApiActivityInterceptor,
         ]),
       ),
       // Who is signed in is settled before the first route renders: guards, the sidebar and every

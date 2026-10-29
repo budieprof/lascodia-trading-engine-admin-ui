@@ -8,6 +8,7 @@ import { buildBreadcrumbTrail } from '@core/routing/breadcrumb-trail';
 import { findPage } from '@shared/navigation/page-catalog';
 import type { PageContext, PageFacts } from './page-context.types';
 import { UiCommandService } from './ui-command.service';
+import { PageApiActivity } from './page-api-activity';
 
 /**
  * How much page context may be sent.
@@ -46,6 +47,7 @@ export class PageContextService {
   private readonly route = inject(ActivatedRoute);
   private readonly scope = inject(AccountScopeService);
   private readonly uiCommands = inject(UiCommandService);
+  private readonly apiActivity = inject(PageApiActivity);
 
   /** The live publisher, with the URL it was registered under. */
   private current: { url: string; source: () => PageFacts } | null = null;
@@ -117,6 +119,7 @@ export class PageContextService {
         accountName: single?.accountName ?? null,
       },
       facts,
+      dataSources: this.apiActivity.list(),
       // What the assistant may ask this page to DO. Without these it can only read and
       // describe — which is how it ended up guessing at chart controls it could not see.
       commands: this.uiCommands.specs(),
@@ -176,16 +179,42 @@ export class PageContextService {
             ...(confirm ? { confirm } : {}),
           })),
         },
+        // 2b. Keep where the data comes from, but only method + path.
+        {
+          ...full,
+          dataSources: (full.dataSources ?? []).map(({ method, path, status, calls }) => ({
+            method,
+            path,
+            status,
+            calls,
+          })),
+          commands: commands.map(({ id, description, confirm }) => ({
+            id,
+            description,
+            ...(confirm ? { confirm } : {}),
+          })),
+        },
         // 3. Lose the page's own facts.
         {
           ...full,
+          dataSources: (full.dataSources ?? []).map(({ method, path, status, calls }) => ({
+            method,
+            path,
+            status,
+            calls,
+          })),
           facts: null,
           commands: commands.map(({ id, description }) => ({ id, description })),
         },
         // 4. Bare command ids, so the assistant still knows what it could ask to run.
-        { ...full, facts: null, commands: commands.map(({ id }) => ({ id, description: '' })) },
+        {
+          ...full,
+          facts: null,
+          dataSources: [],
+          commands: commands.map(({ id }) => ({ id, description: '' })),
+        },
         // 5. Route and scope only.
-        { ...full, facts: null, commands: [] },
+        { ...full, facts: null, dataSources: [], commands: [] },
       ];
 
       for (const stage of stages) {
