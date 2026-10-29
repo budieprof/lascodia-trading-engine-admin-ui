@@ -1,4 +1,9 @@
-import type { SignupBody, TenantSignup, TenantSignupStatus } from './onboarding.types';
+import type {
+  SignupBody,
+  SignupStatus,
+  TenantSignup,
+  TenantSignupStatus,
+} from './onboarding.types';
 
 /** A handle from an organisation's name, as the engine makes it (lowercase letters/digits, hyphens, 3–63). */
 export function slugFrom(name: string): string {
@@ -157,4 +162,41 @@ export function canDecide(s: TenantSignup): { approve: boolean; reject: boolean 
 /** "2 of 4 done". */
 export function progressText(completed: number, total: number): string {
   return completed >= total ? 'All done' : `${completed} of ${total} done`;
+}
+
+/**
+ * The checklist the sign-ups page shows: the engine's own per-requirement checks, or — from an engine that does not
+ * send them yet — the flag plus each refusal reason it gave (each one a requirement that is not met).
+ */
+export function signupRequirements(
+  s: SignupStatus,
+): { label: string; ok: boolean | null; detail: string }[] {
+  if (s.checks?.length)
+    return s.checks.map((c) => ({ label: c.label, ok: c.ok, detail: c.detail }));
+  const out: { label: string; ok: boolean | null; detail: string }[] = [
+    {
+      label: 'Self-serve sign-up switched on (Tenancy:SelfServeSignup)',
+      ok: s.enabled,
+      detail: s.enabled ? 'On.' : 'Off — organisations are created by platform staff.',
+    },
+  ];
+  if (s.enabled) {
+    for (const r of s.reasons) {
+      // "The identity provider's realm cannot send e-mail (no SMTP): every address …" → label + detail.
+      const m = /^(.*?\)):\s*(.*)$/.exec(r);
+      out.push({ label: m ? m[1] : r, ok: false, detail: m ? m[2] : '' });
+    }
+  }
+  return out;
+}
+
+/** Counts of the requests per status, with Expired taken from the row's own flag. */
+export function signupCounts(rows: readonly TenantSignup[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const k =
+      r.expired && (r.status === 'Pending' || r.status === 'Approved') ? 'Expired' : r.status;
+    out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
 }

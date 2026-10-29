@@ -1,15 +1,27 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 
 import { AuthService } from '@core/auth/auth.service';
-import { permissionDefinition } from '@core/auth/permissions.generated';
+import {
+  PERMISSION_CATALOG,
+  Permission,
+  permissionDefinition,
+} from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import {
+  ApprovalPoliciesApiService,
+  type ApprovalPolicyRow,
+} from '@features/organisation/approval-policies';
 import { IamApiService } from '../iam-api.service';
 import { approvalProgress, canDecide, errorText, reportable, when } from '../iam.logic';
 import type { ApprovalRequest, ApprovalStatus } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
+import { ago, countBy, plural } from '../shared/admin-context.logic';
+import { AuditTrailComponent } from '../shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
 
 /**
  * Two-person approvals (U3.4, contract C3.3): actions that need a second person — releasing a kill
@@ -21,8 +33,30 @@ import { iamResource } from '../shared/iam-resource';
   selector: 'app-iam-approvals-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../shared/iam-page.scss',
+  styles: [
+    `
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -42,19 +76,35 @@ import { iamResource } from '../shared/iam-resource';
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="list.reload()"
+          (click)="reloadAll()"
           [disabled]="list.loading()"
         >
           {{ list.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
 
+      <app-stat-tiles [tiles]="tiles()" label="Approvals summary" />
+
       <section class="card">
+        <header class="card-head">
+          <h3>{{ status() === 'Pending' ? 'Waiting for a second person' : 'Recent requests' }}</h3>
+        </header>
         @if (list.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (list.loaded() && list.value().length === 0) {
-          <p class="pad muted">
-            {{ status() === 'Pending' ? 'Nothing is waiting for approval.' : 'No requests.' }}
+          <p class="pad small muted">
+            @if (status() === 'Pending') {
+              Nothing is waiting for approval. A request appears here when someone in this
+              organisation starts an action below that needs a second person; it waits up to its
+              expiry (24 hours unless a policy says otherwise), then lapses.
+              @if (recentCount() > 0) {
+                <button type="button" class="btn btn-sm btn-secondary" (click)="showAll()">
+                  Show the {{ recentCount() }} recent decided
+                </button>
+              }
+            } @else {
+              No request has been made in this organisation yet — nothing below has been asked for.
+            }
           </p>
         } @else if (list.value().length > 0) {
           <div class="table-wrap">
@@ -135,6 +185,94 @@ import { iamResource } from '../shared/iam-resource';
         }
       </section>
 
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>What needs a second person here</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/organisation/approval-policies">Approval policies</a>
+          </header>
+          @if (policies.error(); as err) {
+            <p class="pad small" role="alert">
+              <span class="chip bad">Could not load</span> {{ err }}
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Rule in force</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of policies.value(); track row.kind) {
+                    <tr>
+                      <td>
+                        {{ row.title }}
+                        <span class="sub">{{
+                          row.platformWide ? 'House policy, platform-wide' : 'this organisation'
+                        }}</span>
+                      </td>
+                      <td class="small">
+                        @if (row.policy?.enabled) {
+                          <span class="chip ok">policy</span>
+                          {{ policyText(row) }}
+                        } @else if (row.policy) {
+                          <span class="chip">policy off</span> behaves as without a policy
+                        } @else {
+                          {{ defaultRule(row.kind) }}
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head">
+            <h3>Two-person permissions</h3>
+          </header>
+          <div class="card-body">
+            <p class="small muted">
+              Using these permissions never runs at once: the engine answers "sent for approval" and
+              another person who holds the same permission on the same thing approves it here.
+            </p>
+            <ul class="small">
+              @for (p of twoPerson; track p.key) {
+                <li>
+                  <code>{{ p.key }}</code> — {{ p.description }}
+                </li>
+              }
+            </ul>
+            <p class="note">
+              Outside House the two-person rule always applies. In House it applies when the engine
+              host sets <code>Auth:TwoPerson:EnforceForHouse</code>, and to any action that has an
+              enabled policy above. The approver can never be the requester, and approving runs the
+              stored request again through every check — both names go in the audit log.
+            </p>
+            <p class="small">
+              @if (canDecide()) {
+                <span class="chip ok">you can decide</span> You hold the approvals permission; you
+                can approve a request when you also hold its action's permission.
+              } @else {
+                <span class="chip">view only</span> Deciding needs
+                <code>iam.approvals.decide</code>.
+              }
+            </p>
+          </div>
+        </section>
+      </div>
+
+      <app-audit-trail
+        heading="Approval history"
+        [actions]="['iam.approval.', 'iam.approval_policy.']"
+        empty="No approval has been requested, decided or changed in this organisation yet. Requests, each approval, rejections, the run that follows and policy changes are all recorded here."
+      />
+
       <app-confirm-dialog
         [open]="deciding() !== null"
         [title]="dialogTitle()"
@@ -164,8 +302,10 @@ export class ApprovalsPageComponent {
   private readonly iam = inject(IamApiService);
   private readonly auth = inject(AuthService);
   private readonly notify = inject(NotificationService);
+  private readonly policyApi = inject(ApprovalPoliciesApiService);
 
   protected readonly when = when;
+  protected readonly twoPerson = PERMISSION_CATALOG.filter((p) => p.twoPerson && !p.deprecated);
 
   readonly status = signal<ApprovalStatus | null>('Pending');
   readonly list = iamResource(
@@ -201,8 +341,106 @@ export class ApprovalsPageComponent {
       : `${what} — it will not run.`;
   });
 
+  /** Every request the engine still lists (any status) — the tiles and the "show decided" hint. */
+  readonly recent = iamResource(
+    () => this.iam.approvals(null),
+    [] as ApprovalRequest[],
+    'Could not load recent approvals.',
+  );
+  readonly policies = iamResource(
+    () => this.policyApi.list(),
+    [] as ApprovalPolicyRow[],
+    'Could not load the approval policies.',
+  );
+  readonly canDecide = computed(() => this.auth.hasPermission(Permission.IamApprovalsDecide));
+  readonly recentCount = computed(
+    () => this.recent.value().filter((r) => r.status !== 'Pending').length,
+  );
+
+  readonly tiles = computed<StatTile[]>(() => {
+    const byStatus = countBy(this.recent.value(), (r) => r.status);
+    const pending = byStatus['Pending'] ?? 0;
+    const done = (byStatus['Executed'] ?? 0) + (byStatus['Approved'] ?? 0);
+    const rejected = byStatus['Rejected'] ?? 0;
+    const expired = byStatus['Expired'] ?? 0;
+    const rows = this.policies.value();
+    const inForce = rows.filter((r) => r.policy?.enabled).length;
+    const oldest = this.recent
+      .value()
+      .filter((r) => r.status === 'Pending' && r.requestedAtUtc)
+      .map((r) => r.requestedAtUtc as string)
+      .sort()[0];
+    const loaded = this.recent.loaded();
+    return [
+      {
+        label: 'Waiting now',
+        value: loaded ? String(pending) : '…',
+        caption: pending ? `oldest asked ${ago(oldest)}` : 'nothing needs a decision',
+        tone: pending ? 'warn' : 'good',
+      },
+      {
+        label: 'Approved and run',
+        value: loaded ? String(done) : '…',
+        caption: 'of the requests the engine still lists',
+      },
+      {
+        label: 'Rejected or lapsed',
+        value: loaded ? String(rejected + expired) : '…',
+        caption: `${rejected} rejected · ${expired} expired unanswered`,
+      },
+      {
+        label: 'Four-eyes policies',
+        value: this.policies.loaded() ? `${inForce} of ${rows.length}` : '…',
+        caption: inForce
+          ? `${plural(inForce, 'action')} need more than the default`
+          : 'none set — the default rules apply',
+        route: '/organisation/approval-policies',
+      },
+      {
+        label: 'Two-person permissions',
+        value: String(this.twoPerson.length),
+        caption: this.twoPerson.map((p) => p.key).join(', '),
+      },
+    ];
+  });
+
   constructor() {
+    this.reloadAll();
+  }
+
+  reloadAll(): void {
     this.list.reload();
+    this.recent.reload();
+    this.policies.reload();
+  }
+
+  showAll(): void {
+    this.status.set(null);
+    this.list.reload();
+  }
+
+  policyText(row: ApprovalPolicyRow): string {
+    const p = row.policy;
+    if (!p) return '';
+    const who = p.approverRoles.length ? ` holding ${p.approverRoles.join(' or ')}` : '';
+    const above =
+      row.hasThreshold && p.thresholdNotional != null
+        ? ` at or above ${p.thresholdNotional.toLocaleString()} notional`
+        : '';
+    const expiry = p.expiryMinutes ? ` · lapses after ${p.expiryMinutes} min` : '';
+    return `${plural(p.approversRequired, 'approver')}${who}${above}${expiry}`;
+  }
+
+  /** What happens to an action with no policy (engine four-eyes-approvals.md, "no row = today's behaviour"). */
+  defaultRule(kind: string): string {
+    switch (kind) {
+      case 'killswitch.release':
+        return 'A second person approves (always outside House; in House when the host enforces two-person).';
+      case 'engine.config.change':
+        return 'Runs at once; a risk-loosening change still needs risk.loosen, a second person and the cooling-off.';
+      default:
+        return 'Runs at once — no second person.';
+    }
   }
 
   progress(r: ApprovalRequest): string | null {

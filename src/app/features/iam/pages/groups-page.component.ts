@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Observable, catchError, map, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
@@ -13,9 +13,12 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
 import { errorText, memberLabel, reportable } from '../iam.logic';
-import type { SaveNamedBody } from '../iam.types';
+import type { IamGrant, SaveNamedBody } from '../iam.types';
+import { plural } from '../shared/admin-context.logic';
+import { AuditTrailComponent } from '../shared/audit-trail.component';
 import { iamResource } from '../shared/iam-resource';
 import { MfaHintComponent } from '../shared/mfa-hint.component';
+import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
 
 /** One group (team or account group) as the page shows it. */
 interface Group {
@@ -38,6 +41,14 @@ interface Entry {
 interface GroupKind {
   title: string;
   subtitle: string;
+  /** What grouping is for, in two sentences, shown while nothing is chosen. */
+  explain: string;
+  /** Audit action prefix of this kind's changes. */
+  audit: string;
+  /** Grant principal / scope type that points at this kind of group. */
+  grantMatch: (g: IamGrant) => boolean;
+  /** Heading of the candidates list ("People in this organisation"). */
+  candidatesTitle: string;
   noun: string;
   entryNoun: string;
   emptyEntries: string;
@@ -66,10 +77,13 @@ interface GroupKind {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    RouterLink,
     PageHeaderComponent,
     ConfirmDialogComponent,
     LscCanDirective,
     MfaHintComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
   styles: [
@@ -117,7 +131,7 @@ interface GroupKind {
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="groups.reload()"
+          (click)="reloadAll()"
           [disabled]="groups.loading()"
         >
           {{ groups.loading() ? 'Loading…' : 'Refresh' }}
@@ -132,6 +146,8 @@ interface GroupKind {
         </button>
       </app-page-header>
 
+      <app-stat-tiles [tiles]="tiles()" [label]="kind.title + ' summary'" />
+
       <div class="layout">
         <section class="card">
           <header class="card-head">
@@ -140,7 +156,11 @@ interface GroupKind {
           @if (groups.error(); as err) {
             <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
           } @else if (groups.loaded() && groups.value().length === 0) {
-            <p class="pad muted">None yet.</p>
+            <p class="pad small muted">
+              None yet{{ canManage() ? ' — use New ' + kind.noun + ' to make the first.' : '.' }}
+              Until there is one, every grant here is given to a person directly or at the whole
+              organisation / one account.
+            </p>
           }
           <ul class="list">
             @for (g of groups.value(); track g.id) {
@@ -164,7 +184,39 @@ interface GroupKind {
 
         <section class="card">
           @if (editing() === null) {
-            <p class="pad muted">Choose a {{ kind.noun }} to see who or what is in it.</p>
+            <div class="card-body">
+              <p class="small">{{ kind.explain }}</p>
+              <p class="small muted">
+                {{
+                  groups.value().length
+                    ? 'Choose a ' + kind.noun + ' on the left to see who or what is in it.'
+                    : 'Nothing is grouped yet; below is what could be.'
+                }}
+              </p>
+            </div>
+            <header class="card-head">
+              <h3>{{ kind.candidatesTitle }} ({{ candidates.value().length }})</h3>
+              <span class="spacer"></span>
+              <a class="small" routerLink="/iam/grants">Grants</a>
+            </header>
+            @if (candidates.value().length === 0) {
+              <p class="pad small muted">
+                {{ candidates.loaded() ? 'None you can see.' : 'Loading…' }}
+              </p>
+            } @else {
+              <table class="grid">
+                <tbody>
+                  @for (c of candidates.value(); track c.id) {
+                    <tr>
+                      <td>
+                        {{ c.label }} <span class="sub">{{ c.detail }}</span>
+                      </td>
+                      <td class="small muted">{{ groupsOf(c.id) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
           } @else {
             <header class="card-head">
               <h3>{{ editing() === 'new' ? 'New ' + kind.noun : name() }}</h3>
@@ -283,6 +335,16 @@ interface GroupKind {
         </section>
       </div>
 
+      <app-audit-trail
+        [heading]="kind.title + ' changes'"
+        [actions]="[kind.audit]"
+        [empty]="
+          'No ' +
+          kind.noun +
+          ' has been created, changed or deleted yet. Every change to one, and to who or what is in it, is recorded here.'
+        "
+      />
+
       <app-confirm-dialog
         [open]="dropping() !== null"
         [title]="'Remove ' + (dropping()?.label ?? '') + ' from ' + name() + '?'"
@@ -349,16 +411,76 @@ export class GroupsPageComponent {
       : 'Roles granted at this group no longer apply to this account.',
   );
 
+  readonly grants = iamResource(
+    () => this.iam.grants().pipe(catchError(() => of([] as IamGrant[]))),
+    [] as IamGrant[],
+  );
+  readonly tiles = computed<StatTile[]>(() => {
+    const groups = this.groups.value();
+    const cands = this.candidates.value();
+    const active = cands.filter((c) => !c.inactive).length;
+    const grouped = groups.reduce((n, g) => n + (g.size ?? 0), 0);
+    const grants = this.grants.value();
+    const viaGroups = grants.filter((g) => this.kind.grantMatch(g)).length;
+    const isTeam = this.kind.entryNoun === 'member';
+    return [
+      {
+        label: this.kind.title,
+        value: this.groups.loaded() ? String(groups.length) : '…',
+        caption: groups.length ? `${plural(grouped, 'place')} filled in total` : 'none made yet',
+      },
+      {
+        label: isTeam ? 'People in the organisation' : 'Trading accounts you can see',
+        value: this.candidates.loaded() ? String(isTeam ? active : cands.length) : '…',
+        caption: isTeam
+          ? `${cands.length - active} suspended or invited`
+          : 'each can be in several groups',
+        route: isTeam ? '/iam/members' : '/trading-accounts',
+      },
+      {
+        label: isTeam ? 'Grants to teams' : 'Grants at account groups',
+        value: this.grants.loaded() ? String(viaGroups) : '…',
+        caption: `of ${plural(grants.length, 'grant')} in the organisation`,
+        route: '/iam/grants',
+      },
+      {
+        label: 'Organisation-wide grants',
+        value: this.grants.loaded()
+          ? String(grants.filter((g) => g.scopeType === 'Tenant').length)
+          : '…',
+        caption: 'given to people directly, everywhere',
+      },
+    ];
+  });
+  /** Which groups each candidate is in — filled as groups are opened (the engine answers ids per group). */
+  private readonly membership = signal(new Map<number, string[]>());
+
   constructor() {
+    this.reloadAll();
+  }
+
+  reloadAll(): void {
     this.groups.reload();
     // Also the labels of what is in a group: the engine answers ids only.
     this.candidates.reload();
+    this.grants.reload();
+  }
+
+  groupsOf(id: number): string {
+    const names = this.membership().get(id);
+    if (names?.length) return names.join(', ');
+    return this.groups.value().length ? 'not in an opened group' : `in no ${this.kind.noun}`;
   }
 
   private teamKind(): GroupKind {
     return {
       title: 'Teams',
       subtitle: 'Groups of people. Grant a role to a team and every member holds it.',
+      explain:
+        'A team is a named group of people in this organisation. Grant a role to the team once and every member holds it; someone who joins or leaves the team gains or loses it at once — no grant per person to keep in step.',
+      audit: 'iam.team.',
+      grantMatch: (g) => g.principalType === 'Team',
+      candidatesTitle: 'People in this organisation',
       noun: 'team',
       entryNoun: 'member',
       emptyEntries: 'Nobody is in this team yet.',
@@ -386,7 +508,13 @@ export class GroupsPageComponent {
             ms.map((m) => ({
               id: m.userId,
               label: memberLabel(m),
-              detail: m.status === 'Active' ? (m.email ?? '') : `${m.status} · ${m.email ?? ''}`,
+              detail: [
+                m.status === 'Active' ? null : m.status,
+                m.roles?.length ? m.roles.join(', ') : 'no role',
+                m.email ?? null,
+              ]
+                .filter(Boolean)
+                .join(' · '),
               inactive: m.status !== 'Active',
             })),
           ),
@@ -399,6 +527,11 @@ export class GroupsPageComponent {
       title: 'Account groups',
       subtitle:
         'Sets of trading accounts. Grant a role at an account group and it applies to every account in it.',
+      explain:
+        'An account group is a named set of trading accounts — a desk, a client, a strategy book. Grant a role at the group and it applies to every account in it; the fund module also reports performance per account group.',
+      audit: 'iam.account_group.',
+      grantMatch: (g) => g.scopeType === 'AccountGroup',
+      candidatesTitle: 'Trading accounts',
       noun: 'account group',
       entryNoun: 'account',
       emptyEntries: 'No trading accounts in this group yet.',
@@ -434,7 +567,15 @@ export class GroupsPageComponent {
                 as.map((a) => ({
                   id: a.id,
                   label: a.accountName || a.accountId || `Account #${a.id}`,
-                  detail: `${a.accountId ?? ''}${a.isPaper ? ' · paper' : ''}`,
+                  detail: [
+                    a.accountId,
+                    a.brokerName,
+                    a.accountType,
+                    a.isPaper ? 'paper' : null,
+                    a.isActive ? null : 'inactive',
+                  ]
+                    .filter(Boolean)
+                    .join(' · '),
                 })),
               ),
               catchError(() => of([] as Entry[])),
@@ -468,7 +609,20 @@ export class GroupsPageComponent {
     this.entryIds.set([]);
     this.entriesError.set(null);
     this.kind.entryIds(id).subscribe({
-      next: (ids) => this.entryIds.set(ids),
+      next: (ids) => {
+        this.entryIds.set(ids);
+        const group = this.groups.value().find((g) => g.id === id)?.name;
+        if (group) {
+          const next = new Map(this.membership());
+          for (const [k, v] of next)
+            next.set(
+              k,
+              v.filter((n) => n !== group),
+            );
+          for (const e of ids) next.set(e, [...(next.get(e) ?? []), group]);
+          this.membership.set(next);
+        }
+      },
       error: (err) => this.entriesError.set(errorText(err, 'Could not load the members.')),
     });
   }

@@ -1,4 +1,6 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
@@ -134,6 +136,10 @@ function setup(api: Partial<Record<keyof LifecycleApiService, unknown>>, permiss
   const navigate = vi.fn();
   TestBed.configureTestingModule({
     providers: [
+      // Context panels on these pages call other engine reads; they go to the testing backend and stay unanswered.
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine.test' } },
       {
         provide: LifecycleApiService,
         useValue: {

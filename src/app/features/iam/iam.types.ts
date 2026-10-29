@@ -35,6 +35,8 @@ export interface IamMember {
   /** Names of the roles the member holds in this organisation (any scope). */
   roles?: string[] | null;
   mfaEnabled?: boolean | null;
+  /** Linked to the identity provider (console sign-in through it), rather than only the older password form. */
+  signsInWithIdentityProvider?: boolean | null;
 }
 
 /** A console session (`GET /iam/members/{userId}/sessions`, `GET /iam/me/sessions`). */
@@ -187,6 +189,9 @@ export interface SecurityPolicy {
   sessionIdleMinutes: number;
   sessionAbsoluteHours: number;
   ipAllowlist: string[];
+  /** When it was last saved; null = never (the defaults). Read-only. */
+  updatedAtUtc?: string | null;
+  updatedByAdminUserId?: number | null;
 }
 
 export type SsoProtocol = 'oidc' | 'saml';

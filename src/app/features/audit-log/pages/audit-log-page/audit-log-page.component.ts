@@ -9,6 +9,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, DecimalPipe, JsonPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
 import { NotificationService } from '@core/notifications/notification.service';
@@ -122,6 +123,13 @@ export class AuditLogPageComponent {
   private shownParams: Record<string, string> = {};
 
   constructor() {
+    // Links from other screens' "Recent activity" panels open the log narrowed to their action prefix
+    // (`/admin/audit?action=platform.elevation.`), over all time so an old event is not hidden.
+    const action = inject(ActivatedRoute).snapshot.queryParamMap.get('action');
+    if (action && /^[a-z0-9_.-]{1,80}$/i.test(action)) {
+      this.draft = { ...DEFAULT_AUDIT_FILTERS, action, range: 'all' };
+      this.applied.set({ ...this.draft });
+    }
     this.reload();
     void this.verifyRecent();
   }

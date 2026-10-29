@@ -7,6 +7,13 @@ import { IamApiService } from '@features/iam/iam-api.service';
 import { describeDevice, errorText, reportable, when } from '@features/iam/iam.logic';
 import type { IamSession } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { catchError, of } from 'rxjs';
+import { RouterLink } from '@angular/router';
+import { AuthService } from '@core/auth/auth.service';
+import { ago } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import type { SecurityPolicy } from '@features/iam/iam.types';
 
 /**
  * Your sessions and devices (U3.5, contract C3.5): every console session signed in as you, where
@@ -17,7 +24,13 @@ import { iamResource } from '@features/iam/shared/iam-resource';
   selector: 'app-account-sessions-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PageHeaderComponent, ConfirmDialogComponent],
+  imports: [
+    RouterLink,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -42,6 +55,8 @@ import { iamResource } from '@features/iam/shared/iam-resource';
           Sign out all other sessions
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Sessions summary" />
 
       <section class="card">
         @if (sessions.error(); as err) {
@@ -95,6 +110,29 @@ import { iamResource } from '@features/iam/shared/iam-resource';
         }
       </section>
 
+      @if (policy.value(); as p) {
+        <p class="note">
+          Your organisation's policy: a session ends after {{ p.sessionIdleMinutes }} idle minutes
+          and at most {{ p.sessionAbsoluteHours }} hours;
+          {{ p.mfaRequired ? 'a second factor is required' : 'a second factor is optional' }};
+          {{
+            p.ipAllowlist.length
+              ? 'sign-in only from ' + p.ipAllowlist.length + ' allowed network(s)'
+              : 'any network may sign in'
+          }}.
+          <a routerLink="/iam/security">Security policy</a>
+        </p>
+      }
+
+      @if (actorId()) {
+        <app-audit-trail
+          heading="Your recent sign-ins"
+          [actions]="['auth.login.', 'auth.logout', 'auth.session.']"
+          [actor]="actorId()"
+          empty="No sign-in, sign-out or ended session of yours is in the audit log yet."
+        />
+      }
+
       <app-confirm-dialog
         [open]="pending() !== null"
         [title]="
@@ -129,8 +167,50 @@ export class SessionsPageComponent {
   readonly pending = signal<IamSession | 'others' | null>(null);
   readonly busy = signal(false);
 
+  private readonly auth = inject(AuthService);
+  readonly policy = iamResource<SecurityPolicy | null>(
+    () => this.iam.securityPolicy().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly actorId = computed(() => {
+    const id = this.auth.user()?.passportId;
+    return id ? `admin-user:${id}` : null;
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const list = this.sessions.value();
+    const devices = new Set(list.map((x) => this.device(x))).size;
+    const nets = new Set(list.map((x) => x.ipAddress ?? '')).size;
+    const next = list
+      .map((x) => x.expiresAtUtc ?? '')
+      .filter(Boolean)
+      .sort()[0];
+    const loaded = this.sessions.loaded();
+    return [
+      {
+        label: 'Signed-in sessions',
+        value: loaded ? String(list.length) : '…',
+        caption: list.some((x) => x.current)
+          ? `${this.others().length} besides this one`
+          : 'this browser is not among them',
+        tone: this.others().length > 3 ? 'warn' : null,
+      },
+      { label: 'Devices', value: loaded ? String(devices) : '…', caption: 'browser and system' },
+      {
+        label: 'Networks',
+        value: loaded ? String(nets) : '…',
+        caption: 'distinct addresses signed in from',
+      },
+      {
+        label: 'Next to end',
+        value: next ? ago(next) : '—',
+        caption: next ? 'when its total lifetime runs out' : 'no session',
+      },
+    ];
+  });
+
   constructor() {
     this.sessions.reload();
+    this.policy.reload();
   }
 
   device(s: IamSession): string {

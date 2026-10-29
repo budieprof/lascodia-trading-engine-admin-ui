@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { catchError, defer, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
@@ -8,7 +10,12 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { errorText } from '@features/iam/iam.logic';
+import { IamApiService } from '@features/iam/iam-api.service';
+import type { TenantDto } from '@features/iam/iam.types';
+import { ago, countBy } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { LifecycleApiService } from '../lifecycle-api.service';
 import {
@@ -18,7 +25,7 @@ import {
   planSummary,
   purgeConfirmationOk,
 } from '../lifecycle.logic';
-import type { TenantClosure } from '../lifecycle.types';
+import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
 
 type Dialog = 'reopen' | 'purge' | null;
 
@@ -33,7 +40,16 @@ type Dialog = 'reopen' | 'purge' | null;
   selector: 'app-platform-closures-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, PageHeaderComponent, MfaHintComponent, ModalA11yDirective],
+  imports: [
+    DatePipe,
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    MfaHintComponent,
+    ModalA11yDirective,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   styles: [
     `
@@ -68,6 +84,24 @@ type Dialog = 'reopen' | 'purge' | null;
       .facts dt {
         color: var(--text-secondary);
       }
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+      ol.steps {
+        list-style: decimal;
+        margin: 0;
+        padding-left: var(--space-5);
+        display: grid;
+        gap: var(--space-2);
+      }
     `,
   ],
   template: `
@@ -79,19 +113,26 @@ type Dialog = 'reopen' | 'purge' | null;
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="closures.reload()"
+          (click)="reloadAll()"
           [disabled]="closures.loading()"
         >
           {{ closures.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
 
+      <app-stat-tiles [tiles]="tiles()" label="Closures summary" />
+
       <section class="card">
+        <header class="card-head"><h3>Closed organisations</h3></header>
         @if (closures.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         }
         @if (closures.loaded() && closures.value().length === 0 && !closures.error()) {
-          <p class="pad muted">No organisation has been closed.</p>
+          <p class="pad small muted">
+            No organisation has been closed. A closure appears here the moment an organisation's
+            Owner closes it from <a routerLink="/organisation/close">Close organisation</a>; it then
+            waits out its {{ graceDays() ?? 30 }}-day grace period before its data can be deleted.
+          </p>
         }
         @if (closures.value().length) {
           <div class="table-wrap">
@@ -137,6 +178,112 @@ type Dialog = 'reopen' | 'purge' | null;
           </div>
         }
       </section>
+
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>Every organisation</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/platform/organisations">Organisations</a>
+          </header>
+          @if (tenants.value().length === 0) {
+            <p class="pad small muted">
+              {{
+                canSeeTenants()
+                  ? 'Loading…'
+                  : 'Listing organisations needs platform.tenants.manage.'
+              }}
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Organisation</th>
+                    <th>State</th>
+                    <th>Can it be closed?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (t of tenants.value(); track t.id) {
+                    <tr>
+                      <td>
+                        {{ t.name
+                        }}<span class="sub"
+                          >{{ t.slug }} · {{ t.kind }} · {{ t.activeMembers ?? 0 }} active
+                          members</span
+                        >
+                      </td>
+                      <td>
+                        <span
+                          class="chip"
+                          [class.ok]="t.status === 'Active'"
+                          [class.warn]="t.status === 'Suspended'"
+                          [class.bad]="t.status === 'Closed'"
+                          >{{ t.status }}</span
+                        >
+                      </td>
+                      <td class="small">{{ closable(t) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+          @if (own.value(); as o) {
+            @if (o.blockers.length) {
+              <div class="card-body">
+                <p class="small">
+                  <strong>{{ o.name }}</strong> (the organisation you act in) today:
+                </p>
+                <ul class="errors">
+                  @for (b of o.blockers; track b) {
+                    <li>{{ b }}</li>
+                  }
+                </ul>
+                <p class="small muted">
+                  {{ o.members }} members · {{ o.owners }} Owner(s) ·
+                  {{ o.activeMachineCredentials }} terminal credentials · {{ o.openPositions }} open
+                  positions · {{ o.workingOrders }} working orders
+                </p>
+              </div>
+            }
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head"><h3>What closing does, step by step</h3></header>
+          <div class="card-body small">
+            <ol class="steps">
+              <li>
+                An Owner closes the organisation (step-up sign-in; a second Owner approves when
+                there is more than one). It is refused for House and while positions or working
+                orders are open.
+              </li>
+              <li>
+                At once: the organisation kill switch is engaged, terminal credentials, enrollment
+                tokens, API tokens and invitations are revoked, sessions end and its
+                identity-provider organisation is disabled.
+              </li>
+              <li>
+                For {{ graceDays() ?? 30 }} days (<code>Tenancy:Closure:GraceDays</code>) platform
+                staff can reopen it here — the kill switch stays engaged until someone releases it.
+              </li>
+              <li>
+                After that, staff review a dry-run deletion plan (every table and row count, who is
+                removed, what is kept) and confirm with the organisation's handle. The engine
+                deletes its data; audit events, the closure record and platform rows are kept.
+              </li>
+            </ol>
+          </div>
+        </section>
+      </div>
+
+      <app-audit-trail
+        heading="Closure activity"
+        [actions]="['tenant.closure.', 'platform.tenant.']"
+        empty="No organisation has been closed, reopened, suspended or deleted yet. Each closure, refusal, reopening, deletion plan and deletion is recorded here."
+      />
 
       @if (selected(); as c) {
         <section class="card">
@@ -394,6 +541,60 @@ export class PlatformClosuresPageComponent {
     [],
     'Could not load closed organisations.',
   );
+  private readonly iam = inject(IamApiService);
+  readonly canSeeTenants = computed(() =>
+    this.auth.hasPermission(Permission.PlatformTenantsManage),
+  );
+  readonly tenants = iamResource<TenantDto[]>(
+    () =>
+      this.canSeeTenants()
+        ? this.iam.tenants().pipe(catchError(() => of([] as TenantDto[])))
+        : of([] as TenantDto[]),
+    [],
+  );
+  /** The acting organisation's own closing state — its blockers and the grace period in force. */
+  readonly own = iamResource<TenantClosureState | null>(
+    () => defer(() => this.api.closureState()).pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly graceDays = computed(() => this.own.value()?.graceDays ?? null);
+  readonly tiles = computed<StatTile[]>(() => {
+    const rows = this.closures.value();
+    const tenants = this.tenants.value();
+    const byStatus = countBy(tenants, (t) => t.status);
+    const inGrace = rows.filter((c) => daysUntil(c.graceEndsAtUtc) > 0).length;
+    const latest =
+      rows
+        .map((c) => c.closedAtUtc)
+        .sort()
+        .at(-1) ?? null;
+    return [
+      {
+        label: 'Closed organisations',
+        value: this.closures.loaded() ? String(rows.length) : '…',
+        caption: latest ? `latest closed ${ago(latest)}` : 'none has ever been closed',
+      },
+      {
+        label: 'In their grace period',
+        value: this.closures.loaded() ? String(inGrace) : '…',
+        caption: `can still be reopened (${this.graceDays() ?? 30} days)`,
+        tone: inGrace ? 'warn' : null,
+      },
+      {
+        label: 'Active organisations',
+        value: tenants.length ? String(byStatus['Active'] ?? 0) : '—',
+        caption: `of ${tenants.length} · ${byStatus['Suspended'] ?? 0} suspended`,
+        route: '/platform/organisations',
+      },
+      {
+        label: 'Data deletions',
+        value: this.closures.loaded()
+          ? String(rows.filter((c) => /purg/i.test(c.status)).length)
+          : '…',
+        caption: 'scheduled or finished',
+      },
+    ];
+  });
   readonly selected = signal<TenantClosure | null>(null);
   readonly dialog = signal<Dialog>(null);
   readonly text = signal('');
@@ -404,7 +605,19 @@ export class PlatformClosuresPageComponent {
   });
 
   constructor() {
+    this.reloadAll();
+  }
+
+  reloadAll(): void {
     this.closures.reload();
+    this.tenants.reload();
+    this.own.reload();
+  }
+
+  closable(t: TenantDto): string {
+    if (t.kind === 'House') return 'Never — House is the platform operator and is never closed.';
+    if (t.status === 'Closed') return 'Already closed — see above.';
+    return 'Yes, by its Owner, once nothing is open.';
   }
 
   can(key: string): boolean {

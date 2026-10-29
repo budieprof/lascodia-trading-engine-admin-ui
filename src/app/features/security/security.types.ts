@@ -150,3 +150,36 @@ export interface EvidenceDownload {
   signature: string | null;
   signingKeyId: string | null;
 }
+
+/** One published EA build (`GET platform/ea/releases`, `GET onboarding/ea/latest`) — metadata, never the bytes. */
+export interface EaReleaseInfo {
+  id: number;
+  version: string;
+  numericVersion: number;
+  sha256: string;
+  sizeBytes: number;
+  builtAtUtc: string | null;
+  publishedAtUtc: string;
+  publishedBy: string;
+  notes: string | null;
+  fileName: string;
+}
+
+/** One engine process's build (`GET admin/observability/build-skew`). */
+export interface RoleBuild {
+  role: string;
+  buildId: string;
+  buildVersion: string;
+  buildTimeUtc: string | null;
+  hostName: string | null;
+  startedAtUtc: string | null;
+  lastSeenAtUtc: string | null;
+  hoursBehind: number;
+}
+
+export interface RoleBuildSkew {
+  hasSkew: boolean;
+  distinctBuilds: number;
+  roles: RoleBuild[];
+  staleRoles: string[];
+}

@@ -11,6 +11,11 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
 
 import { VenuesApiService } from '../venues-api.service';
 import {
@@ -48,9 +53,18 @@ interface CredentialForm {
 type Pending =
   | { kind: 'verify'; account: ExecutionAccount }
   | { kind: 'revoke'; account: ExecutionAccount }
-  | { kind: 'status'; account: ExecutionAccount; status: 'Active' | 'Disabled' | 'Suspended'; reason: string };
+  | {
+      kind: 'status';
+      account: ExecutionAccount;
+      status: 'Active' | 'Disabled' | 'Suspended';
+      reason: string;
+    };
 
-const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches: {}, accounts: [], workers: [] } };
+const EMPTY: ConnectionsData = {
+  adapters: [],
+  accounts: [],
+  health: { switches: {}, accounts: [], workers: [] },
+};
 
 /**
  * Connections (multi-asset WS7 7.7): the organisation's execution accounts at venues (exec-gateway `execution/*`) and
@@ -65,7 +79,15 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
   selector: 'app-connections-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent, LscCanDirective, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    LscCanDirective,
+    ConfirmDialogComponent,
+    StatTilesComponent,
+    FeatureStateComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
@@ -100,10 +122,20 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
         subtitle="Execution accounts at exchanges and brokers, their API credentials (write-only) and adapter health. MT5 accounts need none: their Expert Advisor is the adapter."
       >
         <a class="btn btn-secondary" routerLink="/connections/drift">Reconciliation drift</a>
-        <button *lscCan="'accounts.manage'" type="button" class="btn btn-secondary" (click)="startCreate()">
+        <button
+          *lscCan="'accounts.manage'"
+          type="button"
+          class="btn btn-secondary"
+          (click)="startCreate()"
+        >
           Add account
         </button>
-        <button type="button" class="btn btn-secondary" (click)="data.reload()" [disabled]="data.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="data.reload()"
+          [disabled]="data.loading()"
+        >
           {{ data.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -112,19 +144,24 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
         <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
       }
 
+      <app-stat-tiles [tiles]="tiles()" label="Connections summary" />
+
       <section class="card" aria-label="Execution switches">
         <header class="card-head"><h3>Execution switches (platform)</h3></header>
         <div class="switches">
           @for (s of switchList(); track s.key) {
-            <span class="chip" [class.ok]="s.value === 'true' || s.value === 'act'" title="{{ s.key }}">{{ s.short }}: {{ s.value }}</span>
+            <span
+              class="chip"
+              [class.ok]="s.value === 'true' || s.value === 'act'"
+              title="{{ s.key }}"
+              >{{ s.short }}: {{ s.value }}</span
+            >
           } @empty {
             <span class="muted small">No Execution:* switch is stored.</span>
           }
         </div>
         <p class="note">
-          Nothing is routed to a venue while <code>Execution:Router:Enabled</code> is false, and no venue entry is placed
-          while <code>Execution:Entries:Enabled</code> is false. The switches are platform settings (engine config), not
-          this page's.
+          {{ switchNote() }} The switches are platform settings (engine config), not this page's.
         </p>
       </section>
 
@@ -133,8 +170,8 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
           <header class="card-head"><h3>Add an execution account</h3></header>
           <form class="card-body" (ngSubmit)="create()">
             <p class="note">
-              The account is created DISABLED. Store a credential, verify it, then activate it. Paper uses the venue's
-              testnet / paper endpoint; Live trades real money.
+              The account is created DISABLED. Store a credential, verify it, then activate it.
+              Paper uses the venue's testnet / paper endpoint; Live trades real money.
             </p>
             <div class="form-grid">
               <label class="field">
@@ -156,11 +193,22 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
               </label>
               <label class="field">
                 <span class="label">Venue account id (optional)</span>
-                <input class="input" name="c-ext" maxlength="128" [(ngModel)]="c.externalAccountId" />
+                <input
+                  class="input"
+                  name="c-ext"
+                  maxlength="128"
+                  [(ngModel)]="c.externalAccountId"
+                />
               </label>
               <label class="field">
                 <span class="label">Linked trading account id (optional)</span>
-                <input class="input" type="number" name="c-ta" min="1" [(ngModel)]="c.tradingAccountId" />
+                <input
+                  class="input"
+                  type="number"
+                  name="c-ta"
+                  min="1"
+                  [(ngModel)]="c.tradingAccountId"
+                />
               </label>
               <label class="field">
                 <span class="label">Mode</span>
@@ -175,11 +223,24 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
               </label>
             </div>
             @if (c.mode === 'Live') {
-              <p class="note warn">Live: once activated, orders the engine routes here trade real money.</p>
+              <p class="note warn">
+                Live: once activated, orders the engine routes here trade real money.
+              </p>
             }
             <div class="actions-row">
-              <button type="button" class="btn btn-secondary" data-autofocus (click)="creating.set(null)">Cancel</button>
-              <button type="submit" class="btn btn-primary" [disabled]="busy() || !c.name.trim() || !c.adapterKind || !c.venue.trim()">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-autofocus
+                (click)="creating.set(null)"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary"
+                [disabled]="busy() || !c.name.trim() || !c.adapterKind || !c.venue.trim()"
+              >
                 {{ busy() ? 'Adding…' : 'Add (disabled)' }}
               </button>
             </div>
@@ -189,34 +250,72 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
 
       @if (credential(); as f) {
         <section class="card" aria-label="Store a credential">
-          <header class="card-head"><h3>Credential · {{ f.account.name }} ({{ f.account.adapterKind }})</h3></header>
+          <header class="card-head">
+            <h3>Credential · {{ f.account.name }} ({{ f.account.adapterKind }})</h3>
+          </header>
           <form class="card-body" (ngSubmit)="saveCredential()" autocomplete="off">
             <p class="note">
-              Write-only: the values go to the engine once, are stored encrypted and are never shown again — only a
-              fingerprint is. Use a <strong>trade-only</strong> key: a key that can withdraw or transfer is refused and
-              erased at verification.
+              Write-only: the values go to the engine once, are stored encrypted and are never shown
+              again — only a fingerprint is. Use a <strong>trade-only</strong> key: a key that can
+              withdraw or transfer is refused and erased at verification.
             </p>
             <div class="form-grid">
               @for (fld of f.fields; track fld.name) {
                 <label class="field">
-                  <span class="label">{{ fld.label }}{{ fld.optional ? ' (optional)' : '' }} · <code>{{ fld.name }}</code></span>
+                  <span class="label"
+                    >{{ fld.label }}{{ fld.optional ? ' (optional)' : '' }} ·
+                    <code>{{ fld.name }}</code></span
+                  >
                   @if (fld.multiline) {
-                    <textarea class="input" [name]="'cred-' + fld.name" spellcheck="false" [(ngModel)]="f.values[fld.name]"></textarea>
+                    <textarea
+                      class="input"
+                      [name]="'cred-' + fld.name"
+                      spellcheck="false"
+                      [(ngModel)]="f.values[fld.name]"
+                    ></textarea>
                   } @else {
-                    <input class="input" type="password" [name]="'cred-' + fld.name" autocomplete="new-password" [(ngModel)]="f.values[fld.name]" />
+                    <input
+                      class="input"
+                      type="password"
+                      [name]="'cred-' + fld.name"
+                      autocomplete="new-password"
+                      [(ngModel)]="f.values[fld.name]"
+                    />
                   }
                 </label>
               }
               <label class="field">
                 <span class="label">Add another field (name)</span>
-                <input class="input" name="cred-extra" maxlength="64" [(ngModel)]="f.extraName" (keydown.enter)="$event.preventDefault(); addField()" />
+                <input
+                  class="input"
+                  name="cred-extra"
+                  maxlength="64"
+                  [(ngModel)]="f.extraName"
+                  (keydown.enter)="$event.preventDefault(); addField()"
+                />
               </label>
             </div>
             <div class="actions-row">
-              <button type="button" class="btn btn-secondary" (click)="addField()" [disabled]="!f.extraName.trim()">Add field</button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="addField()"
+                [disabled]="!f.extraName.trim()"
+              >
+                Add field
+              </button>
               <span class="spacer"></span>
-              <button type="button" class="btn btn-secondary" data-autofocus (click)="cancelCredential()">Cancel</button>
-              <button type="submit" class="btn btn-primary" [disabled]="busy()">{{ busy() ? 'Saving…' : 'Save credential' }}</button>
+              <button
+                type="button"
+                class="btn btn-secondary"
+                data-autofocus
+                (click)="cancelCredential()"
+              >
+                Cancel
+              </button>
+              <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                {{ busy() ? 'Saving…' : 'Save credential' }}
+              </button>
             </div>
           </form>
         </section>
@@ -235,7 +334,11 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
               }
             </p>
             @if (r.reason) {
-              <p class="note" [class.warn]="r.status === 'RefusedWithdrawalRights' || r.status === 'Rejected'" data-testid="credential-reason">
+              <p
+                class="note"
+                [class.warn]="r.status === 'RefusedWithdrawalRights' || r.status === 'Rejected'"
+                data-testid="credential-reason"
+              >
                 {{ r.reason }}
               </p>
             }
@@ -265,18 +368,38 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
                   <tr>
                     <td>
                       {{ r.account.name }}
-                      <span class="sub">#{{ r.account.id }}{{ r.account.externalAccountId ? ' · ' + r.account.externalAccountId : '' }}{{ r.account.tradingAccountId ? ' · trading account ' + r.account.tradingAccountId : '' }}</span>
+                      <span class="sub"
+                        >#{{ r.account.id
+                        }}{{ r.account.externalAccountId ? ' · ' + r.account.externalAccountId : ''
+                        }}{{
+                          r.account.tradingAccountId
+                            ? ' · trading account ' + r.account.tradingAccountId
+                            : ''
+                        }}</span
+                      >
                     </td>
-                    <td class="small"><code>{{ r.account.adapterKind }}</code><span class="sub">{{ r.account.venue }}</span></td>
+                    <td class="small">
+                      <code>{{ r.account.adapterKind }}</code
+                      ><span class="sub">{{ r.account.venue }}</span>
+                    </td>
                     <td>
-                      <span class="chip" [class.ok]="r.account.status === 'Active'" [class.warn]="r.account.status === 'Suspended'">{{ r.account.status }}</span>
+                      <span
+                        class="chip"
+                        [class.ok]="r.account.status === 'Active'"
+                        [class.warn]="r.account.status === 'Suspended'"
+                        >{{ r.account.status }}</span
+                      >
                       <span class="sub">{{ r.account.mode }}</span>
                     </td>
                     <td class="small">
-                      <span class="chip" [class]="credTone(r.account.credential?.status)">{{ credLabel(r.account.credential?.status) }}</span>
+                      <span class="chip" [class]="credTone(r.account.credential?.status)">{{
+                        credLabel(r.account.credential?.status)
+                      }}</span>
                       @if (r.account.credential; as cred) {
                         @if (cred.keyFingerprint) {
-                          <span class="sub"><code>{{ cred.keyFingerprint }}</code></span>
+                          <span class="sub"
+                            ><code>{{ cred.keyFingerprint }}</code></span
+                          >
                         }
                         @if (cred.reason) {
                           <span class="sub">{{ cred.reason }}</span>
@@ -294,7 +417,9 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
                           </ul>
                         }
                         @if (h.lastConnectResult) {
-                          <span class="sub">{{ h.lastConnectResult }} · {{ when(h.lastConnectedAtUtc) }}</span>
+                          <span class="sub"
+                            >{{ h.lastConnectResult }} · {{ when(h.lastConnectedAtUtc) }}</span
+                          >
                         }
                       } @else {
                         <span class="muted">—</span>
@@ -314,25 +439,67 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
                         }
                       }
                     </td>
-                    <td class="small">{{ when(r.health?.lastFillAtUtc) }}<span class="sub">{{ r.health?.fills24h ?? 0 }} in 24 h</span></td>
+                    <td class="small">
+                      {{ when(r.health?.lastFillAtUtc)
+                      }}<span class="sub">{{ r.health?.fills24h ?? 0 }} in 24 h</span>
+                    </td>
                     <td class="actions">
-                      <button *lscCan="'accounts.connect'" type="button" class="btn btn-sm btn-secondary" (click)="startCredential(r.account)">
+                      <button
+                        *lscCan="'accounts.connect'"
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        (click)="startCredential(r.account)"
+                      >
                         {{ r.account.credential ? 'Replace key' : 'Add key' }}
                       </button>
                       @if (hasStoredKey(r.account)) {
-                        <button *lscCan="'accounts.connect'" type="button" class="btn btn-sm btn-secondary" (click)="ask({ kind: 'verify', account: r.account })">
+                        <button
+                          *lscCan="'accounts.connect'"
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="ask({ kind: 'verify', account: r.account })"
+                        >
                           Verify
                         </button>
-                        <button *lscCan="'accounts.connect'" type="button" class="btn btn-sm btn-danger" (click)="ask({ kind: 'revoke', account: r.account })">
+                        <button
+                          *lscCan="'accounts.connect'"
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          (click)="ask({ kind: 'revoke', account: r.account })"
+                        >
                           Revoke
                         </button>
                       }
                       @if (r.account.status !== 'Active') {
-                        <button *lscCan="'accounts.manage'" type="button" class="btn btn-sm btn-secondary" (click)="ask({ kind: 'status', account: r.account, status: 'Active', reason: '' })">
+                        <button
+                          *lscCan="'accounts.manage'"
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="
+                            ask({
+                              kind: 'status',
+                              account: r.account,
+                              status: 'Active',
+                              reason: '',
+                            })
+                          "
+                        >
                           Activate
                         </button>
                       } @else {
-                        <button *lscCan="'accounts.manage'" type="button" class="btn btn-sm btn-secondary" (click)="ask({ kind: 'status', account: r.account, status: 'Disabled', reason: '' })">
+                        <button
+                          *lscCan="'accounts.manage'"
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="
+                            ask({
+                              kind: 'status',
+                              account: r.account,
+                              status: 'Disabled',
+                              reason: '',
+                            })
+                          "
+                        >
                           Disable
                         </button>
                       }
@@ -343,7 +510,19 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
             </table>
           </div>
         } @else if (data.loaded() && !data.error()) {
-          <p class="pad muted">No execution account yet. MT5 accounts trade through their Expert Advisor and are not listed here.</p>
+          <div class="card-body">
+            <app-feature-state
+              title="Trading at exchanges and brokers"
+              summary="An execution account is an exchange or broker login (crypto, futures, equities) that the engine places orders on directly through one of the adapters below. MT5 accounts trade through their Expert Advisor and are not listed here."
+              kind="waiting"
+              stateLabel="No account connected"
+              [requirements]="venueRequirements()"
+              [links]="[
+                { label: 'Multi-asset set-up guide', route: '/docs/multi-asset-setup' },
+                { label: 'Connections guide', route: '/docs/connections-guide' },
+              ]"
+            />
+          </div>
         }
       </section>
 
@@ -365,7 +544,12 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
             <tbody>
               @for (a of data.value().adapters; track a.kind) {
                 <tr>
-                  <td><code>{{ a.kind }}</code><span class="sub">{{ a.requiresCredential ? 'needs a credential' : 'no credential' }}</span></td>
+                  <td>
+                    <code>{{ a.kind }}</code
+                    ><span class="sub">{{
+                      a.requiresCredential ? 'needs a credential' : 'no credential'
+                    }}</span>
+                  </td>
                   <td class="small">{{ a.capabilities.entryModel }}</td>
                   <td class="small">{{ names(a.capabilities.orderTypes, 'type') }}</td>
                   <td class="small">{{ names(a.capabilities.timeInForce, 'tif') }}</td>
@@ -394,10 +578,19 @@ const EMPTY: ConnectionsData = { adapters: [], accounts: [], health: { switches:
             <tbody>
               @for (w of data.value().health.workers; track w.workerName) {
                 <tr>
-                  <td><code>{{ w.workerName }}</code></td>
-                  <td><span class="chip" [class.ok]="w.isRunning">{{ w.isRunning ? 'yes' : 'no' }}</span></td>
+                  <td>
+                    <code>{{ w.workerName }}</code>
+                  </td>
+                  <td>
+                    <span class="chip" [class.ok]="w.isRunning">{{
+                      w.isRunning ? 'yes' : 'no'
+                    }}</span>
+                  </td>
                   <td class="small">{{ when(w.lastSuccessAt) }}</td>
-                  <td class="small">{{ w.lastErrorMessage ?? '—' }}{{ w.consecutiveFailures ? ' (' + w.consecutiveFailures + ' in a row)' : '' }}</td>
+                  <td class="small">
+                    {{ w.lastErrorMessage ?? '—'
+                    }}{{ w.consecutiveFailures ? ' (' + w.consecutiveFailures + ' in a row)' : '' }}
+                  </td>
                 </tr>
               }
             </tbody>
@@ -452,10 +645,14 @@ export class ConnectionsPageComponent {
   readonly lastResult = signal<ExecutionCredentialStatus | null>(null);
   readonly pending = signal<Pending | null>(null);
 
-  readonly venueAdapters = computed(() => this.data.value().adapters.filter((a) => a.kind !== 'mt5-ea'));
+  readonly venueAdapters = computed(() =>
+    this.data.value().adapters.filter((a) => a.kind !== 'mt5-ea'),
+  );
   readonly rows = computed(() => {
     const d = this.data.value();
-    const byId = new Map<number, ExecutionAccountHealth>(d.health.accounts.map((h) => [h.executionAccountId, h]));
+    const byId = new Map<number, ExecutionAccountHealth>(
+      d.health.accounts.map((h) => [h.executionAccountId, h]),
+    );
     return d.accounts.map((account) => ({ account, health: byId.get(account.id) ?? null }));
   });
   readonly switchList = computed(() =>
@@ -466,10 +663,87 @@ export class ConnectionsPageComponent {
     })),
   );
 
+  private sw(key: string): string | null {
+    return this.data.value().health.switches[key] ?? null;
+  }
+  readonly switchNote = computed(() => {
+    const router = this.sw('Execution:Router:Enabled') === 'true';
+    const entries = this.sw('Execution:Entries:Enabled') === 'true';
+    if (router && entries)
+      return 'Routing and venue entries are on: an approved signal for an instrument with an execution account is placed at its venue.';
+    return `${router ? 'Routing is on' : 'Nothing is routed to a venue (Execution:Router:Enabled is off)'}; ${
+      entries
+        ? 'venue entries are on.'
+        : 'no venue entry is placed (Execution:Entries:Enabled is off).'
+    }`;
+  });
+  readonly venueRequirements = computed<FeatureRequirement[]>(() => {
+    const router = this.sw('Execution:Router:Enabled') === 'true';
+    const entries = this.sw('Execution:Entries:Enabled') === 'true';
+    return [
+      {
+        label: 'Execution:Router:Enabled',
+        ok: router,
+        detail: router ? 'On.' : 'Off — nothing is routed to a venue.',
+        route: '/engine-config',
+        query: { search: 'Execution:' },
+      },
+      {
+        label: 'Execution:Entries:Enabled',
+        ok: entries,
+        detail: entries ? 'On.' : 'Off — no venue entry is placed.',
+        route: '/engine-config',
+        query: { search: 'Execution:' },
+      },
+      {
+        label: 'An execution account with an API key',
+        ok: false,
+        detail:
+          'None yet — use Add account, then store its key (write-only; withdrawal rights are refused).',
+      },
+    ];
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const d = this.data.value();
+    const on = Object.values(d.health.switches).filter((v) => v === 'true' || v === 'act').length;
+    const workers = d.health.workers ?? [];
+    const workersOk = workers.filter((w) => w.isRunning).length;
+    const workersAll = workers.length;
+    return [
+      {
+        label: 'Execution accounts',
+        value: this.data.loaded() ? String(d.accounts.length) : '…',
+        caption: d.accounts.length
+          ? 'at exchanges and brokers'
+          : 'none connected; MT5 trades through its EA',
+      },
+      {
+        label: 'Venue adapters in this build',
+        value: String(this.venueAdapters().length),
+        caption: 'exchanges and brokers the engine can talk to',
+      },
+      {
+        label: 'Execution switches on',
+        value: `${on} of ${Object.keys(d.health.switches).length}`,
+        caption: 'platform settings',
+        route: '/engine-config',
+      },
+      {
+        label: 'Execution workers running',
+        value: workersAll ? `${workersOk} of ${workersAll}` : '—',
+        caption: 'in this engine process',
+      },
+    ];
+  });
+
   readonly confirmTitle = computed(() => {
     const p = this.pending();
     if (!p) return '';
-    return p.kind === 'verify' ? `Verify ${p.account.name}` : p.kind === 'revoke' ? `Revoke the key of ${p.account.name}` : `${p.status === 'Active' ? 'Activate' : p.status === 'Disabled' ? 'Disable' : 'Suspend'} ${p.account.name}`;
+    return p.kind === 'verify'
+      ? `Verify ${p.account.name}`
+      : p.kind === 'revoke'
+        ? `Revoke the key of ${p.account.name}`
+        : `${p.status === 'Active' ? 'Activate' : p.status === 'Disabled' ? 'Disable' : 'Suspend'} ${p.account.name}`;
   });
   readonly confirmMessage = computed(() => {
     const p = this.pending();
@@ -487,11 +761,21 @@ export class ConnectionsPageComponent {
   });
   readonly confirmVariant = computed<'primary' | 'destructive'>(() => {
     const p = this.pending();
-    return p?.kind === 'revoke' || (p?.kind === 'status' && p.status !== 'Active') ? 'destructive' : 'primary';
+    return p?.kind === 'revoke' || (p?.kind === 'status' && p.status !== 'Active')
+      ? 'destructive'
+      : 'primary';
   });
   readonly confirmLabel = computed(() => {
     const p = this.pending();
-    return !p ? 'Confirm' : p.kind === 'verify' ? 'Verify' : p.kind === 'revoke' ? 'Revoke' : p.status === 'Active' ? 'Activate' : 'Disable';
+    return !p
+      ? 'Confirm'
+      : p.kind === 'verify'
+        ? 'Verify'
+        : p.kind === 'revoke'
+          ? 'Revoke'
+          : p.status === 'Active'
+            ? 'Activate'
+            : 'Disable';
   });
 
   constructor() {
@@ -509,7 +793,9 @@ export class ConnectionsPageComponent {
   }
 
   names(values: (string | number)[], kind: 'type' | 'tif'): string {
-    const list = (values ?? []).map((v) => (kind === 'type' ? orderTypeName(v) : tifName(v)).toString());
+    const list = (values ?? []).map((v) =>
+      (kind === 'type' ? orderTypeName(v) : tifName(v)).toString(),
+    );
     return list.length ? list.join(', ') : '—';
   }
 
@@ -519,7 +805,15 @@ export class ConnectionsPageComponent {
 
   startCreate(): void {
     this.credential.set(null);
-    this.creating.set({ name: '', adapterKind: '', venue: '', externalAccountId: '', tradingAccountId: null, mode: 'Paper', currency: '' });
+    this.creating.set({
+      name: '',
+      adapterKind: '',
+      venue: '',
+      externalAccountId: '',
+      tradingAccountId: null,
+      mode: 'Paper',
+      currency: '',
+    });
   }
 
   create(): void {
@@ -554,15 +848,26 @@ export class ConnectionsPageComponent {
     this.creating.set(null);
     this.lastResult.set(null);
     const fields = credentialFieldsFor(account.adapterKind);
-    this.credential.set({ account, fields, values: Object.fromEntries(fields.map((f) => [f.name, ''])), extraName: '' });
+    this.credential.set({
+      account,
+      fields,
+      values: Object.fromEntries(fields.map((f) => [f.name, ''])),
+      extraName: '',
+    });
   }
 
   addField(): void {
     this.credential.update((f) => {
       if (!f) return f;
       const name = f.extraName.trim();
-      if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name) || f.fields.some((x) => x.name === name)) return { ...f, extraName: '' };
-      return { ...f, fields: [...f.fields, { name, label: name }], values: { ...f.values, [name]: '' }, extraName: '' };
+      if (!/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(name) || f.fields.some((x) => x.name === name))
+        return { ...f, extraName: '' };
+      return {
+        ...f,
+        fields: [...f.fields, { name, label: name }],
+        values: { ...f.values, [name]: '' },
+        extraName: '',
+      };
     });
   }
 

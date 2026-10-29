@@ -8,6 +8,15 @@ import {
   untracked,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { catchError, of } from 'rxjs';
+
+import { AuthService } from '@core/auth/auth.service';
+import { PlansApiService } from '@features/platform/plans-api.service';
+import type { TenantUsage } from '@features/platform/plans.types';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
 
 import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
@@ -15,8 +24,11 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
 import { errorText, reportable, ssoErrors, when } from '../iam.logic';
-import type { SaveSsoBody, ScimToken, SsoConfig, SsoProtocol } from '../iam.types';
+import type { IamMember, SaveSsoBody, ScimToken, SsoConfig, SsoProtocol } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
+import { ago } from '../shared/admin-context.logic';
+import { AuditTrailComponent } from '../shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
 import { MfaHintComponent } from '../shared/mfa-hint.component';
 import { SecretOnceComponent } from '../shared/secret-once.component';
 
@@ -36,6 +48,9 @@ import { SecretOnceComponent } from '../shared/secret-once.component';
     ConfirmDialogComponent,
     MfaHintComponent,
     SecretOnceComponent,
+    StatTilesComponent,
+    FeatureStateComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
   template: `
@@ -44,6 +59,19 @@ import { SecretOnceComponent } from '../shared/secret-once.component';
         title="Single sign-on"
         subtitle="Let members sign in with your organisation's identity provider, and provision them from your directory."
       />
+
+      <app-stat-tiles [tiles]="tiles()" label="Single sign-on summary" />
+
+      @if (!config.value()?.enabled) {
+        <app-feature-state
+          title="Your own identity provider"
+          summary="Members whose e-mail is on one of your domains sign in with your company's identity provider (Okta, Entra ID, Google Workspace…) instead of a password here; your directory can add and remove members through SCIM. Until then everyone signs in with the platform's own sign-in."
+          [kind]="config.value() ? 'partial' : 'off'"
+          [stateLabel]="config.value() ? 'Saved · switched off' : 'Not set up'"
+          [requirements]="requirements()"
+          [links]="[{ label: 'Admin guide', route: '/docs/admin-guide' }]"
+        />
+      }
 
       <section class="card">
         <header class="card-head">
@@ -275,6 +303,12 @@ import { SecretOnceComponent } from '../shared/secret-once.component';
         }
       </section>
 
+      <app-audit-trail
+        heading="Single sign-on and directory changes"
+        [actions]="['iam.sso.', 'iam.scim']"
+        empty="Single sign-on has never been configured and no directory has provisioned anyone. Each settings change, SCIM token and provisioned or removed person is recorded here."
+      />
+
       <app-confirm-dialog
         [open]="confirming()"
         title="Save single sign-on?"
@@ -321,6 +355,96 @@ export class SsoPageComponent {
     'Could not load SCIM tokens.',
   );
 
+  private readonly auth = inject(AuthService);
+  private readonly plans = inject(PlansApiService);
+  readonly usage = iamResource<TenantUsage | null>(
+    () => this.plans.myUsage().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly members = iamResource<IamMember[]>(
+    () => this.iam.members().pipe(catchError(() => of([] as IamMember[]))),
+    [],
+  );
+  readonly requirements = computed<FeatureRequirement[]>(() => {
+    const u = this.usage.value();
+    const c = this.config.value();
+    return [
+      {
+        label: 'Your plan includes single sign-on',
+        ok: u ? u.features.sso : null,
+        detail: u
+          ? `${u.plan?.name ?? 'Plan'}: ${u.features.sso ? 'included' : 'not included'}.`
+          : 'Plan not readable.',
+        route: '/iam/plan',
+      },
+      {
+        label: 'Console sign-in through the identity provider',
+        ok: this.auth.mode === 'bff',
+        detail:
+          this.auth.mode === 'bff'
+            ? 'On — the console signs people in through the platform identity provider, which routes your domains.'
+            : 'Off — the console still uses the older password form.',
+      },
+      {
+        label: 'Your identity provider registered here',
+        ok: !!c,
+        detail: c
+          ? `${c.protocol.toUpperCase()} · ${c.displayName || c.issuerOrMetadataUrl}`
+          : "Fill in the form below with your provider's issuer (OIDC) or metadata URL (SAML).",
+      },
+      {
+        label: 'E-mail domains routed to it',
+        ok: c ? c.domains.length > 0 : false,
+        detail: c?.domains.length
+          ? c.domains.join(', ')
+          : "None yet — public mailbox domains and other organisations' domains are refused.",
+      },
+    ];
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const c = this.config.value();
+    const u = this.usage.value();
+    const active = this.members.value().filter((m) => m.status === 'Active');
+    const idp = active.filter((m) => m.signsInWithIdentityProvider).length;
+    const live = this.scim.value().filter((t) => (t.status ?? 'Active') === 'Active').length;
+    return [
+      {
+        label: 'Single sign-on',
+        value: !this.config.loaded() ? '…' : c?.enabled ? 'On' : c ? 'Off' : 'Not set up',
+        caption: c?.lastSyncedAtUtc
+          ? `applied ${ago(c.lastSyncedAtUtc)}`
+          : 'members use the platform sign-in',
+        tone: c?.enabled ? 'good' : null,
+      },
+      {
+        label: 'Domains routed',
+        value: String(c?.domains.length ?? 0),
+        caption: c?.domains.length ? c.domains.join(', ') : 'no domain sent to your provider',
+      },
+      {
+        label: 'Directory tokens (SCIM)',
+        value: this.scim.loaded() ? String(live) : '…',
+        caption: live ? 'can add and remove members' : 'no directory connected',
+      },
+      {
+        label: 'Plan allows',
+        value: !u
+          ? '—'
+          : [u.features.sso ? 'SSO' : null, u.features.scim ? 'SCIM' : null]
+              .filter(Boolean)
+              .join(' + ') || 'Neither',
+        caption: u?.plan?.name ? `${u.plan.name} plan` : 'plan not readable',
+        route: '/iam/plan',
+      },
+      {
+        label: 'Members on the identity provider',
+        value: this.members.loaded() ? `${idp} of ${active.length}` : '…',
+        caption: 'linked to the platform sign-in today',
+        route: '/iam/members',
+      },
+    ];
+  });
+
   readonly protocol = signal<SsoProtocol>('oidc');
   readonly displayName = signal('');
   readonly issuer = signal('');
@@ -364,6 +488,8 @@ export class SsoPageComponent {
     });
     this.config.reload();
     this.scim.reload();
+    this.usage.reload();
+    this.members.reload();
   }
 
   private fill(c: SsoConfig): void {

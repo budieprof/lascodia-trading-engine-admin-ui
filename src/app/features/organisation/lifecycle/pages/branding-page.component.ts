@@ -18,6 +18,9 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { errorText } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { ago } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 import { LifecycleApiService } from '../lifecycle-api.service';
 import {
   BRANDING_LIMITS,
@@ -39,7 +42,13 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
   selector: 'app-organisation-branding-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   styles: [
     `
@@ -83,6 +92,13 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
         object-fit: contain;
         align-self: flex-start;
       }
+      .where {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        display: grid;
+        gap: var(--space-2);
+      }
       .colour-row {
         display: flex;
         gap: var(--space-2);
@@ -113,6 +129,8 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
           {{ branding.loading() ? 'Loading…' : 'Reload' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Branding summary" />
 
       @if (branding.error(); as err) {
         <section class="card">
@@ -269,6 +287,31 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
         }
       }
 
+      <section class="card">
+        <header class="card-head"><h3>Where members see it</h3></header>
+        <div class="card-body small">
+          <ul class="where">
+            <li><strong>Name</strong> — the header, the sidebar and the browser tab title.</li>
+            <li>
+              <strong>Colour</strong> — buttons, links, the selected page in the sidebar and the
+              phone's address bar; text on it switches to black or white for contrast.
+            </li>
+            <li><strong>Logo</strong> — the top of the sidebar, in place of the platform's.</li>
+            <li><strong>Favicon</strong> — the browser tab and bookmarks.</li>
+            <li>
+              Not changed: the sign-in page (always the platform's), e-mails and the public status
+              page. A change shows at each member's next page load.
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <app-audit-trail
+        heading="Branding changes"
+        [actions]="['tenant.branding.']"
+        empty="The branding has never been changed: members see the platform's look. Every change of the name, colour or images is recorded here."
+      />
+
       <app-confirm-dialog
         [open]="confirmingReset()"
         title="Remove all branding?"
@@ -299,6 +342,36 @@ export class BrandingPageComponent {
     'Could not load the branding.',
   );
   readonly canManage = computed(() => this.auth.hasPermission(Permission.TenantBrandingManage));
+  readonly tiles = computed<StatTile[]>(() => {
+    const b = this.branding.value();
+    const img = (i: TenantBranding['logo'], what: string): StatTile => ({
+      label: what,
+      value: i ? `${i.width}×${i.height}` : 'Platform’s',
+      caption: i
+        ? `${i.contentType.replace('image/', '').toUpperCase()} · ${formatBytes(i.sizeBytes)}`
+        : 'none uploaded',
+      tone: i ? 'good' : null,
+    });
+    return [
+      {
+        label: 'Name shown',
+        value: b?.displayName ?? '…',
+        caption: b?.customDisplayName ? 'branding name' : 'the organisation’s own name',
+      },
+      {
+        label: 'Colour',
+        value: b?.primaryColor ?? 'Platform’s',
+        caption: b?.primaryColor ? 'members’ accent colour' : 'no colour set',
+      },
+      img(b?.logo ?? null, 'Sidebar logo'),
+      img(b?.favicon ?? null, 'Favicon'),
+      {
+        label: 'Last changed',
+        value: b?.updatedAtUtc ? ago(b.updatedAtUtc) : 'Never',
+        caption: b?.updatedAtUtc ? `by ${b.updatedBy ?? 'someone'}` : 'the platform look is in use',
+      },
+    ];
+  });
 
   readonly displayName = signal('');
   readonly colour = signal('');
