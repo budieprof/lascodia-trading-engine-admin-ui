@@ -4,6 +4,13 @@ import { RouterLink } from '@angular/router';
 import { AuthService } from '@core/auth/auth.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { catchError, of } from 'rxjs';
+import { IamApiService } from '@features/iam/iam-api.service';
+import type { IamGrant, IamSession, PersonalAccessToken } from '@features/iam/iam.types';
+import { iamResource } from '@features/iam/shared/iam-resource';
+import { PERMISSION_CATALOG } from '@core/auth/permissions.generated';
 
 type PermGroup = { category: string; keys: string[] };
 
@@ -11,7 +18,7 @@ type PermGroup = { category: string; keys: string[] };
   selector: 'app-profile-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, PageHeaderComponent],
+  imports: [RouterLink, PageHeaderComponent, StatTilesComponent, AuditTrailComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -32,6 +39,8 @@ type PermGroup = { category: string; keys: string[] };
           <a class="btn btn-primary" routerLink="/account/change-password">Change password</a>
         }
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Your access summary" />
 
       @if (user(); as u) {
         <section class="card">
@@ -81,6 +90,63 @@ type PermGroup = { category: string; keys: string[] };
         </section>
       }
 
+      <div class="ctx-cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>Where your access comes from</h3>
+            <span class="spacer"></span>
+            @if (canSee('/iam/grants')) {
+              <a class="small" routerLink="/iam/grants">Access grants</a>
+            }
+          </header>
+          @if (grants.value().length) {
+            <table class="grid">
+              <tbody>
+                @for (g of grants.value(); track g.id) {
+                  <tr>
+                    <td>
+                      <strong>{{ g.roleName ?? 'Role #' + g.roleId }}</strong>
+                      <span class="sub"
+                        >{{
+                          g.scopeType === 'Tenant'
+                            ? 'whole organisation'
+                            : g.scopeType + ' ' + (g.scopeName ?? g.scopeId ?? '')
+                        }}
+                        ·
+                        {{
+                          g.expiresAtUtc ? 'until ' + g.expiresAtUtc.slice(0, 10) : 'no end date'
+                        }}</span
+                      >
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          } @else {
+            <p class="pad small muted">
+              {{
+                isSuperAdmin()
+                  ? 'As super admin you pass every permission check; grants below are what you hold besides.'
+                  : 'No grant is listed for you here (or your role cannot read grants).'
+              }}
+            </p>
+          }
+          <p class="pad small muted">
+            {{ stepUpHeld() }} of your permissions ask for a fresh second-factor sign-in before a
+            change; {{ twoPersonHeld() }} send the change to a second person for approval.
+          </p>
+        </section>
+        @if (actorId()) {
+          <app-audit-trail
+            heading="Your recent activity"
+            [actions]="['auth.', 'iam.', 'config.']"
+            [actor]="actorId()"
+            [limit]="6"
+            empty="Nothing you did is in the audit log yet: sign-ins, access changes and setting changes appear here."
+          />
+        }
+      </div>
+
       <section class="card">
         <header class="card-head">
           <h3>Permissions</h3>
@@ -112,6 +178,33 @@ type PermGroup = { category: string; keys: string[] };
   `,
   styles: [
     `
+      .ctx-cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      table.grid {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      table.grid td {
+        padding: 8px var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .sub {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .spacer {
+        flex: 1;
+      }
+      .small {
+        font-size: var(--text-xs);
+      }
+
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -246,6 +339,78 @@ export class ProfilePageComponent {
 
   canSee(url: string): boolean {
     return this.auth.canSeePath(url);
+  }
+
+  private readonly iam = inject(IamApiService);
+  readonly actorId = computed(() => {
+    const id = this.user()?.passportId;
+    return id ? `admin-user:${id}` : null;
+  });
+  private readonly myId = computed(() => {
+    const n = Number(this.user()?.passportId);
+    return Number.isInteger(n) && n > 0 ? n : null;
+  });
+  readonly grants = iamResource<IamGrant[]>(
+    () =>
+      this.myId() && this.auth.hasPermission('iam.members.read')
+        ? this.iam
+            .grants({ principalType: 'User', principalId: this.myId() })
+            .pipe(catchError(() => of([] as IamGrant[])))
+        : of([] as IamGrant[]),
+    [],
+  );
+  readonly sessions = iamResource<IamSession[]>(
+    () => this.iam.mySessions().pipe(catchError(() => of([] as IamSession[]))),
+    [],
+  );
+  readonly tokens = iamResource<PersonalAccessToken[]>(
+    () => this.iam.myTokens().pipe(catchError(() => of([] as PersonalAccessToken[]))),
+    [],
+  );
+  private readonly held = computed(() => new Set(this.permissions()));
+  readonly stepUpHeld = computed(
+    () => PERMISSION_CATALOG.filter((p) => p.stepUp && this.held().has(p.key)).length,
+  );
+  readonly twoPersonHeld = computed(
+    () => PERMISSION_CATALOG.filter((p) => p.twoPerson && this.held().has(p.key)).length,
+  );
+  readonly tiles = computed<StatTile[]>(() => [
+    {
+      label: 'Permissions',
+      value: String(this.permissions().length),
+      caption: `of ${PERMISSION_CATALOG.length} the platform knows`,
+    },
+    {
+      label: 'Grants',
+      value: this.grants.loaded() ? String(this.grants.value().length) : '…',
+      caption: this.isSuperAdmin() ? 'plus the super-admin bypass' : 'roles given to you',
+    },
+    {
+      label: 'Signed-in sessions',
+      value: this.sessions.loaded() ? String(this.sessions.value().length) : '…',
+      caption: 'console sessions as you',
+      route: '/account/sessions',
+    },
+    {
+      label: 'Access tokens',
+      value: this.tokens.loaded()
+        ? String(this.tokens.value().filter((t) => (t.status ?? 'Active') === 'Active').length)
+        : '…',
+      caption: 'active tokens for scripts',
+      route: '/account/tokens',
+    },
+    {
+      label: 'Second factor',
+      value: this.bffMode ? (this.mfaUsed() ? 'Used' : 'Not used') : '—',
+      caption: this.bffMode ? 'at this sign-in' : 'older password sign-in',
+      tone: this.bffMode ? (this.mfaUsed() ? 'good' : 'warn') : null,
+    },
+  ]);
+
+  constructor() {
+    this.grants.reload();
+    this.sessions.reload();
+    this.tokens.reload();
   }
 
   readonly permissionGroups = computed<PermGroup[]>(() => {

@@ -20,6 +20,11 @@ import {
 } from '../iam.logic';
 import type { IamGrant, IamMember, IamSession, MemberStatus } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
+import { ago, countBy } from '../shared/admin-context.logic';
+import { AuditTrailComponent } from '../shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
+import { catchError, of } from 'rxjs';
+import type { IamInvitation } from '../iam.types';
 
 type PendingAction =
   | { kind: 'status'; member: IamMember; to: MemberStatus; label: string }
@@ -35,8 +40,31 @@ type PendingAction =
   selector: 'app-iam-members-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent, ConfirmDialogComponent, LscCanDirective],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    LscCanDirective,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../shared/iam-page.scss',
+  styles: [
+    `
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -55,6 +83,8 @@ type PendingAction =
           {{ members.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Members summary" />
 
       <section class="card">
         <header class="card-head">
@@ -224,6 +254,60 @@ type PendingAction =
         (confirm)="run()"
         (cancelled)="pending.set(null)"
       />
+
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>Who holds which role</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/iam/grants">Access grants</a>
+          </header>
+          @if (roleRows().length === 0) {
+            <p class="pad small muted">
+              {{ grants.loaded() ? 'No role is granted to anyone here.' : 'Loading…' }}
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>Held by</th>
+                    <th>Where</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (r of roleRows(); track r.role) {
+                    <tr>
+                      <td>
+                        <strong>{{ r.role }}</strong>
+                      </td>
+                      <td class="small">{{ r.people.join(', ') }}</td>
+                      <td class="small muted">{{ r.scopes.join(', ') }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+          <p class="pad small muted">
+            {{ withoutRole() }} active member(s) hold no role: they can sign in but see nothing
+            privileged until a role is granted to them or to a team they are in.
+          </p>
+        </section>
+
+        <app-audit-trail
+          heading="Members' sign-ins and access changes"
+          [actions]="[
+            'iam.membership.',
+            'iam.grant.',
+            'iam.invitation.',
+            'auth.login.',
+            'auth.logout',
+          ]"
+          empty="No sign-in, membership or grant change is in the audit log yet. Each is recorded here."
+        />
+      </div>
     </div>
   `,
 })
@@ -287,9 +371,86 @@ export class MembersPageComponent {
     return p.kind === 'status' ? p.label : p.kind === 'remove' ? 'Remove' : 'Sign out everywhere';
   });
 
+  readonly invitations = iamResource(
+    () => this.iam.invitations().pipe(catchError(() => of([] as IamInvitation[]))),
+    [] as IamInvitation[],
+  );
+  readonly roleRows = computed(() => {
+    const names = new Map(this.members.value().map((m) => [m.userId, memberLabel(m)]));
+    const by = new Map<string, { people: Set<string>; scopes: Set<string> }>();
+    for (const g of this.grants.value()) {
+      const role = g.roleName ?? `Role #${g.roleId}`;
+      const e = by.get(role) ?? { people: new Set<string>(), scopes: new Set<string>() };
+      e.people.add(g.principalName ?? names.get(g.principalId) ?? `#${g.principalId}`);
+      e.scopes.add(
+        g.scopeType === 'Tenant'
+          ? 'whole organisation'
+          : `${g.scopeType} ${g.scopeName ?? g.scopeId ?? ''}`.trim(),
+      );
+      by.set(role, e);
+    }
+    return [...by.entries()].map(([role, e]) => ({
+      role,
+      people: [...e.people],
+      scopes: [...e.scopes],
+    }));
+  });
+  readonly withoutRole = computed(
+    () =>
+      this.members.value().filter((m) => m.status === 'Active' && this.rolesOf(m).length === 0)
+        .length,
+  );
+  readonly tiles = computed<StatTile[]>(() => {
+    const ms = this.members.value();
+    const c = countBy(ms, (m) => String(m.status));
+    const idp = ms.filter((m) => m.signsInWithIdentityProvider).length;
+    const never = ms.filter((m) => !m.lastSignInAtUtc).length;
+    const latest =
+      ms
+        .map((m) => m.lastSignInAtUtc ?? '')
+        .sort()
+        .at(-1) || null;
+    const pending = this.invitations
+      .value()
+      .filter((i) => (i.status ?? 'Pending') === 'Pending').length;
+    const loaded = this.members.loaded();
+    return [
+      {
+        label: 'Members',
+        value: loaded ? String(ms.length) : '…',
+        caption: `${c['Active'] ?? 0} active · ${c['Suspended'] ?? 0} suspended`,
+      },
+      {
+        label: 'Holding no role',
+        value: loaded ? String(this.withoutRole()) : '…',
+        caption: 'active, nothing granted',
+        tone: this.withoutRole() ? 'warn' : 'good',
+        route: '/iam/grants',
+      },
+      {
+        label: 'Via identity provider',
+        value: loaded ? `${idp} of ${ms.length}` : '…',
+        caption: 'console sign-in through it',
+        route: '/iam/sso',
+      },
+      {
+        label: 'Never signed in',
+        value: loaded ? String(never) : '…',
+        caption: latest ? `latest sign-in ${ago(latest)}` : 'no sign-in recorded',
+      },
+      {
+        label: 'Invitations waiting',
+        value: this.invitations.loaded() ? String(pending) : '…',
+        caption: 'not yet accepted',
+        route: '/iam/invitations',
+      },
+    ];
+  });
+
   constructor() {
     this.members.reload();
     this.grants.reload();
+    this.invitations.reload();
   }
 
   rolesOf(m: IamMember): string[] {

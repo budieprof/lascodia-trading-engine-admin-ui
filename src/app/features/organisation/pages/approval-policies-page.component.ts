@@ -21,6 +21,9 @@ import { failureMessage, isApprovalPending } from '../organisation.logic';
 import { ago } from '@features/iam/shared/admin-context.logic';
 import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
 import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { catchError, of } from 'rxjs';
+import { IamApiService } from '@features/iam/iam-api.service';
+import type { IamGrant, IamRole } from '@features/iam/iam.types';
 
 /**
  * Four-eyes policies (enterprise program, fund-module): for each governable action, how many people
@@ -259,6 +262,40 @@ import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-til
         /></label>
       </app-confirm-dialog>
 
+      <section class="card">
+        <header class="card-head">
+          <h3>Who can approve today</h3>
+          <span class="spacer"></span>
+          <span class="small muted"
+            >people holding <code>iam.approvals.decide</code> through a role</span
+          >
+        </header>
+        @if (approvers().length === 0) {
+          <p class="pad small muted">
+            {{
+              grants.loaded()
+                ? 'Nobody here holds the approvals permission through a role. A policy that needs approvers could not be satisfied until someone is granted one (Admin, Owner or RiskManager carry it).'
+                : 'Loading…'
+            }}
+          </p>
+        } @else {
+          <table class="grid">
+            <tbody>
+              @for (a of approvers(); track a.name) {
+                <tr>
+                  <td>{{ a.name }}</td>
+                  <td class="small muted">{{ a.roles.join(', ') }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <p class="pad small muted">
+            An approver must also hold the action's own permission and is never the requester — so a
+            policy needing more than {{ approvers().length }} approver(s) could never be met today.
+          </p>
+        }
+      </section>
+
       <app-audit-trail
         heading="Policy changes and approvals"
         [actions]="['iam.approval_policy.', 'iam.approval.']"
@@ -314,6 +351,31 @@ export class ApprovalPoliciesPageComponent {
   readonly removeReason = signal('');
   readonly busy = signal(false);
 
+  private readonly iamApi = inject(IamApiService);
+  readonly grants = iamResource<IamGrant[]>(
+    () =>
+      this.iamApi.grants({ principalType: 'User' }).pipe(catchError(() => of([] as IamGrant[]))),
+    [],
+  );
+  readonly roles = iamResource<IamRole[]>(
+    () => this.iamApi.roles().pipe(catchError(() => of([] as IamRole[]))),
+    [],
+  );
+  readonly approvers = computed(() => {
+    const deciding = new Set(
+      this.roles
+        .value()
+        .filter((r) => r.permissions.includes('iam.approvals.decide'))
+        .map((r) => r.id),
+    );
+    const by = new Map<string, string[]>();
+    for (const g of this.grants.value()) {
+      if (!deciding.has(g.roleId)) continue;
+      const who = g.principalName ?? `User #${g.principalId}`;
+      by.set(who, [...(by.get(who) ?? []), g.roleName ?? `Role #${g.roleId}`]);
+    }
+    return [...by.entries()].map(([name, roles]) => ({ name, roles }));
+  });
   readonly tiles = computed<StatTile[]>(() => {
     const rows = this.list.value();
     const set = rows.filter((r) => r.policy);
@@ -346,6 +408,12 @@ export class ApprovalPoliciesPageComponent {
         caption: last ? 'to any policy' : 'no policy has been set',
       },
       {
+        label: 'People who can approve',
+        value: this.grants.loaded() ? String(this.approvers().length) : '…',
+        caption: 'through a role, besides the requester',
+        tone: this.grants.loaded() ? (this.approvers().length > 1 ? 'good' : 'warn') : null,
+      },
+      {
         label: 'Waiting for approval',
         value: 'Approvals',
         caption: 'requests these policies hold',
@@ -355,6 +423,8 @@ export class ApprovalPoliciesPageComponent {
   });
 
   constructor() {
+    this.grants.reload();
+    this.roles.reload();
     this.list.reload();
   }
 

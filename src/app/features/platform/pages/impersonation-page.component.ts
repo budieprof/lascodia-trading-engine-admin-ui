@@ -53,6 +53,25 @@ import {
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .main-col,
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+
       .cols {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
@@ -99,113 +118,116 @@ import {
         ]"
       />
 
-      <section class="card">
-        <header class="card-head">
-          <h3>Choose the person</h3>
-          <span class="spacer"></span>
-          <select
-            class="select search"
-            name="tenant"
-            aria-label="Organisation"
-            [ngModel]="tenantId()"
-            (ngModelChange)="pickTenant($event)"
-          >
-            <option [ngValue]="null">Organisation…</option>
-            @for (t of tenants.value(); track t.id) {
-              <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
+      <div class="split">
+        <div class="main-col">
+          <section class="card">
+            <header class="card-head">
+              <h3>Choose the person</h3>
+              <span class="spacer"></span>
+              <select
+                class="select search"
+                name="tenant"
+                aria-label="Organisation"
+                [ngModel]="tenantId()"
+                (ngModelChange)="pickTenant($event)"
+              >
+                <option [ngValue]="null">Organisation…</option>
+                @for (t of tenants.value(); track t.id) {
+                  <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
+                }
+              </select>
+              <input
+                class="input search"
+                type="search"
+                placeholder="Filter people"
+                aria-label="Filter people"
+                [ngModel]="filter()"
+                (ngModelChange)="filter.set($event)"
+              />
+            </header>
+            @if (tenantId() === null) {
+              <p class="pad muted">Choose an organisation to list its members.</p>
+            } @else if (membersError(); as e) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ e }}</p>
+            } @else if (shown().length === 0) {
+              <p class="pad small muted">
+                {{
+                  members().length
+                    ? 'No one else is an active member here — you cannot view yourself, and suspended or invited people have no console to see.'
+                    : 'This organisation has no members yet.'
+                }}
+              </p>
+            } @else {
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Person</th>
+                    <th>Membership</th>
+                    <th><span class="sr-only">View</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (m of shown(); track m.userId) {
+                    <tr>
+                      <td>
+                        {{ label(m) }}<span class="sub">{{ m.email || '' }}</span>
+                      </td>
+                      <td class="small">
+                        {{ m.status }}
+                        <span class="sub">{{ memberSince(m) }}</span>
+                      </td>
+                      <td class="actions">
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-primary"
+                          [disabled]="busy()"
+                          (click)="target.set(m)"
+                        >
+                          View as
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
             }
-          </select>
-          <input
-            class="input search"
-            type="search"
-            placeholder="Filter people"
-            aria-label="Filter people"
-            [ngModel]="filter()"
-            (ngModelChange)="filter.set($event)"
+          </section>
+        </div>
+        <aside class="side">
+          <section class="card">
+            <header class="card-head"><h3>The rules</h3></header>
+            <div class="card-body small">
+              <ul class="rules">
+                <li>
+                  Read-only: every change is refused while you view, unless an approved elevation
+                  for that organisation is active (<a routerLink="/platform/elevations"
+                    >elevated access</a
+                  >
+                  — {{ activeElevations() }} active now).
+                </li>
+                <li>
+                  Who may: platform staff holding <code>platform.impersonate</code> ({{
+                    impersonateText()
+                  }}).
+                </li>
+                <li>
+                  It switches your console session; a banner stays on every page until you end it.
+                  It works only in a console session signed in through the identity provider.
+                </li>
+                <li>
+                  The start, the reason you give and the end are written to the viewed
+                  organisation's audit log with your name.
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <app-audit-trail
+            heading="Impersonation history"
+            [actions]="['platform.impersonation.']"
+            empty="No one has viewed the console as another person yet. Each start (with its reason) and each end is recorded here and in the viewed organisation's audit log."
           />
-        </header>
-        @if (tenantId() === null) {
-          <p class="pad muted">Choose an organisation to list its members.</p>
-        } @else if (membersError(); as e) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ e }}</p>
-        } @else if (shown().length === 0) {
-          <p class="pad small muted">
-            {{
-              members().length
-                ? 'No one else is an active member here — you cannot view yourself, and suspended or invited people have no console to see.'
-                : 'This organisation has no members yet.'
-            }}
-          </p>
-        } @else {
-          <table class="grid">
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Membership</th>
-                <th><span class="sr-only">View</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (m of shown(); track m.userId) {
-                <tr>
-                  <td>
-                    {{ label(m) }}<span class="sub">{{ m.email || '' }}</span>
-                  </td>
-                  <td class="small">
-                    {{ m.status }}
-                    <span class="sub">{{ memberSince(m) }}</span>
-                  </td>
-                  <td class="actions">
-                    <button
-                      type="button"
-                      class="btn btn-sm btn-primary"
-                      [disabled]="busy()"
-                      (click)="target.set(m)"
-                    >
-                      View as
-                    </button>
-                  </td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        }
-      </section>
-
-      <div class="cols">
-        <section class="card">
-          <header class="card-head"><h3>The rules</h3></header>
-          <div class="card-body small">
-            <ul class="rules">
-              <li>
-                Read-only: every change is refused while you view, unless an approved elevation for
-                that organisation is active (<a routerLink="/platform/elevations"
-                  >elevated access</a
-                >
-                — {{ activeElevations() }} active now).
-              </li>
-              <li>
-                Who may: platform staff holding <code>platform.impersonate</code> ({{
-                  impersonateText()
-                }}).
-              </li>
-              <li>
-                It switches your console session; a banner stays on every page until you end it. It
-                works only in a console session signed in through the identity provider.
-              </li>
-              <li>
-                The start, the reason you give and the end are written to the viewed organisation's
-                audit log with your name.
-              </li>
-            </ul>
-          </div>
-        </section>
-
-        <app-audit-trail
-          heading="Impersonation history"
-          [actions]="['platform.impersonation.']"
-          empty="No one has viewed the console as another person yet. Each start (with its reason) and each end is recorded here and in the viewed organisation's audit log."
-        />
+        </aside>
       </div>
 
       <app-confirm-dialog

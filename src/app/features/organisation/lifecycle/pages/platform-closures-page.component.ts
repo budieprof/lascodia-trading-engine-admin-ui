@@ -26,6 +26,8 @@ import {
   purgeConfirmationOk,
 } from '../lifecycle.logic';
 import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
+import { PlansApiService } from '@features/platform/plans-api.service';
+import type { TenantUsage } from '@features/platform/plans.types';
 
 type Dialog = 'reopen' | 'purge' | null;
 
@@ -278,6 +280,38 @@ type Dialog = 'reopen' | 'purge' | null;
           </div>
         </section>
       </div>
+
+      @if (usage.value(); as u) {
+        <section class="card">
+          <header class="card-head">
+            <h3>What a deletion covers — {{ u.tenantName }} today</h3>
+          </header>
+          <div class="table-wrap">
+            <table class="grid">
+              <tbody>
+                @for (i of u.items; track i.key) {
+                  <tr>
+                    <td>{{ i.label }}</td>
+                    <td>
+                      <strong>{{ i.used }}</strong>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <p class="pad small muted">
+            A deletion removes every row the organisation owns — these counts plus its orders,
+            positions, signals, settings, alerts and conversations — in dependency order, and keeps
+            its audit events, the closure record and platform rows.
+            {{
+              u.kind === 'House'
+                ? 'House itself is never deleted; these are its figures for scale.'
+                : ''
+            }}
+          </p>
+        </section>
+      }
 
       <app-audit-trail
         heading="Closure activity"
@@ -557,6 +591,11 @@ export class PlatformClosuresPageComponent {
     () => defer(() => this.api.closureState()).pipe(catchError(() => of(null))),
     null,
   );
+  private readonly plansApi = inject(PlansApiService);
+  readonly usage = iamResource<TenantUsage | null>(
+    () => defer(() => this.plansApi.myUsage()).pipe(catchError(() => of(null))),
+    null,
+  );
   readonly graceDays = computed(() => this.own.value()?.graceDays ?? null);
   readonly tiles = computed<StatTile[]>(() => {
     const rows = this.closures.value();
@@ -612,6 +651,7 @@ export class PlatformClosuresPageComponent {
     this.closures.reload();
     this.tenants.reload();
     this.own.reload();
+    this.usage.reload();
   }
 
   closable(t: TenantDto): string {

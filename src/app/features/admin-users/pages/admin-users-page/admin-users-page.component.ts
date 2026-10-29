@@ -16,6 +16,10 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { RouterLink } from '@angular/router';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { ago } from '@features/iam/shared/admin-context.logic';
 
 type EditState = { id: number; email: string; displayName: string };
 type RolesState = { id: number; username: string; selected: Set<number> };
@@ -32,6 +36,9 @@ type RolesState = { id: number; username: string; selected: Set<number> };
     ErrorStateComponent,
     ConfirmDialogComponent,
     ModalA11yDirective,
+    RouterLink,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   template: `
     <div class="page">
@@ -39,6 +46,8 @@ type RolesState = { id: number; username: string; selected: Set<number> };
         title="Admin Users"
         subtitle="Provision admin accounts, assign roles, and manage access. New users and password resets issue a one-time temporary password."
       />
+
+      <app-stat-tiles [tiles]="tiles()" label="Admin users summary" />
 
       <!-- Temp-password callout — shown once after create / reset -->
       @if (lastCredential(); as cred) {
@@ -264,6 +273,31 @@ type RolesState = { id: number; username: string; selected: Set<number> };
           </div>
         }
       </section>
+
+      <div class="ctx-cols">
+        <section class="ctx-card">
+          <h3>Roles in use</h3>
+          <ul class="ctx-list">
+            @for (r of roleUse(); track r.name) {
+              <li>
+                <strong>{{ r.name }}</strong> <span class="muted">— {{ r.users.join(', ') }}</span>
+              </li>
+            } @empty {
+              <li class="muted">No role is assigned to anyone yet.</li>
+            }
+          </ul>
+          <p class="muted small-note">
+            {{ unusedRoles() }} of {{ roles().length }} roles are assigned to nobody. Roles are
+            bundles of permissions — <a routerLink="/admin/roles">see what each holds</a>; in an
+            organisation they are given as grants on <a routerLink="/iam/grants">Access grants</a>.
+          </p>
+        </section>
+        <app-audit-trail
+          heading="User changes"
+          [actions]="['iam.user.', 'auth.password.']"
+          empty="No admin user has been created, edited, deactivated or had a password reset since the audit log began. Each is recorded here."
+        />
+      </div>
     </div>
 
     <!-- Edit profile panel. Escape + focus come from appModalA11y; before it, an open panel
@@ -387,6 +421,36 @@ type RolesState = { id: number; username: string; selected: Set<number> };
   `,
   styles: [
     `
+      .ctx-cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      .ctx-card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+      }
+      .ctx-card h3 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .ctx-list {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        font-size: var(--text-sm);
+        display: grid;
+        gap: 4px;
+      }
+      .small-note {
+        font-size: var(--text-xs);
+        margin: var(--space-2) 0 0;
+      }
+
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -868,6 +932,58 @@ export class AdminUsersPageComponent {
   readonly rolesState = signal<RolesState | null>(null);
 
   private searchDebounce: ReturnType<typeof setTimeout> | null = null;
+
+  readonly roleUse = computed(() => {
+    const by = new Map<string, string[]>();
+    for (const u of this.users())
+      for (const r of u.roles ?? [])
+        by.set(r.name, [...(by.get(r.name) ?? []), u.displayName || u.username]);
+    return [...by.entries()].map(([name, users]) => ({ name, users }));
+  });
+  readonly unusedRoles = computed(() => {
+    const used = new Set(this.roleUse().map((r) => r.name));
+    return this.roles().filter((r) => !used.has(r.name)).length;
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const us = this.users();
+    const active = us.filter((u) => u.isActive).length;
+    const noRole = us.filter((u) => u.isActive && !(u.roles ?? []).length).length;
+    const mustChange = us.filter((u) => u.mustChangePassword).length;
+    const latest =
+      us
+        .map((u) => u.lastLoginAt ?? '')
+        .sort()
+        .at(-1) || null;
+    return [
+      {
+        label: 'Users',
+        value: String(us.length),
+        caption: `${active} active · ${us.length - active} deactivated`,
+      },
+      {
+        label: 'Without a role',
+        value: String(noRole),
+        caption: 'active but can do nothing privileged',
+        tone: noRole ? 'warn' : 'good',
+      },
+      {
+        label: 'Super admins',
+        value: String(us.filter((u) => u.isSuperAdmin).length),
+        caption: 'bypass every permission check',
+      },
+      {
+        label: 'Must change password',
+        value: String(mustChange),
+        caption: 'temporary password not yet replaced',
+        tone: mustChange ? 'warn' : null,
+      },
+      {
+        label: 'Last sign-in',
+        value: latest ? ago(latest) : 'Never',
+        caption: 'by any admin user',
+      },
+    ];
+  });
 
   constructor() {
     this.loadRoles();

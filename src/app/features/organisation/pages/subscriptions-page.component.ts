@@ -30,6 +30,8 @@ import {
   type BindingDraft,
 } from '../subscriptions.logic';
 import { accountLabel, accountRefs } from '../terminals.logic';
+import { RouterLink } from '@angular/router';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 
 /** Strategies per page in the platform and private lists. */
 export const STRATEGY_PAGE_SIZE = 25;
@@ -93,7 +95,14 @@ class StrategyList {
   selector: 'app-org-subscriptions-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, LscCanDirective, PageHeaderComponent, ModalA11yDirective],
+  imports: [
+    FormsModule,
+    LscCanDirective,
+    PageHeaderComponent,
+    ModalA11yDirective,
+    RouterLink,
+    StatTilesComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
@@ -148,6 +157,8 @@ class StrategyList {
           {{ loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Subscriptions summary" />
 
       @if (unavailable()) {
         <section class="card">
@@ -441,6 +452,51 @@ class StrategyList {
           </div>
         </div>
       }
+
+      <section class="card">
+        <header class="card-head">
+          <h3>What each account receives</h3>
+          <span class="spacer"></span>
+          <a class="small" routerLink="/trading-accounts">Trading accounts</a>
+        </header>
+        <div class="table-wrap">
+          <table class="grid">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Type</th>
+                <th>Subscribed to</th>
+                <th>Also receives</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (a of accountRows(); track a.id) {
+                <tr>
+                  <td>
+                    {{ a.name || a.login || 'Account #' + a.id }}
+                    <span class="sub">{{ a.login }} · {{ a.brokerServer || '—' }}</span>
+                  </td>
+                  <td class="small">{{ a.isPaper ? 'Paper' : a.accountType }}</td>
+                  <td class="small">{{ a.subs.length ? a.subs.join(', ') : '—' }}</td>
+                  <td class="small muted">
+                    {{
+                      subscriptions()?.requireSubscription
+                        ? 'nothing else — subscriptions are required'
+                        : 'every unsubscribed strategy whose symbol its EA streams'
+                    }}
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="4" class="small muted">
+                    No trading account is in your current account scope.
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   `,
 })
@@ -520,6 +576,60 @@ export class SubscriptionsPageComponent {
       out.push('Confirm the change to the real-money account(s) first.');
     }
     return out;
+  });
+
+  readonly accountRows = computed(() => {
+    const subs = this.subscriptions()?.subscriptions ?? [];
+    return this.accounts().map((a) => ({
+      ...a,
+      subs: subs
+        .filter((x) => x.tradingAccountId === a.id)
+        .map(
+          (x) =>
+            `${x.strategyName}${x.isEnabled ? '' : ' (paused)'}${x.lotMultiplier !== 1 ? ' ×' + x.lotMultiplier : ''}`,
+        ),
+    }));
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const s = this.subscriptions();
+    const subs = s?.subscriptions ?? [];
+    const strategies = new Set(subs.map((x) => x.strategyId)).size;
+    const paused = subs.filter((x) => !x.isEnabled).length;
+    const accountsWith = new Set(subs.map((x) => x.tradingAccountId)).size;
+    const plat = this.platformList.result.value()?.pager?.totalItemCount;
+    const priv = this.privateList.result.value()?.pager?.totalItemCount;
+    return [
+      {
+        label: 'Subscriptions',
+        value: s ? String(subs.length) : '…',
+        caption: `${strategies} strateg${strategies === 1 ? 'y' : 'ies'} · ${paused} paused`,
+      },
+      {
+        label: 'Accounts subscribed',
+        value: s ? `${accountsWith} of ${this.accounts().length}` : '…',
+        caption: 'in your account scope',
+      },
+      {
+        label: 'Delivery rule',
+        value: !s ? '…' : s.requireSubscription ? 'Opt-in' : 'Fan-out',
+        caption: !s
+          ? null
+          : s.requireSubscription
+            ? 'only subscribed accounts receive signals'
+            : 'unsubscribed strategies reach every account streaming the symbol',
+      },
+      {
+        label: 'Platform strategies',
+        value: plat == null ? '…' : String(plat),
+        caption: 'matching the filter below',
+      },
+      {
+        label: 'Your private strategies',
+        value: priv == null ? '…' : String(priv),
+        caption: 'matching the filter below',
+        route: '/strategies',
+      },
+    ];
   });
 
   constructor() {
