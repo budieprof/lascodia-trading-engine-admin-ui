@@ -624,11 +624,11 @@ export class AccountPerformancePanelComponent {
         caption: 'commission, spread and slippage booked',
       },
       {
-        label: 'Best / worst day',
-        value: best ? `${fractionPct(best.ret, 1)} / ${fractionPct(worst?.ret ?? null, 1)}` : '—',
+        label: 'Best day',
+        value: best ? fractionPct(best.ret, 2) : '—',
         caption:
           best && worst
-            ? `${best.account} ${day(best.date)} · ${worst.account} ${day(worst.date)}`
+            ? `${best.account}, ${day(best.date)} · worst ${fractionPct(worst.ret, 2)} (${worst.account}, ${day(worst.date)})`
             : null,
       },
     ];

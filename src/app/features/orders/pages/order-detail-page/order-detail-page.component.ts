@@ -547,8 +547,33 @@ import {
                           </a>
                         </span>
                       }
+                    } @else if (
+                      statusLabel() === 'Cancelled' ||
+                      statusLabel() === 'Rejected' ||
+                      statusLabel() === 'Expired'
+                    ) {
+                      <span class="related-empty">
+                        None — the order was {{ statusLabel()!.toLowerCase() }} before it filled, so
+                        no position was opened
+                      </span>
                     } @else {
-                      <span class="related-empty">No position created yet</span>
+                      <span class="related-empty"
+                        >No position yet — one opens when the order fills</span
+                      >
+                    }
+                  </div>
+                  <div class="related-item">
+                    <span class="related-label">Trading account</span>
+                    @if (order()!.tradingAccountId) {
+                      <a
+                        class="related-link"
+                        [routerLink]="['/trading-accounts', order()!.tradingAccountId]"
+                      >
+                        Account #{{ order()!.tradingAccountId }}
+                        <span class="link-arrow">&rarr;</span>
+                      </a>
+                    } @else {
+                      <span class="related-empty">Not reported</span>
                     }
                   </div>
                   <div class="related-item">
