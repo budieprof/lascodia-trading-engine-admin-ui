@@ -1,6 +1,14 @@
 import { isQuotaRefusal } from '@core/plans/quota-refusal';
 
-import type { CashFlowKind, FillGroupStats, MonthReturn, YearReturn } from './fund.types';
+import type {
+  CashFlow,
+  CashFlowKind,
+  FillGroupStats,
+  FlowSource,
+  MonthReturn,
+  PerformanceFlow,
+  YearReturn,
+} from './fund.types';
 
 /** "1.23 %" for a fraction; "—" when unknown. */
 export function pct(fraction: number | null | undefined, digits = 2): string {
@@ -86,6 +94,50 @@ export function monthlyGrid(
     ),
     total: years.find((x) => x.year === y)?.return ?? null,
   }));
+}
+
+/** "2026-08-26 19:37" (UTC) for an ISO time; "—" when unknown. */
+export function minuteUtc(iso: string | null | undefined): string {
+  return iso ? iso.slice(0, 16).replace('T', ' ') : '—';
+}
+
+/** A statement flow's source; an engine older than the broker ledger sends only `inferred`. */
+export function flowSource(f: Pick<PerformanceFlow, 'inferred' | 'source'>): FlowSource {
+  return f.source ?? (f.inferred ? 'inferred' : 'recorded');
+}
+
+/** The chip shown for a flow source: label, tone and what it means (title). */
+export function flowSourceChip(source: FlowSource): {
+  label: string;
+  tone: '' | 'ok' | 'warn';
+  title: string;
+} {
+  switch (source) {
+    case 'broker':
+      return {
+        label: 'broker',
+        tone: 'ok',
+        title: "The broker's own balance deal, reported by the EA",
+      };
+    case 'inferred':
+      return {
+        label: 'inferred',
+        tone: 'warn',
+        title: 'Equity moved on a day with no position open; no flow was reported or recorded',
+      };
+    default:
+      return { label: 'recorded', tone: '', title: 'Entered by hand' };
+  }
+}
+
+/** When a statement flow happened: the minute when known, else its day. */
+export function flowWhen(f: Pick<PerformanceFlow, 'dayUtc' | 'atUtc'>): string {
+  return f.atUtc ? minuteUtc(f.atUtc) : day(f.dayUtc);
+}
+
+/** Who a ledger row comes from: "Broker deal #123" (reported by the EA) or the person who entered it. */
+export function ledgerSource(f: Pick<CashFlow, 'brokerDealTicket' | 'recordedBy'>): string {
+  return f.brokerDealTicket ? `Broker deal #${f.brokerDealTicket}` : f.recordedBy;
 }
 
 /** The sign a cash flow of this kind must carry (the engine refuses others). */

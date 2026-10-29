@@ -15,8 +15,13 @@ import {
   MONTHS,
   day,
   defaultPeriod,
+  flowSource,
+  flowSourceChip,
+  flowWhen,
   isUpgradeNotice,
+  ledgerSource,
   liveScopeAccounts,
+  minuteUtc,
   money,
   monthlyGrid,
   num,
@@ -381,7 +386,7 @@ interface GlanceRow {
               <table class="grid">
                 <thead>
                   <tr>
-                    <th>Day</th>
+                    <th>When (UTC)</th>
                     <th>Account</th>
                     <th class="num">Amount</th>
                     <th>Source</th>
@@ -391,15 +396,18 @@ interface GlanceRow {
                 <tbody>
                   @for (f of s.flows; track $index) {
                     <tr>
-                      <td>{{ day(f.dayUtc) }}</td>
+                      <td>{{ flowWhen(f) }}</td>
                       <td>#{{ f.tradingAccountId }}</td>
                       <td class="num">{{ money(f.amount) }}</td>
                       <td>
-                        @if (f.inferred) {
-                          <span class="chip warn">inferred</span>
-                        } @else {
-                          <span class="chip">recorded</span>
-                        }
+                        @let chip = sourceChip(flowSource(f));
+                        <span
+                          class="chip"
+                          [class.ok]="chip.tone === 'ok'"
+                          [class.warn]="chip.tone === 'warn'"
+                          [title]="chip.title"
+                          >{{ chip.label }}</span
+                        >
                       </td>
                       <td class="small">{{ f.note }}</td>
                     </tr>
@@ -415,7 +423,12 @@ interface GlanceRow {
 
           @if (accountId(); as accountId) {
             <section class="card">
-              <div class="card-head"><strong>Recorded deposits and withdrawals</strong></div>
+              <div class="card-head">
+                <strong>Deposits, withdrawals and balance changes</strong>
+                <span class="muted small"
+                  >reported by the EA from the broker, or entered by hand</span
+                >
+              </div>
               @if (canRecord()) {
                 <div class="filters">
                   <label class="field"
@@ -476,18 +489,27 @@ interface GlanceRow {
                       <th>Kind</th>
                       <th class="num">Amount</th>
                       <th>Note</th>
-                      <th>Recorded by</th>
+                      <th>Source</th>
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     @for (f of flows(); track f.id) {
                       <tr>
-                        <td>{{ f.occurredAtUtc.slice(0, 16).replace('T', ' ') }}</td>
+                        <td>{{ minuteUtc(f.occurredAtUtc) }}</td>
                         <td>{{ f.kind }}</td>
                         <td class="num">{{ money(f.amount) }}</td>
                         <td class="small">{{ f.note }}</td>
-                        <td class="small">{{ f.recordedBy }}</td>
+                        <td class="small">
+                          @if (f.brokerDealTicket) {
+                            <span
+                              class="chip ok"
+                              title="The broker's own balance deal, reported by the EA"
+                              >broker</span
+                            >
+                          }
+                          {{ ledgerSource(f) }}
+                        </td>
                         <td class="actions">
                           @if (canRecord()) {
                             <button
@@ -504,8 +526,9 @@ interface GlanceRow {
                     } @empty {
                       <tr>
                         <td colspan="6" class="muted">
-                          Nothing recorded. Equity changes on days without positions are inferred as
-                          flows.
+                          Nothing recorded yet. The EA reports the broker's deposits, withdrawals
+                          and balance resets; until it has, equity changes on days without positions
+                          are inferred as flows.
                         </td>
                       </tr>
                     }
@@ -562,6 +585,11 @@ export class PerformancePageComponent {
   protected readonly num = num;
   protected readonly money = money;
   protected readonly day = day;
+  protected readonly minuteUtc = minuteUtc;
+  protected readonly flowWhen = flowWhen;
+  protected readonly flowSource = flowSource;
+  protected readonly sourceChip = flowSourceChip;
+  protected readonly ledgerSource = ledgerSource;
   protected readonly months = MONTHS;
   protected readonly kinds: CashFlowKind[] = ['Deposit', 'Withdrawal', 'Fee', 'Adjustment'];
 

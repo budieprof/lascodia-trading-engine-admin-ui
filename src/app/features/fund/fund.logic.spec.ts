@@ -10,6 +10,11 @@ import {
   liveScopeAccounts,
   day,
   defaultPeriod,
+  flowSource,
+  flowSourceChip,
+  flowWhen,
+  ledgerSource,
+  minuteUtc,
   isSha256,
   isUpgradeNotice,
   markoutCell,
@@ -183,5 +188,39 @@ describe('shareOfMax / enumWords', () => {
   it('words', () => {
     expect(enumWords('PartiallyFilled')).toBe('Partially filled');
     expect(enumWords('Trading')).toBe('Trading');
+  });
+});
+
+describe('cash-flow sources', () => {
+  it('reads the source the engine sends, and falls back to inferred/recorded for an older engine', () => {
+    expect(flowSource({ inferred: false, source: 'broker' })).toBe('broker');
+    expect(flowSource({ inferred: true })).toBe('inferred');
+    expect(flowSource({ inferred: false })).toBe('recorded');
+  });
+
+  it('labels each source in plain words', () => {
+    expect(flowSourceChip('broker')).toMatchObject({ label: 'broker', tone: 'ok' });
+    expect(flowSourceChip('inferred')).toMatchObject({ label: 'inferred', tone: 'warn' });
+    expect(flowSourceChip('recorded')).toMatchObject({ label: 'recorded', tone: '' });
+    expect(flowSourceChip('broker').title).toContain('reported by the EA');
+  });
+
+  it('shows the minute a flow happened when known, else its day', () => {
+    expect(flowWhen({ dayUtc: '2026-08-26T00:00:00Z', atUtc: '2026-08-26T19:37:50.123Z' })).toBe(
+      '2026-08-26 19:37',
+    );
+    expect(flowWhen({ dayUtc: '2026-08-26T00:00:00Z', atUtc: null })).toBe('2026-08-26');
+    expect(flowWhen({ dayUtc: '2026-08-26T00:00:00Z' })).toBe('2026-08-26');
+    expect(minuteUtc(null)).toBe('—');
+  });
+
+  it('names a broker deal by its ticket and a hand entry by who recorded it', () => {
+    expect(ledgerSource({ brokerDealTicket: '90001', recordedBy: 'ea:broker-deals' })).toBe(
+      'Broker deal #90001',
+    );
+    expect(ledgerSource({ brokerDealTicket: null, recordedBy: 'admin-user:5' })).toBe(
+      'admin-user:5',
+    );
+    expect(ledgerSource({ recordedBy: 'admin-user:5' })).toBe('admin-user:5');
   });
 });
