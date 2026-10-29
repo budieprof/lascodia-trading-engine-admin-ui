@@ -14,6 +14,13 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { errorText } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { catchError, of } from 'rxjs';
+import { RouterLink } from '@angular/router';
+import { ago } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { PlansApiService } from '@features/platform/plans-api.service';
+import type { TenantUsage } from '@features/platform/plans.types';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { LifecycleApiService, NAVIGATE_TO } from '../lifecycle-api.service';
 import { exportInProgress, exportStatusLabel, exportTone, formatBytes } from '../lifecycle.logic';
@@ -32,7 +39,15 @@ export const EXPORT_POLL_MS = 15_000;
   selector: 'app-organisation-data-export-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
+  imports: [
+    DatePipe,
+    RouterLink,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    MfaHintComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   template: `
     <div class="page">
@@ -49,6 +64,8 @@ export const EXPORT_POLL_MS = 15_000;
           {{ exports.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Export summary" />
 
       <section class="card">
         <header class="card-head">
@@ -87,7 +104,10 @@ export const EXPORT_POLL_MS = 15_000;
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         }
         @if (exports.value().length === 0 && exports.loaded() && !exports.error()) {
-          <p class="pad muted">No exports yet.</p>
+          <p class="pad small muted">
+            No export has been made. Export everything above to get a zip you can keep; it appears
+            here while it is prepared and stays downloadable for 7 days.
+          </p>
         }
         @if (exports.value().length) {
           <div class="table-wrap">
@@ -153,6 +173,41 @@ export const EXPORT_POLL_MS = 15_000;
         (confirm)="request()"
         (cancelled)="confirming.set(false)"
       />
+
+      @if (usage.value(); as u) {
+        <section class="card">
+          <header class="card-head">
+            <h3>Some of what an export would hold today</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/iam/plan">Plan & usage</a>
+          </header>
+          <div class="table-wrap">
+            <table class="grid">
+              <tbody>
+                @for (i of u.items; track i.key) {
+                  <tr>
+                    <td>{{ i.label }}</td>
+                    <td>
+                      <strong>{{ i.used }}</strong>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <p class="pad small muted">
+            Counts the plan tracks; the export also carries every order, position, signal, setting,
+            alert, conversation and the organisation's own audit events — every table the
+            organisation owns.
+          </p>
+        </section>
+      }
+
+      <app-audit-trail
+        heading="Export activity"
+        [actions]="['tenant.export.', 'tenant.data.export']"
+        empty="No export has been requested, prepared or downloaded yet. Each request, completion, download link and download is recorded here."
+      />
     </div>
   `,
 })
@@ -172,11 +227,48 @@ export class DataExportPageComponent {
     'Could not load your exports.',
   );
   readonly inProgress = computed(() => exportInProgress(this.exports.value()));
+  private readonly plans = inject(PlansApiService);
+  readonly usage = iamResource<TenantUsage | null>(
+    () => this.plans.myUsage().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly tiles = computed<StatTile[]>(() => {
+    const ex = this.exports.value();
+    const latest = ex[0] ?? null;
+    const ready = ex.filter((e) => e.canDownload).length;
+    const today = ex.filter((e) => Date.now() - Date.parse(e.requestedAtUtc) < 86_400_000).length;
+    return [
+      {
+        label: 'Exports',
+        value: this.exports.loaded() ? String(ex.length) : '…',
+        caption: latest ? `latest ${ago(latest.requestedAtUtc)}` : 'none made yet',
+      },
+      {
+        label: 'Ready to download',
+        value: this.exports.loaded() ? String(ready) : '…',
+        caption: 'kept 7 days, single-use links',
+        tone: ready ? 'good' : null,
+      },
+      {
+        label: 'Requests left today',
+        value: this.exports.loaded() ? String(Math.max(0, 3 - today)) : '…',
+        caption: 'at most three a day, one at a time',
+      },
+      {
+        label: 'Latest size',
+        value: latest?.sizeBytes ? formatBytes(latest.sizeBytes) : '—',
+        caption: latest?.tableCount
+          ? `${latest.tableCount} tables · ${latest.rowCount ?? 0} rows`
+          : 'no finished export',
+      },
+    ];
+  });
   readonly busy = signal(false);
   readonly confirming = signal(false);
 
   constructor() {
     this.exports.reload();
+    this.usage.reload();
     // While one is being prepared, look again now and then (and stop when the page goes).
     const timer = setInterval(() => {
       if (this.inProgress() && !this.exports.loading()) this.exports.reload();

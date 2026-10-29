@@ -1,4 +1,6 @@
-import { HttpErrorResponse } from '@angular/common/http';
+import { HttpErrorResponse, provideHttpClient } from '@angular/common/http';
+import { provideHttpClientTesting } from '@angular/common/http/testing';
+import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { TestBed } from '@angular/core/testing';
 import { of, throwError } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -51,6 +53,10 @@ function setup(api: Partial<Record<keyof PlansApiService, unknown>>) {
   const notify = { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() };
   TestBed.configureTestingModule({
     providers: [
+      // Context panels on these pages call other engine reads; they go to the testing backend and stay unanswered.
+      provideHttpClient(),
+      provideHttpClientTesting(),
+      { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine.test' } },
       { provide: PlansApiService, useValue: api },
       { provide: NotificationService, useValue: notify },
     ],

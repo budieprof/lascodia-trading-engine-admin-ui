@@ -71,7 +71,7 @@ import {
                   >
                 }
                 <span class="sub"
-                  >{{ actor(e) }}{{ e.resourceType ? ' · ' + e.resourceType : ''
+                  >{{ actorLabel(e) }}{{ e.resourceType ? ' · ' + e.resourceType : ''
                   }}{{ e.resourceId ? ' ' + e.resourceId : ''
                   }}{{ e.reason ? ' · ' + e.reason : '' }}</span
                 >
@@ -129,11 +129,13 @@ export class AuditTrailComponent {
   /** What the empty list means and what writes these events. */
   readonly empty = input('Nothing recorded yet.');
   readonly limit = input(8);
+  /** Only this actor's events (`admin-user:5`), e.g. "your own sign-ins". */
+  readonly actor = input<string | null>(null);
 
   protected readonly when = when;
   protected readonly ago = (utc: string) => ago(utc);
   protected readonly label = auditActionLabel;
-  protected readonly actor = auditActorLabel;
+  protected readonly actorLabel = auditActorLabel;
 
   readonly canRead = computed(() => this.auth.hasPermission(Permission.AuditRead));
   readonly rows = signal<TrailEvent[]>([]);
@@ -144,6 +146,7 @@ export class AuditTrailComponent {
     effect(() => {
       const prefixes = this.actions();
       const limit = this.limit();
+      this.actor();
       const allowed = this.canRead();
       untracked(() => {
         if (allowed) this.load(prefixes, limit);
@@ -161,12 +164,16 @@ export class AuditTrailComponent {
       this.loaded.set(true);
       return;
     }
+    const actor = this.actor();
+    const who = actor ? `&actor=${encodeURIComponent(actor)}` : '';
     forkJoin(
       prefixes.map((p) =>
         this.api
           .getEnvelope<{
             items: TrailEvent[];
-          }>(`/admin/audit-events?action=${encodeURIComponent(p)}&limit=${limit}`, { silent: true })
+          }>(`/admin/audit-events?action=${encodeURIComponent(p)}&limit=${limit}${who}`, {
+            silent: true,
+          })
           .pipe(map((page) => page?.items ?? [])),
       ),
     )

@@ -253,6 +253,10 @@ describe('onboarding checklist', () => {
     };
     TestBed.configureTestingModule({
       providers: [
+        // Context panels on these pages call other engine reads; they go to the testing backend and stay unanswered.
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine.test' } },
         { provide: OnboardingApiService, useValue: api },
         { provide: Router, useValue: router },
         {
@@ -316,6 +320,10 @@ describe('PlatformSignupsPageComponent', () => {
     const notify = { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() };
     TestBed.configureTestingModule({
       providers: [
+        // Context panels on these pages call other engine reads; they go to the testing backend and stay unanswered.
+        provideHttpClient(),
+        provideHttpClientTesting(),
+        { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://engine.test' } },
         { provide: OnboardingApiService, useValue: api },
         { provide: NotificationService, useValue: notify },
       ],

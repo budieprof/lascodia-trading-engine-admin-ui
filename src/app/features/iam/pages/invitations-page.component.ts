@@ -1,5 +1,10 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { catchError, of } from 'rxjs';
+
+import { PlansApiService } from '@features/platform/plans-api.service';
+import type { TenantUsage } from '@features/platform/plans.types';
 
 import { LscCanDirective } from '@core/auth/can.directive';
 import { Permission } from '@core/auth/permissions.generated';
@@ -8,8 +13,11 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
 import { errorText, invitationErrors, reportable, scopeLabel, when } from '../iam.logic';
-import type { GrantSpec, IamInvitation, IamRole, ScopeType } from '../iam.types';
+import type { GrantSpec, IamInvitation, IamMember, IamRole, ScopeType } from '../iam.types';
 import { iamResource } from '../shared/iam-resource';
+import { countBy, plural } from '../shared/admin-context.logic';
+import { AuditTrailComponent } from '../shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
 import { ScopeTargetComponent } from '../shared/scope-target.component';
 import { SecretOnceComponent } from '../shared/secret-once.component';
 
@@ -36,8 +44,33 @@ interface GrantRow {
     LscCanDirective,
     ScopeTargetComponent,
     SecretOnceComponent,
+    RouterLink,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
+  styles: [
+    `
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+      .steps {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: decimal;
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -47,12 +80,14 @@ interface GrantRow {
         <button
           type="button"
           class="btn btn-secondary"
-          (click)="invitations.reload()"
+          (click)="reloadAll()"
           [disabled]="invitations.loading()"
         >
           {{ invitations.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Invitations summary" />
 
       <section class="card" *lscCan="P.IamInvitationsManage">
         <header class="card-head"><h3>Invite someone</h3></header>
@@ -155,7 +190,12 @@ interface GrantRow {
         @if (invitations.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (invitations.loaded() && invitations.value().length === 0) {
-          <p class="pad muted">No invitations.</p>
+          <p class="pad small muted">
+            No invitation has been sent from this organisation. Everyone here today ({{
+              plural(activeMembers(), 'active member')
+            }}) was added directly; an invitation sent above appears here until it is accepted,
+            revoked or expires.
+          </p>
         } @else if (invitations.value().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -210,6 +250,70 @@ interface GrantRow {
         }
       </section>
 
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>Roles you can give</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/iam/roles">Roles</a>
+          </header>
+          @if (roles.value().length === 0) {
+            <p class="pad small muted">{{ roles.loaded() ? 'No roles.' : 'Loading…' }}</p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <tbody>
+                  @for (r of roles.value(); track r.id) {
+                    <tr>
+                      <td>
+                        {{ r.name }}<span class="sub">{{ r.description || '' }}</span>
+                      </td>
+                      <td class="small muted">{{ plural(r.permissions.length, 'permission') }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head"><h3>How an invitation works</h3></header>
+          <div class="card-body small">
+            <ol class="steps">
+              <li>
+                You choose the e-mail address and the roles, each at the whole organisation, an
+                account group or one account. You can only give what you hold yourself.
+              </li>
+              <li>
+                The engine e-mails the link when the identity provider can send mail; otherwise it
+                shows you a single-use link (and, for a new person, a temporary password) once, to
+                pass on yourself.
+              </li>
+              <li>
+                The link works for 7 days. The person signs in; a new account sets a password and
+                second factor. They then hold exactly the roles you chose.
+              </li>
+              <li>
+                An invitation counts against the plan's member limit until it is used or revoked.
+              </li>
+            </ol>
+            @if (usage.value(); as u) {
+              <p class="muted">
+                Plan <strong>{{ u.plan?.name ?? '—' }}</strong
+                >: {{ memberLimitText() }}.
+              </p>
+            }
+          </div>
+        </section>
+      </div>
+
+      <app-audit-trail
+        heading="Invitations and membership changes"
+        [actions]="['iam.invitation.', 'iam.membership.']"
+        empty="No invitation has been sent, accepted or revoked and no membership changed yet. Each is recorded here."
+      />
+
       <app-confirm-dialog
         [open]="revoking() !== null"
         [title]="'Revoke the invitation for ' + (revoking()?.email ?? '') + '?'"
@@ -236,6 +340,72 @@ export class InvitationsPageComponent {
     'Could not load invitations.',
   );
   readonly roles = iamResource(() => this.iam.roles(), [] as IamRole[], 'Could not load roles.');
+  private readonly plans = inject(PlansApiService);
+  protected readonly plural = plural;
+  readonly members = iamResource(
+    () => this.iam.members().pipe(catchError(() => of([] as IamMember[]))),
+    [] as IamMember[],
+  );
+  readonly usage = iamResource<TenantUsage | null>(
+    () => this.plans.myUsage().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly activeMembers = computed(
+    () => this.members.value().filter((m) => m.status === 'Active').length,
+  );
+  readonly memberItem = computed(
+    () => this.usage.value()?.items.find((i) => i.key === 'members') ?? null,
+  );
+  readonly memberLimitText = computed(() => {
+    const i = this.memberItem();
+    if (!i) return 'member limit unknown';
+    return i.limit == null
+      ? `no member limit (${i.used} people incl. pending invitations)`
+      : `${i.used} of ${i.limit} people incl. pending invitations`;
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const inv = this.invitations.value();
+    const c = countBy(inv, (i) => (this.isPending(i) ? 'Pending' : (i.status ?? 'Pending')));
+    const item = this.memberItem();
+    return [
+      {
+        label: 'Waiting to be accepted',
+        value: this.invitations.loaded() ? String(c['Pending'] ?? 0) : '…',
+        caption: 'links still valid',
+        tone: c['Pending'] ? 'warn' : null,
+      },
+      {
+        label: 'Accepted',
+        value: this.invitations.loaded() ? String(c['Accepted'] ?? 0) : '…',
+        caption: 'became members',
+      },
+      {
+        label: 'Expired or revoked',
+        value: this.invitations.loaded() ? String((c['Expired'] ?? 0) + (c['Revoked'] ?? 0)) : '…',
+        caption: `${c['Expired'] ?? 0} expired · ${c['Revoked'] ?? 0} revoked`,
+      },
+      {
+        label: 'Members now',
+        value: this.members.loaded() ? String(this.activeMembers()) : '…',
+        caption: `${this.members.value().length - this.activeMembers()} suspended or invited`,
+        route: '/iam/members',
+      },
+      {
+        label: 'Room on the plan',
+        value: !item
+          ? '—'
+          : item.limit == null
+            ? 'Unlimited'
+            : String(Math.max(0, item.limit - item.used)),
+        caption: item
+          ? item.limit == null
+            ? `${this.usage.value()?.plan?.name ?? ''} plan`
+            : `of ${item.limit} people`
+          : 'plan not readable',
+        route: '/iam/plan',
+      },
+    ];
+  });
 
   readonly email = signal('');
   private nextKey = 1;
@@ -252,8 +422,14 @@ export class InvitationsPageComponent {
   readonly busy = signal(false);
 
   constructor() {
+    this.reloadAll();
+  }
+
+  reloadAll(): void {
     this.invitations.reload();
     this.roles.reload();
+    this.members.reload();
+    this.usage.reload();
   }
 
   private specs(): GrantSpec[] {

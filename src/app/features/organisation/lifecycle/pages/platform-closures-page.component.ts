@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, of } from 'rxjs';
+import { catchError, defer, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
@@ -554,7 +554,7 @@ export class PlatformClosuresPageComponent {
   );
   /** The acting organisation's own closing state — its blockers and the grace period in force. */
   readonly own = iamResource<TenantClosureState | null>(
-    () => this.api.closureState().pipe(catchError(() => of(null))),
+    () => defer(() => this.api.closureState()).pipe(catchError(() => of(null))),
     null,
   );
   readonly graceDays = computed(() => this.own.value()?.graceDays ?? null);

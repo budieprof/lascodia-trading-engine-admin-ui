@@ -1,5 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+import { catchError, of } from 'rxjs';
+
+import { ago, countBy, plural } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { OnboardingApiService } from '@features/onboarding/onboarding-api.service';
+import type { SignupStatus } from '@features/onboarding/onboarding.types';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
@@ -39,8 +47,33 @@ import type { PlanDto } from '../plans.types';
     ConfirmDialogComponent,
     TenantPlanPanelComponent,
     UsageExportComponent,
+    RouterLink,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      .cols {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 860px) {
+        .cols {
+          grid-template-columns: 1fr;
+        }
+      }
+      .links {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header title="Organisations" subtitle="Every organisation on the platform.">
@@ -68,6 +101,8 @@ import type { PlanDto } from '../plans.types';
           New organisation
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Organisations summary" />
 
       @if (creating()) {
         <section class="card">
@@ -341,6 +376,84 @@ import type { PlanDto } from '../plans.types';
         }
       </section>
 
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <h3>Plans in use</h3>
+            <span class="spacer"></span>
+            <a class="small" routerLink="/platform/plans">Plans</a>
+          </header>
+          @if (!canManagePlans) {
+            <p class="pad small muted">
+              Seeing the plans needs <code>platform.plans.manage</code>.
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Plan</th>
+                    <th>Organisations on it</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (p of plans.value(); track p.id) {
+                    <tr>
+                      <td>
+                        {{ p.name }}
+                        @if (p.isDefault) {
+                          <span class="chip info">default</span>
+                        }
+                        <span class="sub">{{ p.description || '' }}</span>
+                      </td>
+                      <td class="small">{{ onPlan(p.id, p.isDefault) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head"><h3>How organisations arrive and leave</h3></header>
+          <div class="card-body small">
+            <ul class="links">
+              <li>
+                <strong>Created by staff</strong> here with <em>New organisation</em>, then
+                <em>Invite first Owner</em> seats its first Owner.
+              </li>
+              <li>
+                <strong>Self-serve sign-up</strong>:
+                @if (signup.value(); as su) {
+                  {{ su.available ? 'available' : su.enabled ? 'switched on but blocked' : 'off' }}
+                  ({{ su.pending }} waiting) —
+                }
+                <a routerLink="/platform/signups">Sign-ups</a>.
+              </li>
+              <li>
+                <strong>Suspended</strong> organisations keep their data and open positions under
+                watch; members cannot sign in.
+              </li>
+              <li>
+                <strong>Closed</strong> by an Owner, reopenable for the grace period, then deleted
+                by staff — <a routerLink="/platform/closures">Closed organisations</a>.
+              </li>
+              <li>
+                Their terminals' health across organisations:
+                <a routerLink="/platform/fleet">Fleet</a>.
+              </li>
+            </ul>
+          </div>
+        </section>
+      </div>
+
+      <app-audit-trail
+        heading="Organisation and membership changes"
+        [actions]="['platform.tenant.', 'iam.membership.']"
+        empty="No organisation has been created, suspended or moved to another plan, and no membership changed since the audit log began. Each change is recorded here."
+      />
+
       <app-confirm-dialog
         [open]="statusChange() !== null"
         [title]="
@@ -401,6 +514,74 @@ export class OrganisationsPageComponent {
     'Could not load organisations.',
   );
 
+  private readonly onboarding = inject(OnboardingApiService);
+  readonly signup = iamResource<SignupStatus | null>(
+    () =>
+      this.auth.hasPermission(Permission.PlatformTenantsManage)
+        ? this.onboarding.signupStatus().pipe(catchError(() => of(null)))
+        : of(null),
+    null,
+  );
+  readonly tiles = computed<StatTile[]>(() => {
+    const t = this.tenants.value();
+    const s = countBy(t, (x) => x.status);
+    const k = countBy(t, (x) => x.kind);
+    const members = t.reduce((n, x) => n + (x.activeMembers ?? 0), 0);
+    const newest =
+      t
+        .map((x) => x.createdAtUtc ?? '')
+        .sort()
+        .at(-1) || null;
+    return [
+      {
+        label: 'Organisations',
+        value: this.tenants.loaded() ? String(t.length) : '…',
+        caption:
+          Object.entries(k)
+            .map(([kind, n]) => `${n} ${kind}`)
+            .join(' · ') || 'none',
+      },
+      {
+        label: 'Active',
+        value: this.tenants.loaded() ? String(s['Active'] ?? 0) : '…',
+        caption: `${s['Suspended'] ?? 0} suspended · ${s['Closed'] ?? 0} closed`,
+        tone: s['Suspended'] ? 'warn' : 'good',
+      },
+      {
+        label: 'Active members',
+        value: this.tenants.loaded() ? String(members) : '…',
+        caption: 'across every organisation',
+      },
+      {
+        label: 'Newest',
+        value: newest ? ago(newest) : '—',
+        caption: newest ? 'since the last organisation was created' : 'no organisation yet',
+      },
+      {
+        label: 'Self-serve sign-up',
+        value: !this.signup.value()
+          ? '—'
+          : this.signup.value()!.available
+            ? 'Available'
+            : this.signup.value()!.enabled
+              ? 'Blocked'
+              : 'Off',
+        caption: this.signup.value()
+          ? `${plural(this.signup.value()!.pending, 'request')} waiting`
+          : 'staff create organisations',
+        route: '/platform/signups',
+      },
+    ];
+  });
+
+  onPlan(planId: number, isDefault: boolean): string {
+    const names = this.tenants
+      .value()
+      .filter((t) => t.planId === planId || (isDefault && t.planId == null))
+      .map((t) => t.name);
+    return names.length ? names.join(', ') : 'none';
+  }
+
   readonly creating = signal(false);
   readonly draft = signal<CreateTenantBody>({
     slug: '',
@@ -423,6 +604,7 @@ export class OrganisationsPageComponent {
 
   constructor() {
     this.tenants.reload();
+    this.signup.reload();
     if (this.canManagePlans) this.plans.reload();
   }
 
