@@ -19,6 +19,9 @@ import { MAX_ELEVATION_MINUTES } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { elevationActions, elevationErrors } from '../platform.logic';
+import { ago, countBy, plural } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 
 type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
 
@@ -32,7 +35,14 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
   selector: 'app-platform-elevations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, MfaHintComponent],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    MfaHintComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -49,6 +59,8 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
           {{ elevations.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Elevated access summary" />
 
       <section class="card">
         <header class="card-head"><h3>Request access</h3></header>
@@ -143,7 +155,12 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
         @if (elevations.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (elevations.loaded() && elevations.value().length === 0) {
-          <p class="pad muted">No elevated access requested.</p>
+          <p class="pad small muted">
+            No elevated access has been requested. Platform staff ask for it here when they must act
+            inside a customer organisation (at most 240 minutes, only the permissions ticked);
+            another staff member approves, and it ends by itself. Viewing as someone, read-only,
+            needs none — see Impersonation.
+          </p>
         } @else if (elevations.value().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -231,6 +248,12 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
           <app-mfa-hint [permission]="P.PlatformElevationApprove" />
         }
       </app-confirm-dialog>
+
+      <app-audit-trail
+        heading="Elevation history"
+        [actions]="['platform.elevation.']"
+        empty="No elevation has been requested, approved, rejected or ended yet. Each step is recorded here and in the organisation's own audit log."
+      />
     </div>
   `,
 })
@@ -288,6 +311,42 @@ export class ElevationsPageComponent {
   private readonly me = computed(() => {
     const id = Number(this.auth.user()?.passportId);
     return Number.isInteger(id) && id > 0 ? id : null;
+  });
+
+  readonly tiles = computed<StatTile[]>(() => {
+    const list = this.elevations.value();
+    const c = countBy(list, (e) => String(e.status));
+    const last =
+      list
+        .map((e) => e.requestedAtUtc ?? '')
+        .sort()
+        .at(-1) || null;
+    return [
+      {
+        label: 'Active now',
+        value: this.elevations.loaded() ? String(c['Active'] ?? 0) : '…',
+        caption: c['Active']
+          ? 'staff can act inside an organisation'
+          : 'no staff access inside organisations',
+        tone: c['Active'] ? 'warn' : 'good',
+      },
+      {
+        label: 'Waiting for approval',
+        value: this.elevations.loaded() ? String(c['Pending'] ?? 0) : '…',
+        caption: 'another staff member approves',
+        tone: c['Pending'] ? 'warn' : null,
+      },
+      {
+        label: 'Requests so far',
+        value: this.elevations.loaded() ? String(list.length) : '…',
+        caption: last ? `latest ${ago(last)}` : 'none ever made',
+      },
+      {
+        label: 'Longest allowed',
+        value: '240 min',
+        caption: `${plural((c['Ended'] ?? 0) + (c['Expired'] ?? 0), 'elevation')} ended or expired`,
+      },
+    ];
   });
 
   constructor() {

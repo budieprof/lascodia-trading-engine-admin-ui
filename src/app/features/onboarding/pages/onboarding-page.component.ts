@@ -155,7 +155,7 @@ import type { OnboardingItem, TenantOnboarding } from '../onboarding.types';
                         <strong>{{ i.used }}</strong>
                       </td>
                       <td class="small">
-                        {{ i.limit == null ? 'no limit' : i.limit }}
+                        {{ i.limit === null ? 'no limit' : i.limit }}
                         @if (i.overLimit) {
                           <span class="chip bad">over</span>
                         }

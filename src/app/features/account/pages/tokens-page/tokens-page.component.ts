@@ -24,6 +24,9 @@ import type { PersonalAccessToken } from '@features/iam/iam.types';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { SecretOnceComponent } from '@features/iam/shared/secret-once.component';
+import { ago, countBy } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 
 const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
 
@@ -43,6 +46,8 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
     ConfirmDialogComponent,
     MfaHintComponent,
     SecretOnceComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../../../iam/shared/iam-page.scss',
   template: `
@@ -60,6 +65,8 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
           {{ tokens.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Access tokens summary" />
 
       <section class="card">
         <header class="card-head">
@@ -146,7 +153,11 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
         @if (tokens.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (tokens.loaded() && tokens.value().length === 0) {
-          <p class="pad muted">No tokens.</p>
+          <p class="pad small muted">
+            You have no access tokens. A token lets a script call the engine as you with only the
+            permissions you tick (never more than you hold), in this organisation only, for at most
+            365 days; it is shown once when created. Revoke it here the moment it is not needed.
+          </p>
         } @else if (tokens.value().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -208,6 +219,15 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
         (confirm)="revoke()"
         (cancelled)="revoking.set(null)"
       />
+
+      @if (actorId()) {
+        <app-audit-trail
+          heading="Your token activity"
+          [actions]="['iam.token.']"
+          [actor]="actorId()"
+          empty="You have never created or revoked an access token."
+        />
+      }
     </div>
   `,
 })
@@ -245,6 +265,46 @@ export class TokensPageComponent {
   readonly busy = signal(false);
   readonly created = signal<string | null>(null);
   readonly revoking = signal<PersonalAccessToken | null>(null);
+
+  readonly actorId = computed(() => {
+    const id = this.auth.user()?.passportId;
+    return id ? `admin-user:${id}` : null;
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const list = this.tokens.value();
+    const c = countBy(list, (t) => t.status ?? 'Active');
+    const used =
+      list
+        .map((t) => t.lastUsedAtUtc ?? '')
+        .sort()
+        .at(-1) || null;
+    const next = list
+      .filter((t) => (t.status ?? 'Active') === 'Active')
+      .map((t) => t.expiresAtUtc)
+      .sort()[0];
+    return [
+      {
+        label: 'Active tokens',
+        value: this.tokens.loaded() ? String(c['Active'] ?? 0) : '…',
+        caption: `${c['Revoked'] ?? 0} revoked · ${c['Expired'] ?? 0} expired`,
+      },
+      {
+        label: 'Last used',
+        value: used ? ago(used) : 'Never',
+        caption: 'by any of your tokens',
+      },
+      {
+        label: 'Next to expire',
+        value: next ? ago(next) : '—',
+        caption: next ? new Date(next).toLocaleDateString() : 'no active token',
+      },
+      {
+        label: 'Permissions you could give',
+        value: String(this.auth.permissions().length),
+        caption: 'a token never holds more than you',
+      },
+    ];
+  });
 
   constructor() {
     this.tokens.reload();
