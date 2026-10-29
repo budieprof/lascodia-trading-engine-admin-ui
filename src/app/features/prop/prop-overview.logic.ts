@@ -28,6 +28,16 @@ export const PROP_SETTING_MEANINGS: Record<string, string> = {
     'A payout statement is approved by someone other than the person who prepared it.',
 };
 
+/** Plain names of the `Prop:*` settings. */
+export const PROP_SETTING_LABELS: Record<string, string> = {
+  'Prop:Evaluation:Enabled': 'Rule evaluation',
+  'Prop:Evaluation:IntervalSeconds': 'Evaluation interval (s)',
+  'Prop:Evaluation:StaleAccountSeconds': 'Stale after (s)',
+  'Prop:Enforcement:Enabled': 'Halt on breach',
+  'Prop:Evaluation:MaxEnrollmentsPerTenantPerCycle': 'Enrolments per pass',
+  'Prop:Payouts:RequireDistinctApprover': 'Second-person payout approval',
+};
+
 /** Raw account row the fallback reads (`trading-account/list`). */
 export interface AccountRow {
   id: number;

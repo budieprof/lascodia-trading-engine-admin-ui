@@ -15,7 +15,12 @@ import { when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
 import { PropApiService } from '../prop-api.service';
-import { runningCount, setupKind, setupRequirements } from '../prop-overview.logic';
+import {
+  PROP_SETTING_LABELS,
+  runningCount,
+  setupKind,
+  setupRequirements,
+} from '../prop-overview.logic';
 import { money } from '../prop.logic';
 import type { PropOverview } from '../prop.types';
 
@@ -174,7 +179,10 @@ import type { PropOverview } from '../prop.types';
                     @for (s of o.settings; track s.key) {
                       <tr>
                         <td>
-                          <code>{{ s.key }}</code>
+                          {{ labels[s.key] ?? s.key }}
+                          <span class="sub"
+                            ><code>{{ s.key }}</code></span
+                          >
                         </td>
                         <td>
                           <strong>{{ s.value }}</strong>
@@ -283,6 +291,7 @@ export class PropSetupComponent implements OnInit {
   readonly loaded = output<PropOverview>();
 
   protected readonly money = money;
+  protected readonly labels = PROP_SETTING_LABELS;
   protected readonly when = when;
   protected readonly links = [
     { label: 'Prop API reference', route: '/docs/api' },
