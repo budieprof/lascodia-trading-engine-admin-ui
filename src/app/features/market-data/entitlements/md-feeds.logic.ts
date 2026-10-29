@@ -108,3 +108,58 @@ export function declarationHolders(
     .map(([tenant, feeds]) => ({ tenant, feeds }))
     .sort((a, b) => a.tenant.localeCompare(b.tenant));
 }
+
+/** One feed of `GET md/entitlements/me` with the fields the engine adds beyond the core type (WS8). */
+export interface MyFeedRow {
+  feedId: string;
+  name: string;
+  display: boolean;
+  nonDisplay: boolean;
+  validTo: string | null;
+  source: string;
+  delayMinutes?: number;
+  declarationRequired?: boolean;
+  exchangeFamily?: string | null;
+}
+
+/** How the organisation holds a feed, in plain words. */
+export function holdingLabel(source: string): string {
+  switch (source) {
+    case 'house':
+      return 'Platform (House reads every feed)';
+    case 'default':
+      return 'Default feed (every organisation)';
+    case 'grant':
+      return 'Granted licence';
+    default:
+      return source;
+  }
+}
+
+/** "Real time" / "Delayed 15 min" / "Machines only". */
+export function accessLabel(f: MyFeedRow): string {
+  const timing = (f.delayMinutes ?? 0) > 0 ? `Delayed ${f.delayMinutes} min` : 'Real time';
+  if (f.display && f.nonDisplay) return `${timing} · people and machines`;
+  if (f.display) return `${timing} · people only`;
+  if (f.nonDisplay) return `${timing} · machines only`;
+  return 'No use';
+}
+
+/**
+ * The organisation's feeds with how many readable sources are live behind each (`GET md/sources` lists only enabled
+ * sources the caller may read, each with its kind → feed map).
+ */
+export function liveSourcesPerFeed(
+  sources: readonly { feeds?: Record<string, string> | null }[],
+): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const s of sources)
+    for (const feed of new Set(Object.values(s.feeds ?? {})))
+      out.set(feed, (out.get(feed) ?? 0) + 1);
+  return out;
+}
+
+/** Feeds of one exchange family the organisation reads. */
+export function feedsOfFamily(feeds: readonly MyFeedRow[], family: string): MyFeedRow[] {
+  return feeds.filter((f) => f.exchangeFamily === family);
+}

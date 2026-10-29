@@ -50,11 +50,13 @@ import {
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
+import { ConfigHistoryCardComponent } from '@features/strategies/components/config-history-card/config-history-card.component';
 
 @Component({
   selector: 'app-risk-profiles-page',
   standalone: true,
   imports: [
+    ConfigHistoryCardComponent,
     DataTableComponent,
     PageHeaderComponent,
     ConfirmDialogComponent,
@@ -1100,6 +1102,23 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
               </table>
             }
           </section>
+          <!-- What each fleet-wide option does and how it has been changed. -->
+          <section class="tier2-guide">
+            <h3>What these options do</h3>
+            <dl>
+              @for (g of tier2Guide; track g.key) {
+                <div>
+                  <dt>{{ g.label }}</dt>
+                  <dd>{{ g.help }}</dd>
+                </div>
+              }
+            </dl>
+          </section>
+          <app-config-history-card
+            prefix="RiskCheckerOptions:"
+            title="Tier-2 option changes"
+            emptyText="None of these options has been changed through the console — each holds its seeded or default value."
+          />
         }
       </ui-tabs>
 
@@ -1405,6 +1424,33 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
         }
       }
 
+      .tier2-guide {
+        margin-top: var(--space-4);
+        padding: var(--space-4) var(--space-5);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .tier2-guide h3 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-base);
+      }
+      .tier2-guide dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: var(--space-3);
+      }
+      .tier2-guide dt {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .tier2-guide dd {
+        margin: 2px 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
       /* Global Tier-2 Options tab */
       .gt2-head {
         justify-content: space-between;
@@ -1955,6 +2001,40 @@ export class RiskProfilesPageComponent implements OnInit {
   // governed: each save carries an operator `reason` + `immediate:true`
   // break-glass so the engine either applies it now or queues it for
   // cooling-off (the returned message tells us which).
+  /** Plain-language help for the Tier-2 options (from RiskCheckerOptions' own documentation). */
+  readonly tier2Guide = [
+    {
+      key: 'clock',
+      label: 'Clock-skew tolerance (s)',
+      help: 'How many seconds past its expiry a signal still counts as valid, so a few seconds of engine/EA clock drift does not expire it. 0 disables.',
+    },
+    {
+      key: 'ml',
+      label: 'ML-disagreement min confidence',
+      help: 'When the ML model disagrees with a signal’s direction, the signal must have at least this confidence or it is rejected.',
+    },
+    {
+      key: 'drift',
+      label: 'Max entry-price drift %',
+      help: 'Legacy cap on how far price may have moved from the signal’s entry, as a fraction of price. 0 = off (the default since June 2026).',
+    },
+    {
+      key: 'band',
+      label: 'Entry tolerance band %',
+      help: 'If the live price is within this distance of the entry, the order fires at market instead of waiting as a pending order. 0 disables.',
+    },
+    {
+      key: 'tp',
+      label: 'Entry tolerance TP frac',
+      help: 'The same tolerance as a fraction of the planned move to take-profit, so it means the same on every instrument; falls back to the band when 0.',
+    },
+    {
+      key: 'dd',
+      label: 'Reduced / Halted drawdown %',
+      help: 'Account drawdown at which drawdown recovery halves lot sizes (Reduced) or stops new trading (Halted). Halted must be above Reduced.',
+    },
+  ];
+
   readonly globalOptionSpecs: GlobalOptionSpec[] = [
     {
       label: 'Clock-skew tolerance (s)',

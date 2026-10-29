@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1041,
+  "endpointCount": 1043,
   "groups": [
     {
       "name": "Admin auth",
@@ -4887,6 +4887,28 @@
           "permission": "access.viewer",
           "parameters": [],
           "response": "ResponseData<List<EngineConfigDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/config/history",
+          "summary": "Recent changes of the settings whose key starts with prefix (secrets masked).",
+          "access": "permission",
+          "permission": "access.viewer",
+          "parameters": [
+            {
+              "name": "prefix",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "limit",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<ConfigChangeDto>>"
         },
         {
           "method": "GET",
@@ -14983,6 +15005,28 @@
             }
           ],
           "response": "ResponseData<StrategyExportDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/strategy/{id}/footprint",
+          "summary": "What the strategy has actually done over the last days days — signals per day and by status, orders/fills per account (caller's account scope), fill quality, positions and realised P&L — plus whether it is a sentinel, its creation record and the other strategies on its market. Read-only.",
+          "access": "permission",
+          "permission": "strategies.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "days",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<StrategyFootprintDto>"
         },
         {
           "method": "GET",

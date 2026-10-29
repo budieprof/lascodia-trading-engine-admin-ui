@@ -11,6 +11,7 @@ import {
   type FactTile,
 } from '@features/strategies/components/fact-tiles/fact-tiles.component';
 import { ago, count, day } from '@features/strategies/util/figures';
+import { ConfigHistoryCardComponent } from '@features/strategies/components/config-history-card/config-history-card.component';
 
 /**
  * Why the auto-tune queue holds what it holds, from `GET auto-tune/status`: the tuner worker's switches,
@@ -21,7 +22,7 @@ import { ago, count, day } from '@features/strategies/util/figures';
   selector: 'app-auto-tune-status-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FeatureStateComponent, FactTilesComponent],
+  imports: [FeatureStateComponent, FactTilesComponent, ConfigHistoryCardComponent],
   template: `
     @if (status(); as s) {
       <app-fact-tiles [tiles]="tiles()" />
@@ -45,6 +46,42 @@ import { ago, count, day } from '@features/strategies/util/figures';
               : { label: 'Proposals', route: '/auto-tune' },
           ]"
         />
+        <section class="knobs">
+          <h3>Knobs the tuner can propose</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Setting</th>
+                <th>What it controls</th>
+                <th>Tuner</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdLow</td>
+                <td>
+                  Below this saturation (how far a policy step pushes its knobs against their
+                  per-cycle cap) the CompositeML trainer skips PPO and takes one plain step. Default
+                  0.3.
+                </td>
+                <td>PPO</td>
+              </tr>
+              <tr>
+                <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdHigh</td>
+                <td>
+                  At and above this saturation PPO runs at full intensity; in between it runs about
+                  half its inner iterations. Default 0.7.
+                </td>
+                <td>PPO</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+        <app-config-history-card
+          prefix="CompositeMLReinforceTraining:"
+          title="Changes to these knobs"
+          emptyText="Neither knob has been changed — applying a proposal (or editing the setting) records a row here."
+        />
       }
     } @else if (failed()) {
       <p class="muted">
@@ -59,6 +96,36 @@ import { ago, count, day } from '@features/strategies/util/figures';
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
+      }
+      .knobs {
+        padding: var(--space-4) var(--space-5);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .knobs h3 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-base);
+      }
+      .knobs table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .knobs th,
+      .knobs td {
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+      .knobs th {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: normal;
+      }
+      .mono {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
       }
       .muted {
         margin: 0;

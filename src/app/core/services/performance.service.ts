@@ -74,6 +74,8 @@ export interface AttributionSliceDto {
   trades: number;
   wins: number;
   accounts: number;
+  /** False for a retired/deleted strategy (no page to link to). Absent on older engine builds. */
+  strategyExists?: boolean;
 }
 
 export interface StrategySnapshotCoverageDto {

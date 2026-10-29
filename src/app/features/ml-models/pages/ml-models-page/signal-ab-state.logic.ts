@@ -30,3 +30,57 @@ export function topReasons(
     .map(([reason, count]) => ({ reason, count }))
     .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 }
+
+/** Minimal shape of a shadow evaluation the A/B tab summarises. */
+export interface ShadowLite {
+  symbol: string | null;
+  timeframe: string;
+  startedAt: string;
+  decisionReason: string | null;
+  /** Normalised decision key: promoted | flagged | rejected | pending. */
+  decision: string;
+}
+
+/** Shadow evaluations started per ISO week (Monday, UTC), oldest first, split by decision. */
+export function shadowByWeek(
+  rows: readonly ShadowLite[],
+): { week: string; promoted: number; flagged: number; rejected: number; pending: number }[] {
+  const m = new Map<
+    string,
+    { promoted: number; flagged: number; rejected: number; pending: number }
+  >();
+  for (const r of rows) {
+    const d = new Date(r.startedAt);
+    if (Number.isNaN(d.getTime())) continue;
+    const day = (d.getUTCDay() + 6) % 7;
+    const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - day));
+    const key = monday.toISOString().slice(0, 10);
+    const b = m.get(key) ?? { promoted: 0, flagged: 0, rejected: 0, pending: 0 };
+    const k = (
+      ['promoted', 'flagged', 'rejected'].includes(r.decision) ? r.decision : 'pending'
+    ) as 'promoted' | 'flagged' | 'rejected' | 'pending';
+    b[k]++;
+    m.set(key, b);
+  }
+  return [...m].sort(([a], [b]) => a.localeCompare(b)).map(([week, v]) => ({ week, ...v }));
+}
+
+/** Per pair: how many evaluations, the newest start and the most common reason they ended. */
+export function shadowByPair(
+  rows: readonly ShadowLite[],
+): { pair: string; count: number; promoted: number; latest: string; topReason: string }[] {
+  const g = new Map<string, ShadowLite[]>();
+  for (const r of rows) {
+    const k = `${r.symbol ?? '—'} ${r.timeframe}`;
+    g.set(k, [...(g.get(k) ?? []), r]);
+  }
+  return [...g]
+    .map(([pair, list]) => ({
+      pair,
+      count: list.length,
+      promoted: list.filter((x) => x.decision === 'promoted').length,
+      latest: list.reduce((a, x) => (x.startedAt > a ? x.startedAt : a), ''),
+      topReason: topReasons(list.map((x) => x.decisionReason))[0]?.reason ?? '—',
+    }))
+    .sort((a, b) => b.count - a.count || a.pair.localeCompare(b.pair));
+}

@@ -21,6 +21,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceTrendComponent } from '../../components/evidence-trend/evidence-trend.component';
 
 type WindowDays = 1 | 7 | 30;
 type SortMode = 'layer' | 'drop' | 'recent';
@@ -49,6 +50,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
     PageHeaderComponent,
     CompositeMlNavComponent,
     CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceTrendComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -67,6 +69,15 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       />
 
       <app-composite-ml-pipeline-state variant="compact" [focus]="['catalogueDrift']" />
+
+      <p class="about">
+        Every cold-start gate in the CompositeML pipeline needs a minimum amount of evidence
+        (matured generation decisions, predictions, regime snapshots) before it switches from its
+        fallback to its learned behaviour. The drift monitor records each gate's evidence once a
+        day; a sharp drop is flagged as a drop alert. While the generator is off, no new evidence
+        accrues, so cold gates stay cold.
+      </p>
+      <app-composite-ml-evidence-trend />
 
       <section class="controls">
         <div class="control-group">
@@ -266,6 +277,12 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         display: flex;
         flex-direction: column;
         gap: var(--space-4);
+      }
+      .about {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        max-width: 100ch;
       }
       .controls {
         display: flex;

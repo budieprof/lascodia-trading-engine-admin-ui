@@ -111,8 +111,10 @@ const DEFAULTS: Record<string, string> = {
                     <a [routerLink]="['/backtests', b.id]" class="mono">#{{ b.id }}</a>
                   </td>
                   <td>
-                    @if (b.strategyId) {
+                    @if (b.strategyId && known(b.strategyId)) {
                       <a [routerLink]="['/strategies', b.strategyId]">{{ nameOf(b.strategyId) }}</a>
+                    } @else if (b.strategyId) {
+                      #{{ b.strategyId }} <span class="muted small">(deleted)</span>
                     } @else {
                       —
                     }
@@ -293,6 +295,11 @@ export class PortfolioBacktestContextComponent {
       ? null
       : this.setting('PortfolioBacktest:Enabled').toLowerCase() === 'true',
   );
+
+  /** Strategies the list returned (deleted ones are not listed and have no page). */
+  protected known(id: number): boolean {
+    return this.strategyNames().has(id);
+  }
 
   protected nameOf(id: number): string {
     return this.strategyNames().get(id) ?? `#${id}`;

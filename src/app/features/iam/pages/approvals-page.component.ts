@@ -22,6 +22,10 @@ import { iamResource } from '../shared/iam-resource';
 import { ago, countBy, plural } from '../shared/admin-context.logic';
 import { AuditTrailComponent } from '../shared/audit-trail.component';
 import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.component';
+import { catchError, of } from 'rxjs';
+import { ApiService } from '@core/api/api.service';
+import { OrganisationApiService } from '@features/organisation/organisation-api.service';
+import type { ScopedKillSwitchStatus } from '@features/organisation/organisation.types';
 
 /**
  * Two-person approvals (U3.4, contract C3.3): actions that need a second person — releasing a kill
@@ -352,6 +356,25 @@ export class ApprovalsPageComponent {
     [] as ApprovalPolicyRow[],
     'Could not load the approval policies.',
   );
+  private readonly orgApi = inject(OrganisationApiService);
+  private readonly rawApi = inject(ApiService);
+  /** What could need a second person right now: an engaged switch to release, changes cooling off. */
+  readonly killSwitch = iamResource<ScopedKillSwitchStatus | null>(
+    () =>
+      this.auth.hasPermission(Permission.EngineKillswitch)
+        ? this.orgApi.tenantKillSwitch().pipe(catchError(() => of(null)))
+        : of(null),
+    null,
+  );
+  readonly cooling = iamResource<unknown[] | null>(
+    () =>
+      this.auth.hasPermission(Permission.EngineConfig)
+        ? this.rawApi
+            .getEnvelope<unknown[]>('/config/pending', { silent: true })
+            .pipe(catchError(() => of(null)))
+        : of(null),
+    null,
+  );
   readonly canDecide = computed(() => this.auth.hasPermission(Permission.IamApprovalsDecide));
   readonly recentCount = computed(
     () => this.recent.value().filter((r) => r.status !== 'Pending').length,
@@ -371,6 +394,7 @@ export class ApprovalsPageComponent {
       .map((r) => r.requestedAtUtc as string)
       .sort()[0];
     const loaded = this.recent.loaded();
+    const ks = this.killSwitch.value();
     return [
       {
         label: 'Waiting now',
@@ -397,6 +421,23 @@ export class ApprovalsPageComponent {
         route: '/organisation/approval-policies',
       },
       {
+        label: 'Kill switch to release',
+        value: !ks ? '—' : ks.haltedBy ? 'Engaged' : 'None',
+        caption: !ks
+          ? 'needs engine.killswitch'
+          : ks.haltedBy
+            ? `${ks.haltedBy} switch — releasing it is a two-person action`
+            : 'nothing is halted, so nothing to release',
+        tone: ks?.haltedBy ? 'warn' : null,
+        route: '/organisation/risk',
+      },
+      {
+        label: 'Changes cooling off',
+        value: this.cooling.value() == null ? '—' : String(this.cooling.value()!.length),
+        caption: 'risk-loosening settings waiting out their delay',
+        route: '/engine-config',
+      },
+      {
         label: 'Two-person permissions',
         value: String(this.twoPerson.length),
         caption: this.twoPerson.map((p) => p.key).join(', '),
@@ -412,6 +453,8 @@ export class ApprovalsPageComponent {
     this.list.reload();
     this.recent.reload();
     this.policies.reload();
+    this.killSwitch.reload();
+    this.cooling.reload();
   }
 
   showAll(): void {

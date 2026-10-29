@@ -30,6 +30,9 @@ import {
   readableTextOn,
 } from '../lifecycle.logic';
 import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
+import { catchError, defer, of } from 'rxjs';
+import { PlansApiService } from '@features/platform/plans-api.service';
+import type { TenantUsage } from '@features/platform/plans.types';
 
 /**
  * The organisation's console look (engine multi-tenancy Phase 7, LC.4, `/tenant/branding`): the name in
@@ -52,6 +55,25 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   styles: [
     `
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .main-col,
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+
       .preview {
         display: flex;
         align-items: center;
@@ -138,179 +160,191 @@ import type { BrandingImageKind, TenantBranding } from '../lifecycle.types';
         </section>
       }
 
-      @if (branding.value(); as b) {
-        <section class="card">
-          <header class="card-head">
-            <h3>Preview</h3>
-            <span class="spacer"></span>
-            @if (b.isCustomised) {
-              <span class="chip info">Customised</span>
-            } @else {
-              <span class="chip">Platform look</span>
-            }
-          </header>
-          <div class="card-body">
-            <div class="preview">
-              @if (logoPreview(); as src) {
-                <img [src]="src" alt="Your organisation's logo" />
-              }
-              <strong>{{ previewName() }}</strong>
-              <span class="spacer"></span>
-              @if (previewColour(); as c) {
-                <span class="swatch" [style.background]="c" [style.color]="textOn(c)"
-                  >Primary colour</span
-                >
-              }
-            </div>
-            <p class="note">
-              The sign-in page always shows Lascodia. Members see this after they sign in.
-            </p>
-          </div>
-        </section>
-
-        <section class="card">
-          <header class="card-head"><h3>Name and colour</h3></header>
-          <form class="card-body" (ngSubmit)="saveNameAndColour()">
-            <div class="form-grid">
-              <label class="field">
-                <span class="label">Display name (empty = the organisation's own name)</span>
-                <input
-                  class="input"
-                  name="displayName"
-                  maxlength="64"
-                  [disabled]="!canManage()"
-                  [ngModel]="displayName()"
-                  (ngModelChange)="displayName.set($event)"
-                />
-              </label>
-              <label class="field">
-                <span class="label">Primary colour (empty = the platform's)</span>
-                <span class="colour-row">
-                  <input
-                    type="color"
-                    name="colourPicker"
-                    aria-label="Pick the primary colour"
-                    [disabled]="!canManage()"
-                    [ngModel]="colour() || '#0071e3'"
-                    (ngModelChange)="colour.set($event)"
-                  />
-                  <input
-                    class="input"
-                    name="colour"
-                    placeholder="#1f6feb"
-                    maxlength="7"
-                    [attr.aria-invalid]="!colourOk()"
-                    [disabled]="!canManage()"
-                    [ngModel]="colour()"
-                    (ngModelChange)="colour.set($event)"
-                  />
-                </span>
-              </label>
-            </div>
-            @if (!colourOk()) {
-              <ul class="errors" role="alert">
-                <li>The colour must be a hex colour such as #1f6feb.</li>
-              </ul>
-            }
-            @if (canManage()) {
-              <div class="actions-row">
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  [disabled]="busy() || !colourOk() || !nameDirty()"
-                >
-                  {{ busy() ? 'Saving…' : 'Save name and colour' }}
-                </button>
-              </div>
-            }
-          </form>
-        </section>
-
-        <section class="card">
-          <header class="card-head"><h3>Logo and favicon</h3></header>
-          <div class="card-body images">
-            @for (kind of kinds; track kind) {
-              <div class="image-box">
-                <strong>{{ kind === 'logo' ? 'Logo (sidebar)' : 'Favicon (browser tab)' }}</strong>
-                @if (kind === 'logo' ? logoPreview() : faviconPreview(); as src) {
-                  <img [src]="src" [alt]="kind === 'logo' ? 'Current logo' : 'Current favicon'" />
-                }
-                @if (kind === 'logo' ? b.logo : b.favicon; as img) {
-                  <span class="small muted"
-                    >{{ img.contentType }} · {{ img.width }}×{{ img.height }} px ·
-                    {{ size(img.sizeBytes) }}</span
-                  >
+      <div class="split">
+        <div class="main-col">
+          @if (branding.value(); as b) {
+            <section class="card">
+              <header class="card-head">
+                <h3>Preview</h3>
+                <span class="spacer"></span>
+                @if (b.isCustomised) {
+                  <span class="chip info">Customised</span>
                 } @else {
-                  <span class="small muted">None: the platform's {{ kind }} is shown.</span>
+                  <span class="chip">Platform look</span>
                 }
-                <span class="small muted">{{ limits[kind].label }}.</span>
-                @if (canManage()) {
-                  <label class="btn btn-secondary btn-sm">
-                    Upload…
+              </header>
+              <div class="card-body">
+                <div class="preview">
+                  @if (logoPreview(); as src) {
+                    <img [src]="src" alt="Your organisation's logo" />
+                  }
+                  <strong>{{ previewName() }}</strong>
+                  <span class="spacer"></span>
+                  @if (previewColour(); as c) {
+                    <span class="swatch" [style.background]="c" [style.color]="textOn(c)"
+                      >Primary colour</span
+                    >
+                  }
+                </div>
+                <p class="note">
+                  The sign-in page always shows Lascodia. Members see this after they sign in.
+                </p>
+              </div>
+            </section>
+
+            <section class="card">
+              <header class="card-head"><h3>Name and colour</h3></header>
+              <form class="card-body" (ngSubmit)="saveNameAndColour()">
+                <div class="form-grid">
+                  <label class="field">
+                    <span class="label">Display name (empty = the organisation's own name)</span>
                     <input
-                      type="file"
-                      class="sr-only"
-                      [attr.aria-label]="'Upload a ' + kind"
-                      [accept]="limits[kind].types.join(',') + (kind === 'favicon' ? ',.ico' : '')"
-                      (change)="upload(kind, $event)"
+                      class="input"
+                      name="displayName"
+                      maxlength="64"
+                      [disabled]="!canManage()"
+                      [ngModel]="displayName()"
+                      (ngModelChange)="displayName.set($event)"
                     />
                   </label>
-                  @if (kind === 'logo' ? b.logo : b.favicon) {
+                  <label class="field">
+                    <span class="label">Primary colour (empty = the platform's)</span>
+                    <span class="colour-row">
+                      <input
+                        type="color"
+                        name="colourPicker"
+                        aria-label="Pick the primary colour"
+                        [disabled]="!canManage()"
+                        [ngModel]="colour() || '#0071e3'"
+                        (ngModelChange)="colour.set($event)"
+                      />
+                      <input
+                        class="input"
+                        name="colour"
+                        placeholder="#1f6feb"
+                        maxlength="7"
+                        [attr.aria-invalid]="!colourOk()"
+                        [disabled]="!canManage()"
+                        [ngModel]="colour()"
+                        (ngModelChange)="colour.set($event)"
+                      />
+                    </span>
+                  </label>
+                </div>
+                @if (!colourOk()) {
+                  <ul class="errors" role="alert">
+                    <li>The colour must be a hex colour such as #1f6feb.</li>
+                  </ul>
+                }
+                @if (canManage()) {
+                  <div class="actions-row">
                     <button
-                      type="button"
-                      class="btn btn-danger btn-sm"
-                      [disabled]="busy()"
-                      (click)="removeImage(kind)"
+                      type="submit"
+                      class="btn btn-primary"
+                      [disabled]="busy() || !colourOk() || !nameDirty()"
                     >
-                      Remove {{ kind }}
+                      {{ busy() ? 'Saving…' : 'Save name and colour' }}
                     </button>
-                  }
+                  </div>
+                }
+              </form>
+            </section>
+
+            <section class="card">
+              <header class="card-head"><h3>Logo and favicon</h3></header>
+              <div class="card-body images">
+                @for (kind of kinds; track kind) {
+                  <div class="image-box">
+                    <strong>{{
+                      kind === 'logo' ? 'Logo (sidebar)' : 'Favicon (browser tab)'
+                    }}</strong>
+                    @if (kind === 'logo' ? logoPreview() : faviconPreview(); as src) {
+                      <img
+                        [src]="src"
+                        [alt]="kind === 'logo' ? 'Current logo' : 'Current favicon'"
+                      />
+                    }
+                    @if (kind === 'logo' ? b.logo : b.favicon; as img) {
+                      <span class="small muted"
+                        >{{ img.contentType }} · {{ img.width }}×{{ img.height }} px ·
+                        {{ size(img.sizeBytes) }}</span
+                      >
+                    } @else {
+                      <span class="small muted">None: the platform's {{ kind }} is shown.</span>
+                    }
+                    <span class="small muted">{{ limits[kind].label }}.</span>
+                    @if (canManage()) {
+                      <label class="btn btn-secondary btn-sm">
+                        Upload…
+                        <input
+                          type="file"
+                          class="sr-only"
+                          [attr.aria-label]="'Upload a ' + kind"
+                          [accept]="
+                            limits[kind].types.join(',') + (kind === 'favicon' ? ',.ico' : '')
+                          "
+                          (change)="upload(kind, $event)"
+                        />
+                      </label>
+                      @if (kind === 'logo' ? b.logo : b.favicon) {
+                        <button
+                          type="button"
+                          class="btn btn-danger btn-sm"
+                          [disabled]="busy()"
+                          (click)="removeImage(kind)"
+                        >
+                          Remove {{ kind }}
+                        </button>
+                      }
+                    }
+                  </div>
                 }
               </div>
-            }
-          </div>
-        </section>
+            </section>
 
-        @if (canManage() && b.isCustomised) {
+            @if (canManage() && b.isCustomised) {
+              <section class="card">
+                <div class="card-body actions-row">
+                  <button
+                    type="button"
+                    class="btn btn-danger"
+                    [disabled]="busy()"
+                    (click)="confirmingReset.set(true)"
+                  >
+                    Go back to the platform look
+                  </button>
+                </div>
+              </section>
+            }
+          }
+        </div>
+        <aside class="side">
           <section class="card">
-            <div class="card-body actions-row">
-              <button
-                type="button"
-                class="btn btn-danger"
-                [disabled]="busy()"
-                (click)="confirmingReset.set(true)"
-              >
-                Go back to the platform look
-              </button>
+            <header class="card-head"><h3>Where members see it</h3></header>
+            <div class="card-body small">
+              <ul class="where">
+                <li><strong>Name</strong> — the header, the sidebar and the browser tab title.</li>
+                <li>
+                  <strong>Colour</strong> — buttons, links, the selected page in the sidebar and the
+                  phone's address bar; text on it switches to black or white for contrast.
+                </li>
+                <li><strong>Logo</strong> — the top of the sidebar, in place of the platform's.</li>
+                <li><strong>Favicon</strong> — the browser tab and bookmarks.</li>
+                <li>
+                  Not changed: the sign-in page (always the platform's), e-mails and the public
+                  status page. A change shows at each member's next page load.
+                </li>
+              </ul>
             </div>
           </section>
-        }
-      }
 
-      <section class="card">
-        <header class="card-head"><h3>Where members see it</h3></header>
-        <div class="card-body small">
-          <ul class="where">
-            <li><strong>Name</strong> — the header, the sidebar and the browser tab title.</li>
-            <li>
-              <strong>Colour</strong> — buttons, links, the selected page in the sidebar and the
-              phone's address bar; text on it switches to black or white for contrast.
-            </li>
-            <li><strong>Logo</strong> — the top of the sidebar, in place of the platform's.</li>
-            <li><strong>Favicon</strong> — the browser tab and bookmarks.</li>
-            <li>
-              Not changed: the sign-in page (always the platform's), e-mails and the public status
-              page. A change shows at each member's next page load.
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <app-audit-trail
-        heading="Branding changes"
-        [actions]="['tenant.branding.']"
-        empty="The branding has never been changed: members see the platform's look. Every change of the name, colour or images is recorded here."
-      />
+          <app-audit-trail
+            heading="Branding changes"
+            [actions]="['tenant.branding.']"
+            empty="The branding has never been changed: members see the platform's look. Every change of the name, colour or images is recorded here."
+          />
+        </aside>
+      </div>
 
       <app-confirm-dialog
         [open]="confirmingReset()"
@@ -340,6 +374,14 @@ export class BrandingPageComponent {
     () => this.api.branding(),
     null,
     'Could not load the branding.',
+  );
+  private readonly plansApi = inject(PlansApiService);
+  readonly usage = iamResource<TenantUsage | null>(
+    () => defer(() => this.plansApi.myUsage()).pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly memberCount = computed(
+    () => this.usage.value()?.items.find((i) => i.key === 'members')?.used ?? 0,
   );
   readonly canManage = computed(() => this.auth.hasPermission(Permission.TenantBrandingManage));
   readonly tiles = computed<StatTile[]>(() => {
@@ -407,6 +449,7 @@ export class BrandingPageComponent {
     });
     inject(DestroyRef).onDestroy(() => this.revokePreviews());
     this.branding.reload();
+    this.usage.reload();
   }
 
   saveNameAndColour(): void {

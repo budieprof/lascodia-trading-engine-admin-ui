@@ -50,6 +50,33 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
     AuditTrailComponent,
   ],
   styleUrl: '../../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .help {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -68,85 +95,124 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
 
       <app-stat-tiles [tiles]="tiles()" label="Access tokens summary" />
 
-      <section class="card">
-        <header class="card-head">
-          <h3>New token</h3>
-          <span class="spacer"></span>
-          <app-mfa-hint [permission]="P.IamTokensCreate" />
-        </header>
-        <form class="card-body" (ngSubmit)="create()">
-          @if (created(); as t) {
-            <app-secret-once
-              title="Your new token"
-              [value]="t"
-              warning="Copy it now and keep it like a password: it will not be shown again. Send it as a Bearer token in the Authorization header."
-              (dismissed)="created.set(null)"
+      <div class="split">
+        <section class="card">
+          <header class="card-head">
+            <h3>New token</h3>
+            <span class="spacer"></span>
+            <app-mfa-hint [permission]="P.IamTokensCreate" />
+          </header>
+          <form class="card-body" (ngSubmit)="create()">
+            @if (created(); as t) {
+              <app-secret-once
+                title="Your new token"
+                [value]="t"
+                warning="Copy it now and keep it like a password: it will not be shown again. Send it as a Bearer token in the Authorization header."
+                (dismissed)="created.set(null)"
+              />
+            }
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">Name — what will use it</span>
+                <input
+                  class="input"
+                  name="name"
+                  maxlength="80"
+                  [ngModel]="name()"
+                  (ngModelChange)="name.set($event)"
+                  placeholder="e.g. Nightly P&L export"
+                />
+              </label>
+              <label class="field">
+                <span class="label">Expires after</span>
+                <select
+                  class="select"
+                  name="days"
+                  [ngModel]="days()"
+                  (ngModelChange)="days.set(+$event)"
+                >
+                  @for (d of lifetimes; track d) {
+                    <option [ngValue]="d">{{ d }} days</option>
+                  }
+                </select>
+              </label>
+            </div>
+            <fieldset class="matrix">
+              <legend class="label">
+                Permissions · {{ chosen().size }} selected (only ones you hold are offered)
+              </legend>
+              @for (g of groups(); track g.category) {
+                <div>
+                  <span class="matrix-cat">{{ g.category }}</span>
+                  <div class="matrix-checks">
+                    @for (p of g.permissions; track p.key) {
+                      <label class="check" [title]="p.description">
+                        <input
+                          type="checkbox"
+                          [checked]="chosen().has(p.key)"
+                          (change)="toggle(p.key)"
+                        />
+                        <span>{{ p.key }}</span>
+                      </label>
+                    }
+                  </div>
+                </div>
+              } @empty {
+                <p class="muted small">You hold no permissions a token could carry.</p>
+              }
+            </fieldset>
+            @if (submitted() && errors().length) {
+              <ul class="errors" role="alert">
+                @for (e of errors(); track e) {
+                  <li>{{ e }}</li>
+                }
+              </ul>
+            }
+            <div class="actions-row">
+              <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                {{ busy() ? 'Creating…' : 'Create token' }}
+              </button>
+            </div>
+          </form>
+        </section>
+        <aside class="side">
+          <section class="card">
+            <header class="card-head"><h3>Each field</h3></header>
+            <div class="card-body small">
+              <ul class="help">
+                <li>
+                  <strong>Name</strong> — what will use it; shown in your list and the audit log,
+                  never sent to the script.
+                </li>
+                <li>
+                  <strong>Expires after</strong> — the token stops working then (at most 365 days).
+                  Shorter is safer.
+                </li>
+                <li>
+                  <strong>Permissions</strong> — only ones you hold are offered; the token can never
+                  do more than you, and loses any you lose.
+                </li>
+                <li>
+                  Creating needs a fresh second-factor sign-in. The token is shown
+                  <strong>once</strong>; only its first characters are kept.
+                </li>
+                <li>
+                  Use it as <code>Authorization: Bearer lsc_pat_…</code>; it works in this
+                  organisation only.
+                </li>
+              </ul>
+            </div>
+          </section>
+          @if (actorId()) {
+            <app-audit-trail
+              heading="Your token activity"
+              [actions]="['iam.token.']"
+              [actor]="actorId()"
+              empty="You have never created or revoked an access token."
             />
           }
-          <div class="form-grid">
-            <label class="field">
-              <span class="label">Name — what will use it</span>
-              <input
-                class="input"
-                name="name"
-                maxlength="80"
-                [ngModel]="name()"
-                (ngModelChange)="name.set($event)"
-                placeholder="e.g. Nightly P&L export"
-              />
-            </label>
-            <label class="field">
-              <span class="label">Expires after</span>
-              <select
-                class="select"
-                name="days"
-                [ngModel]="days()"
-                (ngModelChange)="days.set(+$event)"
-              >
-                @for (d of lifetimes; track d) {
-                  <option [ngValue]="d">{{ d }} days</option>
-                }
-              </select>
-            </label>
-          </div>
-          <fieldset class="matrix">
-            <legend class="label">
-              Permissions · {{ chosen().size }} selected (only ones you hold are offered)
-            </legend>
-            @for (g of groups(); track g.category) {
-              <div>
-                <span class="matrix-cat">{{ g.category }}</span>
-                <div class="matrix-checks">
-                  @for (p of g.permissions; track p.key) {
-                    <label class="check" [title]="p.description">
-                      <input
-                        type="checkbox"
-                        [checked]="chosen().has(p.key)"
-                        (change)="toggle(p.key)"
-                      />
-                      <span>{{ p.key }}</span>
-                    </label>
-                  }
-                </div>
-              </div>
-            } @empty {
-              <p class="muted small">You hold no permissions a token could carry.</p>
-            }
-          </fieldset>
-          @if (submitted() && errors().length) {
-            <ul class="errors" role="alert">
-              @for (e of errors(); track e) {
-                <li>{{ e }}</li>
-              }
-            </ul>
-          }
-          <div class="actions-row">
-            <button type="submit" class="btn btn-primary" [disabled]="busy()">
-              {{ busy() ? 'Creating…' : 'Create token' }}
-            </button>
-          </div>
-        </form>
-      </section>
+        </aside>
+      </div>
 
       <section class="card">
         <header class="card-head"><h3>Your tokens</h3></header>
@@ -219,15 +285,6 @@ const LIFETIMES = [7, 30, 90, 180, MAX_TOKEN_DAYS];
         (confirm)="revoke()"
         (cancelled)="revoking.set(null)"
       />
-
-      @if (actorId()) {
-        <app-audit-trail
-          heading="Your token activity"
-          [actions]="['iam.token.']"
-          [actor]="actorId()"
-          empty="You have never created or revoked an access token."
-        />
-      }
     </div>
   `,
 })

@@ -171,11 +171,20 @@ type Pending =
                 invoices.loaded()
                   ? 'No invoices for this month. Draft them once the month is over.' +
                     (billableCount() === 0
-                      ? ' Today only House (never invoiced) exists, so a draft run would skip every organisation; it also needs a published price book for the organisation's plan.'
+                      ? ' Today only House (never invoiced) exists, so a draft run would skip every organisation; it also needs a published price book for each organisation plan.'
                       : '')
                   : 'Loading…'
               }}
             </p>
+            @if (invoices.loaded() && ownUsage.value(); as own) {
+              <div class="card-body">
+                <p class="small muted">
+                  Meanwhile, what metering has recorded for your own organisation this month (a
+                  member read — nothing is added to an audit log):
+                </p>
+                <app-billing-usage-month [usage]="own" />
+              </div>
+            }
           } @else {
             <p class="pad small muted">Total of live invoices: {{ totals() }}</p>
             <div class="table-wrap">
@@ -311,13 +320,49 @@ type Pending =
           @if (books.error(); as err) {
             <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
           } @else if (books.value().length === 0) {
-            <p class="pad muted">
+            <p class="pad small muted">
               {{
                 books.loaded()
-                  ? 'No price books yet: nothing can be invoiced until a plan has a published one.'
+                  ? 'No price books yet: nothing can be invoiced until a plan has a published one. Each plan below needs its own.'
                   : 'Loading…'
               }}
             </p>
+            @if (plans.value().length) {
+              <div class="table-wrap">
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>Plan</th>
+                      <th>Price book</th>
+                      <th>Organisations on it</th>
+                      <th><span class="sr-only">Create</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (p of planRows(); track p.id) {
+                      <tr>
+                        <td>
+                          {{ p.name }}<span class="sub">{{ p.description || '' }}</span>
+                        </td>
+                        <td class="small"><span class="chip warn">none</span></td>
+                        <td class="small">{{ p.orgs }}</td>
+                        <td class="actions">
+                          @if (canManage()) {
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-secondary"
+                              (click)="newBookForPlan(p.id)"
+                            >
+                              Draft one
+                            </button>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
           } @else {
             <div class="table-wrap">
               <table class="grid">
@@ -591,6 +636,12 @@ type Pending =
         </section>
         @if (usage.value(); as u) {
           <app-billing-usage-month [usage]="u" />
+        } @else if (ownUsage.value(); as own) {
+          <p class="note">
+            Until you choose an organisation above: your own organisation's metered month so far
+            (read as a member — not a staff view, so nothing is added to an audit log).
+          </p>
+          <app-billing-usage-month [usage]="own" />
         }
       }
 
@@ -777,6 +828,30 @@ export class PlatformBillingPageComponent {
               : 'Delete';
   });
 
+  readonly ownUsage = iamResource<BillingUsageMonth | null>(
+    () =>
+      this.auth.hasPermission(Permission.TenantBillingRead)
+        ? this.api.myUsage(null).pipe(catchError(() => of(null)))
+        : of(null),
+    null,
+  );
+  readonly planRows = computed(() =>
+    (
+      this.plans.value() as {
+        id: number;
+        name: string;
+        description?: string | null;
+        isDefault?: boolean;
+      }[]
+    ).map((p) => ({
+      ...p,
+      orgs:
+        (this.tenants.value() as { name: string; planId?: number | null }[])
+          .filter((t) => t.planId === p.id || (p.isDefault && t.planId == null))
+          .map((t) => t.name)
+          .join(', ') || 'none',
+    })),
+  );
   readonly billableCount = computed(
     () =>
       (this.tenants.value() as { kind: string; status: string }[]).filter(
@@ -822,6 +897,7 @@ export class PlatformBillingPageComponent {
   });
 
   constructor() {
+    this.ownUsage.reload();
     this.invoices.reload();
     this.books.reload();
     this.provider.reload();
@@ -873,6 +949,13 @@ export class PlatformBillingPageComponent {
         ? formFrom(from, emptyPriceBookForm(from.planId).effectiveFrom)
         : emptyPriceBookForm(null),
     );
+  }
+
+  /** A new price book already pointed at one plan (the empty-state list). */
+  newBookForPlan(planId: number): void {
+    this.editingId.set(null);
+    this.formErrors.set([]);
+    this.form.set(emptyPriceBookForm(planId));
   }
 
   editBook(book: PriceBook): void {

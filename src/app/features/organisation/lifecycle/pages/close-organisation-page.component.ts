@@ -17,6 +17,12 @@ import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-til
 import { LifecycleApiService } from '../lifecycle-api.service';
 import { closeConfirmationOk, closeOutcome } from '../lifecycle.logic';
 import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
+import { catchError, defer, of } from 'rxjs';
+import type { TenantDataExport } from '../lifecycle.types';
 
 /**
  * Closing the organisation (engine multi-tenancy Phase 7, LC.3, `/tenant/closure`, `tenant.close` — Owner,
@@ -39,6 +45,7 @@ import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
     ModalA11yDirective,
     StatTilesComponent,
     AuditTrailComponent,
+    FeatureStateComponent,
   ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   styles: [
@@ -221,6 +228,17 @@ import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
         </div>
       }
 
+      @if (state.value()) {
+        <app-feature-state
+          title="Before you close"
+          summary="What has to be true, or is worth doing, before the organisation is closed — each with its state now."
+          [kind]="state.value()!.canClose ? 'on' : 'partial'"
+          [stateLabel]="state.value()!.canClose ? 'Ready to close' : 'Not ready'"
+          [requirements]="beforeClose()"
+          [links]="[{ label: 'Admin guide: closing', route: '/docs/admin-guide' }]"
+        />
+      }
+
       <app-audit-trail
         heading="Closing and export activity"
         [actions]="['tenant.closure.', 'tenant.export.']"
@@ -291,8 +309,57 @@ export class CloseOrganisationPageComponent {
     closeConfirmationOk(this.state.value(), this.typed(), this.reason()),
   );
 
+  readonly exports = iamResource<TenantDataExport[]>(
+    () => defer(() => this.api.exports()).pipe(catchError(() => of([] as TenantDataExport[]))),
+    [],
+  );
+  readonly beforeClose = computed<FeatureRequirement[]>(() => {
+    const st = this.state.value();
+    if (!st) return [];
+    const ready = this.exports.value().find((e) => e.canDownload);
+    const open = st.openPositions + st.workingOrders;
+    return [
+      {
+        label: 'Not House',
+        ok: !st.isHouse,
+        detail: st.isHouse
+          ? 'House is the platform operator and is never closed.'
+          : 'A customer organisation.',
+      },
+      {
+        label: 'Nothing open',
+        ok: open === 0,
+        detail:
+          open === 0
+            ? 'No open position or working order.'
+            : `${st.openPositions} open position(s), ${st.workingOrders} working order(s) — flatten first.`,
+        route: '/organisation/risk',
+      },
+      {
+        label: 'A copy of your data',
+        ok: ready ? true : null,
+        detail: ready
+          ? 'An export is ready to download.'
+          : 'No export ready — once closed, nobody can sign in to download one.',
+        route: '/organisation/data-export',
+      },
+      {
+        label: 'Owners',
+        ok: st.owners > 0 ? true : null,
+        detail:
+          st.owners === 0
+            ? 'No member holds Owner here; closing needs an Owner.'
+            : st.needsSecondOwner
+              ? `${st.owners} Owners — a second Owner approves.`
+              : `${st.owners} Owner.`,
+        route: '/iam/members',
+      },
+    ];
+  });
+
   constructor() {
     this.state.reload();
+    this.exports.reload();
   }
 
   cancel(): void {

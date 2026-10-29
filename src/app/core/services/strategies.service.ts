@@ -48,9 +48,73 @@ import {
   PromotionReviewOutcome,
 } from '@core/api/api.types';
 
+/** Engine `StrategyFootprintDto` (GET strategy/{id}/footprint). */
+export interface StrategyFootprintDto {
+  strategyId: number;
+  days: number;
+  isSentinel: boolean;
+  signalsInWindow: number;
+  signalsAllTime: number;
+  signalsByStatus: Record<string, number>;
+  signalsByDay: { date: string; signals: number; orders: number }[];
+  firstSignalAtUtc: string | null;
+  lastSignalAtUtc: string | null;
+  ordersInWindow: number;
+  ordersByStatus: Record<string, number>;
+  accounts: {
+    tradingAccountId: number;
+    accountName: string | null;
+    orders: number;
+    filled: number;
+    filledLots: number;
+    positionsClosed: number;
+    realizedPnl: number;
+  }[];
+  fills: number;
+  filledLots: number;
+  avgSlippagePips: number | null;
+  avgAbsSlippagePips: number | null;
+  worstSlippagePips: number | null;
+  avgSubmitToFillMs: number | null;
+  partialFills: number;
+  positionsOpen: number;
+  positionsClosed: number;
+  positionsWon: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  origin: {
+    createdAt: string;
+    generationSource: string | null;
+    generationCycleId: string | null;
+    generationCandidateId: string | null;
+    generation: number;
+    hypothesisClass: string | null;
+    parentStrategyId: number | null;
+    parentName: string | null;
+    secondParentStrategyId: number | null;
+    versions: number;
+    lastVersionAtUtc: string | null;
+    lastVersionReason: string | null;
+    lifecycleStageEnteredAt: string | null;
+  };
+  sameMarket: {
+    id: number;
+    name: string;
+    status: string;
+    lifecycleStage: string;
+    timeframe: string;
+    sameParent: boolean;
+  }[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class StrategiesService {
   private readonly api = inject(ApiService);
+
+  /** What the strategy has done (signals, orders, fills, P&L), whether it is a sentinel, and its origin. */
+  getFootprint(id: number, days = 90): Observable<ResponseData<StrategyFootprintDto>> {
+    return this.api.get(`/strategy/${id}/footprint?days=${days}`, { silent: true });
+  }
 
   getById(id: number): Observable<ResponseData<StrategyDto>> {
     return this.api.get(`/strategy/${id}`);

@@ -25,6 +25,9 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-terminal-wizard/add-broker-terminal-wizard.component';
+import { RouterLink } from '@angular/router';
+import { EAInstancesService } from '@core/services/ea-instances.service';
+import type { EAInstanceDto } from '@core/api/api.types';
 
 /**
  * A daemon / session operation held until the operator confirms it. These used window.confirm(),
@@ -78,6 +81,7 @@ interface RotatedKey {
     ConfirmDialogComponent,
     ModalA11yDirective,
     RefreshButtonComponent,
+    RouterLink,
   ],
   template: `
     <div class="page">
@@ -391,8 +395,52 @@ interface RotatedKey {
           } @else if (sessions().length === 0) {
             <app-empty-state
               title="No terminal sessions"
-              description="Launch a terminal from a registered daemon above to see its session here."
+              description="A session exists only for a terminal the supervisor daemon launched. Terminals started by hand (the MT5 apps) still trade — their EA instances are listed below."
             />
+            <!-- The terminals that ARE running: EA instances reporting heartbeats, launched outside the daemon. -->
+            <div class="ea-context">
+              <h4>
+                EA instances connected now
+                <span class="muted"
+                  >{{ activeEas().length }} active of {{ eaInstances().length }}</span
+                >
+              </h4>
+              @if (activeEas().length === 0) {
+                <p class="muted">No EA instance is sending heartbeats.</p>
+              } @else {
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>Instance</th>
+                      <th>Account</th>
+                      <th>Chart</th>
+                      <th>Symbols</th>
+                      <th>EA</th>
+                      <th>Heartbeat</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (e of activeEas(); track e.id) {
+                      <tr>
+                        <td>
+                          <a [routerLink]="['/ea-instances', e.id]">#{{ e.id }}</a
+                          >{{ e.isCoordinator ? ' · coordinator' : '' }}
+                        </td>
+                        <td>
+                          <a [routerLink]="['/trading-accounts', e.tradingAccountId]"
+                            >#{{ e.tradingAccountId }}</a
+                          >
+                        </td>
+                        <td>{{ e.chartSymbol }} {{ e.chartTimeframe }}</td>
+                        <td class="syms">{{ e.symbols }}</td>
+                        <td>{{ e.eaVersion }}</td>
+                        <td>{{ e.lastHeartbeat | relativeTime }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              }
+            </div>
           } @else {
             <table class="grid">
               <thead>
@@ -855,6 +903,25 @@ interface RotatedKey {
         border-radius: var(--radius-sm);
         font-size: var(--text-sm);
       }
+      .ea-context {
+        margin-top: var(--space-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .ea-context a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .ea-context h4 {
+        margin: 0;
+        font-size: var(--text-sm);
+      }
+      .ea-context .syms {
+        max-width: 360px;
+        overflow-wrap: anywhere;
+        font-size: var(--text-xs);
+      }
       .grid {
         width: 100%;
         border-collapse: collapse;
@@ -919,9 +986,18 @@ interface RotatedKey {
 })
 export class TerminalsPageComponent {
   private readonly terminals = inject(TerminalsService);
+  private readonly eaService = inject(EAInstancesService);
+  protected readonly eaInstances = signal<EAInstanceDto[]>([]);
+  protected readonly activeEas = computed(() =>
+    this.eaInstances().filter((e) => e.status === 'Active'),
+  );
   private readonly notify = inject(NotificationService);
 
   constructor() {
+    this.eaService.list().subscribe({
+      next: (r) => this.eaInstances.set(r?.data ?? []),
+      error: () => this.eaInstances.set([]),
+    });
     // Ensure the log-tail poll is torn down on navigate-away.  Without
     // this, leaving the Terminals page with logs open keeps a setInterval
     // alive forever and would also keep polling the engine.

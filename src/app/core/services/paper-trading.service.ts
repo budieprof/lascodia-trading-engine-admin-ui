@@ -32,6 +32,8 @@ export interface PaperStrategySummaryDto {
   status: string | null;
   lifecycleStage: string | null;
   symbol: string | null;
+  /** The strategy was deleted or is unknown — no page to link to. */
+  strategyDeleted?: boolean;
   executions: number;
   open: number;
   closed: number;

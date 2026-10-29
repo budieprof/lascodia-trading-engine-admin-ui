@@ -5,6 +5,7 @@ import { catchError, map, of } from 'rxjs';
 import {
   PaperTradingService,
   type PaperExecutionSummaryDto,
+  type PaperStrategySummaryDto,
 } from '@core/services/paper-trading.service';
 import { StrategiesService } from '@core/services/strategies.service';
 import type { StrategyDto } from '@core/api/api.types';
@@ -67,9 +68,13 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                 @for (r of s.strategies; track r.strategyId) {
                   <tr>
                     <td class="name">
-                      <a [routerLink]="['/strategies', r.strategyId]">{{
-                        r.name ?? '#' + r.strategyId
-                      }}</a>
+                      @if (linkable(r)) {
+                        <a [routerLink]="['/strategies', r.strategyId]">{{
+                          r.name ?? '#' + r.strategyId
+                        }}</a>
+                      } @else {
+                        {{ r.name ?? '#' + r.strategyId }}
+                      }
                       <span class="muted"> #{{ r.strategyId }} · {{ r.symbol }}</span>
                     </td>
                     <td>{{ r.status }} / {{ r.lifecycleStage }}</td>
@@ -110,7 +115,11 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                     <tr>
                       <td class="mono">{{ e.id }}{{ e.isSynthetic ? ' (backfill)' : '' }}</td>
                       <td>
-                        <a [routerLink]="['/strategies', e.strategyId]">#{{ e.strategyId }}</a>
+                        @if (deletedIds().has(e.strategyId)) {
+                          #{{ e.strategyId }}
+                        } @else {
+                          <a [routerLink]="['/strategies', e.strategyId]">#{{ e.strategyId }}</a>
+                        }
                       </td>
                       <td>{{ e.symbol }}</td>
                       <td>{{ e.direction }}</td>
@@ -253,6 +262,19 @@ export class PaperTrackRecordComponent {
   protected readonly money = money;
   protected readonly ago = ago;
   protected readonly day = day;
+  /** A deleted strategy keeps its paper record but has no page (older engines only mark it in the name). */
+  protected linkable(r: PaperStrategySummaryDto): boolean {
+    return !r.strategyDeleted && !(r.name ?? '').endsWith('(deleted)');
+  }
+  protected readonly deletedIds = computed(
+    () =>
+      new Set(
+        (this.summary()?.strategies ?? [])
+          .filter((r) => !this.linkable(r))
+          .map((r) => r.strategyId),
+      ),
+  );
+
   protected pct(v: number): string {
     return fractionPct(v, 0, false);
   }

@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  signal,
+  type OnInit,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { errorText } from '@features/iam/iam.logic';
@@ -27,10 +35,10 @@ import type { PropAccountFit, PropAccountFitReport } from '../prop.types';
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
       }
-      tr.row {
+      tr.fit-row {
         cursor: pointer;
       }
-      tr.row:hover td {
+      tr.fit-row:hover td {
         background: var(--bg-tertiary);
       }
       .bar {
@@ -70,6 +78,11 @@ import type { PropAccountFit, PropAccountFitReport } from '../prop.types';
       }
       .neg {
         color: var(--loss);
+      }
+      @media (max-width: 900px) {
+        .eq {
+          display: none;
+        }
       }
       details summary {
         cursor: pointer;
@@ -149,13 +162,13 @@ import type { PropAccountFit, PropAccountFitReport } from '../prop.types';
                   Max drawdown
                 </th>
                 <th class="num">Trading days</th>
-                <th>Equity</th>
+                <th class="eq">Equity</th>
               </tr>
             </thead>
             <tbody>
               @for (a of r.accounts; track a.tradingAccountId) {
                 <tr
-                  class="row"
+                  class="fit-row"
                   (click)="toggle(a.tradingAccountId)"
                   [attr.aria-expanded]="open() === a.tradingAccountId"
                 >
@@ -220,10 +233,10 @@ import type { PropAccountFit, PropAccountFitReport } from '../prop.types';
                   <td class="num">
                     {{ a.replay.tradingDays }}
                     @if (a.replay.minTradingDays) {
-                      <span class="sub">of {{ a.replay.minTradingDays }} needed</span>
+                      <span class="sub">{{ a.replay.minTradingDays }} needed</span>
                     }
                   </td>
-                  <td>
+                  <td class="eq">
                     <app-sparkline
                       [data]="curve(a)"
                       width="120px"
@@ -323,11 +336,17 @@ import type { PropAccountFit, PropAccountFitReport } from '../prop.types';
     </section>
   `,
 })
-export class PropAccountFitComponent {
+export class PropAccountFitComponent implements OnInit {
   private readonly api = inject(PropApiService);
 
   /** Measure against this program's rules; null = the editor's default FX two-step rules. */
   readonly programId = input<number | null>(null);
+  /** Load on first render (a page that shows this only once its own data arrived). */
+  readonly autoload = input(false);
+
+  ngOnInit(): void {
+    if (this.autoload()) this.load();
+  }
 
   protected readonly money = money;
   protected readonly pct = pct;

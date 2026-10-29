@@ -5,7 +5,7 @@ import { Observable, catchError, map, of } from 'rxjs';
 
 import { AuthService } from '@core/auth/auth.service';
 import { LscCanDirective } from '@core/auth/can.directive';
-import { Permission } from '@core/auth/permissions.generated';
+import { Permission, permissionDefinition } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { fetchAllPages } from '@core/scope/account-scope.service';
 import { TradingAccountsService } from '@core/services/trading-accounts.service';
@@ -13,8 +13,8 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { IamApiService } from '../iam-api.service';
 import { errorText, memberLabel, reportable } from '../iam.logic';
-import type { IamGrant, SaveNamedBody } from '../iam.types';
-import { plural } from '../shared/admin-context.logic';
+import type { IamGrant, IamMember, IamRole, SaveNamedBody } from '../iam.types';
+import { ago, plural } from '../shared/admin-context.logic';
 import { AuditTrailComponent } from '../shared/audit-trail.component';
 import { iamResource } from '../shared/iam-resource';
 import { MfaHintComponent } from '../shared/mfa-hint.component';
@@ -149,38 +149,88 @@ interface GroupKind {
       <app-stat-tiles [tiles]="tiles()" [label]="kind.title + ' summary'" />
 
       <div class="layout">
-        <section class="card">
-          <header class="card-head">
-            <h3>{{ groups.value().length }} {{ kind.noun }}s</h3>
-          </header>
-          @if (groups.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          } @else if (groups.loaded() && groups.value().length === 0) {
-            <p class="pad small muted">
-              None yet{{ canManage() ? ' — use New ' + kind.noun + ' to make the first.' : '.' }}
-              Until there is one, every grant here is given to a person directly or at the whole
-              organisation / one account.
-            </p>
-          }
-          <ul class="list">
-            @for (g of groups.value(); track g.id) {
-              <li>
-                <button
-                  type="button"
-                  class="item"
-                  [attr.aria-current]="selectedId() === g.id"
-                  (click)="select(g)"
-                >
-                  <strong>{{ g.name }}</strong>
-                  <span class="sub small muted">
-                    {{ g.description || 'No description'
-                    }}{{ g.size !== null ? ' · ' + g.size : '' }}
-                  </span>
-                </button>
-              </li>
+        <div class="page">
+          <section class="card">
+            <header class="card-head">
+              <h3>{{ groups.value().length }} {{ kind.noun }}s</h3>
+            </header>
+            @if (groups.error(); as err) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            } @else if (groups.loaded() && groups.value().length === 0) {
+              <p class="pad small muted">
+                None yet{{ canManage() ? ' — use New ' + kind.noun + ' to make the first.' : '.' }}
+                Until there is one, every grant here is given to a person directly or at the whole
+                organisation / one account.
+              </p>
             }
-          </ul>
-        </section>
+            <ul class="list">
+              @for (g of groups.value(); track g.id) {
+                <li>
+                  <button
+                    type="button"
+                    class="item"
+                    [attr.aria-current]="selectedId() === g.id"
+                    (click)="select(g)"
+                  >
+                    <strong>{{ g.name }}</strong>
+                    <span class="sub small muted">
+                      {{ g.description || 'No description'
+                      }}{{ g.size !== null ? ' · ' + g.size : '' }}
+                    </span>
+                  </button>
+                </li>
+              }
+            </ul>
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Grants in force today ({{ grants.value().length }})</h3>
+              <span class="spacer"></span>
+              <a class="small" routerLink="/iam/grants">Grants</a>
+            </header>
+            @if (grants.value().length === 0) {
+              <p class="pad small muted">
+                {{ grants.loaded() ? 'No role is granted to anyone.' : 'Loading…' }}
+              </p>
+            } @else {
+              <table class="grid">
+                <tbody>
+                  @for (g of grants.value(); track g.id) {
+                    <tr>
+                      <td>
+                        {{ g.principalName ?? g.principalType + ' #' + g.principalId }}
+                        <span class="sub"
+                          >{{ g.lastUsedAtUtc ? 'used ' + ago(g.lastUsedAtUtc) : 'never used' }} ·
+                          {{ g.roleName ?? 'Role #' + g.roleId }} ·
+                          {{
+                            g.scopeType === 'Tenant'
+                              ? 'whole organisation'
+                              : g.scopeType + ' ' + (g.scopeName ?? g.scopeId ?? '')
+                          }}</span
+                        >
+                      </td>
+                      <td class="small muted">
+                        {{
+                          g.principalType === 'Team' || g.scopeType === 'AccountGroup'
+                            ? 'via a group'
+                            : 'direct'
+                        }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+              <p class="pad small muted">
+                {{
+                  kind.entryNoun === 'member'
+                    ? 'Each of these is given to one person. A team would let one grant cover several people.'
+                    : 'Each of these applies to the whole organisation or one account. An account group would let one grant cover a set of accounts.'
+                }}
+              </p>
+            }
+          </section>
+        </div>
 
         <section class="card">
           @if (editing() === null) {
@@ -209,7 +259,14 @@ interface GroupKind {
                   @for (c of candidates.value(); track c.id) {
                     <tr>
                       <td>
-                        {{ c.label }} <span class="sub">{{ c.detail }}</span>
+                        {{ c.label }}
+                        <span class="sub"
+                          >{{
+                            kind.entryNoun === 'member'
+                              ? rolesOf(c.id) + ' · ' + signedIn(c.id) + ' · '
+                              : ''
+                          }}{{ c.detail }}</span
+                        >
                       </td>
                       <td class="small muted">{{ groupsOf(c.id) }}</td>
                     </tr>
@@ -217,6 +274,17 @@ interface GroupKind {
                 </tbody>
               </table>
             }
+            <header class="card-head">
+              <h3>
+                Roles that could be given
+                {{ kind.entryNoun === 'member' ? 'to a team' : 'at an account group' }}
+              </h3>
+              <span class="spacer"></span>
+              <a class="small" routerLink="/iam/roles">Roles</a>
+            </header>
+            <div class="card-body small">
+              <p class="muted">{{ grantableRoles().join(' · ') || 'Loading…' }}</p>
+            </div>
           } @else {
             <header class="card-head">
               <h3>{{ editing() === 'new' ? 'New ' + kind.noun : name() }}</h3>
@@ -336,8 +404,12 @@ interface GroupKind {
       </div>
 
       <app-audit-trail
-        [heading]="kind.title + ' changes'"
-        [actions]="[kind.audit]"
+        [heading]="
+          kind.entryNoun === 'member' ? 'Team changes and recent sign-ins' : kind.title + ' changes'
+        "
+        [actions]="
+          kind.entryNoun === 'member' ? [kind.audit, 'auth.login.succeeded'] : [kind.audit]
+        "
         [empty]="
           'No ' +
           kind.noun +
@@ -464,6 +536,43 @@ export class GroupsPageComponent {
     // Also the labels of what is in a group: the engine answers ids only.
     this.candidates.reload();
     this.grants.reload();
+    this.roles.reload();
+    if (this.kind.entryNoun === 'member') this.memberList.reload();
+  }
+
+  readonly roles = iamResource(
+    () => this.iam.roles().pipe(catchError(() => of([] as IamRole[]))),
+    [] as IamRole[],
+  );
+  /** For an account group only roles with permissions usable below the organisation are meaningful. */
+  readonly grantableRoles = computed(() =>
+    this.roles
+      .value()
+      .filter(
+        (r) =>
+          this.kind.entryNoun === 'member' ||
+          r.permissions.some((k) => permissionDefinition(k)?.scopeable),
+      )
+      .map((r) => r.name),
+  );
+
+  protected readonly ago = (utc: string) => ago(utc);
+  readonly memberList = iamResource(
+    () => this.iam.members().pipe(catchError(() => of([] as IamMember[]))),
+    [] as IamMember[],
+  );
+
+  signedIn(userId: number): string {
+    const m = this.memberList.value().find((x) => x.userId === userId);
+    return m?.lastSignInAtUtc ? `signed in ${ago(m.lastSignInAtUtc)}` : 'never signed in';
+  }
+
+  rolesOf(userId: number): string {
+    const names = this.grants
+      .value()
+      .filter((g) => g.principalType === 'User' && g.principalId === userId)
+      .map((g) => g.roleName ?? `Role #${g.roleId}`);
+    return names.length ? names.join(', ') : 'no role';
   }
 
   groupsOf(id: number): string {
@@ -508,11 +617,7 @@ export class GroupsPageComponent {
             ms.map((m) => ({
               id: m.userId,
               label: memberLabel(m),
-              detail: [
-                m.status === 'Active' ? null : m.status,
-                m.roles?.length ? m.roles.join(', ') : 'no role',
-                m.email ?? null,
-              ]
+              detail: [m.status === 'Active' ? null : m.status, m.email ?? null]
                 .filter(Boolean)
                 .join(' · '),
               inactive: m.status !== 'Active',

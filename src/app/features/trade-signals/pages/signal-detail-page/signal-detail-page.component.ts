@@ -23,6 +23,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { NotificationService } from '@core/notifications/notification.service';
+import { MissingSignalContextComponent } from '../../components/missing-signal-context/missing-signal-context.component';
 import { SignalStoryPanelComponent } from '../../components/signal-story/signal-story-panel.component';
 import type { SignalStory } from '../../components/signal-story/signal-story.types';
 import {
@@ -61,6 +62,7 @@ import {
     ErrorStateComponent,
     ConfirmDialogComponent,
     SignalStoryPanelComponent,
+    MissingSignalContextComponent,
   ],
   template: `
     <div class="page">
@@ -160,6 +162,14 @@ import {
               <a class="btn btn-secondary" routerLink="/trade-signals/feedback">Signal exits</a>
             </nav>
           </section>
+          <app-missing-signal-context
+            [requestedId]="signalId()!"
+            [earliestId]="m.range.earliestId"
+            [latestId]="m.range.latestId"
+            [previousId]="m.range.previousId"
+            [nextId]="m.range.nextId"
+            [totalSignals]="m.range.totalSignals"
+          />
         } @else {
           @if (signal(); as s) {
             @if (story(); as st) {
