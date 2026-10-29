@@ -55,7 +55,7 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { TabsComponent, type TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
 import { ConfigService } from '@core/services/config.service';
-import { topReasons } from './signal-ab-state.logic';
+import { shadowByPair, shadowByWeek, topReasons, type ShadowLite } from './signal-ab-state.logic';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -2021,6 +2021,69 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                   { label: 'Overfit watchlist', route: '/ml-models/overfit-watchlist' },
                 ]"
               />
+
+              <!-- The path a model takes to an A/B test, with today's real counts at each step. -->
+              <div class="ml-kpis ab-funnel">
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">1 · Training runs recorded</span>
+                  <span class="ml-kpi-value">{{ trainingsTotal() | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">2 · Active models (champions)</span>
+                  <span class="ml-kpi-value">{{ activeModelCount() | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">3 · Shadow evaluations</span>
+                  <span class="ml-kpi-value">{{ shadowTotal() | number }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">4 · Challengers promoted</span>
+                  <span class="ml-kpi-value" [class.good]="shadowStats().promoted > 0">{{
+                    shadowStats().promoted | number
+                  }}</span>
+                </div>
+                <div class="ml-kpi">
+                  <span class="ml-kpi-label">5 · Signal A/B tests</span>
+                  <span class="ml-kpi-value">{{ abTotal() | number }}</span>
+                </div>
+              </div>
+
+              @if (abShadowWeeks().length) {
+                <app-chart-card
+                  title="Shadow evaluations by week"
+                  subtitle="Each evaluation that promotes a challenger starts an A/B test here. Bars split by how the evaluation ended."
+                  [options]="abShadowChart()"
+                  height="260px"
+                />
+              }
+
+              @if (abShadowPairs().length) {
+                <div class="ab-pairs">
+                  <h4>Shadow evaluations by pair</h4>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Pair</th>
+                        <th class="num">Evaluations</th>
+                        <th class="num">Promoted</th>
+                        <th>Latest</th>
+                        <th>Most common ending</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (p of abShadowPairs(); track p.pair) {
+                        <tr>
+                          <td class="mono">{{ p.pair }}</td>
+                          <td class="num">{{ p.count | number }}</td>
+                          <td class="num">{{ p.promoted | number }}</td>
+                          <td>{{ p.latest | date: 'd MMM y' }}</td>
+                          <td class="reason-cell">{{ p.topReason }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+              }
             } @else {
               <div class="ml-kpis">
                 <div class="ml-kpi">
@@ -2731,6 +2794,48 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         .ml-kpis {
           grid-template-columns: repeat(2, 1fr);
         }
+      }
+      .ab-funnel {
+        margin-top: var(--space-3);
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+      }
+      @media (max-width: 900px) {
+        .ab-funnel {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .ab-pairs {
+        margin-top: var(--space-3);
+        overflow-x: auto;
+      }
+      .ab-pairs h4 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .ab-pairs table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .ab-pairs th,
+      .ab-pairs td {
+        text-align: left;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .ab-pairs th {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        font-weight: var(--font-medium);
+      }
+      .ab-pairs .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .ab-pairs .reason-cell {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
       }
       .ml-kpi {
         background: var(--bg-secondary);
@@ -3470,6 +3575,46 @@ export class MlModelsPageComponent implements OnInit {
         .map((e) => e.decisionReason),
     ),
   );
+  readonly activeModelCount = computed(() => this.modelsSample().filter((m) => m.isActive).length);
+  private readonly shadowLite = computed<ShadowLite[]>(() =>
+    this.shadowSample().map((e) => ({
+      symbol: e.symbol,
+      timeframe: String(e.timeframe),
+      startedAt: e.startedAt,
+      decisionReason: e.decisionReason,
+      decision: decisionMeta(e.promotionDecision).key,
+    })),
+  );
+  readonly abShadowWeeks = computed(() => shadowByWeek(this.shadowLite()));
+  readonly abShadowPairs = computed(() => shadowByPair(this.shadowLite()).slice(0, 12));
+  readonly abShadowChart = computed<EChartsOption>(() => {
+    const w = this.abShadowWeeks();
+    const bar = (
+      name: string,
+      key: 'promoted' | 'flagged' | 'rejected' | 'pending',
+      color: string,
+    ) => ({
+      name,
+      type: 'bar' as const,
+      stack: 'd',
+      itemStyle: { color },
+      data: w.map((x) => x[key]),
+    });
+    return {
+      grid: { left: 40, right: 16, top: 36, bottom: 40 },
+      tooltip: { trigger: 'axis' },
+      legend: { top: 0, textStyle: { fontSize: 11 } },
+      xAxis: { type: 'category', data: w.map((x) => x.week), axisLabel: { fontSize: 10 } },
+      yAxis: { type: 'value', axisLabel: { fontSize: 10 } },
+      series: [
+        bar('Promoted', 'promoted', '#34C759'),
+        bar('Flagged for review', 'flagged', '#FF9500'),
+        bar('Rejected', 'rejected', '#FF3B30'),
+        bar('Still running', 'pending', '#0071E3'),
+      ],
+    };
+  });
+
   readonly abDetail = computed(() => {
     const st = this.shadowStats();
     if (st.total === 0) return 'No shadow evaluation has run yet, so no challenger could qualify.';
