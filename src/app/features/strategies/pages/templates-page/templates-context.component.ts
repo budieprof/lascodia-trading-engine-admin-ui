@@ -10,6 +10,7 @@ import {
   type FeatureRequirement,
 } from '@shared/components/feedback/feature-state.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
+import { day } from '../../util/figures';
 
 /** The two evaluator types a template can hold (Pine strategies reuse code through libraries instead). */
 const TEMPLATE_TYPES = ['CompositeML', 'Custom'];
@@ -68,6 +69,39 @@ const TEMPLATE_TYPES = ['CompositeML', 'Custom'];
         </p>
         <a routerLink="/strategies/libraries" class="small">Browse the libraries →</a>
       </section>
+      <section class="card">
+        <h3>How Apply works</h3>
+        <ol class="steps">
+          <li>Pick a template and the symbols (and optionally a timeframe) to apply it to.</li>
+          <li>
+            The engine creates one strategy per symbol in a single request, each Paused and in
+            Draft, carrying the template’s parameters, risk, sizing, session and gate settings and
+            its risk profile.
+          </li>
+          <li>
+            Each new strategy then needs its own backtest and Submit for approval before it may
+            trade; the template’s applied count goes up by one per strategy.
+          </li>
+        </ol>
+      </section>
+      <section class="card">
+        <h3>Newest strategies <span class="muted">how they were made</span></h3>
+        @if (recent().length === 0) {
+          <p class="muted">No strategy exists.</p>
+        } @else {
+          <ul>
+            @for (s of recent(); track s.id) {
+              <li>
+                <a [routerLink]="['/strategies', s.id]">{{ s.name }}</a>
+                <span class="muted"
+                  >#{{ s.id }} · {{ s.strategyType }}{{ isScript(s) ? ' (Pine)' : '' }} ·
+                  {{ s.symbol }} {{ s.timeframe }} · {{ day(s.createdAt) }}</span
+                >
+              </li>
+            }
+          </ul>
+        }
+      </section>
     </div>
   `,
   styles: [
@@ -100,6 +134,16 @@ const TEMPLATE_TYPES = ['CompositeML', 'Custom'];
         margin: 0;
         font-size: var(--text-base);
         font-weight: var(--font-semibold);
+      }
+      .steps {
+        margin: 0;
+        padding-left: 18px;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.55;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
       }
       ul {
         margin: 0;
@@ -161,6 +205,13 @@ export class TemplatesContextComponent {
     () => this.all()?.filter((s) => TEMPLATE_TYPES.includes(s.strategyType)) ?? null,
   );
   protected readonly total = computed(() => this.all()?.length ?? null);
+  protected readonly recent = computed(() =>
+    [...(this.all() ?? [])].sort((a, b) => b.id - a.id).slice(0, 6),
+  );
+  protected readonly day = day;
+  protected isScript(s: StrategyDto): boolean {
+    return isScriptStrategy(s);
+  }
   protected readonly scriptCount = computed(
     () => this.all()?.filter((s) => isScriptStrategy(s)).length ?? null,
   );

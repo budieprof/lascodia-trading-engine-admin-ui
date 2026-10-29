@@ -18,6 +18,16 @@ export function isQueuedForCoolingOff(res: ConfigUpsertResponse): boolean {
   return res.outcome === 'QueuedForCoolingOff' || /cooling-off/i.test(res.message ?? '');
 }
 
+/** Engine `ConfigChangeDto` (GET config/history). */
+export interface ConfigChangeDto {
+  key: string;
+  oldValue: string | null;
+  newValue: string | null;
+  reason: string | null;
+  changedByAccountId: number;
+  changedAt: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ConfigService {
   private readonly api = inject(ApiService);
@@ -39,6 +49,13 @@ export class ConfigService {
    *  approval-card preview asks for keys that may legitimately have no row yet. */
   getByKey(key: string, opts?: ApiCallOptions): Observable<ResponseData<EngineConfigDto>> {
     return this.api.get(`/config/${key}`, opts);
+  }
+
+  /** Recent changes of the settings whose key starts with `prefix` (≥ 3 chars; secrets masked), newest first. */
+  getHistory(prefix: string, limit = 20): Observable<ResponseData<ConfigChangeDto[]>> {
+    return this.api.get(`/config/history?prefix=${encodeURIComponent(prefix)}&limit=${limit}`, {
+      silent: true,
+    });
   }
 
   getAll(): Observable<ResponseData<EngineConfigDto[]>> {

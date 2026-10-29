@@ -18,6 +18,7 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
+import { StrategyEditContextComponent } from './strategy-edit-context.component';
 import { failureMessage } from '../../util/api-failure';
 import { MarketDataService } from '@core/services/market-data.service';
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
@@ -35,7 +36,7 @@ import { createStrategyPineAdapter } from '../../pine-assist/strategy-pine-adapt
 @Component({
   selector: 'app-strategy-edit-page',
   standalone: true,
-  imports: [PageHeaderComponent, StrategyFormComponent],
+  imports: [PageHeaderComponent, StrategyFormComponent, StrategyEditContextComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -62,6 +63,11 @@ import { createStrategyPineAdapter } from '../../pine-assist/strategy-pine-adapt
           (strategyChanged)="load()"
           (executionRequested)="backToDetail('execution')"
         />
+        <!-- Field guide, saved values, inherited risk-profile values and recent changes for the open tab. -->
+        <app-strategy-edit-context
+          [strategy]="strategy()!"
+          [tab]="form()?.activeTab() ?? 'inputs'"
+        />
       }
     </div>
   `,
@@ -83,7 +89,7 @@ export class StrategyEditPageComponent implements OnInit, HasUnsavedChanges {
   private readonly dock = inject(AssistantDockService);
   private readonly uiCommands = inject(UiCommandService);
   private readonly pageContext = inject(PageContextService);
-  private readonly form = viewChild(StrategyFormComponent);
+  protected readonly form = viewChild(StrategyFormComponent);
 
   /** The Pine editor as the assistant drives it (pine.* / strategy.* page commands). */
   readonly pineAdapter = createStrategyPineAdapter({

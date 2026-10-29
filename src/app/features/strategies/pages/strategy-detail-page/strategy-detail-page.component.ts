@@ -57,6 +57,8 @@ import { StrategyCapacityCardComponent } from '../../components/strategy-capacit
 import { StrategyPromotionReviewsTabComponent } from '../../components/strategy-promotion-reviews-tab/strategy-promotion-reviews-tab.component';
 import { RejectionDistributionDrawerComponent } from '../../components/rejection-distribution-drawer/rejection-distribution-drawer.component';
 import { StrategyActivityContextComponent } from '../../components/strategy-activity-context/strategy-activity-context.component';
+import { StrategyTabContextComponent } from '../../components/strategy-tab-context/strategy-tab-context.component';
+import { isSentinelName } from '../../components/strategy-tab-context/strategy-tab-context.logic';
 import { RationaleInlineComponent } from '@features/llm/components/rationale-inline/rationale-inline.component';
 import { StrategyScriptCardComponent } from '@features/scripting/components/strategy-script-card/strategy-script-card.component';
 // ADR-0027 script strategies: execution (bindings + policy), live session, alerts, backtests.
@@ -110,6 +112,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     StrategyPromotionReviewsTabComponent,
     RejectionDistributionDrawerComponent,
     StrategyActivityContextComponent,
+    StrategyTabContextComponent,
     RationaleInlineComponent,
     StrategyExecutionPanelComponent,
     ScriptLivePanelComponent,
@@ -551,16 +554,24 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                on activation, with a paper-gate bypass toggle for hand-promoted
                strategies that have no PaperExecution history yet. -->
           @if (activeTab() === 'promotion' && strategy()) {
-            <div class="promotion-stack">
-              <app-promotion-readiness-card
-                [strategyId]="strategy()!.id"
-                (activated)="onPromotionActivated()"
-              />
-              <!-- …and what the engine ACTUALLY decided, attempt by attempt. The card above
+            @if (!isSentinel()) {
+              <div class="promotion-stack">
+                <app-promotion-readiness-card
+                  [strategyId]="strategy()!.id"
+                  (activated)="onPromotionActivated()"
+                />
+                <!-- …and what the engine ACTUALLY decided, attempt by attempt. The card above
                    re-evaluates live, which cannot show a budget timeout or an evidence-unchanged
                    skip — the two outcomes that leave a Draft stuck with no verdict against it. -->
-              <app-promotion-gate-history-card [strategyId]="strategy()!.id" />
-            </div>
+                <app-promotion-gate-history-card [strategyId]="strategy()!.id" />
+              </div>
+            }
+            <app-strategy-tab-context
+              [strategy]="strategy()!"
+              tab="promotion"
+              [embedded]="true"
+              (openTab)="onContextTab($event)"
+            />
           }
 
           <!-- Signals Tab -->
@@ -610,52 +621,86 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
 
           <!-- Optimization Tab — PE-I4 workbench: search space, runs, results, heatmap, trial ledger. -->
           @if (activeTab() === 'optimization') {
-            <app-optimization-workbench [strategy]="strategy()!" />
+            @if (!isSentinel()) {
+              <app-optimization-workbench [strategy]="strategy()!" />
+            }
+            <app-strategy-tab-context
+              [strategy]="strategy()!"
+              tab="optimization"
+              [embedded]="true"
+              (openTab)="onContextTab($event)"
+            />
           }
 
           <!-- Backtests Tab — runs filtered to this strategy. Click-through
                navigates to the backtest detail page (same view the global
                Backtests page links to). -->
           @if (activeTab() === 'backtests') {
-            @if (isScript()) {
-              <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
+            @if (!isSentinel()) {
+              @if (isScript()) {
+                <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
                    the bar magnifier (ADR-0027 §4). -->
-              <app-script-backtest-launcher
-                [strategy]="strategy()!"
-                (queued)="backtestTable?.loadData()"
-              />
-            }
-            <!-- Tighter cells: at the grid's default padding the "(override)" marker and the
+                <app-script-backtest-launcher
+                  [strategy]="strategy()!"
+                  (queued)="backtestTable?.loadData()"
+                />
+              }
+              <!-- Tighter cells: at the grid's default padding the "(override)" marker and the
                  Started column were clipped and single-word headers broke mid-word. -->
-            <div class="bt-runs">
-              <app-data-table
-                #backtestTable
-                [columnDefs]="backtestColumns"
-                [fetchData]="fetchBacktests"
-                (rowClick)="onBacktestRowClick($event)"
-              />
-            </div>
-            <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
-            <app-run-comparison [strategyId]="strategyId" />
+              <div class="bt-runs">
+                <app-data-table
+                  #backtestTable
+                  [columnDefs]="backtestColumns"
+                  [fetchData]="fetchBacktests"
+                  (rowClick)="onBacktestRowClick($event)"
+                />
+              </div>
+              <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
+              <app-run-comparison [strategyId]="strategyId" />
+            }
+            <app-strategy-tab-context
+              [strategy]="strategy()!"
+              tab="backtests"
+              [embedded]="true"
+              (openTab)="onContextTab($event)"
+            />
           }
 
           <!-- Walk-Forward Tab — BT-I5 workbench: launcher, runs, stitched OOS analysis, Monte Carlo. -->
           @if (activeTab() === 'walkforward') {
-            <app-walk-forward-workbench [strategy]="strategy()!" />
+            @if (!isSentinel()) {
+              <app-walk-forward-workbench [strategy]="strategy()!" />
+            }
+            <app-strategy-tab-context
+              [strategy]="strategy()!"
+              tab="walkforward"
+              [embedded]="true"
+              (openTab)="onContextTab($event)"
+            />
           }
 
           <!-- Variants Tab — A/B shadow tests attached to this base strategy. -->
           @if (activeTab() === 'variants') {
-            <app-strategy-variants-tab [strategyId]="strategyId" />
+            @if (!isSentinel()) {
+              <app-strategy-variants-tab [strategyId]="strategyId" />
+            }
+            @if (strategy()) {
+              <app-strategy-tab-context
+                [strategy]="strategy()!"
+                tab="variants"
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            }
           }
 
           <!-- Capacity Profile Tab — AUM-vs-Sharpe sweep with sizing guidance. -->
           @if (activeTab() === 'capacity') {
             <app-strategy-capacity-card [strategyId]="strategyId" />
-            @if ((totalOrders() ?? 0) === 0 && strategy(); as s) {
-              <app-strategy-activity-context
-                [strategy]="s"
-                lead="Its evidence and why it is not trading"
+            @if (strategy()) {
+              <app-strategy-tab-context
+                [strategy]="strategy()!"
+                tab="capacity"
                 [embedded]="true"
                 (openTab)="onContextTab($event)"
               />
@@ -665,6 +710,14 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
           <!-- Promotion Reviews Tab — bull/bear/judge advisory pipeline output. -->
           @if (activeTab() === 'reviews') {
             <app-strategy-promotion-reviews-tab [strategyId]="strategyId" />
+            @if (strategy()) {
+              <app-strategy-tab-context
+                [strategy]="strategy()!"
+                tab="reviews"
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            }
           }
 
           <!-- Lineage Tab — parent/child tree centred on this strategy. -->
@@ -726,6 +779,14 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                 <p class="muted">Lineage unavailable.</p>
               }
             </section>
+            @if (strategy()) {
+              <app-strategy-tab-context
+                [strategy]="strategy()!"
+                tab="lineage"
+                [embedded]="true"
+                (openTab)="onContextTab($event)"
+              />
+            }
           }
 
           <!-- Execution Tab (every strategy type) — account bindings and execution policy
@@ -1722,6 +1783,9 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   }
 
   /** The execution policy and the account bindings are changed on the Execution tab. */
+  /** Sentinel strategies (LLM Spot Analysis, Manual Trades, …) have no rules: their evidence tabs do not apply. */
+  readonly isSentinel = computed(() => isSentinelName(this.strategy()?.name));
+
   /** A reason in the activity context asked for a tab; "rejections" is the per-gate drawer here. */
   onContextTab(tab: string): void {
     if (tab === 'rejections') this.showRejectionDrawer.set(true);

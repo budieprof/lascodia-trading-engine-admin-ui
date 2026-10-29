@@ -201,11 +201,17 @@ const SENTINEL_NAMES = ['LLM Spot Analysis', 'Synthetic Analyser', 'Manual Trade
                     @for (s of strategySlices(); track s.key) {
                       <tr>
                         <td>
-                          @if (s.strategyId) {
+                          @if (s.strategyId && s.strategyExists) {
                             <a [routerLink]="['/strategies', s.strategyId]">{{ s.label }}</a>
                             <span class="muted small"> #{{ s.strategyId }}</span>
                           } @else {
+                            <!-- Not a strategy page any more (retired bucket / deleted strategy): no link. -->
                             {{ s.label }}
+                            <span
+                              class="tag"
+                              title="This attribution bucket no longer has a strategy page — it was retired or deleted"
+                              >{{ s.strategyId ? 'retired #' + s.strategyId : 'no strategy' }}</span
+                            >
                           }
                         </td>
                         <td class="num" [class.profit]="s.pnl > 0" [class.loss]="s.pnl < 0">
@@ -677,7 +683,7 @@ export class AccountPerformancePanelComponent {
         label: 'Largest contributor',
         value: top ? top.label : '—',
         caption: top ? money(top.pnl, this.totals().currency, true) : null,
-        route: top?.strategyId ? `/strategies/${top.strategyId}` : null,
+        route: top?.strategyId && top.strategyExists ? `/strategies/${top.strategyId}` : null,
       },
     ];
   });
