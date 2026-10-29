@@ -9,6 +9,54 @@ export interface PaperTradingStatus {
   changedAt?: string | null;
 }
 
+/** Engine `PaperExecutionSummaryDto` (GET paper-trading/executions/summary). Money in account currency. */
+export interface PaperExecutionSummaryDto {
+  days: number;
+  total: number;
+  open: number;
+  closed: number;
+  expired: number;
+  failed: number;
+  synthetic: number;
+  netPnl: number;
+  wins: number;
+  lastAtUtc: string | null;
+  strategiesInPaperStage: number;
+  strategies: PaperStrategySummaryDto[];
+  recentExecutions: PaperExecutionRowDto[];
+}
+
+export interface PaperStrategySummaryDto {
+  strategyId: number;
+  name: string | null;
+  status: string | null;
+  lifecycleStage: string | null;
+  symbol: string | null;
+  executions: number;
+  open: number;
+  closed: number;
+  expired: number;
+  wins: number;
+  netPnl: number;
+  lastAtUtc: string | null;
+}
+
+export interface PaperExecutionRowDto {
+  id: number;
+  strategyId: number;
+  symbol: string;
+  direction: string;
+  status: string;
+  lotSize: number;
+  simulatedFillPrice: number;
+  simulatedFillAt: string;
+  closedAt: string | null;
+  exitReason: string | null;
+  netPnl: number | null;
+  isSynthetic: boolean;
+  tradeSignalId: number | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class PaperTradingService {
   private readonly api = inject(ApiService);
@@ -37,6 +85,13 @@ export class PaperTradingService {
         if (res.data) this._status.set(res.data);
       }),
     );
+  }
+
+  /** The per-strategy paper track record over the last `days` days plus the newest executions. */
+  getExecutionSummary(days = 90, recent = 25): Observable<ResponseData<PaperExecutionSummaryDto>> {
+    return this.api.get(`/paper-trading/executions/summary?days=${days}&recent=${recent}`, {
+      silent: true,
+    });
   }
 
   backfill(strategyId: number): Observable<ResponseData<void>> {

@@ -24,6 +24,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { AutoTuneStatusPanelComponent } from '../../components/auto-tune-status-panel.component';
 
 type ActionKind = 'apply' | 'reject';
 interface PendingAction {
@@ -59,6 +60,7 @@ const SUMMARY_WINDOW = 200;
     ErrorStateComponent,
     EmptyStateComponent,
     RelativeTimePipe,
+    AutoTuneStatusPanelComponent,
   ],
   template: `
     <div class="page">
@@ -125,6 +127,9 @@ const SUMMARY_WINDOW = 200;
       </section>
       <p class="kpi-caption">Counts cover the newest {{ SUMMARY_WINDOW }} proposals.</p>
 
+      <!-- Why the queue holds what it holds (tuner switches, evidence vs floor, last cycle). -->
+      <app-auto-tune-status-panel mode="proposals" [showCard]="queueEmpty()" />
+
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
       } @else if (listFailed()) {
@@ -144,9 +149,11 @@ const SUMMARY_WINDOW = 200;
         }
 
         @if (proposals().length === 0) {
-          <section class="card">
-            <app-empty-state [title]="emptyTitle()" [description]="emptyDescription()" />
-          </section>
+          @if (!queueEmpty()) {
+            <section class="card">
+              <app-empty-state [title]="emptyTitle()" [description]="emptyDescription()" />
+            </section>
+          }
         } @else {
           <section class="card">
             <table class="proposals-table">
@@ -724,6 +731,16 @@ export class AutoTuneProposalsPageComponent {
     if (xs === null) return null;
     return xs.filter((p) => p.status === status).length;
   }
+
+  /** Nothing to review and no filter narrowing it: the status panel explains why. */
+  protected readonly queueEmpty = computed(
+    () =>
+      !this.loading() &&
+      !this.listFailed() &&
+      this.proposals().length === 0 &&
+      !this.keyFilter().trim() &&
+      (this.statusFilter() === 'Pending' || this.statusFilter() === 'All'),
+  );
 
   protected readonly emptyTitle = computed(() => {
     if (this.keyFilter().trim()) return 'No proposals match';

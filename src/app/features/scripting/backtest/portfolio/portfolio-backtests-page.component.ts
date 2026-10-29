@@ -12,6 +12,7 @@ import { describeFailure, isOk } from '../../shared/api-error';
 import { ScriptDialogService } from '../../shared/script-dialog.service';
 import { PortfolioBacktestApiService } from './portfolio-backtest-api.service';
 import { PortfolioBacktestFormComponent } from './portfolio-backtest-form.component';
+import { PortfolioBacktestContextComponent } from './portfolio-backtest-context.component';
 import { isActive, statusChip } from './portfolio-backtest.model';
 import type { PortfolioRunSummary } from './portfolio-backtest.types';
 
@@ -27,7 +28,7 @@ export const PORTFOLIO_POLL_MS = 5_000;
   selector: 'app-portfolio-backtests-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PageHeaderComponent, RouterLink, PortfolioBacktestFormComponent],
+  imports: [PageHeaderComponent, RouterLink, PortfolioBacktestFormComponent, PortfolioBacktestContextComponent],
   template: `
     <div class="page">
       <app-page-header
@@ -50,6 +51,14 @@ export const PORTFOLIO_POLL_MS = 5_000;
         <app-portfolio-backtest-form (queued)="onQueued($event)" />
       }
 
+      <!-- What a portfolio backtest needs and the evidence already on record; with no run yet it explains the
+           feature and offers to start one. -->
+      <app-portfolio-backtest-context
+        [runCount]="loading() && runs().length === 0 ? null : runs().length"
+        [canQueue]="canQueue()"
+        (start)="showForm.set(true)"
+      />
+
       <section class="card" aria-labelledby="pf-runs-title" data-testid="pf-runs">
         <header class="head">
           <h2 id="pf-runs-title" class="title">Runs</h2>
@@ -63,7 +72,9 @@ export const PORTFOLIO_POLL_MS = 5_000;
           <p class="error-box" role="alert">{{ e }}</p>
         }
         @if (runs().length === 0) {
-          <p class="muted">{{ loading() ? 'Loading the runs…' : 'No portfolio backtest yet.' }}</p>
+          <p class="muted">
+            {{ loading() ? 'Loading the runs…' : 'No portfolio backtest yet — a queued run appears here and is followed every 5 s until it finishes.' }}
+          </p>
         } @else {
           <div class="table-wrap">
             <table>

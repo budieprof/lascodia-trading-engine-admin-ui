@@ -3,6 +3,7 @@ import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { provideRouter } from '@angular/router';
+import { Component, EventEmitter, Input, Output } from '@angular/core';
 import { By } from '@angular/platform-browser';
 
 import { AuthService } from '@core/auth/auth.service';
@@ -14,6 +15,15 @@ import { InputOverridesEditorComponent } from '../../shared/input-overrides-edit
 import { ScriptDialogService } from '../../shared/script-dialog.service';
 import { PortfolioBacktestFormComponent } from './portfolio-backtest-form.component';
 import { PORTFOLIO_POLL_MS, PortfolioBacktestsPageComponent } from './portfolio-backtests-page.component';
+import { PortfolioBacktestContextComponent } from './portfolio-backtest-context.component';
+
+/** The context panel has its own reads; these tests are about the run list. */
+@Component({ selector: 'app-portfolio-backtest-context', standalone: true, template: '' })
+class ContextStub {
+  @Input() runCount: number | null = null;
+  @Input() canQueue = false;
+  @Output() start = new EventEmitter<void>();
+}
 
 declareSignalIo(PageHeaderComponent, { inputs: ['title', 'subtitle'] });
 declareSignalIo(PortfolioBacktestFormComponent, { outputs: ['queued'] });
@@ -76,6 +86,10 @@ describe('PortfolioBacktestsPageComponent (BT-I12)', () => {
         { provide: AuthService, useValue: { hasPermission: () => analyst } },
         { provide: ScriptDialogService, useValue: { confirm } },
       ],
+    });
+    TestBed.overrideComponent(PortfolioBacktestsPageComponent, {
+      remove: { imports: [PortfolioBacktestContextComponent] },
+      add: { imports: [ContextStub] },
     });
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(PortfolioBacktestsPageComponent);
