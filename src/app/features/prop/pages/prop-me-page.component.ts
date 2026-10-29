@@ -1,15 +1,16 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 
 import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { PropAccountFitComponent } from '../components/prop-account-fit.component';
 import { PropDashboardViewComponent } from '../components/prop-dashboard-view.component';
 import { PropGateComponent } from '../components/prop-gate.component';
 import { PropSetupComponent } from '../components/prop-setup.component';
 import { PropApiService } from '../prop-api.service';
-import type { PropDashboard } from '../prop.types';
+import type { PropDashboard, PropOverview } from '../prop.types';
 
 /**
  * "My challenge" (`prop.self`): the signed-in trader's own enrolments — those of the trading account
@@ -27,6 +28,7 @@ import type { PropDashboard } from '../prop.types';
     PropDashboardViewComponent,
     FeatureStateComponent,
     PropSetupComponent,
+    PropAccountFitComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
@@ -47,6 +49,9 @@ import type { PropDashboard } from '../prop.types';
         border-radius: var(--radius-md);
         padding: var(--space-3);
         background: var(--bg-primary);
+      }
+      .lead {
+        margin: 0;
       }
       .shows strong {
         display: block;
@@ -81,13 +86,20 @@ import type { PropDashboard } from '../prop.types';
             <app-prop-dashboard-view [dashboard]="d" />
           } @empty {
             @if (mine.loaded() && !mine.error()) {
+              @if (isStaff()) {
+                <app-prop-setup
+                  [showChecklist]="false"
+                  [autoload]="true"
+                  (loaded)="overview.set($event)"
+                />
+              }
               <app-feature-state
                 title="No challenge is linked to you"
                 kind="waiting"
                 stateLabel="Nothing linked"
                 summary="This page shows a trader their own challenge: where they stand against every rule of their program, live — and nothing about anyone else."
                 [detail]="detail()"
-                [requirements]="requirements"
+                [requirements]="requirements()"
                 [links]="links()"
               />
               <section class="card">
@@ -124,7 +136,12 @@ import type { PropDashboard } from '../prop.types';
                 </div>
               </section>
               @if (isStaff()) {
-                <app-prop-setup [showChecklist]="false" [autoload]="true" />
+                <p class="lead small muted">
+                  Below: what a trader's challenge would show on each of your live accounts, from
+                  their real equity record — the same rule checks “My challenge” runs once an
+                  account is enrolled.
+                </p>
+                <app-prop-account-fit [autoload]="true" />
               }
             }
           }
@@ -143,13 +160,41 @@ export class PropMePageComponent {
     [],
     'Could not load your challenge.',
   );
-  protected readonly requirements = [
-    {
-      label: 'An enrolment for your trading account or your trader record',
-      ok: false,
-      detail: 'The engine found none for your sign-in.',
-    },
-  ];
+  readonly overview = signal<PropOverview | null>(null);
+  /** The steps that put a challenge on this page, with the statuses the engine reports. */
+  readonly requirements = computed(() => {
+    const o = this.overview();
+    const reqs = [
+      {
+        label: 'An enrolment for your trading account or your trader record',
+        ok: false as boolean | null,
+        detail: 'The engine found none for your sign-in.',
+      },
+    ];
+    if (o)
+      reqs.unshift(
+        {
+          label: 'A challenge program defined',
+          ok: o.activePrograms > 0,
+          detail: o.activePrograms
+            ? `${o.activePrograms} active program(s).`
+            : 'No program yet — the firm defines one on Programs.',
+        },
+        {
+          label: 'Traders linked to a console login',
+          ok: o.linkedTraders > 0,
+          detail: o.traders
+            ? `${o.linkedTraders} of ${o.traders} trader(s) can sign in to see this page.`
+            : 'No trader record yet.',
+        },
+        {
+          label: 'Accounts enrolled',
+          ok: (o.enrollmentsByState['Active'] ?? 0) + (o.enrollmentsByState['Funded'] ?? 0) > 0,
+          detail: `${(o.enrollmentsByState['Active'] ?? 0) + (o.enrollmentsByState['Funded'] ?? 0)} running of ${o.accounts.length} active account(s).`,
+        },
+      );
+    return reqs;
+  });
   readonly detail = computed(() =>
     this.isStaff()
       ? 'You are signed in as firm staff. A trader sees this page once the firm links their console user to their trader record (Traders → Edit → Console user), or when they sign in with an enrolled trading account.'
