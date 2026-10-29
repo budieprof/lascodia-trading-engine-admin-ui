@@ -20,6 +20,14 @@ import { AnalysisChatComponent } from '@shared/components/analysis-chat/analysis
 import { AssistantDockService } from '@core/assistant/assistant-dock.service';
 import { AssistantService } from '@core/assistant/assistant.service';
 import { PageContextService } from '@core/assistant/page-context.service';
+import {
+  ACTION_LABEL,
+  findTab,
+  isActiveTab,
+  pageRoot,
+  readPage,
+  TAB_SELECTOR,
+} from '@core/assistant/page-reader';
 import { ScreenCaptureService } from '@core/assistant/screen-capture.service';
 import { NotificationService } from '@core/notifications/notification.service';
 
@@ -515,7 +523,7 @@ export class AssistantDockComponent {
     // App-wide page commands. Pages register their own while mounted; these belong to the dock,
     // which lives as long as the console, so the assistant can move the operator anywhere —
     // before this it could only act on the chart page, the one page that registered commands.
-    this.uiCommands.register(appCommands(this.router), inject(DestroyRef));
+    this.uiCommands.register([...appCommands(this.router), ...pageCommands()], inject(DestroyRef));
 
     // Keep the page chip current.
     effect(() => {
@@ -649,6 +657,99 @@ function appCommands(router: Router): UiCommand[] {
       run: () => {
         history.back();
         return { ok: true, message: 'Went back one page.' };
+      },
+    },
+  ];
+}
+
+/**
+ * Commands that work on EVERY page, because they read and drive the page's rendered structure
+ * rather than a page's own code. Most pages register no commands and publish no facts; with
+ * these the assistant can still see what any page shows and switch its tabs.
+ */
+function pageCommands(): UiCommand[] {
+  return [
+    {
+      id: 'page.read',
+      description:
+        'Read what the current page is showing: its title, section headings, feature status cards ' +
+        '(on/off, the switch, what is missing), figure tiles, tabs, tables (columns + first rows) and ' +
+        'notices. Use it to answer about "this page" on pages that publish no facts. Optionally narrow to ' +
+        'one section by its heading, or ask for more table rows.',
+      params: [
+        {
+          name: 'section',
+          type: 'string',
+          description:
+            'A section heading to read (e.g. "Recent runs"); omit to read the whole page.',
+        },
+        {
+          name: 'rows',
+          type: 'number',
+          description: 'Table rows to return per table (default 10, max 40).',
+        },
+      ],
+      run: (args) => {
+        const result = readPage(pageRoot(), {
+          section: typeof args['section'] === 'string' ? args['section'] : null,
+          rows: typeof args['rows'] === 'number' ? args['rows'] : null,
+        });
+        const parts = [
+          result.title ? `"${result.title}"` : 'this page',
+          `${result.figures.length} figure(s)`,
+          `${result.tables.length} table(s)`,
+          `${result.tabs.length} tab(s)`,
+          `${result.featureStates.length} status card(s)`,
+        ];
+        return {
+          ok: true,
+          message:
+            `Read ${parts.join(', ')}` +
+            (result.sectionNotFound
+              ? ` (no section "${result.sectionNotFound}"; read the whole page)`
+              : '') +
+            '.',
+          data: result,
+        };
+      },
+    },
+    {
+      id: 'page.selectTab',
+      description:
+        "Switch the current page to one of its tabs, by the tab's label (as page.read lists them). " +
+        'Tabs only change what is shown; use page.read afterwards to see the new tab.',
+      params: [
+        {
+          name: 'label',
+          type: 'string',
+          required: true,
+          description: 'The tab label, e.g. "Drift".',
+        },
+      ],
+      run: async (args) => {
+        const label = String(args['label'] ?? '').trim();
+        const root = pageRoot();
+        const tab = findTab(root, label);
+        if (!tab) {
+          const labels = [...root.querySelectorAll(TAB_SELECTOR)]
+            .map((t) => (t as HTMLElement).innerText?.trim())
+            .filter(Boolean);
+          return {
+            ok: false,
+            message: labels.length
+              ? `No tab "${label}". Tabs here: ${labels.join(', ')}.`
+              : 'This page has no tabs.',
+          };
+        }
+        const text = tab.innerText.trim();
+        // A button styled as a tab whose label names an action is not navigation (the crawler's rule).
+        if (tab.getAttribute('role') !== 'tab' && ACTION_LABEL.test(text)) {
+          return { ok: false, message: `"${text}" is an action, not a tab — it was not clicked.` };
+        }
+        if (isActiveTab(tab)) return { ok: true, message: `"${text}" is already showing.` };
+        tab.click();
+        await new Promise((r) => setTimeout(r, 400));
+        return { ok: true, message: `Switched to the "${text}" tab.` };
       },
     },
   ];

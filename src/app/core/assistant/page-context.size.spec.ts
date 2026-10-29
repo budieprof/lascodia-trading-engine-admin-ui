@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Injector, runInInjectionContext, DestroyRef } from '@angular/core';
 import { PageContextService } from './page-context.service';
 import { UiCommandService } from './ui-command.service';
+import { PageApiActivity } from './page-api-activity';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { Router, ActivatedRoute } from '@angular/router';
 import { of } from 'rxjs';
@@ -45,6 +46,7 @@ function makeService(commands: UiCommand[]): PageContextService {
         },
       },
       { provide: UiCommandService, useClass: UiCommandService },
+      { provide: PageApiActivity, useValue: { list: () => [] } },
       { provide: PageContextService, useClass: PageContextService },
     ],
   });

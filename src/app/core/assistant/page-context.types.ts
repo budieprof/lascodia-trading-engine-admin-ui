@@ -6,6 +6,7 @@
  */
 
 import type { UiCommandSpec } from './ui-command.types';
+import type { PageDataSource } from './page-api-activity';
 
 /** What a page chooses to publish about its current state. Every field is optional. */
 export interface PageFacts {
@@ -42,6 +43,11 @@ export interface PageContext {
   /** Which account(s) the console is scoped to — most figures on screen depend on this. */
   scope: { selected: string; accountIds: string; accountName: string | null };
   facts: PageFacts | null;
+  /**
+   * The engine calls this page made since it opened — where every figure on screen comes from.
+   * Each path can be found with search_endpoints and called again with the same query/filters.
+   */
+  dataSources?: PageDataSource[];
   /**
    * Commands the assistant may run in the browser on this page — see
    * {@link UiCommandSpec}. Empty on pages that register none, which is most of them.
