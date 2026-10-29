@@ -41,7 +41,8 @@ export interface AlertDispatchLogDto {
   channel: AlertChannel;
   /** Masked like the channel status. */
   destination: string | null;
-  status: 'Sent' | 'Failed' | 'Retrying' | 'Skipped';
+  /** `Queued` = waiting for the channel's next digest (delivery policy, 2026-10-29). */
+  status: 'Sent' | 'Failed' | 'Retrying' | 'Skipped' | 'Queued';
   message: string;
   dispatchedAt: string;
   /** Why it failed or was skipped. */
