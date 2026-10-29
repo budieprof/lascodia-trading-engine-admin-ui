@@ -11,7 +11,7 @@ const READ_POST = new RegExp(
     String.raw`/(list|paged|query|summary)$`,
     String.raw`/admin/calibration/(signal-rejections|snapshots)$`, // GetPagedSignalRejections / CalibrationSnapshots
     String.raw`/drawdown-recovery/history$`, // GetPagedDrawdownSnapshotsQuery
-    String.raw`/llm-backtest/(estimate-cost|points|\d+/sensitivity-analysis)$`, // Estimate… / GetLlmBacktestPoints / Analyze…
+    String.raw`/llm-backtest/(estimate-cost|points|compare|\d+/sensitivity-analysis)$`, // Estimate… / GetLlmBacktestPoints / CompareLlmBacktestRunsQuery (2026-10-29) / Analyze…
     String.raw`/ml-model/drift-report$`, // GetDriftReportQuery
     String.raw`/scripting/(chart-bars|compile|format|run)$`, // GetChartBars / CompileScript / FormatScript / RunScriptQuery
     String.raw`/strategy-feedback/\d+/snapshots$`, // GetPagedStrategySnapshotsQuery
@@ -21,6 +21,10 @@ const READ_POST = new RegExp(
     String.raw`/trade-signal/preview$`, // PreviewManualTradeQuery — the manual ticket's dry run
     String.raw`/execution-console/ticket/preview$`, // VenueTicketPreviewQuery — the venue ticket's dry run
     String.raw`/md/history$`, // GetMarketDataHistoryQuery — ladder/heatmap history
+    // Dealing desk reads (DealingController; each sends a Get…Query whose handler takes only
+    // IReadApplicationDbContext / the tick store — verified 2026-10-28). `dealing/feeds` (POST/PUT)
+    // and `dealing/trades/ingest` are commands and stay blocked.
+    String.raw`/dealing/(clients|clients/detail|markouts|ab-book-report|ab-book-report/export|alerts|lp-analytics)$`,
   ].join('|'),
   'i',
 );

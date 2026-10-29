@@ -45,3 +45,18 @@ export interface CreateVenueSourceBody {
   writerInstanceIds?: string[];
   reason?: string;
 }
+
+/** `GET admin/md/sources/coverage` (engine pages program): what the store holds per source. */
+export interface StoreCoverageSource {
+  sourceId: string;
+  symbolCount: number;
+  firstDay: string | null;
+  lastDay: string | null;
+  symbolsOnLastDay: number;
+  symbols: { symbol: string; fromDay: string; toDay: string }[];
+}
+
+export interface MarketDataStoreCoverage {
+  todayUtc: string;
+  sources: StoreCoverageSource[];
+}

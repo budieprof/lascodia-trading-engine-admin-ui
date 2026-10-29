@@ -13,6 +13,8 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import type { PipelineState } from '../../composite-ml-pipeline.logic';
 
 /** Cap |deltaFraction| display at ±50% so a single outlier doesn't squash everything else. */
 const DELTA_BAR_CAP = 0.5;
@@ -37,6 +39,7 @@ const NOT_FOUND_CODE = '-14';
     RouterLink,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -49,41 +52,52 @@ const NOT_FOUND_CODE = '-14';
       />
       <app-composite-ml-nav />
 
-      <section class="picker">
-        <div class="picker-field">
-          <label for="fromId">From snapshot</label>
-          <input
-            id="fromId"
-            type="number"
-            min="1"
-            [ngModel]="fromInput()"
-            (ngModelChange)="fromInput.set($event)"
-            placeholder="e.g. 1240"
-          />
-        </div>
-        <span class="picker-arrow">→</span>
-        <div class="picker-field">
-          <label for="toId">To snapshot</label>
-          <input
-            id="toId"
-            type="number"
-            min="1"
-            [ngModel]="toInput()"
-            (ngModelChange)="toInput.set($event)"
-            placeholder="e.g. 1241"
-          />
-        </div>
-        <button type="button" class="btn btn-primary" (click)="apply()" [disabled]="!canApply()">
-          Compare
-        </button>
-      </section>
+      <app-composite-ml-pipeline-state
+        [variant]="result().state === 'idle' ? 'full' : 'compact'"
+        [focus]="['policySnapshots']"
+        pageSummary="Policy Diff compares two CompositeML policy snapshots knob by knob — useful after a rollback or an activation to see exactly which scoring weights moved. It needs at least two snapshots; the policy trainer writes them from the generator's matured decisions."
+        (stateChange)="pipeline.set($event)"
+      />
+
+      @if (!noSnapshots() || result().state !== 'idle') {
+        <section class="picker">
+          <div class="picker-field">
+            <label for="fromId">From snapshot</label>
+            <input
+              id="fromId"
+              type="number"
+              min="1"
+              [ngModel]="fromInput()"
+              (ngModelChange)="fromInput.set($event)"
+              placeholder="e.g. 1240"
+            />
+          </div>
+          <span class="picker-arrow">→</span>
+          <div class="picker-field">
+            <label for="toId">To snapshot</label>
+            <input
+              id="toId"
+              type="number"
+              min="1"
+              [ngModel]="toInput()"
+              (ngModelChange)="toInput.set($event)"
+              placeholder="e.g. 1241"
+            />
+          </div>
+          <button type="button" class="btn btn-primary" (click)="apply()" [disabled]="!canApply()">
+            Compare
+          </button>
+        </section>
+      }
 
       @switch (result().state) {
         @case ('idle') {
-          <app-empty-state
-            title="Pick two snapshots to compare"
-            description="Enter the source and target snapshot ids above, or navigate here from the lineage timeline of any active policy."
-          />
+          @if (!noSnapshots()) {
+            <app-empty-state
+              title="Pick two snapshots to compare"
+              description="Enter the source and target snapshot ids above, or navigate here from the lineage timeline of any active policy."
+            />
+          }
         }
         @case ('loading') {
           <app-card-skeleton [lines]="8" />
@@ -435,6 +449,12 @@ export class DiffPageComponent {
   private readonly compositeMl = inject(CompositeMLService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+
+  protected readonly pipeline = signal<PipelineState | null>(null);
+  /** True only when the engine says no policy snapshot exists at all — the picker is pointless. */
+  protected readonly noSnapshots = computed(
+    () => this.pipeline()?.datasets.find((d) => d.key === 'policySnapshots')?.rows === 0,
+  );
 
   protected readonly fromInput = signal<number | null>(null);
   protected readonly toInput = signal<number | null>(null);

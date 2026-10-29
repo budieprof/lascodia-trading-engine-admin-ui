@@ -190,7 +190,9 @@ import type { DealingLpAnalytics } from '../dealing.types';
           <p class="small muted">{{ d.methodology }}</p>
         </details>
       } @else if (!error()) {
-        <p class="pad muted">Pick a symbol and press Analyse.</p>
+        <p class="pad muted">
+          {{ loading() ? 'Analysing ' + symbol() + '…' : 'Pick a symbol and press Analyse.' }}
+        </p>
       }
     </section>
   `,
@@ -207,6 +209,12 @@ export class DealingLiquidityTabComponent {
   readonly data = signal<DealingLpAnalytics | null>(null);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+
+  constructor() {
+    // Open on the default question (the filter's symbol or EURUSD, last hour) — about a second of store reads —
+    // instead of an empty panel; "Analyse" re-reads with what the operator picks.
+    this.load();
+  }
 
   load(): void {
     if (this.loading()) return;

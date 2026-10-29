@@ -53,7 +53,9 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { TabsComponent, type TabItem } from '@shared/components/ui/tabs/tabs.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
+import { ConfigService } from '@core/services/config.service';
+import { topReasons } from './signal-ab-state.logic';
 import {
   FormFieldComponent,
   FormFieldControlDirective,
@@ -104,7 +106,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
     MetricCardComponent,
     ChartCardComponent,
     TabsComponent,
-    EmptyStateComponent,
+    FeatureStateComponent,
     FormFieldComponent,
     FormFieldControlDirective,
     ModalA11yDirective,
@@ -2006,9 +2008,18 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                    charts and an empty grid. Tests are engine-initiated (the
                    arbiter starts one when a challenger is ready), so there is
                    no Start button to offer here. -->
-              <app-empty-state
-                title="No signal A/B tests yet"
-                description="The engine starts a signal-level A/B test when a challenger model is ready to be measured against the champion on live signals. Nothing has been started so far."
+              <app-feature-state
+                title="Signal-level A/B tests"
+                summary="When a challenger model beats the champion in shadow evaluation (Shadow Arena), the engine splits live signals between the two and compares their real P&L with a sequential test before promoting. No test has started because no challenger has passed the shadow stage yet."
+                [kind]="abSwitch() === false ? 'off' : 'waiting'"
+                [stateLabel]="abSwitch() === false ? 'Off' : 'On · waiting for a challenger'"
+                switchKey="AbTest:Enabled"
+                [detail]="abDetail()"
+                [requirements]="abRequirements()"
+                [links]="[
+                  { label: 'Training queue', route: '/ml-models/training-queue' },
+                  { label: 'Overfit watchlist', route: '/ml-models/overfit-watchlist' },
+                ]"
               />
             } @else {
               <div class="ml-kpis">
@@ -3447,6 +3458,55 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
 export class MlModelsPageComponent implements OnInit {
   private readonly mlModelsService = inject(MLModelsService);
   private readonly mlEvaluationService = inject(MLEvaluationService);
+  private readonly configSvc = inject(ConfigService);
+
+  /** `AbTest:Enabled` — null until read or when there is no row. */
+  readonly abSwitch = signal<boolean | null>(null);
+  /** Why shadow evaluations ended without promotion (the only route into an A/B test). */
+  readonly abShadowReasons = computed(() =>
+    topReasons(
+      this.shadowSample()
+        .filter((e) => decisionMeta(e.promotionDecision).key !== 'promoted')
+        .map((e) => e.decisionReason),
+    ),
+  );
+  readonly abDetail = computed(() => {
+    const st = this.shadowStats();
+    if (st.total === 0) return 'No shadow evaluation has run yet, so no challenger could qualify.';
+    const done =
+      st.completed === st.total
+        ? `All ${st.total} shadow evaluations on record have finished`
+        : `${st.completed} of the last ${st.total} shadow evaluations have finished`;
+    return `${done}; ${st.promoted} promoted a challenger (each promotion would start a test here).`;
+  });
+  readonly abRequirements = computed(() => {
+    const st = this.shadowStats();
+    const top = this.abShadowReasons().slice(0, 3);
+    return [
+      {
+        label: 'A/B testing switched on',
+        ok: this.abSwitch(),
+        detail:
+          this.abSwitch() === null ? 'no setting read' : `AbTest:Enabled = ${this.abSwitch()}`,
+        route: '/engine-config',
+        query: { search: 'AbTest' },
+      },
+      {
+        label: 'A challenger passed shadow evaluation',
+        ok: st.promoted > 0,
+        detail: `${st.promoted} promoted · ${st.flagged} flagged for review · ${st.rejected} rejected`,
+      },
+      ...(top.length
+        ? [
+            {
+              label: 'Why evaluations stopped',
+              ok: null,
+              detail: top.map((r) => `${r.count} × ${r.reason}`).join(' · '),
+            },
+          ]
+        : []),
+    ];
+  });
   private readonly marketDataService = inject(MarketDataService);
   private readonly currencyPairsService = inject(CurrencyPairsService);
   private readonly notifications = inject(NotificationService);
@@ -5720,6 +5780,13 @@ export class MlModelsPageComponent implements OnInit {
     this.loadShadowAnalyticsSample();
     this.loadAbAnalyticsSample();
     this.loadAvailableArchitectures();
+    this.configSvc.getByKey('AbTest:Enabled', { silent: true }).subscribe({
+      next: (r) => {
+        const v = (r?.data?.value ?? '').trim().toLowerCase();
+        this.abSwitch.set(r?.status ? (v === 'true' ? true : v === 'false' ? false : null) : null);
+      },
+      error: () => this.abSwitch.set(null),
+    });
 
     // Coverage preview: trail the form by 350ms so we don't fire a request on every
     // keystroke. The watcher only fires when symbol+timeframe are populated; date

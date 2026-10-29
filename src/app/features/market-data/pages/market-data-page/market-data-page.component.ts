@@ -7,6 +7,7 @@ import {
   effect,
   OnInit,
   OnDestroy,
+  untracked,
 } from '@angular/core';
 import {
   Subject,
@@ -1561,7 +1562,11 @@ interface PriceEntry extends LivePriceDto {
           @if (hasSeries(priceHistoryOptions())) {
             <app-chart-card
               title="Price Movement"
-              subtitle="% change from first observed bid, per pair (last 100 ticks)"
+              [subtitle]="
+                analyticsSeededFromCandles()
+                  ? '% change across the last 100 points per pair — seeded from stored one-minute closes, then live bids'
+                  : '% change from first observed bid, per pair (last 100 ticks)'
+              "
               [options]="priceHistoryOptions()"
               height="320px"
             />
@@ -2514,6 +2519,17 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   // Price history for analytics (stores last 100 ticks per symbol)
   private priceHistory: Record<string, number[]> = {};
   private spreadHistory: Record<string, number[]> = {};
+  /**
+   * Pages program: the analytics tab opened on a few seconds of live bids, so every chart read "no pair has moved yet".
+   * On first open, each symbol with < 10 points is seeded with its last 100 stored one-minute closes (real candles),
+   * then live bids keep appending as before.
+   */
+  private analyticsSeeded = false;
+  readonly analyticsSeededFromCandles = signal(false);
+  private readonly analyticsSeedEffect = effect(() => {
+    if (this.activeTab() !== 'analytics') return;
+    untracked(() => this.seedAnalyticsHistory());
+  });
   // Timeframe the spark buffers were last seeded from. The seed re-runs
   // whenever the chart's selected timeframe changes so the watch-card /
   // matrix sparklines stay aligned with what the operator is looking at
@@ -3908,6 +3924,40 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
    * first TF that returns data (`first(...)` unsubscribes upstream), so the
    * common case is exactly one light request per symbol.
    */
+  private seedAnalyticsHistory(): void {
+    if (this.analyticsSeeded) return;
+    const targets = this.watchedSymbols().filter((s) => (this.priceHistory[s]?.length ?? 0) < 10);
+    if (targets.length === 0) return;
+    this.analyticsSeeded = true;
+    forkJoin(
+      targets.map((sym) =>
+        this.marketDataService
+          .listCandles({ currentPage: 1, itemCountPerPage: 100, filter: { symbol: sym, timeframe: 'M1' } })
+          .pipe(
+            map((res) => ({ sym, candles: (res?.data?.data ?? []) as CandleDto[] })),
+            catchError(() => of({ sym, candles: [] as CandleDto[] })),
+          ),
+      ),
+    )
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((rows) => {
+        let seeded = 0;
+        for (const { sym, candles } of rows) {
+          const closes = candles
+            .map((c) => c.close)
+            .filter((v) => Number.isFinite(v) && v > 0)
+            .reverse();
+          if (closes.length < 2) continue;
+          this.priceHistory[sym] = [...closes, ...(this.priceHistory[sym] ?? [])].slice(-100);
+          seeded++;
+        }
+        if (seeded > 0) {
+          this.analyticsSeededFromCandles.set(true);
+          this.livePrices.set([...this.livePrices()]); // recompute the analytics computeds
+        }
+      });
+  }
+
   private seedSparkHistory(preferredTf: string, only?: readonly string[]): void {
     const FALLBACK = ['M15', 'H1', 'H4', 'M5', 'D1'];
     const TF_PRIORITY = [preferredTf, ...FALLBACK.filter((t) => t !== preferredTf)];

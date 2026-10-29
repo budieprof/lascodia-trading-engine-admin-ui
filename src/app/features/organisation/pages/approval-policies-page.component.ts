@@ -18,6 +18,9 @@ import {
   type ApprovalPolicyRow,
 } from '../approval-policies';
 import { failureMessage, isApprovalPending } from '../organisation.logic';
+import { ago } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 
 /**
  * Four-eyes policies (enterprise program, fund-module): for each governable action, how many people
@@ -30,7 +33,14 @@ import { failureMessage, isApprovalPending } from '../organisation.logic';
   selector: 'app-approval-policies-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, ModalA11yDirective],
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    ConfirmDialogComponent,
+    ModalA11yDirective,
+    StatTilesComponent,
+    AuditTrailComponent,
+  ],
   styleUrl: '../../iam/shared/iam-page.scss',
   template: `
     <div class="page">
@@ -47,6 +57,8 @@ import { failureMessage, isApprovalPending } from '../organisation.logic';
           {{ list.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Approval policies summary" />
 
       <section class="card">
         @if (list.error(); as err) {
@@ -246,6 +258,12 @@ import { failureMessage, isApprovalPending } from '../organisation.logic';
             (ngModelChange)="removeReason.set($event)"
         /></label>
       </app-confirm-dialog>
+
+      <app-audit-trail
+        heading="Policy changes and approvals"
+        [actions]="['iam.approval_policy.', 'iam.approval.']"
+        empty="No policy has been set, changed or removed, and nothing has been sent for approval. Each change and each request is recorded here; requests waiting now are on Approvals."
+      />
     </div>
   `,
   styles: [
@@ -295,6 +313,46 @@ export class ApprovalPoliciesPageComponent {
   readonly removing = signal<ApprovalPolicyRow | null>(null);
   readonly removeReason = signal('');
   readonly busy = signal(false);
+
+  readonly tiles = computed<StatTile[]>(() => {
+    const rows = this.list.value();
+    const set = rows.filter((r) => r.policy);
+    const on = set.filter((r) => r.policy?.enabled);
+    const last =
+      set
+        .map((r) => r.policy?.updatedAtUtc ?? '')
+        .sort()
+        .at(-1) || null;
+    return [
+      {
+        label: 'Policies in force',
+        value: this.list.loaded() ? `${on.length} of ${rows.length}` : '…',
+        caption: on.length ? on.map((r) => r.title).join(', ') : 'every action works as before',
+        tone: this.list.loaded() ? (on.length ? 'good' : null) : null,
+      },
+      {
+        label: 'Switched off',
+        value: this.list.loaded() ? String(set.length - on.length) : '…',
+        caption: 'kept but not applied',
+      },
+      {
+        label: 'Most approvers asked',
+        value: on.length ? String(Math.max(...on.map((r) => r.policy!.approversRequired))) : '—',
+        caption: 'people besides the requester',
+      },
+      {
+        label: 'Last change',
+        value: last ? ago(last) : 'Never',
+        caption: last ? 'to any policy' : 'no policy has been set',
+      },
+      {
+        label: 'Waiting for approval',
+        value: 'Approvals',
+        caption: 'requests these policies hold',
+        route: '/iam/approvals',
+      },
+    ];
+  });
 
   constructor() {
     this.list.reload();

@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
+import { conversationsOverview } from './conversations-overview.logic';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -444,14 +445,75 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
             </div>
           } @else {
             <div class="conv-placeholder">
-              <div class="placeholder-inner">
-                <div class="placeholder-emoji">💬</div>
-                <p>Select a conversation to resume it, or run a new analysis.</p>
-                <p class="muted">
-                  Every LLM analysis is a conversation — ask follow-ups, pull live data, or set up
-                  monitors, and pick it back up any time.
-                </p>
-              </div>
+              @let ov = overview();
+              @if (ov.sample > 0) {
+                <div class="ov">
+                  <h3 class="ov-title">Your recent conversations</h3>
+                  <p class="muted ov-sub">
+                    Pick one on the left to resume it, or start a new analysis. Figures below cover
+                    the {{ ov.sample }} most recent{{ kindFilter() ? ' of this kind' : '' }} of
+                    {{ totalItems() | number }}.
+                  </p>
+                  <div class="ov-tiles">
+                    <div class="ov-tile">
+                      <span class="ov-num">{{ totalItems() | number }}</span
+                      ><span class="ov-lbl">conversations</span>
+                    </div>
+                    <div class="ov-tile">
+                      <span class="ov-num">{{ ov.followUps | number }}</span
+                      ><span class="ov-lbl">follow-up turns</span>
+                    </div>
+                    <div class="ov-tile">
+                      <span class="ov-num">{{ ov.activeMonitors }}</span
+                      ><span class="ov-lbl">live monitors on {{ ov.withMonitors }} thread(s)</span>
+                    </div>
+                    <div class="ov-tile">
+                      <span class="ov-num">{{ ov.symbols }}</span
+                      ><span class="ov-lbl">symbols</span>
+                    </div>
+                  </div>
+                  <div class="ov-kinds" aria-label="Conversations by kind">
+                    @for (k of ov.byKind; track k.kind) {
+                      <div class="ov-kind">
+                        <span class="ov-kind-name">{{ k.kind }}</span>
+                        <span class="ov-bar"><span [style.width.%]="k.pct"></span></span>
+                        <span class="ov-kind-n">{{ k.count }}</span>
+                      </div>
+                    }
+                  </div>
+                  <h4 class="ov-h">Resume</h4>
+                  <ul class="ov-resume">
+                    @for (c of ov.resume; track c.llmInvocationId) {
+                      <li>
+                        <button type="button" (click)="select(c)">
+                          <span class="ov-r-head"
+                            ><strong>{{
+                              c.symbol !== '—' ? c.symbol + ' ' + c.timeframe : c.kind
+                            }}</strong>
+                            <span class="muted"
+                              >#{{ c.llmInvocationId }} ·
+                              {{ c.lastActivityAtUtc | date: 'MMM d, HH:mm' }}</span
+                            ></span
+                          >
+                          <span class="ov-r-body muted">{{ c.preview || c.kind }}</span>
+                          @if (c.activeMonitorCount > 0) {
+                            <span class="ov-r-mon">{{ c.activeMonitorCount }} live monitor(s)</span>
+                          }
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                </div>
+              } @else {
+                <div class="placeholder-inner">
+                  <div class="placeholder-emoji">💬</div>
+                  <p>Select a conversation to resume it, or run a new analysis.</p>
+                  <p class="muted">
+                    Every LLM analysis is a conversation — ask follow-ups, pull live data, or set up
+                    monitors, and pick it back up any time.
+                  </p>
+                </div>
+              }
             </div>
           }
         </main>
@@ -1067,6 +1129,116 @@ const AGENT_MODES: ReadonlySet<AnalysisMode> = new Set<AnalysisMode>(['engineer'
       .placeholder-inner {
         max-width: 420px;
       }
+      .ov {
+        width: 100%;
+        max-width: 640px;
+        text-align: left;
+        align-self: flex-start;
+      }
+      .ov-title {
+        margin: 0 0 4px;
+        font-size: var(--text-lg);
+      }
+      .ov-sub {
+        margin: 0 0 var(--space-4);
+        font-size: var(--text-sm);
+      }
+      .ov-tiles {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-2);
+        margin-bottom: var(--space-4);
+      }
+      .ov-tile {
+        display: flex;
+        flex-direction: column;
+        padding: var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+      }
+      .ov-num {
+        font-size: var(--text-xl);
+        font-weight: var(--font-semibold);
+      }
+      .ov-lbl,
+      .ov-kind-n {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .ov-kinds {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: var(--space-4);
+      }
+      .ov-kind {
+        display: grid;
+        grid-template-columns: 110px minmax(0, 1fr) 40px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .ov-bar {
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        overflow: hidden;
+      }
+      .ov-bar span {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+      }
+      .ov-h {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .ov-resume {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .ov-resume button {
+        width: 100%;
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: var(--space-2) var(--space-3);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+        color: var(--text-primary);
+        font: inherit;
+        cursor: pointer;
+      }
+      .ov-resume button:hover {
+        border-color: var(--accent);
+      }
+      .ov-r-head {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .ov-r-body {
+        font-size: var(--text-xs);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .ov-r-mon {
+        font-size: 11px;
+        color: var(--profit);
+      }
+      @media (max-width: 900px) {
+        .ov-tiles {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
       .placeholder-emoji {
         font-size: 40px;
         margin-bottom: var(--space-3);
@@ -1239,6 +1411,9 @@ export class ConversationsPageComponent {
     { value: 'engineer', label: 'Engineer' },
     { value: 'wire', label: 'Wire' },
   ];
+
+  /** Overview shown in the right pane until a conversation is picked. */
+  protected readonly overview = computed(() => conversationsOverview(this.conversations()));
 
   protected readonly hasMore = computed(() => this.conversations().length < this.totalItems());
   protected readonly openerText = computed(() => this.detail()?.analysis ?? null);

@@ -17,6 +17,7 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { AutoTuneStatusPanelComponent } from '../../components/auto-tune-status-panel.component';
 
 interface EditForm {
   proposalKey: string;
@@ -44,6 +45,7 @@ interface EditForm {
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
+    AutoTuneStatusPanelComponent,
     RelativeTimePipe,
   ],
   template: `
@@ -94,10 +96,13 @@ interface EditForm {
         }
 
         @if (configs().length === 0) {
+          <!-- No config = every proposal waits for review (the safe default); say what a config does
+               and whether there is anything for one to act on. -->
+          <app-auto-tune-status-panel mode="auto-apply" />
           <section class="card">
             <app-empty-state
               title="No per-knob configs"
-              description="Without configs, all auto-tune proposals require operator review. Add a config to enable autonomous application for a specific knob."
+              description="Every auto-tune proposal waits for a person. A config names one knob, the bounds it may move within, how many consecutive matching proposals it needs and the quiet period between changes."
               actionLabel="New config"
               (actionClick)="openEditor(null)"
             />

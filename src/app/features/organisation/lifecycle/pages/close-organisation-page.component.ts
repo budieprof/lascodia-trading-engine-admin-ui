@@ -11,6 +11,9 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { errorText } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
+import { plural } from '@features/iam/shared/admin-context.logic';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 import { LifecycleApiService } from '../lifecycle-api.service';
 import { closeConfirmationOk, closeOutcome } from '../lifecycle.logic';
 import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
@@ -34,6 +37,8 @@ import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
     PageHeaderComponent,
     MfaHintComponent,
     ModalA11yDirective,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
   styles: [
@@ -68,6 +73,8 @@ import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
         title="Close the organisation"
         subtitle="Stop using the platform. Everything stops at once; the data is deleted after a grace period."
       />
+
+      <app-stat-tiles [tiles]="tiles()" label="What closing would affect" />
 
       @if (state.error(); as err) {
         <section class="card">
@@ -213,6 +220,12 @@ import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
           </div>
         </div>
       }
+
+      <app-audit-trail
+        heading="Closing and export activity"
+        [actions]="['tenant.closure.', 'tenant.export.']"
+        empty="This organisation has never been closed, refused a closure or exported its data. Each attempt, refusal and export is recorded here."
+      />
     </div>
   `,
 })
@@ -229,6 +242,46 @@ export class CloseOrganisationPageComponent {
     'Could not load the organisation.',
   );
   readonly canClose = computed(() => this.auth.hasPermission(Permission.TenantClose));
+  readonly tiles = computed<StatTile[]>(() => {
+    const st = this.state.value();
+    const n = (v: number | undefined) => (v == null ? '…' : String(v));
+    return [
+      {
+        label: 'Can it be closed now?',
+        value: !st ? '…' : st.canClose ? 'Yes' : 'No',
+        caption: st
+          ? st.canClose
+            ? 'nothing blocks it'
+            : plural(st.blockers.length, 'reason', 'reasons') + ' below'
+          : null,
+        tone: st ? (st.canClose ? 'warn' : 'good') : null,
+      },
+      {
+        label: 'Open positions',
+        value: n(st?.openPositions),
+        caption: `${n(st?.workingOrders)} working orders — must be 0`,
+        tone: st && st.openPositions + st.workingOrders > 0 ? 'warn' : null,
+        route: '/positions',
+      },
+      {
+        label: 'Members',
+        value: n(st?.members),
+        caption: `${n(st?.owners)} Owner(s)${st?.needsSecondOwner ? ' — a second Owner approves' : ''}`,
+        route: '/iam/members',
+      },
+      {
+        label: 'Terminal credentials',
+        value: n(st?.activeMachineCredentials),
+        caption: 'revoked at once on closing',
+        route: '/organisation/terminals',
+      },
+      {
+        label: 'Grace period',
+        value: st ? `${st.graceDays} days` : '…',
+        caption: 'staff can reopen it until then',
+      },
+    ];
+  });
   readonly open = signal(false);
   readonly typed = signal('');
   readonly reason = signal('');

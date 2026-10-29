@@ -6,7 +6,7 @@ import {
   type HttpResponse,
 } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, catchError, from, map, switchMap, throwError } from 'rxjs';
+import { Observable, catchError, from, map, of, switchMap, throwError } from 'rxjs';
 
 import { SUPPRESS_ERROR_TOAST, ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
@@ -14,6 +14,7 @@ import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { fileNameFromContentDisposition } from '@features/scripting/shared/download';
 
 import type {
+  ComplianceExportPreview,
   BestExecutionReport,
   CashFlow,
   ComplianceExportRecord,
@@ -97,6 +98,25 @@ export class FundApiService {
 
   scope(): Observable<FundScope> {
     return settled(this.api.get<ResponseData<FundScope>>('/fund/scope', SILENT));
+  }
+
+  /**
+   * Ids of the organisation's active, non-paper trading accounts (`trading-account/list`, `accounts.read`) — the pages
+   * open on these. Null when the caller may not list accounts (an Investor): the page then uses the scope as is.
+   */
+  activeAccountIds(): Observable<number[] | null> {
+    return this.api
+      .post<
+        ResponseData<{ data?: { id: number; isActive: boolean; isPaper: boolean }[] }>
+      >('/trading-account/list', { currentPage: 1, itemCountPerPage: 500 }, SILENT)
+      .pipe(
+        map((res) =>
+          res?.status
+            ? (res.data?.data ?? []).filter((a) => a.isActive && !a.isPaper).map((a) => a.id)
+            : null,
+        ),
+        catchError(() => of(null)),
+      );
   }
 
   // ── Performance ──
@@ -185,6 +205,16 @@ export class FundApiService {
   }
 
   // ── Compliance ──
+  /** Row counts and breakdowns a download of the period would carry, and whether exports are signed. */
+  compliancePreview(from: string, to: string): Observable<ComplianceExportPreview> {
+    return settled(
+      this.api.get<ResponseData<ComplianceExportPreview>>(
+        `/fund/compliance-exports/preview${fundQuery({ from, to })}`,
+        SILENT,
+      ),
+    );
+  }
+
   complianceExports(): Observable<ComplianceExportRecord[]> {
     return settled(
       this.api.get<ResponseData<ComplianceExportRecord[]>>('/fund/compliance-exports', SILENT),

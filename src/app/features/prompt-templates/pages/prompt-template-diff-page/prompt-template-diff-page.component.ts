@@ -17,6 +17,7 @@ import {
   PromptTemplateSummary,
 } from '@core/services/prompt-template.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { defaultDiffPair } from '../../utils/prompt-templates.logic';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
@@ -46,8 +47,20 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
         title="Diff prompt templates"
         subtitle="Unified line-level diff of two SystemPrompt bodies"
       >
+        @if (!needsPick() && left() && right()) {
+          <button type="button" class="btn-secondary" (click)="reopenPicker()">
+            Choose other versions
+          </button>
+        }
         <a routerLink="/prompt-templates" class="btn-secondary">‹ Back to list</a>
       </app-page-header>
+
+      @if (autoPicked() && left() && right() && !needsPick()) {
+        <p class="auto-note muted">
+          Opened on the active version (#{{ right()!.id }}, right) against the version it replaced
+          (#{{ left()!.id }}, left) — what changed the last time the prompt was promoted.
+        </p>
+      }
 
       <!-- Picker: direct navigation without ?left=&right= used to render a
            red developer message. Now the operator chooses both sides here
@@ -331,6 +344,10 @@ import { lineDiff, LineDiffResult } from '../../utils/line-diff.util';
         font-weight: 700;
         color: var(--text-secondary);
       }
+      .auto-note {
+        margin: 0;
+        font-size: 0.85rem;
+      }
       .side--left .side-label {
         color: #c4290a;
       }
@@ -530,12 +547,34 @@ export class PromptTemplateDiffPageComponent implements OnInit {
         this.pickerLoading.set(false);
         const rows = [...(res?.data?.data ?? [])].sort((a, b) => b.id - a.id);
         this.pickerRows.set(rows);
-        // Sensible default: the live version on the left, newest other version on the right.
+        // Open full: the active version (right) against the version it replaced (left) — the
+        // picker stays one click away ("Choose other versions").
+        const pair = defaultDiffPair(rows);
+        if (pair && !this.autoPicked()) {
+          this.pickLeft = pair.left;
+          this.pickRight = pair.right;
+          this.autoPicked.set(true);
+          this.applyPick();
+          return;
+        }
         const active = rows.find((r) => r.isActive) ?? rows[1] ?? null;
         const other = rows.find((r) => r.id !== active?.id) ?? null;
-        this.pickLeft = active?.id ?? null;
-        this.pickRight = other?.id ?? null;
+        this.pickLeft = this.left()?.id ?? active?.id ?? null;
+        this.pickRight = this.right()?.id ?? other?.id ?? null;
       });
+  }
+
+  /** True when the page chose the pair itself (no ?left=&right= in the link). */
+  readonly autoPicked = signal(false);
+
+  reopenPicker(): void {
+    if (this.pickerRows().length) {
+      this.pickLeft = this.left()?.id ?? this.pickLeft;
+      this.pickRight = this.right()?.id ?? this.pickRight;
+      this.needsPick.set(true);
+    } else {
+      this.openPicker();
+    }
   }
 
   applyPick(): void {

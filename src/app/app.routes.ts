@@ -683,7 +683,7 @@ export const routes: Routes = [
         // Release notes of every platform component (enterprise program, security-controls).
         path: 'releases',
         canActivate: [canAccessPath('releases')],
-        data: { breadcrumb: 'Release notes' },
+        data: { breadcrumb: 'Releases' },
         loadComponent: () =>
           import('@features/security/pages/release-notes-page.component').then(
             (m) => m.ReleaseNotesPageComponent,

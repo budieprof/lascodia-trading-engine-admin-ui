@@ -6,6 +6,7 @@ import { ApiError, type ResponseData } from '@core/api/api.types';
 import type {
   CreateVenueSourceBody,
   MarketDataSourceAdmin,
+  MarketDataStoreCoverage,
   UpdateMarketDataSourceBody,
 } from './md-sources.types';
 
@@ -36,6 +37,13 @@ export class MarketDataSourcesApiService {
     return settled(
       this.api.get<ResponseData<MarketDataSourceAdmin[]>>('/admin/md/sources', SILENT),
     ).pipe(map((rows) => rows ?? []));
+  }
+
+  /** What the store holds per source (engine pages program; a 404 = older engine, the caller absorbs it). */
+  coverage(): Observable<MarketDataStoreCoverage> {
+    return settled(
+      this.api.get<ResponseData<MarketDataStoreCoverage>>('/admin/md/sources/coverage', SILENT),
+    );
   }
 
   update(sourceId: string, body: UpdateMarketDataSourceBody): Observable<MarketDataSourceAdmin> {

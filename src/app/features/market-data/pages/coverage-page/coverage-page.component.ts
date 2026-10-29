@@ -5,7 +5,10 @@ import { RouterLink } from '@angular/router';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { MarketDataService } from '@core/services/market-data.service';
-import type { CandleCoverageDto, Timeframe } from '@core/api/api.types';
+import type { CandleCoverageDto, ResponseData, Timeframe } from '@core/api/api.types';
+import { ApiService } from '@core/api/api.service';
+import type { CandleWatermark } from '../order-book-page/order-book-board.logic';
+import { MATRIX_TIMEFRAMES, ageText, watermarkMatrix, type MatrixRow } from './watermark-matrix.logic';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
@@ -88,6 +91,52 @@ interface CoverageResult {
           {{ running() ? 'Running…' : 'Probe' }}
         </button>
       </section>
+
+      @if (matrix().length) {
+        <section class="card fresh-card">
+          <header class="fresh-head">
+            <h3>Newest candle per symbol</h3>
+            <span class="muted small">
+              {{ currentCount() }} of {{ matrix().length }} symbols current on every timeframe · forex candles come from
+              the EA, futures / crypto / stock candles from the instrument candle builder
+            </span>
+          </header>
+          <div class="fresh-wrap">
+            <table class="coverage-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  @for (tf of MATRIX_TIMEFRAMES; track tf) {
+                    <th class="num">{{ tf }}</th>
+                  }
+                  <th><span class="sr-only">Probe</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of shownMatrix(); track r.symbol) {
+                  <tr>
+                    <td><code>{{ r.symbol }}</code></td>
+                    @for (tf of MATRIX_TIMEFRAMES; track tf) {
+                      <td class="num" [class.stale]="!r.cells[tf].fresh" [title]="r.cells[tf].latest ?? 'no candle'">
+                        {{ age(r.cells[tf].ageMinutes) }}
+                      </td>
+                    }
+                    <td class="num">
+                      <button type="button" class="btn btn-secondary btn-xs" (click)="probeOne(r.symbol)">Probe gaps</button>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          @if (matrix().length > 12) {
+            <button type="button" class="more" (click)="allMatrix.set(!allMatrix())">
+              {{ allMatrix() ? 'Show fewer' : 'Show all ' + matrix().length + ' symbols' }}
+            </button>
+          }
+          <p class="muted small">Age of the newest stored bar; grey = older than that timeframe should be (market closed, or the producer stopped).</p>
+        </section>
+      }
 
       @if (running()) {
         <app-card-skeleton [lines]="6" />
@@ -213,6 +262,48 @@ interface CoverageResult {
   `,
   styles: [
     `
+      .fresh-card {
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .fresh-head {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        align-items: baseline;
+      }
+      .fresh-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+      }
+      .fresh-wrap {
+        overflow-x: auto;
+      }
+      td.stale {
+        color: var(--text-tertiary, var(--text-secondary));
+        opacity: 0.7;
+      }
+      .btn-xs {
+        padding: 2px 8px;
+        font-size: var(--text-xs);
+      }
+      .more {
+        align-self: flex-start;
+        background: none;
+        border: none;
+        color: var(--accent);
+        cursor: pointer;
+        font-size: var(--text-sm);
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -426,6 +517,30 @@ export class CoveragePageComponent {
   protected readonly selectedTimeframes = signal<Timeframe[]>(['H1']);
   protected readonly running = signal(false);
   protected readonly results = signal<CoverageResult[]>([]);
+  private readonly api = inject(ApiService);
+  protected readonly MATRIX_TIMEFRAMES = MATRIX_TIMEFRAMES;
+  protected readonly age = ageText;
+  protected readonly matrix = signal<MatrixRow[]>([]);
+  protected readonly allMatrix = signal(false);
+  protected readonly shownMatrix = computed(() =>
+    this.allMatrix() ? this.matrix() : this.matrix().slice(0, 12),
+  );
+  protected readonly currentCount = computed(() => this.matrix().filter((r) => r.current).length);
+
+  constructor() {
+    this.api
+      .get<ResponseData<CandleWatermark[]>>('/market-data/candle/watermarks', { silent: true })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => this.matrix.set(watermarkMatrix(res?.data ?? [], Date.now())));
+    // The form opens filled in (three majors, H1): run it so the page opens with answers, not a button.
+    this.run();
+  }
+
+  protected probeOne(symbol: string): void {
+    this.symbolsInput = symbol;
+    if (this.selectedTimeframes().length === 0) this.selectedTimeframes.set(['H1']);
+    this.run();
+  }
 
   protected readonly resultsWithData = computed(() =>
     this.results().filter((r) => r.data !== null),

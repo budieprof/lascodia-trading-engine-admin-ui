@@ -44,6 +44,7 @@ export function toMember(r: Raw): IamMember {
     lastSignInAtUtc: str(r['lastSignInAtUtc']) ?? str(r['lastLoginAtUtc']),
     roles: Array.isArray(r['roles']) ? strings(r['roles']) : null,
     mfaEnabled: bool(r['mfaEnabled']),
+    signsInWithIdentityProvider: bool(r['signsInWithIdentityProvider']),
   };
 }
 

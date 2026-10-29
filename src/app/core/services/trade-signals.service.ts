@@ -10,6 +10,7 @@ import {
   CancelTradeSignalResult,
   CreateTradeSignalRequest,
 } from '@core/api/api.types';
+import type { SignalStory } from '@features/trade-signals/components/signal-story/signal-story.types';
 
 @Injectable({ providedIn: 'root' })
 export class TradeSignalsService {
@@ -17,6 +18,14 @@ export class TradeSignalsService {
 
   getById(id: number): Observable<ResponseData<TradeSignalDto>> {
     return this.api.get(`/trade-signal/${id}`);
+  }
+
+  /**
+   * Everything the engine recorded about one signal (timeline, gates, origin, counts). Silent:
+   * an engine without the endpoint answers 404 and the detail page keeps its plain panels.
+   */
+  story(id: number): Observable<ResponseData<SignalStory>> {
+    return this.api.get(`/trade-signal/${id}/story`, { silent: true });
   }
 
   /**

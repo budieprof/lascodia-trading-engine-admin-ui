@@ -21,6 +21,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 const TIMEFRAMES: readonly Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
@@ -60,6 +61,7 @@ function scopeKeyOf(symbol: string | null, timeframe: Timeframe | null): string 
     FormsModule,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
@@ -77,6 +79,8 @@ function scopeKeyOf(symbol: string | null, timeframe: Timeframe | null): string 
         [refreshing]="reportResource.refreshing() || donorResource.refreshing()"
         (refresh)="reportResource.refresh(); donorResource.refresh()"
       />
+
+      <app-composite-ml-pipeline-state variant="compact" [focus]="['generationAudits']" />
 
       <!-- ── Scope picker ── -->
       <section class="scope-row">

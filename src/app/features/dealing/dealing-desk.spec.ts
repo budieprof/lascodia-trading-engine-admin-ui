@@ -59,6 +59,7 @@ beforeEach(() => {
     ),
     abBookReport: vi.fn(() => throwError(() => notInPlan())),
     feeds: vi.fn(() => of([feed()])),
+    setting: vi.fn(() => of(null)),
     createFeed: vi.fn(() => of(feed({ feedId: 'live-2' }))),
     updateFeed: vi.fn(() => of(feed({ enabled: false }))),
   };

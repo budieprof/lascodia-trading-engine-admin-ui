@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 
@@ -11,6 +18,7 @@ import { when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { failureMessage } from '@features/organisation/organisation.logic';
 import { PropGateComponent, PROP_DIALOG_STYLES } from '../components/prop-gate.component';
+import { PropSetupComponent } from '../components/prop-setup.component';
 import { PropApiService } from '../prop-api.service';
 import { money, optionalNumber, pct, ruleLabel, stateClass } from '../prop.logic';
 import type {
@@ -56,9 +64,19 @@ type Dialog =
     ModalA11yDirective,
     PageHeaderComponent,
     PropGateComponent,
+    PropSetupComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [PROP_DIALOG_STYLES],
+  styles: [
+    PROP_DIALOG_STYLES,
+    `
+      .gate-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -78,132 +96,158 @@ type Dialog =
         </button>
       </app-page-header>
       <app-prop-gate (ready)="start()">
-        <section class="card">
-          <header class="card-head">
-            <label class="row small"
-              >State
-              <select
-                class="select"
-                name="state"
-                [ngModel]="state()"
-                (ngModelChange)="state.set($event); list.reload()"
-              >
-                <option [ngValue]="null">Any</option>
-                @for (s of states; track s) {
-                  <option [ngValue]="s">{{ s }}</option>
-                }
-              </select>
-            </label>
-            <label class="row small"
-              >Program
-              <select
-                class="select"
-                name="program"
-                [ngModel]="programId()"
-                (ngModelChange)="programId.set($event); list.reload()"
-              >
-                <option [ngValue]="null">Any</option>
-                @for (p of programs.value(); track p.id) {
-                  <option [ngValue]="p.id">{{ p.name }}</option>
-                }
-              </select>
-            </label>
-            <label class="row small"
-              >Trader
-              <select
-                class="select"
-                name="trader"
-                [ngModel]="traderId()"
-                (ngModelChange)="traderId.set($event); list.reload()"
-              >
-                <option [ngValue]="null">Any</option>
-                @for (t of traders.value(); track t.id) {
-                  <option [ngValue]="t.id">{{ t.displayName }}</option>
-                }
-              </select>
-            </label>
-          </header>
-          @if (list.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          }
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Trader / account</th>
-                  <th>Program · phase</th>
-                  <th>State</th>
-                  <th class="num">Profit</th>
-                  <th class="num">Days</th>
-                  <th>Started</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (e of list.value(); track e.id) {
+        <div class="gate-body">
+          <app-prop-setup
+            [intro]="intro"
+            [showChecklist]="list.loaded() && !list.value().length"
+            [showAccounts]="true"
+          />
+          <section class="card">
+            <header class="card-head">
+              <label class="row small"
+                >State
+                <select
+                  class="select"
+                  name="state"
+                  [ngModel]="state()"
+                  (ngModelChange)="state.set($event); list.reload()"
+                >
+                  <option [ngValue]="null">Any</option>
+                  @for (s of states; track s) {
+                    <option [ngValue]="s">{{ s }}</option>
+                  }
+                </select>
+              </label>
+              <label class="row small"
+                >Program
+                <select
+                  class="select"
+                  name="program"
+                  [ngModel]="programId()"
+                  (ngModelChange)="programId.set($event); list.reload()"
+                >
+                  <option [ngValue]="null">Any</option>
+                  @for (p of programs.value(); track p.id) {
+                    <option [ngValue]="p.id">{{ p.name }}</option>
+                  }
+                </select>
+              </label>
+              <label class="row small"
+                >Trader
+                <select
+                  class="select"
+                  name="trader"
+                  [ngModel]="traderId()"
+                  (ngModelChange)="traderId.set($event); list.reload()"
+                >
+                  <option [ngValue]="null">Any</option>
+                  @for (t of traders.value(); track t.id) {
+                    <option [ngValue]="t.id">{{ t.displayName }}</option>
+                  }
+                </select>
+              </label>
+            </header>
+            @if (list.error(); as err) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            }
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
                   <tr>
-                    <td>
-                      <a [routerLink]="['/prop/enrollments', e.id]">{{ e.traderName }}</a
-                      ><span class="sub">{{ e.accountLabel }}</span>
-                    </td>
-                    <td>
-                      {{ e.programName }} · {{ e.phaseName
-                      }}<span class="sub">v{{ e.programVersion }}</span>
-                    </td>
-                    <td>
-                      <span class="chip" [class]="'chip ' + stateClass(e.state)">{{
-                        e.state
-                      }}</span>
-                      @if (e.state === 'Failed') {
-                        <span class="sub"
-                          >{{ ruleLabel(e.failedRule)
-                          }}{{
-                            e.haltAppliedAtUtc
-                              ? ' · halted'
-                              : e.haltRequired
-                                ? ' · halt pending'
-                                : ''
-                          }}</span
-                        >
-                      }
-                    </td>
-                    <td class="num" [class.pos]="e.profitPct > 0" [class.neg]="e.profitPct < 0">
-                      {{ pct(e.profitPct) }}
-                    </td>
-                    <td class="num">{{ e.tradingDays }}</td>
-                    <td class="small">{{ when(e.startedAtUtc) }}</td>
-                    <td class="actions">
-                      <ng-container *lscCan="P.PropManage">
-                        @if (e.canAdvance) {
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-secondary"
-                            (click)="openAdvance(e)"
-                          >
-                            Advance
-                          </button>
-                        }
-                        @if (e.state === 'Active' || e.state === 'Funded') {
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-danger"
-                            (click)="dialog.set({ kind: 'withdraw', enrollment: e, reason: '' })"
-                          >
-                            Withdraw
-                          </button>
-                        }
-                      </ng-container>
-                    </td>
+                    <th>Trader / account</th>
+                    <th>Program · phase</th>
+                    <th>State</th>
+                    <th class="num">Profit</th>
+                    <th class="num">Days</th>
+                    <th>Started</th>
+                    <th></th>
                   </tr>
-                } @empty {
-                  <tr>
-                    <td colspan="7" class="muted">No enrolment.</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        </section>
+                </thead>
+                <tbody>
+                  @for (e of list.value(); track e.id) {
+                    <tr>
+                      <td>
+                        <a [routerLink]="['/prop/enrollments', e.id]">{{ e.traderName }}</a
+                        ><span class="sub">{{ e.accountLabel }}</span>
+                      </td>
+                      <td>
+                        {{ e.programName }} · {{ e.phaseName
+                        }}<span class="sub">v{{ e.programVersion }}</span>
+                      </td>
+                      <td>
+                        <span class="chip" [class]="'chip ' + stateClass(e.state)">{{
+                          e.state
+                        }}</span>
+                        @if (e.state === 'Failed') {
+                          <span class="sub"
+                            >{{ ruleLabel(e.failedRule)
+                            }}{{
+                              e.haltAppliedAtUtc
+                                ? ' · halted'
+                                : e.haltRequired
+                                  ? ' · halt pending'
+                                  : ''
+                            }}</span
+                          >
+                        }
+                      </td>
+                      <td class="num" [class.pos]="e.profitPct > 0" [class.neg]="e.profitPct < 0">
+                        {{ pct(e.profitPct) }}
+                      </td>
+                      <td class="num">{{ e.tradingDays }}</td>
+                      <td class="small">{{ when(e.startedAtUtc) }}</td>
+                      <td class="actions">
+                        <ng-container *lscCan="P.PropManage">
+                          @if (e.canAdvance) {
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-secondary"
+                              (click)="openAdvance(e)"
+                            >
+                              Advance
+                            </button>
+                          }
+                          @if (e.state === 'Active' || e.state === 'Funded') {
+                            <button
+                              type="button"
+                              class="btn btn-sm btn-danger"
+                              (click)="dialog.set({ kind: 'withdraw', enrollment: e, reason: '' })"
+                            >
+                              Withdraw
+                            </button>
+                          }
+                        </ng-container>
+                      </td>
+                    </tr>
+                  } @empty {
+                    <tr>
+                      <td colspan="7" class="muted">
+                        @if (state() || programId() || traderId()) {
+                          No enrolment matches these filters.
+                        } @else if (!programs.value().length || !traders.value().length) {
+                          No enrolment yet. Enrolling needs
+                          @if (!programs.value().length) {
+                            <a routerLink="/prop/programs">a program</a>
+                          }
+                          @if (!programs.value().length && !traders.value().length) {
+                            and
+                          }
+                          @if (!traders.value().length) {
+                            <a routerLink="/prop/traders">a trader</a>
+                          }
+                          first; then pick one of the trading accounts below.
+                        } @else {
+                          No enrolment yet — use “Enrol an account” to put one of the trading
+                          accounts below into a program.
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
       </app-prop-gate>
 
       @if (dialog(); as d) {
@@ -374,6 +418,9 @@ type Dialog =
 })
 export class PropEnrollmentsPageComponent {
   private readonly api = inject(PropApiService);
+  readonly setup = viewChild(PropSetupComponent);
+  protected readonly intro =
+    'An enrolment puts one trading account into one phase of a program for one trader. From then on the engine judges it every few seconds; a breach fails it and (with enforcement on) halts the account. Enrolling never places or closes a trade.';
   private readonly notify = inject(NotificationService);
 
   protected readonly P = Permission;
@@ -434,6 +481,7 @@ export class PropEnrollmentsPageComponent {
   }
 
   start(): void {
+    this.setup()?.load();
     this.list.reload();
     this.programs.reload();
     this.traders.reload();

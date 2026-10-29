@@ -213,3 +213,21 @@ export interface DownloadedFile {
   signature: string | null;
   signingKeyId: string | null;
 }
+
+/** `GET fund/compliance-exports/preview` — what a download of the period would hold (nothing built or registered). */
+export interface ComplianceExportPreview {
+  fromUtc: string;
+  toUtc: string;
+  rowCounts: Record<string, number>;
+  maxRowsPerSection: number;
+  tooLarge: string[];
+  auditByCategory: { key: string; count: number }[];
+  ordersByStatus: { key: string; count: number }[];
+  paperOrders: number;
+  approvalsByStatus: { key: string; count: number }[];
+  days: { dayUtc: string; audit: number; orders: number }[];
+  signingConfigured: boolean;
+  signingKeyId: string | null;
+  exportsTotal: number;
+  lastExportAtUtc: string | null;
+}

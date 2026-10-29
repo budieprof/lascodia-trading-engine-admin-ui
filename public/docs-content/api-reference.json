@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1025,
+  "endpointCount": 1041,
   "groups": [
     {
       "name": "Admin auth",
@@ -1001,6 +1001,15 @@
           "parameters": [],
           "body": "CreateVenueSourceCommand",
           "response": "ResponseData<MarketDataSourceAdminDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/md/sources/coverage",
+          "summary": "What the market-data store holds per source: symbols with their first / last stored UTC day (a directory listing).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [],
+          "response": "ResponseData<MarketDataStoreCoverageDto>"
         },
         {
           "method": "PUT",
@@ -2596,6 +2605,15 @@
           ],
           "body": "RejectAutoTuneProposalRequest",
           "response": "ResponseData<long>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/auto-tune/status",
+          "summary": "Why the queue holds what it holds: the tuner worker's switches and evidence floors, the evidence the PPO tuner sees now, proposal counts by status and the worker's last recorded cycle. Read-only.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [],
+          "response": "ResponseData<AutoTuneStatusDto>"
         }
       ]
     },
@@ -3937,6 +3955,15 @@
           "permission": "ml.read",
           "parameters": [],
           "response": "ResponseData<IReadOnlyList<CompositeMLOptionsDiagnosticDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/composite-ml/pipeline-state",
+          "summary": "The whole pipeline in one read-only answer: the CompositeML worker switches (value and when each was last changed), the generator's last recorded cycle, CompositeML strategies by status, and row count + time span of every CompositeML table. The console uses it to say why a page is quiet and where the latest data is, instead of showing an empty table.",
+          "access": "permission",
+          "permission": "ml.read",
+          "parameters": [],
+          "response": "ResponseData<CompositeMLPipelineStateDto>"
         },
         {
           "method": "GET",
@@ -5824,6 +5851,28 @@
         },
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/preview",
+          "summary": "What an export of the period would hold (row counts per section, breakdowns, signing) — nothing is built or registered.",
+          "access": "permission",
+          "permission": "compliance.export",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            }
+          ],
+          "response": "ResponseData<ComplianceExportPreviewDto>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/fund/compliance-exports/verify",
           "summary": "Was a file with this SHA-256 issued to this organisation? (`shasum -a 256 <file>`)",
           "access": "permission",
@@ -7001,6 +7050,15 @@
     {
       "name": "Instrument candles",
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-candles/readiness",
+          "summary": "What the builder needs and has: switch + settings, last cycle, eligible symbols, store sources (mapped / stored), would-be-built instruments, roll calendar.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "response": "ResponseData<InstrumentCandleReadinessDto>"
+        },
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/instrument-candles/state",
@@ -10825,6 +10883,28 @@
           "response": "ResponseData<int>"
         },
         {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/paper-trading/executions/summary",
+          "summary": "The per-strategy paper track record (PaperExecution rows of Approved / PaperTrading strategies) over the last days days, grouped by strategy, plus the newest executions. Read-only.",
+          "access": "permission",
+          "permission": "strategies.read",
+          "parameters": [
+            {
+              "name": "days",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "recent",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<PaperExecutionSummaryDto>"
+        },
+        {
           "method": "PUT",
           "path": "/api/v1/lascodia-trading-engine/paper-trading/mode",
           "summary": "Enable or disable paper trading mode",
@@ -10848,6 +10928,22 @@
     {
       "name": "Performance attribution",
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/performance/accounts",
+          "summary": "Account performance over the last days days (daily equity, realised P&L, costs, trades, rolling ratios, per-strategy and per-symbol attribution) plus the per-strategy health-snapshot coverage. Account-scoped like the trading-accounts list.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [
+            {
+              "name": "days",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<AccountPerformanceOverviewDto>"
+        },
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/performance/all",
@@ -12237,6 +12333,22 @@
         },
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prompt-template/status",
+          "summary": "Is the table the live prompt (`Llm:UseDbBackedPromptTemplate`), version counts, and how often the prompt this name governs is sent (live + backtest LLM calls). Read-only; feeds the list page header.",
+          "access": "permission",
+          "permission": "prompttemplate.view",
+          "parameters": [
+            {
+              "name": "name",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<PromptTemplateStatusDto>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/prompt-template/{id}",
           "summary": "Get a single prompt-template row by id, including the full SystemPrompt body.",
           "access": "permission",
@@ -12305,6 +12417,34 @@
     {
       "name": "Prop",
       "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/account-fit",
+          "summary": "How each active account's real equity record of the last `days` measures against a phase's rules (a program's, or the console's default FX two-step rules). Hypothetical and read-only.",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [
+            {
+              "name": "days",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "programId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "phaseIndex",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<PropAccountFitReportDto>"
+        },
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/prop/breaches",
@@ -12491,6 +12631,15 @@
           "permission": "prop.self",
           "parameters": [],
           "response": "ResponseData<List<PropDashboardDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/prop/overview",
+          "summary": "The module at a glance: live settings, what is set up, and the accounts it could judge (setup checklist).",
+          "access": "permission",
+          "permission": "prop.read",
+          "parameters": [],
+          "response": "ResponseData<PropOverviewDto>"
         },
         {
           "method": "GET",
@@ -12725,6 +12874,28 @@
           ],
           "body": "SavePropTraderCommand",
           "response": "ResponseData<PropTraderDto>"
+        }
+      ]
+    },
+    {
+      "name": "Public billing",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/billing/plans/public",
+          "summary": "The plans for sale: the free default plan first, then each plan with a Stripe price (amount, currency, interval from Stripe).",
+          "access": "anonymous",
+          "rateLimit": "demo",
+          "parameters": [],
+          "response": "ResponseData<List<PlanOfferDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/billing/stripe/webhook",
+          "summary": "Stripe event delivery. 200 = applied or nothing to do; 400 = signature refused (nothing applied); 500 = could not be applied now (Stripe retries); 503 = webhooks not configured.",
+          "access": "anonymous",
+          "rateLimit": "ea",
+          "parameters": []
         }
       ]
     },
@@ -15791,6 +15962,16 @@
       "name": "Tenant billing",
       "endpoints": [
         {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/checkout",
+          "summary": "Start paying for a plan by card: `{planSlug}` → `{url}` of a Stripe Checkout page. The plan changes when Stripe confirms the payment. Already subscribed → `-11` (use the portal); unknown or unpriced plan → `-14`; card payment unavailable → `-503`.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "parameters": [],
+          "body": "StartCheckoutCommand",
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/tenant/billing/invoices",
           "access": "permission",
@@ -15833,6 +16014,24 @@
               "type": "string"
             }
           ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/portal",
+          "summary": "The Stripe billing portal (switch plans, update the card, cancel): `{url}`; `-14` before the first payment.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "parameters": [],
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/subscription",
+          "summary": "The organisation's plan, its card subscription (status, renewal, cancellation) and the plans it can buy.",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [],
+          "response": "ResponseData<SubscriptionDto>"
         },
         {
           "method": "GET",
@@ -16526,6 +16725,22 @@
             }
           ],
           "response": "ResponseData<PagedData<SignalRejectionEventDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/trade-signal/{id}/story",
+          "summary": "Read-only composite of everything the engine recorded about one signal — lifecycle timeline, gate verdicts, the recommendation / parked rec / plan it came from, order / position counts, review journal and cost analysis. For an id that does not exist it answers `exists: false` with the id range that does, so the detail page can explain. Operators only (spans accounts).",
+          "access": "permission",
+          "permission": "signals.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<SignalStoryDto>"
         }
       ]
     },

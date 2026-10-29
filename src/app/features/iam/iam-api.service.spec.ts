@@ -61,6 +61,7 @@ describe('IamApiService (contract C3.5 wire mapping)', () => {
         status: 'Active',
         joinedAtUtc: null,
         lastSignInAtUtc: '2026-10-20T08:00:00Z',
+        signsInWithIdentityProvider: null,
         roles: null,
         mfaEnabled: null,
       },

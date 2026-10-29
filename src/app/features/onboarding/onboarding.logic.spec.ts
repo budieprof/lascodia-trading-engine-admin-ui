@@ -7,13 +7,15 @@ import {
   isPlausibleEmail,
   isValidSlug,
   progressText,
+  signupCounts,
   signupProblems,
   signupRefusal,
+  signupRequirements,
   signupStatusLabel,
   signupTone,
   slugFrom,
 } from './onboarding.logic';
-import type { TenantSignup } from './onboarding.types';
+import type { SignupStatus, TenantSignup } from './onboarding.types';
 
 function signup(over: Partial<TenantSignup> = {}): TenantSignup {
   return {
@@ -139,5 +141,50 @@ describe('the approval queue', () => {
     expect(body).toContain('Name: Ada\r\n');
     expect(body).toContain('I am: A prop firm');
     expect(body).not.toContain('terminals');
+  });
+});
+
+describe('signup requirements', () => {
+  const base: SignupStatus = {
+    enabled: true,
+    available: false,
+    requiresApproval: true,
+    linkHours: 24,
+    reasons: [
+      "The identity provider's realm cannot send e-mail (no SMTP): every address must be verified, so sign-up stays off.",
+    ],
+    pending: 0,
+  };
+
+  it("uses the engine's own checks when it sends them", () => {
+    const out = signupRequirements({
+      ...base,
+      checks: [{ key: 'smtp', label: 'SMTP', ok: null, detail: 'not checked' }],
+    });
+    expect(out).toEqual([{ label: 'SMTP', ok: null, detail: 'not checked' }]);
+  });
+
+  it('falls back to the flag plus each refusal reason', () => {
+    const out = signupRequirements(base);
+    expect(out[0].ok).toBe(true);
+    expect(out[1]).toEqual({
+      label: "The identity provider's realm cannot send e-mail (no SMTP)",
+      ok: false,
+      detail: 'every address must be verified, so sign-up stays off.',
+    });
+  });
+
+  it('lists only the flag while it is off', () => {
+    expect(signupRequirements({ ...base, enabled: false, reasons: ['x'] })).toHaveLength(1);
+  });
+
+  it('counts lapsed requests as expired', () => {
+    expect(
+      signupCounts([
+        signup({ status: 'Pending', expired: true }),
+        signup({ status: 'Pending' }),
+        signup({ status: 'Provisioned' }),
+      ]),
+    ).toEqual({ Expired: 1, Pending: 1, Provisioned: 1 });
   });
 });

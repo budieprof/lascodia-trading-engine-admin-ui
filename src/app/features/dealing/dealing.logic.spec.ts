@@ -2,6 +2,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it } from 'vitest';
 
 import {
+  deskSummary,
   classificationTone,
   csvFileName,
   curveChart,
@@ -16,7 +17,7 @@ import {
   suggestionLabel,
   windowFor,
 } from './dealing.logic';
-import type { CurveSeries } from './dealing.types';
+import type { CurveSeries, DealingClients, DealingCurves } from './dealing.types';
 
 const series = (key: string, means: (number | null)[], ci = 0.1): CurveSeries => ({
   key,
@@ -116,5 +117,61 @@ describe('dealing.logic', () => {
     expect(
       feedProblems({ create: false, feedId: 'Bad Id', displayName: 'ok', writersText: '' }),
     ).toEqual([]);
+  });
+});
+
+describe('deskSummary', () => {
+  const curves = {
+    dimension: 'symbol',
+    all: {
+      key: 'all',
+      fills: 39,
+      volumeLots: 157.94,
+      markouts: [
+        {
+          horizonMs: 1000,
+          n: 30,
+          mean: 5.2,
+          volumeWeightedMean: null,
+          stdDev: null,
+          ci95: null,
+          tStat: null,
+        },
+        {
+          horizonMs: 60000,
+          n: 29,
+          mean: 0.8569,
+          volumeWeightedMean: null,
+          stdDev: 89,
+          ci95: 32.49,
+          tStat: 0.052,
+        },
+      ],
+    },
+    series: [],
+    truncated: false,
+    methodology: '',
+  } as DealingCurves;
+
+  it('builds the tiles from the reads; a positive 60 s markout is a cost to the desk', () => {
+    const t = deskSummary(
+      {
+        clients: { totalClients: 5 } as DealingClients,
+        curves,
+        alerts: [{ severity: 'warning' } as never],
+        feeds: [],
+      },
+      '7d',
+    );
+    expect(t.map((x) => x.value)).toEqual(['5', '39', '157.94 lots', '+0.86 pips', '1', '0']);
+    expect(t[0].hint).toBe('with fills, last 7 days');
+    expect(t[3].tone).toBe('neg');
+    expect(t[3].hint).toContain('t = 0.1');
+    expect(t[5].hint).toContain('own accounts');
+  });
+
+  it('shows unknown, never zero, when a read failed', () => {
+    const t = deskSummary({ clients: null, curves: null, alerts: null, feeds: null }, '24h');
+    expect(t.every((x) => x.value === '—')).toBe(true);
   });
 });

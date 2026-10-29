@@ -32,7 +32,7 @@ interface DeclarationDraft {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, PageHeaderComponent],
-  styleUrl: '../../../iam/shared/iam-page.scss',
+  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -67,6 +67,23 @@ interface DeclarationDraft {
           } @else if (!m.required) {
             <p class="note">Declarations are not checked at the moment; you can still sign them.</p>
           }
+          <div class="tiles" aria-label="Summary">
+            <div class="tile">
+              <span class="t-label">Exchanges</span>
+              <span class="t-value">{{ m.families.length }}</span>
+              <span class="t-hint">with a professional / non-professional rule</span>
+            </div>
+            <div class="tile" [attr.data-tone]="neededOpen(m) ? 'warn' : null">
+              <span class="t-label">Needed now</span>
+              <span class="t-value">{{ neededOpen(m) }}</span>
+              <span class="t-hint">licences you hold without a current declaration</span>
+            </div>
+            <div class="tile">
+              <span class="t-label">Declared</span>
+              <span class="t-value">{{ declaredCount(m) }}</span>
+              <span class="t-hint">renewed every {{ m.validityDays }} days</span>
+            </div>
+          </div>
           <section class="card">
             <header class="card-head"><h3>Exchanges</h3></header>
             <div class="table-wrap">
@@ -87,6 +104,15 @@ interface DeclarationDraft {
                         @if (f.needed && !f.declaration?.current) {
                           <span class="chip warn">Needed for your licences</span>
                         }
+                        <span class="sub">
+                          {{
+                            f.needed
+                              ? 'Needed: your organisation holds a real-time licence of this exchange.'
+                              : m.houseExempt
+                                ? 'Not needed: covered by the platform licence.'
+                                : 'Not needed now: your organisation holds no real-time licence of this exchange.'
+                          }}
+                        </span>
                       </td>
                       <td class="small">
                         @if (f.declaration; as d) {
@@ -133,6 +159,26 @@ interface DeclarationDraft {
               </table>
             </div>
           </section>
+
+          @if (!family()) {
+            <section class="card" aria-label="What you will be asked">
+              <header class="card-head">
+                <h3>What you will be asked</h3>
+                <span class="chip">questionnaire v{{ m.questionnaireVersion }}</span>
+              </header>
+              <div class="card-body">
+                <ol class="small q-list">
+                  @for (q of m.questions; track q.key) {
+                    <li>{{ q.text }}</li>
+                  }
+                </ol>
+                <p class="note">
+                  Any answer that points to professional use makes you a professional subscriber for that exchange (its
+                  fees are higher). You sign with your typed name; staff may review and reclassify it.
+                </p>
+              </div>
+            </section>
+          }
 
           @if (family(); as f) {
             <section class="card">
@@ -236,6 +282,14 @@ export class MarketDataDeclarationsPageComponent {
 
   protected readonly type = subscriberTypeLabel;
   protected readonly at = when;
+
+  neededOpen(m: MyDeclarations): number {
+    return m.families.filter((f) => f.needed && !f.declaration?.current).length;
+  }
+
+  declaredCount(m: MyDeclarations): number {
+    return m.families.filter((f) => f.declaration?.status === 'Accepted' || f.declaration?.status === 'Submitted').length;
+  }
 
   readonly me = iamResource(
     () => this.api.myDeclarations(),

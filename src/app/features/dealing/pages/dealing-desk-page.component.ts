@@ -5,6 +5,7 @@ import { appStorage } from '@core/storage/app-storage';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DealingAbReportTabComponent } from '../components/ab-report-tab.component';
 import { DealingAlertsTabComponent } from '../components/alerts-tab.component';
+import { DealingSummaryComponent } from '../components/dealing-summary.component';
 import { DealingClientsTabComponent } from '../components/clients-tab.component';
 import { DealingFeedsTabComponent } from '../components/feeds-tab.component';
 import { DealingLiquidityTabComponent } from '../components/liquidity-tab.component';
@@ -35,6 +36,7 @@ const TAB_KEY = 'lascodia.dealing.tab';
     DealingAlertsTabComponent,
     DealingLiquidityTabComponent,
     DealingFeedsTabComponent,
+    DealingSummaryComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
@@ -165,6 +167,8 @@ const TAB_KEY = 'lascodia.dealing.tab';
             />
           </label>
         </section>
+
+        <app-dealing-summary />
 
         <nav class="tabs" role="tablist" aria-label="Dealing desk">
           @for (t of tabs; track t.id) {

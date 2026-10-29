@@ -1,6 +1,15 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import { RouterLink } from '@angular/router';
+import { catchError, firstValueFrom, of } from 'rxjs';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -10,7 +19,8 @@ import { blobErrorText, exportMonths, monthLabel } from '@features/platform/plan
 import { saveBlob } from '@features/scripting/shared/download';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
 import { declarationOrder, subscriberTypeLabel, usageLabel } from '../md-entitlements.logic';
-import type { MarketDataUsageReport } from '../md-entitlements.types';
+import { usageSummary } from '../md-usage.logic';
+import type { MarketDataFeedCatalog, MarketDataUsageReport } from '../md-entitlements.types';
 
 /**
  * The exchange usage report (engine C6, platform staff, `platform.usage.read`): per feed and month, how many distinct
@@ -23,8 +33,8 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
   selector: 'app-md-usage-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent],
-  styleUrl: '../../../iam/shared/iam-page.scss',
+  imports: [FormsModule, RouterLink, PageHeaderComponent],
+  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -35,7 +45,7 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
           class="select"
           aria-label="Month"
           [ngModel]="month()"
-          (ngModelChange)="month.set($event); report.reload()"
+          (ngModelChange)="pick($event)"
         >
           @for (m of months; track m) {
             <option [value]="m">{{ label(m) }}</option>
@@ -80,11 +90,60 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         </section>
       } @else if (report.value(); as r) {
+        @if (fellBack()) {
+          <p class="note">
+            {{ label(fellBack()!) }} has no recorded reads, so this shows {{ label(r.month) }} so far. Pick a month
+            above to see another.
+          </p>
+        }
         @if (r.partial) {
           <p class="note warn">
             {{ label(r.month) }} is still running — counts can still grow. File a declaration after
             the month ends.
           </p>
+        }
+        <div class="tiles" aria-label="Summary">
+          <div class="tile">
+            <span class="t-label">Reads</span>
+            <span class="t-value">{{ sum().reads.toLocaleString('en-US') }}</span>
+            <span class="t-hint">{{ sum().displayReads }} on screen (display) · {{ sum().nonDisplayReads }} by machines (non-display)</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Feeds read</span>
+            <span class="t-value">{{ sum().feedsRead }}{{ catalog.value() ? ' / ' + catalog.value()!.feeds.length : '' }}</span>
+            <span class="t-hint">of the feeds in the catalog</span>
+          </div>
+          <div class="tile" [attr.data-tone]="sum().exchangeReads ? 'warn' : null">
+            <span class="t-label">Exchange-licensed reads</span>
+            <span class="t-value">{{ sum().exchangeReads }}</span>
+            <span class="t-hint">{{ sum().exchangeReads ? 'declare these to the exchange' : 'nothing to declare to an exchange' }}</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Organisations</span>
+            <span class="t-value">{{ sum().organisations }}</span>
+            <span class="t-hint">that read any feed</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Most people on one feed</span>
+            <span class="t-value">{{ sum().peakUsers }}</span>
+            <span class="t-hint">distinct users</span>
+          </div>
+        </div>
+        @if (sum().perFeed.length) {
+          <section class="card" aria-label="Reads per feed">
+            <header class="card-head"><h3>Reads per feed</h3></header>
+            <div class="card-body">
+              <ul class="bar-list">
+                @for (p of sum().perFeed; track p.feedId) {
+                  <li>
+                    <code>{{ p.feedId }}</code>
+                    <span class="bar" [attr.aria-label]="p.reads + ' reads'"><span [style.width.%]="p.share * 100"></span></span>
+                    <span class="small">{{ p.reads.toLocaleString('en-US') }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          </section>
         }
         <section class="card">
           <header class="card-head"><h3>Per feed</h3></header>
@@ -218,6 +277,31 @@ import type { MarketDataUsageReport } from '../md-entitlements.types';
             </div>
           </section>
         }
+        @if (sum().unread.length) {
+          <section class="card" aria-label="Feeds with no reads">
+            <header class="card-head">
+              <h3>Feeds nobody read in {{ label(r.month) }}</h3>
+              <span class="chip">{{ sum().unread.length }}</span>
+            </header>
+            <div class="card-body">
+              <div class="chips">
+                @for (u of sum().unread; track u.feedId) {
+                  <span class="chip" [class.info]="u.exchangeFeed" [title]="u.name">{{ u.feedId }}</span>
+                }
+              </div>
+              <p class="note">
+                Nothing to declare for these. Most are exchange feeds whose sources are registered but disabled (see
+                Sources); blue = exchange-licensed.
+              </p>
+            </div>
+          </section>
+        }
+        <nav class="links-row" aria-label="Related">
+          <a routerLink="/market-data/entitlements">Entitlements (who may read)</a>
+          <a routerLink="/market-data/declarations-review">Subscriber declarations</a>
+          <a routerLink="/market-data/sources">Sources</a>
+          <a routerLink="/docs/platform-guide">Guide: usage and declarations</a>
+        </nav>
         <p class="muted small">
           A read is a chart subscription, a history read or a chart-flow read — not a tick. The
           engine's own use of a licensed feed is House's non-display use by <code>system:…</code>.
@@ -246,8 +330,36 @@ export class MarketDataUsagePageComponent {
     'Could not load the usage report.',
   );
   readonly feeds = computed(() => declarationOrder(this.report.value()?.feeds ?? []));
+  readonly catalog = iamResource<MarketDataFeedCatalog | null>(
+    () => this.api.feeds().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly sum = computed(() => usageSummary(this.report.value(), this.catalog.value()));
+  /** The default (last) month that had no reads, when the page moved on to the current month. */
+  readonly fellBack = signal<string | null>(null);
+  private picked = false;
 
   constructor() {
+    this.report.reload();
+    this.catalog.reload();
+    // Last month is the declaration month; when it holds nothing, show the running month instead of an empty page.
+    effect(() => {
+      const r = this.report.value();
+      if (this.picked || !r || r.month !== this.month() || r.feeds.length > 0) return;
+      if (this.month() === this.months[0]) return;
+      untracked(() => {
+        this.picked = true;
+        this.fellBack.set(r.month);
+        this.month.set(this.months[0]);
+        this.report.reload();
+      });
+    });
+  }
+
+  pick(month: string): void {
+    this.picked = true;
+    this.fellBack.set(null);
+    this.month.set(month);
     this.report.reload();
   }
 

@@ -359,6 +359,104 @@ export interface InstrumentCandleState {
   statusCounts: Record<string, number>;
 }
 
+/** `GET instrument-candles/readiness` (engine pages program): what the builder needs and has. */
+export interface CandleSourceReadiness {
+  sourceId: string;
+  kind: string;
+  displayName: string;
+  feedId: string;
+  enabled: boolean;
+  writers: number;
+  mappedSymbols: string[];
+  mappedEligible: number;
+  storedSymbols: number;
+  storedEligible: number;
+  firstStoredDay: string | null;
+  lastStoredDay: string | null;
+}
+
+export interface CandleCandidateSource {
+  sourceId: string;
+  enabled: boolean;
+  mapped: boolean;
+  storedFrom: string | null;
+  storedTo: string | null;
+}
+
+export interface CandleCandidate {
+  symbol: string;
+  assetClass: string;
+  exchange: string;
+  tradingCalendarCode: string;
+  cursorStatus: string | null;
+  /** building (has a cursor) · ready (trades stored) · mapped (a source maps it, nothing stored yet). */
+  stage: 'building' | 'ready' | 'mapped' | string;
+  sources: CandleCandidateSource[];
+}
+
+export interface RollCalendarContract {
+  contract: string;
+  rollUtc: string;
+  lastTradeUtc: string;
+  expiryUtc: string;
+  hasCursor: boolean;
+}
+
+export interface RollCalendarRoot {
+  root: string;
+  exchange: string;
+  description: string | null;
+  continuousSymbol: string;
+  rollRule: string;
+  cycleMonths: string;
+  tradingCalendarCode: string;
+  spotSymbol: string | null;
+  contracts: number;
+  lastRolled: RollCalendarContract | null;
+  upcoming: RollCalendarContract[];
+  continuousStatus: string | null;
+}
+
+export interface InstrumentCandleReadiness {
+  builderEnabled: boolean;
+  continuousEnabled: boolean;
+  continuousAdjustment: string;
+  pollIntervalSeconds: number;
+  backfillMaxDays: number;
+  excludeEquityOddLots: boolean;
+  workerCapturedAtUtc: string | null;
+  workerLastSuccessUtc: string | null;
+  workerLastErrorUtc: string | null;
+  workerLastError: string | null;
+  workerConsecutiveFailures: number | null;
+  eligibleByClass: Record<string, number>;
+  sources: CandleSourceReadiness[];
+  candidateTotal: number;
+  candidates: CandleCandidate[];
+  roots: RollCalendarRoot[];
+  barsLast24h: number;
+  generatedAtUtc: string;
+}
+
+/** `GET futures/catalog` — the futures roots the data sidecars know (engine FuturesProductCatalog). */
+export interface FuturesCatalogRoot {
+  root: string;
+  exchange: string;
+  dataset: string;
+  group: string;
+  description: string;
+  currency: string;
+  tickSize: number;
+  tickValue: number;
+  multiplier: number;
+  cycleMonths: string;
+  rollRule: string;
+  tradingCalendarCode: string;
+  continuousSymbol: string;
+  spotSymbol: string | null;
+  nearby: { contract: string; lastTradeUtc: string; rollUtc: string }[];
+}
+
 // ── instrument-fundamentals/* ─────────────────────────────────────────────────────────────────────
 
 export interface EquityCorporateAction {

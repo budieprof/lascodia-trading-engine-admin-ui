@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import { RouterLink } from '@angular/router';
+import { catchError, firstValueFrom, of } from 'rxjs';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -8,7 +9,14 @@ import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
 import { subscriberTypeLabel } from '../md-entitlements.logic';
-import type { DeclarationDecision, SubscriberDeclarationDto } from '../md-entitlements.types';
+import { declarationCounts, declarationHolders } from '../md-feeds.logic';
+import type {
+  DeclarationDecision,
+  MarketDataEntitlementDto,
+  MarketDataFeedCatalog,
+  MyDeclarations,
+  SubscriberDeclarationDto,
+} from '../md-entitlements.types';
 
 /**
  * Staff review of subscriber declarations (engine WS8 8.2, `platform.data.manage`): every organisation's people and their
@@ -19,8 +27,8 @@ import type { DeclarationDecision, SubscriberDeclarationDto } from '../md-entitl
   selector: 'app-md-declarations-review-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent],
-  styleUrl: '../../../iam/shared/iam-page.scss',
+  imports: [FormsModule, RouterLink, PageHeaderComponent],
+  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -55,9 +63,50 @@ import type { DeclarationDecision, SubscriberDeclarationDto } from '../md-entitl
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         </section>
       } @else {
-        <section class="card">
+        <div class="tiles" aria-label="Summary">
+          <div class="tile" [attr.data-tone]="counts().Submitted ? 'warn' : null">
+            <span class="t-label">Awaiting review</span>
+            <span class="t-value">{{ counts().Submitted }}</span>
+            <span class="t-hint">submitted, not yet reviewed</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Accepted</span>
+            <span class="t-value">{{ counts().Accepted }}</span>
+            <span class="t-hint">valid {{ me.value()?.validityDays ?? 365 }} days from signing</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Rejected or withdrawn</span>
+            <span class="t-value">{{ counts().Rejected + counts().Withdrawn }}</span>
+            <span class="t-hint">{{ counts().Superseded }} superseded by a newer one</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Exchanges that need one</span>
+            <span class="t-value">{{ me.value()?.families?.length ?? '—' }}</span>
+            <span class="t-hint">licensor families with a declaration rule</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Organisations that must declare</span>
+            <span class="t-value">{{ holders().length }}</span>
+            <span class="t-hint">hold a real-time display grant of such a feed</span>
+          </div>
+        </div>
+
+        <section class="card" aria-label="Declarations">
+          <header class="card-head"><h3>Declarations</h3></header>
           @if (list.value().length === 0) {
-            <p class="pad muted">No declarations{{ status() ? ' with that status' : '' }}.</p>
+            <p class="pad muted">
+              @if (status()) {
+                No declarations with that status.
+              } @else if (holders().length === 0) {
+                None — and none is expected yet: no organisation holds a real-time display grant of a feed that needs
+                one{{ me.value()?.houseExempt ? ', and House is exempt' : '' }}. A person is asked to declare when their
+                organisation is granted, for example, CME depth for display (Market data → Entitlements); they answer
+                the questionnaire below on the Data declarations page and it lands here for review.
+              } @else {
+                None yet, although {{ holders().length }} organisation(s) hold a feed that needs one — their people are
+                asked when they open that data.
+              }
+            </p>
           } @else {
             <div class="table-wrap">
               <table class="grid">
@@ -176,6 +225,59 @@ import type { DeclarationDecision, SubscriberDeclarationDto } from '../md-entitl
             </div>
           </section>
         }
+        <div class="two-col">
+          <section class="card" aria-label="Exchanges">
+            <header class="card-head"><h3>Exchanges with a declaration rule</h3></header>
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Exchange family</th>
+                    <th>Feeds</th>
+                    <th>Organisations holding real-time display</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (f of me.value()?.families ?? []; track f.id) {
+                    <tr>
+                      <td>{{ f.name }}<span class="sub"><code>{{ f.id }}</code></span></td>
+                      <td class="small">{{ feedsOf(f.id) || '— no feed in the catalog yet' }}</td>
+                      <td class="small">{{ holdersOf(f.id) || 'none' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section class="card" aria-label="Questionnaire">
+            <header class="card-head">
+              <h3>The questionnaire</h3>
+              @if (me.value(); as m) {
+                <span class="chip">version {{ m.questionnaireVersion }}</span>
+              }
+            </header>
+            <div class="card-body">
+              <ol class="small q-list">
+                @for (q of me.value()?.questions ?? []; track q.key) {
+                  <li>
+                    {{ q.text }}
+                    <span class="muted">— “{{ q.professionalWhen ? 'Yes' : 'No' }}” makes the person professional.</span>
+                  </li>
+                }
+              </ol>
+              <p class="note">
+                Any professional answer classifies the person as a professional subscriber (exchange fees are higher);
+                people with no declaration are counted as professional in the usage report, as exchanges do. The person
+                signs with their typed name; a declaration renews yearly.
+              </p>
+              <nav class="links-row" aria-label="Related">
+                <a routerLink="/market-data/declarations">Data declarations (the person's page)</a>
+                <a routerLink="/market-data/entitlements">Entitlements</a>
+                <a routerLink="/market-data/usage">Usage per exchange</a>
+              </nav>
+            </div>
+          </section>
+        </div>
       }
     </div>
   `,
@@ -193,6 +295,26 @@ export class MarketDataDeclarationsReviewPageComponent {
     [] as SubscriberDeclarationDto[],
     'Could not load the declarations.',
   );
+  /** Every declaration including history, for the counts. */
+  readonly history = iamResource(
+    () => this.api.declarations({ includeHistory: true }).pipe(catchError(() => of([]))),
+    [] as SubscriberDeclarationDto[],
+  );
+  /** The questionnaire and exchange families (the same read every person's page uses). */
+  readonly me = iamResource<MyDeclarations | null>(
+    () => this.api.myDeclarations().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly catalog = iamResource<MarketDataFeedCatalog | null>(
+    () => this.api.feeds().pipe(catchError(() => of(null))),
+    null,
+  );
+  readonly grants = iamResource<MarketDataEntitlementDto[]>(
+    () => this.api.list({ includeRevoked: false }).pipe(catchError(() => of([]))),
+    [],
+  );
+  readonly counts = computed(() => declarationCounts(this.history.value()));
+  readonly holders = computed(() => declarationHolders(this.catalog.value(), this.grants.value()));
   readonly reviewing = signal<SubscriberDeclarationDto | null>(null);
   readonly decision = signal<DeclarationDecision>('accept');
   readonly note = signal('');
@@ -200,6 +322,27 @@ export class MarketDataDeclarationsReviewPageComponent {
 
   constructor() {
     this.list.reload();
+    this.history.reload();
+    this.me.reload();
+    this.catalog.reload();
+    this.grants.reload();
+  }
+
+  feedsOf(family: string): string {
+    return (this.catalog.value()?.feeds ?? [])
+      .filter((f) => f.exchangeFamily === family && f.requiresDeclaration)
+      .map((f) => f.feedId)
+      .join(', ');
+  }
+
+  holdersOf(family: string): string {
+    const feeds = new Set(
+      (this.catalog.value()?.feeds ?? []).filter((f) => f.exchangeFamily === family).map((f) => f.feedId),
+    );
+    return this.holders()
+      .filter((h) => h.feeds.some((f) => feeds.has(f)))
+      .map((h) => h.tenant)
+      .join(', ');
   }
 
   protected answers(d: SubscriberDeclarationDto): { key: string; value: boolean }[] {

@@ -183,6 +183,9 @@ interface AuditEntry {
       @if (loadError()) {
         <p class="bad">{{ loadError() }}</p>
       }
+      @if (autoNote(); as note) {
+        <p class="auto-note">{{ note }}</p>
+      }
       @if (visibleRows().length === 0 && !loading()) {
         <p class="muted">
           No rows for the current filter. When the engine-wide gate is on and the LLM produces a rec
@@ -540,6 +543,11 @@ interface AuditEntry {
   `,
   styles: [
     `
+      .auto-note {
+        margin: 0 0 0.5rem;
+        font-size: 0.8125rem;
+        color: var(--text-secondary);
+      }
       :host {
         display: block;
       }
@@ -1349,6 +1357,7 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   }
 
   protected toggleState(state: string, on: boolean): void {
+    this.autoNote.set(null);
     const next = new Set(this.selectedStates());
     if (on) next.add(state);
     else next.delete(state);
@@ -1447,6 +1456,10 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
     }
   }
 
+  /** First load only: an empty "active" view widens to every state and says why. */
+  private autoWiden = true;
+  protected readonly autoNote = signal<string | null>(null);
+
   protected reload(): void {
     this.loading.set(true);
     this.loadError.set(null);
@@ -1472,8 +1485,21 @@ export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
           this.loadError.set(res.message ?? 'Failed to load.');
           return;
         }
+        const total = res.data?.pager?.totalItemCount ?? 0;
+        if (this.autoWiden && total === 0 && symbol.length === 0 && states.length === 2) {
+          // Nothing parked right now (the normal state — recs are only parked while the LLM's
+          // entry is far from market): show the most recent recs of every state instead.
+          this.autoWiden = false;
+          this.autoNote.set(
+            'Nothing is parked or re-validating right now, so every state is shown, newest first. A rec is parked when the LLM recommends an entry far from the market; it then waits for price and is re-checked.',
+          );
+          this.selectedStates.set(new Set(this.allStates));
+          this.reload();
+          return;
+        }
+        this.autoWiden = false;
         this.rows.set(res.data?.data ?? []);
-        this.totalItemCount.set(res.data?.pager?.totalItemCount ?? 0);
+        this.totalItemCount.set(total);
         // Guard against landing past the last page after a filter/size change
         // (e.g. was on page 6, new filter yields 2 pages) — clamp + refetch.
         const pages = this.totalPages();

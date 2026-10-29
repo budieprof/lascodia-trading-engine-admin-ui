@@ -10,9 +10,11 @@ import { blobError, toDownloadedFile } from '@features/fund/fund-api.service';
 import type {
   AccessReviewCampaign,
   AccessReviewCampaignDetail,
+  EaReleaseInfo,
   EvidenceDownload,
   ReleaseComponent,
   ReleaseNote,
+  RoleBuildSkew,
 } from './security.types';
 
 /** The pages show their own errors; session handling (sign-in again, step-up, CSRF) still applies. */
@@ -83,6 +85,21 @@ export class SecurityApiService {
     return settled(
       this.api.get<ResponseData<ReleaseNote[]>>(`/release-notes?${q.toString()}`, SILENT),
     ).pipe(map((rows) => rows ?? []));
+  }
+
+  // ── Published builds ──
+  /** Every kept EA build, highest version first (platform staff, `platform.ea.releases.manage`). */
+  eaReleases(): Observable<EaReleaseInfo[]> {
+    return settled(
+      this.api.get<ResponseData<EaReleaseInfo[]>>('/platform/ea/releases', SILENT),
+    ).pipe(map((rows) => rows ?? []));
+  }
+
+  /** The build each engine process runs (`access.operator`). */
+  engineBuilds(): Observable<RoleBuildSkew> {
+    return settled(
+      this.api.get<ResponseData<RoleBuildSkew>>('/admin/observability/build-skew', SILENT),
+    );
   }
 
   // ── Evidence bundle (platform staff) ──

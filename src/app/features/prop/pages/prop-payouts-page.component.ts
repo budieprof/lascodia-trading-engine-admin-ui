@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
@@ -12,9 +19,11 @@ import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { failureMessage } from '@features/organisation/organisation.logic';
 import { PropGateComponent, PROP_DIALOG_STYLES } from '../components/prop-gate.component';
+import { PropSetupComponent } from '../components/prop-setup.component';
 import { PropApiService } from '../prop-api.service';
 import { dayStartUtc, money, optionalNumber } from '../prop.logic';
 import type {
+  PropOverview,
   PropEnrollment,
   PropPayout,
   PropPayoutDeduction,
@@ -45,9 +54,36 @@ interface PrepareDraft {
     MfaHintComponent,
     PageHeaderComponent,
     PropGateComponent,
+    PropSetupComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [PROP_DIALOG_STYLES],
+  styles: [
+    PROP_DIALOG_STYLES,
+    `
+      .gate-body {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      ol.steps {
+        margin: 0;
+        padding-left: var(--space-5);
+        font-size: var(--text-xs);
+        line-height: 1.6;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -72,115 +108,170 @@ interface PrepareDraft {
           Prepare a statement
         </button>
       </app-page-header>
-      <app-prop-gate (ready)="list.reload()">
-        <section class="card">
-          <header class="card-head">
-            <label class="row small"
-              >Status
-              <select
-                class="select"
-                name="status"
-                [ngModel]="status()"
-                (ngModelChange)="status.set($event); list.reload()"
-              >
-                <option [ngValue]="null">Any</option>
-                <option [ngValue]="'Draft'">Waiting for approval</option>
-                <option [ngValue]="'Approved'">Approved</option>
-                <option [ngValue]="'Rejected'">Rejected</option>
-              </select>
-            </label>
-            <span class="spacer"></span>
-            <label class="row small"
-              >From <input class="input" type="date" name="ef" [(ngModel)]="exportFrom"
-            /></label>
-            <label class="row small"
-              >To <input class="input" type="date" name="et" [(ngModel)]="exportTo"
-            /></label>
-            <button type="button" class="btn btn-sm btn-secondary" (click)="exportCsv()">
-              Export CSV
-            </button>
-          </header>
-          @if (list.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          }
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Trader / account</th>
-                  <th>Period (UTC)</th>
-                  <th class="num">Gross</th>
-                  <th class="num">Split</th>
-                  <th class="num">Deductions</th>
-                  <th class="num">Net to trader</th>
-                  <th>Status</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (p of list.value(); track p.id) {
-                  <tr>
-                    <td>
-                      <a [routerLink]="['/prop/enrollments', p.enrollmentId]">{{ p.traderName }}</a
-                      ><span class="sub">{{ p.accountLabel }}</span>
-                    </td>
-                    <td class="small">{{ when(p.periodStartUtc) }} – {{ when(p.periodEndUtc) }}</td>
-                    <td class="num" [class.pos]="p.grossProfit > 0" [class.neg]="p.grossProfit < 0">
-                      {{ money(p.grossProfit, p.currency) }}
-                    </td>
-                    <td class="num">{{ p.traderSharePct }}%</td>
-                    <td class="num">{{ money(p.deductionsTotal) }}</td>
-                    <td class="num">
-                      <strong>{{ money(p.netPayout, p.currency) }}</strong>
-                    </td>
-                    <td>
-                      <span
-                        class="chip"
-                        [class.ok]="p.status === 'Approved'"
-                        [class.bad]="p.status === 'Rejected'"
-                        [class.info]="p.status === 'Draft'"
-                        >{{ p.status }}</span
-                      >
-                      <span class="sub"
-                        >by {{ p.preparedBy }}{{ p.decidedBy ? ' · ' + p.decidedBy : '' }}</span
-                      >
-                      @if (p.consistencyMet === false) {
-                        <span class="sub">consistency rule not met</span>
-                      }
-                    </td>
-                    <td class="actions">
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="pdf(p)">
-                        PDF
-                      </button>
-                      @if (p.status === 'Draft') {
-                        <ng-container *lscCan="P.PropPayoutsApprove">
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-primary"
-                            (click)="deciding.set({ payout: p, approve: true, note: '' })"
+      <app-prop-gate (ready)="start()">
+        <div class="gate-body">
+          <app-prop-setup
+            [intro]="intro"
+            [showChecklist]="list.loaded() && !list.value().length"
+            (loaded)="overview.set($event)"
+          />
+          <div class="split">
+            <section class="card">
+              <header class="card-head">
+                <label class="row small"
+                  >Status
+                  <select
+                    class="select"
+                    name="status"
+                    [ngModel]="status()"
+                    (ngModelChange)="status.set($event); list.reload()"
+                  >
+                    <option [ngValue]="null">Any</option>
+                    <option [ngValue]="'Draft'">Waiting for approval</option>
+                    <option [ngValue]="'Approved'">Approved</option>
+                    <option [ngValue]="'Rejected'">Rejected</option>
+                  </select>
+                </label>
+                <span class="spacer"></span>
+                <label class="row small"
+                  >From <input class="input" type="date" name="ef" [(ngModel)]="exportFrom"
+                /></label>
+                <label class="row small"
+                  >To <input class="input" type="date" name="et" [(ngModel)]="exportTo"
+                /></label>
+                <button type="button" class="btn btn-sm btn-secondary" (click)="exportCsv()">
+                  Export CSV
+                </button>
+              </header>
+              @if (list.error(); as err) {
+                <p class="pad" role="alert">
+                  <span class="chip bad">Could not load</span> {{ err }}
+                </p>
+              }
+              <div class="table-wrap">
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>Trader / account</th>
+                      <th>Period (UTC)</th>
+                      <th class="num">Gross</th>
+                      <th class="num">Split</th>
+                      <th class="num">Deductions</th>
+                      <th class="num">Net to trader</th>
+                      <th>Status</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (p of list.value(); track p.id) {
+                      <tr>
+                        <td>
+                          <a [routerLink]="['/prop/enrollments', p.enrollmentId]">{{
+                            p.traderName
+                          }}</a
+                          ><span class="sub">{{ p.accountLabel }}</span>
+                        </td>
+                        <td class="small">
+                          {{ when(p.periodStartUtc) }} – {{ when(p.periodEndUtc) }}
+                        </td>
+                        <td
+                          class="num"
+                          [class.pos]="p.grossProfit > 0"
+                          [class.neg]="p.grossProfit < 0"
+                        >
+                          {{ money(p.grossProfit, p.currency) }}
+                        </td>
+                        <td class="num">{{ p.traderSharePct }}%</td>
+                        <td class="num">{{ money(p.deductionsTotal) }}</td>
+                        <td class="num">
+                          <strong>{{ money(p.netPayout, p.currency) }}</strong>
+                        </td>
+                        <td>
+                          <span
+                            class="chip"
+                            [class.ok]="p.status === 'Approved'"
+                            [class.bad]="p.status === 'Rejected'"
+                            [class.info]="p.status === 'Draft'"
+                            >{{ p.status }}</span
                           >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-sm btn-danger"
-                            (click)="deciding.set({ payout: p, approve: false, note: '' })"
+                          <span class="sub"
+                            >by {{ p.preparedBy }}{{ p.decidedBy ? ' · ' + p.decidedBy : '' }}</span
                           >
-                            Reject
+                          @if (p.consistencyMet === false) {
+                            <span class="sub">consistency rule not met</span>
+                          }
+                        </td>
+                        <td class="actions">
+                          <button type="button" class="btn btn-sm btn-secondary" (click)="pdf(p)">
+                            PDF
                           </button>
-                        </ng-container>
-                      }
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td colspan="8" class="muted">No statement.</td>
-                  </tr>
-                }
-              </tbody>
-            </table>
+                          @if (p.status === 'Draft') {
+                            <ng-container *lscCan="P.PropPayoutsApprove">
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-primary"
+                                (click)="deciding.set({ payout: p, approve: true, note: '' })"
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                class="btn btn-sm btn-danger"
+                                (click)="deciding.set({ payout: p, approve: false, note: '' })"
+                              >
+                                Reject
+                              </button>
+                            </ng-container>
+                          }
+                        </td>
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td colspan="8" class="muted">
+                          @if (status()) {
+                            No statement with this status.
+                          } @else if (fundedCount() === 0) {
+                            No statement yet. Statements are prepared for funded enrolments — none
+                            is funded yet (an account reaches the funded phase after passing its
+                            challenge phases and being advanced).
+                          } @else {
+                            No statement yet — {{ fundedCount() }} funded enrolment(s) can have one
+                            prepared.
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="card">
+              <header class="card-head"><h3>How payouts work</h3></header>
+              <div class="card-body">
+                <ol class="steps">
+                  <li>
+                    <strong>Prepare</strong> a statement for a funded enrolment and a period: the
+                    engine sums the realised profit of the positions closed in it and applies the
+                    program's split ({{ splitText() }}), minus any deductions you add.
+                  </li>
+                  <li>
+                    <strong>Approve or reject</strong> — needs a fresh second-factor sign-in{{
+                      distinctText()
+                    }}.
+                  </li>
+                  <li>
+                    <strong>Send</strong> the PDF or CSV to the trader. Pay them outside the
+                    platform.
+                  </li>
+                </ol>
+                <p class="note">
+                  The platform moves no money: a statement is a record of what is owed, nothing
+                  more.
+                </p>
+              </div>
+            </section>
           </div>
-        </section>
+        </div>
       </app-prop-gate>
 
       @if (draft(); as d) {
@@ -375,6 +466,24 @@ interface PrepareDraft {
 })
 export class PropPayoutsPageComponent {
   private readonly api = inject(PropApiService);
+  readonly setup = viewChild(PropSetupComponent);
+  readonly overview = signal<PropOverview | null>(null);
+  protected readonly intro =
+    'Profit-split statements for funded traders: prepared from the closed positions of a period, approved by a second person, exported as PDF or CSV. No money is moved by the platform.';
+  readonly fundedCount = computed(() => this.overview()?.enrollmentsByState['Funded'] ?? 0);
+  readonly splitText = computed(() => 'set per program — 80 % to the trader by default');
+  readonly distinctText = computed(() => {
+    const o = this.overview();
+    if (!o || o.requireDistinctPayoutApprover === null) return '';
+    return o.requireDistinctPayoutApprover
+      ? ', and never by the person who prepared it'
+      : '; the preparer may approve their own statement';
+  });
+
+  start(): void {
+    this.list.reload();
+    this.setup()?.load();
+  }
   private readonly notify = inject(NotificationService);
 
   protected readonly P = Permission;

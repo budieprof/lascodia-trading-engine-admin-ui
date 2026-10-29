@@ -7,6 +7,8 @@ import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
@@ -56,6 +58,8 @@ type Pending =
     ConfirmDialogComponent,
     InvoiceDetailComponent,
     UsageMonthViewComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
@@ -85,6 +89,8 @@ type Pending =
         title="Billing"
         subtitle="Invoices from metered usage × plan price books. No tax is computed; no real payment provider is integrated."
       />
+
+      <app-stat-tiles [tiles]="tiles()" label="Billing summary" />
 
       <div class="tabs" role="tablist" aria-label="Billing sections">
         @for (t of tabs; track t.id) {
@@ -163,7 +169,10 @@ type Pending =
             <p class="pad muted">
               {{
                 invoices.loaded()
-                  ? 'No invoices for this month. Draft them once the month is over.'
+                  ? 'No invoices for this month. Draft them once the month is over.' +
+                    (billableCount() === 0
+                      ? ' Today only House (never invoiced) exists, so a draft run would skip every organisation; it also needs a published price book for the organisation's plan.'
+                      : '')
                   : 'Loading…'
               }}
             </p>
@@ -622,6 +631,12 @@ type Pending =
           </label>
         }
       </app-confirm-dialog>
+
+      <app-audit-trail
+        heading="Billing activity"
+        [actions]="['platform.billing.', 'tenant.billing.']"
+        empty="No invoice has been drafted, finalised or voided, no price book changed and no usage month viewed yet. Each is recorded here."
+      />
     </div>
   `,
 })
@@ -760,6 +775,50 @@ export class PlatformBillingPageComponent {
             : k === 'publish'
               ? 'Publish'
               : 'Delete';
+  });
+
+  readonly billableCount = computed(
+    () =>
+      (this.tenants.value() as { kind: string; status: string }[]).filter(
+        (t) => t.kind !== 'House' && t.kind !== 'Demo' && t.status !== 'Closed',
+      ).length,
+  );
+  readonly tiles = computed<StatTile[]>(() => {
+    const books = this.books.value();
+    const published = books.filter((b) => b.status === 'Published');
+    const plans = this.plans.value() as { id: number }[];
+    const covered = new Set(published.map((b) => b.planId)).size;
+    const billable = (this.tenants.value() as { kind: string; status: string }[]).filter(
+      (t) => t.kind !== 'House' && t.kind !== 'Demo' && t.status !== 'Closed',
+    ).length;
+    const p = this.provider.value();
+    const inv = this.invoices.value();
+    return [
+      {
+        label: 'Payment provider',
+        value: p ? (p.configured === 'none' ? 'None' : p.configured) : '…',
+        caption: p?.active ? 'collects payments' : 'invoices are collected outside the engine',
+        tone: p ? (p.active ? 'good' : 'warn') : null,
+      },
+      {
+        label: 'Plans with a published price book',
+        value: this.books.loaded() ? `${covered} of ${plans.length}` : '…',
+        caption: `${books.length - published.length} draft version(s)`,
+        tone: this.books.loaded() ? (covered ? null : 'warn') : null,
+      },
+      {
+        label: 'Organisations to invoice',
+        value: this.tenants.loaded() ? String(billable) : '…',
+        caption: 'House and the showcase organisation are never invoiced',
+      },
+      {
+        label: `Invoices · ${monthLabel(this.month())}`,
+        value: this.invoices.loaded() ? String(inv.length) : '…',
+        caption: inv.length
+          ? `${inv.filter((i) => i.status === 'Finalised').length} finalised`
+          : 'none drafted for this month',
+      },
+    ];
   });
 
   constructor() {

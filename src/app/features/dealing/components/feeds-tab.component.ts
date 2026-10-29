@@ -5,6 +5,10 @@ import { LscCanDirective } from '@core/auth/can.directive';
 import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
 import { DealingApiService } from '../dealing-api.service';
 import { DealingFiltersStore } from '../dealing-filters.store';
 import { feedProblems, isModuleNotInPlan, parseWriters } from '../dealing.logic';
@@ -30,7 +34,7 @@ interface FeedForm {
   selector: 'app-dealing-feeds-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, LscCanDirective],
+  imports: [FormsModule, LscCanDirective, FeatureStateComponent],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
@@ -221,9 +225,17 @@ interface FeedForm {
           </table>
         </div>
       } @else if (loaded() && !error()) {
-        <p class="pad muted">
-          No trade feed yet. The desk still analyses the organisation's own accounts (feed "own").
-        </p>
+        <div class="card-body">
+          <app-feature-state
+            title="Client trade feeds"
+            kind="partial"
+            stateLabel="Own accounts only"
+            switchKey="Dealing:Markout:Enabled"
+            summary="A trade feed brings the client trades of a broker's MT5 trade server into the desk, so every client's flow is marked out, scored for toxicity and suggested for A- or B-book. Without one, the desk analyses your own trading accounts' fills (feed &quot;own&quot;) — which is what the other tabs show now."
+            detail="A feed is posted by a gateway next to the trade server (the MetaQuotes Manager API is a licensed SDK, so the reference gateway documents it but does not ship it). Register the feed here with the gateway's daemon identity, then start the gateway."
+            [requirements]="requirements()"
+          />
+        </div>
       }
     </section>
   `,
@@ -247,8 +259,57 @@ export class DealingFeedsTabComponent {
     return f ? feedProblems(f) : [];
   });
 
+  /** `Dealing:Markout:*` switches as the engine has them (null = not readable with this access). */
+  readonly config = signal<Record<string, string | null>>({});
+  readonly requirements = computed<FeatureRequirement[]>(() => {
+    const c = this.config();
+    const flag = (k: string) => (c[k] == null ? null : c[k]!.toLowerCase() === 'true');
+    const markout = flag('Dealing:Markout:Enabled');
+    const own = flag('Dealing:Markout:OwnAccounts');
+    return [
+      {
+        label: 'Markout worker on',
+        ok: markout,
+        detail:
+          markout === null
+            ? 'Dealing:Markout:Enabled could not be read.'
+            : `Dealing:Markout:Enabled = ${markout} — fills are marked out at 1 s to 5 min on the tick store.`,
+        route: '/engine-config',
+        query: { search: 'Dealing:' },
+      },
+      {
+        label: "Your own accounts' fills analysed",
+        ok: own,
+        detail:
+          own === null
+            ? 'Dealing:Markout:OwnAccounts could not be read.'
+            : own
+              ? `Dealing:Markout:OwnAccounts = true — the last ${c['Dealing:Markout:OwnLookbackDays'] ?? '7'} days of your live fills.`
+              : 'Dealing:Markout:OwnAccounts = false — your own fills are not analysed.',
+        route: '/engine-config',
+        query: { search: 'Dealing:' },
+      },
+      {
+        label: 'A trade feed registered',
+        ok: false,
+        detail: 'None — use “Register a feed” with the trade server name and the gateway identity.',
+      },
+      {
+        label: 'A gateway posting client trades',
+        ok: false,
+        detail: 'Nothing has posted to dealing/trades/ingest (no feed to post to).',
+      },
+    ];
+  });
+
   constructor() {
     this.load();
+    for (const key of [
+      'Dealing:Markout:Enabled',
+      'Dealing:Markout:OwnAccounts',
+      'Dealing:Markout:OwnLookbackDays',
+    ])
+      this.api.setting(key).subscribe((v) => this.config.update((c) => ({ ...c, [key]: v })));
   }
 
   load(): void {
