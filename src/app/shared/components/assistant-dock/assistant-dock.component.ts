@@ -12,6 +12,8 @@ import {
 } from '@angular/core';
 import { Router, type Routes } from '@angular/router';
 import { UiCommandService } from '@core/assistant/ui-command.service';
+import { AssistantWriteGuard, describeBlocked } from '@core/assistant/assistant-write-guard';
+import { pageControlCommands } from '@core/assistant/page-control-commands';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import { fromEvent } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -431,6 +433,7 @@ export class AssistantDockComponent {
   private readonly notifications = inject(NotificationService);
   private readonly router = inject(Router);
   private readonly uiCommands = inject(UiCommandService);
+  private readonly writeGuard = inject(AssistantWriteGuard);
 
   private readonly dockEl = viewChild<ElementRef<HTMLElement>>('dockEl');
 
@@ -523,7 +526,15 @@ export class AssistantDockComponent {
     // App-wide page commands. Pages register their own while mounted; these belong to the dock,
     // which lives as long as the console, so the assistant can move the operator anywhere —
     // before this it could only act on the chart page, the one page that registered commands.
-    this.uiCommands.register([...appCommands(this.router), ...pageCommands()], inject(DestroyRef));
+    // pageControlCommands drive any page's filters, sort, paging and rows under the write guard.
+    this.uiCommands.register(
+      [
+        ...appCommands(this.router),
+        ...pageCommands(this.writeGuard),
+        ...pageControlCommands(this.writeGuard),
+      ],
+      inject(DestroyRef),
+    );
 
     // Keep the page chip current.
     effect(() => {
@@ -667,7 +678,7 @@ function appCommands(router: Router): UiCommand[] {
  * rather than a page's own code. Most pages register no commands and publish no facts; with
  * these the assistant can still see what any page shows and switch its tabs.
  */
-function pageCommands(): UiCommand[] {
+function pageCommands(guard: AssistantWriteGuard): UiCommand[] {
   return [
     {
       id: 'page.read',
@@ -747,9 +758,12 @@ function pageCommands(): UiCommand[] {
           return { ok: false, message: `"${text}" is an action, not a tab — it was not clicked.` };
         }
         if (isActiveTab(tab)) return { ok: true, message: `"${text}" is already showing.` };
-        tab.click();
-        await new Promise((r) => setTimeout(r, 400));
-        return { ok: true, message: `Switched to the "${text}" tab.` };
+        // Under the write guard too: a tab's first load is a read, anything else is refused.
+        const report = await guard.run(() => tab.click());
+        return {
+          ok: report.blocked.length === 0,
+          message: `Switched to the "${text}" tab.` + describeBlocked(report),
+        };
       },
     },
   ];

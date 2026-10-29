@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpEventType, type HttpInterceptorFn, type HttpRequest } from '@angular/common/http';
 import { NavigationEnd, Router } from '@angular/router';
 import { filter, tap } from 'rxjs';
+import { READ_POST } from './read-posts';
 
 /** The engine's API prefix; everything after it is what the assistant's endpoint search matches. */
 const API_PREFIX = '/api/v1/lascodia-trading-engine';
@@ -31,7 +32,8 @@ const CREDENTIAL_SEGMENT =
 /**
  * A request body is kept only for read-shaped calls, where it is the page's filter (a paged list,
  * a search, a compare, a preview). A write's body is the operator's form — it can hold anything
- * they typed, so it is not copied into the assistant's context.
+ * they typed, so it is not copied into the assistant's context. The reviewed read routes the
+ * assistant's write guard lets through ({@link READ_POST}) count as read-shaped too.
  */
 const FILTER_BODY_PATH =
   /\/(list|query|paged|search|compare|preview|summary|points|walk|explain|estimate|sensitivity-analysis|validate|compile)$/i;
@@ -102,7 +104,9 @@ export class PageApiActivity {
     }
     if (this.sources.size >= MAX_SOURCES) return;
     const body =
-      req.method !== 'GET' && req.method !== 'HEAD' && FILTER_BODY_PATH.test(parsed.path)
+      req.method !== 'GET' &&
+      req.method !== 'HEAD' &&
+      (FILTER_BODY_PATH.test(parsed.path) || READ_POST.test(parsed.path))
         ? abbreviate(req.body)
         : undefined;
     this.sources.set(key, {
