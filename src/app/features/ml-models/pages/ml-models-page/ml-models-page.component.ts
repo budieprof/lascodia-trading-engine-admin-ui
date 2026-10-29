@@ -133,7 +133,23 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 <span class="ml-kpi-value">{{ modelStats().total | number }}</span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Active</span>
+                <!-- Cross-pair starting-weight templates (Symbol "ALL") are active rows in the
+                     registry but never trade; the list leaves them out, so say how many. -->
+                <span
+                  class="ml-kpi-label"
+                  [attr.title]="
+                    templateModelCount()
+                      ? 'Per-pair models only. ' +
+                        templateModelCount() +
+                        ' cross-pair starting-weight template(s) are also active: new per-pair models start from them; they never trade.'
+                      : null
+                  "
+                  >Active{{
+                    templateModelCount()
+                      ? ' · +' + templateModelCount() + ' templates not listed'
+                      : ''
+                  }}</span
+                >
                 <span class="ml-kpi-value" [class.good]="modelStats().active > 0">
                   {{ modelStats().active | number }}
                 </span>
@@ -4877,6 +4893,8 @@ export class MlModelsPageComponent implements OnInit {
   // ── Monitor state ──
   monitorModels = signal<MLModelDto[]>([]);
   private readonly monitorActiveModels = signal<MLModelDto[]>([]);
+  /** Active cross-pair starting-weight templates — active rows the list leaves out by design. */
+  readonly templateModelCount = signal(0);
   /** Serving models, by pair. */
   readonly monitorServing = computed(() =>
     [...this.monitorActiveModels()].sort((a, b) =>
@@ -6024,6 +6042,26 @@ export class MlModelsPageComponent implements OnInit {
       .subscribe({
         next: (res) => {
           if (res.data) this.monitorActiveModels.set(res.data.data);
+        },
+      });
+    this.mlModelsService
+      .list({
+        currentPage: 1,
+        itemCountPerPage: 1,
+        filter: { isActive: true, excludeMetaLearners: false },
+      })
+      .subscribe({
+        next: (all) => {
+          const withTemplates = all.data?.pager?.totalItemCount;
+          this.mlModelsService
+            .list({ currentPage: 1, itemCountPerPage: 1, filter: { isActive: true } })
+            .subscribe({
+              next: (perPair) => {
+                const listed = perPair.data?.pager?.totalItemCount;
+                if (withTemplates != null && listed != null)
+                  this.templateModelCount.set(Math.max(0, withTemplates - listed));
+              },
+            });
         },
       });
   }
