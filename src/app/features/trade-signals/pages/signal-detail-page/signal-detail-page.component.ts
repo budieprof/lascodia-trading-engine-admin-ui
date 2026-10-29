@@ -164,6 +164,60 @@ import {
           @if (signal(); as s) {
             @if (story(); as st) {
               <app-signal-story-panel [story]="st" [signal]="s" />
+            } @else if (!storyLoading()) {
+              <!-- Engine without the story endpoint: still show what the signal row itself says. -->
+              <section class="facts-card">
+                <dl class="facts">
+                  <div>
+                    <dt>Strategy</dt>
+                    <dd>
+                      <a [routerLink]="['/strategies', s.strategyId]">#{{ s.strategyId }}</a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Source</dt>
+                    <dd>{{ sourceLabel(s) }}</dd>
+                  </div>
+                  <div>
+                    <dt>Confidence</dt>
+                    <dd>{{ s.confidence * 100 | number: '1.0-0' }}%</dd>
+                  </div>
+                  <div>
+                    <dt>Size</dt>
+                    <dd>{{ s.suggestedLotSize | number: '1.2-2' }} lots</dd>
+                  </div>
+                  <div>
+                    <dt>Generated</dt>
+                    <dd>{{ s.generatedAt | date: 'MMM d y, HH:mm' : 'UTC' }} UTC</dd>
+                  </div>
+                  <div>
+                    <dt>Expires</dt>
+                    <dd>{{ s.expiresAt | date: 'MMM d y, HH:mm' : 'UTC' }} UTC</dd>
+                  </div>
+                  <div>
+                    <dt>Accounts that picked it up</dt>
+                    <dd>{{ s.accountsPickedUpCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>ML score</dt>
+                    <dd>
+                      {{
+                        s.mlConfidenceScore != null
+                          ? (s.mlConfidenceScore | number: '1.2-2') +
+                            ' · ' +
+                            (s.mlPredictedDirection ?? '—')
+                          : 'not scored'
+                      }}
+                    </dd>
+                  </div>
+                  @if (s.rejectionReason) {
+                    <div class="wide">
+                      <dt>Why it stopped</dt>
+                      <dd>{{ s.rejectionReason }}</dd>
+                    </div>
+                  }
+                </dl>
+              </section>
             }
             <!-- Chart pane — renders only when the signal has resolvable
                  symbol + actionable prices. Hold-only / malformed signals
@@ -350,6 +404,38 @@ import {
       .muted {
         color: var(--text-secondary);
       }
+      .facts-card {
+        padding: var(--space-3) var(--space-4);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        background: var(--bg-secondary);
+      }
+      .facts {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+        margin: 0;
+      }
+      .facts .wide {
+        grid-column: 1 / -1;
+      }
+      .facts dt {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .facts dd {
+        margin: 2px 0 0;
+        font-size: var(--text-sm);
+        overflow-wrap: anywhere;
+      }
+      .facts a {
+        color: var(--accent);
+      }
+      @media (max-width: 900px) {
+        .facts {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
       .missing {
         padding: var(--space-5);
         border: 1px solid var(--border);
@@ -456,6 +542,13 @@ export class SignalDetailPageComponent {
 
   /** GET trade-signal/{id}/story — null until loaded, or when the engine lacks the endpoint. */
   readonly story = signal<SignalStory | null>(null);
+  readonly storyLoading = signal(false);
+
+  sourceLabel(s: TradeSignalDto): string {
+    if (s.source === 'SpotAnalysis') return 'LLM spot analysis';
+    if (s.source === 'Manual' || s.isManual) return 'Entered by hand';
+    return 'Strategy';
+  }
   /** Set when the id does not exist: the sentence + the range that does. */
   readonly missing = signal<{ sentence: string; range: SignalRange } | null>(null);
 
@@ -539,10 +632,12 @@ export class SignalDetailPageComponent {
     this.chartError.set(null);
     this.missing.set(null);
     this.story.set(null);
+    this.storyLoading.set(true);
     this.signalsService
       .story(id)
       .pipe(catchError(() => of(null)))
       .subscribe((res) => {
+        this.storyLoading.set(false);
         const st = res?.status ? res.data : null;
         if (!st) return;
         if (st.exists) {

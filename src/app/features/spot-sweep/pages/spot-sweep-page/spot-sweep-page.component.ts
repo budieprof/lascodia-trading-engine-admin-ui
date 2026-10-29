@@ -1901,7 +1901,8 @@ export class SpotSweepPageComponent implements OnDestroy {
     if (!last) return 'The sweep has no recorded runs yet.';
     const days = Math.floor((Date.now() - new Date(last.at).getTime()) / 86_400_000);
     const signals = (h ?? []).filter((r) => r.signalId != null).length;
-    return `Its last run analysed ${last.symbol} on ${new Date(last.at).toUTCString().slice(5, 22)} UTC (${days} day(s) ago); ${signals} of the ${h!.length} most recent runs below produced a signal. The configuration is kept, so turning it back on resumes with these settings.`;
+    const orders = (h ?? []).filter((r) => r.orderId != null).length;
+    return `Its last run analysed ${last.symbol} on ${new Date(last.at).toUTCString().slice(5, 22)} UTC (${days} day(s) ago); of the ${h!.length} most recent runs below, ${signals} created a signal and ${orders} reached an order. The configuration is kept, so turning it back on resumes with these settings.`;
   });
 
   readonly sweepRequirements = computed<FeatureRequirement[]>(() => {
@@ -1916,7 +1917,12 @@ export class SpotSweepPageComponent implements OnDestroy {
       {
         label: 'Pairs selected',
         ok: cfg ? cfg.pairs.length > 0 : null,
-        detail: cfg ? `${cfg.pairs.length} pair(s): ${cfg.pairs.slice(0, 6).join(', ')}` : null,
+        detail: cfg
+          ? `${cfg.pairs.length} pair(s): ${cfg.pairs
+              .slice(0, 6)
+              .map((p) => `${p.symbol} ${p.timeframe}`)
+              .join(', ')}`
+          : null,
       },
       {
         label: 'Kill switch clear',

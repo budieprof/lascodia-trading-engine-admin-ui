@@ -836,14 +836,20 @@ const DEFAULT_PAGE_SIZE = 25;
         }
       }
       .layout {
+        min-width: 0;
         display: grid;
         grid-template-columns: minmax(0, 1fr) 320px;
         gap: 1rem;
         align-items: start;
       }
-      @media (max-width: 1100px) {
+      /* The version table needs the full width below ~1600px; history then sits beneath it. */
+      @media (max-width: 1600px) {
         .layout {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .layout .history-list {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
         }
       }
       .history {

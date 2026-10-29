@@ -698,7 +698,8 @@ export class LlmRationalesPageComponent implements OnInit {
       case 'partial':
         return 'Partly on';
       case 'waiting':
-        return 'On · quiet';
+        // Only claim "on" when the engine reported the switch.
+        return this.coverage()?.layerEnabled ? 'On · quiet' : 'Quiet';
       default:
         return 'On';
     }
