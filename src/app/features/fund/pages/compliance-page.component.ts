@@ -77,6 +77,7 @@ import type {
         gap: 2px;
         height: 70px;
         padding: 0 1rem;
+        margin-bottom: 1rem;
       }
       .days span {
         flex: 1;
