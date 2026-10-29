@@ -1,3 +1,4 @@
+import { RouterLink } from '@angular/router';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -33,6 +34,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
+import { ConfigHistoryCardComponent } from '@features/strategies/components/config-history-card/config-history-card.component';
 
 interface StrategySwitch {
   strategy: StrategyDto;
@@ -59,6 +61,8 @@ const PAGE_SIZE = 25;
     DatePipe,
     ModalA11yDirective,
     MfaHintComponent,
+    ConfigHistoryCardComponent,
+    RouterLink,
   ],
   template: `
     <div class="page">
@@ -181,6 +185,25 @@ const PAGE_SIZE = 25;
           />
         } @else if (filteredRows().length === 0) {
           <p class="empty-line">{{ emptyFilterMessage() }}</p>
+          @if (statusFilter() === 'engaged' && !searchTerm().trim()) {
+            <div class="engaged-help">
+              <p>
+                Engaging a strategy's switch stops it generating signals and blocks new orders for
+                it at Tier 1; its open positions stay under normal management. Every strategy's
+                switch is off, so all
+                {{ rows().length }} may signal subject to their own status — only Active ones do.
+              </p>
+              <p>
+                Wider switches: the global switch above stops every strategy; organisation and
+                account switches are on <a routerLink="/organisation/risk">Organisation → Risk</a>.
+              </p>
+            </div>
+            <app-config-history-card
+              prefix="KillSwitch:"
+              title="Kill-switch history"
+              emptyText="No kill switch has ever been flipped — every switch is on its seeded value."
+            />
+          }
         } @else {
           <!-- Paged, not a fixed-height scroll box: the old container cut the twelfth row in
                half with no scrollbar while the header claimed every row was shown. -->
@@ -583,6 +606,18 @@ const PAGE_SIZE = 25;
       }
       .chip.active .chip-count {
         color: var(--text-secondary);
+      }
+      .engaged-help {
+        padding: 0 var(--space-5) var(--space-3);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+      .engaged-help p {
+        margin: 0 0 var(--space-2);
+      }
+      .engaged-help a {
+        color: var(--accent);
       }
       .empty-line {
         margin: 0;

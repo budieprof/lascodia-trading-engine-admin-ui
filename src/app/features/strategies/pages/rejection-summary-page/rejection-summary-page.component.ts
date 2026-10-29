@@ -25,6 +25,18 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
 type SortMode = 'count' | 'recent' | 'strategy';
 
+/** Plain-language meaning of the reason codes the engine records (StrategyWorker, ExpireTradeSignalCommand, …). */
+const REASON_MEANING: Record<string, string> = {
+  backtest_not_qualified:
+    'The strategy has no completed backtest meeting the minimum win rate / profit factor / Sharpe, so the engine skipped generating its signal on this bar.',
+  qualification_query_timeout:
+    'Looking up which strategies have qualifying backtests timed out, so no strategy on the symbol was allowed to signal on that tick (fail-closed).',
+  ttl_elapsed_after_approval:
+    'The signal was approved but its order was not placed before the signal’s time-to-live ran out, so it expired.',
+  ttl_elapsed_unapproved:
+    'The signal was never approved before its time-to-live ran out, so it expired.',
+};
+
 @Component({
   selector: 'app-rejection-summary-page',
   standalone: true,
@@ -145,9 +157,17 @@ type SortMode = 'count' | 'recent' | 'strategy';
                 @for (r of filteredRows(); track rowKey(r)) {
                   <tr>
                     <td>
-                      <a [routerLink]="['/strategies', r.strategyId]" class="link mono">
-                        #{{ r.strategyId }}
-                      </a>
+                      @if (strategyName(r.strategyId); as n) {
+                        <a [routerLink]="['/strategies', r.strategyId]" class="link">{{ n }}</a>
+                        <span class="mono small muted"> #{{ r.strategyId }}</span>
+                      } @else {
+                        <!-- 0 = a symbol-level rejection with no single strategy; others were deleted. -->
+                        <span class="muted">{{
+                          r.strategyId === 0
+                            ? 'Symbol-wide (no one strategy)'
+                            : '#' + r.strategyId + (namesReady() ? ' (deleted)' : '')
+                        }}</span>
+                      }
                     </td>
                     <td class="mono">{{ r.symbol }}</td>
                     <td class="mono small">{{ r.stage }}</td>
@@ -167,12 +187,90 @@ type SortMode = 'count' | 'recent' | 'strategy';
               </tbody>
             </table>
           </section>
+
+          <div class="ctx-grid">
+            <section class="card ctx">
+              <h3>By stage</h3>
+              @for (g of byStage(); track g.stage) {
+                <div class="stage-row">
+                  <span class="mono small">{{ g.stage }}</span>
+                  <span class="bar-track wide"
+                    ><span class="bar-fill" [style.width.%]="g.share * 100"></span
+                  ></span>
+                  <span class="mono">{{ g.count }}</span>
+                </div>
+              }
+              <p class="muted small">
+                Stages run in order: the backtest gate before a signal is generated, then Tier-1 /
+                Tier-2 risk checks, then expiry for a signal nobody executed in time.
+              </p>
+            </section>
+            <section class="card ctx">
+              <h3>What these reasons mean</h3>
+              <dl>
+                @for (r of reasonGlossary(); track r.reason) {
+                  <div>
+                    <dt class="mono">
+                      {{ r.reason }} <span class="muted">· {{ r.count }}</span>
+                    </dt>
+                    <dd>{{ r.meaning }}</dd>
+                  </div>
+                }
+              </dl>
+              <a routerLink="/signal-rejections" class="link small">Every rejected signal →</a>
+            </section>
+          </div>
         }
       }
     </div>
   `,
   styles: [
     `
+      .ctx-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+        margin-top: var(--space-3);
+      }
+      @media (max-width: 1000px) {
+        .ctx-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .ctx {
+        padding: var(--space-4) var(--space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .ctx h3 {
+        margin: 0;
+        font-size: var(--text-base);
+      }
+      .stage-row {
+        display: grid;
+        grid-template-columns: 140px 1fr 60px;
+        gap: var(--space-2);
+        align-items: center;
+      }
+      .bar-track.wide {
+        width: 100%;
+      }
+      .ctx dl {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .ctx dd {
+        margin: 2px 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.45;
+      }
+      .muted {
+        color: var(--text-tertiary);
+      }
       /* Header actions were \`.btn btn-secondary\` with no matching rule on
          this page, so they rendered as bare text links. */
       .btn {
@@ -361,6 +459,13 @@ export class RejectionSummaryPageComponent {
   );
 
   constructor() {
+    this.strategies.list({ currentPage: 1, itemCountPerPage: 500, filter: null }).subscribe({
+      next: (r) => {
+        this.names.set(new Map((r?.data?.data ?? []).map((x) => [x.id, x.name ?? `#${x.id}`])));
+        this.namesReady.set(true);
+      },
+      error: () => this.names.set(new Map()),
+    });
     effect(() => {
       this.windowDays();
       this.resource.refresh();
@@ -368,6 +473,37 @@ export class RejectionSummaryPageComponent {
   }
 
   protected readonly rows = computed(() => this.resource.value() ?? []);
+
+  private readonly names = signal<Map<number, string>>(new Map());
+  protected readonly namesReady = signal(false);
+  protected strategyName(id: number): string | null {
+    return this.names().get(id) ?? null;
+  }
+
+  protected readonly byStage = computed(() => {
+    const m = new Map<string, number>();
+    for (const r of this.filteredRows()) m.set(r.stage, (m.get(r.stage) ?? 0) + r.count);
+    const total = [...m.values()].reduce((a, b) => a + b, 0) || 1;
+    return [...m.entries()]
+      .map(([stage, count]) => ({ stage, count, share: count / total }))
+      .sort((a, b) => b.count - a.count);
+  });
+
+  protected readonly reasonGlossary = computed(() => {
+    const m = new Map<string, { count: number; stage: string }>();
+    for (const r of this.filteredRows()) {
+      const e = m.get(r.reason) ?? { count: 0, stage: r.stage };
+      e.count += r.count;
+      m.set(r.reason, e);
+    }
+    return [...m.entries()]
+      .map(([reason, e]) => ({
+        reason,
+        count: e.count,
+        meaning: REASON_MEANING[reason] ?? `Recorded by the ${e.stage} stage.`,
+      }))
+      .sort((a, b) => b.count - a.count);
+  });
   protected readonly loading = computed(() => this.resource.loading() && this.rows().length === 0);
   protected readonly totalRejections = computed(() => this.rows().reduce((s, r) => s + r.count, 0));
   protected readonly distinctStrategies = computed(

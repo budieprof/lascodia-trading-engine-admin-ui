@@ -38,11 +38,13 @@ import {
   CreateSignalDialogComponent,
   type SignalPrefill,
 } from '@features/trade-signals/components/create-signal-dialog/create-signal-dialog.component';
+import { OrderSignalContextComponent } from '../../components/order-signal-context.component';
 
 @Component({
   selector: 'app-order-detail-page',
   standalone: true,
   imports: [
+    OrderSignalContextComponent,
     ConfirmDialogComponent,
     CreateSignalDialogComponent,
     TabsComponent,
@@ -503,6 +505,10 @@ import {
                   }
                 </div>
               </div>
+              <app-order-signal-context
+                [tradeSignalId]="order()!.tradeSignalId"
+                [orderId]="order()!.id"
+              />
             }
 
             @case ('related') {
@@ -586,6 +592,10 @@ import {
                   </div>
                 </div>
               </div>
+              <app-order-signal-context
+                [tradeSignalId]="order()!.tradeSignalId"
+                [orderId]="order()!.id"
+              />
             }
           }
         </ui-tabs>
