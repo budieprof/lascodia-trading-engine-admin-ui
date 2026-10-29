@@ -1,6 +1,6 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable, map } from 'rxjs';
+import { Observable, catchError, map, of } from 'rxjs';
 
 import { ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
@@ -106,6 +106,16 @@ export class DealingApiService {
     return settled(
       this.api.post<ResponseData<DealingLpAnalytics>>('/dealing/lp-analytics', body, SILENT),
     );
+  }
+
+  /** One engine setting's value (`GET config/{key}`), or null when it cannot be read with this access. */
+  setting(key: string): Observable<string | null> {
+    return this.api
+      .get<ResponseData<{ value?: string | null }>>(`/config/${encodeURIComponent(key)}`, SILENT)
+      .pipe(
+        map((r) => (r?.status ? (r.data?.value ?? null) : null)),
+        catchError(() => of(null)),
+      );
   }
 
   feeds(): Observable<DealingFeed[]> {

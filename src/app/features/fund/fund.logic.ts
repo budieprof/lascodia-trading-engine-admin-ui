@@ -1,6 +1,6 @@
 import { isQuotaRefusal } from '@core/plans/quota-refusal';
 
-import type { CashFlowKind, MonthReturn, YearReturn } from './fund.types';
+import type { CashFlowKind, FillGroupStats, MonthReturn, YearReturn } from './fund.types';
 
 /** "1.23 %" for a fraction; "—" when unknown. */
 export function pct(fraction: number | null | undefined, digits = 2): string {
@@ -129,4 +129,90 @@ export function isSha256(text: string): boolean {
 /** Markout cell: "0.40 (n=12)". */
 export function markoutCell(mean: number | null | undefined, samples: number | undefined): string {
   return mean === null || mean === undefined ? '—' : `${mean.toFixed(2)} (n=${samples ?? 0})`;
+}
+
+/** A summary tile: label, value, a hint line and an optional tone. */
+export interface SummaryTile {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: 'pos' | 'neg' | '';
+}
+
+/** The headline tiles of a best-execution report (its "All fills" row). Pips are costs when positive. */
+export function bestExTiles(r: {
+  fillsMeasured: number;
+  markoutHorizons: string[];
+  overall: FillGroupStats;
+}): SummaryTile[] {
+  const o = r.overall;
+  const h = r.markoutHorizons.findIndex((x) => x === '60s' || x === '1m');
+  const mi = h >= 0 ? h : r.markoutHorizons.length - 1;
+  const mo = mi >= 0 ? (o.meanMarkoutPips[mi] ?? null) : null;
+  const tone = (v: number | null, costPositive = true): SummaryTile['tone'] =>
+    v === null || v === 0 ? '' : v > 0 === costPositive ? 'neg' : 'pos';
+  return [
+    {
+      label: 'Fills measured',
+      value: String(r.fillsMeasured),
+      hint: `${num(o.lots)} lots · ${o.withArrivalBenchmark} with an arrival price`,
+    },
+    {
+      label: 'Mean slippage vs arrival',
+      value: `${num(o.meanSlippagePips)} pips`,
+      hint: `median ${num(o.medianSlippagePips)} · 95th pct |slip| ${num(o.p95AbsSlippagePips)}`,
+      tone: tone(o.meanSlippagePips),
+    },
+    {
+      label: 'Filled better than arrival',
+      value: pct(o.priceImprovementShare, 0),
+      hint: `vs requested price ${num(o.meanVsRequestedPips)} pips`,
+    },
+    {
+      label: 'Effective spread',
+      value: `${num(o.meanEffectiveSpreadPips)} pips`,
+      hint: `quoted ${num(o.meanQuotedSpreadPips)} pips at the fill`,
+      tone: tone(o.meanEffectiveSpreadPips),
+    },
+    {
+      label: 'Fill latency',
+      value: `${num(o.medianLatencyMs, 0)} ms`,
+      hint: `p95 ${num(o.p95LatencyMs, 0)} ms (submit → fill)`,
+    },
+    {
+      label: `Markout ${mi >= 0 ? r.markoutHorizons[mi] : ''}`.trim(),
+      value: `${num(mo)} pips`,
+      hint:
+        mi >= 0
+          ? `${pct(o.favourableMarkoutShare[mi] ?? null, 0)} favourable · n=${o.markoutSamples[mi] ?? 0}`
+          : 'no markout horizon',
+      tone: tone(mo, false),
+    },
+    { label: 'Commission paid', value: money(o.commission), hint: 'account currency, all fills' },
+  ];
+}
+
+/**
+ * The accounts a page opens on: the scope's accounts that are active (in the active list's order of the scope), at most
+ * `max`; without an active list (null) the first `max` of the scope.
+ */
+export function liveScopeAccounts<T extends { id: number }>(
+  accounts: readonly T[],
+  activeIds: readonly number[] | null,
+  max = 8,
+): T[] {
+  const live = activeIds === null ? accounts : accounts.filter((a) => activeIds.includes(a.id));
+  return live.slice(0, max);
+}
+
+/** Each value as a percent of the largest (bar heights / widths); all 0 when every value is 0. */
+export function shareOfMax(values: readonly number[]): number[] {
+  const max = Math.max(0, ...values);
+  return values.map((v) => (max > 0 ? Math.round((Math.max(0, v) / max) * 1000) / 10 : 0));
+}
+
+/** Plain words for the engine's enum names in breakdowns ("PartiallyFilled" → "Partially filled"). */
+export function enumWords(key: string): string {
+  const spaced = key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }

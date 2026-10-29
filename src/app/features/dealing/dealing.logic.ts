@@ -1,7 +1,15 @@
 import type { EChartsOption } from 'echarts';
 
 import { quotaRefusalOf } from '@core/plans/quota-refusal';
-import type { CurveSeries, DealingAlert, DealingWindow, HorizonStat } from './dealing.types';
+import type {
+  CurveSeries,
+  DealingAlert,
+  DealingClients,
+  DealingCurves,
+  DealingFeed,
+  DealingWindow,
+  HorizonStat,
+} from './dealing.types';
 
 /** The horizons the engine reports, in order. */
 export const HORIZONS_MS = [1_000, 5_000, 30_000, 60_000, 300_000] as const;
@@ -212,4 +220,81 @@ export function feedProblems(f: {
   if (writers.some((w) => w.length > 64))
     problems.push('A gateway identity is at most 64 characters.');
   return problems;
+}
+
+export interface DeskTile {
+  label: string;
+  value: string;
+  hint: string;
+  tone?: 'pos' | 'neg' | '';
+  title?: string;
+}
+
+const WINDOW_WORDS: Record<WindowPreset, string> = {
+  '24h': 'last 24 hours',
+  '7d': 'last 7 days',
+  '30d': 'last 30 days',
+  '90d': 'last 90 days',
+};
+
+/**
+ * The desk's headline tiles from the tabs' own reads. Markouts are pips, POSITIVE = the price moved in the client's
+ * favour (a cost to whoever took the other side), so a positive 60 s markout is shown in the loss colour for the desk.
+ * Unknown (a read failed) shows "—", never 0.
+ */
+export function deskSummary(
+  p: {
+    clients: DealingClients | null;
+    curves: DealingCurves | null;
+    alerts: DealingAlert[] | null;
+    feeds: DealingFeed[] | null;
+  },
+  preset: WindowPreset,
+): DeskTile[] {
+  const words = WINDOW_WORDS[preset] ?? preset;
+  const all = p.curves?.all ?? null;
+  const m60 = all?.markouts.find((h) => h.horizonMs === 60_000) ?? null;
+  const critical = (p.alerts ?? []).filter((a) => a.severity === 'critical').length;
+  const external = (p.feeds ?? []).filter((f) => f.feedId !== 'own');
+  return [
+    {
+      label: 'Clients',
+      value: p.clients ? String(p.clients.totalClients) : '—',
+      hint: `with fills, ${words}`,
+    },
+    {
+      label: 'Fills',
+      value: all ? String(all.fills) : '—',
+      hint: m60 ? `${m60.n} with a 60 s markout` : words,
+    },
+    {
+      label: 'Volume',
+      value: all ? `${all.volumeLots.toFixed(2)} lots` : '—',
+      hint: 'sum of filled lots',
+    },
+    {
+      label: 'Mean markout at 60 s',
+      value: m60?.mean != null ? `${pips(m60.mean)} pips` : '—',
+      hint:
+        m60?.ci95 != null
+          ? `± ${m60.ci95.toFixed(2)} (95 %) · t = ${m60.tStat?.toFixed(1) ?? 'n/a'}`
+          : 'positive = moved in the client’s favour',
+      tone: m60?.mean == null || m60.mean === 0 ? '' : m60.mean > 0 ? 'neg' : 'pos',
+      title:
+        'Positive = the price moved in the client’s favour after the fill (adverse for the desk).',
+    },
+    {
+      label: 'Alerts',
+      value: p.alerts ? String(p.alerts.length) : '—',
+      hint: p.alerts ? `${critical} critical · computed on read` : 'computed on read',
+      tone: critical > 0 ? 'neg' : '',
+    },
+    {
+      label: 'Trade feeds',
+      value: p.feeds ? String(external.length) : '—',
+      hint: external.length
+        ? `${external.filter((f) => f.enabled).length} enabled`
+        : 'own accounts analysed (feed "own")',
+    },
+  ];
 }
