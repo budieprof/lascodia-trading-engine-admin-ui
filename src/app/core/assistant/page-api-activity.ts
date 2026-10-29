@@ -12,6 +12,12 @@ const IGNORED = [
   /^\/market-data\/analyze\/\d+\/follow-up/,
   /^\/health(\/|$)/,
   /^\/admin\/auth\/me$/,
+  // The console shell's own calls (header, status bar, notification bell) — every page makes them,
+  // so they say nothing about the page the operator is on.
+  /^\/tenant\/branding$/,
+  /^\/admin\/notifications\/feed$/,
+  /^\/paper-trading\/status$/,
+  /^\/admin\/kill-switch\/global$/,
 ];
 
 /**
