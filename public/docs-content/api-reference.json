@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1025,
+  "endpointCount": 1032,
   "groups": [
     {
       "name": "Admin auth",
@@ -1001,6 +1001,15 @@
           "parameters": [],
           "body": "CreateVenueSourceCommand",
           "response": "ResponseData<MarketDataSourceAdminDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/md/sources/coverage",
+          "summary": "What the market-data store holds per source: symbols with their first / last stored UTC day (a directory listing).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [],
+          "response": "ResponseData<MarketDataStoreCoverageDto>"
         },
         {
           "method": "PUT",
@@ -7003,6 +7012,15 @@
       "endpoints": [
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/instrument-candles/readiness",
+          "summary": "What the builder needs and has: switch + settings, last cycle, eligible symbols, store sources (mapped / stored), would-be-built instruments, roll calendar.",
+          "access": "permission",
+          "permission": "marketdata.read",
+          "parameters": [],
+          "response": "ResponseData<InstrumentCandleReadinessDto>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/instrument-candles/state",
           "summary": "Cursors (status, built span, lag, counts) and recent rolls; `?symbol=` prefix, `?status=`.",
           "access": "permission",
@@ -12729,6 +12747,28 @@
       ]
     },
     {
+      "name": "Public billing",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/billing/plans/public",
+          "summary": "The plans for sale: the free default plan first, then each plan with a Stripe price (amount, currency, interval from Stripe).",
+          "access": "anonymous",
+          "rateLimit": "demo",
+          "parameters": [],
+          "response": "ResponseData<List<PlanOfferDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/billing/stripe/webhook",
+          "summary": "Stripe event delivery. 200 = applied or nothing to do; 400 = signature refused (nothing applied); 500 = could not be applied now (Stripe retries); 503 = webhooks not configured.",
+          "access": "anonymous",
+          "rateLimit": "ea",
+          "parameters": []
+        }
+      ]
+    },
+    {
       "name": "Rate limiting",
       "endpoints": [
         {
@@ -15791,6 +15831,16 @@
       "name": "Tenant billing",
       "endpoints": [
         {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/checkout",
+          "summary": "Start paying for a plan by card: `{planSlug}` → `{url}` of a Stripe Checkout page. The plan changes when Stripe confirms the payment. Already subscribed → `-11` (use the portal); unknown or unpriced plan → `-14`; card payment unavailable → `-503`.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "parameters": [],
+          "body": "StartCheckoutCommand",
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/tenant/billing/invoices",
           "access": "permission",
@@ -15833,6 +15883,24 @@
               "type": "string"
             }
           ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/portal",
+          "summary": "The Stripe billing portal (switch plans, update the card, cancel): `{url}`; `-14` before the first payment.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "parameters": [],
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/subscription",
+          "summary": "The organisation's plan, its card subscription (status, renewal, cancellation) and the plans it can buy.",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "parameters": [],
+          "response": "ResponseData<SubscriptionDto>"
         },
         {
           "method": "GET",

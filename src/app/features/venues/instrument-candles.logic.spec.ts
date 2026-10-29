@@ -175,4 +175,33 @@ describe('rollRows', () => {
     expect(next.hint).toContain('ESZ6');
     expect(tiles.find((t) => t.label === 'Symbols eligible')!.value).toBe('7,332');
   });
+
+  describe('candleTiles without readiness', () => {
+    it('counts candle rows written from the cursors', () => {
+      const cursor = {
+        id: 1,
+        symbol: 'BTC-USD',
+        kind: 'Instrument',
+        sourceId: 'crypto-coinbase',
+        root: null,
+        builtFromUtc: null,
+        builtToUtc: null,
+        status: 'Live',
+        note: null,
+        barsWritten: 564,
+        tradesRead: 1,
+        tradesExcluded: 0,
+        updatedAtUtc: '',
+        lagMinutes: 2,
+      };
+      const tiles = candleTiles(
+        state({ cursors: [cursor, { ...cursor, id: 2, barsWritten: 563 }] }),
+        null,
+        [],
+        NOW,
+      );
+      expect(tiles.find((t) => t.label === 'Candle rows written')!.value).toBe('1,127');
+      expect(tiles.find((t) => t.label === 'Worst lag')!.value).toBe('2 min');
+    });
+  });
 });

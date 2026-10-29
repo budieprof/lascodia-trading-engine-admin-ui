@@ -205,11 +205,20 @@ export function candleTiles(
     hint: state.cursors.length ? `${live} live` : 'none claimed yet',
     tone: state.cursors.length ? 'ok' : null,
   });
-  tiles.push({
-    label: 'Bars built, 24 h',
-    value: r ? r.barsLast24h.toLocaleString('en-US') : '—',
-    hint: r ? 'one-minute bars (M1) in the last 24 hours' : 'needs the engine update',
-  });
+  if (r) {
+    tiles.push({
+      label: 'Bars built, 24 h',
+      value: r.barsLast24h.toLocaleString('en-US'),
+      hint: 'one-minute bars (M1) in the last 24 hours',
+    });
+  } else {
+    const written = state.cursors.reduce((a, c) => a + (c.barsWritten ?? 0), 0);
+    tiles.push({
+      label: 'Candle rows written',
+      value: written.toLocaleString('en-US'),
+      hint: 'all timeframes, since each symbol was claimed',
+    });
+  }
   const lags = state.cursors
     .map((c) => c.lagMinutes)
     .filter((m): m is number => typeof m === 'number');
