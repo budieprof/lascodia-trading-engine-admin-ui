@@ -101,6 +101,14 @@ import { ApiService } from '@core/api/api.service';
         unless the organisation sets up its own below). In-app alerts always reach the console's
         bell.
       </p>
+      <p class="note">
+        What gets sent (platform settings, the same for every organisation): an alert whose
+        condition stays active is repeated only as a reminder — after 1 hour, 2, 4, 8, 16, then
+        once a day — not every time it is re-checked, and a condition that keeps clearing and
+        coming back is announced once. By default e-mail sends only Critical alerts straight away
+        (at most 6 an hour) and collects Medium and High ones into one digest e-mail an hour.
+        Every alert is still listed on the Alerts page.
+      </p>
 
       @if (channels.error(); as err) {
         <section class="card">
@@ -201,10 +209,12 @@ import { ApiService } from '@core/api/api.service';
                   @case ('Webhook') {
                     <label class="field">
                       <span class="label">
-                        URL (https, a public host){{
+                        {{
                           ownWebhookUrl()
-                            ? ' — stored: ' + ownWebhookUrl() + ' (leave empty to keep it)'
-                            : ''
+                            ? 'URL (https, a public host) — stored: ' +
+                              ownWebhookUrl() +
+                              ' (leave empty to keep it)'
+                            : 'Add the URL that should receive alerts here (https, a public host) — nothing is sent until one is set'
                         }}
                       </span>
                       <input
