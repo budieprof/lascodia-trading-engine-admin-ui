@@ -15,6 +15,12 @@ import type { FuturesCatalogRoot, InstrumentCandleReadiness, InstrumentCandleSta
 
 const EMPTY: InstrumentCandleState = { builderEnabled: false, continuousAdjustment: null, cursors: [], rolls: [], statusCounts: {} };
 const ROLL_ROWS_COLLAPSED = 12;
+const SOURCE_KIND: Record<string, string> = {
+  CmeFutures: 'futures',
+  CryptoExchange: 'crypto',
+  ExchangeFeed: 'stocks',
+  FixVenue: 'FX venues',
+};
 const CANDIDATE_ROWS_COLLAPSED = 15;
 
 /**
@@ -153,7 +159,7 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                   <tbody>
                     @for (c of shownCandidates(); track c.symbol) {
                       <tr>
-                        <td><code>{{ c.symbol }}</code><span class="sub">{{ c.assetClass }} · {{ c.exchange }} · {{ c.tradingCalendarCode }}</span></td>
+                        <td><code>{{ c.symbol }}</code><span class="sub" title="The instrument-master row's exchange; candles come from the source chosen per symbol">{{ c.assetClass }} · master row {{ c.exchange }} · {{ c.tradingCalendarCode }}</span></td>
                         <td>
                           <span class="chip" [class.ok]="c.stage === 'building'" [class.info]="c.stage === 'ready'">{{ stageLabel(c.stage) }}</span>
                           @if (c.cursorStatus) {
@@ -164,7 +170,7 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                           <div class="chips">
                             @for (s of c.sources; track s.sourceId) {
                               <span class="chip" [class.ok]="s.storedTo === today()" [class.warn]="s.enabled && !s.storedTo" [title]="sourceTitle(s)">
-                                {{ s.sourceId }}{{ s.storedTo ? ' · ' + s.storedTo : s.enabled ? ' · nothing stored' : ' · disabled' }}
+                                {{ s.sourceId }}{{ s.storedTo ? ' · ' + s.storedTo : s.enabled ? ' · mapped, its feed sends no trades' : ' · disabled' }}
                               </span>
                             }
                           </div>
@@ -212,7 +218,7 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                   </tr>
                 </thead>
                 <tbody>
-                  @for (s of sortedSources(); track s.sourceId) {
+                  @for (s of shownSources(); track s.sourceId) {
                     <tr>
                       <td><code>{{ s.sourceId }}</code><span class="sub">{{ s.displayName }}</span></td>
                       <td>
@@ -231,6 +237,16 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                 </tbody>
               </table>
             </div>
+            @if (idleSources().length) {
+              <p class="pad muted small">
+                @if (!allSources()) {
+                  {{ idleSources().length }} more registered but disabled (never used): {{ idleSummary() }}.
+                }
+                <button type="button" class="toggle-more" (click)="allSources.set(!allSources())">
+                  {{ allSources() ? 'Hide disabled' : 'Show them' }}
+                </button>
+              </p>
+            }
           } @else {
             <p class="pad muted">{{ readinessNote() }}</p>
           }
@@ -429,6 +445,20 @@ export class InstrumentCandlesPageComponent {
       (a, b) => Number(b.enabled) - Number(a.enabled) || b.storedSymbols - a.storedSymbols || a.sourceId.localeCompare(b.sourceId),
     ),
   );
+  readonly allSources = signal(false);
+  /** Disabled sources that never stored anything — one line unless asked for. */
+  readonly idleSources = computed(() => this.sortedSources().filter((s) => !s.enabled && s.storedSymbols === 0));
+  readonly shownSources = computed(() =>
+    this.allSources() ? this.sortedSources() : this.sortedSources().filter((s) => s.enabled || s.storedSymbols > 0),
+  );
+  readonly idleSummary = computed(() => {
+    const by = new Map<string, string[]>();
+    for (const s of this.idleSources()) {
+      const k = SOURCE_KIND[s.kind] ?? s.kind;
+      by.set(k, [...(by.get(k) ?? []), s.sourceId + (s.mappedEligible ? ` (${s.mappedEligible} mapped)` : '')]);
+    }
+    return [...by.entries()].map(([k, ids]) => `${k}: ${ids.join(', ')}`).join(' · ');
+  });
   readonly adjustment = computed(
     () => this.readiness()?.continuousAdjustment ?? this.state.value().continuousAdjustment ?? 'Panama',
   );
