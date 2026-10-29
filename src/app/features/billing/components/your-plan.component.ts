@@ -20,28 +20,36 @@ import { BillingApiService } from '../billing-api.service';
 import type { BillingSubscription, PlanOffer } from '../billing.types';
 import {
   CHECKOUT_POLL_MS,
+  CHECKOUT_RETURN_PARAMS,
+  PAYSTACK_CONFIRM_FALLBACK,
+  type PaystackOutcome,
   billingRefusal,
   canChangePlan,
   checkoutPollOutcome,
   checkoutReturn,
+  currentPlanHint,
   freeOfferHint,
   isFollowableRedirect,
   noPaidOffers,
   offerAction,
   offerPrice,
+  paystackOutcome,
+  paystackReference,
   planLimits,
   planNotices,
   showManageBilling,
   statusBadge,
 } from '../plan-offers.logic';
 
-type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
+type ReturnState = 'confirming' | 'waiting' | 'done' | 'late' | 'cancelled' | null;
 
 /**
  * "Your plan" at the top of Usage & billing (`GET tenant/billing/subscription`): the current plan and its status,
  * the plans on offer, and — for someone holding `tenant.billing.manage` while the engine says they may — Upgrade
- * (Stripe Checkout) or Switch / Manage billing (the billing portal). Coming back from Checkout
- * (`?checkout=success|cancelled`) it says what happened and waits for the plan to change.
+ * (the provider's payment page: Stripe Checkout or Paystack) or Switch / Manage billing (the billing portal;
+ * Paystack's manage page cannot switch plan, so no Switch there). Coming back from Stripe
+ * (`?checkout=success|cancelled`) it says what happened and waits for the plan to change; coming back from
+ * Paystack (`?checkout=paystack&reference=…`) it first asks the engine what became of the payment.
  */
 @Component({
   selector: 'app-billing-your-plan',
@@ -136,6 +144,9 @@ type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
       </header>
       <div class="card-body">
         @switch (returned()) {
+          @case ('confirming') {
+            <p class="note" role="status">Checking your payment…</p>
+          }
           @case ('waiting') {
             <p class="note ok" role="status">
               Payment received — your plan updates in a few seconds.
@@ -157,7 +168,7 @@ type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
             </p>
           }
           @case ('cancelled') {
-            <p class="note" role="status">Checkout cancelled — nothing was charged.</p>
+            <p class="note" role="status">Payment cancelled — nothing was charged.</p>
           }
         }
 
@@ -194,6 +205,9 @@ type ReturnState = 'waiting' | 'done' | 'late' | 'cancelled' | null;
                     }
                   </dl>
                   @if (freeHint(o, s); as hint) {
+                    <p class="small muted">{{ hint }}</p>
+                  }
+                  @if (currentHint(o, s); as hint) {
                     <p class="small muted">{{ hint }}</p>
                   }
                   @if (action(o, s); as a) {
@@ -288,10 +302,13 @@ export class YourPlanComponent {
     const s = this.sub.value();
     return !!s && noPaidOffers(s);
   });
-  /** Just paid at Checkout and the plan has not caught up: no new checkout (it would be a second subscription). */
+  /**
+   * Just paid (or checking a Paystack payment) and the plan has not caught up: no new checkout (it would be a
+   * second subscription).
+   */
   readonly paymentPending = computed(() => {
     const r = this.returned();
-    return r === 'waiting' || r === 'late';
+    return r === 'confirming' || r === 'waiting' || r === 'late';
   });
   /** Self-serve off: the current plan only. */
   readonly shownOffers = computed<PlanOffer[]>(() => {
@@ -303,10 +320,13 @@ export class YourPlanComponent {
   private poll: Subscription | null = null;
 
   constructor() {
-    const ret = checkoutReturn(this.route.snapshot.queryParamMap.get('checkout'));
+    const params = this.route.snapshot.queryParamMap;
+    const ret = checkoutReturn(params.get('checkout'));
     if (ret) this.stripReturnParams();
     if (ret === 'cancelled') this.returned.set('cancelled');
     if (ret === 'success') this.waitForPlanChange();
+    else if (ret === 'paystack')
+      this.confirmPaystack(paystackReference(params.get('reference'), params.get('trxref')));
     else this.sub.reload();
   }
 
@@ -320,6 +340,10 @@ export class YourPlanComponent {
 
   freeHint(offer: PlanOffer, s: BillingSubscription): string | null {
     return freeOfferHint(offer, s, this.holdsManageKey());
+  }
+
+  currentHint(offer: PlanOffer, s: BillingSubscription): string | null {
+    return currentPlanHint(offer, s, this.holdsManageKey());
   }
 
   choose(offer: PlanOffer, s: BillingSubscription): void {
@@ -363,6 +387,45 @@ export class YourPlanComponent {
     });
   }
 
+  /** Back from Paystack: the engine checks the payment with Paystack, then the page acts on its answer. */
+  private confirmPaystack(reference: string | null): void {
+    this.sub.reload();
+    if (!reference) {
+      this.actionError.set(PAYSTACK_CONFIRM_FALLBACK);
+      return;
+    }
+    this.returned.set('confirming');
+    this.api
+      .confirmPaystack(reference)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (r) => this.applyPaystack(paystackOutcome(r)),
+        error: (e: unknown) => {
+          this.returned.set(null);
+          if (reportable(e)) this.actionError.set(billingRefusal(e, PAYSTACK_CONFIRM_FALLBACK));
+        },
+      });
+  }
+
+  private applyPaystack(outcome: PaystackOutcome): void {
+    switch (outcome.kind) {
+      case 'done':
+        this.returned.set('done');
+        this.sub.reload();
+        return;
+      case 'wait':
+        this.waitForPlanChange();
+        return;
+      case 'cancelled':
+        this.returned.set('cancelled');
+        return;
+      case 'error':
+        this.returned.set(null);
+        this.actionError.set(outcome.text);
+        return;
+    }
+  }
+
   /** After a paid checkout: read the plan every 2 s (up to 30 s) until the engine has the new plan. */
   private waitForPlanChange(): void {
     this.returned.set('waiting');
@@ -393,7 +456,7 @@ export class YourPlanComponent {
   private stripReturnParams(): void {
     void this.router.navigate([], {
       relativeTo: this.route,
-      queryParams: { checkout: null, session_id: null },
+      queryParams: Object.fromEntries(CHECKOUT_RETURN_PARAMS.map((k) => [k, null])),
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });

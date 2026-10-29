@@ -1,14 +1,41 @@
 import { ApiError } from '@core/api/api.types';
 import { errorText } from '@features/iam/iam.logic';
-import type { BillingSubscription, PlanOffer, SubscriptionStatus } from './billing.types';
+import type {
+  BillingProvider,
+  BillingSubscription,
+  PaystackConfirmation,
+  PlanOffer,
+  SubscriptionStatus,
+} from './billing.types';
 import { isPaid } from './plan-price';
 
 export { isPaid, limitPoints, offerPrice, planLimits, planPrice } from './plan-price';
 
 /**
- * Decisions for self-serve plans (Stripe Checkout + billing portal): which button a plan card offers for the
- * person's status and permission, what the status says, and when the wait after a checkout is over. Pure.
+ * Decisions for self-serve plans (Stripe Checkout + billing portal, or Paystack's payment page + manage page):
+ * which button a plan card offers for the person's status and permission, what the status says, and when the wait
+ * after a checkout is over. Pure.
  */
+
+function providerOf(value: unknown): BillingProvider | null {
+  return value === 'stripe' || value === 'paystack' ? value : null;
+}
+
+/**
+ * The subscription as the page uses it. Engines older than Paystack support send no `provider`,
+ * `checkoutProvider` or `canSwitchPlan`: the providers read as null and switching stays on (today's Stripe
+ * behaviour). Only an explicit `false` turns Switch off.
+ */
+export function normaliseSubscription(raw: BillingSubscription): BillingSubscription {
+  const r = (raw ?? {}) as Partial<BillingSubscription>;
+  return {
+    ...(r as BillingSubscription),
+    offers: r.offers ?? [],
+    provider: providerOf(r.provider),
+    checkoutProvider: providerOf(r.checkoutProvider),
+    canSwitchPlan: r.canSwitchPlan !== false,
+  };
+}
 
 /** A paid subscription exists: changing plan happens in the billing portal, not a new checkout. */
 export function hasLiveSubscription(status: SubscriptionStatus): boolean {
@@ -85,7 +112,7 @@ export function planNotices(
   return out;
 }
 
-/** Self-serve is on but the engine offers no paid plan to buy (no Stripe prices set up yet). */
+/** Self-serve is on but the engine offers no paid plan to buy (no provider prices set up yet). */
 export function noPaidOffers(sub: BillingSubscription): boolean {
   return sub.selfServeEnabled && !sub.offers.some(isPaid);
 }
@@ -111,14 +138,35 @@ export function canChangePlan(sub: BillingSubscription, holdsManageKey: boolean)
   return sub.selfServeEnabled && sub.canManage && holdsManageKey;
 }
 
+/**
+ * The line on the current plan's card when a live subscription cannot change plan in Manage billing (Paystack):
+ * moving is a cancellation there, then a new checkout here once the paid period is over. Null otherwise — also
+ * once the plan is already cancelled (the plan notice says when it ends) or there is no other paid plan.
+ */
+export function currentPlanHint(
+  offer: PlanOffer,
+  sub: BillingSubscription,
+  holdsManageKey: boolean,
+): string | null {
+  if (sub.canSwitchPlan !== false || sub.cancelAtPeriodEnd) return null;
+  if (!showManageBilling(sub, holdsManageKey) || !hasLiveSubscription(sub.status)) return null;
+  if (!offer.isCurrent && offer.slug !== sub.currentPlan?.slug) return null;
+  const other = sub.offers.some(
+    (o) => isPaid(o) && !o.isCurrent && o.slug !== sub.currentPlan?.slug,
+  );
+  if (!other) return null;
+  return 'To move to another plan, cancel this one in Manage billing. It stays on until the paid period ends; then choose the new plan here.';
+}
+
 export type OfferAction = { kind: 'checkout' | 'portal'; label: string };
 
 /**
  * The button on one plan card, or null: none on the current plan, the free plan (leaving a paid plan is a
  * cancellation, in the portal) or for someone who may not change the plan. With a live subscription the
- * switch happens in the billing portal; without one it is a new checkout.
+ * switch happens in the billing portal; without one it is a new checkout. A live subscription whose provider
+ * cannot switch plan there (`canSwitchPlan: false`, Paystack) gets no button: the current plan's card says how.
  *
- * `paymentPending`: the person has just paid at Checkout and the engine has not heard from Stripe yet (the
+ * `paymentPending`: the person has just paid at the payment page and the engine has not heard from the provider yet (the
  * page is waiting, or gave up waiting). The plan still reads as the old one, so a new checkout would be a
  * second subscription — no Upgrade then.
  */
@@ -130,7 +178,8 @@ export function offerAction(
 ): OfferAction | null {
   if (!canChangePlan(sub, holdsManageKey)) return null;
   if (offer.isCurrent || offer.slug === sub.currentPlan?.slug || !isPaid(offer)) return null;
-  if (hasLiveSubscription(sub.status)) return { kind: 'portal', label: 'Switch' };
+  if (hasLiveSubscription(sub.status))
+    return sub.canSwitchPlan === false ? null : { kind: 'portal', label: 'Switch' };
   return paymentPending ? null : { kind: 'checkout', label: 'Upgrade' };
 }
 
@@ -139,16 +188,63 @@ export function showManageBilling(sub: BillingSubscription, holdsManageKey: bool
   return canChangePlan(sub, holdsManageKey) && sub.hasBillingAccount;
 }
 
-/** Where Stripe sent the person back to: `?checkout=success|cancelled`. */
-export function checkoutReturn(value: string | null | undefined): 'success' | 'cancelled' | null {
-  return value === 'success' ? 'success' : value === 'cancelled' ? 'cancelled' : null;
+export type CheckoutReturn = 'success' | 'cancelled' | 'paystack';
+
+/**
+ * Where the payment page sent the person back to: Stripe's `?checkout=success|cancelled`, or Paystack's
+ * `?checkout=paystack&reference=…` (paid or not — the engine is asked which).
+ */
+export function checkoutReturn(value: string | null | undefined): CheckoutReturn | null {
+  return value === 'success' || value === 'cancelled' || value === 'paystack' ? value : null;
+}
+
+/** The Paystack transaction reference from the return URL (`reference`, else `trxref`); null when neither. */
+export function paystackReference(
+  reference: string | null | undefined,
+  trxref: string | null | undefined,
+): string | null {
+  const r = (reference ?? '').trim() || (trxref ?? '').trim();
+  return r || null;
+}
+
+/** Query parameters the payment pages add on the way back; stripped once the page has read them. */
+export const CHECKOUT_RETURN_PARAMS = ['checkout', 'session_id', 'reference', 'trxref'] as const;
+
+/**
+ * What the page does with the engine's answer about a Paystack payment:
+ * `done` — the plan is on; `wait` — paid, still being set up (the same wait as Stripe's `checkout=success`);
+ * `cancelled` — not paid (the same notice as Stripe's `checkout=cancelled`); `error` — say `text`.
+ */
+export type PaystackOutcome =
+  | { kind: 'done' }
+  | { kind: 'wait' }
+  | { kind: 'cancelled' }
+  | { kind: 'error'; text: string };
+
+export const PAYSTACK_CONFIRM_FALLBACK =
+  'We could not confirm your payment. If you paid, refresh this page in a minute.';
+
+export function paystackOutcome(res: PaystackConfirmation | null | undefined): PaystackOutcome {
+  const message = typeof res?.message === 'string' ? res.message.trim() : '';
+  switch (res?.state) {
+    case 'active':
+      return { kind: 'done' };
+    case 'processing':
+      return { kind: 'wait' };
+    case 'not_paid':
+      return { kind: 'cancelled' };
+    case 'failed':
+      return { kind: 'error', text: message || 'Your payment did not go through.' };
+    default:
+      return { kind: 'error', text: message || PAYSTACK_CONFIRM_FALLBACK };
+  }
 }
 
 export const CHECKOUT_POLL_MS = 2_000;
 export const CHECKOUT_POLL_LIMIT_MS = 30_000;
 
 /**
- * After a successful checkout the engine learns of the payment from Stripe a moment later. Done once the plan
+ * After a successful checkout the engine learns of the payment from the provider a moment later. Done once the plan
  * differs from the one the page started with or a subscription is live; out of time after `limitMs`.
  */
 export function checkoutPollOutcome(

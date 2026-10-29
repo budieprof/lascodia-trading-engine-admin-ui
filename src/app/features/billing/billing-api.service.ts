@@ -14,9 +14,11 @@ import type {
   GenerateInvoicesResult,
   Invoice,
   PaymentProviderInfo,
+  PaystackConfirmation,
   PriceBook,
   PriceBookBody,
 } from './billing.types';
+import { normaliseSubscription } from './plan-offers.logic';
 
 const SILENT = { silent: true } as const;
 
@@ -75,13 +77,16 @@ export class BillingApiService {
     );
   }
 
-  // ── The organisation's plan (self-serve: Stripe Checkout + billing portal) ──
+  // ── The organisation's plan (self-serve: Stripe Checkout + billing portal, or Paystack) ──
   subscription(): Observable<BillingSubscription> {
     return settled(
       this.api.get<ResponseData<BillingSubscription>>('/tenant/billing/subscription', SILENT),
-    ).pipe(map((s) => ({ ...s, offers: s?.offers ?? [] })));
+    ).pipe(map(normaliseSubscription));
   }
-  /** `tenant.billing.manage`: a Checkout session for `planSlug`; the caller sends the browser to `url`. */
+  /**
+   * `tenant.billing.manage`: a payment page for `planSlug` (Stripe Checkout or Paystack, the engine's choice);
+   * the caller sends the browser to `url`.
+   */
   checkout(planSlug: string): Observable<BillingRedirect> {
     return settled(
       this.api.post<ResponseData<BillingRedirect>>(
@@ -91,10 +96,20 @@ export class BillingApiService {
       ),
     );
   }
-  /** `tenant.billing.manage`: the billing portal (switch plan, card, cancel). */
+  /** `tenant.billing.manage`: the billing portal (Stripe: switch plan, card, cancel; Paystack: card, cancel). */
   portal(): Observable<BillingRedirect> {
     return settled(
       this.api.post<ResponseData<BillingRedirect>>('/tenant/billing/portal', {}, SILENT),
+    );
+  }
+  /** `tenant.billing.manage`: after Paystack's payment page sends the browser back, what became of `reference`. */
+  confirmPaystack(reference: string): Observable<PaystackConfirmation> {
+    return settled(
+      this.api.post<ResponseData<PaystackConfirmation>>(
+        '/tenant/billing/paystack/confirm',
+        { reference },
+        SILENT,
+      ),
     );
   }
 

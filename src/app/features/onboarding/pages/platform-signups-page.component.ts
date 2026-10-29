@@ -298,12 +298,12 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
             @if (billing.value(); as b) {
               <p>
                 @if (b.selfServeEnabled) {
-                  <span class="chip ok">card billing on</span> An Owner can upgrade with a card
-                  (Stripe Checkout) from their organisation's billing page.
+                  <span class="chip ok">card billing on</span> An Owner can upgrade with a card (the
+                  payment provider's payment page) from their organisation's billing page.
                 } @else {
                   <span class="chip">card billing off</span> Upgrading is by contacting the platform
-                  operator: self-serve card billing (<code>Billing:SelfServe:Enabled</code> + Stripe
-                  keys on the engine host) is not set up.
+                  operator: self-serve card billing (<code>Billing:SelfServe:Enabled</code> +
+                  payment provider keys on the engine host) is not set up.
                 }
               </p>
             }

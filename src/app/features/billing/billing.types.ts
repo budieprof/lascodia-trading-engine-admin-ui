@@ -193,7 +193,7 @@ export interface BillingFile {
   fileName: string;
 }
 
-// ── Self-serve plans (Stripe Checkout + billing portal) ──
+// ── Self-serve plans (Stripe Checkout + billing portal, or Paystack's payment page + manage page) ──
 
 /** One plan an organisation can be on (`GET billing/plans/public`, and `offers` of the subscription). */
 export interface PlanOffer {
@@ -233,6 +233,28 @@ export interface BillingSubscription {
   canManage: boolean;
   hasBillingAccount: boolean;
   offers: PlanOffer[];
+  /**
+   * The provider of the organisation's current / last subscription; null = never paid. Absent from engines older
+   * than Paystack support — `normaliseSubscription` fills it with null.
+   */
+  provider: BillingProvider | null;
+  /** Which provider a NEW checkout goes to (null when absent / unknown). */
+  checkoutProvider: BillingProvider | null;
+  /**
+   * A live subscription can change plan inside Manage billing (Stripe: yes; Paystack: no — its manage page only
+   * updates the card or cancels). Absent = true, today's Stripe behaviour.
+   */
+  canSwitchPlan: boolean;
+}
+
+export type BillingProvider = 'stripe' | 'paystack';
+
+/** `POST tenant/billing/paystack/confirm {reference}`: what became of a Paystack payment. */
+export type PaystackConfirmState = 'active' | 'processing' | 'not_paid' | 'failed';
+
+export interface PaystackConfirmation {
+  state: PaystackConfirmState;
+  message: string;
 }
 
 /** `POST tenant/billing/checkout` / `POST tenant/billing/portal`: where to send the browser. */
