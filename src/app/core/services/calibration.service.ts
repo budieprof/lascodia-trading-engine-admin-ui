@@ -19,8 +19,12 @@ export class CalibrationService {
     return this.api.get(`/admin/calibration/trend-report`);
   }
 
-  getScreeningGateBinding(): Observable<ResponseData<ScreeningGateBindingReportDto>> {
-    return this.api.get(`/admin/calibration/screening-gate-binding-report`);
+  /** `lookbackDays` omitted = the engine's default (30). The engine does not cap it. */
+  getScreeningGateBinding(
+    lookbackDays?: number,
+  ): Observable<ResponseData<ScreeningGateBindingReportDto>> {
+    const q = lookbackDays ? `?lookbackDays=${lookbackDays}` : '';
+    return this.api.get(`/admin/calibration/screening-gate-binding-report${q}`);
   }
 
   listSignalRejections(

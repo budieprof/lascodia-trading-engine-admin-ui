@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { map, of } from 'rxjs';
 import type { EChartsOption } from 'echarts';
@@ -18,6 +18,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 type LookbackDays = 7 | 30 | 90 | 365;
 
@@ -34,8 +35,10 @@ interface DriftHistoryResult {
   imports: [
     DatePipe,
     DecimalPipe,
+    RouterLink,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     ChartCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -60,13 +63,87 @@ interface DriftHistoryResult {
         (refresh)="resource.refresh()"
       />
 
+      <app-composite-ml-pipeline-state variant="compact" [focus]="['catalogueDrift']" />
+
       @if (!layerKey()) {
-        <app-empty-state
-          title="Pick an entry from the drift summary"
-          description="This page charts one (layer key, symbol, timeframe) over time. Open it from the History link on a Drift Summary row."
-          actionLabel="Go to Drift Summary"
-          (actionClick)="router.navigate(['/composite-ml/drift'])"
-        />
+        <!-- No entry chosen: list every tracked entry (the drift summary's rows) so the page opens
+             on real data, each row one click from its chart. -->
+        <section class="card">
+          <h3 class="table-title">Pick an entry to chart</h3>
+          <p class="hint muted">
+            The drift monitor records, once a day, how much evidence each cold-start gate has
+            (observed count) against what it needs to turn warm (threshold). Pick one to see its
+            history.
+          </p>
+          @if (entries.loading()) {
+            <app-card-skeleton [lines]="4" />
+          } @else if (entries.error()) {
+            <app-error-state
+              title="Could not load the tracked entries"
+              message="The drift summary did not answer."
+              (retry)="entries.refresh()"
+            />
+          } @else if ((entries.value() ?? []).length === 0) {
+            <app-empty-state
+              title="No entry tracked yet"
+              description="The drift monitor (CompositeMLCatalogueDriftMonitorWorker) writes its first samples on its daily run."
+            />
+          } @else {
+            <table class="samples-table">
+              <thead>
+                <tr>
+                  <th>Gate</th>
+                  <th>Scope</th>
+                  <th class="num">Observed</th>
+                  <th class="num">Threshold</th>
+                  <th>Warm</th>
+                  <th>Last sample</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (
+                  e of entries.value();
+                  track e.layerKey + (e.symbol ?? '') + (e.timeframe ?? '')
+                ) {
+                  <tr>
+                    <td class="mono">{{ e.layerKey }}</td>
+                    <td>
+                      {{
+                        e.symbol ? e.symbol + (e.timeframe ? ' · ' + e.timeframe : '') : 'global'
+                      }}
+                    </td>
+                    <td class="num">{{ e.latestObservedCount | number: '1.0-0' }}</td>
+                    <td class="num">{{ e.latestThreshold | number: '1.0-0' }}</td>
+                    <td>
+                      <span
+                        class="warm-pill"
+                        [class.warm]="e.latestIsWarm"
+                        [class.cold]="!e.latestIsWarm"
+                      >
+                        {{ e.latestIsWarm ? 'warm' : 'cold' }}
+                      </span>
+                    </td>
+                    <td [title]="e.latestEvaluatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss UTC'">
+                      {{ e.latestEvaluatedAtUtc | relativeTime }}
+                    </td>
+                    <td>
+                      <a
+                        routerLink="/composite-ml/drift/history"
+                        [queryParams]="{
+                          layerKey: e.layerKey,
+                          symbol: e.symbol ?? undefined,
+                          timeframe: e.timeframe ?? undefined,
+                        }"
+                        >Chart</a
+                      >
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          }
+        </section>
       } @else {
         <section class="controls">
           <div class="control-group">
@@ -285,6 +362,13 @@ interface DriftHistoryResult {
         background: rgba(255, 149, 0, 0.12);
         color: var(--tone-amber);
       }
+      .samples-table a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .samples-table a:hover {
+        text-decoration: underline;
+      }
       .card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
@@ -398,6 +482,16 @@ export class DriftHistoryPageComponent {
       intervalMs: 120_000,
       refreshOn: ['compositeMLCatalogueDriftDropAlert', 'mlModelActivated', 'mlModelRetired'],
     },
+  );
+
+  /** Every tracked entry (the drift summary), shown when no entry is chosen yet. */
+  protected readonly entries = createPolledResource(
+    () =>
+      this.compositeMl.getCatalogueDriftSummary().pipe(
+        map(unwrapResponse),
+        map((d) => d.rows),
+      ),
+    { intervalMs: 300_000, active: computed(() => !this.layerKey()) },
   );
 
   constructor() {

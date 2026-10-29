@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { map } from 'rxjs';
@@ -16,8 +24,10 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { LAYER_DESCRIPTIONS, nextWiderLookback } from '../../composite-ml-pipeline.logic';
 
-type LookbackDays = 1 | 7 | 30;
+type LookbackDays = 1 | 7 | 30 | 90;
 
 /** A fetch result tagged with the window it covers, so a pill switch never shows the old window's rows. */
 interface LayerHealthResult {
@@ -35,6 +45,7 @@ interface LayerHealthResult {
     FormsModule,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
@@ -60,12 +71,18 @@ interface LayerHealthResult {
             <button
               type="button"
               [class.active]="lookback() === option"
-              (click)="lookback.set(option)"
+              (click)="pickLookback(option)"
             >
               {{ option }}d
             </button>
           }
         </div>
+        @if (widenedFrom(); as from) {
+          <span class="widened" role="status">
+            No layer state in the last {{ from }} days — widened to {{ lookback() }} days to show
+            the most recent cycles.
+          </span>
+        }
       </div>
 
       @if (loading()) {
@@ -111,11 +128,23 @@ interface LayerHealthResult {
         </div>
 
         @if (layers().length === 0) {
-          <app-empty-state
-            title="No layer state in this window"
-            description="No cycles have recorded layer state in the selected lookback. Try a larger window, or check that the CompositeML generator is running."
+          @if (lookback() < 90) {
+            <app-empty-state
+              title="No layer state in this window"
+              [description]="
+                'No generator cycle recorded layer state in the last ' +
+                lookback() +
+                ' days. Pick a wider window; the pipeline card below says when the last cycle ran.'
+              "
+            />
+          }
+          <app-composite-ml-pipeline-state
+            variant="full"
+            [focus]="['layerStates']"
+            pageSummary="Every CompositeML generator cycle records which of its 15 scoring layers were switched on. This tab rolls those records up per layer, so a layer that was turned off, or whose settings kept changing, stands out. Rows older than the engine's 90-day window are not shown."
           />
         } @else {
+          <app-composite-ml-pipeline-state variant="compact" [focus]="['layerStates']" />
           <section class="card">
             <table class="layers-table">
               <thead>
@@ -132,7 +161,12 @@ interface LayerHealthResult {
               <tbody>
                 @for (layer of sortedLayers(); track layer.layerName) {
                   <tr>
-                    <td class="mono">{{ layer.layerName }}</td>
+                    <td>
+                      <span class="mono">{{ layer.layerName }}</span>
+                      @if (describe(layer.layerName); as d) {
+                        <span class="layer-desc">{{ d }}</span>
+                      }
+                    </td>
                     <td>
                       <span class="status-pill" [attr.data-status]="statusOf(layer)">
                         {{ statusLabel(layer) }}
@@ -216,6 +250,7 @@ interface LayerHealthResult {
       }
       .controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-3);
       }
@@ -257,6 +292,7 @@ interface LayerHealthResult {
         border-radius: var(--radius-md);
         padding: var(--card-padding);
         box-shadow: var(--shadow-sm);
+        overflow-x: auto;
       }
       .layers-table {
         width: 100%;
@@ -297,6 +333,7 @@ interface LayerHealthResult {
       }
       .status-pill {
         display: inline-block;
+        white-space: nowrap;
         padding: 2px 8px;
         font-size: var(--text-xs);
         font-weight: var(--font-semibold);
@@ -357,15 +394,33 @@ interface LayerHealthResult {
         color: var(--text-secondary);
         font-size: var(--text-xs);
       }
+      .layer-desc {
+        display: block;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-top: 2px;
+      }
+      .widened {
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        padding: 4px 10px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+      }
     `,
   ],
 })
 export class LayerHealthPageComponent {
   private readonly compositeMl = inject(CompositeMLService);
 
-  protected readonly LOOKBACK_OPTIONS: readonly LookbackDays[] = [1, 7, 30] as const;
+  protected readonly LOOKBACK_OPTIONS: readonly LookbackDays[] = [1, 7, 30, 90] as const;
 
   protected readonly lookback = signal<LookbackDays>(7);
+  /** Set when the page widened the window by itself because the opening one was empty. */
+  protected readonly widenedFrom = signal<LookbackDays | null>(null);
+  /** Once the operator picks a window, the page never widens it again. */
+  private userPicked = false;
 
   protected readonly resource = createPolledResource<LayerHealthResult>(
     () => {
@@ -394,6 +449,28 @@ export class LayerHealthPageComponent {
       () => this.lookback(),
       () => this.resource.refresh(),
     );
+    // The default window is empty while the generator is off: step to the next wider window
+    // (7 → 30 → 90 days, the engine's limit) until rows appear, and say so on screen.
+    effect(() => {
+      const cur = this.current();
+      if (!cur || cur.rows.length > 0 || this.userPicked) return;
+      const next = nextWiderLookback(cur.lookback, this.LOOKBACK_OPTIONS) as LookbackDays | null;
+      if (next === null) return;
+      untracked(() => {
+        if (this.widenedFrom() === null) this.widenedFrom.set(cur.lookback);
+        this.lookback.set(next);
+      });
+    });
+  }
+
+  protected pickLookback(option: LookbackDays): void {
+    this.userPicked = true;
+    this.widenedFrom.set(null);
+    this.lookback.set(option);
+  }
+
+  protected describe(layer: string): string | null {
+    return LAYER_DESCRIPTIONS[layer] ?? null;
   }
 
   /** The loaded result, or null while the picked window has not arrived yet. */

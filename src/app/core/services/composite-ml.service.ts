@@ -20,6 +20,7 @@ import type {
   Timeframe,
   TrainerSkillSnapshotDto,
 } from '@core/api/api.types';
+import type { PipelineState } from '@features/composite-ml/composite-ml-pipeline.logic';
 
 /**
  * Read endpoints for the CompositeML operator console (PRD §5.1). The
@@ -46,6 +47,18 @@ export class CompositeMLService {
     return this.api.get<ResponseData<CompositeMLLayerHealthDto[]>>(
       `/composite-ml/layer-health?lookbackDays=${lookbackDays}`,
     );
+  }
+
+  /**
+   * GET /composite-ml/pipeline-state — switches (value + when last changed), the generator's last
+   * cycle, CompositeML strategies by status and the row count / time span of every CompositeML
+   * table. Silent: an engine without this endpoint answers 404 and the caller falls back to
+   * reading the switches one by one.
+   */
+  getPipelineState(): Observable<ResponseData<PipelineState>> {
+    return this.api.get<ResponseData<PipelineState>>('/composite-ml/pipeline-state', {
+      silent: true,
+    });
   }
 
   /**

@@ -13,6 +13,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 type LineageResult =
   | { state: 'loading' }
@@ -32,6 +33,7 @@ const NOT_FOUND_CODE = '-14';
     RouterLink,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -61,6 +63,11 @@ const NOT_FOUND_CODE = '-14';
             actionLabel="← Back to Active Policies"
             (actionClick)="goToPolicies()"
           />
+          <app-composite-ml-pipeline-state
+            variant="full"
+            [focus]="['policySnapshots']"
+            pageSummary="A policy snapshot is one version of the CompositeML generator's scoring weights; this page walks a snapshot's ancestry (each snapshot names the one it replaced). The checklist shows how many snapshots exist and why."
+          />
         }
         @case ('error') {
           <section class="state-card">
@@ -73,6 +80,7 @@ const NOT_FOUND_CODE = '-14';
           </section>
         }
         @case ('loaded') {
+          <app-composite-ml-pipeline-state variant="compact" [focus]="['policySnapshots']" />
           @if (loadedData()) {
             <section class="meta-row">
               <span class="meta">

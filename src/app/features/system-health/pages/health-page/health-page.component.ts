@@ -1,13 +1,22 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { catchError, map, merge, of, throttleTime } from 'rxjs';
+import { catchError, forkJoin, map, merge, of, throttleTime } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { HealthService } from '@core/services/health.service';
 import { WorkersService } from '@core/services/workers.service';
 import { DeadLetterService } from '@core/services/dead-letter.service';
+import { ConfigService } from '@core/services/config.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
 import type { DeadLetterDto, EngineStatusDto, WorkerHealthDto } from '@core/api/api.types';
 import { createPolledResource } from '@core/polling/polled-resource';
@@ -238,7 +247,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                           </td>
                           <td class="mono">{{ w.name }}</td>
                           <td class="msg" [title]="w.lastErrorMessage ?? ''">
-                            {{ w.lastErrorMessage ?? '—' }}
+                            {{ w.lastErrorMessage ?? idleReason(w.name) }}
                           </td>
                           <!-- capturedAt is when the snapshot was taken (always "just now"); the
                                worker's own last good cycle is what says how long it has been out. -->
@@ -893,8 +902,43 @@ export class HealthPageComponent {
   private readonly deadLetterSvc = inject(DeadLetterService);
   private readonly realtime = inject(RealtimeService);
   private readonly router = inject(Router);
+  private readonly config = inject(ConfigService);
+
+  /** `Workers:{name}:Enabled` rows of the idle workers — why each one is idle. null = no row. */
+  private readonly idleSwitches = signal<Record<string, { value: string; at: string } | null>>({});
+  private idleKey = '';
 
   constructor() {
+    // An idle worker with no error is usually switched off on purpose: read its switch so the
+    // table says so (and since when) instead of "—". Only re-read when the idle set changes.
+    effect(() => {
+      const names = this.issuesList()
+        .filter((w) => w.status === 'Idle' && !w.lastErrorMessage)
+        .map((w) => w.name)
+        .sort();
+      const key = names.join('|');
+      if (key === this.idleKey || names.length === 0) return;
+      this.idleKey = key;
+      untracked(() =>
+        forkJoin(
+          names.map((n) =>
+            this.config.getByKey(`Workers:${n}:Enabled`, { silent: true }).pipe(
+              map((r) =>
+                r.status && r.data
+                  ? { value: (r.data.value ?? '').trim(), at: r.data.lastUpdatedAt }
+                  : null,
+              ),
+              catchError(() => of(null)),
+            ),
+          ),
+        ).subscribe((rows) => {
+          const rec: Record<string, { value: string; at: string } | null> = {};
+          names.forEach((n, i) => (rec[n] = rows[i]));
+          this.idleSwitches.set(rec);
+        }),
+      );
+    });
+
     // Risk events are the reason someone is staring at this page — surface
     // them immediately so the "is the engine still okay?" question resolves
     // before the next 15s poll. Throttle 1s to de-dupe duplicate breach
@@ -1035,6 +1079,15 @@ export class HealthPageComponent {
       .sort((a, b) => (order[a.status] ?? 99) - (order[b.status] ?? 99))
       .slice(0, 12);
   });
+
+  /** Plain reason for an idle worker without an error, from its switch row. */
+  idleReason(name: string): string {
+    const sw = this.idleSwitches()[name];
+    if (sw === undefined) return '—';
+    if (sw && sw.value.toLowerCase() === 'false')
+      return `Switched off — Workers:${name}:Enabled = false since ${(sw.at ?? '').slice(0, 10)}`;
+    return 'Switched on; no completed cycle yet (nothing to do, or a long interval)';
+  }
 
   // Per-category breakdown — uses the DTO's built-in `category` field
   // (server-derived from the worker name's first CamelCase segment, so the

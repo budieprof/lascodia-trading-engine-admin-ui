@@ -20,6 +20,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 type WindowDays = 1 | 7 | 30;
 type SortMode = 'layer' | 'drop' | 'recent';
@@ -47,6 +48,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
     RouterLink,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -63,6 +65,8 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
         [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
+
+      <app-composite-ml-pipeline-state variant="compact" [focus]="['catalogueDrift']" />
 
       <section class="controls">
         <div class="control-group">

@@ -13,10 +13,11 @@ import { createPolledResource } from '@core/polling/polled-resource';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceFloorsComponent } from '../../components/evidence-floors/evidence-floors.component';
 
 @Component({
   selector: 'app-layer-skill-page',
@@ -28,9 +29,10 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
     FormsModule,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceFloorsComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
     RelativeTimePipe,
     ModalA11yDirective,
   ],
@@ -55,24 +57,29 @@ import { CompositeMlNavComponent } from '../../components/composite-ml-nav/compo
           (retry)="resource.refresh()"
         />
       } @else {
-        <section class="kpi-strip">
-          <span class="kpi"
-            ><strong>{{ snapshots().length }}</strong> snapshots</span
-          >
-          <span class="kpi"
-            ><strong>{{ distinctLayers().length }}</strong> distinct layers</span
-          >
-          <span class="kpi" [class.warn]="autoDisabledCount() > 0">
-            <strong>{{ autoDisabledCount() }}</strong> auto-disabled
-          </span>
-        </section>
-
         @if (snapshots().length === 0) {
-          <app-empty-state
-            title="No active skill snapshots"
-            description="Auto-arbitration evaluator hasn't recorded any layer skill yet."
+          <app-composite-ml-pipeline-state
+            variant="full"
+            [focus]="['layerSkill', 'generationAudits']"
+            pageSummary="Layer skill measures what each of the generator's scoring layers is worth: the reward of strategies generated with the layer on is compared with shadow decisions made with it switched off, per symbol and timeframe. A layer that hurts is switched off automatically for a while, and an operator can override that here. No active layer-skill snapshot exists — the checklist below shows which inputs are missing."
+          />
+          <app-composite-ml-evidence-floors
+            [prefixes]="['LayerSkillEvaluator.']"
+            title="Evidence the layer-skill evaluator needs"
           />
         } @else {
+          <app-composite-ml-pipeline-state variant="compact" [focus]="['layerSkill']" />
+          <section class="kpi-strip">
+            <span class="kpi"
+              ><strong>{{ snapshots().length }}</strong> snapshots</span
+            >
+            <span class="kpi"
+              ><strong>{{ distinctLayers().length }}</strong> distinct layers</span
+            >
+            <span class="kpi" [class.warn]="autoDisabledCount() > 0">
+              <strong>{{ autoDisabledCount() }}</strong> auto-disabled
+            </span>
+          </section>
           <section class="card">
             <table class="skill-table">
               <thead>

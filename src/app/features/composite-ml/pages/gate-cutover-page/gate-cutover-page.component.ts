@@ -17,6 +17,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
+import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 
 interface PendingFlip {
   row: GateCutoverStatusRowDto;
@@ -40,6 +41,7 @@ function dotSegments(id: string): string[] {
     FormsModule,
     PageHeaderComponent,
     CompositeMlNavComponent,
+    CompositeMlPipelineStateComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     EmptyStateComponent,
@@ -57,6 +59,8 @@ function dotSegments(id: string): string[] {
         [refreshing]="resource.refreshing()"
         (refresh)="resource.refresh()"
       />
+
+      <app-composite-ml-pipeline-state variant="compact" [focus]="['generationAudits']" />
 
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
