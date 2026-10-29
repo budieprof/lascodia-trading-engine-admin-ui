@@ -1,0 +1,154 @@
+// Summary strip + context panels shared by the market-data group's pages (pages program, 2026-10-28).
+// Scoped per component (included through styleUrls); keep it small — it counts toward each page's style budget.
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+}
+.tile {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  .t-label {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    font-weight: var(--font-medium);
+  }
+  .t-value {
+    font-size: var(--text-xl, 1.25rem);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+  .t-hint {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary, var(--text-secondary));
+    overflow-wrap: anywhere;
+  }
+  &[data-tone='ok'] .t-value {
+    color: var(--profit);
+  }
+  &[data-tone='warn'] .t-value {
+    color: var(--warning, #b25000);
+  }
+  &[data-tone='bad'] .t-value {
+    color: var(--loss);
+  }
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .two-col {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px var(--space-4);
+  margin: 0;
+  font-size: var(--text-sm);
+  dt {
+    color: var(--text-secondary);
+  }
+  dd {
+    margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+.bar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  li {
+    display: grid;
+    grid-template-columns: minmax(7rem, max-content) 1fr max-content;
+    gap: var(--space-2);
+    align-items: center;
+    font-size: var(--text-sm);
+  }
+  .bar {
+    height: 8px;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    overflow: hidden;
+    span {
+      display: block;
+      height: 100%;
+      background: var(--accent);
+    }
+  }
+}
+
+.links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+  a {
+    color: var(--accent);
+  }
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.methods {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--space-3);
+  .method {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    line-height: 1.45;
+    strong {
+      display: block;
+      color: var(--text-primary);
+      font-size: var(--text-sm);
+      margin-bottom: 2px;
+    }
+    &.current {
+      border-color: var(--accent);
+      background: var(--bg-tertiary);
+    }
+  }
+}
+
+.toggle-more {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  padding: var(--space-2) var(--space-4);
+}
+
+ol.q-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  display: grid;
+  gap: 6px;
+}

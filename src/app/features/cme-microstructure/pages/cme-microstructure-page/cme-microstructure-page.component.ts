@@ -53,6 +53,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
 import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
+import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic';
 
 /**
  * CME Microstructure operator panel (engine ADR-0021 / ADR-0022).
@@ -307,7 +308,7 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                   </tr>
                 </thead>
                 <tbody>
-                  @for (c of s.contracts; track c.contractCode) {
+                  @for (c of shownContracts(); track c.contractCode) {
                     <tr [class.front]="c.isFrontMonth">
                       <td>
                         <code>{{ c.contractCode }}</code>
@@ -344,6 +345,19 @@ import { CmeExperimentTradesComponent } from '@features/cme-microstructure/compo
                 </tbody>
               </table>
             </div>
+            @if (split().hiddenPast + split().hiddenFuture > 0) {
+              <p class="muted small footnote">
+                @if (!showAllContracts()) {
+                  {{ split().shown.length }} of {{ s.contracts.length }} contracts shown — those with data, the front
+                  month and the ones expiring within ~6 months. Hidden: {{ split().hiddenPast }} expired and
+                  {{ split().hiddenFuture }} far-dated contracts with nothing ingested ({{ split().withData }} contracts
+                  hold any data).
+                }
+                <button type="button" class="btn btn-sm btn-secondary" (click)="showAllContracts.set(!showAllContracts())">
+                  {{ showAllContracts() ? 'Show only the relevant contracts' : 'Show all ' + s.contracts.length }}
+                </button>
+              </p>
+            }
             @if (status()?.warmTier?.sessionCount) {
               <p class="muted small footnote">
                 The warm tier is not broken down per contract by the status endpoint — use
@@ -1264,6 +1278,17 @@ export class CmeMicrostructurePageComponent {
   protected synthSeed = 20260808;
 
   protected readonly hasData = computed(() => (this.status()?.tradeCount ?? 0) > 0);
+  protected readonly showAllContracts = signal(false);
+  protected readonly split = computed(() =>
+    splitContracts(
+      this.status()?.contracts ?? [],
+      new Set(this.status()?.warmTier?.contracts ?? []),
+      Date.now(),
+    ),
+  );
+  protected readonly shownContracts = computed(() =>
+    this.showAllContracts() ? (this.status()?.contracts ?? []) : this.split().shown,
+  );
 
   /** Whether the warm tier lists this contract — the status endpoint has no per-contract span. */
   protected inWarmTier(contractCode: string): boolean {
