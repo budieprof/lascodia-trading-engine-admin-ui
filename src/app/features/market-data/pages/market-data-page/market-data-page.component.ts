@@ -22,6 +22,7 @@ import {
   first,
   switchMap,
   finalize,
+  mergeMap,
 } from 'rxjs';
 import { DatePipe } from '@angular/common';
 import { NgxEchartsDirective } from 'ngx-echarts';
@@ -1564,7 +1565,7 @@ interface PriceEntry extends LivePriceDto {
               title="Price Movement"
               [subtitle]="
                 analyticsSeededFromCandles()
-                  ? '% change across the last 100 points per pair — seeded from stored one-minute closes, then live bids'
+                  ? '% change across the last 100 points per pair — seeded from stored 15-minute closes, then live bids'
                   : '% change from first observed bid, per pair (last 100 ticks)'
               "
               [options]="priceHistoryOptions()"
@@ -2521,7 +2522,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   private spreadHistory: Record<string, number[]> = {};
   /**
    * Pages program: the analytics tab opened on a few seconds of live bids, so every chart read "no pair has moved yet".
-   * On first open, each symbol with < 10 points is seeded with its last 100 stored one-minute closes (real candles),
+   * On first open, each symbol with < 10 points is seeded with its last 100 stored 15-minute closes (M15, four requests at a time) (real candles),
    * then live bids keep appending as before.
    */
   private analyticsSeeded = false;
@@ -3929,32 +3930,35 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     const targets = this.watchedSymbols().filter((s) => (this.priceHistory[s]?.length ?? 0) < 10);
     if (targets.length === 0) return;
     this.analyticsSeeded = true;
-    forkJoin(
-      targets.map((sym) =>
-        this.marketDataService
-          .listCandles({ currentPage: 1, itemCountPerPage: 100, filter: { symbol: sym, timeframe: 'M1' } })
-          .pipe(
-            map((res) => ({ sym, candles: (res?.data?.data ?? []) as CandleDto[] })),
-            catchError(() => of({ sym, candles: [] as CandleDto[] })),
-          ),
-      ),
-    )
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((rows) => {
-        let seeded = 0;
-        for (const { sym, candles } of rows) {
-          const closes = candles
-            .map((c) => c.close)
-            .filter((v) => Number.isFinite(v) && v > 0)
-            .reverse();
-          if (closes.length < 2) continue;
-          this.priceHistory[sym] = [...closes, ...(this.priceHistory[sym] ?? [])].slice(-100);
-          seeded++;
-        }
-        if (seeded > 0) {
-          this.analyticsSeededFromCandles.set(true);
-          this.livePrices.set([...this.livePrices()]); // recompute the analytics computeds
-        }
+    // M15, four at a time: an M1 page costs the engine ~2-3 s (it counts millions of rows), and 26 of them at once
+    // held every browser connection long enough to starve the Candle History tab (measured 2026-10-29).
+    from(targets)
+      .pipe(
+        mergeMap(
+          (sym) =>
+            this.marketDataService
+              .listCandles(
+                { currentPage: 1, itemCountPerPage: 100, filter: { symbol: sym, timeframe: 'M15' } },
+                { silent: true },
+              )
+              .pipe(
+                map((res) => ({ sym, candles: (res?.data?.data ?? []) as CandleDto[] })),
+                catchError(() => of({ sym, candles: [] as CandleDto[] })),
+              ),
+          4,
+        ),
+        takeUntil(this.destroy$),
+      )
+      // Applied as each symbol answers, so the charts fill in progressively instead of after the slowest reply.
+      .subscribe(({ sym, candles }) => {
+        const closes = candles
+          .map((c) => c.close)
+          .filter((v) => Number.isFinite(v) && v > 0)
+          .reverse();
+        if (closes.length < 2) return;
+        this.priceHistory[sym] = [...closes, ...(this.priceHistory[sym] ?? [])].slice(-100);
+        this.analyticsSeededFromCandles.set(true);
+        this.livePrices.set([...this.livePrices()]); // recompute the analytics computeds
       });
   }
 

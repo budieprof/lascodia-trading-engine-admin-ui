@@ -1,6 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { firstValueFrom } from 'rxjs';
+import { RouterLink } from '@angular/router';
+import { catchError, firstValueFrom, map, of } from 'rxjs';
+
+import { ApiService } from '@core/api/api.service';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -14,6 +17,13 @@ import {
   subscriberTypeLabel,
 } from '../md-entitlements.logic';
 import type { DeclarationFamily, MyDeclarations } from '../md-entitlements.types';
+import {
+  accessLabel,
+  feedsOfFamily,
+  holdingLabel,
+  liveSourcesPerFeed,
+  type MyFeedRow,
+} from '../md-feeds.logic';
 
 interface DeclarationDraft {
   answers: Record<string, boolean | null>;
@@ -31,7 +41,7 @@ interface DeclarationDraft {
   selector: 'app-md-declarations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent],
+  imports: [FormsModule, RouterLink, PageHeaderComponent],
   styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
   template: `
     <div class="page">
@@ -79,6 +89,16 @@ interface DeclarationDraft {
               <span class="t-hint">licences you hold without a current declaration</span>
             </div>
             <div class="tile">
+              <span class="t-label">Feeds you can read</span>
+              <span class="t-value">{{ myFeeds().length || '—' }}</span>
+              <span class="t-hint">{{ exchangeFeedCount() }} of them exchange or venue feeds</span>
+            </div>
+            <div class="tile" [attr.data-tone]="liveFeedCount() ? 'ok' : null">
+              <span class="t-label">With a live source</span>
+              <span class="t-value">{{ myFeeds().length ? liveFeedCount() : '—' }}</span>
+              <span class="t-hint">feeds an enabled source delivers now</span>
+            </div>
+            <div class="tile">
               <span class="t-label">Declared</span>
               <span class="t-value">{{ declaredCount(m) }}</span>
               <span class="t-hint">renewed every {{ m.validityDays }} days</span>
@@ -113,6 +133,11 @@ interface DeclarationDraft {
                                 : 'Not needed now: your organisation holds no real-time licence of this exchange.'
                           }}
                         </span>
+                        @if (familyFeeds(f.id); as fs) {
+                          @if (fs.length) {
+                            <span class="sub">Your feeds: {{ fs }}</span>
+                          }
+                        }
                       </td>
                       <td class="small">
                         @if (f.declaration; as d) {
@@ -159,6 +184,43 @@ interface DeclarationDraft {
               </table>
             </div>
           </section>
+
+          @if (myFeeds().length) {
+            <section class="card" aria-label="Your feed access">
+              <header class="card-head">
+                <h3>Your organisation's feed access</h3>
+                <span class="chip">{{ myFeeds().length }} feeds</span>
+                <span class="spacer"></span>
+                <a class="small" routerLink="/market-data/instrument-candles">Instrument candles</a>
+              </header>
+              <div class="table-wrap">
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>Feed</th>
+                      <th>Access</th>
+                      <th>Held as</th>
+                      <th title="Enabled sources delivering this feed now">Live sources</th>
+                      <th>Declaration</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (f of myFeeds(); track f.feedId) {
+                      <tr>
+                        <td><code>{{ f.feedId }}</code><span class="sub">{{ f.name }}</span></td>
+                        <td class="small">{{ access(f) }}@if (f.validTo) {<span class="sub">until {{ f.validTo.slice(0, 10) }}</span>}</td>
+                        <td class="small">{{ holding(f.source) }}</td>
+                        <td class="small">
+                          <span class="chip" [class.ok]="(live().get(f.feedId) ?? 0) > 0">{{ live().get(f.feedId) ?? 0 }}</span>
+                        </td>
+                        <td class="small">{{ f.declarationRequired ? 'Needed for real-time viewing' : 'Not needed' }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          }
 
           @if (!family()) {
             <section class="card" aria-label="What you will be asked">
@@ -283,6 +345,45 @@ export class MarketDataDeclarationsPageComponent {
   protected readonly type = subscriberTypeLabel;
   protected readonly at = when;
 
+  private readonly http = inject(ApiService);
+  protected readonly access = accessLabel;
+  protected readonly holding = holdingLabel;
+  /** `GET md/entitlements/me` — every feed the organisation may read, with how it holds it. */
+  readonly feedsRes = iamResource<MyFeedRow[]>(
+    () =>
+      this.http.getEnvelope<{ feeds: MyFeedRow[] }>('/md/entitlements/me', { silent: true }).pipe(
+        map((r) => r?.feeds ?? []),
+        catchError(() => of([] as MyFeedRow[])),
+      ),
+    [],
+  );
+  /** `GET md/sources` — the enabled sources the caller may read, each with its feeds. */
+  readonly sourcesRes = iamResource<{ feeds?: Record<string, string> | null }[]>(
+    () =>
+      this.http
+        .getEnvelope<{ feeds?: Record<string, string> | null }[]>('/md/sources', { silent: true })
+        .pipe(
+          map((r) => r ?? []),
+          catchError(() => of([])),
+        ),
+    [],
+  );
+  readonly myFeeds = computed(() =>
+    [...this.feedsRes.value()].sort(
+      (a, b) =>
+        Number(!!b.exchangeFamily) - Number(!!a.exchangeFamily) || a.feedId.localeCompare(b.feedId),
+    ),
+  );
+  readonly live = computed(() => liveSourcesPerFeed(this.sourcesRes.value()));
+  readonly exchangeFeedCount = computed(() => this.myFeeds().filter((f) => !!f.exchangeFamily).length);
+  readonly liveFeedCount = computed(() => this.myFeeds().filter((f) => (this.live().get(f.feedId) ?? 0) > 0).length);
+
+  familyFeeds(family: string): string {
+    return feedsOfFamily(this.myFeeds(), family)
+      .map((f) => `${f.feedId} (${(f.delayMinutes ?? 0) > 0 ? 'delayed' : 'real time'})`)
+      .join(', ');
+  }
+
   neededOpen(m: MyDeclarations): number {
     return m.families.filter((f) => f.needed && !f.declaration?.current).length;
   }
@@ -318,6 +419,8 @@ export class MarketDataDeclarationsPageComponent {
 
   constructor() {
     this.me.reload();
+    this.feedsRes.reload();
+    this.sourcesRes.reload();
   }
 
   open(f: DeclarationFamily): void {

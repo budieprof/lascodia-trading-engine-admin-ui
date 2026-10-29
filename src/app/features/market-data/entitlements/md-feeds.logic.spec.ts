@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  accessLabel,
   declarationCounts,
   declarationHolders,
   feedHoldings,
+  feedsOfFamily,
   groupByFamily,
+  holdingLabel,
+  liveSourcesPerFeed,
 } from './md-feeds.logic';
 import type { MarketDataEntitlementDto, MarketDataFeedCatalog } from './md-entitlements.types';
 
@@ -104,5 +108,42 @@ describe('declarations', () => {
         g({ tenantName: 'Bot', display: false }),
       ]),
     ).toEqual([{ tenant: 'Acme', feeds: ['cme-l2'] }]);
+  });
+});
+
+describe('my feeds', () => {
+  const f = (over: object) => ({
+    feedId: 'cme-l2',
+    name: 'CME',
+    display: true,
+    nonDisplay: true,
+    validTo: null,
+    source: 'house',
+    ...over,
+  });
+  it('labels access and holding', () => {
+    expect(accessLabel(f({}))).toBe('Real time · people and machines');
+    expect(accessLabel(f({ delayMinutes: 15, nonDisplay: false }))).toBe(
+      'Delayed 15 min · people only',
+    );
+    expect(holdingLabel('grant')).toBe('Granted licence');
+  });
+  it('counts live sources per feed and filters by family', () => {
+    const m = liveSourcesPerFeed([
+      { feeds: { ticks: 'broker-ticks', book: 'broker-dom' } },
+      { feeds: { ticks: 'broker-ticks' } },
+      { feeds: { ticks: 'crypto:okx', book: 'crypto:okx', trades: 'crypto:okx' } },
+    ]);
+    expect([m.get('broker-ticks'), m.get('crypto:okx'), m.get('cme-l2')]).toEqual([
+      2,
+      1,
+      undefined,
+    ]);
+    expect(
+      feedsOfFamily(
+        [f({ exchangeFamily: 'cme-group' }), f({ feedId: 'x', exchangeFamily: null })],
+        'cme-group',
+      ).length,
+    ).toBe(1);
   });
 });

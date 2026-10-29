@@ -10,6 +10,8 @@ import { iamResource } from '@features/iam/shared/iam-resource';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
 import { subscriberTypeLabel } from '../md-entitlements.logic';
 import { declarationCounts, declarationHolders } from '../md-feeds.logic';
+import { MarketDataSourcesApiService } from '../../sources/md-sources-api.service';
+import type { MarketDataUsageReport } from '../md-entitlements.types';
 import type {
   DeclarationDecision,
   MarketDataEntitlementDto,
@@ -83,6 +85,11 @@ import type {
             <span class="t-label">Exchanges that need one</span>
             <span class="t-value">{{ me.value()?.families?.length ?? '—' }}</span>
             <span class="t-hint">licensor families with a declaration rule</span>
+          </div>
+          <div class="tile">
+            <span class="t-label">Exchange reads this month</span>
+            <span class="t-value">{{ usage.value() ? exchangeReads() : '—' }}</span>
+            <span class="t-hint">reads of feeds with a declaration rule, {{ monthLabel }}</span>
           </div>
           <div class="tile">
             <span class="t-label">Organisations that must declare</span>
@@ -234,6 +241,8 @@ import type {
                   <tr>
                     <th>Exchange family</th>
                     <th>Feeds</th>
+                    <th title="Enabled registry sources behind the family's feeds / all">Sources live</th>
+                    <th title="Reads of the family's feeds this month (all organisations)">Reads this month</th>
                     <th>Organisations holding real-time display</th>
                   </tr>
                 </thead>
@@ -242,6 +251,14 @@ import type {
                     <tr>
                       <td>{{ f.name }}<span class="sub"><code>{{ f.id }}</code></span></td>
                       <td class="small">{{ feedsOf(f.id) || '— no feed in the catalog yet' }}</td>
+                      <td class="small">
+                        @if (enabledIds(); as ids) {
+                          <span class="chip" [class.ok]="sourcesLive(f.id, ids) > 0">{{ sourcesLive(f.id, ids) }} / {{ sourcesAll(f.id) }}</span>
+                        } @else {
+                          {{ sourcesAll(f.id) }} registered
+                        }
+                      </td>
+                      <td class="small">{{ readsOf(f.id) }}</td>
                       <td class="small">{{ holdersOf(f.id) || 'none' }}</td>
                     </tr>
                   }
@@ -313,6 +330,18 @@ export class MarketDataDeclarationsReviewPageComponent {
     () => this.api.list({ includeRevoked: false }).pipe(catchError(() => of([]))),
     [],
   );
+  private readonly sourcesApi = inject(MarketDataSourcesApiService);
+  protected readonly monthLabel = new Date().toLocaleString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  readonly usage = iamResource<MarketDataUsageReport | null>(
+    () => this.api.usage(new Date().toISOString().slice(0, 7)).pipe(catchError(() => of(null))),
+    null,
+  );
+  /** Enabled registry source ids; null when the registry could not be read. */
+  readonly enabledIds = signal<ReadonlySet<string> | null>(null);
+  readonly exchangeReads = computed(() => {
+    const feeds = new Set((this.catalog.value()?.feeds ?? []).filter((f) => f.requiresDeclaration).map((f) => f.feedId));
+    return (this.usage.value()?.feeds ?? []).filter((f) => feeds.has(f.feedId)).reduce((a, f) => a + f.accessCount, 0);
+  });
   readonly counts = computed(() => declarationCounts(this.history.value()));
   readonly holders = computed(() => declarationHolders(this.catalog.value(), this.grants.value()));
   readonly reviewing = signal<SubscriberDeclarationDto | null>(null);
@@ -326,6 +355,28 @@ export class MarketDataDeclarationsReviewPageComponent {
     this.me.reload();
     this.catalog.reload();
     this.grants.reload();
+    this.usage.reload();
+    this.sourcesApi
+      .list()
+      .pipe(catchError(() => of(null)))
+      .subscribe((rows) => this.enabledIds.set(rows ? new Set(rows.filter((r) => r.enabled).map((r) => r.sourceId)) : null));
+  }
+
+  private familyFeeds(family: string) {
+    return (this.catalog.value()?.feeds ?? []).filter((f) => f.exchangeFamily === family);
+  }
+
+  sourcesAll(family: string): number {
+    return new Set(this.familyFeeds(family).flatMap((f) => f.sources)).size;
+  }
+
+  sourcesLive(family: string, ids: ReadonlySet<string>): number {
+    return new Set(this.familyFeeds(family).flatMap((f) => f.sources).filter((s) => ids.has(s))).size;
+  }
+
+  readsOf(family: string): number {
+    const feeds = new Set(this.familyFeeds(family).map((f) => f.feedId));
+    return (this.usage.value()?.feeds ?? []).filter((f) => feeds.has(f.feedId)).reduce((a, f) => a + f.accessCount, 0);
   }
 
   feedsOf(family: string): string {
