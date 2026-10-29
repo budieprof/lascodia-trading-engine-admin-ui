@@ -252,6 +252,14 @@ interface EditorFormValue {
               Archive
             </button>
           }
+          @if (!canEditBody() && !isDraft(r)) {
+            <!-- The bar used to render as an empty box for an active or archived version. -->
+            <p class="readonly-note">
+              {{ r.isActive ? 'The active version' : 'An archived version' }} is read-only — only
+              drafts can be edited or promoted. Use <strong>Fork</strong> above to start a draft
+              from it, or <strong>Diff vs other version</strong> to see what changed.
+            </p>
+          }
         </section>
       }
 
@@ -467,6 +475,11 @@ interface EditorFormValue {
   `,
   styles: [
     `
+      .readonly-note {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
       .page {
         padding: var(--space-6);
         display: flex;

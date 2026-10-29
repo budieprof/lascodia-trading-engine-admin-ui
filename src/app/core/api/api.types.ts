@@ -3667,6 +3667,11 @@ export interface RationaleCoverageEntryDto {
   averageConfidence: number | null;
   latestAt: string | null;
   latestRationaleId: number | null;
+  /** Rationales ever written for this type (engine ≥ 2026-10-28; absent before). */
+  allTimeCount?: number;
+  allTimeLatestAt?: string | null;
+  /** Per-type handler switch in LifecycleRationaleOptions (null = uncatalogued type). */
+  enabled?: boolean | null;
 }
 
 export interface RationaleCoverageDto {
@@ -3676,6 +3681,11 @@ export interface RationaleCoverageDto {
   lowConfidenceCount: number;
   totalCostUsd: number;
   byEventType: RationaleCoverageEntryDto[];
+  /** All-time figures (engine ≥ 2026-10-28; absent before). */
+  allTimeTotal?: number;
+  allTimeLatestAt?: string | null;
+  /** LifecycleRationaleOptions:Enabled — the master switch (appsettings). */
+  layerEnabled?: boolean | null;
 }
 
 /** One-shot market-analysis result from POST /market-data/analyze. */

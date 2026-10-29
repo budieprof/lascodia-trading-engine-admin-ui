@@ -26,6 +26,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { pickComparablePair } from '../../utils/compare-pick.logic';
 
 /** Direction-of-good helper rows for the headline-metrics delta table. */
 type DirectionGood = 'up' | 'down';
@@ -66,6 +67,12 @@ interface DeltaRow {
         <a routerLink="/llm-backtest" class="btn-secondary">‹ Back to list</a>
       </app-page-header>
 
+      @if (autoReason(); as why) {
+        <p class="auto-note">
+          {{ why }} Pick any other pair on the
+          <a routerLink="/llm-backtest">backtest list</a> (“Compare these 2”).
+        </p>
+      }
       @if (loading()) {
         <section class="card empty">Loading comparison…</section>
       } @else if (missingSelection()) {
@@ -74,8 +81,8 @@ interface DeltaRow {
              query parameters are missing. -->
         <section class="card">
           <app-empty-state
-            title="Pick two runs to compare"
-            description="Select exactly two runs on the LLM Backtest list and press “Compare these 2”. The baseline goes on the left, the candidate on the right."
+            title="No two runs to compare yet"
+            description="A comparison needs two completed, non-dry runs over overlapping symbols and timeframes. Launch a backtest (or a second one with another prompt version), then select two runs on the list and press “Compare these 2”."
             actionLabel="Go to backtest runs"
             (actionClick)="goToList()"
           />
@@ -339,6 +346,14 @@ interface DeltaRow {
   `,
   styles: [
     `
+      .auto-note {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+      .auto-note a {
+        color: var(--accent);
+      }
       .page {
         padding: var(--space-6);
         display: flex;
@@ -663,10 +678,44 @@ export class LlmBacktestComparePageComponent implements OnInit {
     const left = Number(params.get('left'));
     const right = Number(params.get('right'));
     if (!Number.isFinite(left) || left <= 0 || !Number.isFinite(right) || right <= 0) {
-      this.missingSelection.set(true);
+      this.autoPick();
       return;
     }
+    this.load(left, right);
+  }
+
+  /** Why the page chose the pair itself (null when the link named both runs). */
+  readonly autoReason = signal<string | null>(null);
+
+  /**
+   * Reached without ?left=&right=: open on the newest completed run against the most similar
+   * earlier one instead of an empty "pick two runs" card.
+   */
+  private autoPick(): void {
+    this.loading.set(true);
+    this.svc
+      .listRuns({ currentPage: 1, itemCountPerPage: 50 })
+      .pipe(catchError(() => of(null)))
+      .subscribe((res) => {
+        const pair = res?.status ? pickComparablePair(res.data?.data ?? []) : null;
+        if (!pair) {
+          this.loading.set(false);
+          this.missingSelection.set(true);
+          return;
+        }
+        this.autoReason.set(pair.reason);
+        this.router.navigate([], {
+          relativeTo: this.route,
+          queryParams: { left: pair.left, right: pair.right },
+          replaceUrl: true,
+        });
+        this.load(pair.left, pair.right);
+      });
+  }
+
+  private load(left: number, right: number): void {
     if (left === right) {
+      this.loading.set(false);
       this.errorMessage.set(
         `Run #${left} was selected on both sides — pick two different runs to compare.`,
       );

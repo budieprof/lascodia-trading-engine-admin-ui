@@ -68,6 +68,30 @@ export interface PromptTemplatesListRequest {
   includeArchived?: boolean;
 }
 
+/** `GET /prompt-template/status` (engine pages program 2026-10-28; 404 on older engines). */
+export interface PromptTemplateStatus {
+  name: string;
+  /** Effective `Llm:UseDbBackedPromptTemplate`: true = the active row is the live prompt. */
+  useDbBackedPromptTemplate: boolean;
+  /** 'database' when the active row is sent, 'code' when the built-in constant is. */
+  liveSource: 'database' | 'code';
+  versions: number;
+  drafts: number;
+  archived: number;
+  activeId: number | null;
+  activeVersion: string | null;
+  activePromotedAt: string | null;
+  lastChangeAt: string | null;
+  /** LlmInvocation.Purpose the prompt is sent under (e.g. market_analysis.spot). */
+  purpose: string | null;
+  callsLast7Days: number;
+  callsLast30Days: number;
+  callsAllTime: number;
+  lastCallAt: string | null;
+  backtestCallsAllTime: number;
+  lastBacktestCallAt: string | null;
+}
+
 /** Body for `POST /prompt-template/fork`. */
 export interface ForkPromptTemplateRequest {
   fromId: number;
@@ -112,6 +136,13 @@ export class PromptTemplateService {
     req: PromptTemplatesListRequest,
   ): Observable<ResponseData<PagedData<PromptTemplateSummary>>> {
     return this.api.post(`/prompt-template/list`, req);
+  }
+
+  /** Is the table the live prompt, version counts, how often the prompt is sent. Silent: 404 on older engines. */
+  status(name: string): Observable<ResponseData<PromptTemplateStatus>> {
+    return this.api.get(`/prompt-template/status?name=${encodeURIComponent(name)}`, {
+      silent: true,
+    });
   }
 
   /** Resolve the currently-live row for a `name`. */
