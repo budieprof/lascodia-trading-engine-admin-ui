@@ -14,6 +14,7 @@ import { Router, type Routes } from '@angular/router';
 import { UiCommandService } from '@core/assistant/ui-command.service';
 import { AssistantWriteGuard, describeBlocked } from '@core/assistant/assistant-write-guard';
 import { pageControlCommands } from '@core/assistant/page-control-commands';
+import { isWriteLikeLabel } from '@core/assistant/page-controls';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import { fromEvent } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -26,6 +27,7 @@ import {
   ACTION_LABEL,
   findTab,
   isActiveTab,
+  isTab,
   pageRoot,
   readPage,
   TAB_SELECTOR,
@@ -743,6 +745,7 @@ function pageCommands(guard: AssistantWriteGuard): UiCommand[] {
         const tab = findTab(root, label);
         if (!tab) {
           const labels = [...root.querySelectorAll(TAB_SELECTOR)]
+            .filter(isTab)
             .map((t) => (t as HTMLElement).innerText?.trim())
             .filter(Boolean);
           return {
@@ -754,7 +757,10 @@ function pageCommands(guard: AssistantWriteGuard): UiCommand[] {
         }
         const text = tab.innerText.trim();
         // A button styled as a tab whose label names an action is not navigation (the crawler's rule).
-        if (tab.getAttribute('role') !== 'tab' && ACTION_LABEL.test(text)) {
+        if (
+          tab.getAttribute('role') !== 'tab' &&
+          (ACTION_LABEL.test(text) || isWriteLikeLabel(text))
+        ) {
           return { ok: false, message: `"${text}" is an action, not a tab — it was not clicked.` };
         }
         if (isActiveTab(tab)) return { ok: true, message: `"${text}" is already showing.` };

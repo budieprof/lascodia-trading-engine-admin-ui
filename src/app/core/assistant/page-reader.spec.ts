@@ -82,3 +82,17 @@ describe('findTab', () => {
     expect(findTab(root, 'missing')).toBeNull();
   });
 });
+
+describe('tabs inside a tabs component panel', () => {
+  const TABBED = `
+    <div class="tabs">
+      <div class="tabs__bar" role="tablist"><button role="tab" aria-selected="true">Strategy List</button><button role="tab">Monitor</button></div>
+      <div class="tabs__content"><button>+ Create Strategy</button><button>Clone…</button></div>
+    </div>`;
+
+  it('only the tab bar counts as tabs, not every button in the panel', () => {
+    const r = readPage(page(TABBED));
+    expect(r.tabs.map((t) => t.label)).toEqual(['Strategy List', 'Monitor']);
+    expect(findTab(page(TABBED), 'clone')).toBeNull();
+  });
+});

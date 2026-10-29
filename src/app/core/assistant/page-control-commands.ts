@@ -78,8 +78,8 @@ export function pageControlCommands(
         {
           name: 'value',
           type: 'string',
-          required: true,
-          description: 'The value: text, an option label, true/false, or a date.',
+          description:
+            'The value: text, an option label, true/false, or a date. Empty clears the field.',
         },
         {
           name: 'submit',
@@ -202,6 +202,10 @@ export function pageControlCommands(
         const expandedAfter = target.el.isConnected
           ? target.el.getAttribute('aria-expanded')
           : null;
+        if (target.kind === 'sort') {
+          const sortAfter = sortState(target.el, d);
+          if (sortAfter) changes.push(`the column is now sorted ${sortAfter}`);
+        }
         if (expandedBefore !== null && expandedAfter !== null && expandedAfter !== expandedBefore)
           changes.push(expandedAfter === 'true' ? 'it expanded' : 'it collapsed');
         if (report.requests.length)
@@ -225,4 +229,21 @@ export function pageControlCommands(
       },
     },
   ];
+}
+
+/**
+ * A sort header's state after a click. Grids re-render headers, so the clicked element may be gone:
+ * look the column up again by its label.
+ */
+function sortState(el: HTMLElement, doc: Document): string | null {
+  const read = (h: Element | null) => {
+    const v = h?.getAttribute('aria-sort');
+    return v && v !== 'none' ? v : null;
+  };
+  if (el.isConnected) return read(el.closest('[aria-sort]'));
+  const label = (el.innerText || el.textContent || '').trim();
+  const again = [...doc.querySelectorAll('[aria-sort]')].find(
+    (h) => ((h as HTMLElement).innerText || h.textContent || '').trim() === label,
+  );
+  return read(again ?? null);
 }

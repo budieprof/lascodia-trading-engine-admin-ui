@@ -9,7 +9,7 @@
  * refuses any request that is not a read: the two layers together mean a page control can never
  * become a way to change data without the operator's approval card.</p>
  */
-import { ACTION_LABEL, TAB_SELECTOR, pageRoot } from './page-reader';
+import { ACTION_LABEL, TAB_SELECTOR, isTab, pageRoot } from './page-reader';
 
 const LABEL_CAP = 80;
 const VALUE_CAP = 80;
@@ -24,7 +24,7 @@ const MAX_ROW_SAMPLES = 5;
  * click too keeps the assistant from even opening a "Buy" confirmation it could never complete.
  */
 const MORE_WRITE_WORDS =
-  /\b(buy|sell|place|create|add|new|edit|update|modify|promote|demote|archive|unarchive|restore|confirm|execute|deploy|publish|unpublish|import|upload|generate|assign|unassign|revoke|grant|invite|rename|duplicate|clone|schedule|acknowledge|ack|snooze|mute|unmute|dismiss|mark|toggle|flip|export|download|print|sign out|log ?out|sign in|log ?in|connect|disconnect|terminate|liquidate|hedge|rebalance|retrain|train|backfill|purge|wipe|override|unlock|lock|block|unblock|ban|suspend|impersonate)\b/i;
+  /\b(buy|sell|place|create|add|new|edit|update|modify|promote|demote|archive|unarchive|restore|confirm|execute|deploy|publish|unpublish|import|upload|generate|assign|unassign|revoke|grant|invite|rename|duplicate|clone|schedule|acknowledge|ack|snooze|mute|unmute|dismiss|mark|toggle|flip|export|download|print|sign out|log ?out|sign in|log ?in|connect|disconnect|terminate|liquidate|hedge|register|queue|enqueue|submit|rebalance|retrain|train|backfill|purge|wipe|override|unlock|lock|block|unblock|ban|suspend|impersonate)\b/i;
 
 /** True when a control's label names an action rather than a view change. */
 export function isWriteLikeLabel(label: string): boolean {
@@ -137,30 +137,28 @@ export function listControls(doc: Document = document): PageControlsResult {
   const scopes = controlScopes(doc);
   const seen = new Set<Element>();
   const fields: PageField[] = [];
-  const radioGroups = new Set<string>();
   const controlsByKey = new Map<string, PageControl>();
   const actions = new Set<string>();
 
   // Overlays first: what is open on top is what the operator is looking at.
   const ordered = [...scopes.slice(1), scopes[0]];
+  for (const { el, where } of collectFields(ordered)) {
+    seen.add(el);
+    if (fields.length < MAX_FIELDS) fields.push(describeField(el, where));
+  }
+  // Two fields with one label ("TOTAL RULES", "All") are told apart as "Label #2", "Label #3" —
+  // findField reads the same suffix back.
+  const counts = new Map<string, number>();
+  for (const f of fields) {
+    const n = (counts.get(f.label) ?? 0) + 1;
+    counts.set(f.label, n);
+    if (n > 1) f.label = `${f.label} #${n}`;
+  }
   for (const { el: scope, where } of ordered) {
-    for (const el of scope.querySelectorAll('input, select, textarea') as NodeListOf<FormEl>) {
-      if (seen.has(el) || !isFieldCandidate(el) || !visible(el) || el.closest(DOCK_SELECTOR))
-        continue;
-      seen.add(el);
-      if (fields.length >= MAX_FIELDS) continue;
-      if (el instanceof HTMLInputElement && el.type === 'radio') {
-        const key = el.name || fieldLabel(el);
-        if (radioGroups.has(key)) continue;
-        radioGroups.add(key);
-      }
-      fields.push(describeField(el, where));
-    }
-
     for (const el of scope.querySelectorAll(CLICKABLE_SELECTOR) as NodeListOf<HTMLElement>) {
       if (seen.has(el) || !visible(el) || el.closest(DOCK_SELECTOR)) continue;
       seen.add(el);
-      if (el.matches(TAB_SELECTOR)) continue; // page.read / page.selectTab cover tabs
+      if (isTab(el)) continue; // page.read / page.selectTab cover tabs
       if (isDisabled(el)) continue;
       // Controls inside table rows are row actions — summarised by label with a repeat count.
       const label = controlLabel(el);
@@ -227,7 +225,8 @@ function describeRows(scopes: Array<{ el: HTMLElement }>, doc: Document): PageRo
  * then the shortest row), else the smallest section/card/list item containing it.
  */
 export function findWithin(doc: Document, within: string): HTMLElement | null {
-  const want = norm(within);
+  // Samples are cut with "…"; the model passes them back as given.
+  const want = norm(within.replace(/…$/, ''));
   if (!want) return null;
   const scopes = controlScopes(doc);
   const rows: HTMLElement[] = [];
@@ -259,30 +258,49 @@ export function findField(
   label: string,
   within?: HTMLElement | null,
 ): FormEl | null {
-  const want = norm(label);
+  const m = /^(.*?)\s+#(\d+)$/.exec(label.trim());
+  const want = norm(m ? m[1] : label);
+  const nth = m ? Number(m[2]) : 1;
   if (!want) return null;
-  const roots = within ? [within] : controlScopes(doc).map((s) => s.el);
-  const all: FormEl[] = [];
-  for (const r of roots) {
-    for (const el of r.querySelectorAll('input, select, textarea') as NodeListOf<FormEl>) {
-      if (isFieldCandidate(el) && visible(el) && !el.closest(DOCK_SELECTOR) && !all.includes(el))
-        all.push(el);
-    }
-  }
+  const scopes = controlScopes(doc);
+  const roots = within ? [{ el: within }] : [...scopes.slice(1), scopes[0]];
+  const all = collectFields(roots).map((f) => f.el);
   const labelled = all.map((el) => ({ el, l: norm(fieldLabel(el)) }));
+  const exact = labelled.filter((x) => x.l === want);
+  if (exact.length) return exact[Math.min(nth, exact.length) - 1].el;
   return (
-    labelled.find((x) => x.l === want)?.el ??
     labelled.find((x) => x.l.startsWith(want))?.el ??
     labelled.find((x) => x.l.includes(want))?.el ??
     // A radio is also found by one of its option labels ("Closed").
-    all.find(
+    ([...roots.flatMap((r) => [...r.el.querySelectorAll('input[type="radio"]')])].find(
       (el) =>
-        el instanceof HTMLInputElement &&
-        el.type === 'radio' &&
-        norm(optionLabelOfRadio(el)) === want,
-    ) ??
+        isFieldCandidate(el as FormEl) && norm(optionLabelOfRadio(el as HTMLInputElement)) === want,
+    ) as FormEl | undefined) ??
     null
   );
+}
+
+/** The fields of these scopes in listing order, one entry per radio group, each element once. */
+function collectFields(
+  scopes: ReadonlyArray<{ el: HTMLElement; where?: string }>,
+): Array<{ el: FormEl; where?: string }> {
+  const out: Array<{ el: FormEl; where?: string }> = [];
+  const seen = new Set<Element>();
+  const radioGroups = new Set<string>();
+  for (const { el: scope, where } of scopes) {
+    for (const el of scope.querySelectorAll('input, select, textarea') as NodeListOf<FormEl>) {
+      if (seen.has(el) || !isFieldCandidate(el) || !visible(el) || el.closest(DOCK_SELECTOR))
+        continue;
+      seen.add(el);
+      if (el instanceof HTMLInputElement && el.type === 'radio') {
+        const key = el.name || fieldLabel(el);
+        if (radioGroups.has(key)) continue;
+        radioGroups.add(key);
+      }
+      out.push({ el, where });
+    }
+  }
+  return out;
 }
 
 export interface ClickTarget {
@@ -331,10 +349,15 @@ export function findClickTarget(
     candidates.find((c) => c.l.includes(want));
   if (hit) {
     const l = controlLabel(hit.el);
+    // The data grid sorts on a click on the header's label, not on the header cell itself.
+    const sortLabel = hit.el.matches('.ag-header-cell')
+      ? (hit.el.querySelector('.ag-header-cell-label') as HTMLElement | null)
+      : null;
+    if (sortLabel) return { el: sortLabel, label: l, kind: 'sort' };
     return {
       el: hit.el,
       label: l,
-      kind: hit.el.matches(TAB_SELECTOR) ? 'button' : controlKind(hit.el, l),
+      kind: isTab(hit.el) ? 'button' : controlKind(hit.el, l),
     };
   }
   // A cell whose text IS the label: open its row ("EURUSD").
@@ -362,11 +385,14 @@ export function clickRefusal(
 ): string | null {
   if (el.closest(DOCK_SELECTOR)) return 'it is part of the assistant panel';
   if (isDisabled(el)) return `"${label}" is disabled`;
-  const isTab = el.getAttribute('role') === 'tab';
+  const realTab = el.getAttribute('role') === 'tab';
   const names = [label, el.getAttribute('aria-label') ?? '', el.getAttribute('title') ?? ''].join(
     ' ',
   );
-  if (!isTab && isWriteLikeLabel(names)) {
+  // An in-console link only navigates (the page it opens loads with reads; the write guard covers
+  // anything else), so "Kill switches" — the page — is fine where the button would not be.
+  const inAppLink = el.tagName === 'A' && isInAppHref(el as HTMLAnchorElement, doc);
+  if (!realTab && !inAppLink && isWriteLikeLabel(names)) {
     return `"${label}" is an action that changes data, not a view control`;
   }
   const button = el.closest('button, input[type="submit"], input[type="image"]') as
@@ -597,22 +623,33 @@ export function fieldLabel(el: FormEl): string {
     const t = labelText(wrapping);
     if (t) return cap(t, LABEL_CAP);
   }
-  // A label-ish element just before the control in the same small container.
+  // A label-ish element just before the control, in a container that holds only this field (a
+  // wider container's labels belong to other things — the page's KPI tiles, say).
   let container: HTMLElement | null = el.parentElement;
   for (let depth = 0; container && depth < 3; depth++, container = container.parentElement) {
-    const candidate = [
-      ...container.querySelectorAll('label, .label, [class*="label"], legend, .field-name, .title'),
-    ].find(
+    if (container.querySelectorAll('input, select, textarea').length > 1) break;
+    const preceding = (
+      [
+        ...container.querySelectorAll(
+          'label, .label, [class*="label"], legend, .field-name, .title',
+        ),
+      ] as HTMLElement[]
+    ).filter(
       (c) =>
         !c.contains(el) &&
         !c.querySelector('input, select, textarea') &&
-        (c.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
-    ) as HTMLElement | undefined;
-    if (candidate && text(candidate)) return cap(text(candidate), LABEL_CAP);
-    if (container.querySelectorAll('input, select, textarea').length > 3) break;
+        !c.closest('[class*="kpi"], [class*="stat-"], [class*="tile"], app-metric-card') &&
+        (c.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0 &&
+        text(c),
+    );
+    const nearest = preceding.at(-1);
+    if (nearest) return cap(text(nearest), LABEL_CAP);
   }
-  const fallback =
-    el.getAttribute('placeholder') ?? el.getAttribute('title') ?? el.getAttribute('name') ?? '';
+  const placeholder = el.getAttribute('placeholder')?.trim();
+  if (placeholder) return cap(placeholder, LABEL_CAP);
+  // An unlabelled filter select names itself by its "all" option: "All outcomes".
+  if (el instanceof HTMLSelectElement && el.options.length) return optionText(el.options[0]);
+  const fallback = el.getAttribute('title') ?? el.getAttribute('name') ?? '';
   return cap(fallback.trim(), LABEL_CAP);
 }
 
@@ -660,6 +697,10 @@ function controlState(el: HTMLElement, kind: ControlKind): string | undefined {
 // ── Helpers ───────────────────────────────────────────────────────────────────────────────
 
 function isFieldCandidate(el: FormEl): boolean {
+  // Row-selection checkboxes (the data grid's, a table's) select rows for bulk ACTIONS — not a view.
+  if (el.closest('.ag-root-wrapper')) return false;
+  if (el instanceof HTMLInputElement && el.type === 'checkbox' && el.closest('tbody tr'))
+    return false;
   if (el instanceof HTMLInputElement) {
     return !['hidden', 'password', 'file', 'submit', 'button', 'reset', 'image', 'color'].includes(
       el.type,
@@ -888,9 +929,19 @@ export function overlayTitle(el: HTMLElement): string {
 
 /** Open overlays right now (for before/after comparison). */
 export function openOverlays(doc: Document = document): HTMLElement[] {
-  return ([...doc.querySelectorAll(OVERLAY_SELECTOR)] as HTMLElement[]).filter(
+  const all = ([...doc.querySelectorAll(OVERLAY_SELECTOR)] as HTMLElement[]).filter(
     (el) => visible(el) && !el.closest(DOCK_SELECTOR),
   );
+  // One overlay is often several matching elements (a pane holding a dialog): keep the outermost.
+  return all.filter((el) => !all.some((o) => o !== el && o.contains(el)));
+}
+
+function isInAppHref(a: HTMLAnchorElement, doc: Document): boolean {
+  const raw = a.getAttribute('href') ?? '';
+  if (/^\s*(javascript|mailto|tel|data|blob):/i.test(raw) || a.hasAttribute('download'))
+    return false;
+  const path = inAppHref(a, doc);
+  return path !== null && !/^\/(login|logout|signup|bff|api|scim)(\/|$)/i.test(path);
 }
 
 function inAppHref(a: HTMLAnchorElement, doc: Document): string | null {

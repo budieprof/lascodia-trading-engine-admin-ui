@@ -271,3 +271,39 @@ describe('within', () => {
     expect(findWithin(document, 'XAUUSD')).toBeNull();
   });
 });
+
+describe('tabbed pages and row selection', () => {
+  it('lists the content of a tabs panel, and leaves row-selection checkboxes out', () => {
+    page(`<div class="tabs"><div class="tabs__bar" role="tablist"><button role="tab">List</button></div>
+      <div class="tabs__content"><button type="button">Show more</button><button>+ Create Strategy</button>
+      <table><tbody><tr><td><input type="checkbox" aria-label="Select row" /></td><td>A</td></tr></tbody></table></div></div>`);
+    const r = listControls(document);
+    expect(r.controls.map((c) => c.label)).toEqual(['Show more']);
+    expect(r.actionsNotClickable).toEqual(['+ Create Strategy']);
+    expect(r.fields).toEqual([]);
+  });
+});
+
+describe('labels', () => {
+  it('tells same-label fields apart with #n, names unlabelled selects by their first option, ignores KPI tiles', () => {
+    page(`<div class="kpi"><span class="kpi-label">TOTAL RULES</span><strong>12</strong></div>
+      <div class="bar"><input type="search" placeholder="Search rules" />
+      <select><option>All outcomes</option><option>Failed</option></select>
+      <select><option>All outcomes</option><option>Passed</option></select></div>`);
+    const labels = listControls(document).fields.map((f) => f.label);
+    expect(labels).toEqual(['Search rules', 'All outcomes', 'All outcomes #2']);
+    const second = findField(document, 'All outcomes #2') as HTMLSelectElement;
+    expect(setFieldValue(second, 'Passed').value).toBe('Passed');
+  });
+
+  it('clicks an in-console link even when its words sound like an action', () => {
+    page(`<a href="/kill-switches">Kill switches</a>`);
+    const a = document.querySelector('a') as HTMLElement;
+    expect(clickRefusal(a, 'Kill switches')).toBeNull();
+  });
+
+  it('accepts a truncated row sample as within', () => {
+    page(LIST_PAGE.replace('GBPUSD', 'crypto-coinbase Coinbase Advanced Trade feed'));
+    expect(findWithin(document, 'crypto-coinbase Coinbase Advanced…')?.tagName).toBe('TR');
+  });
+});
