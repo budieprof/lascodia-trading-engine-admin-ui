@@ -28,7 +28,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
-import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { TemplatesContextComponent } from './templates-context.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { failureMessage, failureMessages } from '../../util/api-failure';
@@ -105,7 +105,7 @@ const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; place
     MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
-    EmptyStateComponent,
+    TemplatesContextComponent,
     ConfirmDialogComponent,
     RelativeTimePipe,
   ],
@@ -158,10 +158,8 @@ const SUB_CONFIG_FIELDS: ReadonlyArray<{ key: SubConfigKey; label: string; place
         </section>
 
         @if (templates().length === 0) {
-          <app-empty-state
-            title="No templates saved yet"
-            description="Save a strategy as a template from the strategy detail page to start a reusable library."
-          />
+          <!-- Why the library is empty and what reuse looks like instead (real counts). -->
+          <app-templates-context />
         } @else {
           <section class="card">
             <table class="templates-table">

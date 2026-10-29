@@ -16,9 +16,36 @@ import type {
  * per-knob auto-apply config CRUD that gates which proposals can flow
  * autonomously vs require review.
  */
+/** Engine `AutoTuneStatusDto` (GET /auto-tune/status). */
+export interface AutoTuneStatusDto {
+  workerEnabled: boolean;
+  ppoTunerEnabled: boolean;
+  pollIntervalSeconds: number;
+  ppoLookbackDays: number;
+  ppoMinObservations: number;
+  ppoMinObservationsPerArm: number;
+  ppoObservations: number;
+  generationAuditsInWindow: number;
+  auditsWithRealisedPnl: number;
+  abTaggedPolicySnapshots: number;
+  proposalsByStatus: Record<string, number>;
+  lastProposalAtUtc: string | null;
+  autoApplyConfigs: number;
+  autoApplyEnabledConfigs: number;
+  workerLastSuccessAtUtc: string | null;
+  workerLastCapturedAtUtc: string | null;
+  workerRunning: boolean | null;
+  workerLastError: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class AutoTuneService {
   private readonly api = inject(ApiService);
+
+  /** GET /auto-tune/status — the tuner's switches, evidence vs floor, proposal counts, last cycle. */
+  getStatus(): Observable<ResponseData<AutoTuneStatusDto>> {
+    return this.api.get(`/auto-tune/status`, { silent: true });
+  }
 
   /** GET /auto-tune/proposals — defaults to Pending so the bare endpoint = "what's awaiting me". */
   listProposals(

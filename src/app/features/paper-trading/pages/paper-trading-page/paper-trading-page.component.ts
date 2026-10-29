@@ -8,6 +8,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import type { StrategyDto } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { PaperTrackRecordComponent } from '../../components/paper-track-record.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import {
   FormFieldComponent,
@@ -25,6 +26,7 @@ import {
     DatePipe,
     FormFieldComponent,
     FormFieldControlDirective,
+    PaperTrackRecordComponent,
   ],
   template: `
     <div class="page">
@@ -62,7 +64,19 @@ import {
             Last changed: {{ service.status()!.changedAt | date: 'MMM d, yyyy HH:mm:ss' }}
           </div>
         }
+        <p class="explain">
+          <code>Engine:PaperMode</code> is the engine-wide switch: while it is on, EVERY order is
+          filled by a simulated broker and none reaches an MT5 account. It is
+          {{
+            service.isPaperMode()
+              ? 'on — live accounts are not trading'
+              : 'off — orders go to the live accounts through their EA instances'
+          }}. It is a trading-behaviour switch; strategies that are not yet trusted are paper-traded
+          on their own (below) without it.
+        </p>
       </div>
+
+      <app-paper-track-record />
 
       <div class="backfill-card">
         <h3 class="section-title">Backfill Simulated Executions</h3>
@@ -116,6 +130,16 @@ import {
         display: flex;
         flex-direction: column;
         gap: var(--space-5);
+      }
+      .explain {
+        margin: var(--space-3) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        line-height: 1.5;
+        max-width: 900px;
+      }
+      .explain code {
+        font-size: var(--text-xs);
       }
       .status-card {
         background: var(--bg-secondary);
