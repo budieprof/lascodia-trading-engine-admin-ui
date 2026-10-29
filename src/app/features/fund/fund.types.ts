@@ -36,12 +36,19 @@ export interface PerformanceDay {
   drawdown: number;
 }
 
+/** Where a statement flow comes from: the broker's own balance deal (reported by the EA), entered by hand, or inferred. */
+export type FlowSource = 'broker' | 'recorded' | 'inferred';
+
 export interface PerformanceFlow {
   dayUtc: string;
   tradingAccountId: number;
   amount: number;
   inferred: boolean;
   note: string | null;
+  /** When the flow happened (UTC); null for inferred flows and portfolio joins (only the day is known). Engine 2026-10-29+. */
+  atUtc?: string | null;
+  /** Engine 2026-10-29+; older engines send only `inferred`. */
+  source?: FlowSource;
 }
 
 export interface MonthReturn {
@@ -103,6 +110,8 @@ export interface CashFlow {
   note: string | null;
   recordedBy: string;
   recordedAtUtc: string;
+  /** The MT5 deal ticket when the EA reported this flow from the broker's deal history (null = entered by hand). */
+  brokerDealTicket?: string | null;
 }
 
 export interface RecordCashFlowBody {
