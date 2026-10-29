@@ -73,6 +73,9 @@
 // ── Tables ──
 .table-wrap {
   overflow-x: auto;
+  // Anchor absolutely-positioned children (the visually-hidden "Actions" header label) to the
+  // scroller. Without it they escape it and widen the whole page on narrow screens.
+  position: relative;
 }
 table.grid {
   width: 100%;
