@@ -5,7 +5,13 @@ import type { PlanOffer } from './billing.types';
  * beyond the DTO type, so the landing bundle stays small.
  */
 
-/** "Free" for the free plan; otherwise the price in its currency with the billing interval: "$49 / month". */
+/** Currencies written with their own sign rather than en-US's code ("NGN 73,500"): ₦ for Paystack's naira prices. */
+const NARROW_SIGN: ReadonlySet<string> = new Set(['NGN']);
+
+/**
+ * "Free" for the free plan; otherwise the price in its currency with the billing interval: "$49 / month",
+ * "₦73,500 / month". Whole amounts carry no ".00".
+ */
 export function planPrice(
   amount: number | null | undefined,
   currency: string | null | undefined,
@@ -23,6 +29,8 @@ export function planPrice(
       ? new Intl.NumberFormat('en-US', {
           style: 'currency',
           currency: code,
+          // Only listed codes take the narrow sign: for others it is ambiguous (CAD and AUD would both read "$").
+          currencyDisplay: NARROW_SIGN.has(code) ? 'narrowSymbol' : 'symbol',
           minimumFractionDigits: digits,
           maximumFractionDigits: digits,
         }).format(amount)

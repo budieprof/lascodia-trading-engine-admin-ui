@@ -8,12 +8,18 @@ import {
   canChangePlan,
   checkoutPollOutcome,
   checkoutReturn,
+  CHECKOUT_RETURN_PARAMS,
+  currentPlanHint,
   freeOfferHint,
   isFollowableRedirect,
   limitPoints,
+  normaliseSubscription,
   noPaidOffers,
   offerAction,
   offerPrice,
+  PAYSTACK_CONFIRM_FALLBACK,
+  paystackOutcome,
+  paystackReference,
   periodEndLabel,
   planLimits,
   planNotices,
@@ -59,6 +65,9 @@ function sub(over: Partial<BillingSubscription> = {}): BillingSubscription {
     canManage: true,
     hasBillingAccount: false,
     offers: [{ ...TRIAL, isCurrent: true }, offer()],
+    provider: null,
+    checkoutProvider: null,
+    canSwitchPlan: true,
     ...over,
   };
 }
@@ -73,6 +82,15 @@ describe('plan prices', () => {
     expect(planPrice(19.5, 'usd', 'month')).toBe('$19.50 / month');
     expect(planPrice(1200, 'eur', null)).toBe('€1,200');
     expect(planPrice(49, 'gbp', 'month')).toBe('£49 / month');
+  });
+
+  it('reads naira with ₦, grouped, no ".00" on whole amounts', () => {
+    expect(planPrice(73500, 'ngn', 'month')).toBe('₦73,500 / month');
+    expect(planPrice(735000, 'NGN', 'year')).toBe('₦735,000 / year');
+    expect(planPrice(73500, 'ngn', null)).toBe('₦73,500');
+    expect(planPrice(73500.5, 'ngn', 'month')).toBe('₦73,500.50 / month');
+    // Dollars are unchanged.
+    expect(planPrice(49, 'usd', 'month')).toBe('$49 / month');
   });
 
   it('never throws on an odd currency', () => {
@@ -220,12 +238,129 @@ describe('which button a plan card shows', () => {
   });
 });
 
+describe('a subscription from an engine with or without provider fields', () => {
+  it('missing fields default to today’s behaviour: no provider, Switch allowed', () => {
+    const old = { ...sub() } as Partial<BillingSubscription>;
+    delete old.provider;
+    delete old.checkoutProvider;
+    delete old.canSwitchPlan;
+    delete old.offers;
+    const s = normaliseSubscription(old as BillingSubscription);
+    expect(s.provider).toBeNull();
+    expect(s.checkoutProvider).toBeNull();
+    expect(s.canSwitchPlan).toBe(true);
+    expect(s.offers).toEqual([]);
+    const live = normaliseSubscription({
+      ...(old as BillingSubscription),
+      offers: sub().offers,
+      status: 'active',
+      currentPlan: { slug: 'desk', name: 'Desk' },
+    });
+    expect(offerAction(offer(), live, true)).toEqual({ kind: 'portal', label: 'Switch' });
+  });
+
+  it('keeps known providers, drops anything else, only an explicit false stops Switch', () => {
+    const s = normaliseSubscription(
+      sub({ provider: 'paystack', checkoutProvider: 'stripe', canSwitchPlan: false }),
+    );
+    expect(s).toMatchObject({
+      provider: 'paystack',
+      checkoutProvider: 'stripe',
+      canSwitchPlan: false,
+    });
+    const odd = normaliseSubscription({
+      ...sub(),
+      provider: 'PayPal' as never,
+      checkoutProvider: '' as never,
+      canSwitchPlan: null as never,
+    });
+    expect(odd).toMatchObject({ provider: null, checkoutProvider: null, canSwitchPlan: true });
+  });
+});
+
+describe('a live subscription that cannot switch plan (Paystack)', () => {
+  const paystack = (over: Partial<BillingSubscription> = {}) =>
+    sub({
+      status: 'active',
+      hasBillingAccount: true,
+      provider: 'paystack',
+      checkoutProvider: 'paystack',
+      canSwitchPlan: false,
+      currentPlan: { slug: 'pro', name: 'Pro' },
+      offers: [
+        TRIAL,
+        offer({ isCurrent: true }),
+        offer({ slug: 'desk', name: 'Desk', priceAmount: 99 }),
+      ],
+      ...over,
+    });
+
+  it('offers no Switch on other paid plans', () => {
+    const s = paystack();
+    expect(offerAction(s.offers[2], s, true)).toBeNull();
+    expect(offerAction(s.offers[1], s, true)).toBeNull();
+    // Without a live subscription it is a new checkout, as before.
+    expect(offerAction(s.offers[2], paystack({ status: 'canceled' }), true)?.kind).toBe('checkout');
+  });
+
+  it('says on the current plan how to move, for someone who sees Manage billing', () => {
+    const s = paystack();
+    expect(currentPlanHint(s.offers[1], s, true)).toMatch(
+      /^To move to another plan, cancel this one in Manage billing\./,
+    );
+    expect(currentPlanHint(s.offers[2], s, true)).toBeNull();
+    expect(currentPlanHint(s.offers[1], s, false)).toBeNull();
+    expect(currentPlanHint(s.offers[1], paystack({ cancelAtPeriodEnd: true }), true)).toBeNull();
+    expect(currentPlanHint(s.offers[1], paystack({ canSwitchPlan: true }), true)).toBeNull();
+    expect(currentPlanHint(s.offers[1], paystack({ status: 'canceled' }), true)).toBeNull();
+    // No other paid plan to move to.
+    expect(
+      currentPlanHint(s.offers[1], paystack({ offers: [TRIAL, offer({ isCurrent: true })] }), true),
+    ).toBeNull();
+  });
+
+  it('the free plan keeps its "cancel in Manage billing" line', () => {
+    expect(freeOfferHint(TRIAL, paystack(), true)).toBe(
+      'To go back to Trial, cancel your plan in Manage billing.',
+    );
+  });
+});
+
 describe('coming back from checkout', () => {
   it('reads the query value', () => {
     expect(checkoutReturn('success')).toBe('success');
     expect(checkoutReturn('cancelled')).toBe('cancelled');
+    expect(checkoutReturn('paystack')).toBe('paystack');
+    expect(checkoutReturn('PAYSTACK')).toBeNull();
     expect(checkoutReturn('other')).toBeNull();
     expect(checkoutReturn(null)).toBeNull();
+  });
+
+  it('reads the Paystack reference, preferring reference over trxref', () => {
+    expect(paystackReference('ref_1', 'ref_2')).toBe('ref_1');
+    expect(paystackReference(null, 'ref_2')).toBe('ref_2');
+    expect(paystackReference('  ', ' ref_2 ')).toBe('ref_2');
+    expect(paystackReference(null, undefined)).toBeNull();
+    expect(CHECKOUT_RETURN_PARAMS).toEqual(['checkout', 'session_id', 'reference', 'trxref']);
+  });
+
+  it('maps the engine’s Paystack answer to what the page does', () => {
+    expect(paystackOutcome({ state: 'active', message: 'ok' })).toEqual({ kind: 'done' });
+    expect(paystackOutcome({ state: 'processing', message: '' })).toEqual({ kind: 'wait' });
+    expect(paystackOutcome({ state: 'not_paid', message: 'x' })).toEqual({ kind: 'cancelled' });
+    expect(paystackOutcome({ state: 'failed', message: 'Your card was declined.' })).toEqual({
+      kind: 'error',
+      text: 'Your card was declined.',
+    });
+    expect(paystackOutcome({ state: 'failed', message: '' })).toEqual({
+      kind: 'error',
+      text: 'Your payment did not go through.',
+    });
+    expect(paystackOutcome({ state: 'weird' as never, message: '' })).toEqual({
+      kind: 'error',
+      text: PAYSTACK_CONFIRM_FALLBACK,
+    });
+    expect(paystackOutcome(null)).toEqual({ kind: 'error', text: PAYSTACK_CONFIRM_FALLBACK });
   });
 
   it('waits until the plan changes or a subscription is live, up to 30 s', () => {
@@ -254,6 +389,7 @@ describe('coming back from checkout', () => {
 describe('redirects and refusals', () => {
   it('follows https, same-origin paths and local http only', () => {
     expect(isFollowableRedirect('https://checkout.stripe.com/c/pay/cs_test_1')).toBe(true);
+    expect(isFollowableRedirect('https://checkout.paystack.com/0peioxfhpn')).toBe(true);
     expect(isFollowableRedirect('/organisation/billing?checkout=success')).toBe(true);
     expect(isFollowableRedirect('http://localhost:5081/test-checkout')).toBe(true);
     expect(isFollowableRedirect('http://evil.example.com/')).toBe(false);

@@ -72,6 +72,14 @@ describe('landing plan cards with the engine’s offers', () => {
     expect(out[2].points[0]).toBe('Up to 5 trading accounts');
   });
 
+  it('naira prices read with ₦ and no decimals', () => {
+    const out = mergePlanOffers(PLANS, [
+      TRIAL,
+      offer({ priceAmount: 73500, currency: 'ngn', interval: 'month' }),
+    ]);
+    expect(out[1]).toMatchObject({ price: '₦73,500', priceNote: 'per month' });
+  });
+
   it('ignores malformed offers', () => {
     const bad = [{ slug: 'x', name: '', priceAmount: 10 } as PlanOffer, null as never];
     expect(mergePlanOffers(PLANS, bad)).toBe(PLANS);

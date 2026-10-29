@@ -22,7 +22,7 @@ import { YourPlanComponent } from '../components/your-plan.component';
 
 /**
  * The organisation's "Usage & billing" (engine billing-metering, `tenant.billing.read`): its plan (self-serve
- * upgrades through Stripe Checkout — `components/your-plan`), what was metered each day, the month's estimate
+ * upgrades through Stripe Checkout or Paystack — `components/your-plan`), what was metered each day, the month's estimate
  * on the price books in force, and its finalised invoices.
  */
 @Component({
