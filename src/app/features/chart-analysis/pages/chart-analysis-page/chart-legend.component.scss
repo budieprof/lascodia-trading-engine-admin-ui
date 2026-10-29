@@ -1,0 +1,145 @@
+// Styles for app-chart-legend — moved verbatim from chart-analysis-page.component.scss.
+
+:host {
+  // No box of its own: the page lays this section out exactly as when it was inline.
+  display: contents;
+}
+
+.muted {
+  color: var(--text-muted, #787b86);
+}
+
+.legend {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 10;
+  // The legend floats over the canvas; without this the chart cannot be
+  // dragged wherever the legend happens to overlap it.
+  pointer-events: none;
+  font-size: 12px;
+  line-height: 1.5;
+  text-shadow: 0 0 4px var(--surface, #fff);
+}
+
+.legend-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.legend-ohlc {
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+
+  b {
+    margin-left: 3px;
+    font-weight: 600;
+  }
+
+  &.up {
+    color: #26a69a;
+  }
+
+  &.down {
+    color: #ef5350;
+  }
+}
+
+.legend-time {
+  font-size: 11px;
+}
+
+.legend-indicator {
+  display: flex;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-value {
+  font-weight: 600;
+}
+
+.market-status {
+  font-size: 11px;
+  font-weight: 600;
+
+  &.open {
+    color: #26a69a;
+  }
+
+  &.closed {
+    color: var(--text-muted, #787b86);
+  }
+
+  &.stale {
+    color: #ffa726;
+  }
+}
+
+// ── Line icons (app-chart-icon) ──
+// TradingView's look: icon-led buttons, full-strength ink at rest, icon and label on one baseline.
+.market-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.muted {
+  color: var(--tv-muted);
+}
+
+// ── Legend: one line, like TradingView ─────────────────────────────────────
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  max-width: calc(100% - 120px);
+  font-size: 13px;
+  text-shadow: none;
+}
+
+.legend > * {
+  flex-basis: 100%;
+}
+
+.legend > .legend-title,
+.legend > .legend-ohlc {
+  flex-basis: auto;
+}
+
+.legend-title {
+  gap: 6px;
+
+  strong {
+    font-weight: 400;
+  }
+}
+
+.legend-ohlc {
+  gap: 8px;
+
+  &.up {
+    color: var(--tv-up);
+  }
+
+  &.down {
+    color: var(--tv-down);
+  }
+
+  b {
+    font-weight: 400;
+    margin-left: 1px;
+  }
+}
+
+.legend-time {
+  display: none;
+}
+
+.market-status {
+  font-size: 12px;
+}

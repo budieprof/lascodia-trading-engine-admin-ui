@@ -84,11 +84,6 @@ $pane-gap: 4px;
   letter-spacing: 0.02em;
 }
 
-.caret {
-  font-size: 10px;
-  color: var(--text-muted, #787b86);
-}
-
 .menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -146,36 +141,6 @@ $pane-gap: 4px;
   font-size: 13px;
 }
 
-// ── Timeframes and tools ───────────────────────────────────────────────────
-
-.timeframes {
-  display: flex;
-  gap: 2px;
-}
-
-.tf,
-.tool {
-  padding: 5px 9px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #787b86);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-    color: inherit;
-  }
-
-  &.active {
-    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-    color: var(--accent, #2962ff);
-    font-weight: 600;
-  }
-}
-
 // ── Chart surface ──────────────────────────────────────────────────────────
 
 .chart-body {
@@ -203,166 +168,6 @@ $pane-gap: 4px;
   min-height: 0;
 }
 
-// ── Left drawing rail ──────────────────────────────────────────────────────
-
-.draw-rail {
-  position: absolute;
-  inset: 0 auto 0 0;
-  width: $rail-width;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 4px;
-  // Bounded by `inset`, so this genuinely scrolls instead of growing.
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-.rail-tool {
-  width: 30px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted, #787b86);
-  font-size: 14px;
-  line-height: 1;
-  cursor: pointer;
-
-  &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-    color: inherit;
-  }
-
-  &.active {
-    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-    color: var(--accent, #2962ff);
-  }
-
-  &.danger:hover {
-    color: #ef5350;
-  }
-}
-
-// One rail button per tool family; the caret opens the family's flyout.
-.rail-slot {
-  position: relative;
-  display: flex;
-  align-items: center;
-
-  .rail-caret {
-    position: absolute;
-    right: -3px;
-    bottom: 1px;
-    width: 10px;
-    height: 12px;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text-muted, #787b86);
-    font-size: 10px;
-    line-height: 1;
-    cursor: pointer;
-    opacity: 0.55;
-    transform: rotate(0deg);
-
-    &:hover,
-    &.active {
-      opacity: 1;
-      color: var(--accent, #2962ff);
-    }
-  }
-
-  &:hover .rail-caret,
-  &.open .rail-caret {
-    opacity: 1;
-  }
-}
-
-// Outside the rail (which scrolls and clips) so the menu can overhang the chart.
-.rail-flyout {
-  position: absolute;
-  left: calc(#{$rail-width} + 4px);
-  z-index: 40;
-  min-width: 220px;
-  max-height: calc(100% - 16px);
-  overflow-y: auto;
-  padding: 6px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
-  font-size: 13px;
-}
-
-.rail-flyout-title {
-  padding: 4px 8px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text-muted, #787b86);
-}
-
-.rail-flyout-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
-  // DR-I12: the favourite star, at the row's end; shown on hover, always when starred.
-  .fav-star {
-    margin-left: auto;
-    padding: 0 2px;
-    color: var(--text-muted, #787b86);
-    opacity: 0;
-    cursor: pointer;
-  }
-
-  &:hover .fav-star,
-  .fav-star.on {
-    opacity: 1;
-  }
-
-  .fav-star.on {
-    color: #f7a600;
-  }
-
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-
-  .icon {
-    width: 20px;
-    text-align: center;
-    color: var(--text-muted, #787b86);
-  }
-
-  &:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-  }
-
-  &.active {
-    background: var(--accent-soft, rgba(41, 98, 255, 0.12));
-    color: var(--accent, #2962ff);
-  }
-}
-
-// ── Object tree ────────────────────────────────────────────────────────────
-
-.tree-title {
-  padding: 2px 10px 6px;
-  font-weight: 600;
-  color: var(--text-muted, #787b86);
-}
-
 .tree-remove {
   border: 0;
   background: transparent;
@@ -373,26 +178,6 @@ $pane-gap: 4px;
   &:hover {
     color: #ef5350;
   }
-}
-
-.legend {
-  position: absolute;
-  top: 8px;
-  left: 12px;
-  z-index: 10;
-  // The legend floats over the canvas; without this the chart cannot be
-  // dragged wherever the legend happens to overlap it.
-  pointer-events: none;
-  font-size: 12px;
-  line-height: 1.5;
-  text-shadow: 0 0 4px var(--surface, #fff);
-}
-
-.legend-title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: 13px;
 }
 
 .legend-ohlc {
@@ -414,10 +199,6 @@ $pane-gap: 4px;
   }
 }
 
-.legend-time {
-  font-size: 11px;
-}
-
 .legend-indicator {
   display: flex;
   gap: 8px;
@@ -436,100 +217,6 @@ $pane-gap: 4px;
   color: var(--text-muted, #787b86);
   font-size: 13px;
   pointer-events: none;
-}
-
-// ── Active studies ─────────────────────────────────────────────────────────
-
-.studies {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 10px;
-  flex: 0 0 auto;
-}
-
-.study {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 6px 3px 4px;
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 6px;
-  font-size: 12px;
-
-  &.hidden-study {
-    opacity: 0.5;
-  }
-}
-
-.study-label {
-  font-weight: 600;
-}
-
-.study-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--text-muted, #787b86);
-
-  input {
-    width: 52px;
-    padding: 2px 4px;
-    border: 1px solid var(--border, #e6e9ef);
-    border-radius: 4px;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-  }
-}
-
-.study-toggle,
-.study-settings,
-.study-remove {
-  border: 0;
-  background: transparent;
-  color: var(--text-muted, #787b86);
-  cursor: pointer;
-  font-size: 11px;
-  padding: 2px 4px;
-  line-height: 1;
-
-  &:hover {
-    color: inherit;
-  }
-}
-
-// Source (DR-16), sessions and picked times (DR-22) on the studies bar.
-.source-input {
-  max-width: 132px;
-  padding: 1px 2px;
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-}
-
-.study-input input.session-input {
-  width: 84px;
-}
-
-.pick-input {
-  padding: 2px 6px;
-  border: 1px dashed var(--border, #e6e9ef);
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-size: 12px;
-  cursor: crosshair;
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.6;
-  }
 }
 
 // ── Layout menu and context menu ───────────────────────────────────────────
@@ -577,44 +264,6 @@ $pane-gap: 4px;
 .layout-menu .menu-list li {
   display: flex;
   align-items: center;
-}
-
-.context-menu {
-  position: absolute;
-  z-index: 50;
-  min-width: 190px;
-  display: flex;
-  flex-direction: column;
-  padding: 4px 0;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-  font-size: 12px;
-
-  button {
-    padding: 7px 12px;
-    border: 0;
-    background: transparent;
-    color: inherit;
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
-
-    &:hover:not(:disabled) {
-      background: var(--surface-hover, rgba(0, 0, 0, 0.05));
-    }
-
-    &:disabled {
-      opacity: 0.45;
-      cursor: default;
-    }
-
-    &.danger:hover:not(:disabled) {
-      color: #ef5350;
-    }
-  }
 }
 
 // ── Split view ─────────────────────────────────────────────────────────────
@@ -703,23 +352,6 @@ $pane-gap: 4px;
   font-weight: 600;
 }
 
-.market-status {
-  font-size: 11px;
-  font-weight: 600;
-
-  &.open {
-    color: #26a69a;
-  }
-
-  &.closed {
-    color: var(--text-muted, #787b86);
-  }
-
-  &.stale {
-    color: #ffa726;
-  }
-}
-
 .chart-grid {
   &[data-layout='6'] {
     grid-template-columns: repeat(3, 1fr);
@@ -730,112 +362,6 @@ $pane-gap: 4px;
     grid-template-columns: repeat(4, 1fr);
     grid-template-rows: 1fr 1fr;
   }
-}
-
-// ── Details / News side pane ───────────────────────────────────────────────
-
-.side-pane {
-  position: absolute;
-  top: 8px;
-  right: 76px;
-  z-index: 19;
-  width: 260px;
-  max-height: calc(100% - 24px);
-  overflow-y: auto;
-  padding: 6px 0 10px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--border, #e6e9ef);
-  border-radius: 8px;
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
-  font-size: 12px;
-}
-
-/* The news module's read on the pair, above the raw headlines. Separated by a
-   rule because it is a CONCLUSION, not another headline — reading it as one
-   more item in the list is exactly the mistake it exists to prevent. */
-.note-hint {
-  cursor: help;
-  font-style: italic;
-}
-
-.news-focus {
-  padding-bottom: 8px;
-  margin-bottom: 8px;
-  border-bottom: 1px solid var(--border, #e0e3eb);
-}
-
-.detail-list {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 10px;
-  margin: 0;
-  padding: 0 12px;
-
-  dt {
-    color: var(--text-muted, #787b86);
-  }
-
-  dd {
-    margin: 0;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .up {
-    color: #26a69a;
-  }
-
-  .down {
-    color: #ef5350;
-  }
-}
-
-.pane-empty {
-  padding: 10px 12px;
-  color: var(--text-muted, #787b86);
-}
-
-.news-list {
-  list-style: none;
-  // Long-press opens the AI analysis: no text selection or iOS callout under the finger.
-  user-select: none;
-  -webkit-touch-callout: none;
-  margin: 0;
-  padding: 0 12px;
-
-  li {
-    padding: 6px 0;
-    border-bottom: 1px solid var(--border, #e6e9ef);
-
-    &:last-child {
-      border-bottom: 0;
-    }
-  }
-
-  a {
-    color: inherit;
-    text-decoration: none;
-    line-height: 1.35;
-
-    &:hover {
-      color: var(--accent, #2962ff);
-    }
-  }
-}
-
-.news-meta {
-  font-size: 11px;
-  margin-top: 2px;
-}
-
-.script-error {
-  color: var(--danger, #ef5350);
-  border-color: currentColor;
-}
-
-.symbol-input {
-  width: 72px;
-  text-transform: uppercase;
 }
 
 // Strategy tester / Pine editor dock: under the chart (resizable), maximised over it with a strip of the live chart
@@ -1090,44 +616,14 @@ $pane-gap: 4px;
   }
 }
 
-// Many studies must not push the chart off the page.
-.studies {
-  max-height: 112px;
-  overflow-y: auto;
-}
-
 // ── Line icons (app-chart-icon) ──
 // TradingView's look: icon-led buttons, full-strength ink at rest, icon and label on one baseline.
-.tool,
 .menu-action,
-.market-status,
-.study-toggle,
-.study-settings,
-.study-remove,
 .tree-remove,
 .panel-focus {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-
-.tool {
-  color: var(--text, #131722);
-}
-
-.rail-tool {
-  width: 36px;
-  height: 34px;
-  color: var(--text, #131722);
-}
-
-.rail-caret {
-  display: inline-flex;
-  align-items: center;
-}
-
-.icon {
-  display: inline-flex;
 }
 
 // ── Watchlist dock (right) ──
@@ -1602,74 +1098,8 @@ $dock-w: min(var(--dock-width, 380px), 40%);
   gap: 8px;
 }
 
-// ── Left rail ──────────────────────────────────────────────────────────────
-.draw-rail {
-  padding: 4px;
-  gap: 0;
-  background: var(--tv-bg);
-}
-
-.rail-tool {
-  width: 44px;
-  height: 38px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--tv-ink);
-
-  &:hover {
-    background: var(--tv-hover);
-  }
-
-  &.active {
-    background: var(--tv-active-bg);
-    color: var(--tv-blue);
-  }
-}
-
 // ── Right icon strip ───────────────────────────────────────────────────────
 $strip-width: 46px;
-
-.right-strip {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 22;
-  width: $strip-width;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 4px 0;
-  background: var(--tv-bg);
-}
-
-.strip-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 38px;
-  height: 38px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--tv-ink);
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    background: var(--tv-hover);
-  }
-
-  &.active {
-    background: var(--tv-active-bg);
-    color: var(--tv-blue);
-  }
-
-  &:disabled {
-    opacity: 0.35;
-    cursor: default;
-  }
-}
 
 .watch-dock {
   right: $strip-width + $pane-gap;
@@ -1779,42 +1209,6 @@ $strip-width: 46px;
   .tb-menu-item {
     min-height: 40px;
   }
-
-  .study-toggle,
-  .study-settings,
-  .study-remove {
-    justify-content: center;
-    min-width: 40px;
-    min-height: 40px;
-  }
-}
-
-// ── Legend: one line, like TradingView ─────────────────────────────────────
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 10px;
-  max-width: calc(100% - 120px);
-  font-size: 13px;
-  text-shadow: none;
-}
-
-.legend > * {
-  flex-basis: 100%;
-}
-
-.legend > .legend-title,
-.legend > .legend-ohlc {
-  flex-basis: auto;
-}
-
-.legend-title {
-  gap: 6px;
-
-  strong {
-    font-weight: 400;
-  }
 }
 
 .legend-ohlc {
@@ -1831,142 +1225,6 @@ $strip-width: 46px;
   b {
     font-weight: 400;
     margin-left: 1px;
-  }
-}
-
-.legend-time {
-  display: none;
-}
-
-.market-status {
-  font-size: 12px;
-}
-
-// ── Studies strip ──────────────────────────────────────────────────────────
-.studies {
-  background: var(--tv-bg);
-}
-
-.study {
-  border-color: var(--tv-line);
-  border-radius: 4px;
-}
-
-// ── Rail flyouts and utilities, TradingView metrics ──
-.rail-flyout {
-  min-width: 240px;
-  padding: 6px 0;
-  background: var(--tv-bg);
-  border: 0;
-  border-radius: 6px;
-  box-shadow:
-    var(--tv-menu-shadow),
-    0 0 0 1px var(--tv-line);
-}
-
-.rail-flyout-title {
-  padding: 10px 14px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--tv-muted);
-}
-
-.rail-flyout-sep {
-  height: 1px;
-  margin: 6px 6px;
-  background: var(--tv-line);
-}
-
-.rail-flyout-item {
-  gap: 10px;
-  min-height: 40px;
-  padding: 0 14px 0 8px;
-  border-radius: 0;
-  color: var(--tv-ink);
-
-  &:hover {
-    background: var(--tv-hover);
-  }
-
-  &.active {
-    background: var(--tv-active-bg);
-    color: var(--tv-blue);
-  }
-}
-
-.rail-sep {
-  flex: none;
-  width: 28px;
-  height: 1px;
-  margin: 6px auto;
-  background: var(--tv-line);
-}
-
-.rail-tool:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-// ── Drawing context menu (TradingView) ─────────────────────────────────────
-.drawing-menu,
-.drawing-menu .submenu {
-  min-width: 220px;
-  padding: 6px 0;
-  background: var(--tv-bg);
-  color: var(--tv-ink);
-  border: 0;
-  border-radius: 6px;
-  box-shadow:
-    var(--tv-menu-shadow),
-    0 0 0 1px var(--tv-line);
-  font-size: 13px;
-
-  button {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 6px 14px;
-    font-size: 13px;
-
-    &:hover:not(:disabled) {
-      background: var(--tv-hover);
-    }
-  }
-
-  .menu-sep {
-    height: 1px;
-    margin: 6px 0;
-    background: var(--tv-line);
-  }
-
-  .mi-blank {
-    width: 20px;
-  }
-}
-
-.drawing-menu .submenu-host {
-  position: relative;
-
-  > .has-sub {
-    width: 100%;
-  }
-
-  .sub-caret {
-    margin-left: auto;
-    color: var(--tv-muted);
-  }
-
-  > .submenu {
-    display: none;
-    position: absolute;
-    left: 100%;
-    top: -6px;
-  }
-
-  &:hover > .submenu,
-  &:focus-within > .submenu {
-    display: flex;
   }
 }
 

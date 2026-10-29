@@ -1,0 +1,95 @@
+// The per-architecture leaderboard on the Architecture tab (MlArchLeaderboardComponent).
+
+:host {
+  // No box of its own: the page lays the card out exactly as when it was inline.
+  display: contents;
+}
+
+.arch-board {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.arch-board-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.arch-board-head h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+.arch-board-scroll {
+  max-height: 540px;
+  overflow-x: auto;
+  overflow-y: auto;
+}
+/* Thirteen nowrap columns need ~1,100px; below that the wrapper scrolls
+   sideways instead of the card clipping the last columns. */
+table.arch-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: collapse;
+}
+table.arch-table th,
+table.arch-table td {
+  padding: 8px var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+table.arch-table thead th {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+table.arch-table.sticky thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+table.arch-table tbody tr:last-child td {
+  border-bottom: none;
+}
+table.arch-table tbody tr:hover {
+  background: var(--bg-tertiary);
+}
+table.arch-table th.num,
+table.arch-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+table.arch-table td.mono {
+  font-family: 'SF Mono', 'Menlo', monospace;
+}
+table.arch-table td.muted {
+  color: var(--text-tertiary);
+}
+table.arch-table td.good {
+  color: var(--profit);
+}
+table.arch-table td.warn {
+  color: #c93400;
+}
+table.arch-table td.bad {
+  color: var(--loss);
+}
+.arch-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.small {
+  font-size: var(--text-xs);
+}

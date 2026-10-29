@@ -1,0 +1,139 @@
+// Live bid/ask, candle-close countdown and open P&L badges in the trading chart's toolbar.
+
+:host {
+  // No box of its own: the parent lays the content out exactly as when it was inline.
+  display: contents;
+}
+
+.live-price-display {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 4px var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-variant-numeric: tabular-nums;
+}
+.live-label {
+  font-size: 9px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+.live-bid {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  transition: color 0.3s ease;
+}
+.live-bid.up {
+  color: var(--profit);
+}
+.live-bid.down {
+  color: var(--loss);
+}
+.live-separator {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+.live-ask {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.live-spread {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  padding: 1px 6px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+/* Candle-close countdown badge — pinned next to the live-price box
+   so the operator can read both the current bid/ask and how long
+   until the next bar without taking their eyes off the chrome. */
+.candle-countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  transition:
+    background 0.2s,
+    color 0.2s,
+    border-color 0.2s;
+}
+.countdown-label {
+  color: var(--text-tertiary);
+  font-weight: var(--font-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.countdown-value {
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+}
+/* Under 10 seconds, flag the imminent close in orange so operators
+   can defer manual entries past the bar boundary. */
+.candle-countdown.imminent {
+  background: rgba(255, 149, 0, 0.12);
+  border-color: rgba(255, 149, 0, 0.4);
+}
+.candle-countdown.imminent .countdown-value {
+  color: #ff9500;
+}
+
+/* Open positions cumulative P&L badge — same shell as the candle
+   countdown so the two read as a paired row. Sign tints the
+   background and the value so the operator can pick up gain/loss
+   from peripheral vision without parsing the digits. */
+.open-pnl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.open-pnl.gain {
+  background: rgba(52, 199, 89, 0.1);
+  border-color: rgba(52, 199, 89, 0.35);
+}
+.open-pnl.gain .countdown-value {
+  color: #34c759;
+}
+.open-pnl.loss {
+  background: rgba(255, 59, 48, 0.1);
+  border-color: rgba(255, 59, 48, 0.35);
+}
+.open-pnl.loss .countdown-value {
+  color: #ff3b30;
+}

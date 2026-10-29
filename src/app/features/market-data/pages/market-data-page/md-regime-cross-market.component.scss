@@ -1,0 +1,253 @@
+// The chart tab's Regime & Cross-Market panel: regime, ML prediction, correlation, spread comparison
+// and tick volatility.
+@use 'market-insights-chrome';
+
+:host {
+  // No box of its own: the page lays the panel out exactly as when it was inline.
+  display: contents;
+}
+
+/* ── Regime & Cross-Market panel ────────────────────────────────
+   Market Insights chrome (.insights-section / .insights-grid): one frame,
+   hairline cells. Cells stretch to the row, so the two short panels
+   (regime, ML prediction) stack in one column beside the three tall ones
+   instead of each padding out to the spread chart's height. Every area is
+   filled at every breakpoint, so the 1px border backdrop never shows
+   through as a grey block. minmax(0, …) lets the echarts cells shrink. */
+.insights-grid.analytics-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(0, 1.2fr);
+  grid-template-areas:
+    'regime corr spread vol'
+    'pred corr spread vol';
+}
+.a-regime {
+  grid-area: regime;
+}
+.a-pred {
+  grid-area: pred;
+}
+.a-corr {
+  grid-area: corr;
+}
+.a-spread {
+  grid-area: spread;
+}
+.a-vol {
+  grid-area: vol;
+}
+/* Viewport width, sidebar included: four-up wants ~1,250px of content, which a
+   1440px screen with the sidebar open does not have. */
+@media (max-width: 1560px) {
+  .insights-grid.analytics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      'regime corr'
+      'pred corr'
+      'spread vol';
+  }
+}
+@media (max-width: 900px) {
+  .insights-grid.analytics-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: 'regime' 'pred' 'corr' 'spread' 'vol';
+  }
+}
+/* The correlation list fills its cell and scrolls; size containment keeps a long
+   watch list from setting the row height for every other cell. */
+.a-corr .corr-list {
+  contain: size;
+  flex: 1 1 auto;
+  min-height: 240px;
+  overflow-y: auto;
+}
+.insight-caption {
+  margin: 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+/* Regime card */
+.regime-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  background: rgba(142, 142, 147, 0.12);
+  color: var(--text-primary);
+}
+.regime-pill.trending {
+  background: rgba(52, 199, 89, 0.14);
+  color: #15803d;
+}
+.regime-pill.ranging {
+  background: rgba(0, 113, 227, 0.12);
+  color: #0071e3;
+}
+.regime-pill.high-vol {
+  background: rgba(255, 149, 0, 0.14);
+  color: #c93400;
+}
+.regime-pill.low-vol {
+  background: rgba(142, 142, 147, 0.18);
+  color: #636366;
+}
+.regime-pill.crisis {
+  background: rgba(255, 59, 48, 0.16);
+  color: #b91c1c;
+}
+.regime-pill.breakout {
+  background: rgba(175, 82, 222, 0.14);
+  color: #8a2be2;
+}
+.regime-conf {
+  font-size: 11px;
+  font-weight: var(--font-medium);
+  opacity: 0.8;
+}
+.regime-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+}
+.regime-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.regime-stats dt {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.regime-stats dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+/* Prediction card */
+.pred-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  background: rgba(142, 142, 147, 0.12);
+}
+.pred-pill.up {
+  background: rgba(52, 199, 89, 0.14);
+  color: #15803d;
+}
+.pred-pill.down {
+  background: rgba(255, 59, 48, 0.14);
+  color: #b91c1c;
+}
+.pred-conf {
+  font-size: 11px;
+  opacity: 0.85;
+}
+.pred-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+}
+.pred-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.pred-stats dt {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.pred-stats dd {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+.status-chip {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  background: rgba(142, 142, 147, 0.18);
+  color: var(--text-secondary);
+}
+// Status modifiers arrive as [class]="'status-' + status".
+.status-chip.status-pending {
+  background: rgba(255, 149, 0, 0.14);
+  color: #c93400;
+}
+.status-chip.status-approved,
+.status-chip.status-executed {
+  background: rgba(52, 199, 89, 0.14);
+  color: #15803d;
+}
+.status-chip.status-rejected {
+  background: rgba(255, 59, 48, 0.14);
+  color: #b91c1c;
+}
+
+/* Correlation strip */
+.corr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.corr-row {
+  display: grid;
+  grid-template-columns: 70px 1fr 50px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 11px;
+}
+.corr-symbol {
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+}
+.corr-bar-wrap {
+  position: relative;
+  height: 8px;
+  background: rgba(142, 142, 147, 0.12);
+  border-radius: 4px;
+}
+.corr-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 4px;
+}
+.corr-bar.positive {
+  background: #34c759;
+}
+.corr-bar.negative {
+  background: #ff3b30;
+}
+.corr-zero {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--border);
+}
+.corr-value {
+  text-align: right;
+}

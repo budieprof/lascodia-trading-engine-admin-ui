@@ -61,6 +61,9 @@ import {
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { MlTrainingDiagnosticsComponent } from './ml-training-diagnostics.component';
+import { MlAbTestDetailComponent } from './ml-ab-test-detail.component';
+import { MlArchLeaderboardComponent } from './ml-arch-leaderboard.component';
 
 /** Analytics samples are capped so a 30k-run fleet does not land in the browser. */
 const ANALYTICS_SAMPLE_CAP = 5000;
@@ -112,6 +115,9 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
     ModalA11yDirective,
     DatePipe,
     DecimalPipe,
+    MlTrainingDiagnosticsComponent,
+    MlAbTestDetailComponent,
+    MlArchLeaderboardComponent,
   ],
   template: `
     <div class="page">
@@ -1030,182 +1036,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                   <p class="muted small mt-4">Loading diagnostics…</p>
                 } @else if (diagnostics()) {
                   @if (diagnostics(); as d) {
-                    <section class="diagnostics mt-6">
-                      <h4>Diagnostics</h4>
-
-                      <div class="diag-grid">
-                        <div class="diag-card">
-                          <h5>Evaluation metrics</h5>
-                          <dl>
-                            <div>
-                              <dt>F1 score</dt>
-                              <dd>
-                                {{ d.f1Score !== null ? (d.f1Score | number: '1.4-4') : '—' }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Brier score</dt>
-                              <dd>
-                                {{ d.brierScore !== null ? (d.brierScore | number: '1.4-4') : '—' }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Sharpe ratio</dt>
-                              <dd>
-                                {{
-                                  d.sharpeRatio !== null ? (d.sharpeRatio | number: '1.3-3') : '—'
-                                }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Expected value</dt>
-                              <dd>
-                                {{
-                                  d.expectedValue !== null
-                                    ? (d.expectedValue | number: '1.4-4')
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Abstention rate</dt>
-                              <dd>
-                                {{
-                                  d.abstentionRate !== null
-                                    ? (d.abstentionRate * 100 | number: '1.1-1') + '%'
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Abstention precision</dt>
-                              <dd>
-                                {{
-                                  d.abstentionPrecision !== null
-                                    ? (d.abstentionPrecision * 100 | number: '1.1-1') + '%'
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                          </dl>
-                        </div>
-
-                        <div class="diag-card">
-                          <h5>Architecture &amp; budget</h5>
-                          <dl>
-                            <div>
-                              <dt>Architecture</dt>
-                              <dd>{{ d.learnerArchitecture }}</dd>
-                            </div>
-                            <div>
-                              <dt>Priority</dt>
-                              <dd>{{ d.priority }}</dd>
-                            </div>
-                            <div>
-                              <dt>Training time</dt>
-                              <dd>
-                                {{
-                                  d.trainingDurationMs !== null
-                                    ? (d.trainingDurationMs | number) + ' ms'
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Attempt</dt>
-                              <dd>{{ d.attemptCount }}</dd>
-                            </div>
-                            <div>
-                              <dt>Picked up</dt>
-                              <dd>
-                                {{ d.pickedUpAt ? (d.pickedUpAt | date: 'MMM d, HH:mm:ss') : '—' }}
-                              </dd>
-                            </div>
-                            <div>
-                              <dt>Label imbalance</dt>
-                              <dd>
-                                {{
-                                  d.labelImbalanceRatio !== null
-                                    ? (d.labelImbalanceRatio * 100 | number: '1.1-1') + '%'
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                          </dl>
-                        </div>
-
-                        <div class="diag-card">
-                          <h5>Drift trigger</h5>
-                          @if (d.driftTriggerType) {
-                            <dl>
-                              <div>
-                                <dt>Trigger</dt>
-                                <dd>{{ d.driftTriggerType }}</dd>
-                              </div>
-                            </dl>
-                            @if (d.driftMetadataJson) {
-                              <pre class="json">{{ formatJson(d.driftMetadataJson) }}</pre>
-                            }
-                          } @else {
-                            <p class="muted small">
-                              Run was scheduled or manual — no drift trigger.
-                            </p>
-                          }
-                        </div>
-
-                        <div class="diag-card">
-                          <h5>Reproducibility</h5>
-                          <dl>
-                            <div>
-                              <dt>Dataset hash</dt>
-                              <dd class="mono">{{ d.datasetHash || '—' }}</dd>
-                            </div>
-                            <div>
-                              <dt>Candle range</dt>
-                              <dd>
-                                {{
-                                  d.candleIdRangeStart !== null
-                                    ? d.candleIdRangeStart + ' → ' + d.candleIdRangeEnd
-                                    : '—'
-                                }}
-                              </dd>
-                            </div>
-                          </dl>
-                        </div>
-                      </div>
-
-                      @if (trainingFlagBadges(d).length > 0) {
-                        <div class="flag-row">
-                          <span class="flag-label">Training techniques applied:</span>
-                          @for (flag of trainingFlagBadges(d); track flag) {
-                            <span class="flag-pill">{{ flag }}</span>
-                          }
-                        </div>
-                      }
-
-                      <details class="diag-details">
-                        <summary>Hyperparameter config</summary>
-                        <pre class="json">{{
-                          d.hyperparamConfigJson
-                            ? formatJson(d.hyperparamConfigJson)
-                            : '— not provided —'
-                        }}</pre>
-                      </details>
-                      <details class="diag-details">
-                        <summary>Training-dataset stats</summary>
-                        <pre class="json">{{
-                          d.trainingDatasetStatsJson
-                            ? formatJson(d.trainingDatasetStatsJson)
-                            : '— not provided —'
-                        }}</pre>
-                      </details>
-                      <details class="diag-details">
-                        <summary>Cross-validation fold scores</summary>
-                        <pre class="json">{{
-                          d.cvFoldScoresJson ? formatJson(d.cvFoldScoresJson) : '— not provided —'
-                        }}</pre>
-                      </details>
-                    </section>
+                    <app-ml-training-diagnostics [diagnostics]="d" />
                   }
                 } @else {
                   <p class="muted small mt-4">Diagnostics could not be loaded for this run.</p>
@@ -1581,79 +1412,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
             </div>
 
             <!-- Per-architecture leaderboard -->
-            <section class="arch-board">
-              <header class="arch-board-head">
-                <h3>Per-architecture leaderboard</h3>
-                <span class="muted small">
-                  Sortable by total models · default order: most models first
-                </span>
-              </header>
-              <div class="arch-board-scroll">
-                <table class="arch-table sticky">
-                  <thead>
-                    <tr>
-                      <th>Architecture</th>
-                      <th class="num">Total</th>
-                      <th class="num">Active</th>
-                      <th class="num">Training</th>
-                      <th class="num">Superseded</th>
-                      <th class="num">Failed</th>
-                      <th class="num">Activation %</th>
-                      <th class="num">Avg accuracy</th>
-                      <th class="num">Median accuracy</th>
-                      <th class="num">Best accuracy</th>
-                      <th class="num">Avg RMSE</th>
-                      <th class="num">Total samples</th>
-                      <th class="num">Latest trained</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (row of archLeaderboard(); track row.architecture) {
-                      <tr>
-                        <td class="mono">
-                          <span class="arch-dot" [style.background]="row.color"></span>
-                          {{ row.architecture }}
-                        </td>
-                        <td class="num mono">{{ row.count | number }}</td>
-                        <td class="num mono" [class.good]="row.active > 0">{{ row.active }}</td>
-                        <td class="num mono">{{ row.training }}</td>
-                        <td class="num mono muted">{{ row.superseded }}</td>
-                        <td class="num mono" [class.bad]="row.failed > 0">
-                          {{ row.failed }}
-                        </td>
-                        <td class="num mono" [class.good]="row.activationRate >= 0.05">
-                          {{ formatPct(row.activationRate) }}
-                        </td>
-                        <td
-                          class="num mono"
-                          [class.good]="row.accuracies.length > 0 && row.avgAccuracy >= 0.55"
-                          [class.warn]="row.accuracies.length > 0 && row.avgAccuracy < 0.52"
-                        >
-                          {{ row.accuracies.length > 0 ? formatPct(row.avgAccuracy) : '—' }}
-                        </td>
-                        <td class="num mono">
-                          {{ row.accuracies.length > 0 ? formatPct(row.medianAccuracy) : '—' }}
-                        </td>
-                        <td class="num mono" [class.good]="row.accuracies.length > 0">
-                          {{ row.accuracies.length > 0 ? formatPct(row.bestAccuracy) : '—' }}
-                        </td>
-                        <td class="num mono">
-                          {{ row.avgRMSE > 0 ? row.avgRMSE.toFixed(3) : '—' }}
-                        </td>
-                        <td class="num mono muted">
-                          {{ row.totalSamples | number }}
-                        </td>
-                        <td class="muted">
-                          {{
-                            row.latestTrainedAt ? (row.latestTrainedAt | date: 'MMM d, HH:mm') : '—'
-                          }}
-                        </td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
-            </section>
+            <app-ml-arch-leaderboard [rows]="archLeaderboard()" />
 
             @if (archAnalyticsRows().length === 0) {
               <div class="empty-arch">
@@ -2304,88 +2063,7 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
               </section>
 
               @if (selectedAb(); as t) {
-                <div class="ab-detail mt-6">
-                  <header class="ab-head">
-                    <h4>Test #{{ t.id }} — {{ t.symbol }} / {{ t.timeframe }}</h4>
-                    <span class="pill" [attr.data-status]="t.status">{{ t.status }}</span>
-                  </header>
-                  <div class="ab-grid">
-                    <div class="ab-side champion">
-                      <h5>Champion (#{{ t.championModelId }})</h5>
-                      <dl>
-                        <div>
-                          <dt>P&L</dt>
-                          <dd
-                            class="mono"
-                            [class.profit]="t.championPnl > 0"
-                            [class.loss]="t.championPnl < 0"
-                          >
-                            {{ t.championPnl | number: '1.2-2' }}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Win Rate</dt>
-                          <dd class="mono">{{ t.championWinRate * 100 | number: '1.1-1' }}%</dd>
-                        </div>
-                      </dl>
-                    </div>
-                    <div class="ab-side challenger">
-                      <h5>Challenger (#{{ t.challengerModelId }})</h5>
-                      <dl>
-                        <div>
-                          <dt>P&L</dt>
-                          <dd
-                            class="mono"
-                            [class.profit]="t.challengerPnl > 0"
-                            [class.loss]="t.challengerPnl < 0"
-                          >
-                            {{ t.challengerPnl | number: '1.2-2' }}
-                          </dd>
-                        </div>
-                        <div>
-                          <dt>Win Rate</dt>
-                          <dd class="mono">{{ t.challengerWinRate * 100 | number: '1.1-1' }}%</dd>
-                        </div>
-                      </dl>
-                    </div>
-                  </div>
-                  <dl class="ab-stats">
-                    <div>
-                      <dt>Samples</dt>
-                      <dd class="mono">{{ t.sampleSize | number }}</dd>
-                    </div>
-                    <div>
-                      <dt>SPRT LLR</dt>
-                      <dd class="mono">
-                        {{
-                          t.sprtLogLikelihoodRatio !== null
-                            ? (t.sprtLogLikelihoodRatio | number: '1.3-3')
-                            : '—'
-                        }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>p-value</dt>
-                      <dd class="mono">
-                        {{ t.pValue !== null ? (t.pValue | number: '1.4-4') : '—' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Started</dt>
-                      <dd>{{ t.startedAt | date: 'MMM d, HH:mm' }}</dd>
-                    </div>
-                    <div>
-                      <dt>Completed</dt>
-                      <dd>{{ t.completedAt ? (t.completedAt | date: 'MMM d, HH:mm') : '—' }}</dd>
-                    </div>
-                    @if (t.decision) {
-                      <div class="full">
-                        <dt>Decision</dt>
-                        <dd>{{ t.decision }}</dd>
-                      </div>
-                    }
-                  </dl>
-                </div>
+                <app-ml-ab-test-detail [test]="t" />
               }
             }
           </div>
@@ -2704,91 +2382,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         .arch-chart-row {
           grid-template-columns: 1fr;
         }
-      }
-      .arch-board {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .arch-board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .arch-board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .arch-board-scroll {
-        max-height: 540px;
-        overflow-x: auto;
-        overflow-y: auto;
-      }
-      /* Thirteen nowrap columns need ~1,100px; below that the wrapper scrolls
-         sideways instead of the card clipping the last columns. */
-      table.arch-table {
-        width: 100%;
-        min-width: 1120px;
-        border-collapse: collapse;
-      }
-      table.arch-table th,
-      table.arch-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-        white-space: nowrap;
-      }
-      table.arch-table thead th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      table.arch-table.sticky thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      table.arch-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      table.arch-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      table.arch-table th.num,
-      table.arch-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      table.arch-table td.mono {
-        font-family: 'SF Mono', 'Menlo', monospace;
-      }
-      table.arch-table td.muted {
-        color: var(--text-tertiary);
-      }
-      table.arch-table td.good {
-        color: var(--profit);
-      }
-      table.arch-table td.warn {
-        color: #c93400;
-      }
-      table.arch-table td.bad {
-        color: var(--loss);
-      }
-      .arch-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 6px;
-        vertical-align: middle;
       }
       .empty-arch {
         background: var(--bg-secondary);
@@ -3123,24 +2716,13 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
 
       /* Training run detail */
       .run-detail,
-      .ab-detail {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .run-head,
-      .ab-head {
+      .run-head {
         display: flex;
         justify-content: space-between;
         align-items: center;
         gap: var(--space-3);
       }
-      .run-head h3,
-      .ab-head h4 {
+      .run-head h3 {
         margin: 0;
         font-size: var(--text-base);
         font-weight: var(--font-semibold);
@@ -3164,18 +2746,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
       .pill[data-status='Failed'] {
         background: rgba(255, 59, 48, 0.12);
         color: #d70015;
-      }
-      .pill[data-status='ChampionWon'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .pill[data-status='ChallengerWon'] {
-        background: rgba(175, 82, 222, 0.12);
-        color: #8944ab;
-      }
-      .pill[data-status='Inconclusive'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
       }
       .run-head-actions {
         display: flex;
@@ -3341,15 +2911,13 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
       .coverage-stats dd.danger {
         color: #d70015;
       }
-      .run-info,
-      .ab-stats {
+      .run-info {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
         gap: var(--space-4);
         margin: 0;
       }
-      .run-info dt,
-      .ab-stats dt {
+      .run-info dt {
         font-size: var(--text-xs);
         color: var(--text-tertiary);
         text-transform: uppercase;
@@ -3357,16 +2925,12 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         font-weight: var(--font-medium);
         margin: 0;
       }
-      .run-info dd,
-      .ab-stats dd {
+      .run-info dd {
         margin: 2px 0 0;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
-      }
-      .ab-stats .full {
-        grid-column: 1 / -1;
       }
       .run-error {
         background: rgba(255, 59, 48, 0.06);
@@ -3393,154 +2957,10 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         color: var(--text-primary);
       }
 
-      /* Diagnostics panel */
-      .diagnostics h4 {
-        margin: 0 0 var(--space-4);
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .diag-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: var(--space-3);
-      }
-      .diag-card {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-      }
-      .diag-card h5 {
-        margin: 0 0 var(--space-2);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .diag-card dl {
-        display: grid;
-        grid-template-columns: auto 1fr;
-        gap: var(--space-1) var(--space-3);
-        margin: 0;
-      }
-      .diag-card dl > div {
-        display: contents;
-      }
-      .diag-card dt {
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-      }
-      .diag-card dd {
-        margin: 0;
-        font-size: var(--text-xs);
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-      }
-      .diag-card .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        word-break: break-all;
-      }
-      .flag-row {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        align-items: center;
-        margin-top: var(--space-4);
-        padding: var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-      }
-      .flag-label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .flag-pill {
-        display: inline-flex;
-        align-items: center;
-        padding: 2px var(--space-2);
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        background: rgba(10, 132, 255, 0.12);
-        color: #0a84ff;
-      }
-      .diag-details {
-        margin-top: var(--space-3);
-      }
-      .diag-details summary {
-        cursor: pointer;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        padding: var(--space-2) 0;
-      }
-      .json {
-        margin: var(--space-2) 0 0;
-        padding: var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-        color: var(--text-primary);
-        max-height: 280px;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
       .small {
         font-size: var(--text-xs);
       }
 
-      /* Signal A/B detail */
-      .ab-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-4);
-      }
-      .ab-side {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-      }
-      .ab-side.champion {
-        border-left: 3px solid #0071e3;
-      }
-      .ab-side.challenger {
-        border-left: 3px solid #34c759;
-      }
-      .ab-side h5 {
-        margin: 0 0 var(--space-3);
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-      }
-      .ab-side dl {
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .ab-side dl > div {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .ab-side dt {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .ab-side dd {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
       .mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
       }
@@ -3549,12 +2969,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
       }
       .loss {
         color: var(--loss);
-      }
-
-      @media (max-width: 768px) {
-        .ab-grid {
-          grid-template-columns: 1fr;
-        }
       }
 
       @media (max-width: 1200px) {
@@ -6210,30 +5624,6 @@ export class MlModelsPageComponent implements OnInit {
     if (h > 0) return `${h}h ${m}m ${s}s`;
     if (m > 0) return `${m}m ${s}s`;
     return `${s}s`;
-  }
-
-  formatJson(raw: string): string {
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  }
-
-  trainingFlagBadges(d: MLTrainingRunDiagnosticsDto): string[] {
-    const flags: Array<[boolean, string]> = [
-      [d.smoteApplied, 'SMOTE'],
-      [d.adversarialAugmentApplied, 'Adversarial'],
-      [d.mixupApplied, 'Mixup'],
-      [d.curriculumApplied, 'Curriculum'],
-      [d.nceLossUsed, 'NCE loss'],
-      [d.rareEventWeightingApplied, 'Rare-event weighting'],
-      [d.isPretrainingRun, 'Pre-training'],
-      [d.isDistillationRun, 'Distillation'],
-      [d.isEmergencyRetrain, 'Emergency'],
-      [d.isMamlRun, 'MAML'],
-    ];
-    return flags.filter(([on]) => on).map(([, label]) => label);
   }
 
   submitTraining(): void {
