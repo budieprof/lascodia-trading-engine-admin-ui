@@ -11,7 +11,7 @@ const READ_POST = new RegExp(
     String.raw`/(list|paged|query|summary)$`,
     String.raw`/admin/calibration/(signal-rejections|snapshots)$`, // GetPagedSignalRejections / CalibrationSnapshots
     String.raw`/drawdown-recovery/history$`, // GetPagedDrawdownSnapshotsQuery
-    String.raw`/llm-backtest/(estimate-cost|points|\d+/sensitivity-analysis)$`, // Estimate… / GetLlmBacktestPoints / Analyze…
+    String.raw`/llm-backtest/(estimate-cost|points|compare|\d+/sensitivity-analysis)$`, // Estimate… / GetLlmBacktestPoints / CompareLlmBacktestRunsQuery (2026-10-29) / Analyze…
     String.raw`/ml-model/drift-report$`, // GetDriftReportQuery
     String.raw`/scripting/(chart-bars|compile|format|run)$`, // GetChartBars / CompileScript / FormatScript / RunScriptQuery
     String.raw`/strategy-feedback/\d+/snapshots$`, // GetPagedStrategySnapshotsQuery
