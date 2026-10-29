@@ -21,6 +21,23 @@ const MAX_ITEMS = 40;
 export const TAB_SELECTOR =
   '[role="tab"], .tabs button, .tabs a, .tab-bar button, .tab-bar a, nav.tabs button, .subnav a, .pill-tabs button';
 
+/**
+ * Whether an element matching {@link TAB_SELECTOR} really is a tab. `.tabs button` is a descendant
+ * selector, and the shared tabs component wraps its whole panel in `.tabs` — so on a tabbed page
+ * every button in the content ("+ Create Strategy", each row's "Clone…") matched as a "tab". A
+ * real `role="tab"` always counts; anything else counts only when it is not inside the panel of the
+ * tab container it matched through.
+ */
+export function isTab(el: Element): boolean {
+  if (el.getAttribute('role') === 'tab') return true;
+  if (!el.matches(TAB_SELECTOR)) return false;
+  const container = el.closest('.tabs, .tab-bar, nav.tabs, .subnav, .pill-tabs');
+  const panel = el.closest(
+    '[role="tabpanel"], .tabs__content, [class*="tab-content"], [class*="tab-panel"]',
+  );
+  return !(container && panel && container.contains(panel));
+}
+
 export interface PageReadTable {
   /** The nearest heading above the table, if any. */
   heading: string | null;
@@ -136,7 +153,7 @@ export function readPage(
   }
 
   const tabs = [...root.querySelectorAll(TAB_SELECTOR)]
-    .filter(visible)
+    .filter((t) => visible(t) && isTab(t))
     .map((t) => ({ label: text(t), active: isActiveTab(t) }))
     .filter((t) => t.label);
 
@@ -199,8 +216,8 @@ export function readPage(
 export function findTab(root: HTMLElement, label: string): HTMLElement | null {
   const want = norm(label);
   if (!want) return null;
-  const tabs = [...root.querySelectorAll(TAB_SELECTOR)].filter((t) =>
-    isVisible(t as HTMLElement),
+  const tabs = [...root.querySelectorAll(TAB_SELECTOR)].filter(
+    (t) => isVisible(t as HTMLElement) && isTab(t),
   ) as HTMLElement[];
   return (
     tabs.find((t) => norm(text(t)) === want) ??

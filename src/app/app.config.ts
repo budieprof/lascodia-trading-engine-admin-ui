@@ -23,6 +23,7 @@ import { approvalInterceptor } from '@core/auth/approval.interceptor';
 import { AuthService } from '@core/auth/auth.service';
 import { serverClockInterceptor } from '@core/time/server-clock';
 import { pageApiActivityInterceptor } from '@core/assistant/page-api-activity';
+import { assistantWriteGuardInterceptor } from '@core/assistant/assistant-write-guard';
 import { errorInterceptor } from '@core/auth/error.interceptor';
 import { retryInterceptor } from '@core/api/retry.interceptor';
 import { RUNTIME_CONFIG, RuntimeConfig } from '@core/config/runtime-config';
@@ -98,11 +99,13 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
           },
         }),
       ),
-      // Order matters: auth → CSRF (BFF sign-in) → retry (so retries carry both) → error (final
-      // toast, step-up, CSRF refresh) → approval (two-person 202 notice).
+      // Order matters: assistant write guard (first, so a write it refuses never retries, toasts or
+      // leaves the browser) → auth → CSRF (BFF sign-in) → retry (so retries carry both) → error
+      // (final toast, step-up, CSRF refresh) → approval (two-person 202 notice).
       provideHttpClient(
         withXhr(),
         withInterceptors([
+          assistantWriteGuardInterceptor,
           authInterceptor,
           csrfInterceptor,
           retryInterceptor,
