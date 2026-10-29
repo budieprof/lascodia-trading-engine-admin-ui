@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { CurrencyPipe, DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Observable, catchError, forkJoin, map, of, switchMap } from 'rxjs';
 
@@ -33,6 +33,12 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 
 import { OpsApprovalsComponent } from './ops-approvals.component';
 import { OpsRunningComponent } from './ops-running.component';
+import {
+  latestCapabilities,
+  recentWorkOrders,
+  summariseWindow,
+  toolLabel,
+} from './agent-ops-history';
 import {
   auditKindLabel,
   buildWorkOrder,
@@ -107,6 +113,7 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     DatePipe,
+    CurrencyPipe,
     RouterLink,
     PageHeaderComponent,
     MetricCardComponent,
@@ -292,6 +299,171 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
           }
         </section>
 
+        <!-- ── History: what the board alone cannot say when nothing is running ── -->
+        @if (history(); as h) {
+          <section class="block">
+            <header class="block-head">
+              <h2>Last 7 and 30 days</h2>
+              <span class="hint">From the agent's audit timeline; spend from run state</span>
+            </header>
+            <table class="hist">
+              <thead>
+                <tr>
+                  <th></th>
+                  <th class="num">7 days</th>
+                  <th class="num">30 days</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>Work orders started</td>
+                  <td class="num">{{ h.d7.runsStarted }}</td>
+                  <td class="num">{{ h.d30.runsStarted }}</td>
+                </tr>
+                <tr>
+                  <td>Work orders finished</td>
+                  <td class="num">{{ h.d7.runsFinished }}</td>
+                  <td class="num">{{ h.d30.runsFinished }}</td>
+                </tr>
+                <tr>
+                  <td>Approvals asked of you</td>
+                  <td class="num">{{ h.d7.approvalsAsked }}</td>
+                  <td class="num">{{ h.d30.approvalsAsked }}</td>
+                </tr>
+                <tr>
+                  <td>Config writes (agent or operator)</td>
+                  <td class="num">{{ h.d7.configWrites }}</td>
+                  <td class="num">{{ h.d30.configWrites }}</td>
+                </tr>
+                <tr>
+                  <td>Change sets recorded</td>
+                  <td class="num">{{ h.d7.changeSets }}</td>
+                  <td class="num">{{ h.d30.changeSets }}</td>
+                </tr>
+                <tr>
+                  <td>Model lifecycle events</td>
+                  <td class="num">{{ h.d7.modelEvents }}</td>
+                  <td class="num">{{ h.d30.modelEvents }}</td>
+                </tr>
+                <tr>
+                  <td
+                    title="Total cost of the work orders active in the window, across all their runs. The page reads the run state of the newest 12 work orders; a ≥ means older ones in the window were not counted."
+                  >
+                    Spend (work orders active in the window)
+                  </td>
+                  <td class="num">
+                    {{ h.d7.spendComplete ? '' : '≥ ' }}{{ h.d7.spendUsd | currency: 'USD' }}
+                    <span class="muted"
+                      >· {{ h.d7.spendSessions }} of {{ h.d7.sessionsInWindow }}</span
+                    >
+                  </td>
+                  <td class="num">
+                    {{ h.d30.spendComplete ? '' : '≥ ' }}{{ h.d30.spendUsd | currency: 'USD' }}
+                    <span class="muted"
+                      >· {{ h.d30.spendSessions }} of {{ h.d30.sessionsInWindow }}</span
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        }
+
+        @if (recent().length > 0) {
+          <section class="block">
+            <header class="block-head">
+              <h2>Recent work orders</h2>
+              <span class="hint">Newest first, whatever their state</span>
+            </header>
+            <table class="hist">
+              <thead>
+                <tr>
+                  <th>Work order</th>
+                  <th>State</th>
+                  <th>Last activity</th>
+                  <th class="num">Runs</th>
+                  <th class="num">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (o of recent(); track o.sessionId) {
+                  <tr>
+                    <td class="title-cell">
+                      <a
+                        [routerLink]="['/conversations']"
+                        [queryParams]="{ conversation: o.sessionId }"
+                        [title]="o.title"
+                        >#{{ o.sessionId }} · {{ o.title }}</a
+                      >
+                    </td>
+                    <td>{{ o.statusLabel || '—' }}</td>
+                    <td [title]="o.lastActivityAtUtc">
+                      {{ o.lastActivityAtUtc | date: 'd MMM HH:mm' }}
+                    </td>
+                    <td class="num">{{ o.run?.runCount ?? '—' }}</td>
+                    <td class="num">
+                      {{ o.run ? (o.run.sessionCostUsd | currency: 'USD') : '—' }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </section>
+        }
+
+        <section class="block">
+          <header class="block-head">
+            <h2>What the agent can do</h2>
+            <span class="hint">
+              @if (capabilities(); as c) {
+                Permissions its latest run started with, {{ c.atUtc | date: 'd MMM' }}
+              } @else {
+                No run has recorded its permissions yet
+              }
+            </span>
+          </header>
+          <p class="about">
+            The algo-engineer reads the engine (models, backtests, signals, config), investigates
+            what you ask, proposes changes and — with your approval — applies them: training, shadow
+            evaluations, config changes, model activation. It can also arm monitors that wake it
+            when something happens. Start one from
+            <a routerLink="/conversations">Conversations</a> → New analysis → Algo-engineer work
+            order; it then appears above while it runs.
+          </p>
+          @if (capabilities(); as c) {
+            <ul class="caps">
+              <li [class.on]="c.caps.mlControl">
+                ML control {{ c.caps.mlControl ? 'on' : 'off' }}
+              </li>
+              <li [class.on]="c.caps.configWrite">
+                Config writes {{ c.caps.configWrite ? 'on' : 'off' }}
+              </li>
+              <li [class.on]="c.caps.promote">Promotion {{ c.caps.promote ? 'on' : 'off' }}</li>
+              <li [class.on]="!c.caps.readOnly">
+                {{ c.caps.readOnly ? 'Read-only' : 'May write' }}
+              </li>
+              @if (c.caps.maxSteps !== null) {
+                <li>Up to {{ c.caps.maxSteps }} steps</li>
+              }
+              @if (c.caps.budgetUsd !== null) {
+                <li>Budget {{ c.caps.budgetUsd | currency: 'USD' }} a run</li>
+              }
+            </ul>
+            @if (c.caps.approvalRequiredFor.length) {
+              <p class="about">
+                <strong>Always asks you first:</strong>
+                {{ approvalList() }}.
+              </p>
+            }
+            @if (c.caps.reads || c.caps.writes || c.caps.denied) {
+              <p class="about">
+                Platform access — reads: {{ c.caps.reads ?? '—' }}; writes:
+                {{ c.caps.writes ?? '—' }}; never: {{ c.caps.denied ?? '—' }}.
+              </p>
+            }
+          }
+        </section>
+
         @if (orders().length === 0) {
           <app-empty-state
             title="No work orders yet"
@@ -355,6 +527,63 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
         margin-left: auto;
         font-size: var(--text-xs);
         color: var(--text-tertiary);
+      }
+      .hist {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .hist th,
+      .hist td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      .hist th {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+      }
+      .hist .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .title-cell {
+        max-width: 0;
+        width: 60%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .hist a,
+      .about a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .about {
+        margin: 0;
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+        max-width: 95ch;
+      }
+      .caps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      .caps li {
+        font-size: var(--text-xs);
+        padding: 2px 10px;
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+      }
+      .caps li.on {
+        color: var(--profit);
       }
       .none {
         margin: 0;
@@ -578,6 +807,39 @@ export class AlgoEngineerOperationsPageComponent {
   );
 
   protected readonly kindLabel = auditKindLabel;
+
+  /** 30 days of the agent's timeline — the history behind the 7/30-day table. Silent; null hides it. */
+  private readonly history30 = createPolledResource(
+    () => {
+      const to = new Date();
+      const from = new Date(to.getTime() - 30 * 86_400_000);
+      return this.algoEngineer.getAudit(from.toISOString(), to.toISOString(), 500).pipe(
+        map((r) => (r?.status ? (r.data ?? []) : null)),
+        catchError(() => of(null)),
+      );
+    },
+    { intervalMs: 300_000 },
+  );
+
+  protected readonly history = computed(() => {
+    const audit = this.history30.value();
+    if (!audit) return null;
+    const orders = this.orders();
+    const nowMs = this.now();
+    return {
+      d7: summariseWindow(audit, orders, 7, nowMs),
+      d30: summariseWindow(audit, orders, 30, nowMs),
+    };
+  });
+
+  protected readonly recent = computed(() => recentWorkOrders(this.orders(), 10));
+
+  protected readonly capabilities = computed(() =>
+    latestCapabilities(Object.values(this.board().runs)),
+  );
+  protected readonly approvalList = computed(
+    () => this.capabilities()?.caps.approvalRequiredFor.map(toolLabel).join(', ') ?? '',
+  );
 
   /** "updated 12s ago" — from the page's own clock, so it ages between refetches. */
   protected readonly updatedLabel = computed(() => {

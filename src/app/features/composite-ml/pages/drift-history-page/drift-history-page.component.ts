@@ -19,6 +19,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
+import { CompositeMlEvidenceTrendComponent } from '../../components/evidence-trend/evidence-trend.component';
 
 type LookbackDays = 7 | 30 | 90 | 365;
 
@@ -39,6 +40,7 @@ interface DriftHistoryResult {
     PageHeaderComponent,
     CompositeMlNavComponent,
     CompositeMlPipelineStateComponent,
+    CompositeMlEvidenceTrendComponent,
     ChartCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
@@ -64,6 +66,7 @@ interface DriftHistoryResult {
       />
 
       <app-composite-ml-pipeline-state variant="compact" [focus]="['catalogueDrift']" />
+      <app-composite-ml-evidence-trend [highlight]="layerKey()" />
 
       @if (!layerKey()) {
         <!-- No entry chosen: list every tracked entry (the drift summary's rows) so the page opens
