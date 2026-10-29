@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CandleDto } from '@core/api/api.types';
-import { atrFromCandles, atrLevels, atrTimeframe, orderStrategies, pipSizeFor, roundTo } from './signal-defaults';
+import {
+  atrFromCandles,
+  atrLevels,
+  atrTimeframe,
+  orderStrategies,
+  pipSizeFor,
+  roundTo,
+} from './signal-defaults';
 
 const candle = (i: number, range: number, isClosed = true): CandleDto => ({
   id: i,
@@ -27,7 +34,11 @@ describe('create-signal defaults (SP-13)', () => {
   });
 
   it('stop 1.5 ATR beyond the entry, target 2R on the other side, rounded to the digits', () => {
-    expect(atrLevels(1.1, 'Buy', 0.002, 5)).toEqual({ stopLoss: 1.097, takeProfit: 1.106, stopDistance: 0.003 });
+    expect(atrLevels(1.1, 'Buy', 0.002, 5)).toEqual({
+      stopLoss: 1.097,
+      takeProfit: 1.106,
+      stopDistance: 0.003,
+    });
     const sell = atrLevels(150.123, 'Sell', 0.4, 3);
     expect(sell.stopLoss).toBe(150.723);
     expect(sell.takeProfit).toBe(148.923);
