@@ -10,7 +10,18 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, map, of } from 'rxjs';
+import { catchError, forkJoin, map, of, switchMap } from 'rxjs';
+
+import { ApiService } from '@core/api/api.service';
+import type { ResponseData } from '@core/api/api.types';
+import {
+  activeSymbols,
+  boardRow,
+  defaultBook,
+  sortBoard,
+  type BookBoardRow,
+  type CandleWatermark,
+} from './order-book-board.logic';
 
 import { MarketDataService } from '@core/services/market-data.service';
 import type { OrderBookLevel, OrderBookLevels, OrderBookSnapshotDto } from '@core/api/api.types';
@@ -93,10 +104,14 @@ interface DepthLevel {
       </section>
 
       @if (!symbol()) {
-        <app-empty-state
-          title="Pick a symbol to load"
-          description="Enter a currency pair (e.g. EURUSD) and press Load. Streams refresh every 2 seconds while this page is open."
-        />
+        @if (boardLoading()) {
+          <app-card-skeleton [lines]="4" />
+        } @else {
+          <app-empty-state
+            title="No broker book is streaming right now"
+            description="None of the symbols the EAs stream has a depth snapshot from the last 5 minutes (the forex market may be closed). Pick any symbol below or type one to see its last recorded book."
+          />
+        }
       } @else if (loading()) {
         <app-card-skeleton [lines]="8" />
       } @else if (resource.error()) {
@@ -216,10 +231,117 @@ interface DepthLevel {
           }
         </section>
       }
+
+      <section class="board">
+        <header class="board-head">
+          <h3>Books by symbol</h3>
+          <span class="muted small">
+            Latest depth snapshot per symbol the EAs stream (checked when the page opened)
+            @if (board().length) {
+              · {{ streamingCount() }} of {{ board().length }} updated in the last 5 minutes
+            }
+          </span>
+          <button type="button" class="toggle" (click)="loadBoard()">Re-check</button>
+        </header>
+        @if (board().length) {
+          <div class="board-wrap">
+            <table class="board-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th class="num">Bid</th>
+                  <th class="num">Ask</th>
+                  <th class="num" title="Ask minus bid, in price units">Spread</th>
+                  <th class="num" title="Levels each side beyond top of book">Depth</th>
+                  <th>Captured</th>
+                  <th>EA instance</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of board(); track r.symbol) {
+                  <tr [class.current]="r.symbol === symbol()">
+                    <td>
+                      <button type="button" class="link" (click)="pick(r.symbol)">{{ r.symbol }}</button>
+                    </td>
+                    @if (r.snapshot; as b) {
+                      <td class="num mono">{{ b.bidPrice | number: '1.0-5' }}</td>
+                      <td class="num mono">{{ b.askPrice | number: '1.0-5' }}</td>
+                      <td class="num mono">{{ b.askPrice - b.bidPrice | number: '1.0-5' }}</td>
+                      <td class="num">{{ r.depth || 'top only' }}</td>
+                      <td [class.stale]="(r.ageSeconds ?? 0) > 300">{{ b.capturedAt | relativeTime }}</td>
+                      <td class="muted small">{{ b.instanceId }}</td>
+                    } @else {
+                      <td colspan="6" class="muted small">
+                        {{ r.symbol.includes('-') ? 'exchange-traded (crypto) — no broker book; its depth is on the chart’s order-flow views' : 'no depth snapshot recorded — the broker streams no DOM for it' }}
+                      </td>
+                    }
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (!boardLoading()) {
+          <p class="muted small">No symbol has streamed one-minute candles in the last 3 days, so there is no book to list.</p>
+        }
+      </section>
     </div>
   `,
   styles: [
     `
+      .board {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .board-head {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: var(--space-3);
+      }
+      .board-head h3 {
+        margin: 0;
+        font-size: var(--text-sm);
+      }
+      .board-wrap {
+        overflow-x: auto;
+      }
+      .board-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .board-table th,
+      .board-table td {
+        text-align: left;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+      }
+      .board-table th {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .board-table .num {
+        text-align: right;
+      }
+      .board-table tr.current td {
+        background: var(--bg-tertiary);
+      }
+      .board-table .stale {
+        color: var(--text-tertiary, var(--text-secondary));
+      }
+      .link {
+        background: none;
+        border: none;
+        padding: 0;
+        color: var(--accent);
+        font-family: var(--font-mono);
+        cursor: pointer;
+      }
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -436,6 +558,12 @@ export class OrderBookPageComponent {
   protected readonly symbolInput = signal<string>('');
   protected readonly symbol = signal<string>('');
   protected readonly showHeatmap = signal<boolean>(false);
+  private readonly api = inject(ApiService);
+  protected readonly board = signal<BookBoardRow[]>([]);
+  protected readonly boardLoading = signal(true);
+  protected readonly streamingCount = computed(
+    () => this.board().filter((r) => r.ageSeconds !== null && r.ageSeconds <= 300).length,
+  );
 
   // Hydrate symbol from query param so deep-links work.
   private readonly _qpSymbol = toSignal(
@@ -468,6 +596,44 @@ export class OrderBookPageComponent {
       this.symbol();
       this.resource.refresh();
     });
+    this.loadBoard();
+  }
+
+  /** One pass over the symbols the EAs stream: each one's latest book (no polling — Re-check repeats it). */
+  protected loadBoard(): void {
+    this.boardLoading.set(true);
+    this.api
+      .get<ResponseData<CandleWatermark[]>>('/market-data/candle/watermarks', { silent: true })
+      .pipe(
+        map((res) => activeSymbols(res?.data ?? [], Date.now())),
+        switchMap((symbols) =>
+          symbols.length
+            ? forkJoin(
+                symbols.map((sym) =>
+                  this.marketData.getLatestOrderBook(sym).pipe(
+                    map((res) => boardRow(sym, res?.status ? (res.data ?? null) : null, Date.now())),
+                    catchError(() => of(boardRow(sym, null, Date.now()))),
+                  ),
+                ),
+              )
+            : of([] as BookBoardRow[]),
+        ),
+        catchError(() => of([] as BookBoardRow[])),
+      )
+      .subscribe((rows) => {
+        const sorted = sortBoard(rows);
+        this.board.set(sorted);
+        this.boardLoading.set(false);
+        if (!this.symbol() && !this._qpSymbol()) {
+          const pick = defaultBook(sorted);
+          if (pick) this.pick(pick);
+        }
+      });
+  }
+
+  protected pick(sym: string): void {
+    this.symbolInput.set(sym);
+    this.symbol.set(sym);
   }
 
   protected readonly snapshot = computed(() => this.resource.value());

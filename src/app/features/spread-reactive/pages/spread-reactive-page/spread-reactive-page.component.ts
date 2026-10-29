@@ -311,6 +311,18 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
               </tbody>
             </table>
           </div>
+          @if (unsampled().count > 0 && !stateFilter().trim()) {
+            <p class="muted small unsampled-note">
+              @if (!showUnsampled()) {
+                {{ unsampled().count }} more pairs ({{ unsampled().symbols }} symbols on accounts
+                {{ unsampled().accounts.join(', ') }}) have a floor but no spread sample yet: their EA has not streamed
+                that symbol since the engine started, so they stand by as Warming. They are hidden here.
+              }
+              <button type="button" class="btn ghost" (click)="showUnsampled.set(!showUnsampled()); statePage.set(1)">
+                {{ showUnsampled() ? 'Hide pairs with no sample' : 'Show them' }}
+              </button>
+            </p>
+          }
           @if (statePageCount() > 1) {
             <div class="pager">
               <button
@@ -1168,9 +1180,18 @@ export class SpreadReactivePageComponent {
   private static readonly STATE_PAGE_SIZE = 50;
   protected readonly stateFilter = signal('');
   protected readonly statePage = signal(1);
+  /** Never-sampled pairs (a floor, no tick yet) are one summary line unless asked for (pages program). */
+  protected readonly showUnsampled = signal(false);
+  protected readonly unsampled = computed(() => {
+    const rows = this.stateRows().filter((r) => !this.hasSample(r));
+    const accounts = [...new Set(rows.map((r) => r.tradingAccountId))].sort((a, b) => a - b);
+    const symbols = new Set(rows.map((r) => r.symbol)).size;
+    return { count: rows.length, accounts, symbols };
+  });
   protected readonly filteredStateRows = computed(() => {
     const q = this.stateFilter().trim().toUpperCase();
-    if (!q) return this.stateRows();
+    if (!q)
+      return this.showUnsampled() ? this.stateRows() : this.stateRows().filter((r) => this.hasSample(r));
     return this.stateRows().filter(
       (r) => r.symbol.toUpperCase().includes(q) || String(r.tradingAccountId).includes(q),
     );
