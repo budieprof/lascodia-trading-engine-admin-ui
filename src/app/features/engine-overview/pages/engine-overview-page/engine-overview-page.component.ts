@@ -31,6 +31,12 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { RouterLink } from '@angular/router';
+import { EAInstancesService } from '@core/services/ea-instances.service';
+import { SecurityApiService } from '@features/security/security-api.service';
+import type { RoleBuildSkew } from '@features/security/security.types';
+import { ago } from '@features/iam/shared/admin-context.logic';
+import type { EAInstanceDto } from '@core/api/api.types';
 
 /**
  * One-screen engine health summary. Two presentation modes:
@@ -57,6 +63,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     ChartCardComponent,
     ConfirmDialogComponent,
     RelativeTimePipe,
+    RouterLink,
   ],
   template: `
     <div class="page" [class.wall]="wallMode()">
@@ -364,6 +371,65 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         </section>
       }
 
+      @if (!wallMode()) {
+        <div class="ctx-row">
+          <section class="ctx">
+            <header class="ctx-head">
+              <h3>Engine processes</h3>
+              <a routerLink="/releases">Builds →</a>
+            </header>
+            @if (builds(); as b) {
+              <ul class="ctx-list">
+                @for (r of b.roles; track r.role) {
+                  <li>
+                    <span class="ctx-dot" [class.stale]="r.hoursBehind > 0"></span>
+                    <strong>{{ roleLabel(r.role) }}</strong>
+                    <span class="ctx-muted"
+                      >started {{ ago(r.startedAtUtc) }} · last seen {{ ago(r.lastSeenAtUtc) }} ·
+                      build {{ r.buildId.slice(0, 8) }}</span
+                    >
+                  </li>
+                }
+              </ul>
+              <p class="ctx-muted">
+                {{
+                  b.hasSkew
+                    ? b.distinctBuilds +
+                      ' different builds are running — one process was recreated without the others.'
+                    : 'All processes run one build.'
+                }}
+              </p>
+            } @else {
+              <p class="ctx-muted">The process list needs operator access, or is loading.</p>
+            }
+          </section>
+          <section class="ctx">
+            <header class="ctx-head">
+              <h3>Connected terminals</h3>
+              <a routerLink="/ea-instances">EA instances →</a>
+            </header>
+            @if (terminals().length) {
+              <ul class="ctx-list">
+                @for (t of terminals(); track t.id) {
+                  <li>
+                    <span class="ctx-dot" [class.stale]="t.status !== 'Active'"></span>
+                    <strong>{{ t.chartSymbol || t.instanceId }}</strong>
+                    <span class="ctx-muted"
+                      >account #{{ t.tradingAccountId }} · EA {{ t.eaVersion || '?' }} · heartbeat
+                      {{ ago(t.lastHeartbeat) }}{{ t.isCoordinator ? ' · coordinator' : '' }}</span
+                    >
+                  </li>
+                }
+              </ul>
+            } @else {
+              <p class="ctx-muted">
+                No terminal is connected. The engine trades MT5 accounts only through connected EAs.
+              </p>
+            }
+          </section>
+        </div>
+      }
+
       <!-- Both actions change an operational record: Retry re-publishes the event to every
            handler, Discard closes it for good. Neither fires from one click. -->
       <app-confirm-dialog
@@ -380,6 +446,58 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
   `,
   styles: [
     `
+      .ctx-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        gap: var(--space-3);
+      }
+      .ctx {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4);
+      }
+      .ctx-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+      }
+      .ctx-head h3 {
+        margin: 0 0 var(--space-2);
+        font-size: var(--text-base);
+      }
+      .ctx-head a {
+        font-size: var(--text-sm);
+        color: var(--accent);
+      }
+      .ctx-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: grid;
+        gap: 6px;
+        font-size: var(--text-sm);
+      }
+      .ctx-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--profit);
+        margin-right: 6px;
+      }
+      .ctx-dot.stale {
+        background: var(--warning);
+      }
+      .ctx-muted {
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+        margin-left: 6px;
+      }
+      p.ctx-muted {
+        margin: var(--space-2) 0 0;
+      }
+
       .page {
         padding: var(--space-2) 0;
         display: flex;
@@ -1138,10 +1256,39 @@ export class EngineOverviewPageComponent {
       .slice(0, cap);
   });
 
+  private readonly securityApi = inject(SecurityApiService);
+  private readonly eaApi = inject(EAInstancesService);
+  protected readonly ago = (utc: string | null) => ago(utc);
+  readonly builds = signal<RoleBuildSkew | null>(null);
+  readonly terminals = signal<EAInstanceDto[]>([]);
+
+  roleLabel(role: string): string {
+    const labels: Record<string, string> = {
+      'money-path': 'Trading',
+      research: 'Research and backtesting',
+      llm: 'AI analysis',
+    };
+    return labels[role] ?? role;
+  }
+
+  private loadContext(): void {
+    if (!this.auth.hasPermission(Permission.AccessOperator)) return;
+    this.securityApi
+      .engineBuilds()
+      .subscribe({ next: (b) => this.builds.set(b), error: () => undefined });
+    this.eaApi.list().subscribe({
+      next: (r) => this.terminals.set((r?.data ?? []).filter((t) => t.status === 'Active')),
+      error: () => undefined,
+    });
+  }
+
   constructor() {
     interval(10_000)
       .pipe(startWith(0), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.refresh());
+    interval(60_000)
+      .pipe(startWith(0), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.loadContext());
   }
 
   protected goWorkers(): void {

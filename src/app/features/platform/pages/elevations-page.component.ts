@@ -44,6 +44,33 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
     AuditTrailComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .help {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -62,93 +89,129 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
 
       <app-stat-tiles [tiles]="tiles()" label="Elevated access summary" />
 
-      <section class="card">
-        <header class="card-head"><h3>Request access</h3></header>
-        <form class="card-body" (ngSubmit)="request()">
-          <div class="form-grid">
-            <label class="field">
-              <span class="label">Organisation</span>
-              @if (tenants.value().length) {
-                <select
-                  class="select"
-                  name="tenant"
-                  [ngModel]="tenantId()"
-                  (ngModelChange)="tenantId.set($event)"
-                >
-                  <option [ngValue]="null">Choose…</option>
-                  @for (t of tenants.value(); track t.id) {
-                    <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
-                  }
-                </select>
-              } @else {
+      <div class="split">
+        <section class="card">
+          <header class="card-head"><h3>Request access</h3></header>
+          <form class="card-body" (ngSubmit)="request()">
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">Organisation</span>
+                @if (tenants.value().length) {
+                  <select
+                    class="select"
+                    name="tenant"
+                    [ngModel]="tenantId()"
+                    (ngModelChange)="tenantId.set($event)"
+                  >
+                    <option [ngValue]="null">Choose…</option>
+                    @for (t of tenants.value(); track t.id) {
+                      <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
+                    }
+                  </select>
+                } @else {
+                  <input
+                    class="input"
+                    type="number"
+                    min="1"
+                    name="tenant"
+                    placeholder="Organisation id"
+                    [ngModel]="tenantId()"
+                    (ngModelChange)="tenantId.set(+$event || null)"
+                  />
+                }
+              </label>
+              <label class="field">
+                <span class="label">For how long (minutes, at most {{ maxMinutes }})</span>
                 <input
                   class="input"
                   type="number"
                   min="1"
-                  name="tenant"
-                  placeholder="Organisation id"
-                  [ngModel]="tenantId()"
-                  (ngModelChange)="tenantId.set(+$event || null)"
+                  [max]="maxMinutes"
+                  name="minutes"
+                  [ngModel]="minutes()"
+                  (ngModelChange)="minutes.set(+$event)"
                 />
-              }
-            </label>
+              </label>
+            </div>
             <label class="field">
-              <span class="label">For how long (minutes, at most {{ maxMinutes }})</span>
+              <span class="label">Why (goes into the organisation's audit log)</span>
               <input
                 class="input"
-                type="number"
-                min="1"
-                [max]="maxMinutes"
-                name="minutes"
-                [ngModel]="minutes()"
-                (ngModelChange)="minutes.set(+$event)"
+                name="reason"
+                [ngModel]="reason()"
+                (ngModelChange)="reason.set($event)"
+                placeholder="e.g. Support ticket 4411: positions not reconciling"
               />
             </label>
-          </div>
-          <label class="field">
-            <span class="label">Why (goes into the organisation's audit log)</span>
-            <input
-              class="input"
-              name="reason"
-              [ngModel]="reason()"
-              (ngModelChange)="reason.set($event)"
-              placeholder="e.g. Support ticket 4411: positions not reconciling"
-            />
-          </label>
-          <fieldset class="matrix">
-            <legend class="label">Permissions needed · {{ chosen().size }} selected</legend>
-            @for (g of groups(); track g.category) {
-              <div>
-                <span class="matrix-cat">{{ g.category }}</span>
-                <div class="matrix-checks">
-                  @for (p of g.permissions; track p.key) {
-                    <label class="check" [title]="p.description">
-                      <input
-                        type="checkbox"
-                        [checked]="chosen().has(p.key)"
-                        (change)="toggle(p.key)"
-                      />
-                      <span>{{ p.key }}</span>
-                    </label>
-                  }
+            <fieldset class="matrix">
+              <legend class="label">Permissions needed · {{ chosen().size }} selected</legend>
+              @for (g of groups(); track g.category) {
+                <div>
+                  <span class="matrix-cat">{{ g.category }}</span>
+                  <div class="matrix-checks">
+                    @for (p of g.permissions; track p.key) {
+                      <label class="check" [title]="p.description">
+                        <input
+                          type="checkbox"
+                          [checked]="chosen().has(p.key)"
+                          (change)="toggle(p.key)"
+                        />
+                        <span>{{ p.key }}</span>
+                      </label>
+                    }
+                  </div>
                 </div>
-              </div>
-            }
-          </fieldset>
-          @if (submitted() && errors().length) {
-            <ul class="errors" role="alert">
-              @for (e of errors(); track e) {
-                <li>{{ e }}</li>
               }
-            </ul>
-          }
-          <div class="actions-row">
-            <button type="submit" class="btn btn-primary" [disabled]="busy()">
-              {{ busy() ? 'Sending…' : 'Request access' }}
-            </button>
-          </div>
-        </form>
-      </section>
+            </fieldset>
+            @if (submitted() && errors().length) {
+              <ul class="errors" role="alert">
+                @for (e of errors(); track e) {
+                  <li>{{ e }}</li>
+                }
+              </ul>
+            }
+            <div class="actions-row">
+              <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                {{ busy() ? 'Sending…' : 'Request access' }}
+              </button>
+            </div>
+          </form>
+        </section>
+        <aside class="side">
+          <section class="card">
+            <header class="card-head"><h3>Each field</h3></header>
+            <div class="card-body small">
+              <ul class="help">
+                <li>
+                  <strong>Organisation</strong> — the customer organisation you must act in. House
+                  needs none.
+                </li>
+                <li>
+                  <strong>For how long</strong> — minutes, at most 240; it ends by itself, or when
+                  you end it.
+                </li>
+                <li>
+                  <strong>Why</strong> — written to that organisation's own audit log, so its people
+                  can see it.
+                </li>
+                <li>
+                  <strong>Permissions</strong> — only what the task needs; you hold them in that
+                  organisation while it lasts.
+                </li>
+                <li>
+                  Another staff member with <code>platform.elevation.approve</code> must approve it;
+                  you cannot approve your own.
+                </li>
+              </ul>
+            </div>
+          </section>
+          <app-audit-trail
+            heading="Elevation history"
+            [actions]="['platform.elevation.']"
+            empty="No elevation has been requested, approved, rejected or ended yet. Each step is recorded here and in the organisation's own audit log."
+          />
+        </aside>
+      </div>
 
       <section class="card">
         <header class="card-head"><h3>Requests</h3></header>
@@ -248,12 +311,6 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
           <app-mfa-hint [permission]="P.PlatformElevationApprove" />
         }
       </app-confirm-dialog>
-
-      <app-audit-trail
-        heading="Elevation history"
-        [actions]="['platform.elevation.']"
-        empty="No elevation has been requested, approved, rejected or ended yet. Each step is recorded here and in the organisation's own audit log."
-      />
     </div>
   `,
 })

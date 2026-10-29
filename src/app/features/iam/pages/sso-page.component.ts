@@ -53,6 +53,35 @@ import { SecretOnceComponent } from '../shared/secret-once.component';
     AuditTrailComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
+  styles: [
+    `
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .main-col,
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+      .help {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: disc;
+        display: grid;
+        gap: var(--space-2);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -73,242 +102,282 @@ import { SecretOnceComponent } from '../shared/secret-once.component';
         />
       }
 
-      <section class="card">
-        <header class="card-head">
-          <h3>Identity provider</h3>
-          @if (config.value()?.enabled) {
-            <span class="chip ok">On</span>
-          } @else {
-            <span class="chip">Off</span>
-          }
-          @if (config.value()?.lastSyncError; as syncError) {
-            <span class="chip bad" [title]="syncError">Not applied</span>
-          } @else if (config.value()?.lastSyncedAtUtc) {
-            <span class="chip" [title]="'Applied ' + when(config.value()?.lastSyncedAtUtc)"
-              >Applied</span
-            >
-          }
-          <span class="spacer"></span>
-          <app-mfa-hint [permission]="P.IamSsoManage" />
-        </header>
-        @if (config.value()?.lastSyncError; as syncError) {
-          <p class="pad note warn" role="alert">
-            The identity provider could not apply these settings: {{ syncError }}
-          </p>
-        }
-        @if (config.error(); as err) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-        } @else {
-          <form class="card-body" (ngSubmit)="review()">
-            <div class="row">
-              <label class="check"
-                ><input
-                  type="radio"
-                  name="protocol"
-                  value="oidc"
-                  [ngModel]="protocol()"
-                  (ngModelChange)="protocol.set($event)"
-                />
-                OpenID Connect</label
-              >
-              <label class="check"
-                ><input
-                  type="radio"
-                  name="protocol"
-                  value="saml"
-                  [ngModel]="protocol()"
-                  (ngModelChange)="protocol.set($event)"
-                />
-                SAML 2.0</label
-              >
-            </div>
-            <div class="form-grid">
-              <label class="field">
-                <span class="label">Name on the sign-in page</span>
-                <input
-                  class="input"
-                  name="displayName"
-                  [ngModel]="displayName()"
-                  (ngModelChange)="displayName.set($event)"
-                  placeholder="e.g. Acme Okta"
-                />
-              </label>
-              <label class="field">
-                <span class="label">{{
-                  protocol() === 'oidc' ? 'Issuer URL' : 'Metadata URL'
-                }}</span>
-                <input
-                  class="input"
-                  type="url"
-                  name="issuer"
-                  [ngModel]="issuer()"
-                  (ngModelChange)="issuer.set($event)"
-                  placeholder="https://"
-                />
-              </label>
-              @if (protocol() === 'oidc') {
-                <label class="field">
-                  <span class="label">Client id</span>
-                  <input
-                    class="input"
-                    name="clientId"
-                    autocomplete="off"
-                    [ngModel]="clientId()"
-                    (ngModelChange)="clientId.set($event)"
-                  />
-                </label>
-                <label class="field">
-                  <span class="label"
-                    >Client secret
-                    {{ hasSecret() ? '(stored — leave empty to keep it)' : '' }}</span
+      <div class="split">
+        <div class="main-col">
+          <section class="card">
+            <header class="card-head">
+              <h3>Identity provider</h3>
+              @if (config.value()?.enabled) {
+                <span class="chip ok">On</span>
+              } @else {
+                <span class="chip">Off</span>
+              }
+              @if (config.value()?.lastSyncError; as syncError) {
+                <span class="chip bad" [title]="syncError">Not applied</span>
+              } @else if (config.value()?.lastSyncedAtUtc) {
+                <span class="chip" [title]="'Applied ' + when(config.value()?.lastSyncedAtUtc)"
+                  >Applied</span
+                >
+              }
+              <span class="spacer"></span>
+              <app-mfa-hint [permission]="P.IamSsoManage" />
+            </header>
+            @if (config.value()?.lastSyncError; as syncError) {
+              <p class="pad note warn" role="alert">
+                The identity provider could not apply these settings: {{ syncError }}
+              </p>
+            }
+            @if (config.error(); as err) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            } @else {
+              <form class="card-body" (ngSubmit)="review()">
+                <div class="row">
+                  <label class="check"
+                    ><input
+                      type="radio"
+                      name="protocol"
+                      value="oidc"
+                      [ngModel]="protocol()"
+                      (ngModelChange)="protocol.set($event)"
+                    />
+                    OpenID Connect</label
                   >
-                  <input
-                    class="input"
-                    type="password"
-                    name="clientSecret"
-                    autocomplete="new-password"
-                    [ngModel]="clientSecret()"
-                    (ngModelChange)="clientSecret.set($event)"
-                  />
-                </label>
-              }
-            </div>
-            <label class="field">
-              <span class="label">E-mail domains that sign in here — one per line</span>
-              <textarea
-                class="textarea"
-                name="domains"
-                rows="3"
-                spellcheck="false"
-                [ngModel]="domainsText()"
-                (ngModelChange)="domainsText.set($event)"
-                placeholder="acme.com"
-              ></textarea>
-            </label>
-            <label class="check">
-              <input
-                type="checkbox"
-                name="enabled"
-                [ngModel]="enabled()"
-                (ngModelChange)="enabled.set($event)"
-              />
-              Send people with these e-mail domains to this identity provider
-            </label>
-            @if (submitted() && problems().length) {
-              <ul class="errors" role="alert">
-                @for (e of problems(); track e) {
-                  <li>{{ e }}</li>
-                }
-              </ul>
-            }
-            <div class="actions-row">
-              <button type="submit" class="btn btn-primary" [disabled]="busy()">
-                {{ busy() ? 'Saving…' : 'Save' }}
-              </button>
-            </div>
-          </form>
-        }
-      </section>
-
-      <section class="card">
-        <header class="card-head">
-          <h3>Directory provisioning (SCIM)</h3>
-          <span class="spacer"></span>
-          <input
-            class="input search"
-            name="scimName"
-            placeholder="Token name, e.g. Azure AD"
-            [ngModel]="scimName()"
-            (ngModelChange)="scimName.set($event)"
-            aria-label="Token name"
-          />
-          <select
-            class="select"
-            name="scimDays"
-            aria-label="Expires after"
-            [ngModel]="scimDays()"
-            (ngModelChange)="scimDays.set(+$event)"
-          >
-            @for (d of [90, 180, 365]; track d) {
-              <option [ngValue]="d">{{ d }} days</option>
-            }
-          </select>
-          <button
-            type="button"
-            class="btn btn-sm btn-primary"
-            [disabled]="busy() || !scimName().trim()"
-            (click)="createScim()"
-          >
-            Create token
-          </button>
-        </header>
-        <div class="card-body">
-          <p class="note">
-            Your directory calls <code>/scim/v2</code> with this token to add, update and remove
-            members of this organisation.
-          </p>
-          @if (newScim(); as t) {
-            <app-secret-once
-              title="SCIM token — paste it into your directory"
-              [value]="t"
-              (dismissed)="newScim.set(null)"
-            />
-          }
-        </div>
-        @if (scim.error(); as err) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-        } @else if (scim.value().length > 0) {
-          <table class="grid">
-            <thead>
-              <tr>
-                <th>Token</th>
-                <th>Created</th>
-                <th>Last used</th>
-                <th>Expires</th>
-                <th><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (t of scim.value(); track t.id) {
-                <tr>
-                  <td>
-                    {{ t.name || 'Token' }}
-                    <span class="sub"
-                      ><code>{{ t.prefix }}…</code></span
-                    >
-                  </td>
-                  <td class="small">{{ when(t.createdAtUtc) }}</td>
-                  <td class="small">{{ t.lastUsedAtUtc ? when(t.lastUsedAtUtc) : 'Never' }}</td>
-                  <td class="small">
-                    {{ t.expiresAtUtc ? when(t.expiresAtUtc) : 'Never' }}
-                    @if (t.status && t.status !== 'Active') {
-                      <span class="chip">{{ t.status }}</span>
-                    }
-                  </td>
-                  <td class="actions">
-                    @if (!t.status || t.status === 'Active') {
-                      <button
-                        type="button"
-                        class="btn btn-sm btn-danger"
-                        (click)="revokingScim.set(t)"
+                  <label class="check"
+                    ><input
+                      type="radio"
+                      name="protocol"
+                      value="saml"
+                      [ngModel]="protocol()"
+                      (ngModelChange)="protocol.set($event)"
+                    />
+                    SAML 2.0</label
+                  >
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span class="label">Name on the sign-in page</span>
+                    <input
+                      class="input"
+                      name="displayName"
+                      [ngModel]="displayName()"
+                      (ngModelChange)="displayName.set($event)"
+                      placeholder="e.g. Acme Okta"
+                    />
+                  </label>
+                  <label class="field">
+                    <span class="label">{{
+                      protocol() === 'oidc' ? 'Issuer URL' : 'Metadata URL'
+                    }}</span>
+                    <input
+                      class="input"
+                      type="url"
+                      name="issuer"
+                      [ngModel]="issuer()"
+                      (ngModelChange)="issuer.set($event)"
+                      placeholder="https://"
+                    />
+                  </label>
+                  @if (protocol() === 'oidc') {
+                    <label class="field">
+                      <span class="label">Client id</span>
+                      <input
+                        class="input"
+                        name="clientId"
+                        autocomplete="off"
+                        [ngModel]="clientId()"
+                        (ngModelChange)="clientId.set($event)"
+                      />
+                    </label>
+                    <label class="field">
+                      <span class="label"
+                        >Client secret
+                        {{ hasSecret() ? '(stored — leave empty to keep it)' : '' }}</span
                       >
-                        Revoke
-                      </button>
+                      <input
+                        class="input"
+                        type="password"
+                        name="clientSecret"
+                        autocomplete="new-password"
+                        [ngModel]="clientSecret()"
+                        (ngModelChange)="clientSecret.set($event)"
+                      />
+                    </label>
+                  }
+                </div>
+                <label class="field">
+                  <span class="label">E-mail domains that sign in here — one per line</span>
+                  <textarea
+                    class="textarea"
+                    name="domains"
+                    rows="3"
+                    spellcheck="false"
+                    [ngModel]="domainsText()"
+                    (ngModelChange)="domainsText.set($event)"
+                    placeholder="acme.com"
+                  ></textarea>
+                </label>
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    name="enabled"
+                    [ngModel]="enabled()"
+                    (ngModelChange)="enabled.set($event)"
+                  />
+                  Send people with these e-mail domains to this identity provider
+                </label>
+                @if (submitted() && problems().length) {
+                  <ul class="errors" role="alert">
+                    @for (e of problems(); track e) {
+                      <li>{{ e }}</li>
                     }
-                  </td>
-                </tr>
+                  </ul>
+                }
+                <div class="actions-row">
+                  <button type="submit" class="btn btn-primary" [disabled]="busy()">
+                    {{ busy() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
+              </form>
+            }
+          </section>
+
+          <section class="card">
+            <header class="card-head">
+              <h3>Directory provisioning (SCIM)</h3>
+              <span class="spacer"></span>
+              <input
+                class="input search"
+                name="scimName"
+                placeholder="Token name, e.g. Azure AD"
+                [ngModel]="scimName()"
+                (ngModelChange)="scimName.set($event)"
+                aria-label="Token name"
+              />
+              <select
+                class="select"
+                name="scimDays"
+                aria-label="Expires after"
+                [ngModel]="scimDays()"
+                (ngModelChange)="scimDays.set(+$event)"
+              >
+                @for (d of [90, 180, 365]; track d) {
+                  <option [ngValue]="d">{{ d }} days</option>
+                }
+              </select>
+              <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                [disabled]="busy() || !scimName().trim()"
+                (click)="createScim()"
+              >
+                Create token
+              </button>
+            </header>
+            <div class="card-body">
+              <p class="note">
+                Your directory calls <code>/scim/v2</code> with this token to add, update and remove
+                members of this organisation.
+              </p>
+              @if (newScim(); as t) {
+                <app-secret-once
+                  title="SCIM token — paste it into your directory"
+                  [value]="t"
+                  (dismissed)="newScim.set(null)"
+                />
               }
-            </tbody>
-          </table>
-        }
-      </section>
-
-      <app-audit-trail
-        heading="Single sign-on and directory changes"
-        [actions]="['iam.sso.', 'iam.scim']"
-        empty="Single sign-on has never been configured and no directory has provisioned anyone. Each settings change, SCIM token and provisioned or removed person is recorded here."
-      />
-
+            </div>
+            @if (scim.error(); as err) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            } @else if (scim.value().length > 0) {
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Token</th>
+                    <th>Created</th>
+                    <th>Last used</th>
+                    <th>Expires</th>
+                    <th><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (t of scim.value(); track t.id) {
+                    <tr>
+                      <td>
+                        {{ t.name || 'Token' }}
+                        <span class="sub"
+                          ><code>{{ t.prefix }}…</code></span
+                        >
+                      </td>
+                      <td class="small">{{ when(t.createdAtUtc) }}</td>
+                      <td class="small">{{ t.lastUsedAtUtc ? when(t.lastUsedAtUtc) : 'Never' }}</td>
+                      <td class="small">
+                        {{ t.expiresAtUtc ? when(t.expiresAtUtc) : 'Never' }}
+                        @if (t.status && t.status !== 'Active') {
+                          <span class="chip">{{ t.status }}</span>
+                        }
+                      </td>
+                      <td class="actions">
+                        @if (!t.status || t.status === 'Active') {
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-danger"
+                            (click)="revokingScim.set(t)"
+                          >
+                            Revoke
+                          </button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            }
+          </section>
+        </div>
+        <aside class="side">
+          <section class="card">
+            <header class="card-head"><h3>Each field</h3></header>
+            <div class="card-body small">
+              <ul class="help">
+                <li>
+                  <strong>OpenID Connect / SAML 2.0</strong> — the protocol your provider speaks;
+                  OIDC is simpler where both exist.
+                </li>
+                <li>
+                  <strong>Name on the sign-in page</strong> — the button people see, e.g. "Acme
+                  Okta".
+                </li>
+                <li>
+                  <strong>Issuer URL</strong> (OIDC) or <strong>metadata URL</strong> (SAML) — the
+                  engine reads the provider's settings from it.
+                </li>
+                <li>
+                  <strong>Client id / secret</strong> (OIDC) — from the app you register at your
+                  provider; the secret is write-only and never shown again.
+                </li>
+                <li>
+                  <strong>E-mail domains</strong> — people with these addresses are sent to your
+                  provider. Public mailbox domains and other organisations' domains are refused.
+                </li>
+                <li>
+                  <strong>Send people… to this provider</strong> — switches the routing on; until
+                  then it is saved but unused.
+                </li>
+                <li>
+                  <strong>SCIM token</strong> — lets your directory add and remove members at
+                  <code>/scim/v2</code>; shown once.
+                </li>
+                <li>Saving needs <code>iam.sso.manage</code> and a fresh second-factor sign-in.</li>
+              </ul>
+            </div>
+          </section>
+          <app-audit-trail
+            heading="Single sign-on and directory changes"
+            [actions]="['iam.sso.', 'iam.scim']"
+            empty="Single sign-on has never been configured and no directory has provisioned anyone. Each settings change, SCIM token and provisioned or removed person is recorded here."
+          />
+        </aside>
+      </div>
       <app-confirm-dialog
         [open]="confirming()"
         title="Save single sign-on?"

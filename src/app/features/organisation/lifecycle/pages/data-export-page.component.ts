@@ -49,6 +49,36 @@ export const EXPORT_POLL_MS = 15_000;
     AuditTrailComponent,
   ],
   styleUrls: ['../../../iam/shared/iam-page.scss'],
+  styles: [
+    `
+      .steps {
+        margin: 0;
+        padding-left: var(--space-5);
+        list-style: decimal;
+        display: grid;
+        gap: var(--space-2);
+      }
+
+      .split {
+        display: grid;
+        grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .split {
+          grid-template-columns: 1fr;
+        }
+      }
+      .main-col,
+      .side {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -67,102 +97,159 @@ export const EXPORT_POLL_MS = 15_000;
 
       <app-stat-tiles [tiles]="tiles()" label="Export summary" />
 
-      <section class="card">
-        <header class="card-head">
-          <h3>New export</h3>
-          <span class="spacer"></span>
-          <app-mfa-hint [permission]="P.TenantDataExport" />
-        </header>
-        <div class="card-body">
-          <p>
-            The export holds your trading accounts, orders, positions, strategies and scripts,
-            settings, alerts, LLM conversations and every other record of your organisation, with
-            its audit trail — one file per kind of record (JSON Lines) and a manifest, in a zip.
-            Passwords, API keys, bot tokens, webhook URLs and signing secrets are left out. Platform
-            strategies and market data are not yours, so they are not in it.
-          </p>
-          <p class="note">
-            It is prepared in the background (usually a few minutes) and can be downloaded for 7
-            days. One export at a time, at most three a day.
-          </p>
-          <div class="actions-row">
-            <button
-              type="button"
-              class="btn btn-primary"
-              [disabled]="busy() || !!inProgress()"
-              (click)="confirming.set(true)"
-            >
-              {{ inProgress() ? 'An export is being prepared…' : 'Export everything' }}
-            </button>
-          </div>
-        </div>
-      </section>
+      <div class="split">
+        <div class="main-col">
+          <section class="card">
+            <header class="card-head">
+              <h3>New export</h3>
+              <span class="spacer"></span>
+              <app-mfa-hint [permission]="P.TenantDataExport" />
+            </header>
+            <div class="card-body">
+              <p>
+                The export holds your trading accounts, orders, positions, strategies and scripts,
+                settings, alerts, LLM conversations and every other record of your organisation,
+                with its audit trail — one file per kind of record (JSON Lines) and a manifest, in a
+                zip. Passwords, API keys, bot tokens, webhook URLs and signing secrets are left out.
+                Platform strategies and market data are not yours, so they are not in it.
+              </p>
+              <p class="note">
+                It is prepared in the background (usually a few minutes) and can be downloaded for 7
+                days. One export at a time, at most three a day.
+              </p>
+              <div class="actions-row">
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  [disabled]="busy() || !!inProgress()"
+                  (click)="confirming.set(true)"
+                >
+                  {{ inProgress() ? 'An export is being prepared…' : 'Export everything' }}
+                </button>
+              </div>
+            </div>
+          </section>
 
-      <section class="card">
-        <header class="card-head"><h3>Your exports</h3></header>
-        @if (exports.error(); as err) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-        }
-        @if (exports.value().length === 0 && exports.loaded() && !exports.error()) {
-          <p class="pad small muted">
-            No export has been made. Export everything above to get a zip you can keep; it appears
-            here while it is prepared and stays downloadable for 7 days.
-          </p>
-        }
-        @if (exports.value().length) {
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th scope="col">Asked for</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">Size</th>
-                  <th scope="col">Records</th>
-                  <th scope="col">Downloads</th>
-                  <th scope="col"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (e of exports.value(); track e.id) {
-                  <tr>
-                    <td>
-                      {{ e.requestedAtUtc | date: 'medium' }}
-                      <div class="sub">#{{ e.id }} · {{ e.requestedBy }}</div>
-                    </td>
-                    <td>
-                      <span class="chip" [class]="'chip ' + tone(e)">{{ label(e) }}</span>
-                      @if (e.failureReason) {
-                        <div class="sub">{{ e.failureReason }}</div>
-                      }
-                    </td>
-                    <td>{{ size(e.sizeBytes) }}</td>
-                    <td>
-                      @if (e.rowCount !== null) {
-                        {{ e.rowCount.toLocaleString() }} in {{ e.tableCount }} table(s)
-                      } @else {
-                        —
-                      }
-                    </td>
-                    <td>{{ e.downloadCount }}</td>
-                    <td>
-                      @if (e.canDownload) {
-                        <button
-                          type="button"
-                          class="btn btn-secondary btn-sm"
-                          [disabled]="busy()"
-                          (click)="download(e)"
-                        >
-                          Download
-                        </button>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      </section>
+          <section class="card">
+            <header class="card-head"><h3>Your exports</h3></header>
+            @if (exports.error(); as err) {
+              <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            }
+            @if (exports.value().length === 0 && exports.loaded() && !exports.error()) {
+              <p class="pad small muted">
+                No export has been made. Export everything above to get a zip you can keep; it
+                appears here while it is prepared and stays downloadable for 7 days.
+              </p>
+            }
+            @if (exports.value().length) {
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Asked for</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Size</th>
+                      <th scope="col">Records</th>
+                      <th scope="col">Downloads</th>
+                      <th scope="col"><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (e of exports.value(); track e.id) {
+                      <tr>
+                        <td>
+                          {{ e.requestedAtUtc | date: 'medium' }}
+                          <div class="sub">#{{ e.id }} · {{ e.requestedBy }}</div>
+                        </td>
+                        <td>
+                          <span class="chip" [class]="'chip ' + tone(e)">{{ label(e) }}</span>
+                          @if (e.failureReason) {
+                            <div class="sub">{{ e.failureReason }}</div>
+                          }
+                        </td>
+                        <td>{{ size(e.sizeBytes) }}</td>
+                        <td>
+                          @if (e.rowCount !== null) {
+                            {{ e.rowCount.toLocaleString() }} in {{ e.tableCount }} table(s)
+                          } @else {
+                            —
+                          }
+                        </td>
+                        <td>{{ e.downloadCount }}</td>
+                        <td>
+                          @if (e.canDownload) {
+                            <button
+                              type="button"
+                              class="btn btn-secondary btn-sm"
+                              [disabled]="busy()"
+                              (click)="download(e)"
+                            >
+                              Download
+                            </button>
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+          </section>
+        </div>
+        <aside class="side">
+          @if (usage.value(); as u) {
+            <section class="card">
+              <header class="card-head">
+                <h3>Some of what an export would hold today</h3>
+                <span class="spacer"></span>
+                <a class="small" routerLink="/iam/plan">Plan & usage</a>
+              </header>
+              <div class="table-wrap">
+                <table class="grid">
+                  <tbody>
+                    @for (i of u.items; track i.key) {
+                      <tr>
+                        <td>{{ i.label }}</td>
+                        <td>
+                          <strong>{{ i.used }}</strong>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+              <p class="pad small muted">
+                Counts the plan tracks; the export also carries every order, position, signal,
+                setting, alert, conversation and the organisation's own audit events — every table
+                the organisation owns.
+              </p>
+            </section>
+          }
+          <section class="card">
+            <header class="card-head"><h3>How the download works</h3></header>
+            <div class="card-body small">
+              <ol class="steps">
+                <li>Export everything (an Owner, with a fresh second-factor sign-in).</li>
+                <li>
+                  The engine builds the zip in the background, off the trading path — usually
+                  minutes.
+                </li>
+                <li>
+                  When it is ready, <strong>Download</strong> makes a single-use link; it works
+                  once.
+                </li>
+                <li>
+                  The zip's manifest lists each file's SHA-256 so you can check the copy you keep.
+                </li>
+                <li>
+                  Left out on purpose: passwords, API keys, bot tokens, webhook URLs and signing
+                  secrets.
+                </li>
+              </ol>
+            </div>
+          </section>
+        </aside>
+      </div>
 
       <app-confirm-dialog
         [open]="confirming()"
@@ -173,35 +260,6 @@ export const EXPORT_POLL_MS = 15_000;
         (confirm)="request()"
         (cancelled)="confirming.set(false)"
       />
-
-      @if (usage.value(); as u) {
-        <section class="card">
-          <header class="card-head">
-            <h3>Some of what an export would hold today</h3>
-            <span class="spacer"></span>
-            <a class="small" routerLink="/iam/plan">Plan & usage</a>
-          </header>
-          <div class="table-wrap">
-            <table class="grid">
-              <tbody>
-                @for (i of u.items; track i.key) {
-                  <tr>
-                    <td>{{ i.label }}</td>
-                    <td>
-                      <strong>{{ i.used }}</strong>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-          <p class="pad small muted">
-            Counts the plan tracks; the export also carries every order, position, signal, setting,
-            alert, conversation and the organisation's own audit events — every table the
-            organisation owns.
-          </p>
-        </section>
-      }
 
       <app-audit-trail
         heading="Export activity"

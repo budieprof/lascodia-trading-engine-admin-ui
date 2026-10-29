@@ -29,6 +29,10 @@ import {
 import { OrganisationApiService } from '../organisation-api.service';
 import { failureMessage } from '../organisation.logic';
 import type { AlertChannelName, AlertChannelSettings } from '../organisation.types';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
+import { catchError, defer, of } from 'rxjs';
+import { ApiService } from '@core/api/api.service';
 
 /**
  * Alert channels (multi-tenancy Phase 7, T7.5; engine `/alerts/channels`, docs/api/alert-webhooks.md).
@@ -48,6 +52,8 @@ import type { AlertChannelName, AlertChannelSettings } from '../organisation.typ
     ConfirmDialogComponent,
     MfaHintComponent,
     SecretOnceComponent,
+    StatTilesComponent,
+    AuditTrailComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
@@ -88,6 +94,13 @@ import type { AlertChannelName, AlertChannelSettings } from '../organisation.typ
           {{ channels.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
+
+      <app-stat-tiles [tiles]="tiles()" label="Alert delivery today" />
+      <p class="note">
+        Above: how alerts are delivered right now, channel by channel (the platform's channels
+        unless the organisation sets up its own below). In-app alerts always reach the console's
+        bell.
+      </p>
 
       @if (channels.error(); as err) {
         <section class="card">
@@ -340,6 +353,12 @@ import type { AlertChannelName, AlertChannelSettings } from '../organisation.typ
         (confirm)="rotate()"
         (cancelled)="rotating.set(false)"
       />
+
+      <app-audit-trail
+        heading="Channel changes"
+        [actions]="['config.alert_channel.']"
+        empty="No alert channel has been set up, changed or removed for this organisation, and no signing secret rotated. Each change is recorded here."
+      />
     </div>
   `,
 })
@@ -405,7 +424,43 @@ export class AlertsPageComponent {
       : `The organisation's alerts are no longer sent on this channel. Its stored settings and secrets are deleted.`;
   });
 
+  private readonly rawApi = inject(ApiService);
+  readonly delivery = iamResource<
+    {
+      channel: string;
+      isConfigured: boolean;
+      isEnabled: boolean;
+      destinationPreview: string | null;
+    }[]
+  >(
+    () =>
+      defer(() =>
+        this.auth.hasPermission(Permission.AccessOperator)
+          ? this.rawApi
+              .getEnvelope<
+                {
+                  channel: string;
+                  isConfigured: boolean;
+                  isEnabled: boolean;
+                  destinationPreview: string | null;
+                }[]
+              >('/alert/channel/status', { silent: true })
+              .pipe(catchError(() => of([])))
+          : of([]),
+      ).pipe(catchError(() => of([]))),
+    [],
+  );
+  readonly tiles = computed<StatTile[]>(() =>
+    this.delivery.value().map((c) => ({
+      label: c.channel === 'InApp' ? 'In the console' : c.channel,
+      value: !c.isConfigured ? 'Not set up' : c.isEnabled ? 'Delivering' : 'Off',
+      caption: c.destinationPreview ?? (c.isConfigured ? null : 'no destination configured'),
+      tone: !c.isConfigured ? null : c.isEnabled ? ('good' as const) : ('warn' as const),
+    })),
+  );
+
   constructor() {
+    this.delivery.reload();
     this.channels.reload();
   }
 
