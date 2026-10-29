@@ -916,6 +916,9 @@ export class LibrariesPageComponent implements OnInit, HasUnsavedChanges {
     const initial = Number(this.route.snapshot?.queryParamMap?.get('id'));
     void this.load().then(() => {
       if (Number.isFinite(initial) && initial > 0) this.select(initial);
+      // Open the first library rather than leaving the reading pane blank (built-ins have ids ≤ 0).
+      else if (this.selectedId() === null && this.libraries().length > 0)
+        void this.select(this.libraries()[0].id);
     });
   }
 

@@ -23,6 +23,14 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import {
+  FeatureStateComponent,
+  type FeatureRequirement,
+} from '@shared/components/feedback/feature-state.component';
+import { ConfigService } from '@core/services/config.service';
+import { WorkersService } from '@core/services/workers.service';
+import type { WorkerHealthDto } from '@core/api/api.types';
+import { catchError, of } from 'rxjs';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { DatePipe } from '@angular/common';
@@ -42,6 +50,7 @@ import { DatePipe } from '@angular/common';
     ChartCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
+    FeatureStateComponent,
     ErrorStateComponent,
     RelativeTimePipe,
     DatePipe,
@@ -203,9 +212,27 @@ import { DatePipe } from '@angular/common';
               height="280px"
             />
           } @else {
-            <app-empty-state
-              title="No allocation snapshot yet"
-              description="StrategyAllocatorWorker hasn't run a cycle, or no strategies are eligible."
+            <!-- The allocator is a trading-behaviour switch the operator keeps off: say so with its real
+                 settings rather than "hasn't run a cycle". -->
+            <app-feature-state
+              [kind]="allocatorEnabled() === true ? 'waiting' : 'off'"
+              title="No allocation snapshot"
+              switchKey="StrategyAllocator:Enabled"
+              summary="The allocator scales each Active strategy's position size by its recent Sharpe: 1.00 at or above the target, down to the floor below it. Weights are independent per strategy and are re-computed once per cycle."
+              [detail]="
+                allocatorEnabled() === false
+                  ? 'Switched off on purpose — sizing is not throttled by recent performance while it is off. Turning it on changes how live accounts trade, so it stays an operator decision.'
+                  : null
+              "
+              [requirements]="allocatorRequirements()"
+              [links]="[
+                {
+                  label: 'Allocator settings',
+                  route: '/engine-config',
+                  query: { search: 'StrategyAllocator' },
+                },
+                { label: 'Strategies', route: '/strategies' },
+              ]"
             />
           }
         }
@@ -836,7 +863,77 @@ export class StrategyPortfolioPageComponent {
     };
   });
 
+  private readonly config = inject(ConfigService);
+  private readonly workers = inject(WorkersService);
+  private readonly allocatorSettings = signal<Record<string, string | null>>({});
+  private readonly allocatorWorker = signal<WorkerHealthDto | null | undefined>(undefined);
+  protected readonly allocatorEnabled = computed(() => {
+    const v = this.allocatorSettings()['StrategyAllocator:Enabled'];
+    return v === undefined ? undefined : (v ?? 'false').toLowerCase() === 'true';
+  });
+
+  protected readonly allocatorRequirements = computed<FeatureRequirement[]>(() => {
+    const s = this.allocatorSettings();
+    const w = this.allocatorWorker();
+    const on = this.allocatorEnabled();
+    const val = (k: string) => s[k] ?? '—';
+    return [
+      {
+        label: 'Allocator switched on',
+        ok: on === undefined ? null : on,
+        detail:
+          on === undefined
+            ? 'reading the setting…'
+            : `StrategyAllocator:Enabled = ${val('StrategyAllocator:Enabled')}`,
+        route: '/engine-config',
+        query: { search: 'StrategyAllocator' },
+      },
+      {
+        label: 'Allocator worker running',
+        ok: w === undefined ? null : w ? w.isRunning : null,
+        detail: w
+          ? `cycle every ${val('StrategyAllocator:PollIntervalHours')} h · last ${w.lastSuccessAt ? new Date(w.lastSuccessAt).toUTCString().slice(5, 22) + ' UTC' : 'never'} (a cycle while switched off records nothing)`
+          : w === null
+            ? 'not reported by this engine process'
+            : 'checking…',
+        route: '/worker-health',
+      },
+      {
+        label: 'Its rules',
+        ok: null,
+        detail: `target Sharpe ${val('StrategyAllocator:TargetSharpe')} · floor ${val('StrategyAllocator:MinWeight')}× · ${val(
+          'StrategyAllocator:LookbackDays',
+        )}-day lookback · at least ${val('StrategyAllocator:MinObservations')} closed trades per strategy`,
+      },
+    ];
+  });
+
   constructor() {
+    for (const key of [
+      'StrategyAllocator:Enabled',
+      'StrategyAllocator:TargetSharpe',
+      'StrategyAllocator:MinWeight',
+      'StrategyAllocator:LookbackDays',
+      'StrategyAllocator:MinObservations',
+      'StrategyAllocator:PollIntervalHours',
+    ])
+      this.config
+        .getByKey(key, { silent: true })
+        .pipe(catchError(() => of(null)))
+        .subscribe((r) =>
+          this.allocatorSettings.update((m) => ({
+            ...m,
+            [key]: r?.status && r.data ? r.data.value : null,
+          })),
+        );
+    this.workers
+      .list()
+      .pipe(catchError(() => of(null)))
+      .subscribe((rows) =>
+        this.allocatorWorker.set(
+          rows ? (rows.find((x) => x.workerName === 'StrategyAllocatorWorker') ?? null) : null,
+        ),
+      );
     this.loadWeights();
     this.loadFwer();
 
