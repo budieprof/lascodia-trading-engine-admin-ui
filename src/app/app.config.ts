@@ -15,7 +15,6 @@ import { provideHttpClient, withInterceptors, withXhr } from '@angular/common/ht
 import { provideAnimations } from '@angular/platform-browser/animations';
 import { HoverPreloadingStrategy } from '@core/routing/hover-preloading.strategy';
 import { provideEchartsCore } from 'ngx-echarts';
-import * as echarts from 'echarts';
 import { routes } from './app.routes';
 import { authInterceptor } from '@core/auth/auth.interceptor';
 import { csrfInterceptor } from '@core/auth/csrf.interceptor';
@@ -33,12 +32,15 @@ import { webVitalsProviders } from '@core/observability/web-vitals';
 import { provideChartTouchCancel } from '@shared/utils/lwc-touch-cancel';
 import { lascodiaTheme, lascodiaDarkTheme } from '../styles/echarts-theme';
 
-// Register both themes at bootstrap so ChartCardComponent can swap between them
-// as the user toggles light/dark. Echarts only consults the theme name at
-// instance creation, so the chart-card re-renders when the theme signal flips.
-echarts.registerTheme('lascodia-light', lascodiaTheme);
-echarts.registerTheme('lascodia-dark', lascodiaDarkTheme);
-
+// ECharts (~1.4 MB with zrender) is loaded on demand: the first chart directive that renders
+// calls this loader, so the shell (sign-in, sidebar, assistant dock, command palette) never pays
+// for it. `import()` is evaluated once and the promise memoised, so the themes are registered
+// exactly once, before any chart is created.
+//
+// Both themes are registered so ChartCardComponent can swap between them as the user toggles
+// light/dark. Echarts only consults the theme name at instance creation, so the chart-card
+// re-renders when the theme signal flips.
+//
 // Charts rendered through ChartCardComponent pass the theme name explicitly. Sixteen pages use
 // the `echarts` directive directly and passed none, so they got ECharts' stock look — and none
 // of the theme-level defaults (axis label overlap hiding, compact number formatting). Hand
@@ -48,16 +50,24 @@ echarts.registerTheme('lascodia-dark', lascodiaDarkTheme);
 //
 // A facade, NOT `echarts.init = …`: an ES module namespace is read-only at runtime, and that
 // assignment threw "Cannot assign to import" during bootstrap and took the whole app down.
-const themedInit: typeof echarts.init = (dom, theme, opts) =>
-  echarts.init(
-    dom,
-    theme ??
-      (document.documentElement.getAttribute('data-theme') === 'dark'
-        ? 'lascodia-dark'
-        : 'lascodia-light'),
-    opts,
-  );
-const themedEcharts = { ...echarts, init: themedInit };
+let themedEcharts: Promise<typeof import('echarts')> | null = null;
+export function loadThemedEcharts(): Promise<typeof import('echarts')> {
+  themedEcharts ??= import('echarts').then((echarts) => {
+    echarts.registerTheme('lascodia-light', lascodiaTheme);
+    echarts.registerTheme('lascodia-dark', lascodiaDarkTheme);
+    const themedInit: typeof echarts.init = (dom, theme, opts) =>
+      echarts.init(
+        dom,
+        theme ??
+          (document.documentElement.getAttribute('data-theme') === 'dark'
+            ? 'lascodia-dark'
+            : 'lascodia-light'),
+        opts,
+      );
+    return { ...echarts, init: themedInit };
+  });
+  return themedEcharts;
+}
 
 export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig {
   return {
@@ -121,7 +131,7 @@ export function buildAppConfig(runtimeConfig: RuntimeConfig): ApplicationConfig 
       // permissions (BFF: GET /bff/session; legacy: a restored admin token's permissions).
       provideAppInitializer(() => inject(AuthService).initialize()),
       provideAnimations(),
-      provideEchartsCore({ echarts: themedEcharts }),
+      provideEchartsCore({ echarts: loadThemedEcharts }),
       // Once for the app: a touch the browser cancels on any Lightweight Charts chart must not
       // swallow the next tap, on whatever page the chart is.
       provideChartTouchCancel(),

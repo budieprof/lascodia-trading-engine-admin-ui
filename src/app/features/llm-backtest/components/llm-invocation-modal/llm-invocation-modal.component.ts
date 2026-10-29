@@ -131,7 +131,7 @@ export interface LlmInvocationModalContext {
               </div>
               <div class="meta-cell meta-cell--wide" [title]="d.promptHash">
                 <span class="meta-key">Prompt hash</span>
-                <span class="mono small">{{ d.promptHash?.slice(0, 16) }}…</span>
+                <span class="mono small">{{ d.promptHash.slice(0, 16) }}…</span>
               </div>
             </div>
 

@@ -1,0 +1,194 @@
+<!-- Details / News side pane. -->
+@if (page.sidePane() === 'details') {
+  <aside class="side-pane">
+    <div class="tree-title">{{ page.details().symbol }} details</div>
+    <dl class="detail-list">
+      <dt>Pair</dt>
+      <dd>{{ page.details().base }} / {{ page.details().quote }}</dd>
+      <dt>Digits</dt>
+      <dd>{{ page.details().digits }}</dd>
+      <dt>Contract</dt>
+      <dd>{{ page.details().contractSize ?? '—' }}</dd>
+      <dt>Lots</dt>
+      <dd>
+        {{ page.details().minLot ?? '—' }} – {{ page.details().maxLot ?? '—' }} step
+        {{ page.details().lotStep ?? '—' }}
+      </dd>
+      <dt>Last</dt>
+      <dd>
+        {{
+          page.details().last === null
+            ? '—'
+            : (page.details().last
+              | number: '1.' + page.details().digits + '-' + page.details().digits)
+        }}
+      </dd>
+      <dt>Session</dt>
+      <dd>
+        @if (page.details().dayChangePct !== null) {
+          <span
+            [class.up]="(page.details().dayChangePct ?? 0) >= 0"
+            [class.down]="(page.details().dayChangePct ?? 0) < 0"
+          >
+            {{ page.details().dayChangePct | number: '1.2-2' }}%
+          </span>
+        } @else {
+          —
+        }
+      </dd>
+      <dt>Day H/L</dt>
+      <dd>
+        {{
+          page.details().dayHigh === null
+            ? '—'
+            : (page.details().dayHigh
+              | number: '1.' + page.details().digits + '-' + page.details().digits)
+        }}
+        /
+        {{
+          page.details().dayLow === null
+            ? '—'
+            : (page.details().dayLow
+              | number: '1.' + page.details().digits + '-' + page.details().digits)
+        }}
+      </dd>
+      <dt>Loaded</dt>
+      <dd>{{ page.details().bars }} bars</dd>
+      <dt>From</dt>
+      <dd class="muted">{{ page.details().from }}</dd>
+      <dt>To</dt>
+      <dd class="muted">{{ page.details().to }}</dd>
+    </dl>
+    <app-performance-tiles [symbol]="page.symbol()" />
+    <app-technicals-gauge
+      [bars]="page.bars()"
+      [timeframe]="page.resolutionLabel(page.resolution())"
+    />
+    <app-seasonals [symbol]="page.symbol()" />
+  </aside>
+}
+
+@if (page.sidePane() === 'news') {
+  <aside class="side-pane">
+    <div class="tree-title">News · {{ page.details().base }} / {{ page.details().quote }}</div>
+
+    <!--
+      The module's read on the PAIR, above the raw headlines.
+      `liveShare` is the load-bearing number here: a strong score that
+      is no longer live is a story the market has already repriced, and
+      headlines shown without it invite trading news that is in the
+      price already.
+    -->
+    @if (page.newsFocus()?.context; as ctx) {
+      <dl class="detail-list news-focus">
+        <dt>Pair bias</dt>
+        <dd>
+          @if (ctx.pairBias !== null) {
+            <span [class.up]="ctx.pairBias > 0" [class.down]="ctx.pairBias < 0">
+              {{ ctx.pairBias > 0 ? '+' : '' }}{{ ctx.pairBias | number: '1.2-2' }}
+            </span>
+          } @else {
+            <span
+              class="muted"
+              title="A leg the module does not track — the two sides cannot be differenced"
+            >
+              not comparable
+            </span>
+          }
+        </dd>
+        <dt>{{ page.newsFocus()?.baseCurrency }}</dt>
+        <dd>{{ page.legSummary(ctx.baseLeg) }}</dd>
+        <!-- Rendered unconditionally rather than behind an @if: a <dl>
+             may only contain dt/dd pairs, and a control-flow block
+             inside one inserts anchor nodes that break that contract.
+             A single-currency request simply has no quote leg. -->
+        <dt>{{ page.newsFocus()?.quoteCurrency ?? 'Quote' }}</dt>
+        <dd>{{ page.legSummary(ctx.quoteLeg) }}</dd>
+        <!-- `asOfNote` is a full paragraph explaining how the score is
+             built, not the short timestamp the name suggests. Rendered
+             inline it swamped the pane and pushed the headlines below
+             the fold, so it lives in the tooltip. -->
+        <dt>Method</dt>
+        <dd class="muted note-hint" [title]="ctx.asOfNote">
+          hover for scoring <app-chart-icon name="info" [size]="14" />
+        </dd>
+      </dl>
+      @if (page.newsFocus()?.omissionReason; as why) {
+        <div class="muted news-meta" title="Why this context did not reach the model's prompt">
+          Not in prompt: {{ why }}
+        </div>
+      }
+    }
+
+    @if (page.newsLoading()) {
+      <div class="pane-empty">Loading…</div>
+    } @else if (!page.articles().length) {
+      <div class="pane-empty">No headlines in the last 48h.</div>
+    } @else {
+      <ul class="news-list">
+        @for (a of page.articles(); track a.id) {
+          <li
+            (appLongPress)="page.openArticle(a)"
+            (click)="$event.preventDefault(); page.newsAnalysis.set(a)"
+            title="Click for the AI analysis · long-press to open the article"
+          >
+            <a [href]="a.url" target="_blank" rel="noopener noreferrer">{{ a.title }}</a>
+            <div class="muted news-meta">
+              {{ a.sourceName }} ·
+              {{ a.publishedAtUtc | zonedDate: page.timezone() : 'dateTime' }}
+              @for (f of a | articleFlags: page.calendarCurrencies(); track f.currency) {
+                <span
+                  style="margin-left: 4px; white-space: nowrap"
+                  [style.color]="
+                    f.direction === 'Bullish'
+                      ? '#089981'
+                      : f.direction === 'Bearish'
+                        ? '#f23645'
+                        : null
+                  "
+                  [title]="f.title"
+                  >{{ f.flag || f.currency }} {{ f.arrow }}</span
+                >
+              }
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  </aside>
+}
+
+@if (page.sidePane() === 'calendar') {
+  <aside class="side-pane">
+    <app-economic-calendar-pane
+      [currencies]="page.calendarCurrencies()"
+      [timeZone]="page.timezone()"
+      [(allCurrencies)]="page.calendarAll"
+      [(minImpact)]="page.calendarMinImpact"
+      (opened)="page.calendarEvent.set($event)"
+    />
+  </aside>
+}
+@if (page.chartPanels.open(); as panel) {
+  @if (page.sidePane() === 'none') {
+    <aside class="side-pane">
+      <app-chart-panels-dock
+        [panel]="panel"
+        [symbol]="page.symbol()"
+        [timeframe]="page.resolutionLabel(page.resolution())"
+        [digits]="page.precision()"
+        [timeZone]="page.timezone()"
+        [replayAt]="page.orderFlowReplayClip()"
+        [sourceId]="page.orderFlow().sourceId"
+        [tickReplayBook]="page.tickReplayBook()"
+        (symbolSelected)="page.selectSymbol($event)"
+      />
+    </aside>
+  }
+}
+
+@if (page.sidePane() === 'datawindow') {
+  <aside class="side-pane">
+    <app-data-window [sections]="page.dataWindowSections()" />
+  </aside>
+}

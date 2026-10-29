@@ -1,0 +1,143 @@
+<!-- Right-click menu on a drawing. -->
+@if (page.drawingMenu(); as dm) {
+  @if (page.drawingById(dm.id); as dd) {
+    <div
+      class="context-menu drawing-menu"
+      role="menu"
+      [style.left.px]="dm.x"
+      [style.top.px]="dm.y"
+      (pointerdown)="$event.stopPropagation()"
+    >
+      <button type="button" (click)="page.drawingAction(dd.id, 'settings')">
+        <app-chart-icon name="settings" [size]="20" />Settings…
+      </button>
+      <div class="menu-sep"></div>
+      <button type="button" (click)="page.drawingAction(dd.id, 'clone')">
+        <app-chart-icon name="clone" [size]="20" />Clone
+      </button>
+      <button type="button" (click)="page.drawingAction(dd.id, 'copy')">
+        <span class="mi-blank"></span>Copy
+      </button>
+      <button type="button" (click)="page.drawingAction(dd.id, 'hide')">
+        <app-chart-icon name="eye-off" [size]="20" />Hide
+      </button>
+      <button type="button" (click)="page.drawingAction(dd.id, 'lock')">
+        <app-chart-icon [name]="dd.locked ? 'unlock' : 'lock'" [size]="20" />{{
+          dd.locked ? 'Unlock' : 'Lock'
+        }}
+      </button>
+      <div class="menu-sep"></div>
+      <div class="submenu-host">
+        <button type="button" class="has-sub">
+          <app-chart-icon name="layers" [size]="20" />Visual order<span class="sub-caret">›</span>
+        </button>
+        <div class="context-menu submenu" role="menu">
+          <button type="button" (click)="page.drawingAction(dd.id, 'front')">
+            <app-chart-icon name="bring-front" [size]="20" />Bring to front
+          </button>
+          <button type="button" (click)="page.drawingAction(dd.id, 'forward')">
+            <span class="mi-blank"></span>Bring forward
+          </button>
+          <button type="button" (click)="page.drawingAction(dd.id, 'backward')">
+            <span class="mi-blank"></span>Send backward
+          </button>
+          <button type="button" (click)="page.drawingAction(dd.id, 'back')">
+            <app-chart-icon name="send-back" [size]="20" />Send to back
+          </button>
+        </div>
+      </div>
+      <div class="menu-sep"></div>
+      <button type="button" class="danger" (click)="page.drawingAction(dd.id, 'remove')">
+        <app-chart-icon name="trash" [size]="20" />Remove
+      </button>
+    </div>
+  }
+}
+
+@if (page.settingsFor(); as sid) {
+  <app-drawing-settings-dialog
+    [drawingId]="sid"
+    [resolutions]="page.resolutions"
+    (closed)="page.settingsFor.set(null)"
+  />
+}
+
+@if (page.contextMenu(); as cm) {
+  <div class="context-menu" [style.left.px]="cm.x" [style.top.px]="cm.y">
+    <button type="button" (click)="page.resetScales()">Reset scales</button>
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      [attr.aria-checked]="page.invertScale()"
+      (click)="page.invertScale.set(!page.invertScale()); page.closeContextMenu()"
+    >
+      {{ page.invertScale() ? '✓ ' : '' }}Invert scale
+    </button>
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      [attr.aria-checked]="page.scaleMode() === 'indexed'"
+      (click)="
+        page.scaleMode.set(page.scaleMode() === 'indexed' ? 'normal' : 'indexed');
+        page.closeContextMenu()
+      "
+    >
+      {{ page.scaleMode() === 'indexed' ? '✓ ' : '' }}Indexed to 100
+    </button>
+    <button
+      type="button"
+      (click)="
+        page.scaleSide.set(page.scaleSide() === 'right' ? 'left' : 'right'); page.closeContextMenu()
+      "
+    >
+      Move scale to the {{ page.scaleSide() === 'right' ? 'left' : 'right' }}
+    </button>
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      data-testid="countdown-toggle"
+      [attr.aria-checked]="page.showCountdown()"
+      (click)="page.showCountdown.set(!page.showCountdown()); page.closeContextMenu()"
+    >
+      {{ page.showCountdown() ? '✓ ' : '' }}Countdown to bar close
+    </button>
+    <button type="button" (click)="page.chartSettingsOpen.set(true); page.closeContextMenu()">
+      Settings…
+    </button>
+    <button type="button" (click)="page.paletteOpen.set(true); page.closeContextMenu()" title="⌘⇧K">
+      Commands…
+    </button>
+    <button type="button" (click)="page.takeSnapshot()">Save image…</button>
+    <button type="button" (click)="page.copySnapshot()">Copy image</button>
+    <button type="button" (click)="page.exportChartData()">Export chart data (CSV)</button>
+    <button type="button" (click)="page.objectTreeOpen.set(true); page.closeContextMenu()">
+      Show objects
+    </button>
+    <button type="button" (click)="page.openStudiesDialog(); page.closeContextMenu()">
+      Add indicator…
+    </button>
+    @if (cm.level; as lvl) {
+      <button type="button" (click)="page.createAlertAtLevel($event)" data-testid="alert-at-level">
+        Add alert at {{ lvl.label }}
+        {{ lvl.price | number: '1.' + page.precision() + '-' + page.precision() }}
+      </button>
+    }
+    @if (cm.price !== null) {
+      <button type="button" (click)="page.createAlertHere($event)">
+        Add alert at {{ cm.price | number: '1.' + page.precision() + '-' + page.precision() }}
+      </button>
+    }
+    <button type="button" (click)="page.duplicateLayout(); page.closeContextMenu()">
+      Save layout as…
+    </button>
+    <button
+      type="button"
+      class="danger"
+      (click)="page.clearDrawingsFromMenu()"
+      [disabled]="!page.drawings.visible().length"
+    >
+      Remove all drawings
+    </button>
+    <button type="button" (click)="page.closeContextMenu()">Close</button>
+  </div>
+}

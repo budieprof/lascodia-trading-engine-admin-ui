@@ -380,7 +380,8 @@ export class MonitorTemplatesComponent {
   protected readonly templates = signal<MonitorTemplate[]>([]);
   protected readonly loading = signal(true);
   protected readonly selected = signal<MonitorTemplate | null>(null);
-  protected readonly paramValues = signal<Record<string, string>>({});
+  /** Typed values by parameter name; a parameter the operator has not touched has no entry. */
+  protected readonly paramValues = signal<Partial<Record<string, string>>>({});
   protected readonly subjectsText = signal('');
   protected readonly timeframe = signal('H1');
   protected readonly expiresInHours = signal(24);
@@ -465,7 +466,11 @@ export class MonitorTemplatesComponent {
     this.monitors
       .instantiateTemplate(t.id, {
         subjectRefs,
-        parameters: this.paramValues(),
+        parameters: Object.fromEntries(
+          Object.entries(this.paramValues()).filter(
+            (e): e is [string, string] => e[1] !== undefined,
+          ),
+        ),
         timeframe: t.subjectKind === 'Symbol' ? this.timeframe() : null,
         expiresInHours: Number(this.expiresInHours()),
         // Templates are lint-validated at authoring time with their example

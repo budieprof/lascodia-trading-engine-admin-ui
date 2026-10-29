@@ -1,0 +1,187 @@
+<!-- Left drawing rail, as on TradingView. -->
+<nav class="draw-rail" aria-label="Drawing tools">
+  <button
+    type="button"
+    class="rail-tool"
+    [class.active]="page.tool() === null"
+    (click)="page.selectTool(null)"
+    title="Cursor (Esc)"
+  >
+    <app-chart-icon name="arrow" [size]="24" />
+  </button>
+  @for (group of page.toolGroups(); track group.name) {
+    @let current = page.railTool(group);
+    <div class="rail-slot" [class.open]="page.railFlyout() === group.name">
+      <button
+        type="button"
+        class="rail-tool"
+        [class.active]="page.tool() === current.kind"
+        (click)="page.selectTool(current.kind)"
+        [title]="current.label"
+      >
+        <app-chart-icon [name]="current.kind" [size]="28" />
+      </button>
+      @if (group.tools.length > 1) {
+        <button
+          type="button"
+          class="rail-caret"
+          [class.active]="page.railGroupActive(group)"
+          (click)="page.toggleRailFlyout(group.name, $event)"
+          [title]="group.title"
+          [attr.aria-expanded]="page.railFlyout() === group.name"
+          aria-haspopup="menu"
+        >
+          <app-chart-icon name="chevron-right" [size]="12" />
+        </button>
+      }
+    </div>
+  }
+  <div class="rail-sep"></div>
+  @for (t of page.railStandalone; track t.kind) {
+    <button
+      type="button"
+      class="rail-tool"
+      [class.active]="page.tool() === t.kind"
+      (click)="page.selectTool(t.kind)"
+      [title]="t.label"
+    >
+      <app-chart-icon [name]="t.kind" [size]="28" />
+    </button>
+  }
+  <div class="rail-sep"></div>
+  <div class="rail-slot" [class.open]="page.magnetMenuOpen()">
+    <button
+      type="button"
+      class="rail-tool"
+      [class.active]="page.magnet()"
+      (click)="page.magnet.set(!page.magnet())"
+      [title]="
+        (page.magnetStrength() === 'strong' ? 'Strong' : 'Weak') +
+        ' magnet (M) — hold Ctrl/⌘ to invert while drawing'
+      "
+    >
+      <app-chart-icon name="magnet" [size]="28" />
+    </button>
+    <button
+      type="button"
+      class="rail-caret"
+      [class.active]="page.magnet()"
+      (click)="page.toggleMagnetMenu($event)"
+      title="Magnet mode"
+      [attr.aria-expanded]="page.magnetMenuOpen()"
+      aria-haspopup="menu"
+    >
+      <app-chart-icon name="chevron-right" [size]="12" />
+    </button>
+  </div>
+  <button
+    type="button"
+    class="rail-tool"
+    [class.active]="page.stayInDrawing()"
+    (click)="page.toggleStayInDrawing()"
+    title="Stay in drawing mode"
+    [attr.aria-pressed]="page.stayInDrawing()"
+  >
+    <app-chart-icon name="draw-stay" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="rail-tool"
+    [class.active]="page.drawings.allLocked()"
+    [disabled]="!page.drawings.visible().length"
+    (click)="page.drawings.setLockAll(!page.drawings.allLocked())"
+    [title]="page.drawings.allLocked() ? 'Unlock all drawings' : 'Lock all drawings'"
+  >
+    <app-chart-icon [name]="page.drawings.allLocked() ? 'lock' : 'unlock'" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="rail-tool"
+    [class.active]="page.drawings.hidden()"
+    (click)="page.drawings.hidden.set(!page.drawings.hidden())"
+    [title]="page.drawings.hidden() ? 'Show all drawings' : 'Hide all drawings'"
+  >
+    <app-chart-icon [name]="page.drawings.hidden() ? 'eye-off' : 'eye'" [size]="28" />
+  </button>
+  <div class="rail-sep"></div>
+  <button
+    type="button"
+    class="rail-tool"
+    [disabled]="!page.drawings.visible().length"
+    (click)="page.drawings.clearVisible()"
+    title="Remove all drawings on this chart"
+  >
+    <app-chart-icon name="trash" [size]="28" />
+  </button>
+</nav>
+
+@if (page.magnetMenuOpen()) {
+  <div
+    class="rail-flyout magnet-menu"
+    [style.top.px]="page.railFlyoutTop()"
+    role="menu"
+    (click)="$event.stopPropagation()"
+  >
+    <button
+      type="button"
+      class="rail-flyout-item"
+      role="menuitemradio"
+      [class.active]="page.magnet() && page.magnetStrength() === 'weak'"
+      (click)="page.setMagnetStrength('weak')"
+    >
+      <app-chart-icon name="magnet" [size]="28" /><span>Weak Magnet</span>
+    </button>
+    <button
+      type="button"
+      class="rail-flyout-item"
+      role="menuitemradio"
+      [class.active]="page.magnet() && page.magnetStrength() === 'strong'"
+      (click)="page.setMagnetStrength('strong')"
+    >
+      <app-chart-icon name="magnet" [size]="28" /><span>Strong Magnet</span>
+    </button>
+  </div>
+}
+
+@if (page.openRailGroup(); as g) {
+  <div
+    class="rail-flyout"
+    role="menu"
+    [style.top.px]="page.railFlyoutTop()"
+    (click)="$event.stopPropagation()"
+  >
+    @for (sec of g.sections; track sec.title) {
+      @if (!$first) {
+        <div class="rail-flyout-sep"></div>
+      }
+      <div class="rail-flyout-title">{{ sec.title }}</div>
+      @for (t of sec.tools; track t.kind) {
+        <button
+          type="button"
+          role="menuitem"
+          class="rail-flyout-item"
+          [class.active]="page.tool() === t.kind"
+          (click)="page.pickRailTool(g.name, t.kind)"
+        >
+          <span class="icon"><app-chart-icon [name]="t.kind" [size]="28" /></span>
+          <span>{{ t.label }}</span>
+          <!-- DR-I12: star a tool for the Favourites bar. -->
+          <span
+            class="fav-star"
+            role="button"
+            tabindex="-1"
+            [class.on]="page.favoriteTools.has(t.kind)"
+            [attr.aria-label]="
+              (page.favoriteTools.has(t.kind) ? 'Remove from' : 'Add to') + ' favourites'
+            "
+            [title]="
+              page.favoriteTools.has(t.kind) ? 'Remove from favourites' : 'Add to favourites'
+            "
+            (click)="page.toggleFavoriteTool(t.kind, $event)"
+            >{{ page.favoriteTools.has(t.kind) ? '★' : '☆' }}</span
+          >
+        </button>
+      }
+    }
+  </div>
+}
