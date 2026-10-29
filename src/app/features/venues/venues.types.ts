@@ -426,6 +426,8 @@ export interface InstrumentCandleReadiness {
   excludeEquityOddLots: boolean;
   workerCapturedAtUtc: string | null;
   workerLastSuccessUtc: string | null;
+  /** Newest builder cursor update — the builder's own per-cycle evidence (absent on engines before 2026-10-29). */
+  builderLastCycleUtc?: string | null;
   workerLastErrorUtc: string | null;
   workerLastError: string | null;
   workerConsecutiveFailures: number | null;

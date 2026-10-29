@@ -64,6 +64,54 @@ function plural(n: number, one: string, many = `${one}s`): string {
   return `${n} ${n === 1 ? one : many}`;
 }
 
+function parseOrNull(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * "Builder worker cycling" from two pieces of evidence: the worker's health snapshot (persisted by the research
+ * process every 5 minutes, so up to ~5 min old, and empty for the first snapshot after a restart) and the builder's own
+ * cursor writes (every cycle touches every cursor it works — current to within one poll interval). The newer wins.
+ */
+export function workerRequirement(
+  state: InstrumentCandleState,
+  r: InstrumentCandleReadiness,
+  nowMs: number,
+): FeatureRequirement {
+  const snapshot = parseOrNull(r.workerLastSuccessUtc);
+  const cursorTimes = state.cursors.map((c) => parseOrNull(c.updatedAtUtc)).filter((t): t is number => t !== null);
+  const cycle = parseOrNull(r.builderLastCycleUtc) ?? (cursorTimes.length ? Math.max(...cursorTimes) : null);
+  const last = snapshot === null ? cycle : cycle === null ? snapshot : Math.max(snapshot, cycle);
+  const failing = (r.workerConsecutiveFailures ?? 0) > 0;
+  const base = { label: 'Builder worker cycling', route: '/worker-health' };
+  if (last === null) {
+    const on = r.builderEnabled;
+    return {
+      ...base,
+      ok: on ? null : false,
+      detail: on
+        ? 'No cycle recorded yet. The worker runs in the research process: its first cycle starts about 75 s after ' +
+          'that process starts, and worker health is saved every 5 minutes.'
+        : 'Not cycling: the builder is switched off.',
+    };
+  }
+  const mins = Math.max(0, Math.round((nowMs - last) / 60_000));
+  const fresh = nowMs - last < WORKER_FRESH_MS;
+  const via = last === cycle && cycle !== snapshot ? ' (from the builder’s cursor updates)' : '';
+  return {
+    ...base,
+    ok: fresh && !failing,
+    detail:
+      (fresh
+        ? `Last cycle ${mins} min ago${via}, every ${r.pollIntervalSeconds} s`
+        : `No cycle for ${mins} min${via} — expected every ${r.pollIntervalSeconds} s; is the research process running?`) +
+      (failing ? ` · ${r.workerConsecutiveFailures} failed cycle(s) in a row` : '') +
+      (r.workerLastError ? ` · last error: ${r.workerLastError}` : ''),
+  };
+}
+
 /**
  * The builder's chain, link by link, each from engine data: switch → worker cycling → a source enabled with a writer
  * → trades stored → stored today → symbols claimed. `readiness` null = the engine has no readiness endpoint yet; the
@@ -87,18 +135,7 @@ export function candleChain(
   });
 
   if (r) {
-    const last = r.workerLastSuccessUtc ? Date.parse(r.workerLastSuccessUtc) : null;
-    const fresh = last !== null && nowMs - last < WORKER_FRESH_MS;
-    reqs.push({
-      label: 'Builder worker cycling',
-      ok: last === null ? null : fresh && !(r.workerConsecutiveFailures ?? 0),
-      detail:
-        last === null
-          ? 'No health snapshot of InstrumentCandleWorker yet (it runs in the research process).'
-          : `Last successful cycle ${Math.max(0, Math.round((nowMs - last) / 60_000))} min ago, every ${r.pollIntervalSeconds} s` +
-            (r.workerLastError ? ` · last error: ${r.workerLastError}` : ''),
-      route: '/worker-health',
-    });
+    reqs.push(workerRequirement(state, r, nowMs));
     const writable = writableSources(r);
     reqs.push({
       label: 'A futures, crypto or stock source enabled with a writer',
