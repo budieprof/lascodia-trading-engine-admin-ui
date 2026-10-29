@@ -1,0 +1,118 @@
+// Styles for app-chart-side-pane — moved verbatim from chart-analysis-page.component.scss.
+
+:host {
+  // No box of its own: the page lays this section out exactly as when it was inline.
+  display: contents;
+}
+
+.muted {
+  color: var(--text-muted, #787b86);
+}
+
+// ── Object tree ────────────────────────────────────────────────────────────
+
+.tree-title {
+  padding: 2px 10px 6px;
+  font-weight: 600;
+  color: var(--text-muted, #787b86);
+}
+
+// ── Details / News side pane ───────────────────────────────────────────────
+
+.side-pane {
+  position: absolute;
+  top: 8px;
+  right: 76px;
+  z-index: 19;
+  width: 260px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 6px 0 10px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.16);
+  font-size: 12px;
+}
+
+/* The news module's read on the pair, above the raw headlines. Separated by a
+   rule because it is a CONCLUSION, not another headline — reading it as one
+   more item in the list is exactly the mistake it exists to prevent. */
+.note-hint {
+  cursor: help;
+  font-style: italic;
+}
+
+.news-focus {
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border, #e0e3eb);
+}
+
+.detail-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  margin: 0;
+  padding: 0 12px;
+
+  dt {
+    color: var(--text-muted, #787b86);
+  }
+
+  dd {
+    margin: 0;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .up {
+    color: #26a69a;
+  }
+
+  .down {
+    color: #ef5350;
+  }
+}
+
+.pane-empty {
+  padding: 10px 12px;
+  color: var(--text-muted, #787b86);
+}
+
+.news-list {
+  list-style: none;
+  // Long-press opens the AI analysis: no text selection or iOS callout under the finger.
+  user-select: none;
+  -webkit-touch-callout: none;
+  margin: 0;
+  padding: 0 12px;
+
+  li {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border, #e6e9ef);
+
+    &:last-child {
+      border-bottom: 0;
+    }
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+    line-height: 1.35;
+
+    &:hover {
+      color: var(--accent, #2962ff);
+    }
+  }
+}
+
+.news-meta {
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.muted {
+  color: var(--tv-muted);
+}

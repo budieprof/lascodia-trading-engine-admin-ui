@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { candleChain, candleTiles, rollRows } from './instrument-candles.logic';
+import { candleChain, candleTiles, rollRows, workerRequirement } from './instrument-candles.logic';
 import type {
   FuturesCatalogRoot,
   InstrumentCandleReadiness,
@@ -203,5 +203,56 @@ describe('rollRows', () => {
       expect(tiles.find((t) => t.label === 'Candle rows written')!.value).toBe('1,127');
       expect(tiles.find((t) => t.label === 'Worst lag')!.value).toBe('2 min');
     });
+  });
+});
+
+describe('workerRequirement', () => {
+  const cursor = (updatedAtUtc: string) =>
+    ({ symbol: 'BTC-USD', kind: 'Instrument', status: 'Live', updatedAtUtc }) as unknown as InstrumentCandleState['cursors'][number];
+
+  it('is unknown with a plain reason when neither a snapshot nor a cursor exists', () => {
+    const w = workerRequirement(state(), readiness({ workerLastSuccessUtc: null }), NOW);
+    expect(w.ok).toBeNull();
+    expect(w.detail).toContain('No cycle recorded yet');
+  });
+
+  it('uses the builder cursor updates when the restart snapshot has no success', () => {
+    const w = workerRequirement(
+      state(),
+      readiness({ workerLastSuccessUtc: null, builderLastCycleUtc: '2026-10-28T11:59:00Z' }),
+      NOW,
+    );
+    expect(w.ok).toBe(true);
+    expect(w.detail).toContain('Last cycle 1 min ago');
+    expect(w.detail).toContain('cursor updates');
+  });
+
+  it('falls back to the state cursors on an engine without builderLastCycleUtc', () => {
+    const w = workerRequirement(
+      state({ cursors: [cursor('2026-10-28T11:58:00Z')] }),
+      readiness({ workerLastSuccessUtc: null }),
+      NOW,
+    );
+    expect(w.ok).toBe(true);
+  });
+
+  it('takes the newer of snapshot and cursor evidence and flags a stale worker', () => {
+    const stale = workerRequirement(
+      state(),
+      readiness({ workerLastSuccessUtc: '2026-10-28T10:00:00Z', builderLastCycleUtc: '2026-10-28T10:30:00Z' }),
+      NOW,
+    );
+    expect(stale.ok).toBe(false);
+    expect(stale.detail).toContain('No cycle for 90 min');
+  });
+
+  it('is not ok while cycles are failing', () => {
+    const w = workerRequirement(
+      state(),
+      readiness({ workerConsecutiveFailures: 3, workerLastError: 'timeout' }),
+      NOW,
+    );
+    expect(w.ok).toBe(false);
+    expect(w.detail).toContain('3 failed cycle(s) in a row');
   });
 });

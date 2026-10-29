@@ -1,0 +1,70 @@
+<div class="legend" appMeasuredBottom (bottomChange)="page.legendBottom.set($event)">
+  <div class="legend-title">
+    <strong>{{ page.symbol() }}</strong>
+    <span class="muted">{{ page.resolutionLabel(page.resolution()) }}</span>
+    <span class="market-status" [class]="page.marketStatus()">
+      <app-chart-icon
+        [name]="
+          page.marketStatus() === 'open'
+            ? 'live'
+            : page.marketStatus() === 'closed'
+              ? 'closed'
+              : 'warning'
+        "
+        [size]="12"
+      />
+      {{
+        page.marketStatus() === 'open'
+          ? 'live'
+          : page.marketStatus() === 'closed'
+            ? 'market closed'
+            : 'feed stale'
+      }}
+    </span>
+  </div>
+  @if (page.legend(); as l) {
+    <div class="legend-ohlc" [class.up]="page.legendUp()" [class.down]="!page.legendUp()">
+      <span
+        >O<b>{{ l.open | number: '1.' + page.precision() + '-' + page.precision() }}</b></span
+      >
+      <span
+        >H<b>{{ l.high | number: '1.' + page.precision() + '-' + page.precision() }}</b></span
+      >
+      <span
+        >L<b>{{ l.low | number: '1.' + page.precision() + '-' + page.precision() }}</b></span
+      >
+      <span
+        >C<b>{{ l.close | number: '1.' + page.precision() + '-' + page.precision() }}</b></span
+      >
+      @if (page.legendChange(); as change) {
+        <span class="change" data-testid="legend-change">{{ change }}</span>
+      }
+      @if (page.legendVolume(); as vol) {
+        <span
+          >Vol<b>{{ vol }}</b></span
+        >
+      }
+    </div>
+    <div class="legend-time muted">{{ l.dateLabel ?? page.formatTime(l.time) }}</div>
+    @for (ind of l.indicators; track ind.uid) {
+      <div class="legend-indicator">
+        <span class="muted">{{ ind.label }}</span>
+        @for (v of ind.values; track v.title) {
+          <span class="legend-value" [style.color]="v.color">
+            {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+          </span>
+        }
+      </div>
+    }
+  }
+  <!-- Compare overlays and synthetic series (CC-I12). -->
+  @for (c of page.compareSeries(); track c.id) {
+    <div class="legend-indicator">
+      <span [style.color]="c.color">● {{ page.compareTitleOf(c) }}</span>
+    </div>
+  }
+  <!-- Overlay Pine scripts' status lines (PC-I2); pane scripts' sit over their panes. -->
+  @for (row of page.legendScriptRows(); track row.key) {
+    <app-script-status-line [row]="row" (action)="page.onScriptAction($event)" />
+  }
+</div>

@@ -215,7 +215,7 @@ export class WatchlistPanelComponent {
    * Each symbol's last tick: its direction and the price before it. TradingView colours the digits that tick changed
    * and keeps them coloured until the next tick (no timed flash).
    */
-  readonly tick = signal<Record<string, { dir: 'up' | 'down'; prev: number }>>({});
+  readonly tick = signal<Partial<Record<string, { dir: 'up' | 'down'; prev: number }>>>({});
   readonly listMenuOpen = signal(false);
   readonly moreMenuOpen = signal(false);
   readonly columnsMenuOpen = signal(false);
@@ -480,12 +480,10 @@ export class WatchlistPanelComponent {
       if (!this.needs().has('events') || this.hidden()) return;
       const ccys = this.currencies();
       const load = () =>
-        this.calendar
-          .upcoming({ currencies: ccys, minImpact: 'High' })
-          .subscribe({
-            next: (rows) => this.events.set(rows ?? []),
-            error: () => this.events.set([]),
-          });
+        this.calendar.upcoming({ currencies: ccys, minImpact: 'High' }).subscribe({
+          next: (rows) => this.events.set(rows ?? []),
+          error: () => this.events.set([]),
+        });
       untracked(load);
       const timer = setInterval(load, CONTEXT_REFRESH_MS);
       onCleanup(() => clearInterval(timer));

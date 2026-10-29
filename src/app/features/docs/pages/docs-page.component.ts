@@ -19,6 +19,7 @@ import { map } from 'rxjs';
 import { DocsContentService } from '../docs-content.service';
 import { DOC_GROUPS, guideBySlug, neighbours } from '../docs-catalog';
 import { DOC_ICONS } from '../docs-icons';
+import { DocMarkdownComponent } from './doc-markdown.component';
 import { isSafeDocHtml, readingMinutes, renderMarkdown, type DocHeading } from '../markdown';
 
 /** A screenshot opened full size. */
@@ -37,7 +38,7 @@ interface Zoomed {
   selector: 'app-docs-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, LucideDynamicIcon, DatePipe],
+  imports: [RouterLink, LucideDynamicIcon, DatePipe, DocMarkdownComponent],
   styleUrl: './docs.scss',
   host: { '(window:scroll)': 'onScroll()', '(document:keydown.escape)': 'zoomed.set(null)' },
   template: `
@@ -123,7 +124,7 @@ interface Zoomed {
                 <span></span><span></span><span class="short"></span><span></span>
               </div>
             } @else {
-              <div class="md" [innerHTML]="html()" (click)="follow($event)"></div>
+              <app-doc-markdown [html]="html()" (click)="follow($event)" />
             }
 
             <footer class="guide-foot">

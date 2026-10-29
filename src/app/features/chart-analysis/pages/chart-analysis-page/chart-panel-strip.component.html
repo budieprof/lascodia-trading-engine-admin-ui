@@ -1,0 +1,142 @@
+<nav class="right-strip" aria-label="Panels">
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.watchlistOpen()"
+    (click)="page.watchlistOpen.set(!page.watchlistOpen())"
+    title="Watchlist, details and news"
+  >
+    <app-chart-icon name="watchlist" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.sidePane() === 'details'"
+    (click)="page.openSidePane('details')"
+    title="Symbol details"
+  >
+    <app-chart-icon name="info" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.sidePane() === 'news'"
+    (click)="page.openSidePane('news')"
+    title="News for this pair"
+  >
+    <app-chart-icon name="news" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.sidePane() === 'calendar'"
+    (click)="page.openSidePane('calendar')"
+    title="Economic calendar"
+    data-testid="calendar-button"
+  >
+    <app-chart-icon name="calendar" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'notes'"
+    (click)="page.openPanel('notes')"
+    title="Notes and ideas"
+    data-testid="notes-button"
+  >
+    <app-chart-icon name="pencil" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'depth'"
+    (click)="page.openPanel('depth')"
+    title="Broker depth (DOM)"
+    data-testid="depth-button"
+  >
+    <app-chart-icon name="layers" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'ladder'"
+    (click)="page.openPanel('ladder')"
+    title="Price ladder (DOM): trade from the book"
+    data-testid="ladder-button"
+  >
+    <app-chart-icon name="ladder" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'multibook'"
+    (click)="page.openPanel('multibook')"
+    title="Multibook: the consolidated book of every source you may see, with dispersion and source health"
+    data-testid="multibook-button"
+  >
+    <app-chart-icon name="multibook" [size]="28" />
+  </button>
+  @if (page.venueInstrument()) {
+    <!-- Multi-asset WS7 7.9: futures / crypto / equity fundamentals — only for exchange-traded symbols. -->
+    <button
+      type="button"
+      class="strip-btn"
+      [class.active]="page.chartPanels.open() === 'fundamentals'"
+      (click)="page.openPanel('fundamentals')"
+      title="Fundamentals: term structure, funding and open interest, dividends"
+      data-testid="fundamentals-button"
+    >
+      <app-chart-icon name="fundamentals" [size]="28" />
+    </button>
+  }
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'sentiment'"
+    (click)="page.openPanel('sentiment')"
+    title="Sentiment: news pressure and COT positioning"
+    data-testid="sentiment-button"
+  >
+    <app-chart-icon name="delta" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.chartPanels.open() === 'account'"
+    (click)="page.openPanel('account')"
+    title="Account: positions, orders, signals, paper trades"
+    data-testid="account-button"
+  >
+    <app-chart-icon name="trades" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.sidePane() === 'datawindow'"
+    (click)="page.openSidePane('datawindow')"
+    title="Data window — every value at the crosshair"
+    data-testid="datawindow-button"
+  >
+    <app-chart-icon name="data-window" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.objectTreeOpen()"
+    (click)="page.objectTreeOpen.set(!page.objectTreeOpen())"
+    [disabled]="!page.drawings.symbolDrawings().length"
+    [title]="'Drawings on this chart (' + page.drawings.symbolDrawings().length + ')'"
+  >
+    <app-chart-icon name="object-tree" [size]="28" />
+  </button>
+  <button
+    type="button"
+    class="strip-btn"
+    [class.active]="page.alertManagerOpen()"
+    (click)="page.toggleAlertManager()"
+    [title]="'Alerts (' + page.chartAlerts.activeCount() + ' active)'"
+    data-testid="alert-manager-button"
+  >
+    <app-chart-icon name="alert" [size]="28" />
+  </button>
+</nav>

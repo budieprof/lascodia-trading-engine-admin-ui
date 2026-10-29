@@ -1,0 +1,155 @@
+// Styles for app-chart-studies-strip — moved verbatim from chart-analysis-page.component.scss.
+
+:host {
+  // No box of its own: the page lays this section out exactly as when it was inline.
+  display: contents;
+}
+
+// ── Active studies ─────────────────────────────────────────────────────────
+
+.studies {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 10px;
+  flex: 0 0 auto;
+}
+
+.study {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px 3px 4px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 6px;
+  font-size: 12px;
+
+  &.hidden-study {
+    opacity: 0.5;
+  }
+}
+
+.study-label {
+  font-weight: 600;
+}
+
+.study-input {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted, #787b86);
+
+  input {
+    width: 52px;
+    padding: 2px 4px;
+    border: 1px solid var(--border, #e6e9ef);
+    border-radius: 4px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+  }
+}
+
+.study-toggle,
+.study-settings,
+.study-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, #787b86);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  line-height: 1;
+
+  &:hover {
+    color: inherit;
+  }
+}
+
+// Source (DR-16), sessions and picked times (DR-22) on the studies bar.
+.source-input {
+  max-width: 132px;
+  padding: 1px 2px;
+  border: 1px solid var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+}
+
+.study-input input.session-input {
+  width: 84px;
+}
+
+.pick-input {
+  padding: 2px 6px;
+  border: 1px dashed var(--border, #e6e9ef);
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: crosshair;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+}
+
+.script-error {
+  color: var(--danger, #ef5350);
+  border-color: currentColor;
+}
+
+.symbol-input {
+  width: 72px;
+  text-transform: uppercase;
+}
+
+// Many studies must not push the chart off the page.
+.studies {
+  max-height: 112px;
+  overflow-y: auto;
+}
+
+// ── Line icons (app-chart-icon) ──
+// TradingView's look: icon-led buttons, full-strength ink at rest, icon and label on one baseline.
+.study-toggle,
+.study-settings,
+.study-remove {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+// A finger needs ~40px. The dock's tabs, the menus' rows (32px) and the studies chips' icon buttons
+// (~24px) are sized for a mouse; on a touch screen they get the room, desktop is unchanged. (The
+// bottom bar sizes its own: ChartBottomBarComponent.)
+@media (pointer: coarse) {
+  .study-toggle,
+  .study-settings,
+  .study-remove {
+    justify-content: center;
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+// ── Studies strip ──────────────────────────────────────────────────────────
+.studies {
+  background: var(--tv-bg);
+}
+
+.study {
+  border-color: var(--tv-line);
+  border-radius: 4px;
+}
+
+// The page's beside-dock grid spans each of its direct children across both columns
+// (`.chart-page.dock-side > *`). This strip's host has no box, so the strip is that grid item.
+:host-context(.chart-page.dock-side) .studies {
+  grid-column: 1 / -1;
+}

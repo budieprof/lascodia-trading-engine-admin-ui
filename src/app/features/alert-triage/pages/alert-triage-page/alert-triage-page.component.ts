@@ -2311,6 +2311,8 @@ export class AlertTriagePageComponent {
         return 'not sent';
       case 'Retrying':
         return 'retrying';
+      case 'Queued':
+        return 'waiting for digest';
       default:
         return 'failed';
     }

@@ -10,6 +10,7 @@ import {
   ElementRef,
   computed,
   effect,
+  forwardRef,
   inject,
   signal,
   untracked,
@@ -86,12 +87,10 @@ import {
   InstrumentIconComponent,
 } from '../../watchlist/instrument-icon.component';
 import { changeText, formatVolume } from '../../chart/legend-format';
-import { DataWindowComponent } from '../../chart/data-window.component';
 import { toCsv } from '../../chart/snapshot';
 import { StrategiesService } from '@core/services/strategies.service';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingToolbarComponent } from '../../drawings/ui/drawing-toolbar.component';
-import { DrawingSettingsDialogComponent } from '../../drawings/ui/drawing-settings-dialog.component';
 import type { ZOrderOp } from '../../drawings/drawing-ops';
 import {
   WatchlistPanelComponent,
@@ -100,7 +99,6 @@ import {
 import { TechnicalsViewComponent } from '../../panels/technicals-view.component';
 import { SeasonalsViewComponent } from '../../panels/seasonals-view.component';
 import { NewsAnalysisModalComponent } from '../../panels/news-analysis-modal.component';
-import { LongPressDirective } from '../../panels/long-press.directive';
 import type { StudyRef } from '../../panels/technicals';
 import { IndicatorsDialogComponent } from '../../dialog/indicators-dialog.component';
 import type { DialogItem, DialogTab } from '../../dialog/dialog-items';
@@ -115,9 +113,6 @@ import {
 import { FxFundamentalsService } from '../../panels/fx-fundamentals.service';
 import { DailyBarsService } from '../../panels/daily-bars.service';
 import { FUNDAMENTAL_PANES, stepDifference, type PanePoint } from '../../panels/fx-fundamentals';
-import { PerformanceTilesComponent } from '../../panels/performance-tiles.component';
-import { SeasonalsComponent } from '../../panels/seasonals.component';
-import { TechnicalsGaugeComponent } from '../../panels/technicals-gauge.component';
 import type { ChartViewState, ExternalPane } from '../../chart/chart-host.component';
 import {
   catchError,
@@ -145,7 +140,7 @@ import {
   isBusy,
   type ScriptFailure,
 } from '../../scripts/script-run-state';
-import { ScriptChipComponent, type ScriptChip } from '../../scripts/script-chip.component';
+import type { ScriptChip } from '../../scripts/script-chip.component';
 import {
   displayOverrides,
   resolveDisplay,
@@ -209,7 +204,6 @@ import {
   type ChartScriptLayer,
 } from '../../scripts/script-layers';
 import { inputsSummary, type ScriptAction } from '../../scripts/script-status';
-import { ScriptStatusLineComponent } from '../../scripts/script-status-line.component';
 import {
   ScriptEditorPanelComponent,
   type ScriptEditorSubmit,
@@ -312,18 +306,21 @@ import {
   type StudyTemplate,
 } from '../../workspace/layout-store.service';
 import { ChartWorkspaceSync } from '../../workspace/workspace-sync.service';
-import { EconomicCalendarPaneComponent } from '../../panels/economic-calendar-pane.component';
 import { EconomicEventModalComponent } from '../../panels/economic-event-modal.component';
-import { ZonedDatePipe } from '../../panels/zoned-time';
 import {
-  ArticleFlagsPipe,
   concernsPane,
   headlineAge,
   mergeArticles,
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
-import { ChartPanelsDockComponent } from '../../panels/side/chart-panels-dock.component';
 import { ReplayController } from '../../replay/replay-controller';
+import { CHART_PAGE } from './chart-page.token';
+import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
+import { ChartPanelStripComponent } from './chart-panel-strip.component';
+import { ChartLegendComponent } from './chart-legend.component';
+import { ChartContextMenusComponent } from './chart-context-menus.component';
+import { ChartSidePaneComponent } from './chart-side-pane.component';
+import { ChartStudiesStripComponent } from './chart-studies-strip.component';
 import type { UiCommand } from '@core/assistant/ui-command.types';
 import { buildPaletteActions, type PaletteAction } from '../../palette/chart-palette';
 import { ChartPaletteComponent } from '../../palette/chart-palette.component';
@@ -344,7 +341,6 @@ import {
   withoutStudy,
   type PanelScript,
 } from '../../workspace/chart-panels';
-import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { restoredAppearance, type ChartAppearance } from '../../chart/appearance';
 import {
   recalled,
@@ -666,32 +662,20 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ChartHostComponent,
     ChartTradingComponent,
     ChartAnalysisComponent,
-    DataWindowComponent,
     IndicatorsDialogComponent,
     ChartIconComponent,
     DrawingToolbarComponent,
-    DrawingSettingsDialogComponent,
     WatchlistPanelComponent,
     StrategyTesterPanelComponent,
     ScriptLogsPanelComponent,
     ScriptEditorPanelComponent,
     ScriptSettingsDialogComponent,
     ChartBottomBarComponent,
-    PerformanceTilesComponent,
-    SeasonalsComponent,
-    TechnicalsGaugeComponent,
     TechnicalsViewComponent,
     SeasonalsViewComponent,
     NewsAnalysisModalComponent,
-    EconomicCalendarPaneComponent,
     EconomicEventModalComponent,
-    ZonedDatePipe,
-    ArticleFlagsPipe,
-    ChartPanelsDockComponent,
-    LongPressDirective,
     UndoNoticeComponent,
-    ScriptChipComponent,
-    ScriptStatusLineComponent,
     ChartAlertFormComponent,
     ChartAlertManagerComponent,
     ObjectTreeComponent,
@@ -702,10 +686,17 @@ const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'perce
     ReplayPanelComponent,
     ChartSettingsDialogComponent,
     ChartPaletteComponent,
-    MeasuredBottomDirective,
     CompareDialogComponent,
     LayerGroupsMenuComponent,
+    ChartDrawingRailComponent,
+    ChartPanelStripComponent,
+    ChartLegendComponent,
+    ChartContextMenusComponent,
+    ChartSidePaneComponent,
+    ChartStudiesStripComponent,
   ],
+  // The template's sections (rail, strip, legend, menus, side pane, studies) render this page's state.
+  providers: [{ provide: CHART_PAGE, useExisting: forwardRef(() => ChartAnalysisPageComponent) }],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: {
@@ -1936,7 +1927,7 @@ export class ChartAnalysisPageComponent {
   /** The SP-I9 side panels (notes, broker depth, sentiment, account), one at a time beside the page's own panes. */
   readonly chartPanels = inject(ChartPanelsState);
   /** The symbol's exchange-traded instrument (fundamentals rail button), or null for every MT5 symbol. */
-  protected readonly venueInstrument = computed(() => venueInstrumentFor(this.symbol()));
+  readonly venueInstrument = computed(() => venueInstrumentFor(this.symbol()));
 
   // ── Technicals view ("More technicals") ──────────────────────────────────
   // Laid over the chart area rather than replacing it, so the chart stays
@@ -2165,7 +2156,7 @@ export class ChartAnalysisPageComponent {
     /** A derived level under the click (PR-7): its alert is offered at the level's exact price. */
     level?: AlertableLevel | null;
   } | null>(null);
-  protected readonly chartAlerts = inject(ChartAlertsService);
+  readonly chartAlerts = inject(ChartAlertsService);
   private readonly notify = inject(NotificationService);
   /** The page's questions (names, deletions) in the console's dialog, not the browser's (CC-I11). */
   private readonly dialogs = inject(ScriptDialogService);

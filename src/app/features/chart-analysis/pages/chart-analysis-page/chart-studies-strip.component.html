@@ -1,0 +1,141 @@
+<!-- Active studies: rename-free, TradingView-style list with inline inputs. -->
+@if (page.active().length || page.scriptChips().length || page.scriptError()) {
+  <aside class="studies">
+    <!-- Pine scripts: each with its own run state (PC-05/PC-13/PC-I7). -->
+    @for (c of page.scriptChips(); track c.key) {
+      <app-script-chip
+        [chip]="c"
+        (visibility)="page.toggleScriptVisible(c.key)"
+        (settings)="page.settings.open(c.key)"
+        (source)="page.openScriptSource(c.key)"
+        (tester)="page.testerOpen.set(!page.testerOpen())"
+        (logs)="page.openLogs(c.key)"
+        (alert)="page.openScriptAlert(c.key)"
+        (removed)="page.removeScriptFromChart(c.key)"
+        (openAt)="page.openScriptAt(c.key, $event)"
+      />
+    }
+    @if (page.scriptError()) {
+      <div class="study script-error" role="alert">
+        {{ page.scriptError() }}
+        <button type="button" class="study-remove" (click)="page.scriptError.set(null)">
+          <app-chart-icon name="close" [size]="14" />
+        </button>
+      </div>
+    }
+    @for (item of page.active(); track item.uid) {
+      <div class="study" [class.hidden-study]="!item.visible">
+        <button
+          type="button"
+          class="study-toggle"
+          (click)="page.toggleIndicator(item.uid)"
+          [attr.aria-pressed]="item.visible"
+          [title]="item.visible ? 'Hide' : 'Show'"
+        >
+          <app-chart-icon [name]="item.visible ? 'eye' : 'eye-off'" [size]="16" />
+        </button>
+        <span class="study-label">{{ page.labelFor(item) }}</span>
+        @for (input of page.inputsFor(item); track input.key) {
+          <label class="study-input">
+            {{ input.label }}
+            @switch (input.type) {
+              @case ('select') {
+                <select (change)="page.setParam(item.uid, input.key, $any($event.target).value)">
+                  @for (opt of input.options ?? []; track opt) {
+                    <option [value]="opt" [selected]="item.params[input.key] === opt">
+                      {{ opt }}
+                    </option>
+                  }
+                </select>
+              }
+              @case ('source') {
+                <!-- DR-16 / DR-I5: a price, or another study's plot. -->
+                <select
+                  class="source-input"
+                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                >
+                  @for (g of page.sourceGroupsFor(item); track g.label) {
+                    <optgroup [label]="g.label">
+                      @for (c of g.choices; track c.value) {
+                        <option [value]="c.value" [selected]="item.params[input.key] === c.value">
+                          {{ c.label }}
+                        </option>
+                      }
+                    </optgroup>
+                  }
+                </select>
+              }
+              @case ('symbol') {
+                <input
+                  type="text"
+                  class="symbol-input"
+                  [value]="item.params[input.key]"
+                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                />
+              }
+              @case ('session') {
+                <input
+                  type="text"
+                  class="session-input"
+                  placeholder="0800-1700"
+                  [value]="item.params[input.key]"
+                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                />
+              }
+              @case ('time') {
+                <!-- DR-22: picked on the chart, never typed as milliseconds. -->
+                <button
+                  type="button"
+                  class="pick-input"
+                  [disabled]="!page.canPickOnChart()"
+                  (click)="page.pickStudyTime(item.uid, input.key)"
+                >
+                  {{ page.studyTimeLabel(item.params[input.key]) }}
+                </button>
+              }
+              @default {
+                <input
+                  type="number"
+                  [value]="item.params[input.key]"
+                  [min]="input.min ?? 0"
+                  [max]="input.max ?? 100000"
+                  step="any"
+                  (change)="page.setParam(item.uid, input.key, $any($event.target).value)"
+                />
+              }
+            }
+          </label>
+        }
+        @if (page.isPatternStudy(item)) {
+          <!-- DR-I8: the scorecard of the patterns this study marks. -->
+          <button
+            type="button"
+            class="study-settings"
+            (click)="page.openScorecard()"
+            title="Pattern scorecard"
+            aria-label="Pattern scorecard"
+          >
+            <app-chart-icon name="structure" [size]="14" />
+          </button>
+        }
+        <button
+          type="button"
+          class="study-settings"
+          (click)="page.studySettingsFor.set(item.uid)"
+          title="Settings"
+          aria-label="Settings"
+        >
+          <app-chart-icon name="settings" [size]="14" />
+        </button>
+        <button
+          type="button"
+          class="study-remove"
+          (click)="page.removeIndicator(item.uid)"
+          title="Remove"
+        >
+          <app-chart-icon name="close" [size]="14" />
+        </button>
+      </div>
+    }
+  </aside>
+}

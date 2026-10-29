@@ -67,7 +67,7 @@ const ALERT_TYPES: AlertType[] = [
 
 const SEVERITIES: AlertSeverity[] = ['Info', 'Medium', 'High', 'Critical'];
 
-interface ChannelDef {
+export interface ChannelDef {
   channel: AlertChannel;
   title: string;
   description: string;
@@ -79,15 +79,75 @@ interface ChannelDef {
   fields: ChannelField[];
 }
 
-interface ChannelField {
+export interface ChannelField {
   key: string;
   label: string;
-  type: 'text' | 'password' | 'number' | 'checkbox';
+  type: 'text' | 'password' | 'number' | 'checkbox' | 'select';
   hint?: string;
   required?: boolean;
+  /** `select` only: the values offered. The first option of the list is NOT implied — an unset key shows "Default (…)". */
+  options?: readonly string[];
+  /** The engine's compiled default, shown while the key has no saved value. */
+  defaultValue?: string;
 }
 
-const CHANNEL_DEFS: ChannelDef[] = [
+/**
+ * The delivery policy of an outbound channel (engine `Alert:Delivery:{Channel}:*`, 2026-10-29): which severities are
+ * sent, which wait for a digest, how many may go out an hour, and whether a still-active alert is repeated only as a
+ * reminder (after 1 h, 2 h, 4 h … then once a day). Every alert is still recorded on this page whatever these say.
+ */
+export function deliveryPolicyFields(
+  channel: 'Email' | 'Webhook' | 'Telegram',
+  d: { min: string; immediate: string; digest: number; perHour: number },
+): ChannelField[] {
+  const key = (k: string) => `Alert:Delivery:${channel}:${k}`;
+  return [
+    {
+      key: key('MinSeverity'),
+      label: 'Send alerts from',
+      type: 'select',
+      options: SEVERITIES,
+      defaultValue: d.min,
+      hint: 'Less severe alerts are recorded here but not sent on this channel.',
+    },
+    {
+      key: key('ImmediateMinSeverity'),
+      label: 'Send straight away from',
+      type: 'select',
+      options: SEVERITIES,
+      defaultValue: d.immediate,
+      hint: 'Less severe ones wait for the digest (when a digest interval is set).',
+    },
+    {
+      key: key('DigestMinutes'),
+      label: 'Digest every (minutes)',
+      type: 'number',
+      defaultValue: String(d.digest),
+      hint: 'One message listing the alerts queued since the last one. 0 = no digest.',
+    },
+    {
+      key: key('MaxPerHour'),
+      label: 'At most per hour',
+      type: 'number',
+      defaultValue: String(d.perHour),
+      hint: 'Messages sent straight away per hour; past it they go in the digest. 0 = no limit.',
+    },
+    {
+      key: key('Reminders'),
+      label: 'Repeat a still-active alert only as a reminder (1 h, 2 h, 4 h … then daily)',
+      type: 'checkbox',
+      defaultValue: 'true',
+    },
+    {
+      key: key('ResolvedNotices'),
+      label: 'Say when an alert this channel announced has cleared',
+      type: 'checkbox',
+      defaultValue: 'true',
+    },
+  ];
+}
+
+export const CHANNEL_DEFS: ChannelDef[] = [
   {
     // Contract C2 (2026-10-09): delivered inside this admin UI — nothing to set up, only the on/off switch
     // (InAppAlertOptions:IsEnabled). Chart alerts and script alert bindings can choose it.
@@ -101,8 +161,15 @@ const CHANNEL_DEFS: ChannelDef[] = [
     channel: 'Email',
     title: 'Email (SMTP)',
     description:
-      'Sends each triggered alert as a plain-text email via SMTP. Use a transactional provider (SendGrid, Postmark, SES) for production.',
+      'Sends alerts as plain-text email. By default only Critical alerts go out straight away (at most 6 an hour); Medium and High ones are collected into one digest email an hour. Tick "Use the platform mail service" to send through the same mail service as sign-up email, so no SMTP account is needed here.',
     fields: [
+      {
+        key: 'EmailAlertOptions:UsePlatformMailRelay',
+        label: 'Use the platform mail service (the one sign-up email uses)',
+        type: 'checkbox',
+        defaultValue: 'false',
+        hint: 'Then only the To address is needed below.',
+      },
       { key: 'EmailAlertOptions:Host', label: 'SMTP host', type: 'text', required: true },
       {
         key: 'EmailAlertOptions:Port',
@@ -116,22 +183,30 @@ const CHANNEL_DEFS: ChannelDef[] = [
       { key: 'EmailAlertOptions:ToAddress', label: 'To address', type: 'text', required: true },
       { key: 'EmailAlertOptions:FromAddress', label: 'From address', type: 'text', required: true },
       { key: 'EmailAlertOptions:FromName', label: 'From name', type: 'text' },
+      ...deliveryPolicyFields('Email', { min: 'Medium', immediate: 'Critical', digest: 60, perHour: 6 }),
     ],
   },
   {
     channel: 'Webhook',
     title: 'Webhook',
     description:
-      'POSTs every alert to the configured URL. Use the shared secret to verify origin via the X-Lascodia-Secret header.',
+      'Add the URL that should receive alerts here — nothing is sent until one is set. Each alert is POSTed as JSON (alertId, symbol, alertType, severity, kind, message, timestamp). Set a signing secret so the receiver can check each request with the X-Lascodia-Signature header.',
     fields: [
-      { key: 'WebhookAlertOptions:Url', label: 'Webhook URL', type: 'text', required: true },
+      {
+        key: 'WebhookAlertOptions:Url',
+        label: 'Webhook URL',
+        type: 'text',
+        required: true,
+        hint: 'https://… — the address that should receive alerts',
+      },
       { key: 'WebhookAlertOptions:TimeoutSeconds', label: 'Timeout (s)', type: 'number' },
       {
         key: 'WebhookAlertOptions:SharedSecret',
-        label: 'Shared secret',
+        label: 'Signing secret',
         type: 'password',
-        hint: 'Sent as X-Lascodia-Secret header — leave blank to omit.',
+        hint: 'Signs every request (X-Lascodia-Timestamp + X-Lascodia-Signature). Leave blank to send unsigned.',
       },
+      ...deliveryPolicyFields('Webhook', { min: 'Info', immediate: 'Info', digest: 0, perHour: 0 }),
     ],
   },
   {
@@ -155,6 +230,7 @@ const CHANNEL_DEFS: ChannelDef[] = [
         hint: 'Numeric for users/groups, @channelname for public channels',
       },
       { key: 'TelegramAlertOptions:TimeoutSeconds', label: 'Timeout (s)', type: 'number' },
+      ...deliveryPolicyFields('Telegram', { min: 'Info', immediate: 'Info', digest: 0, perHour: 0 }),
     ],
   },
 ];
@@ -667,21 +743,37 @@ const CHANNEL_DEFS: ChannelDef[] = [
                         @if (f.type === 'checkbox') {
                           <input
                             type="checkbox"
-                            [checked]="getBool(f.key)"
+                            [checked]="getBool(f.key, f.defaultValue)"
                             (change)="setField(f.key, $event)"
                           />
+                        } @else if (f.type === 'select') {
+                          <select
+                            class="input"
+                            [value]="getValue(f.key)"
+                            (change)="setField(f.key, $event)"
+                            [attr.aria-label]="f.label"
+                          >
+                            <option value="">Default ({{ f.defaultValue }})</option>
+                            @for (o of f.options ?? []; track o) {
+                              <option [value]="o" [selected]="getValue(f.key) === o">{{ o }}</option>
+                            }
+                          </select>
                         } @else {
                           <input
                             class="input"
                             [type]="f.type"
                             [value]="getValue(f.key)"
                             (input)="setField(f.key, $event)"
-                            [attr.placeholder]="f.hint ?? null"
+                            [attr.placeholder]="
+                              f.defaultValue !== undefined
+                                ? 'Default: ' + f.defaultValue
+                                : (f.hint ?? null)
+                            "
                             autocomplete="off"
                             [attr.aria-label]="f.label"
                           />
                         }
-                        @if (f.hint && f.type !== 'checkbox') {
+                        @if (f.hint) {
                           <span class="hint muted">{{ f.hint }}</span>
                         }
                       </label>
@@ -2413,14 +2505,17 @@ export class AlertsPageComponent {
     return this.draftValues()[key] ?? this.configValues()[key] ?? '';
   }
 
-  getBool(key: string): boolean {
-    const v = this.getValue(key);
+  getBool(key: string, defaultValue?: string): boolean {
+    const v = this.getValue(key) || defaultValue || '';
     return v === 'true' || v === '1';
   }
 
   setField(key: string, evt: Event): void {
-    const target = evt.target as HTMLInputElement;
-    const value = target.type === 'checkbox' ? String(target.checked) : target.value;
+    const target = evt.target as HTMLInputElement | HTMLSelectElement;
+    const value =
+      target instanceof HTMLInputElement && target.type === 'checkbox'
+        ? String(target.checked)
+        : target.value;
     this.draftValues.update((d) => ({ ...d, [key]: value }));
   }
 

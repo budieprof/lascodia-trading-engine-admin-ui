@@ -1,0 +1,116 @@
+// The model's position-management instructions, in the spot-analysis dialog.
+
+:host {
+  // No box of its own: the parent lays the content out exactly as when it was inline.
+  display: contents;
+}
+
+/* Exit-instructions card — sits between the recommendation and the
+   prose body. One row per instruction; the outcome chip on the left
+   colour-codes whether the engine acted on it or rejected it. */
+.exit-card {
+  margin: var(--space-3) var(--space-5) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.exit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.exit-title {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+.exit-meta {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.exit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.exit-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+}
+.exit-row-rejected {
+  opacity: 0.85;
+}
+.exit-outcome {
+  grid-column: 1;
+  align-self: center;
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  letter-spacing: 0.05em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.exit-outcome-ok {
+  background: rgba(22, 163, 74, 0.12);
+  border-color: #16a34a;
+  color: #16a34a;
+}
+.exit-outcome-warn {
+  background: rgba(245, 158, 11, 0.1);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+.exit-outcome-muted {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+}
+.exit-outcome-bad {
+  background: rgba(220, 38, 38, 0.1);
+  border-color: #dc2626;
+  color: #dc2626;
+}
+.exit-action {
+  grid-column: 2;
+  align-self: center;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.exit-confidence {
+  grid-column: 3;
+  align-self: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.exit-reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.exit-failure {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: #dc2626;
+}

@@ -44,6 +44,10 @@ import {
 } from '@core/api/api.types';
 import { applyTickToCandles, preserveFormingBar } from '@shared/utils/live-candle';
 import { TIMEFRAME_PILLS, chartAnalysisTarget } from './chart-analysis-link';
+import { ChartQuoteStripComponent } from './chart-quote-strip.component';
+import { AnalysisAutogenWarningComponent } from './analysis-autogen-warning.component';
+import { AnalysisRejectedRecsComponent } from './analysis-rejected-recs.component';
+import { AnalysisExitInstructionsComponent } from './analysis-exit-instructions.component';
 import { appStorage } from '@core/storage/app-storage';
 
 /**
@@ -338,6 +342,10 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
     MarkdownCopyDirective,
     ConfirmDialogComponent,
     ModalA11yDirective,
+    ChartQuoteStripComponent,
+    AnalysisAutogenWarningComponent,
+    AnalysisRejectedRecsComponent,
+    AnalysisExitInstructionsComponent,
   ],
   template: `
     <div class="trading-chart">
@@ -410,48 +418,15 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
           </a>
         </div>
         <div class="toolbar-right">
-          @if (livePrice()) {
-            <div class="live-price-display">
-              <span class="live-label">Live</span>
-              <span class="live-dot"></span>
-              <span
-                class="live-bid"
-                [class.up]="priceDirection() === 'up'"
-                [class.down]="priceDirection() === 'down'"
-              >
-                {{ livePrice()!.bid.toFixed(pricePrecision()) }}
-              </span>
-              <span class="live-separator">/</span>
-              <span class="live-ask">{{ livePrice()!.ask.toFixed(pricePrecision()) }}</span>
-              <span class="live-spread">{{ livePrice()!.spread.toFixed(1) }} sp</span>
-            </div>
-          }
-          <div
-            class="candle-countdown"
-            [class.imminent]="candleCountdown().startsWith('00:0')"
-            [title]="
-              'Time remaining until the current ' + selectedTimeframe() + ' candle closes (mm:ss)'
-            "
-          >
-            <span class="countdown-label">{{ selectedTimeframe() }} closes in</span>
-            <span class="countdown-value">{{ candleCountdown() }}</span>
-          </div>
-          @if (openPositionsPnL(); as pnl) {
-            <div
-              class="open-pnl"
-              [class.gain]="pnl.sign > 0"
-              [class.loss]="pnl.sign < 0"
-              [title]="
-                'Live unrealised P&L summed across ' +
-                pnl.count +
-                ' open position(s) on ' +
-                selectedSymbol()
-              "
-            >
-              <span class="countdown-label">Open P&L · {{ pnl.count }} pos</span>
-              <span class="countdown-value">{{ pnl.display }}</span>
-            </div>
-          }
+          <app-chart-quote-strip
+            [livePrice]="livePrice()"
+            [priceDirection]="priceDirection()"
+            [pricePrecision]="pricePrecision()"
+            [candleCountdown]="candleCountdown()"
+            [timeframe]="selectedTimeframe()"
+            [symbol]="selectedSymbol()"
+            [openPnl]="openPositionsPnL()"
+          />
           <!--
             LLM analysis menu — collapses the six analysis actions (spot,
             macro, directed limit/stop proposals) into a single dropdown to
@@ -851,20 +826,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                  generatedSignalIds is server-truth, signalAutoGenEnabled() is
                  the toolbar's current state. -->
             @if (showAutoGenWarning(ar)) {
-              <section class="rec-autogen-warn" role="status">
-                <span class="warn-icon" aria-hidden="true">⚠</span>
-                <div class="warn-body">
-                  <strong>Auto-gen was off — no signal was created.</strong>
-                  <span class="warn-muted">
-                    Toggle <em>Auto-gen signals</em> on the toolbar to have the engine persist
-                    viable setups automatically next time, or use <em>Create Signal</em> below to
-                    file this one manually.
-                  </span>
-                </div>
-                <button type="button" class="warn-action" (click)="toggleSignalAutoGen()">
-                  Turn on
-                </button>
-              </section>
+              <app-analysis-autogen-warning (turnOn)="toggleSignalAutoGen()" />
             }
             @if (ar.recommendation; as rec) {
               <section
@@ -1025,36 +987,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                  reason the engine couldn't file it (TradeSpec geometry,
                  directed-side mismatch, viability gate). -->
             @if (ar.rejectedRecommendations && ar.rejectedRecommendations.length > 0) {
-              <section class="rejected-card">
-                <div class="rejected-head">
-                  Proposed but not tradeable ({{ ar.rejectedRecommendations.length }}) — surfaced so
-                  nothing is silently dropped:
-                </div>
-                @for (rej of ar.rejectedRecommendations; track $index) {
-                  <div class="rej" [attr.data-action]="rej.recommendation.action">
-                    <div class="rej-top">
-                      <span class="rec-action">{{ rej.recommendation.action }}</span>
-                      <span class="rej-conf mono"
-                        >{{ (rej.recommendation.confidence * 100).toFixed(0) }}%</span
-                      >
-                      <span class="rej-code mono" [title]="rej.reasonCode">{{
-                        rej.reasonCode
-                      }}</span>
-                    </div>
-                    @if (
-                      rej.recommendation.action !== 'Hold' &&
-                      rej.recommendation.entryPrice !== null &&
-                      rej.recommendation.entryPrice !== undefined
-                    ) {
-                      <div class="rej-levels mono">
-                        Entry {{ rej.recommendation.entryPrice }} · SL
-                        {{ rej.recommendation.stopLoss }} · TP {{ rej.recommendation.takeProfit }}
-                      </div>
-                    }
-                    <p class="rej-reason">{{ rej.reasonDetail }}</p>
-                  </div>
-                }
-              </section>
+              <app-analysis-rejected-recs [rejected]="ar.rejectedRecommendations" />
             }
             <!-- Position management — LLM exit instructions, including
                  server-rejected ones so the operator sees the model's full
@@ -1062,52 +995,7 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
                  amber = rate-limited / below-confidence, grey = position
                  already closed, red = dispatch failure). -->
             @if ((ar.exitInstructions?.length ?? 0) > 0) {
-              <section class="exit-card">
-                <header class="exit-head">
-                  <span class="exit-title">Position management</span>
-                  <span class="exit-meta">
-                    {{ ar.exitInstructions!.length }} instruction(s) ·
-                    {{ exitExecutedCount(ar) }} executed
-                  </span>
-                </header>
-                <ul class="exit-list">
-                  @for (e of ar.exitInstructions!; track e.positionId + '|' + e.action) {
-                    <li class="exit-row" [class.exit-row-rejected]="e.outcome !== 'Executed'">
-                      <span
-                        class="exit-outcome"
-                        [class.exit-outcome-ok]="e.outcome === 'Executed'"
-                        [class.exit-outcome-warn]="
-                          e.outcome === 'RateLimited' || e.outcome === 'BelowConfidence'
-                        "
-                        [class.exit-outcome-muted]="e.outcome === 'PositionClosed'"
-                        [class.exit-outcome-bad]="e.outcome === 'Failed'"
-                      >
-                        {{ exitOutcomeLabel(e.outcome) }}
-                      </span>
-                      <span class="exit-action">
-                        @if (e.action === 'close') {
-                          Close
-                          {{
-                            e.executedCloseLots !== null
-                              ? e.executedCloseLots + ' lots'
-                              : e.closeFractionPct + '%'
-                          }}
-                          of #{{ e.positionId }}
-                        } @else {
-                          Move stop on #{{ e.positionId }} to {{ e.newStopLoss }}
-                        }
-                      </span>
-                      <span class="exit-confidence">
-                        {{ (e.confidence * 100).toFixed(0) }}% confidence
-                      </span>
-                      <p class="exit-reason">{{ e.reason }}</p>
-                      @if (e.failureMessage; as fm) {
-                        <p class="exit-failure">{{ fm }}</p>
-                      }
-                    </li>
-                  }
-                </ul>
-              </section>
+              <app-analysis-exit-instructions [instructions]="ar.exitInstructions!" />
             }
             <div
               class="analysis-body md"
@@ -1322,23 +1210,6 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         border-color: var(--text-secondary);
       }
 
-      .live-price-display {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: 4px var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        font-variant-numeric: tabular-nums;
-      }
-      .live-label {
-        font-size: 9px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-tertiary);
-      }
       .live-dot {
         width: 6px;
         height: 6px;
@@ -1354,105 +1225,6 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         50% {
           opacity: 0.4;
         }
-      }
-      .live-bid {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        transition: color 0.3s ease;
-      }
-      .live-bid.up {
-        color: var(--profit);
-      }
-      .live-bid.down {
-        color: var(--loss);
-      }
-      .live-separator {
-        color: var(--text-tertiary);
-        font-size: 11px;
-      }
-      .live-ask {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .live-spread {
-        font-size: 10px;
-        color: var(--text-tertiary);
-        padding: 1px 6px;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
-      }
-
-      /* Candle-close countdown badge — pinned next to the live-price box
-         so the operator can read both the current bid/ask and how long
-         until the next bar without taking their eyes off the chrome. */
-      .candle-countdown {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        font-size: 11px;
-        line-height: 1;
-        white-space: nowrap;
-        transition:
-          background 0.2s,
-          color 0.2s,
-          border-color 0.2s;
-      }
-      .countdown-label {
-        color: var(--text-tertiary);
-        font-weight: var(--font-medium);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .countdown-value {
-        color: var(--text-primary);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      /* Under 10 seconds, flag the imminent close in orange so operators
-         can defer manual entries past the bar boundary. */
-      .candle-countdown.imminent {
-        background: rgba(255, 149, 0, 0.12);
-        border-color: rgba(255, 149, 0, 0.4);
-      }
-      .candle-countdown.imminent .countdown-value {
-        color: #ff9500;
-      }
-
-      /* Open positions cumulative P&L badge — same shell as the candle
-         countdown so the two read as a paired row. Sign tints the
-         background and the value so the operator can pick up gain/loss
-         from peripheral vision without parsing the digits. */
-      .open-pnl {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        font-size: 11px;
-        line-height: 1;
-        white-space: nowrap;
-      }
-      .open-pnl.gain {
-        background: rgba(52, 199, 89, 0.1);
-        border-color: rgba(52, 199, 89, 0.35);
-      }
-      .open-pnl.gain .countdown-value {
-        color: #34c759;
-      }
-      .open-pnl.loss {
-        background: rgba(255, 59, 48, 0.1);
-        border-color: rgba(255, 59, 48, 0.35);
-      }
-      .open-pnl.loss .countdown-value {
-        color: #ff3b30;
       }
 
       /* Spot-analysis trigger — primary-styled so it stands out in the
@@ -1824,64 +1596,6 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         color: #ff3b30;
       }
 
-      /* Auto-gen-off warning ribbon. Slots between the header and the
-         recommendation card. Amber accent so it reads as guidance, not
-         failure — the analysis itself succeeded; only the persistence step
-         was skipped by operator-controlled state. */
-      .rec-autogen-warn {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--space-3);
-        margin: var(--space-3) var(--space-5) 0;
-        padding: var(--space-3) var(--space-4);
-        border: 1px solid #f59e0b;
-        border-left-width: 4px;
-        border-radius: var(--radius-sm);
-        background: rgba(245, 158, 11, 0.08);
-        color: var(--text-primary);
-      }
-      .rec-autogen-warn .warn-icon {
-        font-size: var(--text-base);
-        line-height: 1.4;
-        color: #f59e0b;
-      }
-      .rec-autogen-warn .warn-body {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        flex: 1 1 auto;
-        font-size: var(--text-xs);
-        line-height: 1.5;
-      }
-      .rec-autogen-warn .warn-body strong {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .rec-autogen-warn .warn-muted {
-        color: var(--text-tertiary);
-      }
-      .rec-autogen-warn .warn-muted em {
-        font-style: normal;
-        color: var(--text-primary);
-        font-weight: var(--font-medium);
-      }
-      .rec-autogen-warn .warn-action {
-        flex: 0 0 auto;
-        align-self: center;
-        padding: 4px var(--space-3);
-        border: 1px solid #f59e0b;
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: #f59e0b;
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      .rec-autogen-warn .warn-action:hover {
-        background: rgba(245, 158, 11, 0.12);
-      }
-
       /* Trade recommendation card — renders between the head and the prose
          body. Action colour-codes the left border so the operator can
          eyeball Buy / Sell / Hold instantly. */
@@ -1976,59 +1690,6 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         color: var(--text-secondary);
         font-style: italic;
       }
-      .rejected-card {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        margin-top: var(--space-3);
-      }
-      .rejected-head {
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-      }
-      .rejected-card .rej {
-        border: 1px dashed var(--border);
-        border-left: 3px solid var(--text-tertiary);
-        border-radius: var(--radius-sm);
-        padding: var(--space-2) var(--space-3);
-        background: var(--bg-primary);
-      }
-      .rejected-card .rej[data-action='Buy'] {
-        border-left-color: #1d8a3e;
-      }
-      .rejected-card .rej[data-action='Sell'] {
-        border-left-color: #c93631;
-      }
-      .rejected-card .rej-top {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        margin-bottom: 4px;
-      }
-      .rejected-card .rej-conf {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .rejected-card .rej-code {
-        margin-left: auto;
-        font-size: 10px;
-        color: var(--loss);
-        background: color-mix(in srgb, var(--loss) 10%, transparent);
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-      }
-      .rejected-card .rej-levels {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        margin-bottom: 4px;
-      }
-      .rejected-card .rej-reason {
-        margin: 0;
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        color: var(--text-primary);
-      }
 
       /* Promote-to-signal action row at the bottom of the recommendation card.
          Three states share the row: the CTA button (default), an "already
@@ -2080,116 +1741,6 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
       }
       .rec-signal-link:hover {
         text-decoration: underline;
-      }
-
-      /* Exit-instructions card — sits between the recommendation and the
-         prose body. One row per instruction; the outcome chip on the left
-         colour-codes whether the engine acted on it or rejected it. */
-      .exit-card {
-        margin: var(--space-3) var(--space-5) 0;
-        padding: var(--space-3) var(--space-4);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .exit-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-3);
-      }
-      .exit-title {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .exit-meta {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .exit-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .exit-row {
-        display: grid;
-        grid-template-columns: auto 1fr auto;
-        gap: var(--space-2) var(--space-3);
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-      }
-      .exit-row-rejected {
-        opacity: 0.85;
-      }
-      .exit-outcome {
-        grid-column: 1;
-        align-self: center;
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        letter-spacing: 0.05em;
-        padding: 2px 6px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        color: var(--text-tertiary);
-        white-space: nowrap;
-      }
-      .exit-outcome-ok {
-        background: rgba(22, 163, 74, 0.12);
-        border-color: #16a34a;
-        color: #16a34a;
-      }
-      .exit-outcome-warn {
-        background: rgba(245, 158, 11, 0.1);
-        border-color: #f59e0b;
-        color: #f59e0b;
-      }
-      .exit-outcome-muted {
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .exit-outcome-bad {
-        background: rgba(220, 38, 38, 0.1);
-        border-color: #dc2626;
-        color: #dc2626;
-      }
-      .exit-action {
-        grid-column: 2;
-        align-self: center;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .exit-confidence {
-        grid-column: 3;
-        align-self: center;
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      .exit-reason {
-        grid-column: 1 / -1;
-        margin: 0;
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        color: var(--text-secondary);
-        font-style: italic;
-      }
-      .exit-failure {
-        grid-column: 1 / -1;
-        margin: 0;
-        font-size: var(--text-xs);
-        line-height: 1.5;
-        color: #dc2626;
       }
 
       .chart-toggles {
@@ -3462,32 +3013,6 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (recs.length === 0) return false;
     const generated = ar.generatedSignalIds ?? [];
     return generated.length === 0;
-  }
-
-  /** Count of exit instructions on a result that actually executed (vs.
-   *  rate-limited / below-confidence / failed). Surfaced in the section
-   *  header so the operator sees the executed-to-emitted ratio at a glance. */
-  exitExecutedCount(ar: MarketAnalysisResultDto): number {
-    return (ar.exitInstructions ?? []).filter((e) => e.outcome === 'Executed').length;
-  }
-
-  /** Friendly label for an exit-instruction outcome — the wire codes are
-   *  PascalCase compact identifiers; the UI shows a hyphenated form. */
-  exitOutcomeLabel(outcome: string): string {
-    switch (outcome) {
-      case 'Executed':
-        return 'EXECUTED';
-      case 'RateLimited':
-        return 'RATE-LIMITED';
-      case 'BelowConfidence':
-        return 'LOW CONFIDENCE';
-      case 'PositionClosed':
-        return 'POSITION CLOSED';
-      case 'Failed':
-        return 'FAILED';
-      default:
-        return outcome.toUpperCase();
-    }
   }
 
   /** Bubble click → open the last completed analysis in the modal. */
