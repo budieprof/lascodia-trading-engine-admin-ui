@@ -326,15 +326,15 @@
   }
 }
 .hero__beam--a {
-  left: calc(50% - 64px * 5);
+  left: calc(50% - 64px * 9);
 }
 .hero__beam--b {
-  left: calc(50% + 64px * 3);
+  left: calc(50% + 64px * 9);
   animation-delay: -2.2s;
   animation-duration: 7s;
 }
 .hero__beam--c {
-  left: calc(50% - 64px * 9);
+  left: calc(50% + 64px * 11);
   animation-delay: -4.1s;
   animation-duration: 8s;
 }
@@ -851,6 +851,12 @@
 }
 
 // ── Responsive ──
+// The beams run outside the text column; where there is no room beside it, they are left out.
+@media (max-width: 1240px) {
+  .hero__beam {
+    display: none;
+  }
+}
 @media (max-width: 1040px) {
   .nav__links {
     display: none;
