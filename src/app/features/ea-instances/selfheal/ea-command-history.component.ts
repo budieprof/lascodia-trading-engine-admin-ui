@@ -150,7 +150,7 @@ const PAGE_SIZE = 25;
   ],
 })
 export class EaCommandHistoryComponent {
-  readonly instanceId = input.required<string>();
+  readonly instanceId = input<string>('');
   readonly refreshTick = input(0);
 
   private readonly admin = inject(EAAdminService);
@@ -179,6 +179,15 @@ export class EaCommandHistoryComponent {
 
   constructor() {
     this.ops.settled$.pipe(takeUntilDestroyed()).subscribe(() => this.resource.refresh());
+    // instanceId arrives after construction (the first poll ran with ''), so fetch as soon as it is known.
+    let lastId = '';
+    effect(() => {
+      const id = this.instanceId();
+      if (id && id !== lastId) {
+        lastId = id;
+        untracked(() => this.resource.refresh());
+      }
+    });
     let first = true;
     effect(() => {
       this.page();

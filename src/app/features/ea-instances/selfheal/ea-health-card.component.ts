@@ -282,7 +282,7 @@ type HealthAnswer = { ok: true; dto: EAHealthDto } | { ok: false; message: strin
   ],
 })
 export class EaHealthCardComponent {
-  readonly instanceId = input.required<string>();
+  readonly instanceId = input<string>('');
   /** C1 diag from the latest heartbeat (recent transitions). */
   readonly diag = input<EADiag | null>(null);
   /** Bumped by the page's Refresh button. */
@@ -376,10 +376,18 @@ export class EaHealthCardComponent {
     const tick = setInterval(() => this.now.set(Date.now()), 1000);
     destroyRef.onDestroy(() => clearInterval(tick));
     this.ops.settled$.pipe(takeUntilDestroyed()).subscribe(() => this.resource.refresh());
+    // instanceId arrives after construction (the first poll ran with ''), so fetch as soon as it is known.
+    let lastId = '';
+    effect(() => {
+      const id = this.instanceId();
+      if (id && id !== lastId) {
+        lastId = id;
+        untracked(() => this.resource.refresh());
+      }
+    });
     let firstTick = true;
     effect(() => {
       this.refreshTick();
-      this.instanceId();
       if (firstTick) {
         firstTick = false;
         return;
