@@ -31,11 +31,14 @@ describe('strategy examples (PE-I9)', () => {
     }
   });
 
-  it('import lascodia/classic/1 exactly when they say so', () => {
+  it('list exactly the lascodia libraries they import', () => {
     for (const e of STRATEGY_EXAMPLES) {
-      expect(e.source.includes('import lascodia/classic/1 as classic'), e.id).toBe(e.usesClassic);
+      const imported = [...e.source.matchAll(/^import lascodia\/([a-z]+)\/1 as /gm)].map(
+        (m) => m[1],
+      );
+      expect([...imported].sort(), e.id).toEqual([...e.libraries].sort());
     }
-    expect(STRATEGY_EXAMPLES.filter((e) => e.usesClassic)).toHaveLength(3);
+    expect(STRATEGY_EXAMPLES.filter((e) => e.libraries.includes('classic'))).toHaveLength(3);
   });
 
   it('size orders the engine does not round to nothing (100% of equity, not 10%)', () => {

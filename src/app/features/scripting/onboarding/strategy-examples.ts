@@ -1,8 +1,9 @@
 /**
  * The example gallery (PE-I9): complete, compile-ready strategies to start from. Three are the
- * engine's retired classic strategy types, built on the built-in `lascodia/classic/1` library; the
- * others need no library. Every one opens its trades with a stop (an ATR bracket), so none trips
- * PS9002, and every parameter is an input the optimizer can search.
+ * engine's retired classic strategy types, built on the built-in `lascodia/classic/1` library; one
+ * shows the engine's risk, news, cost and data-quality libraries working together; the others need
+ * no library. Every one opens its trades with a stop, so none trips PS9002, and every parameter is
+ * an input the optimizer can search.
  *
  * Examples teach the shape of a strategy. None is a validated edge: backtest one before trusting it.
  */
@@ -16,8 +17,8 @@ export interface StrategyExample {
   style: StrategyExampleStyle;
   /** One or two plain sentences: what it trades on, and how it exits. */
   summary: string;
-  /** Built on `lascodia/classic/1`. */
-  usesClassic: boolean;
+  /** The built-in `lascodia/*` libraries it imports, by name (`classic`, `risk`, …). */
+  libraries: readonly string[];
   source: string;
 }
 
@@ -106,6 +107,65 @@ plot(rangeLow, "Range low", color.red, style = plot.style_linebr)
 // One trade at a time: a breakout while a trade is open is ignored.
 ${BRACKET_ENTRIES('strategy.position_size == 0')}`;
 
+/**
+ * Risk-based sizing (1% of equity over the stop distance) opens positions several times the equity, so this one
+ * declares retail FX margin (3.33% = 30:1); without it the emulator refuses every order as unaffordable.
+ */
+const LEVERAGED_DECLARATION =
+  'overlay = true, initial_capital = 10000, margin_long = 3.33, margin_short = 3.33, default_qty_type = strategy.percent_of_equity, default_qty_value = 100';
+
+const RSI2_PULLBACK = `//@version=6
+strategy("RSI(2) pullback, news-aware", ${LEVERAGED_DECLARATION})
+import lascodia/meanrev/1 as mr
+import lascodia/risk/1 as risk
+import lascodia/events/1 as ev
+import lascodia/costs/1 as costs
+import lascodia/guards/1 as guards
+
+//#region Inputs
+trendLength = input.int(200, "Trend SMA", minval = 20, group = "Signal")
+oversold = input.float(10, "RSI(2) oversold", minval = 1, maxval = 50, group = "Signal")
+overbought = input.float(90, "RSI(2) overbought", minval = 50, maxval = 99, group = "Signal")
+exitLength = input.int(5, "Exit SMA", minval = 2, group = "Exit")
+riskPct = input.float(1.0, "Risk per trade (% of equity)", minval = 0.1, maxval = 5, step = 0.1, group = "Risk")
+maxCostR = input.float(0.1, "Largest cost (x risk)", minval = 0.01, step = 0.01, group = "Risk")
+holdHours = input.float(24, "Expected hold (hours)", minval = 1, group = "News")
+flatMinutes = input.float(30, "Be flat before news (minutes)", minval = 0, group = "News")
+//#endregion
+
+// 1 = a pullback in an uptrend, -1 = a rally in a downtrend (RSI(2) against the 200-bar trend).
+int sig = mr.signal(trendLength, oversold, overbought)
+
+// The stop sits beyond the recent swing and outside normal noise; the size makes a stop-out cost riskPct of equity.
+float longStop = risk.stop(1)
+float shortStop = risk.stop(-1)
+float sl = sig == -1 ? shortStop : longStop
+float stopDistance = math.abs(close - sl)
+float units = risk.qty(strategy.equity, riskPct, stopDistance, strategy.account_currency)
+
+// Only on clean bars, clear of scheduled news for the expected hold, with costs small against the risk.
+bool cleanBar = guards.tradeable()
+bool newsClear = ev.clear(holdHours * 60, 60)
+bool cheap = costs.affordable(stopDistance, maxCostR)
+bool exitLong = mr.exitLong(exitLength)
+bool exitShort = mr.exitShort(exitLength)
+bool beforeNews = ev.flattenNow(flatMinutes)
+
+if strategy.position_size == 0 and cleanBar and newsClear and cheap and units > 0
+    if sig == 1
+        strategy.entry("Long", strategy.long, qty = units)
+        strategy.exit("Long stop", "Long", stop = sl)
+    else if sig == -1
+        strategy.entry("Short", strategy.short, qty = units)
+        strategy.exit("Short stop", "Short", stop = sl)
+
+// Out on the bounce back to the short average, or before scheduled news.
+if strategy.position_size > 0 and (exitLong or beforeNews)
+    strategy.close("Long")
+if strategy.position_size < 0 and (exitShort or beforeNews)
+    strategy.close("Short")
+`;
+
 const DONCHIAN_BREAKOUT = `//@version=6
 strategy("Donchian breakout", ${DECLARATION})
 
@@ -141,7 +201,7 @@ export const STRATEGY_EXAMPLES: readonly StrategyExample[] = [
     style: 'Trend',
     summary:
       'Buys when the fast EMA crosses above the slow one and sells on the cross below; every trade gets an ATR stop and target. The editor’s starting script.',
-    usesClassic: false,
+    libraries: [],
     source: DEFAULT_STRATEGY_SCRIPT,
   },
   {
@@ -150,7 +210,7 @@ export const STRATEGY_EXAMPLES: readonly StrategyExample[] = [
     style: 'Mean reversion',
     summary:
       'Fades RSI as it leaves the oversold or overbought zone, with an ATR stop and target. The retired RSIReversion type, from lascodia/classic.',
-    usesClassic: true,
+    libraries: ['classic'],
     source: RSI_REVERSION,
   },
   {
@@ -159,7 +219,7 @@ export const STRATEGY_EXAMPLES: readonly StrategyExample[] = [
     style: 'Mean reversion',
     summary:
       'Trades a close back inside the Bollinger band after a close outside it, skipping squeezes; ATR stop and target. The retired BollingerBandReversion type.',
-    usesClassic: true,
+    libraries: ['classic'],
     source: BOLLINGER_REVERSION,
   },
   {
@@ -168,8 +228,17 @@ export const STRATEGY_EXAMPLES: readonly StrategyExample[] = [
     style: 'Breakout',
     summary:
       'Marks the overnight range in UTC hours and trades a close beyond it inside the morning window, one trade at a time; ATR stop and target. The retired SessionBreakout type.',
-    usesClassic: true,
+    libraries: ['classic'],
     source: SESSION_BREAKOUT,
+  },
+  {
+    id: 'rsi2-pullback',
+    title: 'RSI(2) pullback, news-aware',
+    style: 'Mean reversion',
+    summary:
+      'Buys sharp pullbacks in an uptrend (and sells rallies in a downtrend), exits on the bounce back to a short average. Sizes from a stop outside normal noise, skips news, the rollover and costly trades, and is flat before scheduled news.',
+    libraries: ['meanrev', 'risk', 'events', 'costs', 'guards'],
+    source: RSI2_PULLBACK,
   },
   {
     id: 'donchian-breakout',
@@ -177,7 +246,7 @@ export const STRATEGY_EXAMPLES: readonly StrategyExample[] = [
     style: 'Breakout',
     summary:
       'Goes with a close beyond the previous bars’ highest high or lowest low; ATR stop and target. No library needed.',
-    usesClassic: false,
+    libraries: [],
     source: DONCHIAN_BREAKOUT,
   },
 ];

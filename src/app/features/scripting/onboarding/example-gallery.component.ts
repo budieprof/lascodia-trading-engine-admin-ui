@@ -24,11 +24,11 @@ import { STRATEGY_EXAMPLES, type StrategyExample } from './strategy-examples';
             <div class="card-head">
               <span class="card-title">{{ ex.title }}</span>
               <span class="chip">{{ ex.style }}</span>
-              @if (ex.usesClassic) {
+              @for (lib of ex.libraries; track lib) {
                 <span
                   class="chip chip-accent"
-                  title="Imports the built-in lascodia/classic/1 library"
-                  >lascodia/classic</span
+                  [title]="'Imports the built-in lascodia/' + lib + '/1 library'"
+                  >lascodia/{{ lib }}</span
                 >
               }
             </div>
