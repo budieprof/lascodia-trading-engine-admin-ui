@@ -102,6 +102,9 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
   selector: 'app-libraries-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // A full-height page (LayoutComponent lays .content out as a column for it): the reading pane
+  // and its source editor take what the header leaves instead of a fixed 480px box.
+  host: { class: 'fill-height' },
   imports: [
     RouterLink,
     PageHeaderComponent,
@@ -254,7 +257,7 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
                 (sourceChange)="patchDraft({ source: $event })"
                 [fileName]="(d.name || 'library') + '.pine'"
                 label="Library source"
-                editorHeight="420px"
+                editorHeight="max(420px, calc(100vh - 470px))"
                 saveShortcut="save"
                 (saveRequested)="publish()"
                 (compiled)="draftCompile.set($event)"
@@ -365,9 +368,10 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
                   <p class="muted small">Loading source…</p>
                 } @else {
                   <app-pine-editor
+                    class="source-editor"
                     [value]="detail()?.source ?? ''"
                     [readOnly]="true"
-                    height="480px"
+                    height="100%"
                   />
                 }
               } @else if (detailTab() === 'changes') {
@@ -399,7 +403,7 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
                       [after]="pair.newer.source"
                       [beforeLabel]="'v' + pair.older.version"
                       [afterLabel]="'v' + pair.newer.version"
-                      maxHeight="480px"
+                      maxHeight="max(480px, calc(100vh - 380px))"
                     />
                     @if (exportDiff(); as x) {
                       <div class="export-diff" data-testid="export-diff">
@@ -567,8 +571,18 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
   styles: [
     SCRIPTING_UI_STYLES,
     `
+      :host {
+        display: block;
+        position: relative;
+        height: 100%;
+        min-height: 560px;
+      }
       .page {
+        position: absolute;
+        inset: 0;
         padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
       }
       .filters {
         display: flex;
@@ -586,20 +600,36 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
       .layout {
         display: grid;
         grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
         gap: 16px;
-        align-items: start;
+        flex: 1;
+        min-height: 0;
       }
       @media (max-width: 960px) {
         .layout {
           grid-template-columns: minmax(0, 1fr);
+          grid-template-rows: auto;
+          overflow-y: auto;
+        }
+        .list {
+          max-height: 40vh;
+        }
+        .panel > .source-editor {
+          flex: none;
+          height: 60vh;
         }
       }
       .list {
         display: flex;
         flex-direction: column;
         gap: 6px;
-        max-height: calc(100vh - 220px);
+        min-height: 0;
         overflow-y: auto;
+      }
+      .detail {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
       }
       .pad {
         padding: 8px;
@@ -651,8 +681,20 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         display: flex;
         flex-direction: column;
         gap: 10px;
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+      .panel > * {
+        flex-shrink: 0;
+      }
+      /* The read-only source takes whatever the panel has left. */
+      .panel > .source-editor {
+        flex: 1 1 0;
+        min-height: 320px;
       }
       .panel.empty {
+        flex: none;
         color: var(--text-secondary);
         font-size: 13px;
       }
