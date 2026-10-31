@@ -234,39 +234,27 @@
     background: linear-gradient(90deg, transparent, rgba(110, 170, 255, 0.7), transparent);
   }
 }
+// Aurora: soft colour pools drifting slowly. Plain radial gradients moved by transform only — no blur filter and
+// no oversized rotating layer, which some phone GPUs cannot draw (2026-10-31: the top of the hero rendered
+// washed-out on Android Edge because a 1.6x-viewport, 90 px-blurred rotating square exceeded the layer limit).
 .hero__aurora {
   position: absolute;
-  left: 50%;
-  top: -40%;
-  width: 160%;
-  aspect-ratio: 1;
-  translate: -50% 0;
-  background: conic-gradient(
-    from 180deg at 50% 50%,
-    transparent 0deg,
-    rgba(10, 108, 255, 0.35) 60deg,
-    rgba(19, 194, 232, 0.25) 110deg,
-    transparent 160deg,
-    transparent 200deg,
-    rgba(123, 92, 255, 0.32) 260deg,
-    transparent 320deg
-  );
-  filter: blur(90px);
-  opacity: 0.8;
-  animation: hero-aurora 28s linear infinite;
-  mask-image: radial-gradient(closest-side, #000 40%, transparent);
-  -webkit-mask-image: radial-gradient(closest-side, #000 40%, transparent);
+  inset: -10% -10% 20%;
+  background:
+    radial-gradient(40% 45% at 30% 35%, rgba(10, 108, 255, 0.32), transparent 70%),
+    radial-gradient(35% 40% at 72% 30%, rgba(123, 92, 255, 0.3), transparent 70%),
+    radial-gradient(45% 35% at 50% 70%, rgba(19, 194, 232, 0.18), transparent 70%);
+  animation: hero-aurora 24s ease-in-out infinite alternate;
 }
 @keyframes hero-aurora {
   to {
-    rotate: 360deg;
+    transform: translate3d(3%, 2%, 0) scale(1.06);
   }
 }
 .hero__blob {
   position: absolute;
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.45;
+  opacity: 0.4;
   animation: blob 18s ease-in-out infinite;
 }
 .hero__blob--a {
@@ -699,21 +687,11 @@
 }
 .final__aurora {
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 140%;
-  aspect-ratio: 1;
-  translate: -50% -50%;
-  background: conic-gradient(
-    from 0deg,
-    transparent,
-    rgba(79, 224, 255, 0.45) 60deg,
-    transparent 120deg,
-    rgba(165, 139, 255, 0.5) 220deg,
-    transparent 300deg
-  );
-  filter: blur(70px);
-  animation: hero-aurora 22s linear infinite;
+  inset: -10%;
+  background:
+    radial-gradient(40% 50% at 20% 20%, rgba(79, 224, 255, 0.35), transparent 70%),
+    radial-gradient(40% 50% at 85% 85%, rgba(165, 139, 255, 0.45), transparent 70%);
+  animation: hero-aurora 20s ease-in-out infinite alternate;
   pointer-events: none;
 }
 .final__card.lp-spot::before {

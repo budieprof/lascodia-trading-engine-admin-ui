@@ -473,7 +473,7 @@
     position: absolute;
     left: 50%;
     top: 50%;
-    width: 200%;
+    width: 120%;
     aspect-ratio: 1;
     background: conic-gradient(
       from 0deg,
@@ -499,6 +499,14 @@
 @keyframes hc-spin {
   to {
     transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+// The turning square must cover the frame's diagonal: ~1.1x the width on the wide desktop frame, more on a phone
+// where the frame is taller relative to its width. Kept as small as that allows — phone GPUs cap layer size.
+@media (max-width: 760px) {
+  .hc-glow::before,
+  .hc-halo::before {
+    width: 170%;
   }
 }
 @media (prefers-reduced-motion: reduce) {
