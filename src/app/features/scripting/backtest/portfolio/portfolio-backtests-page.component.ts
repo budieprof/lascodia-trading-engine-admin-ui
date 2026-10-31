@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 
@@ -28,7 +36,12 @@ export const PORTFOLIO_POLL_MS = 5_000;
   selector: 'app-portfolio-backtests-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [PageHeaderComponent, RouterLink, PortfolioBacktestFormComponent, PortfolioBacktestContextComponent],
+  imports: [
+    PageHeaderComponent,
+    RouterLink,
+    PortfolioBacktestFormComponent,
+    PortfolioBacktestContextComponent,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -36,7 +49,12 @@ export const PORTFOLIO_POLL_MS = 5_000;
         subtitle="Several script strategies on one account: shared equity and margin, the live currency-exposure limits, one bar clock."
       >
         @if (canQueue()) {
-          <button type="button" class="btn btn-primary" (click)="showForm.set(!showForm())" data-testid="pf-new">
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="showForm.set(!showForm())"
+            data-testid="pf-new"
+          >
             {{ showForm() ? 'Close the form' : 'New portfolio backtest' }}
           </button>
         }
@@ -52,16 +70,18 @@ export const PORTFOLIO_POLL_MS = 5_000;
       }
 
       <!-- What a portfolio backtest needs and the evidence already on record; with no run yet it explains the
-           feature and offers to start one. -->
+           feature (queuing one starts from the header button). -->
       <app-portfolio-backtest-context
         [runCount]="loading() && runs().length === 0 ? null : runs().length"
         [canQueue]="canQueue()"
-        (start)="showForm.set(true)"
       />
 
       <section class="card" aria-labelledby="pf-runs-title" data-testid="pf-runs">
         <header class="head">
           <h2 id="pf-runs-title" class="title">Runs</h2>
+          @if (runs().length) {
+            <span class="count">{{ runs().length }}</span>
+          }
           @if (polling()) {
             <span class="chip chip-accent">Updating while a run is going</span>
           }
@@ -72,12 +92,34 @@ export const PORTFOLIO_POLL_MS = 5_000;
           <p class="error-box" role="alert">{{ e }}</p>
         }
         @if (runs().length === 0) {
-          <p class="muted">
-            {{ loading() ? 'Loading the runs…' : 'No portfolio backtest yet — a queued run appears here and is followed every 5 s until it finishes.' }}
-          </p>
+          @if (loading()) {
+            <p class="loading">Loading the runs…</p>
+          } @else {
+            <div class="empty" role="status">
+              <span class="empty-icon" aria-hidden="true">
+                <svg
+                  viewBox="0 0 24 24"
+                  width="22"
+                  height="22"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="1.6"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M3 3v18h18" />
+                  <path d="M7 15l4-4 3 3 5-6" />
+                </svg>
+              </span>
+              <p class="empty-title">No portfolio backtest yet</p>
+              <p class="empty-desc">
+                A queued run appears here and is followed every 5 s until it finishes.
+              </p>
+            </div>
+          }
         } @else {
           <div class="table-wrap">
-            <table>
+            <table class="grid">
               <thead>
                 <tr>
                   <th scope="col">Run</th>
@@ -96,9 +138,11 @@ export const PORTFOLIO_POLL_MS = 5_000;
               <tbody>
                 @for (r of runs(); track r.id) {
                   <tr [attr.data-run]="r.id">
-                    <td>
-                      <a [routerLink]="['/portfolio-backtests', r.id]" class="mono">#{{ r.id }}</a>
-                      <span class="block">{{ r.name }}</span>
+                    <td class="run-cell">
+                      <a [routerLink]="['/portfolio-backtests', r.id]" class="run-id"
+                        >#{{ r.id }}</a
+                      >
+                      <span class="block name" [title]="r.name">{{ r.name }}</span>
                     </td>
                     <td>
                       <span [class]="'chip ' + chip(r)">{{ r.status }}</span>
@@ -110,19 +154,29 @@ export const PORTFOLIO_POLL_MS = 5_000;
                       }
                     </td>
                     <td class="num">{{ r.memberCount }}</td>
-                    <td class="small">{{ r.fromDate.slice(0, 10) }} → {{ r.toDate.slice(0, 10) }}</td>
-                    <td class="num">{{ money(r.netProfit, r.accountCurrency) }}</td>
-                    <td class="num">{{ pct(r.totalReturnPct, true) }}</td>
-                    <td class="num">{{ pct(r.maxDrawdownPct) }}</td>
-                    <td class="num">{{ r.totalTrades ?? '—' }}</td>
-                    <td class="num">{{ r.refusedEntries ?? '—' }}</td>
-                    <td class="small">{{ when(r.queuedAt) }}<span class="muted block">{{ r.queuedBy ?? '' }}</span></td>
+                    <td class="small">
+                      {{ r.fromDate.slice(0, 10) }} → {{ r.toDate.slice(0, 10) }}
+                    </td>
+                    <td class="num" [class]="tone(r.netProfit)">
+                      {{ money(r.netProfit, r.accountCurrency) }}
+                    </td>
+                    <td class="num" [class]="tone(r.totalReturnPct)">
+                      {{ pct(r.totalReturnPct, true) }}
+                    </td>
+                    <td class="num" [class.dim]="!r.maxDrawdownPct">{{ pct(r.maxDrawdownPct) }}</td>
+                    <td class="num" [class.dim]="!r.totalTrades">{{ r.totalTrades ?? '—' }}</td>
+                    <td class="num" [class.dim]="!r.refusedEntries">
+                      {{ r.refusedEntries ?? '—' }}
+                    </td>
+                    <td class="small">
+                      {{ when(r.queuedAt) }}<span class="muted block">{{ r.queuedBy ?? '' }}</span>
+                    </td>
                     <td class="actions">
                       @if (canQueue()) {
                         @if (active(r)) {
                           <button
                             type="button"
-                            class="btn btn-sm"
+                            class="btn btn-sm btn-ghost-accent"
                             (click)="cancel(r)"
                             [disabled]="r.cancelRequested"
                             [attr.data-testid]="'pf-cancel-' + r.id"
@@ -132,7 +186,7 @@ export const PORTFOLIO_POLL_MS = 5_000;
                         } @else {
                           <button
                             type="button"
-                            class="btn btn-sm btn-danger"
+                            class="btn btn-sm btn-ghost-danger"
                             (click)="remove(r)"
                             [attr.data-testid]="'pf-delete-' + r.id"
                           >
@@ -153,24 +207,197 @@ export const PORTFOLIO_POLL_MS = 5_000;
   styles: [
     SCRIPTING_UI_STYLES,
     `
-      .page { padding: var(--space-2) 0; display: flex; flex-direction: column; gap: var(--space-4); }
-      .card {
-        padding: var(--space-4) var(--space-5); background: var(--bg-secondary); border: 1px solid var(--border);
-        border-radius: var(--radius-md); display: flex; flex-direction: column; gap: var(--space-3);
+      .page {
+        padding: var(--space-2) 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-4);
       }
-      .head { display: flex; align-items: center; gap: 8px; }
-      .title { margin: 0; font-size: var(--text-base); font-weight: var(--font-semibold); }
-      .spacer { flex: 1; }
-      .table-wrap { overflow-x: auto; }
-      table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
-      th, td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-weight: normal; }
-      thead th { font-size: var(--text-xs); color: var(--text-secondary); }
-      .num { text-align: right; font-variant-numeric: tabular-nums; }
-      .block { display: block; margin-top: 2px; }
-      .actions { white-space: nowrap; }
-      .ok-box { margin: 0; padding: 8px 12px; border-radius: 8px; background: rgba(52, 199, 89, 0.12); font-size: 13px; }
-      .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
-      p { margin: 0; }
+      .card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+      }
+      .title {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .count {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      .spacer {
+        flex: 1;
+      }
+      .card > .error-box {
+        margin: 0 var(--space-5) var(--space-3);
+      }
+      .loading {
+        padding: var(--space-5);
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        border-top: 1px solid var(--border);
+      }
+      .empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        text-align: center;
+        padding: var(--space-6) var(--space-4) var(--space-7, 28px);
+        border-top: 1px solid var(--border);
+      }
+      .empty-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 44px;
+        height: 44px;
+        margin-bottom: 4px;
+        border-radius: 50%;
+        background: var(--bg-tertiary);
+        color: var(--text-tertiary);
+      }
+      .empty-title {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .empty-desc {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        max-width: 34rem;
+      }
+      .table-wrap {
+        overflow-x: auto;
+      }
+      table.grid {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .grid th,
+      .grid td {
+        padding: 9px var(--space-3);
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+        vertical-align: top;
+        font-weight: normal;
+      }
+      .grid th:first-child,
+      .grid td:first-child {
+        padding-left: var(--space-5);
+      }
+      .grid th:last-child,
+      .grid td:last-child {
+        padding-right: var(--space-5);
+      }
+      .grid thead th {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        background: var(--bg-primary);
+        white-space: nowrap;
+      }
+      .grid tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .grid tbody tr:hover td {
+        background: var(--bg-primary);
+      }
+      .num {
+        text-align: right !important;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .dim {
+        color: var(--text-tertiary);
+      }
+      .profit {
+        color: var(--profit);
+      }
+      .loss {
+        color: var(--loss);
+      }
+      .run-id {
+        font-family: var(--font-mono, ui-monospace, monospace);
+        font-size: 12.5px;
+        font-weight: var(--font-semibold);
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .run-id:hover {
+        text-decoration: underline;
+      }
+      .run-cell {
+        max-width: 280px;
+      }
+      .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+        font-size: var(--text-xs);
+      }
+      .block {
+        display: block;
+        margin-top: 2px;
+      }
+      .actions {
+        white-space: nowrap;
+        text-align: right;
+      }
+      .btn-ghost-danger {
+        background: transparent;
+        color: var(--loss);
+      }
+      .btn-ghost-danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
+        filter: none;
+      }
+      .btn-ghost-accent {
+        background: transparent;
+        color: var(--accent);
+      }
+      .btn-ghost-accent:hover:not(:disabled) {
+        background: rgba(0, 113, 227, 0.08);
+        filter: none;
+      }
+      .ok-box {
+        margin: 0;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: rgba(52, 199, 89, 0.12);
+        font-size: 13px;
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+      }
+      p {
+        margin: 0;
+      }
     `,
   ],
 })
@@ -209,6 +436,10 @@ export class PortfolioBacktestsPageComponent implements OnInit {
   }
   pct(v: number | null, signed = false): string {
     return formatPercent(v, { signed });
+  }
+  /** Profit/loss colour for a signed figure; a missing or zero figure stays muted. */
+  tone(v: number | null): string {
+    return v == null || v === 0 ? 'num dim' : v > 0 ? 'num profit' : 'num loss';
   }
   when(iso: string | null): string {
     return iso ? `${formatDateTime(Date.parse(iso))} UTC` : '—';
@@ -263,7 +494,10 @@ export class PortfolioBacktestsPageComponent implements OnInit {
     await this.act(() => firstValueFrom(this.api.remove(r.id)), 'The run could not be deleted.');
   }
 
-  private async act(call: () => Promise<{ status?: boolean } | null | undefined>, fallback: string): Promise<void> {
+  private async act(
+    call: () => Promise<{ status?: boolean } | null | undefined>,
+    fallback: string,
+  ): Promise<void> {
     try {
       const res = await call();
       if (!res?.status) throw res;

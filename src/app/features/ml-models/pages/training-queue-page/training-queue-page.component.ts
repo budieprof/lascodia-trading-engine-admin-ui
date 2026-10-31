@@ -18,7 +18,6 @@ import { createPolledResource } from '@core/polling/polled-resource';
 import { NotificationService } from '@core/notifications/notification.service';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
@@ -49,7 +48,6 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
     DatePipe,
     RouterLink,
     PageHeaderComponent,
-    MetricCardComponent,
     CardSkeletonComponent,
     ErrorStateComponent,
     FeatureStateComponent,
@@ -76,33 +74,34 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         />
       } @else {
         <section class="kpis">
-          <app-metric-card
-            label="Total active"
-            [value]="runs().length"
-            format="number"
-            [dotColor]="runs().length > 0 ? '#0A84FF' : '#34C759'"
-          />
-          <app-metric-card
-            label="Queued (no worker)"
-            [value]="queuedCount()"
-            format="number"
-            [dotColor]="queuedCount() > 0 ? '#FF9500' : '#34C759'"
-          />
-          <app-metric-card
-            label="Running"
-            [value]="runningCount()"
-            format="number"
-            [dotColor]="runningCount() > 0 ? '#34C759' : '#8E8E93'"
-          />
-          <!-- Same tile as its three neighbours: the age is expressed in hours
-               so it fits MetricCard's numeric contract, and an empty queue
-               renders the card's own placeholder rather than a custom one. -->
-          <app-metric-card
-            label="Oldest queue age (h)"
-            [value]="oldestQueueAgeHours()"
-            format="number"
-            [dotColor]="oldestQueueWarning() ? '#FF3B30' : '#8E8E93'"
-          />
+          <div class="kpi" [class.tone-info]="runs().length > 0">
+            <span class="kpi-label">Total active</span>
+            <span class="kpi-value">{{ runs().length }}</span>
+            <span class="kpi-hint">queued + running</span>
+          </div>
+          <div class="kpi" [class.tone-warn]="queuedCount() > 0">
+            <span class="kpi-label">Queued (no worker)</span>
+            <span class="kpi-value">{{ queuedCount() }}</span>
+            <span class="kpi-hint">{{
+              queuedCount() > 0 ? 'waiting for a worker' : 'nothing waiting'
+            }}</span>
+          </div>
+          <div class="kpi" [class.tone-good]="runningCount() > 0">
+            <span class="kpi-label">Running</span>
+            <span class="kpi-value">{{ runningCount() }}</span>
+            <span class="kpi-hint">{{ runningCount() > 0 ? 'worker busy' : 'worker idle' }}</span>
+          </div>
+          <!-- The age is expressed in hours; an empty queue shows a dash rather
+               than a fake 0, and the tile turns red past the 6 h threshold. -->
+          <div class="kpi" [class.tone-bad]="oldestQueueWarning()">
+            <span class="kpi-label">Oldest queue age</span>
+            <span class="kpi-value">{{
+              oldestQueueAgeHours() !== null ? oldestQueueAgeHours() + ' h' : '—'
+            }}</span>
+            <span class="kpi-hint">{{
+              oldestQueueWarning() ? 'over the 6 h threshold' : 'investigate above 6 h'
+            }}</span>
+          </div>
         </section>
 
         <!-- ── Auto-pick blocklist ──────────────────────────────────────────
@@ -113,7 +112,18 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         <section class="card blocklist">
           <header class="blocklist-header">
             <div>
-              <h3>Auto-pick blocklist</h3>
+              <h3>
+                Auto-pick blocklist
+                @if (archResource.value()?.architectures?.length) {
+                  <span class="count-chip"
+                    >{{ blockedSet().size }} of
+                    {{ archResource.value()!.architectures.length }} blocked</span
+                  >
+                }
+                @if (blocklistDirty()) {
+                  <span class="dirty-chip">Unsaved changes</span>
+                }
+              </h3>
               <p class="muted small">
                 Checked architectures are skipped by drift workers, trainer-selector fallbacks,
                 shadow rotation, and self-tuning retry. Manual training triggers still allow them.
@@ -148,6 +158,9 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
                     (change)="toggleBlocked(a.name)"
                   />
                   <span class="arch-name mono">{{ a.name }}</span>
+                  <span class="arch-state">{{
+                    blockedSet().has(a.name) ? 'Blocked' : 'Allowed'
+                  }}</span>
                 </label>
               }
             </div>
@@ -176,7 +189,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
             ]"
           />
         } @else {
-          <section class="card">
+          <section class="card board">
             <table class="queue-table">
               <thead>
                 <tr>
@@ -205,7 +218,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
                       <span class="muted small"> · {{ r.timeframe }}</span>
                     </td>
                     <td>
-                      <span class="chip" [attr.data-state]="r.status.toLowerCase()">
+                      <span class="chip dot" [attr.data-state]="r.status.toLowerCase()">
                         {{ r.status }}
                       </span>
                       @if (r.cancelRequested) {
@@ -257,7 +270,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 
         @if (history(); as h) {
           @if (h.total > 0) {
-            <section class="card">
+            <section class="card board">
               <header class="card-head">
                 <h3>Recently finished</h3>
                 <span class="sub">
@@ -294,13 +307,13 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
                 <tbody>
                   @for (r of recentRows(); track r.id) {
                     <tr>
-                      <td class="mono">#{{ r.id }}</td>
+                      <td class="mono id">#{{ r.id }}</td>
                       <td>
                         <span class="mono symbol">{{ r.symbol }}</span>
                         <span class="muted small"> · {{ r.timeframe }}</span>
                       </td>
                       <td>
-                        <span class="chip" [attr.data-state]="('' + r.status).toLowerCase()">{{
+                        <span class="chip dot" [attr.data-state]="('' + r.status).toLowerCase()">{{
                           r.status
                         }}</span>
                       </td>
@@ -340,23 +353,90 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         flex-direction: column;
         gap: var(--space-4);
       }
+      /* KPI tiles — same look as the Drift Report strip. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-3);
-        align-items: start;
       }
       @media (max-width: 720px) {
         .kpis {
-          grid-template-columns: repeat(2, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
+      }
+      .kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .kpi::before {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .kpi.tone-info {
+        --tone: var(--accent);
+      }
+      .kpi.tone-warn {
+        --tone: var(--warning);
+      }
+      .kpi.tone-good {
+        --tone: var(--profit);
+      }
+      .kpi.tone-bad {
+        --tone: var(--loss);
+      }
+      .kpi[class*='tone-']::before {
+        opacity: 1;
+      }
+      .kpi-label {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-value {
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .tone-warn .kpi-value {
+        color: var(--warning);
+      }
+      .tone-bad .kpi-value {
+        color: var(--loss);
+      }
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .card-head {
         display: flex;
         flex-wrap: wrap;
         align-items: baseline;
         gap: var(--space-1) var(--space-3);
-        padding: var(--space-3) var(--space-4) var(--space-2);
+        padding: var(--space-3) var(--space-4);
       }
       .card-head h3 {
         margin: 0;
@@ -372,6 +452,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         flex-wrap: wrap;
         gap: var(--space-2);
         padding: 0 var(--space-4) var(--space-3);
+        border-bottom: 1px solid var(--border);
       }
       .reason-chip {
         font-size: var(--text-xs);
@@ -389,6 +470,10 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         box-shadow: var(--shadow-sm);
         overflow-x: auto;
       }
+      /* Table cards run the table edge to edge, like the Drift Report boards. */
+      .card.board {
+        padding: 0;
+      }
       .queue-table {
         width: 100%;
         border-collapse: collapse;
@@ -396,17 +481,37 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
       }
       .queue-table th,
       .queue-table td {
-        padding: 8px 10px;
+        padding: 9px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
         vertical-align: middle;
+        white-space: nowrap;
+      }
+      .queue-table th:first-child,
+      .queue-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .queue-table th:last-child,
+      .queue-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .queue-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .queue-table tbody tr:hover {
+        background: var(--bg-primary);
       }
       .queue-table th {
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        font-size: var(--text-xs);
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+      }
+      .id {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
       }
       .queue-table td.num,
       .queue-table th.num {
@@ -442,6 +547,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
       .reason {
         max-width: 360px;
         color: var(--text-secondary);
+        white-space: normal;
         word-break: break-word;
         font-size: var(--text-xs);
       }
@@ -451,21 +557,41 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
         white-space: nowrap;
       }
       .chip {
-        display: inline-block;
-        padding: 2px 8px;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0 10px;
         border-radius: 999px;
         font-size: var(--text-xs);
-        font-weight: var(--font-medium);
+        font-weight: var(--font-semibold);
+        line-height: 22px;
         background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
-      .chip[data-state='running'] {
-        background: rgba(52, 199, 89, 0.15);
-        color: #34c759;
+      .chip.dot::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+      .chip[data-state='running'],
+      .chip[data-state='completed'] {
+        background: rgba(52, 199, 89, 0.14);
+        color: #248a3d;
       }
       .chip[data-state='queued'] {
         background: rgba(255, 149, 0, 0.15);
-        color: #ff9500;
+        color: #c93400;
+      }
+      .chip[data-state='failed'] {
+        background: rgba(255, 59, 48, 0.12);
+        color: #d70015;
+      }
+      /* Cancelled is an operator/guard stop, not a failure — muted amber. */
+      .chip[data-state='cancelled'] {
+        background: rgba(255, 149, 0, 0.1);
+        color: #a05a00;
       }
       .chip.cancel-chip {
         margin-left: 6px;
@@ -529,6 +655,24 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
       .blocklist-header h3 {
         margin: 0 0 4px 0;
         font-size: var(--text-base);
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-2);
+      }
+      .count-chip,
+      .dirty-chip {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+      }
+      .dirty-chip {
+        color: #a05a00;
+        background: rgba(255, 149, 0, 0.14);
       }
       .blocklist-header p {
         margin: 0;
@@ -536,34 +680,61 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
       }
       .arch-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
         gap: 8px;
       }
       .arch-chip {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 8px 12px;
+        padding: 7px 12px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         cursor: pointer;
         user-select: none;
-        transition: background 0.15s ease;
+        transition:
+          background 0.15s ease,
+          border-color 0.15s ease;
       }
       .arch-chip:hover {
-        background: var(--bg-tertiary);
-      }
-      .arch-chip.blocked {
-        background: rgba(255, 59, 48, 0.08);
-        border-color: rgba(255, 59, 48, 0.3);
+        border-color: var(--text-tertiary);
       }
       .arch-chip input {
         margin: 0;
         cursor: pointer;
+        accent-color: #d70015;
       }
       .arch-name {
         font-size: var(--text-sm);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .arch-state {
+        flex: none;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+      }
+      /* Blocked reads red end to end: tint, border, name and badge. */
+      .arch-chip.blocked {
+        background: rgba(255, 59, 48, 0.07);
+        border-color: rgba(255, 59, 48, 0.45);
+      }
+      .arch-chip.blocked .arch-name {
+        color: #d70015;
+        font-weight: var(--font-semibold);
+      }
+      .arch-chip.blocked .arch-state {
+        color: #fff;
+        background: #d70015;
+        border-radius: 4px;
+        padding: 0 5px;
+        line-height: 16px;
       }
       .disabled-note {
         margin-top: var(--space-3);

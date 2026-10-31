@@ -12,10 +12,9 @@ import { OptionsHealthCardComponent } from '../../components/options-health-card
 import { CompositeMlNavComponent } from '../../components/composite-ml-nav/composite-ml-nav.component';
 import { CompositeMlPipelineStateComponent } from '../../components/pipeline-state/pipeline-state.component';
 import { CompositeMlEvidenceFloorsComponent } from '../../components/evidence-floors/evidence-floors.component';
-import { ageText, type PipelineState } from '../../composite-ml-pipeline.logic';
+import { ageText, utcText, type PipelineState } from '../../composite-ml-pipeline.logic';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
-import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
@@ -32,7 +31,6 @@ type TierFilter = 'all' | 'live' | 'coldstart';
     FormsModule,
     RouterLink,
     PageHeaderComponent,
-    MetricCardComponent,
     CardSkeletonComponent,
     EmptyStateComponent,
     ErrorStateComponent,
@@ -68,35 +66,38 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         <!-- No active snapshot exists at all (not a filter miss): show what the pipeline holds and
              why nothing was activated, instead of four zero tiles over an empty table. -->
         <div class="kpis">
-          <app-metric-card
-            label="Active partitions"
-            [value]="0"
-            format="number"
-            dotColor="#8E8E93"
-          />
-          <app-metric-card
-            label="Policy snapshots ever written"
-            [value]="dataset('policySnapshots')?.rows ?? null"
-            format="number"
-            dotColor="#8E8E93"
-          />
-          <app-metric-card
-            [label]="'Generation decisions' + newest('generationAudits')"
-            [value]="dataset('generationAudits')?.rows ?? null"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            [label]="
-              'CompositeML strategies remaining' +
-              (pipeline()?.strategiesEverGenerated
-                ? ' (of ' + pipeline()!.strategiesEverGenerated + ' generated)'
-                : '')
-            "
-            [value]="pipeline()?.datasets?.length ? pipeline()!.strategiesLive : null"
-            format="number"
-            dotColor="#FF9500"
-          />
+          <div class="kpi">
+            <span class="kpi-label">Active partitions</span>
+            <span class="kpi-value dim">0</span>
+            <span class="kpi-hint">no policy snapshot is active</span>
+          </div>
+          <div class="kpi">
+            <span class="kpi-label">Policy snapshots</span>
+            <span class="kpi-value" [class.dim]="!dataset('policySnapshots')?.rows">{{
+              count(dataset('policySnapshots')?.rows)
+            }}</span>
+            <span class="kpi-hint">ever written by the policy trainer</span>
+          </div>
+          <div class="kpi tone-info">
+            <span class="kpi-label">Generation decisions</span>
+            <span class="kpi-value" [class.dim]="!dataset('generationAudits')?.rows">{{
+              count(dataset('generationAudits')?.rows)
+            }}</span>
+            <span class="kpi-hint" [title]="newestUtc('generationAudits')">{{
+              newestCaption('generationAudits')
+            }}</span>
+          </div>
+          <div class="kpi tone-warn">
+            <span class="kpi-label">CompositeML strategies</span>
+            <span class="kpi-value">{{
+              count(pipeline()?.datasets?.length ? pipeline()!.strategiesLive : null)
+            }}</span>
+            <span class="kpi-hint">{{
+              pipeline()?.strategiesEverGenerated
+                ? 'remaining of ' + pipeline()!.strategiesEverGenerated + ' generated'
+                : 'remaining'
+            }}</span>
+          </div>
         </div>
         <app-composite-ml-pipeline-state
           variant="full"
@@ -115,30 +116,30 @@ type TierFilter = 'all' | 'live' | 'coldstart';
           (stateChange)="pipeline.set($event)"
         />
         <div class="kpis">
-          <app-metric-card
-            label="Active partitions"
-            [value]="policies().length"
-            format="number"
-            dotColor="#0071E3"
-          />
-          <app-metric-card
-            label="Cold-start tiers"
-            [value]="coldStartCount()"
-            format="number"
-            [dotColor]="coldStartCount() > 0 ? '#AF52DE' : '#34C759'"
-          />
-          <app-metric-card
-            label="Distinct trainers"
-            [value]="distinctTrainers().length"
-            format="number"
-            dotColor="#34C759"
-          />
-          <app-metric-card
-            label="Live tiers"
-            [value]="policies().length - coldStartCount()"
-            format="number"
-            dotColor="#34C759"
-          />
+          <div class="kpi tone-info">
+            <span class="kpi-label">Active partitions</span>
+            <span class="kpi-value">{{ count(policies().length) }}</span>
+            <span class="kpi-hint">symbol × timeframe × tier</span>
+          </div>
+          <div class="kpi" [class.tone-purple]="coldStartCount() > 0">
+            <span class="kpi-label">Cold-start tiers</span>
+            <span class="kpi-value" [class.dim]="coldStartCount() === 0">{{
+              count(coldStartCount())
+            }}</span>
+            <span class="kpi-hint">partitions marked cold-start</span>
+          </div>
+          <div class="kpi tone-good">
+            <span class="kpi-label">Distinct trainers</span>
+            <span class="kpi-value">{{ count(distinctTrainers().length) }}</span>
+            <span class="kpi-hint" [title]="distinctTrainers().join(', ')">{{
+              distinctTrainers().join(', ') || 'none named'
+            }}</span>
+          </div>
+          <div class="kpi tone-good">
+            <span class="kpi-label">Live tiers</span>
+            <span class="kpi-value">{{ count(policies().length - coldStartCount()) }}</span>
+            <span class="kpi-hint">partitions not cold-start</span>
+          </div>
         </div>
 
         <section class="card">
@@ -306,10 +307,76 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         flex-direction: column;
         gap: var(--space-5);
       }
+      /* KPI strip — Drift Report family: tone stripe, short label, figure, one-line caption. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
         gap: var(--space-3);
+      }
+      .kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+      }
+      .kpi::before {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .kpi.tone-info {
+        --tone: var(--accent);
+      }
+      .kpi.tone-good {
+        --tone: var(--profit);
+      }
+      .kpi.tone-warn {
+        --tone: var(--warning);
+      }
+      .kpi.tone-purple {
+        --tone: var(--tone-purple);
+      }
+      .kpi[class*='tone-']::before {
+        opacity: 1;
+      }
+      .kpi-label {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-value {
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+      }
+      .kpi-value.dim {
+        color: var(--text-tertiary);
+      }
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .card {
         background: var(--bg-secondary);
@@ -363,11 +430,16 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         border-bottom: 1px solid var(--border);
       }
       .policies-table th {
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        background: var(--bg-primary);
+        white-space: nowrap;
+      }
+      .policies-table tbody tr:hover td {
+        background: var(--bg-primary);
       }
       .policies-table tr.expanded {
         background: var(--bg-primary);
@@ -434,11 +506,15 @@ type TierFilter = 'all' | 'live' | 'coldstart';
         border: none;
         color: var(--accent);
         cursor: pointer;
-        font-size: var(--text-sm);
-        padding: 0;
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        padding: 3px 10px;
+        margin-left: -10px;
+        border-radius: var(--radius-full);
       }
       .link:hover {
-        text-decoration: underline;
+        background: rgba(0, 113, 227, 0.08);
       }
       .delta-row td {
         padding: 0 12px 12px;
@@ -491,9 +567,16 @@ export class ActivePoliciesPageComponent {
   protected dataset(key: string) {
     return this.pipeline()?.datasets.find((d) => d.key === key) ?? null;
   }
-  protected newest(key: string): string {
+  protected newestCaption(key: string): string {
     const d = this.dataset(key);
-    return d?.latestUtc ? ` · newest ${ageText(d.latestUtc, Date.now())}` : '';
+    return d?.latestUtc ? `newest ${ageText(d.latestUtc, Date.now())}` : 'none recorded yet';
+  }
+  protected newestUtc(key: string): string {
+    return utcText(this.dataset(key)?.latestUtc ?? null);
+  }
+  /** Tile figure: grouped thousands, or a dash while the pipeline state is still loading. */
+  protected count(n: number | null | undefined): string {
+    return n == null ? '—' : n.toLocaleString('en-US');
   }
 
   protected readonly tierFilter = signal<TierFilter>('all');

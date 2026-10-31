@@ -103,8 +103,14 @@ const FALLBACK_KEYS = [GENERATOR_SWITCH, POLICY_TRAINER_SWITCH, CPC_SWITCH, LAST
                             <span class="tag">this page</span>
                           }
                         </td>
-                        <td class="num">{{ d.rows.toLocaleString('en-US') }}</td>
-                        <td [title]="utc(d.latestUtc)">
+                        <td class="num" [class.rows-zero]="d.rows === 0">
+                          {{ d.rows.toLocaleString('en-US') }}
+                        </td>
+                        <td
+                          class="newest"
+                          [class.rows-zero]="!d.latestUtc"
+                          [title]="utc(d.latestUtc)"
+                        >
                           {{ d.latestUtc ? age(d.latestUtc) : '—' }}
                         </td>
                         <td>
@@ -144,6 +150,10 @@ const FALLBACK_KEYS = [GENERATOR_SWITCH, POLICY_TRAINER_SWITCH, CPC_SWITCH, LAST
     `
       :host {
         display: block;
+        --tone-amber: #b25000;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-amber: #ff9f0a;
       }
       .full {
         display: grid;
@@ -198,6 +208,7 @@ const FALLBACK_KEYS = [GENERATOR_SWITCH, POLICY_TRAINER_SWITCH, CPC_SWITCH, LAST
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-4) var(--space-5);
+        box-shadow: var(--shadow-sm);
       }
       .card-head {
         display: flex;
@@ -228,47 +239,92 @@ const FALLBACK_KEYS = [GENERATOR_SWITCH, POLICY_TRAINER_SWITCH, CPC_SWITCH, LAST
       th,
       td {
         text-align: left;
-        padding: 6px 10px;
+        padding: 8px 10px;
         border-bottom: 1px solid var(--border);
-        vertical-align: baseline;
+        vertical-align: middle;
       }
       th {
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        background: var(--bg-primary);
+        white-space: nowrap;
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
       }
       .num {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
       tr.focus td {
-        background: var(--bg-primary);
+        background: rgba(0, 113, 227, 0.04);
         font-weight: var(--font-medium);
+      }
+      tr.focus td:first-child {
+        box-shadow: inset 2px 0 0 var(--accent);
       }
       .tag {
         margin-left: 6px;
-        font-size: var(--text-xs);
+        font-size: 9.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
         color: var(--accent);
+        background: rgba(0, 113, 227, 0.1);
+        padding: 1px 6px;
+        border-radius: 4px;
+        vertical-align: 1px;
       }
+      td.rows-zero {
+        color: var(--text-tertiary);
+      }
+      /* Status dot: still updating = green, stopped = amber, never written = muted grey. */
       .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         font-size: var(--text-xs);
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-primary);
+        font-weight: var(--font-medium);
         color: var(--text-secondary);
         white-space: nowrap;
+      }
+      .status::before {
+        content: '';
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.5;
       }
       .status[data-status='updating'] {
         color: var(--profit);
       }
+      .status[data-status='updating']::before {
+        background: var(--profit);
+        opacity: 1;
+        box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18);
+      }
+      .status[data-status='stopped'] {
+        color: var(--tone-amber, #b25000);
+      }
+      .status[data-status='stopped']::before {
+        background: var(--warning);
+        opacity: 1;
+      }
       .status[data-status='never'] {
         color: var(--text-tertiary);
+        font-weight: var(--font-normal, 400);
       }
       .producer {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
+      }
+      .newest {
+        white-space: nowrap;
       }
       .foot {
         margin: var(--space-3) 0 0;

@@ -44,7 +44,8 @@ import { createPolledResource } from '@core/polling/polled-resource';
                 <td class="mono">{{ f.layerKey }}</td>
                 <td class="desc">{{ f.description }}</td>
                 <td class="num">
-                  {{ f.observed | number: '1.0-0' }} / {{ f.threshold | number: '1.0-0' }}
+                  <span [class.zero]="f.observed === 0">{{ f.observed | number: '1.0-0' }}</span>
+                  <span class="of"> / {{ f.threshold | number: '1.0-0' }}</span>
                 </td>
                 <td class="bar-col">
                   <span class="track"
@@ -52,9 +53,12 @@ import { createPolledResource } from '@core/polling/polled-resource';
                   ></span>
                 </td>
                 <td>
-                  <span class="pill" [class.warm]="f.isWarm">{{
-                    f.isWarm ? 'warm' : f.observationsNeeded + ' more needed'
-                  }}</span>
+                  <span
+                    class="pill"
+                    [class.warm]="f.isWarm"
+                    [class.cold]="!f.isWarm && f.observed === 0"
+                    >{{ f.isWarm ? 'warm' : f.observationsNeeded + ' more needed' }}</span
+                  >
                 </td>
               </tr>
             }
@@ -68,12 +72,19 @@ import { createPolledResource } from '@core/polling/polled-resource';
       :host {
         display: block;
       }
+      :host {
+        --tone-amber: #b25000;
+      }
+      :host-context([data-theme='dark']) {
+        --tone-amber: #ff9f0a;
+      }
       .card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         padding: var(--space-4) var(--space-5);
         overflow-x: auto;
+        box-shadow: var(--shadow-sm);
       }
       .head {
         display: flex;
@@ -93,6 +104,10 @@ import { createPolledResource } from '@core/polling/polled-resource';
       }
       .sub a {
         color: var(--accent);
+        text-decoration: none;
+      }
+      .sub a:hover {
+        text-decoration: underline;
       }
       table {
         width: 100%;
@@ -102,20 +117,30 @@ import { createPolledResource } from '@core/polling/polled-resource';
       th,
       td {
         text-align: left;
-        padding: 6px 10px;
+        padding: 8px 10px;
         border-bottom: 1px solid var(--border);
+        vertical-align: middle;
       }
       th {
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        background: var(--bg-primary);
+        white-space: nowrap;
+      }
+      tbody tr:last-child td {
+        border-bottom: none;
       }
       .num {
         text-align: right;
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
+      }
+      .zero,
+      .of {
+        color: var(--text-tertiary);
       }
       .mono {
         font-family: var(--font-mono);
@@ -130,28 +155,54 @@ import { createPolledResource } from '@core/polling/polled-resource';
       .bar-col {
         width: 120px;
       }
+      /* Progress: amber while filling, green once warm — same tones as the status dot beside it. */
       .track {
         display: block;
         height: 6px;
         border-radius: var(--radius-full);
-        background: var(--bg-primary);
+        background: var(--bg-tertiary, var(--bg-primary));
         overflow: hidden;
       }
       .fill {
         display: block;
         height: 100%;
+        border-radius: inherit;
         background: var(--warning);
       }
       .fill.warm {
         background: var(--profit);
       }
       .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         font-size: var(--text-xs);
+        font-weight: var(--font-medium);
         white-space: nowrap;
-        color: var(--warning);
+        color: var(--tone-amber);
+        font-variant-numeric: tabular-nums;
+      }
+      .pill::before {
+        content: '';
+        flex: none;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--warning);
+      }
+      .pill.cold {
+        color: var(--text-secondary);
+      }
+      .pill.cold::before {
+        background: transparent;
+        box-shadow: inset 0 0 0 1.5px var(--warning);
       }
       .pill.warm {
         color: var(--profit);
+      }
+      .pill.warm::before {
+        background: var(--profit);
+        box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18);
       }
     `,
   ],
