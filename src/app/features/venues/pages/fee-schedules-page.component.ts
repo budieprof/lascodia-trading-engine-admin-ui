@@ -7,6 +7,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
 
 import { VenuesApiService } from '../venues-api.service';
 import {
@@ -17,10 +18,77 @@ import {
   feeBody,
   feeFieldsFor,
   feeProblems,
-  feeSummary,
   isoMidnight,
 } from '../venues.logic';
 import type { FeeAssetClass, FeeSchedule, FeeScheduleFields } from '../venues.types';
+
+type FeeCol = { key: keyof FeeScheduleFields; head: string; strong?: boolean };
+
+const CLASS_LABEL: Record<string, string> = {
+  Future: 'Futures',
+  Crypto: 'Crypto',
+  Equity: 'Equities',
+  Etf: 'ETFs',
+};
+
+/** Each asset class shows its own fee columns (a futures row carries no bps, a crypto row no per-contract fee). */
+const EQUITY_COLS: FeeCol[] = [
+  { key: 'commissionPerShare', head: 'Per share', strong: true },
+  { key: 'commissionBps', head: 'Bps' },
+  { key: 'minCommissionPerOrder', head: 'Min / order' },
+  { key: 'maxCommissionPctOfNotional', head: 'Cap %' },
+  { key: 'secFeePerMillion', head: 'SEC / $1M' },
+  { key: 'finraTafPerShare', head: 'TAF / share' },
+  { key: 'finraTafMaxPerTrade', head: 'TAF cap' },
+  { key: 'borrowFeeAnnualPct', head: 'Borrow %/yr' },
+  { key: 'slippageTicks', head: 'Slip ticks' },
+];
+const FEE_COLUMNS: Record<string, FeeCol[]> = {
+  Crypto: [
+    { key: 'makerFeeBps', head: 'Maker bps', strong: true },
+    { key: 'takerFeeBps', head: 'Taker bps', strong: true },
+    { key: 'tierMinVolume30d', head: 'Tier from (30d vol)' },
+  ],
+  Future: [
+    { key: 'commissionPerContract', head: 'Commission' },
+    { key: 'exchangeFeePerContract', head: 'Exchange' },
+    { key: 'clearingFeePerContract', head: 'Clearing' },
+    { key: 'regulatoryFeePerContract', head: 'Regulatory' },
+    { key: '__total' as keyof FeeScheduleFields, head: 'Total / side', strong: true },
+    { key: 'slippageTicks', head: 'Slip ticks' },
+  ],
+  Equity: EQUITY_COLS,
+  Etf: EQUITY_COLS,
+};
+
+const numFmt = new Intl.NumberFormat('en-US', { maximumFractionDigits: 6 });
+const dayFmt = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric',
+  month: 'short',
+  year: 'numeric',
+  timeZone: 'UTC',
+});
+const day = (iso: string): string => dayFmt.format(new Date(iso));
+
+/** The edit form renders above the tables; bring it into view when a row far down is edited. */
+function revealForm(label: string): void {
+  setTimeout(() =>
+    document
+      .querySelector(`[aria-label="${label}"]`)
+      ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+  );
+}
+
+function futureTotal(f: FeeScheduleFields): number | null {
+  const parts = [
+    f.commissionPerContract,
+    f.exchangeFeePerContract,
+    f.clearingFeePerContract,
+    f.regulatoryFeePerContract,
+  ];
+  if (parts.every((v) => v === null)) return null;
+  return Math.round(parts.reduce<number>((s, v) => s + (v ?? 0), 0) * 1e6) / 1e6;
+}
 
 interface Editing {
   id: number | null;
@@ -42,8 +110,14 @@ interface Editing {
   selector: 'app-fee-schedules-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, LscCanDirective, ConfirmDialogComponent],
-  styleUrl: '../../iam/shared/iam-page.scss',
+  imports: [
+    FormsModule,
+    PageHeaderComponent,
+    LscCanDirective,
+    ConfirmDialogComponent,
+    StatTilesComponent,
+  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './venue-page.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -68,43 +142,7 @@ interface Editing {
         </button>
       </app-page-header>
 
-      <section class="card">
-        <div class="card-body row">
-          <label class="field">
-            <span class="label">Asset class</span>
-            <select
-              class="select"
-              name="f-ac"
-              [ngModel]="filterClass()"
-              (ngModelChange)="filterClass.set($event); rows.reload()"
-            >
-              <option value="">All</option>
-              @for (c of classes; track c) {
-                <option [value]="c">{{ c }}</option>
-              }
-            </select>
-          </label>
-          <label class="field">
-            <span class="label">Search (code, scope, notes)</span>
-            <input
-              class="input search"
-              name="f-q"
-              [ngModel]="search()"
-              (ngModelChange)="search.set($event)"
-              (keydown.enter)="rows.reload()"
-            />
-          </label>
-          <label class="check">
-            <input
-              type="checkbox"
-              name="f-del"
-              [ngModel]="includeDeleted()"
-              (ngModelChange)="includeDeleted.set($event); rows.reload()"
-            />
-            Show deleted
-          </label>
-        </div>
-      </section>
+      <app-stat-tiles [tiles]="tiles()" label="Fee schedule summary" />
 
       @if (editing(); as e) {
         <section class="card" aria-label="Fee schedule row">
@@ -254,74 +292,154 @@ interface Editing {
       }
 
       <section class="card">
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="Asset class">
+            <button type="button" [class.on]="!filterClass()" (click)="filterClass.set('')">
+              All<span class="n">{{ classCounts()['all'] }}</span>
+            </button>
+            @for (c of presentClasses(); track c) {
+              <button type="button" [class.on]="filterClass() === c" (click)="filterClass.set(c)">
+                {{ classLabel(c) }}<span class="n">{{ classCounts()[c] ?? 0 }}</span>
+              </button>
+            }
+          </div>
+          <label class="search-box">
+            <input
+              class="input"
+              name="f-q"
+              placeholder="Search code, venue, notes"
+              aria-label="Search code, venue, scope or notes"
+              [ngModel]="search()"
+              (ngModelChange)="search.set($event)"
+            />
+          </label>
+          <span class="grow"></span>
+          <label class="toggle" [class.on]="showHistory()">
+            <input
+              type="checkbox"
+              name="f-hist"
+              [ngModel]="showHistory()"
+              (ngModelChange)="showHistory.set($event)"
+            />
+            Show superseded
+            @if (expiredCount()) {
+              <span class="dim">({{ expiredCount() }})</span>
+            }
+          </label>
+          <label class="toggle" [class.on]="includeDeleted()">
+            <input
+              type="checkbox"
+              name="f-del"
+              [ngModel]="includeDeleted()"
+              (ngModelChange)="includeDeleted.set($event); rows.reload()"
+            />
+            Show deleted
+          </label>
+        </div>
         @if (rows.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         }
-        <div class="table-wrap">
-          <table class="grid">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Class · venue · scope</th>
-                <th>Fees</th>
-                <th>In force</th>
-                <th>Source</th>
-                <th><span class="sr-only">Actions</span></th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (f of shown(); track f.id) {
-                <tr [class.muted]="f.isDeleted">
-                  <td>
-                    <code style="white-space: nowrap">{{ f.code }}</code
-                    ><span class="sub">{{ f.notes }}</span>
-                  </td>
-                  <td class="small">
-                    {{ f.assetClass }} · {{ f.venue }}{{ f.scope ? ' · ' + f.scope : '' }}
-                  </td>
-                  <td class="small">{{ summary(f) }}</td>
-                  <td class="small">
-                    <span class="chip" [class.ok]="f.inForce" [class.bad]="f.isDeleted">{{
-                      f.isDeleted ? 'deleted' : f.inForce ? 'yes' : 'no'
-                    }}</span>
-                    <span class="sub"
-                      >{{ f.effectiveFromUtc.slice(0, 10) }} →
-                      {{ f.effectiveToUtc ? f.effectiveToUtc.slice(0, 10) : '…' }}</span
-                    >
-                  </td>
-                  <td class="small">
-                    {{ f.source }}<span class="sub">{{ when(f.updatedAtUtc) }}</span>
-                  </td>
-                  <td class="actions">
-                    @if (!f.isDeleted) {
-                      <button
-                        *lscCan="'platform.data.manage'"
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        (click)="startEdit(f)"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        *lscCan="'platform.data.manage'"
-                        type="button"
-                        class="btn btn-sm btn-danger"
-                        (click)="deleting.set({ row: f, reason: '' })"
-                      >
-                        Delete
-                      </button>
-                    }
-                  </td>
-                </tr>
-              } @empty {
-                <tr>
-                  <td colspan="6" class="muted">No fee schedule rows.</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
       </section>
+
+      @for (sec of sections(); track sec.cls) {
+        <section class="card" [attr.aria-label]="classLabel(sec.cls) + ' fees'">
+          <header class="card-head">
+            <h3>{{ classLabel(sec.cls) }}</h3>
+            <span class="count">{{ sec.rows.length }}</span>
+            <span class="hint">{{ classHint(sec.cls) }}</span>
+          </header>
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  @for (col of sec.cols; track col.key) {
+                    <th class="num" [title]="labels[col.key] ?? col.head">{{ col.head }}</th>
+                  }
+                  <th>Status</th>
+                  @if (!sec.wide) {
+                    <th>Source</th>
+                  }
+                  <th><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (f of sec.rows; track f.id) {
+                  <tr [class.is-deleted]="f.isDeleted" [class.is-past]="isExpired(f)">
+                    <td>
+                      <span class="ident">{{ f.code }}</span>
+                      <span class="sub"
+                        >{{ f.venue }}{{ f.scope ? ' · ' + f.scope : '' }} · {{ f.currency }}</span
+                      >
+                      @if (f.notes) {
+                        <span class="sub" [title]="f.notes">{{ f.notes }}</span>
+                      }
+                      @if (sec.wide) {
+                        @if (unverified(f)) {
+                          <span class="chip warn">Unverified</span>
+                        }
+                        <span class="source" [title]="f.source">{{ f.source }}</span>
+                      }
+                    </td>
+                    @for (col of sec.cols; track col.key) {
+                      <td
+                        class="num"
+                        [class.dim]="cell(f, col.key) === '—'"
+                        [class.strong]="col.strong"
+                      >
+                        {{ cell(f, col.key) }}
+                      </td>
+                    }
+                    <td class="nowrap">
+                      <span class="dot" [class]="statusTone(f)">{{ statusLabel(f) }}</span>
+                      <span class="when-sub">{{ period(f) }}</span>
+                    </td>
+                    @if (!sec.wide) {
+                      <td>
+                        @if (unverified(f)) {
+                          <span
+                            class="chip warn"
+                            title="The source says these are starting values, not a verified quote"
+                            >Unverified</span
+                          >
+                        }
+                        <span class="source" [title]="f.source">{{ f.source }}</span>
+                        <span class="when-sub">updated {{ when(f.updatedAtUtc) }}</span>
+                      </td>
+                    }
+                    <td class="actions" [class.stack]="sec.wide">
+                      @if (!f.isDeleted) {
+                        <button
+                          *lscCan="'platform.data.manage'"
+                          type="button"
+                          class="btn btn-sm btn-ghost"
+                          (click)="startEdit(f)"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          *lscCan="'platform.data.manage'"
+                          type="button"
+                          class="btn btn-sm btn-ghost-danger"
+                          (click)="deleting.set({ row: f, reason: '' })"
+                        >
+                          Delete
+                        </button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </section>
+      } @empty {
+        @if (!rows.loading()) {
+          <section class="card">
+            <p class="empty">No fee schedule rows match.</p>
+          </section>
+        }
+      }
 
       <app-confirm-dialog
         [open]="!!deleting()"
@@ -343,7 +461,6 @@ export class FeeSchedulesPageComponent {
   protected readonly when = when;
   protected readonly classes = FEE_ASSET_CLASSES;
   protected readonly labels = FEE_LABELS as Record<string, string>;
-  protected readonly summary = feeSummary;
 
   readonly filterClass = signal<FeeAssetClass | ''>('');
   readonly search = signal('');
@@ -351,21 +468,86 @@ export class FeeSchedulesPageComponent {
   readonly rows = iamResource<FeeSchedule[]>(
     () =>
       this.api.feeSchedules({
-        assetClass: this.filterClass() || undefined,
         includeDeleted: this.includeDeleted(),
       }),
     [],
     'Could not load the fee schedules.',
   );
-  readonly shown = computed(() => {
+  readonly showHistory = signal(false);
+
+  /** Rows after search and the superseded toggle, before the class pills. */
+  private readonly base = computed(() => {
     const q = this.search().trim().toLowerCase();
-    return q
-      ? this.rows
-          .value()
-          .filter((f) =>
-            `${f.code} ${f.scope ?? ''} ${f.notes ?? ''} ${f.venue}`.toLowerCase().includes(q),
-          )
-      : this.rows.value();
+    const hist = this.showHistory();
+    return this.rows
+      .value()
+      .filter((f) => hist || f.isDeleted || !this.isExpired(f))
+      .filter(
+        (f) =>
+          !q || `${f.code} ${f.scope ?? ''} ${f.notes ?? ''} ${f.venue}`.toLowerCase().includes(q),
+      );
+  });
+  readonly expiredCount = computed(
+    () => this.rows.value().filter((f) => !f.isDeleted && this.isExpired(f)).length,
+  );
+  readonly classCounts = computed(() => {
+    const c: Record<string, number> = { all: 0 };
+    for (const f of this.base()) {
+      c[f.assetClass] = (c[f.assetClass] ?? 0) + 1;
+      c['all']++;
+    }
+    return c;
+  });
+  readonly presentClasses = computed(() =>
+    FEE_ASSET_CLASSES.filter((c) => this.rows.value().some((f) => f.assetClass === c)),
+  );
+  readonly sections = computed(() => {
+    const cls = this.filterClass();
+    const rows = this.base().filter((f) => !cls || f.assetClass === cls);
+    return FEE_ASSET_CLASSES.map((c) => {
+      const list = rows
+        .filter((f) => f.assetClass === c)
+        .sort(
+          (a, b) =>
+            a.code.localeCompare(b.code) || b.effectiveFromUtc.localeCompare(a.effectiveFromUtc),
+        );
+      // A fee no row of the section uses is a column of dashes: leave it out.
+      const cols = (FEE_COLUMNS[c] ?? FEE_COLUMNS['Equity']).filter((col) =>
+        list.some((f) => this.cell(f, col.key) !== '—'),
+      );
+      // Many fee columns leave no room for a source column; it moves under the code instead.
+      return { cls: c, cols, rows: list, wide: cols.length > 6 };
+    }).filter((s) => s.rows.length > 0);
+  });
+  readonly tiles = computed<StatTile[]>(() => {
+    const all = this.rows.value().filter((f) => !f.isDeleted);
+    const live = all.filter((f) => f.inForce);
+    const unverified = live.filter((f) => this.unverified(f)).length;
+    return [
+      {
+        label: 'Rows in force',
+        value: this.rows.loaded() ? String(live.length) : '…',
+        caption: `of ${all.length} stored`,
+      },
+      {
+        label: 'Venues',
+        value: String(new Set(live.map((f) => f.venue)).size),
+        caption:
+          [...new Set(live.map((f) => f.assetClass))].map((c) => this.classLabel(c)).join(' · ') ||
+          'none',
+      },
+      {
+        label: 'Unverified in force',
+        value: String(unverified),
+        caption: unverified ? 'starting values — check against the venue' : 'all sourced',
+        tone: unverified ? 'warn' : 'good',
+      },
+      {
+        label: 'Superseded',
+        value: String(this.expiredCount()),
+        caption: 'older rows kept for backtest history',
+      },
+    ];
   });
   readonly editing = signal<Editing | null>(null);
   readonly deleting = signal<{ row: FeeSchedule; reason: string } | null>(null);
@@ -396,6 +578,51 @@ export class FeeSchedulesPageComponent {
     this.rows.reload();
   }
 
+  classLabel(c: string): string {
+    return CLASS_LABEL[c] ?? c;
+  }
+
+  classHint(c: string): string {
+    return c === 'Crypto'
+      ? 'basis points of notional · negative maker = rebate'
+      : c === 'Future'
+        ? 'per contract per side'
+        : 'per share / notional · sells pay SEC + FINRA TAF';
+  }
+
+  isExpired(f: FeeSchedule): boolean {
+    return !!f.effectiveToUtc && Date.parse(f.effectiveToUtc) <= Date.now();
+  }
+
+  unverified(f: FeeSchedule): boolean {
+    return /NOT a quote|NOT verified/i.test(f.source ?? '');
+  }
+
+  statusLabel(f: FeeSchedule): string {
+    if (f.isDeleted) return 'Deleted';
+    if (f.inForce) return 'In force';
+    return this.isExpired(f) ? 'Superseded' : 'Scheduled';
+  }
+
+  statusTone(f: FeeSchedule): string {
+    return 'dot ' + (f.isDeleted ? 'bad' : f.inForce ? 'ok' : this.isExpired(f) ? '' : 'warn');
+  }
+
+  period(f: FeeSchedule): string {
+    const from =
+      Date.parse(f.effectiveFromUtc) <= Date.parse('2000-01-02') ? null : day(f.effectiveFromUtc);
+    const to = f.effectiveToUtc ? day(f.effectiveToUtc) : null;
+    if (from && to) return `${from} → ${to}`;
+    if (to) return `until ${to}`;
+    return from ? `since ${from}` : 'since the start';
+  }
+
+  cell(f: FeeSchedule, k: keyof FeeScheduleFields): string {
+    const v = (k as string) === '__total' ? futureTotal(f) : (f[k] as number | null);
+    if (v === null || v === undefined) return '—';
+    return numFmt.format(v);
+  }
+
   touch(): void {
     this.version.update((v) => v + 1);
   }
@@ -421,6 +648,7 @@ export class FeeSchedulesPageComponent {
       to: '',
       reason: '',
     });
+    revealForm('Fee schedule row');
   }
 
   startEdit(f: FeeSchedule): void {
@@ -436,6 +664,7 @@ export class FeeSchedulesPageComponent {
       to: dateOnly(f.effectiveToUtc),
       reason: '',
     });
+    revealForm('Fee schedule row');
   }
 
   private fieldsOf(e: Editing): FeeScheduleFields {

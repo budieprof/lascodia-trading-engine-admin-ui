@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
+import { formatDistanceToNow } from 'date-fns';
 
 import { AuthService } from '@core/auth/auth.service';
 import { LscCanDirective } from '@core/auth/can.directive';
@@ -88,7 +89,7 @@ const EMPTY: ConnectionsData = {
     StatTilesComponent,
     FeatureStateComponent,
   ],
-  styleUrl: '../../iam/shared/iam-page.scss',
+  styleUrls: ['../../iam/shared/iam-page.scss', './venue-page.scss'],
   styles: [
     `
       textarea.input {
@@ -108,10 +109,44 @@ const EMPTY: ConnectionsData = {
         color: var(--loss);
       }
       .switches {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-4);
+      }
+      .switch {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: var(--space-2) var(--space-3);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        min-width: 0;
+      }
+      .switch-name {
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .switches + .note {
+        margin: 0 var(--space-4) var(--space-3);
+      }
+      .tags {
         display: flex;
         flex-wrap: wrap;
-        gap: 6px;
-        padding: var(--space-3);
+        gap: 3px;
+      }
+      .tag {
+        font-size: 10.5px;
+        font-weight: var(--font-medium);
+        padding: 1px 7px;
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        white-space: nowrap;
       }
     `,
   ],
@@ -147,22 +182,26 @@ const EMPTY: ConnectionsData = {
       <app-stat-tiles [tiles]="tiles()" label="Connections summary" />
 
       <section class="card" aria-label="Execution switches">
-        <header class="card-head"><h3>Execution switches (platform)</h3></header>
+        <header class="card-head">
+          <h3>Execution switches</h3>
+          <span class="hint">platform settings · edit in Engine config</span>
+        </header>
         <div class="switches">
           @for (s of switchList(); track s.key) {
-            <span
-              class="chip"
-              [class.ok]="s.value === 'true' || s.value === 'act'"
-              title="{{ s.key }}"
-              >{{ s.short }}: {{ s.value }}</span
-            >
+            <div class="switch" [title]="s.key + ' = ' + s.value">
+              <span class="switch-name">{{ s.short }}</span>
+              <span
+                class="dot"
+                [class.ok]="s.value === 'true' || s.value === 'act'"
+                [class.warn]="s.value !== 'true' && s.value !== 'false' && s.value !== 'act'"
+                >{{ switchText(s.value) }}</span
+              >
+            </div>
           } @empty {
             <span class="muted small">No Execution:* switch is stored.</span>
           }
         </div>
-        <p class="note">
-          {{ switchNote() }} The switches are platform settings (engine config), not this page's.
-        </p>
+        <p class="note">{{ switchNote() }}</p>
       </section>
 
       @if (creating(); as c) {
@@ -347,7 +386,10 @@ const EMPTY: ConnectionsData = {
       }
 
       <section class="card" aria-label="Execution accounts">
-        <header class="card-head"><h3>Execution accounts</h3></header>
+        <header class="card-head">
+          <h3>Execution accounts</h3>
+          <span class="count">{{ rows().length }}</span>
+        </header>
         @if (rows().length) {
           <div class="table-wrap">
             <table class="grid">
@@ -367,7 +409,7 @@ const EMPTY: ConnectionsData = {
                 @for (r of rows(); track r.account.id) {
                   <tr>
                     <td>
-                      {{ r.account.name }}
+                      <span class="strong">{{ r.account.name }}</span>
                       <span class="sub"
                         >#{{ r.account.id
                         }}{{ r.account.externalAccountId ? ' · ' + r.account.externalAccountId : ''
@@ -447,7 +489,7 @@ const EMPTY: ConnectionsData = {
                       <button
                         *lscCan="'accounts.connect'"
                         type="button"
-                        class="btn btn-sm btn-secondary"
+                        class="btn btn-sm btn-ghost"
                         (click)="startCredential(r.account)"
                       >
                         {{ r.account.credential ? 'Replace key' : 'Add key' }}
@@ -456,7 +498,7 @@ const EMPTY: ConnectionsData = {
                         <button
                           *lscCan="'accounts.connect'"
                           type="button"
-                          class="btn btn-sm btn-secondary"
+                          class="btn btn-sm btn-ghost"
                           (click)="ask({ kind: 'verify', account: r.account })"
                         >
                           Verify
@@ -464,7 +506,7 @@ const EMPTY: ConnectionsData = {
                         <button
                           *lscCan="'accounts.connect'"
                           type="button"
-                          class="btn btn-sm btn-danger"
+                          class="btn btn-sm btn-ghost-danger"
                           (click)="ask({ kind: 'revoke', account: r.account })"
                         >
                           Revoke
@@ -474,7 +516,7 @@ const EMPTY: ConnectionsData = {
                         <button
                           *lscCan="'accounts.manage'"
                           type="button"
-                          class="btn btn-sm btn-secondary"
+                          class="btn btn-sm btn-ghost"
                           (click)="
                             ask({
                               kind: 'status',
@@ -490,7 +532,7 @@ const EMPTY: ConnectionsData = {
                         <button
                           *lscCan="'accounts.manage'"
                           type="button"
-                          class="btn btn-sm btn-secondary"
+                          class="btn btn-sm btn-ghost"
                           (click)="
                             ask({
                               kind: 'status',
@@ -527,16 +569,20 @@ const EMPTY: ConnectionsData = {
       </section>
 
       <section class="card" aria-label="Adapters">
-        <header class="card-head"><h3>Adapters in this build</h3></header>
+        <header class="card-head">
+          <h3>Adapters in this build</h3>
+          <span class="count">{{ data.value().adapters.length }}</span>
+          <span class="hint">what each venue connector can do</span>
+        </header>
         <div class="table-wrap">
           <table class="grid">
             <thead>
               <tr>
-                <th>Kind</th>
+                <th>Adapter</th>
                 <th>Entries</th>
                 <th>Order types</th>
                 <th>Time in force</th>
-                <th>Stops at venue</th>
+                <th>Protective stops</th>
                 <th>Positions</th>
                 <th>Unit</th>
               </tr>
@@ -545,15 +591,35 @@ const EMPTY: ConnectionsData = {
               @for (a of data.value().adapters; track a.kind) {
                 <tr>
                   <td>
-                    <code>{{ a.kind }}</code
-                    ><span class="sub">{{
-                      a.requiresCredential ? 'needs a credential' : 'no credential'
+                    <span class="ident">{{ a.kind }}</span>
+                    <span class="sub">{{
+                      a.requiresCredential ? 'needs an API key' : 'no credential'
                     }}</span>
                   </td>
-                  <td class="small">{{ a.capabilities.entryModel }}</td>
-                  <td class="small">{{ names(a.capabilities.orderTypes, 'type') }}</td>
-                  <td class="small">{{ names(a.capabilities.timeInForce, 'tif') }}</td>
-                  <td class="small">{{ a.capabilities.positionStops ? 'yes' : 'engine-held' }}</td>
+                  <td>
+                    <span class="chip" [class.info]="a.capabilities.entryModel !== 'direct'">{{
+                      a.capabilities.entryModel
+                    }}</span>
+                  </td>
+                  <td>
+                    <span class="tags">
+                      @for (t of nameList(a.capabilities.orderTypes, 'type'); track t) {
+                        <span class="tag">{{ t }}</span>
+                      }
+                    </span>
+                  </td>
+                  <td>
+                    <span class="tags">
+                      @for (t of nameList(a.capabilities.timeInForce, 'tif'); track t) {
+                        <span class="tag">{{ t }}</span>
+                      }
+                    </span>
+                  </td>
+                  <td>
+                    <span class="dot" [class.ok]="a.capabilities.positionStops">{{
+                      a.capabilities.positionStops ? 'at the venue' : 'held by the engine'
+                    }}</span>
+                  </td>
                   <td class="small">{{ a.capabilities.positionModel }}</td>
                   <td class="small">{{ unit(a.capabilities.quantityUnit) }}</td>
                 </tr>
@@ -564,7 +630,11 @@ const EMPTY: ConnectionsData = {
       </section>
 
       <section class="card" aria-label="Execution workers">
-        <header class="card-head"><h3>Execution workers (this engine process)</h3></header>
+        <header class="card-head">
+          <h3>Execution workers</h3>
+          <span class="count">{{ data.value().health.workers.length }}</span>
+          <span class="hint">in this engine process</span>
+        </header>
         <div class="table-wrap">
           <table class="grid">
             <thead>
@@ -579,17 +649,23 @@ const EMPTY: ConnectionsData = {
               @for (w of data.value().health.workers; track w.workerName) {
                 <tr>
                   <td>
-                    <code>{{ w.workerName }}</code>
+                    <span class="ident">{{ w.workerName }}</span>
                   </td>
                   <td>
-                    <span class="chip" [class.ok]="w.isRunning">{{
-                      w.isRunning ? 'yes' : 'no'
+                    <span class="dot" [class.ok]="w.isRunning" [class.bad]="!w.isRunning">{{
+                      w.isRunning ? 'Running' : 'Stopped'
                     }}</span>
                   </td>
-                  <td class="small">{{ when(w.lastSuccessAt) }}</td>
-                  <td class="small">
-                    {{ w.lastErrorMessage ?? '—'
-                    }}{{ w.consecutiveFailures ? ' (' + w.consecutiveFailures + ' in a row)' : '' }}
+                  <td class="small" [title]="when(w.lastSuccessAt)">{{ ago(w.lastSuccessAt) }}</td>
+                  <td class="small" [class.dim]="!w.lastErrorMessage">
+                    @if (w.lastErrorMessage) {
+                      <span class="dot bad">{{ w.lastErrorMessage }}</span>
+                      @if (w.consecutiveFailures) {
+                        <span class="when-sub">{{ w.consecutiveFailures }} in a row</span>
+                      }
+                    } @else {
+                      None
+                    }
                   </td>
                 </tr>
               }
@@ -792,11 +868,18 @@ export class ConnectionsPageComponent {
     return Object.keys(h.instructions24h ?? {}).sort();
   }
 
-  names(values: (string | number)[], kind: 'type' | 'tif'): string {
-    const list = (values ?? []).map((v) =>
-      (kind === 'type' ? orderTypeName(v) : tifName(v)).toString(),
-    );
-    return list.length ? list.join(', ') : '—';
+  nameList(values: (string | number)[], kind: 'type' | 'tif'): string[] {
+    return (values ?? []).map((v) => (kind === 'type' ? orderTypeName(v) : tifName(v)).toString());
+  }
+
+  switchText(v: string): string {
+    return v === 'true' ? 'On' : v === 'false' ? 'Off' : v;
+  }
+
+  ago(utc: string | null | undefined): string {
+    if (!utc) return '—';
+    const d = new Date(utc);
+    return Number.isNaN(d.getTime()) ? '—' : formatDistanceToNow(d, { addSuffix: true });
   }
 
   unit(v: string | number): string {
