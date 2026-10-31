@@ -24,9 +24,11 @@ import { LandingOnboardingComponent } from './components/landing-onboarding.comp
 import { LandingSafetyComponent } from './components/landing-safety.component';
 import { LandingTradePathComponent } from './components/landing-trade-path.component';
 import { LandingTrustComponent } from './components/landing-trust.component';
-import { SALES_EMAIL, STATS } from './landing.content';
+import { SALES_EMAIL, STATS, TICKER } from './landing.content';
+import { CountUpDirective } from './count-up.directive';
 import { primaryCta } from './landing.logic';
 import { RevealDirective } from './reveal.directive';
+import { SpotlightDirective } from './spotlight.directive';
 
 const NAV = [
   { id: 'product', label: 'Platform' },
@@ -56,6 +58,8 @@ const PAGE_DESCRIPTION =
     RouterLink,
     LogoComponent,
     RevealDirective,
+    SpotlightDirective,
+    CountUpDirective,
     HeroConsoleComponent,
     LandingTradePathComponent,
     LandingFeaturesComponent,
@@ -72,6 +76,10 @@ export class LandingPageComponent {
   protected readonly theme = inject(ThemeService);
   protected readonly nav = NAV;
   protected readonly stats = STATS;
+  protected readonly tickerRows = TICKER;
+  /** The headline, word by word, so each word can rise in on its own beat. */
+  protected readonly titleA = ['Systematic', 'trading,'];
+  protected readonly titleB = ['with', 'the', 'safety', 'built', 'in.'];
   protected readonly year = new Date().getFullYear();
   protected readonly salesEmail = SALES_EMAIL;
 

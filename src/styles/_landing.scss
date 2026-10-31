@@ -235,6 +235,64 @@
   }
 }
 
+// The always-dark surfaces (hero, nav over the hero): the dark palette re-declared locally, so every primitive
+// inside them — buttons, cards, text — reads as dark whatever the page theme is.
+.lp-dark {
+  --lp-card: #101218;
+  --lp-card-2: rgba(22, 24, 32, 0.66);
+  --lp-ink: #f5f5f7;
+  --lp-ink-2: #b4b4bd;
+  --lp-ink-3: #7c7c86;
+  --lp-line: rgba(255, 255, 255, 0.08);
+  --lp-line-strong: rgba(255, 255, 255, 0.14);
+  --lp-blue: #3d8bff;
+  --lp-shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 40px 90px -24px rgba(0, 40, 120, 0.45);
+  color: var(--lp-ink);
+}
+
+// SpotlightDirective: a soft glow under the cursor plus a lit edge where the cursor is nearest.
+.lp-spot {
+  --mx: 50%;
+  --my: 50%;
+  isolation: isolate;
+
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.4s;
+  }
+  &::before {
+    z-index: -1;
+    background: radial-gradient(
+      420px circle at var(--mx) var(--my),
+      color-mix(in srgb, var(--lp-blue) 9%, transparent),
+      transparent 45%
+    );
+  }
+  &::after {
+    padding: 1px;
+    background: radial-gradient(
+      300px circle at var(--mx) var(--my),
+      color-mix(in srgb, var(--lp-blue) 70%, transparent),
+      transparent 60%
+    );
+    -webkit-mask:
+      linear-gradient(#000 0 0) content-box,
+      linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+  }
+  &:hover::before,
+  &:hover::after {
+    opacity: 1;
+  }
+}
+
 // Above the fold (the hero): an entrance that starts on first paint, never waiting for a scroll observer.
 .lp-enter {
   animation: lp-enter 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;

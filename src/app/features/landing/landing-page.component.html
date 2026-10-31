@@ -1,6 +1,12 @@
 <a class="lp-skip" href="#lp-main" (click)="go($event, 'lp-main')">Skip to content</a>
 
-<header class="nav" [class.is-scrolled]="scrolled() || menuOpen()" [class.is-open]="menuOpen()">
+<header
+  class="nav"
+  [class.is-scrolled]="scrolled() || menuOpen()"
+  [class.lp-dark]="!scrolled() && !menuOpen()"
+  [class.is-open]="menuOpen()"
+>
+  <span class="nav__progress" aria-hidden="true"></span>
   <div class="lp-container nav__inner">
     <a class="nav__brand" href="/" (click)="toTop($event)" aria-label="Lascodia, back to top">
       <app-logo [size]="30" />
@@ -86,12 +92,17 @@
 
 <main id="lp-main">
   <!-- ── Hero ── -->
-  <section class="hero" aria-labelledby="lp-hero-title">
+  <section class="hero lp-dark" aria-labelledby="lp-hero-title" lpSpot>
     <div class="hero__bg" aria-hidden="true">
+      <span class="hero__aurora"></span>
       <span class="hero__blob hero__blob--a"></span>
       <span class="hero__blob hero__blob--b"></span>
       <span class="hero__blob hero__blob--c"></span>
       <span class="hero__grid"></span>
+      <span class="hero__beam hero__beam--a"></span>
+      <span class="hero__beam hero__beam--b"></span>
+      <span class="hero__beam hero__beam--c"></span>
+      <span class="hero__horizon"></span>
     </div>
 
     <div class="lp-container hero__inner">
@@ -106,19 +117,29 @@
         <span class="lp-arrow" aria-hidden="true">→</span>
       </a>
 
-      <h1 class="hero__title lp-enter" id="lp-hero-title" style="--lp-delay: 60ms">
-        Systematic trading,<br />
-        <span class="lp-grad-text">with the safety built in.</span>
+      <h1 class="hero__title" id="lp-hero-title">
+        @for (w of titleA; track $index) {
+          <span class="hero__word" [style.--i]="$index">{{ w }}</span>
+          {{ ' ' }}
+        }
+        <br />
+        @for (w of titleB; track $index) {
+          <span class="hero__word hero__word--grad" [style.--i]="titleA.length + $index">{{
+            w
+          }}</span>
+          {{ ' ' }}
+        }
       </h1>
 
-      <p class="hero__lede lp-enter" style="--lp-delay: 120ms">
+      <p class="hero__lede lp-enter" style="--lp-delay: 520ms">
         Lascodia turns strategies into orders on your own MetaTrader 5 terminals — with live
         charting and order flow, honest research, AI analysis in plain language and risk controls
         your whole team can see.
       </p>
 
-      <div class="hero__ctas lp-enter" style="--lp-delay: 180ms">
-        <a class="lp-btn lp-btn--primary" [routerLink]="cta().route">
+      <div class="hero__ctas lp-enter" style="--lp-delay: 620ms">
+        <a class="lp-btn lp-btn--primary hero__primary" [routerLink]="cta().route">
+          <span class="hero__shine" aria-hidden="true"></span>
           {{ cta().kind === 'signup' ? 'Start free' : cta().label }}
           <span class="lp-arrow" aria-hidden="true">→</span>
         </a>
@@ -136,18 +157,37 @@
         }
       </div>
 
-      <p class="hero__fine lp-enter" style="--lp-delay: 220ms">
+      <ul class="hero__fine lp-enter" style="--lp-delay: 700ms">
         @if (cta().kind === 'signup') {
-          Free Trial on demo accounts · No card required · Works with any MT5 broker
+          <li>Free Trial on demo accounts</li>
+          <li>No card required</li>
+          <li>Works with any MT5 broker</li>
         } @else {
-          Works with any MetaTrader 5 broker · Your funds stay with your broker
+          <li>Works with any MetaTrader 5 broker</li>
+          <li>Your funds stay with your broker</li>
         }
-      </p>
+      </ul>
 
-      <div class="hero__stage lp-enter" style="--lp-delay: 260ms">
+      <div class="hero__stage lp-enter" style="--lp-delay: 760ms">
         <lp-hero-console />
       </div>
     </div>
+  </section>
+
+  <!-- ── Capability ticker ── -->
+  <section class="tick" aria-label="What is in the box">
+    @for (row of tickerRows; track $index; let odd = $odd) {
+      <div class="tick__row" [class.tick__row--rev]="odd">
+        <!-- Two copies so the loop is seamless; the second is hidden from screen readers. -->
+        @for (copy of [0, 1]; track copy) {
+          <ul class="tick__track" [attr.aria-hidden]="copy === 1 ? 'true' : null">
+            @for (t of row; track t) {
+              <li>{{ t }}</li>
+            }
+          </ul>
+        }
+      </div>
+    }
   </section>
 
   <!-- ── Proof strip ── -->
@@ -155,8 +195,8 @@
     <div class="lp-container">
       <ul class="stats__list">
         @for (s of stats; track s.label; let i = $index) {
-          <li [lpReveal]="i * 80">
-            <b class="lp-grad-text">{{ s.value }}</b>
+          <li class="lp-card stats__card" lpSpot [lpReveal]="i * 80">
+            <b class="lp-grad-text" [lpCountUp]="s.value"></b>
             <span>{{ s.label }}</span>
           </li>
         }
@@ -174,7 +214,8 @@
   <!-- ── Closing call to action ── -->
   <section class="final" aria-labelledby="lp-final-title">
     <div class="lp-container">
-      <div class="final__card" lpReveal>
+      <div class="final__card" lpReveal lpSpot>
+        <div class="final__aurora" aria-hidden="true"></div>
         <div class="final__glow" aria-hidden="true"></div>
         <h2 class="final__title" id="lp-final-title">Trade with a system you can trust.</h2>
         <p class="final__lede">
