@@ -5,25 +5,30 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="metric-card">
-      <div class="metric-header">
-        @if (dotColor()) {
-          <span class="dot" [style.background]="dotColor()"></span>
-        }
-        <span class="metric-label">{{ label() }}</span>
-      </div>
-      <div class="metric-value" [class.profit]="isPositive()" [class.loss]="isNegative()">
-        {{ formattedValue() }}
-      </div>
-      @if (delta() !== undefined) {
-        <div
-          class="metric-delta"
-          [class.profit]="(delta() ?? 0) >= 0"
-          [class.loss]="(delta() ?? 0) < 0"
-        >
-          {{ (delta() ?? 0) >= 0 ? '↑' : '↓' }} {{ formatDelta() }}
+    <div
+      class="metric-card"
+      [class.toned]="!!dotColor()"
+      [style.--tone]="dotColor() || null"
+      [attr.title]="caption() ? label() + ' — ' + caption() : label()"
+    >
+      <span class="metric-label">{{ label() }}</span>
+      <div class="metric-body">
+        <div class="metric-value" [class.profit]="isPositive()" [class.loss]="isNegative()">
+          {{ formattedValue() }}
         </div>
-      }
+        @if (delta() !== undefined) {
+          <div
+            class="metric-delta"
+            [class.profit]="(delta() ?? 0) >= 0"
+            [class.loss]="(delta() ?? 0) < 0"
+          >
+            {{ (delta() ?? 0) >= 0 ? '↑' : '↓' }} {{ formatDelta() }}
+          </div>
+        }
+        @if (caption()) {
+          <div class="metric-caption">{{ caption() }}</div>
+        }
+      </div>
     </div>
   `,
   styles: [
@@ -32,68 +37,72 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
         display: block;
         height: 100%;
       }
+      /* Compact tile shared by every KPI strip: small uppercase label on top, the figure (and its
+         delta / caption) pinned to the bottom so values line up across a row whatever the label
+         length. The page's dot colour now paints a stripe down the left edge instead of a dot. */
       .metric-card {
+        --tone: var(--text-tertiary);
+        position: relative;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--card-padding);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
         box-shadow: var(--shadow-sm);
-        transition: all 0.2s ease;
-        /* Make every card the same height so values line up vertically across
-         * a row, even when grid sizing makes some cards taller than others. */
         height: 100%;
+        box-sizing: border-box;
         display: flex;
         flex-direction: column;
-      }
-
-      .metric-card:hover {
-        box-shadow: var(--shadow-md);
-        transform: translateY(-1px);
-      }
-
-      .metric-header {
-        display: flex;
-        align-items: flex-start;
         gap: var(--space-2);
-        margin-bottom: var(--space-3);
-        /* Reserve two lines of label height so cards with one-line labels
-         * (e.g. "Reject rate") and two-line labels (e.g. "Avg slippage (pips)")
-         * push their values down to the same Y position. */
-        min-height: 2.6em;
+        overflow: hidden;
+        min-width: 0;
       }
-
-      .dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        /* Keep the dot aligned with the first line of the label rather than
-         * the centre of the (now multi-line) header block. */
-        margin-top: 0.4em;
+      .metric-card::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.3;
+      }
+      .metric-card.toned::before {
+        opacity: 0.9;
       }
 
       .metric-label {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        line-height: 1.3;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        line-height: 1.35;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+      }
+
+      .metric-body {
+        margin-top: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
       }
 
       .metric-value {
-        /* Six tiles across a 1440px page leave ~150px for a value like
-           "$2,093,491.05"; at the fixed 2xl size it clipped mid-digit
-           ("$2,093,491.("). The size follows the viewport between lg and
-           2xl, and a value that still does not fit wraps rather than clips. */
-        font-size: clamp(var(--text-base), 1.3vw, var(--text-2xl));
+        /* Six tiles across a 1440px page leave ~150px for a value like "$2,093,491.05"; the size
+           follows the viewport and a value that still does not fit wraps rather than clips. */
+        font-size: clamp(var(--text-lg), 1.5vw, 24px);
         font-weight: var(--font-semibold);
         color: var(--text-primary);
-        letter-spacing: var(--tracking-tight);
+        letter-spacing: -0.01em;
         font-variant-numeric: tabular-nums;
         line-height: 1.2;
         min-width: 0;
         overflow-wrap: anywhere;
       }
-
       .metric-value.profit {
         color: var(--profit);
       }
@@ -102,17 +111,23 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
       }
 
       .metric-delta {
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
         font-weight: var(--font-medium);
-        margin-top: var(--space-1);
         font-variant-numeric: tabular-nums;
       }
-
       .metric-delta.profit {
         color: var(--profit);
       }
       .metric-delta.loss {
         color: var(--loss);
+      }
+
+      .metric-caption {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
     `,
   ],
@@ -123,6 +138,8 @@ export class MetricCardComponent {
   format = input<'currency' | 'percent' | 'number'>('number');
   delta = input<number | undefined>(undefined);
   dotColor = input<string>();
+  /** Optional one-line context under the figure ("of 30 total", "latest 3 days ago"). */
+  caption = input<string | null>(null);
   colorByValue = input(false);
 
   /**
