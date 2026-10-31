@@ -8,22 +8,28 @@ describe('watch-script', () => {
       const src = buildWatchScript({ template: t.id, level: 1.1495, precision: 5 });
       expect(src.startsWith('//@version=6\nindicator(')).toBe(true);
       expect(src).toContain('armedAt = input.time(0, "armedAt")');
-      expect(src).toContain('import lascodia/structure/1 as st');
+      expect(src).toContain('import lascodia/plan/1 as plan');
       expect(src).toContain('level = input.price(1.14950, "level")');
       for (const plot of ['"step"', '"ready"', '"broken"']) expect(src).toContain(plot);
       expect(src).not.toContain('strategy(');
       expect(src).not.toContain('calc_on_every_tick');
-      // Steps only count from armedAt, and stop once ready.
-      expect(src).toMatch(/^if time >= armedAt and step < \d$/m);
+      // Steps only count from armedAt and stop once ready: the library does it, from the armedAt input.
+      expect(src).toMatch(/plan\.(watch|reclaim|breakRetest)\(\S*,? ?armedAt/);
     }
   });
 
-  it('calls every structure block on every candle, never inside the step logic', () => {
+  it('leaves the step bookkeeping to the library (no hand-written state machine)', () => {
     for (const t of WATCH_TEMPLATES) {
       const src = buildWatchScript({ template: t.id, level: 1.1495, precision: 5 });
-      const indented = src.split('\n').filter((l) => l.startsWith(' '));
-      expect(indented.some((l) => l.includes('st.'))).toBe(false);
+      expect(src).not.toMatch(/step :=|broken :=|var int step/);
+      expect(src.split('\n').some((l) => l.startsWith(' '))).toBe(false);
     }
+    expect(buildWatchScript({ template: 'dipReclaim', level: 1.15, precision: 5 })).toContain(
+      'plan.reclaim(1, armedAt, level, maxWait = 0)',
+    );
+    expect(buildWatchScript({ template: 'breakRetestDown', level: 1.15, precision: 5 })).toContain(
+      'plan.breakRetest(-1, armedAt, level, maxWait = 0, failAtr = 1.0)',
+    );
   });
 
   it('adds the extra "called off" guard on the right side', () => {
@@ -34,14 +40,17 @@ describe('watch-script', () => {
       precision: 5,
     });
     expect(up).toContain('calledOff = input.price(1.14000, "called off")');
-    expect(up).toContain('    if close < calledOff\n        broken := true');
+    expect(up).toContain('plan.reclaim(1, armedAt, level, maxWait = 0, calledOff = calledOff)');
     const down = buildWatchScript({
       template: 'pushFail',
       level: 1.15,
       calledOff: 1.16,
       precision: 5,
     });
-    expect(down).toContain('    if close > calledOff');
+    expect(down).toContain('plan.reclaim(-1, armedAt, level, maxWait = 0, calledOff = calledOff)');
+    expect(
+      buildWatchScript({ template: 'closeBelow', level: 1.15, calledOff: 1.16, precision: 5 }),
+    ).toContain('plan.watch(armedAt, 1, invalidAbove = calledOff)');
     expect(buildWatchScript({ template: 'closeAbove', level: 1.15, precision: 5 })).not.toContain(
       'calledOff',
     );

@@ -2,9 +2,10 @@
  * "Watch this" (SP-I5): the Structure Watch scripts the chart writes for the operator. Each follows the watch contract
  * the engine checks before arming (engine `ScriptWatchContract`): an `indicator()` that declares
  * `armedAt = input.time(0, "armedAt")` (the engine sets it; steps count only from it), judges closed candles only, and
- * publishes the plots "step", "ready" and "broken" (and "stop" where the setup has one). They are built from the
- * engine's tested structure blocks (`import lascodia/structure/1 as st`) — the same blocks the AI's watches use — so a
- * chart watch and an AI watch read the market the same way. Pure: no Angular.
+ * publishes the plots "step", "ready" and "broken" (and "stop" where the setup has one). They are built on the
+ * engine's tested watch library (`import lascodia/plan/1 as plan`) — the same templates the AI's watches use — so a
+ * chart watch and an AI watch follow a setup the same way: arming, ordered steps, latched breaks, frozen once ready.
+ * Pure: no Angular.
  */
 
 /** Which way a setup leans: "up" setups are called off by a close below, "down" ones by a close above. */
@@ -136,152 +137,57 @@ export function buildWatchScript(input: WatchScriptInput): string {
   const hasOff =
     input.calledOff !== null && input.calledOff !== undefined && Number.isFinite(input.calledOff);
   const off = hasOff ? fmt(input.calledOff as number, input.precision) : null;
+  const dir = t.lean === 'up' ? 1 : -1;
+  const offArg = off !== null ? ', calledOff = calledOff' : '';
 
   const head = [
     '//@version=6',
     `indicator("${pineText(`Watch: ${t.label} ${lvl}`)}", overlay = true)`,
-    'import lascodia/structure/1 as st',
+    'import lascodia/plan/1 as plan',
     'armedAt = input.time(0, "armedAt")',
     `level = input.price(${lvl}, "level")`,
     ...(off !== null ? [`calledOff = input.price(${off}, "called off")`] : []),
-    'var int step = 0',
-    'var bool broken = false',
   ];
 
-  // The extra guard runs first on every candle after armedAt, whatever the step: a close beyond it ends the watch.
-  const guard =
-    off === null
-      ? []
-      : [
-          `    if ${t.lean === 'up' ? 'close < calledOff' : 'close > calledOff'}`,
-          '        broken := true',
-        ];
-
-  // Every structure block is evaluated on EVERY candle, outside the step logic: the blocks keep history (ATR,
-  // previous candles), and calling them only on some candles would feed them a broken series.
-  let signals: string[];
+  // The library keeps the steps: nothing before armedAt, steps in order, broken latched, frozen once ready, the
+  // "called off" price judged on closes. Every condition is computed on every candle.
   let body: string[];
-  let readyStep: number;
-  let extraVars: string[] = [];
-  let tail: string[] = [];
-
+  let plotStop = false;
   switch (t.id) {
     case 'closeAbove':
     case 'closeBelow':
-      readyStep = 1;
-      signals = [
-        `closedBeyond = st.${t.id === 'closeAbove' ? 'closedAbove' : 'closedBelow'}(level)`,
+      body = [
+        `var w = plan.watch(armedAt, 1${off !== null ? (dir > 0 ? ', invalidBelow = calledOff' : ', invalidAbove = calledOff') : ''})`,
+        'w.update()',
+        `bool beyond = ${t.id === 'closeAbove' ? 'close > level' : 'close < level'}`,
+        'w.stepIf(0, beyond)',
+        '[step, ready, broken, entry, stop] = w.outputs()',
       ];
-      body = ['    if not broken and step == 0 and closedBeyond', '        step := 1'];
       break;
     case 'dipReclaim':
-      readyStep = 3;
-      extraVars = ['var float dipLow = na'];
-      signals = [
-        'ruler = st.ruler()',
-        'dipped = st.sweptBelow(level)',
-        'reclaimed = st.closedAbove(level)',
-        'turnedUp = st.higherLow(dipLow)',
-      ];
-      body = [
-        '    if not broken',
-        '        if step == 0 and dipped',
-        '            step := 1',
-        '            dipLow := low',
-        '        if step == 1',
-        '            dipLow := math.min(dipLow, low)',
-        '            if reclaimed',
-        '                step := 2',
-        '            else if close < level - ruler',
-        '                broken := true',
-        '        else if step == 2',
-        '            if close < dipLow',
-        '                broken := true',
-        '            else if turnedUp',
-        '                step := 3',
-      ];
-      tail = ['plot(dipLow - 0.5 * ruler, "stop")'];
-      break;
     case 'pushFail':
-      readyStep = 3;
-      extraVars = ['var float pushHigh = na'];
-      signals = [
-        'ruler = st.ruler()',
-        'pushed = st.sweptAbove(level)',
-        'rejected = st.closedBelow(level)',
-        'turnedDown = st.lowerHigh(pushHigh)',
-      ];
+      // No time limit on the reclaim (maxWait = 0): the chart's watch waits as long as the level stays in play.
       body = [
-        '    if not broken',
-        '        if step == 0 and pushed',
-        '            step := 1',
-        '            pushHigh := high',
-        '        if step == 1',
-        '            pushHigh := math.max(pushHigh, high)',
-        '            if rejected',
-        '                step := 2',
-        '            else if close > level + ruler',
-        '                broken := true',
-        '        else if step == 2',
-        '            if close > pushHigh',
-        '                broken := true',
-        '            else if turnedDown',
-        '                step := 3',
+        `[step, ready, broken, entry, stop] = plan.reclaim(${dir}, armedAt, level, maxWait = 0${offArg})`,
       ];
-      tail = ['plot(pushHigh + 0.5 * ruler, "stop")'];
+      plotStop = true;
       break;
     case 'breakRetestUp':
-      readyStep = 2;
-      signals = [
-        'ruler = st.ruler()',
-        'brokeOut = st.closedAbove(level)',
-        'retestHeld = st.retestHoldsAbove(level)',
-      ];
-      body = [
-        '    if not broken',
-        '        if step == 0',
-        '            if brokeOut',
-        '                step := 1',
-        '        else if step == 1',
-        '            if close < level - ruler',
-        '                broken := true',
-        '            else if retestHeld',
-        '                step := 2',
-      ];
-      break;
     case 'breakRetestDown':
-      readyStep = 2;
-      signals = [
-        'ruler = st.ruler()',
-        'brokeDown = st.closedBelow(level)',
-        'retestHeld = st.retestHoldsBelow(level)',
-      ];
+      // Called off by a close a full candle-size (ATR) back through the level; no time limit on the retest.
       body = [
-        '    if not broken',
-        '        if step == 0',
-        '            if brokeDown',
-        '                step := 1',
-        '        else if step == 1',
-        '            if close > level + ruler',
-        '                broken := true',
-        '            else if retestHeld',
-        '                step := 2',
+        `[step, ready, broken, entry, stop] = plan.breakRetest(${dir}, armedAt, level, maxWait = 0, failAtr = 1.0${offArg})`,
       ];
       break;
   }
 
   return [
     ...head,
-    ...extraVars,
-    ...signals,
-    // Once ready the watch has done its job: later candles never move the step or break it.
-    `if time >= armedAt and step < ${readyStep}`,
-    ...guard,
     ...body,
     'plot(step, "step")',
-    `plot(step >= ${readyStep} ? 1 : 0, "ready")`,
-    'plot(broken ? 1 : 0, "broken")',
-    ...tail,
+    'plot(ready, "ready")',
+    'plot(broken, "broken")',
+    ...(plotStop ? ['plot(stop, "stop")'] : []),
     '',
   ].join('\n');
 }
