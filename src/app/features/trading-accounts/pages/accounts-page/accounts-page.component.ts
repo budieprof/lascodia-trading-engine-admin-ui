@@ -22,6 +22,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { CurrencyFormatPipe } from '@shared/pipes/currency-format.pipe';
 
 /**
@@ -41,6 +42,7 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
     ConfirmDialogComponent,
     ChartCardComponent,
     ErrorStateComponent,
+    MetricCardComponent,
     DatePipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -62,129 +64,239 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
         />
       }
 
-      <!-- 8-card KPI strip — fleet roll-ups across all accounts -->
+      <!-- 8-tile KPI strip — fleet roll-ups across all accounts. Shared metric-card
+           tiles; tile()/money() render "—" while the fleet is unavailable. -->
       <div class="kpi-strip">
-        <div class="kpi">
-          <span class="kpi-label">Accounts</span>
-          <span class="kpi-value">{{ tile(stats().total) }}</span>
-        </div>
-        <div class="kpi">
-          <span class="kpi-label">Active</span>
-          <span class="kpi-value" [class.good]="stats().active > 0">
-            {{ tile(stats().active) }}
-          </span>
-        </div>
-        <div class="kpi">
-          <span class="kpi-label">Live (real)</span>
-          <span class="kpi-value" [class.warn]="stats().live > 0">{{ tile(stats().live) }}</span>
-        </div>
-        <div class="kpi">
-          <span class="kpi-label">Demo · Paper</span>
-          <span class="kpi-value">{{ tile(stats().demo) }} · {{ tile(stats().paper) }}</span>
-        </div>
+        <app-metric-card
+          label="Accounts"
+          [displayValue]="'' + tile(stats().total)"
+          dotColor="#0071E3"
+          [caption]="countsCaption()"
+        />
+        <app-metric-card
+          label="Active"
+          [displayValue]="'' + tile(stats().active)"
+          [dotColor]="stats().active > 0 ? '#34C759' : '#8E8E93'"
+          [caption]="'of ' + stats().total + ' registered'"
+        />
+        <app-metric-card
+          label="Live (real)"
+          [displayValue]="'' + tile(stats().live)"
+          [dotColor]="stats().live > 0 ? '#FF9500' : undefined"
+          caption="real-money broker accounts"
+        />
+        <app-metric-card
+          label="Demo · Paper"
+          [displayValue]="tile(stats().demo) + ' · ' + tile(stats().paper)"
+          caption="no real money at risk"
+        />
         <!--
           Money tiles sum ACTIVE accounts only. An inactive account's balance,
           margin and floating P&L are the last snapshot before it stopped
           syncing (Raw Spread #25: Sep 6, $35k margin "in use"), so summing
           them reported +$530 unrealized on a fleet with no open position.
         -->
-        <div class="kpi" [title]="inactiveNote()">
-          <span class="kpi-label">Total balance · active</span>
-          <span class="kpi-value mono">
-            {{ money(stats().totalBalance, primaryCurrency()) }}
-          </span>
-        </div>
-        <div class="kpi" [title]="inactiveNote()">
-          <span class="kpi-label">Total equity · active</span>
-          <span class="kpi-value mono">
-            {{ money(stats().totalEquity, primaryCurrency()) }}
-          </span>
-        </div>
-        <div class="kpi" [title]="inactiveNote()">
-          <span class="kpi-label">Margin used · active</span>
-          <span class="kpi-value mono">
-            {{ money(stats().marginUsed, primaryCurrency()) }}
-          </span>
-        </div>
-        <div class="kpi" [title]="inactiveNote()">
-          <span class="kpi-label">Unrealized P&L · active</span>
-          <span
-            class="kpi-value mono"
-            [class.good]="stats().unrealizedPnL > 0"
-            [class.bad]="stats().unrealizedPnL < 0"
-          >
-            @if (loadError() && allAccounts().length === 0) {
-              —
-            } @else {
-              {{ stats().unrealizedPnL > 0 ? '+' : ''
-              }}{{ formatCurrency(stats().unrealizedPnL, primaryCurrency()) }}
-            }
-          </span>
-        </div>
+        <app-metric-card
+          label="Total balance · active"
+          [displayValue]="money(stats().totalBalance, primaryCurrency())"
+          dotColor="#0071E3"
+          [caption]="activeCaption()"
+        />
+        <app-metric-card
+          label="Total equity · active"
+          [displayValue]="money(stats().totalEquity, primaryCurrency())"
+          dotColor="#34C759"
+          [caption]="activeCaption()"
+        />
+        <app-metric-card
+          label="Margin used · active"
+          [displayValue]="money(stats().marginUsed, primaryCurrency())"
+          [dotColor]="marginPct() > 50 ? '#FF3B30' : '#FF9500'"
+          [caption]="marginPct().toFixed(1) + '% of active equity'"
+        />
+        <app-metric-card
+          label="Unrealized P&L · active"
+          [value]="stats().unrealizedPnL"
+          [displayValue]="pnlLabel()"
+          [colorByValue]="true"
+          [dotColor]="stats().unrealizedPnL < 0 ? '#FF3B30' : '#34C759'"
+          caption="equity − balance on open positions"
+        />
       </div>
 
-      <!-- Charts row: balance/equity bars + the two composition splits.
-           A split with a single non-zero bucket is a full ring that says
-           nothing a sentence can't, so those render as a text summary. -->
+      <!-- Active accounts: full snapshot cards, richest first. -->
+      @if (activeAccounts().length > 0) {
+        <section class="acct-section">
+          <header class="section-head">
+            <h3>Active accounts</h3>
+            <span class="count-chip">{{ activeAccounts().length }}</span>
+            <span class="muted">synced by an attached EA — money tiles above sum these</span>
+          </header>
+          <div class="account-grid">
+            @for (a of activeAccounts(); track a.id) {
+              <article class="acct-card" [attr.data-env]="environmentOf(a)">
+                <header class="acct-head">
+                  <span class="acct-name" [title]="a.accountName ?? ''">{{
+                    a.accountName ?? '—'
+                  }}</span>
+                  <div class="acct-pills">
+                    <span
+                      class="acct-pill"
+                      [class.live]="environmentOf(a) === 'Live'"
+                      [class.demo]="environmentOf(a) === 'Demo'"
+                      [title]="environmentTitle(a)"
+                    >
+                      {{ environmentOf(a) }}
+                    </span>
+                  </div>
+                </header>
+                <div class="acct-equity">
+                  <span class="acct-equity-label">Equity</span>
+                  <span class="mono">{{ formatCurrency(a.equity, a.currency ?? 'USD') }}</span>
+                </div>
+                <dl class="acct-rows">
+                  <div class="acct-row">
+                    <dt>Balance</dt>
+                    <dd class="mono">{{ formatCurrency(a.balance, a.currency ?? 'USD') }}</dd>
+                  </div>
+                  <div class="acct-row">
+                    <dt>Margin used</dt>
+                    <dd class="mono">{{ formatCurrency(a.marginUsed, a.currency ?? 'USD') }}</dd>
+                  </div>
+                  <div class="acct-row">
+                    <dt>Free margin</dt>
+                    <dd class="mono">
+                      {{ formatCurrency(a.marginAvailable, a.currency ?? 'USD') }}
+                    </dd>
+                  </div>
+                  <div class="acct-row">
+                    <dt>Margin level</dt>
+                    <dd class="mono">{{ marginLevelLabel(a) }}</dd>
+                  </div>
+                </dl>
+                <footer class="acct-foot">
+                  <span class="acct-foot-label" [title]="a.brokerName ?? ''">
+                    <i class="dot on"></i>{{ a.brokerName ?? '—' }}
+                  </span>
+                  <span class="acct-foot-time">
+                    Synced {{ a.lastSyncedAt ? (a.lastSyncedAt | date: 'MMM d, HH:mm') : '—' }}
+                  </span>
+                </footer>
+              </article>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Inactive accounts: one compact line each. Their figures are the last
+           snapshot before syncing stopped, so they stay visible but quiet. -->
+      @if (inactiveAccounts().length > 0) {
+        <section class="acct-section quiet">
+          <header class="section-head">
+            <button
+              type="button"
+              class="disclosure"
+              (click)="showInactive.set(!showInactive())"
+              [attr.aria-expanded]="showInactive()"
+            >
+              <span class="chev" [class.open]="showInactive()">›</span>
+              <h3>Inactive accounts</h3>
+              <span class="count-chip">{{ inactiveAccounts().length }}</span>
+            </button>
+            <span class="muted">last snapshot before syncing stopped · not in the totals</span>
+          </header>
+          @if (showInactive()) {
+            <div class="mini-grid">
+              @for (a of inactiveAccounts(); track a.id) {
+                <article class="mini-card">
+                  <div class="mini-top">
+                    <span class="mini-name" [title]="a.accountName ?? ''">{{
+                      a.accountName ?? '—'
+                    }}</span>
+                    <span
+                      class="acct-pill"
+                      [class.live]="environmentOf(a) === 'Live'"
+                      [class.demo]="environmentOf(a) === 'Demo'"
+                      [title]="environmentTitle(a)"
+                      >{{ environmentOf(a) }}</span
+                    >
+                  </div>
+                  <div class="mini-bottom">
+                    <span class="mono mini-eq" [class.zero]="a.equity === 0">{{
+                      formatCurrency(a.equity, a.currency ?? 'USD')
+                    }}</span>
+                    <span class="mini-meta" [title]="a.brokerName ?? ''">
+                      #{{ a.id }} · {{ a.brokerName ?? '—' }} ·
+                      {{ a.lastSyncedAt ? (a.lastSyncedAt | date: 'MMM d') : '—' }}
+                    </span>
+                  </div>
+                </article>
+              }
+            </div>
+          }
+        </section>
+      }
+
+      <!-- Charts row: balance/equity bars + the account-mix panel. The mix used
+           to be two donuts with empty centres; stacked bars with counts say the
+           same thing in a third of the ink. -->
       <div class="charts-row">
         <app-chart-card
           title="Balance vs equity by account"
           subtitle="Top 10 by balance — equity diverges when positions are open"
           [options]="balanceEquityOptions()"
-          height="280px"
+          height="260px"
         />
-        @if (envSplit().nonZero >= 2) {
-          <app-chart-card
-            title="Environment split"
-            subtitle="Real-broker live, real-broker demo and paper accounts"
-            [options]="envDonutOptions()"
-            height="280px"
-          />
-        } @else {
-          <section class="board-card split-card">
-            <header class="board-head">
-              <h3>Environment split</h3>
-              <span class="muted">Real-broker live, real-broker demo and paper accounts</span>
-            </header>
-            <p class="split-summary">
-              @for (b of envSplit().buckets; track b.name) {
-                <span class="split-item" [class.dim]="b.value === 0">
-                  <strong>{{ b.value }}</strong> {{ b.name }}
-                </span>
+        <section class="panel mix-panel">
+          <header class="panel-head">
+            <h3>Account mix</h3>
+            <p>Activation status, and where each account's money lives</p>
+          </header>
+          @if (stats().total > 0) {
+            <div class="mix-body">
+              <div class="mix-headline">
+                <span class="mix-big">{{ stats().total }}</span>
+                <span class="mix-big-label">accounts</span>
+              </div>
+              @for (g of mixGroups(); track g.title) {
+                <div class="mix-group">
+                  <div class="mix-group-title">{{ g.title }}</div>
+                  <div class="mix-stack" role="img" [attr.aria-label]="g.title">
+                    @for (b of g.buckets; track b.name) {
+                      @if (b.value > 0) {
+                        <span
+                          [style.width.%]="share(b.value)"
+                          [style.background]="b.color"
+                          [title]="b.name + ': ' + b.value"
+                        ></span>
+                      }
+                    }
+                  </div>
+                  <ul class="mix-rows">
+                    @for (b of g.buckets; track b.name) {
+                      <li [class.dim]="b.value === 0">
+                        <span class="mix-dot" [style.background]="b.color"></span>
+                        <span class="mix-name">{{ b.name }}</span>
+                        <span class="mix-count">{{ b.value }}</span>
+                        <span class="mix-pct">{{ share(b.value).toFixed(0) }}%</span>
+                      </li>
+                    }
+                  </ul>
+                </div>
               }
-            </p>
-          </section>
-        }
-        @if (activeSplit().nonZero >= 2) {
-          <app-chart-card
-            title="Active vs inactive"
-            subtitle="Activation status across accounts"
-            [options]="activeDonutOptions()"
-            height="280px"
-          />
-        } @else {
-          <section class="board-card split-card">
-            <header class="board-head">
-              <h3>Active vs inactive</h3>
-              <span class="muted">Activation status across accounts</span>
-            </header>
-            <p class="split-summary">
-              @for (b of activeSplit().buckets; track b.name) {
-                <span class="split-item" [class.dim]="b.value === 0">
-                  <strong>{{ b.value }}</strong> {{ b.name }}
-                </span>
-              }
-            </p>
-          </section>
-        }
+            </div>
+          } @else {
+            <p class="panel-empty">{{ loadError() ? '—' : 'No accounts loaded yet.' }}</p>
+          }
+        </section>
       </div>
 
       <!-- 2-col row: per-broker breakdown + per-currency breakdown -->
       <div class="breakdown-row">
-        <section class="board-card">
-          <header class="board-head">
+        <section class="board">
+          <header class="section-head">
             <h3>Per-broker breakdown</h3>
-            <span class="muted">Aggregated by broker name</span>
+            <span class="muted">Aggregated by broker name · includes inactive snapshots</span>
           </header>
           @if (perBrokerBreakdown().length > 0) {
             <div class="board-scroll">
@@ -193,7 +305,7 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
                   <tr>
                     <th>Broker</th>
                     <th class="num">Accounts</th>
-                    <th class="num">Active</th>
+                    <th class="active-col">Active</th>
                     <th class="num">Balance</th>
                     <th class="num">Equity</th>
                     <th class="num">Margin used</th>
@@ -202,16 +314,25 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
                 <tbody>
                   @for (b of perBrokerBreakdown(); track b.brokerName) {
                     <tr>
-                      <td class="mono">{{ b.brokerName }}</td>
-                      <td class="num mono">{{ b.count }}</td>
-                      <td class="num mono">{{ b.active }}</td>
-                      <td class="num mono">
+                      <td class="strong">{{ b.brokerName }}</td>
+                      <td class="num">{{ b.count }}</td>
+                      <td class="active-col">
+                        <span class="active-cell">
+                          <span class="track"
+                            ><i [style.width.%]="b.count > 0 ? (b.active / b.count) * 100 : 0"></i
+                          ></span>
+                          <span class="num" [class.zero]="b.active === 0"
+                            >{{ b.active }} / {{ b.count }}</span
+                          >
+                        </span>
+                      </td>
+                      <td class="num" [class.zero]="b.balance === 0">
                         {{ formatCurrency(b.balance, primaryCurrency()) }}
                       </td>
-                      <td class="num mono">
+                      <td class="num" [class.zero]="b.equity === 0">
                         {{ formatCurrency(b.equity, primaryCurrency()) }}
                       </td>
-                      <td class="num mono">
+                      <td class="num" [class.zero]="b.marginUsed === 0">
                         {{ formatCurrency(b.marginUsed, primaryCurrency()) }}
                       </td>
                     </tr>
@@ -224,8 +345,8 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
           }
         </section>
 
-        <section class="board-card">
-          <header class="board-head">
+        <section class="board">
+          <header class="section-head">
             <h3>Per-currency breakdown</h3>
             <span class="muted">Grouped by account currency</span>
           </header>
@@ -244,13 +365,11 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
                 <tbody>
                   @for (c of perCurrencyBreakdown(); track c.currency) {
                     <tr>
-                      <td class="mono">{{ c.currency }}</td>
-                      <td class="num mono">{{ c.count }}</td>
-                      <td class="num mono">{{ formatCurrency(c.balance, c.currency) }}</td>
-                      <td class="num mono">{{ formatCurrency(c.equity, c.currency) }}</td>
-                      <td class="num mono">
-                        {{ formatCurrency(c.marginUsed, c.currency) }}
-                      </td>
+                      <td class="strong mono">{{ c.currency }}</td>
+                      <td class="num">{{ c.count }}</td>
+                      <td class="num">{{ formatCurrency(c.balance, c.currency) }}</td>
+                      <td class="num">{{ formatCurrency(c.equity, c.currency) }}</td>
+                      <td class="num">{{ formatCurrency(c.marginUsed, c.currency) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -262,72 +381,13 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
         </section>
       </div>
 
-      <!-- Account snapshot cards — quick scan of every account's health -->
-      @if (allAccounts().length > 0) {
-        <div class="account-grid">
-          @for (a of allAccounts(); track a.id) {
-            <article class="acct-card" [class.inactive]="!a.isActive">
-              <header class="acct-head">
-                <span class="acct-name">{{ a.accountName ?? '—' }}</span>
-                <div class="acct-pills">
-                  <span
-                    class="acct-pill"
-                    [class.live]="environmentOf(a) === 'Live'"
-                    [class.demo]="environmentOf(a) === 'Demo'"
-                    [title]="environmentTitle(a)"
-                  >
-                    {{ environmentOf(a).toUpperCase() }}
-                  </span>
-                  <span class="acct-pill" [class.good]="a.isActive" [class.muted]="!a.isActive">
-                    {{ a.isActive ? 'Active' : 'Inactive' }}
-                  </span>
-                </div>
-              </header>
-              <div class="acct-equity mono">
-                {{ formatCurrency(a.equity, a.currency ?? 'USD') }}
-              </div>
-              <div class="acct-rows">
-                <div class="acct-row">
-                  <span class="acct-row-label">Balance</span>
-                  <span class="acct-row-value mono">
-                    {{ formatCurrency(a.balance, a.currency ?? 'USD') }}
-                  </span>
-                </div>
-                <div class="acct-row">
-                  <span class="acct-row-label">Margin used</span>
-                  <span class="acct-row-value mono">
-                    {{ formatCurrency(a.marginUsed, a.currency ?? 'USD') }}
-                  </span>
-                </div>
-                <div class="acct-row">
-                  <span class="acct-row-label">Free margin</span>
-                  <span class="acct-row-value mono">
-                    {{ formatCurrency(a.marginAvailable, a.currency ?? 'USD') }}
-                  </span>
-                </div>
-                <div class="acct-row">
-                  <span class="acct-row-label">Margin level</span>
-                  <span class="acct-row-value mono">
-                    {{ marginLevelLabel(a) }}
-                  </span>
-                </div>
-              </div>
-              <footer class="acct-foot">
-                <span class="acct-foot-label">{{ a.brokerName ?? '—' }}</span>
-                <span class="acct-foot-time">
-                  Synced {{ a.lastSyncedAt ? (a.lastSyncedAt | date: 'MMM d, HH:mm') : '—' }}
-                </span>
-              </footer>
-            </article>
-          }
-        </div>
-      }
-
-      <app-data-table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-        (rowClick)="goToDetail($event)"
-      />
+      <div class="acct-grid-table">
+        <app-data-table
+          [columnDefs]="columns"
+          [fetchData]="fetchData"
+          (rowClick)="goToDetail($event)"
+        />
+      </div>
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
@@ -343,307 +403,7 @@ type AccountEnvironment = 'Live' | 'Demo' | 'Paper';
       />
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-      }
-
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-5);
-        border: none;
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-1);
-      }
-      .btn:active {
-        transform: scale(0.97);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover {
-        background: var(--accent-hover);
-      }
-
-      /* KPI strip */
-      .kpi-strip {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin: var(--space-3) 0 var(--space-3);
-      }
-      @media (max-width: 720px) {
-        .kpi-strip {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .kpi-label {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .kpi {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .kpi-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .kpi-value {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-value.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-base);
-      }
-      .kpi-value.good {
-        color: var(--profit);
-      }
-      .kpi-value.bad {
-        color: var(--loss);
-      }
-      .kpi-value.warn {
-        color: #c93400;
-      }
-      .kpi-value.info {
-        color: var(--accent);
-      }
-
-      /* Charts row */
-      .charts-row {
-        display: grid;
-        grid-template-columns: 1.4fr 1fr 1fr;
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-        align-items: start;
-      }
-      .split-card {
-        align-self: stretch;
-      }
-      .split-summary {
-        margin: 0;
-        padding: var(--space-5) var(--space-4);
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2) var(--space-5);
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .split-item strong {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-        margin-right: 4px;
-      }
-      .split-item.dim {
-        color: var(--text-tertiary);
-      }
-      .split-item.dim strong {
-        color: var(--text-tertiary);
-      }
-      @media (max-width: 1100px) {
-        .charts-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Breakdown row */
-      .breakdown-row {
-        display: grid;
-        grid-template-columns: 1.4fr 1fr;
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      /* Side by side only where both tables fit: at 1440px six money columns
-         in a 1.4fr / 1fr split were cut off mid-header ("MARGIN USE…"). */
-      @media (max-width: 1700px) {
-        .breakdown-row {
-          grid-template-columns: 1fr;
-        }
-      }
-      .board-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      /* Money columns must not wrap or clip; a narrow card scrolls instead. */
-      .board-scroll {
-        overflow-x: auto;
-      }
-      .board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .board-table th,
-      .board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-        white-space: nowrap;
-      }
-      .board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .board-table th.num,
-      .board-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .board-table .mono,
-      .acct-card .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .empty-msg {
-        padding: var(--space-4);
-        margin: 0;
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-
-      /* Account snapshot grid */
-      .account-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      .acct-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        transition: all 0.2s ease;
-      }
-      .acct-card:hover {
-        box-shadow: var(--shadow-md);
-        transform: translateY(-1px);
-      }
-      .acct-card.inactive {
-        opacity: 0.65;
-      }
-      .acct-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: var(--space-2);
-      }
-      .acct-name {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .acct-pills {
-        display: flex;
-        gap: 4px;
-      }
-      .acct-pill {
-        padding: 2px 6px;
-        border-radius: 3px;
-        font-size: 9px;
-        font-weight: var(--font-bold);
-        letter-spacing: 0.04em;
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
-      }
-      .acct-pill.live {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-      .acct-pill.demo {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .acct-pill.good {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .acct-pill.muted {
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .acct-equity {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        letter-spacing: var(--tracking-tight);
-      }
-      .acct-rows {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .acct-row {
-        display: flex;
-        justify-content: space-between;
-        font-size: var(--text-xs);
-      }
-      .acct-row-label {
-        color: var(--text-tertiary);
-      }
-      .acct-row-value {
-        color: var(--text-secondary);
-      }
-      .acct-foot {
-        display: flex;
-        justify-content: space-between;
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--border);
-        font-size: 10px;
-        color: var(--text-tertiary);
-      }
-    `,
-  ],
+  styleUrl: './accounts-page.component.scss',
 })
 export class AccountsPageComponent implements OnInit {
   private readonly accountsService = inject(TradingAccountsService);
@@ -666,6 +426,20 @@ export class AccountsPageComponent implements OnInit {
   allAccounts = signal<TradingAccountDto[]>([]);
   /** Set when the fleet fetch failed; tiles then show "—" instead of zeros. */
   loadError = signal<string | null>(null);
+  /** Inactive accounts render as a collapsed compact list; the header toggles it. */
+  showInactive = signal(false);
+
+  /** Active accounts get the full snapshot cards, richest first. */
+  activeAccounts = computed(() =>
+    this.allAccounts()
+      .filter((a) => a.isActive)
+      .sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0)),
+  );
+  inactiveAccounts = computed(() =>
+    this.allAccounts()
+      .filter((a) => !a.isActive)
+      .sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0)),
+  );
 
   formatCurrency(value: number, currency: string): string {
     return this.currencyPipe.transform(value, currency || 'USD') ?? '—';
@@ -758,11 +532,29 @@ export class AccountsPageComponent implements OnInit {
     };
   });
 
-  inactiveNote = computed(() => {
-    const n = this.stats().total - this.stats().active;
-    return n > 0
-      ? `Summed over the ${this.stats().active} active accounts; ${n} inactive account${n === 1 ? '' : 's'} hold a stale last snapshot and are left out`
-      : '';
+  countsCaption = computed(() => {
+    const s = this.stats();
+    return `${s.active} active · ${s.total - s.active} inactive`;
+  });
+
+  /** Caption on the money tiles: what the sum covers (and what it leaves out). */
+  activeCaption = computed(() => {
+    const s = this.stats();
+    const off = s.total - s.active;
+    return off > 0
+      ? `${s.active} active · ${off} inactive excluded`
+      : `${s.active} active accounts`;
+  });
+
+  marginPct = computed(() => {
+    const s = this.stats();
+    return s.totalEquity > 0 ? (s.marginUsed / s.totalEquity) * 100 : 0;
+  });
+
+  pnlLabel = computed(() => {
+    if (this.loadError() && this.allAccounts().length === 0) return '—';
+    const v = this.stats().unrealizedPnL;
+    return (v > 0 ? '+' : '') + this.formatCurrency(v, this.primaryCurrency());
   });
 
   envSplit = computed(() => {
@@ -824,29 +616,17 @@ export class AccountsPageComponent implements OnInit {
     };
   });
 
-  private donut(buckets: { name: string; value: number; color: string }[]): EChartsOption {
-    if (buckets.every((b) => b.value === 0)) return {};
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: buckets
-            .filter((b) => b.value > 0)
-            .map((b) => ({ value: b.value, name: b.name, itemStyle: { color: b.color } })),
-        },
-      ],
-    };
+  /** The two composition splits drawn as stacked bars in the "Account mix" panel. */
+  mixGroups = computed(() => [
+    { title: 'Status', buckets: this.activeSplit().buckets },
+    { title: 'Environment', buckets: this.envSplit().buckets },
+  ]);
+
+  /** Percentage of all accounts (0 when the fleet is empty). */
+  share(value: number): number {
+    const total = this.stats().total;
+    return total > 0 ? (value / total) * 100 : 0;
   }
-
-  envDonutOptions = computed<EChartsOption>(() => this.donut(this.envSplit().buckets));
-
-  activeDonutOptions = computed<EChartsOption>(() => this.donut(this.activeSplit().buckets));
 
   perBrokerBreakdown = computed(() => {
     const groups: Record<
@@ -894,101 +674,115 @@ export class AccountsPageComponent implements OnInit {
     this.currencyPipe.transform(params.value, params.data?.currency ?? 'USD');
 
   // Column widths are sized to the widest real value ("$937,634.28") so money
-  // never clips, and every header fits on one line at its minWidth.
+  // never clips, and every header fits on one line at its width. The minimums
+  // add up to less than the 1440px content column, so sizeColumnsToFit never
+  // has to scroll the grid: broker + environment ride in the Account cell and
+  // the status column carries only its pill.
+  private readonly moneyCol = (w: number, extra: Partial<ColDef<TradingAccountDto>> = {}) =>
+    ({
+      width: w,
+      minWidth: w,
+      type: 'rightAligned',
+      valueFormatter: this.moneyFormatter,
+      // The theme makes .ag-cell a flex row, so text-align alone never moves the value.
+      cellStyle: { fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' },
+      ...extra,
+    }) as ColDef<TradingAccountDto>;
+
   columns: ColDef<TradingAccountDto>[] = [
-    { headerName: 'ID', field: 'id', width: 70, minWidth: 70, sortable: true },
-    { headerName: 'Name', field: 'accountName', flex: 1, minWidth: 170 },
-    { headerName: 'Broker', field: 'brokerName', width: 160, minWidth: 140 },
-    { headerName: 'Currency', field: 'currency', width: 100, minWidth: 100 },
     {
-      headerName: 'Balance',
-      field: 'balance',
-      width: 140,
-      minWidth: 140,
-      type: 'rightAligned',
-      valueFormatter: this.moneyFormatter,
+      headerName: 'ID',
+      field: 'id',
+      width: 56,
+      minWidth: 56,
+      sortable: true,
+      cellStyle: { color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' },
     },
     {
-      headerName: 'Equity',
-      field: 'equity',
-      width: 140,
-      minWidth: 140,
-      type: 'rightAligned',
-      valueFormatter: this.moneyFormatter,
+      headerName: 'Account',
+      field: 'accountName',
+      flex: 1,
+      minWidth: 180,
+      // Name on the first line, environment tag + broker underneath — the old
+      // separate Broker column truncated "Exness Technologies Ltd" at 160px.
+      cellRenderer: (p: { data?: TradingAccountDto }) => {
+        const a = p.data;
+        if (!a) return '';
+        const env = this.environmentOf(a);
+        const tone =
+          env === 'Live'
+            ? 'background:rgba(255,149,0,0.14);color:#C93400'
+            : env === 'Paper'
+              ? 'background:rgba(0,113,227,0.12);color:#0040DD'
+              : 'background:rgba(142,142,147,0.14);color:#636366';
+        const name = esc(a.accountName ?? '—');
+        const broker = esc(a.brokerName ?? '—');
+        return `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;width:100%;overflow:hidden;line-height:1.3;min-width:0">
+          <span title="${name}" style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${name}</span>
+          <span style="display:flex;align-items:center;gap:5px;min-width:0;font-size:11px;color:var(--text-tertiary)">
+            <span title="${esc(this.environmentTitle(a))}" style="${tone};flex-shrink:0;padding:0 5px;border-radius:4px;font-size:9px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;line-height:14px">${env}</span>
+            <span title="${broker}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${broker}</span>
+          </span>
+        </div>`;
+      },
     },
     {
-      headerName: 'Margin used',
-      field: 'marginUsed',
-      width: 140,
-      minWidth: 140,
-      type: 'rightAligned',
-      valueFormatter: this.moneyFormatter,
+      headerName: 'Ccy',
+      headerTooltip: 'Account currency',
+      field: 'currency',
+      width: 64,
+      minWidth: 64,
+      cellStyle: { color: 'var(--text-secondary)' },
     },
-    {
-      headerName: 'Free margin',
-      field: 'marginAvailable',
-      width: 140,
-      minWidth: 140,
-      type: 'rightAligned',
-      valueFormatter: this.moneyFormatter,
-    },
+    this.moneyCol(100, { headerName: 'Balance', field: 'balance' }),
+    this.moneyCol(100, { headerName: 'Equity', field: 'equity' }),
+    this.moneyCol(112, { headerName: 'Margin used', field: 'marginUsed' }),
+    this.moneyCol(104, { headerName: 'Free margin', field: 'marginAvailable' }),
     {
       headerName: 'Status',
       field: 'isActive',
-      width: 100,
-      minWidth: 100,
+      width: 96,
+      minWidth: 96,
       cellRenderer: (params: { value: boolean }) => {
         const active = params.value;
         const bg = active ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
         const color = active ? '#248A3D' : '#636366';
+        const dot = active ? '#34C759' : '#AEAEB2';
         const label = active ? 'Active' : 'Inactive';
-        return `<span style="background:${bg};color:${color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
-      },
-    },
-    {
-      headerName: 'Environment',
-      field: 'isPaper',
-      width: 130,
-      minWidth: 130,
-      cellRenderer: (params: { data: TradingAccountDto }) => {
-        const env = params.data ? this.environmentOf(params.data) : 'Demo';
-        const style =
-          env === 'Paper'
-            ? 'background:rgba(0,113,227,0.12);color:#0040DD'
-            : env === 'Live'
-              ? 'background:rgba(255,149,0,0.12);color:#C93400'
-              : 'background:rgba(142,142,147,0.12);color:#636366';
-        const title = params.data ? this.environmentTitle(params.data) : '';
-        return `<span title="${title}" style="${style};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${env}</span>`;
+        return `<span style="display:inline-flex;align-items:center;gap:5px;background:${bg};color:${color};padding:2px 9px;border-radius:999px;font-size:11.5px;font-weight:600;line-height:18px;white-space:nowrap"><i style="width:6px;height:6px;border-radius:50%;background:${dot}"></i>${label}</span>`;
       },
     },
     {
       headerName: 'Synced',
       field: 'lastSyncedAt',
-      width: 150,
-      minWidth: 150,
+      width: 104,
+      minWidth: 104,
+      cellStyle: { color: 'var(--text-secondary)', fontSize: '12px' },
       // Same "MMM d, HH:mm" as the snapshot cards — one date format per page.
       valueFormatter: (p: { value: string | null }) =>
         p.value ? formatDate(p.value, 'MMM d, HH:mm', 'en-US') : '—',
     },
     {
-      headerName: 'Actions',
+      headerName: '',
       field: 'id',
-      width: 190,
-      minWidth: 190,
+      colId: 'actions',
+      width: 176,
+      minWidth: 176,
       sortable: false,
+      resizable: false,
+      cellStyle: { paddingLeft: '6px', paddingRight: '6px' },
       // "Activate" only makes sense on an inactive account; on active rows it
       // was a no-op button that also pushed Sync/Delete out of the cell.
       cellRenderer: (params: { data?: TradingAccountDto }) => {
-        const btn = (action: string, label: string, bg: string, color: string) =>
-          `<button data-action="${action}" style="height:26px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:${bg};color:${color}">${label}</button>`;
+        const btn = (action: string, label: string, color: string, border: string) =>
+          `<button data-action="${action}" style="height:24px;padding:0 7px;border:1px solid ${border};background:transparent;border-radius:999px;font:inherit;font-size:11px;font-weight:600;cursor:pointer;color:${color}">${label}</button>`;
         const activate = params.data?.isActive
           ? ''
-          : btn('activate', 'Activate', 'rgba(52,199,89,0.15)', '#248A3D');
-        return `<div style="display:flex;gap:4px;align-items:center;height:100%">
+          : btn('activate', 'Activate', '#248A3D', 'rgba(52,199,89,0.45)');
+        return `<div style="display:flex;gap:3px;align-items:center;justify-content:flex-end;height:100%">
           ${activate}
-          ${btn('sync', 'Sync', 'rgba(0,113,227,0.15)', '#0040DD')}
-          ${btn('delete', 'Delete', 'rgba(255,59,48,0.15)', '#D70015')}
+          ${btn('sync', 'Sync', '#0040DD', 'rgba(0,113,227,0.35)')}
+          ${btn('delete', 'Delete', '#D70015', 'rgba(255,59,48,0.35)')}
         </div>`;
       },
       onCellClicked: (params: any) => {
@@ -1118,4 +912,14 @@ export class AccountsPageComponent implements OnInit {
       },
     });
   }
+}
+
+/** AG Grid string renderers inject HTML: escape every data-derived value. */
+function esc(v: string): string {
+  return v
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }

@@ -521,59 +521,72 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
             </form>
           }
 
-          <!-- 8-card KPI strip — fleet-wide risk roll-ups -->
+          <!-- 8-tile KPI strip (4 × 2) — fleet-wide risk roll-ups. Labels stay short; the
+               qualifier ("bounded profiles only", "of N") rides in the caption. -->
           <div class="rp-kpis">
             <app-metric-card
-              label="Total profiles"
+              label="Profiles"
               [value]="rpStats().total"
               format="number"
               dotColor="#0071E3"
+              [caption]="
+                rpStats().unlimited > 0
+                  ? rpStats().unlimited + ' with unlimited limits'
+                  : 'all limits bounded'
+              "
             />
             <app-metric-card
               label="Tightest total DD"
               [value]="rpStats().minTotalDD"
               format="percent"
               dotColor="#34C759"
+              caption="strictest lifetime cap"
             />
             <app-metric-card
-              [label]="
-                rpStats().unlimited > 0
-                  ? 'Loosest bounded total DD (' + rpStats().unlimited + ' unlimited)'
-                  : 'Loosest total DD'
-              "
+              label="Loosest total DD"
               [value]="rpStats().maxTotalDD"
               format="percent"
               dotColor="#FF3B30"
+              [caption]="
+                rpStats().unlimited > 0
+                  ? 'bounded only · ' + rpStats().unlimited + ' unlimited'
+                  : 'widest lifetime cap'
+              "
             />
             <app-metric-card
               label="Avg risk / trade"
               [value]="rpStats().avgRiskPerTrade"
               format="percent"
               dotColor="#FF9500"
+              caption="bounded profiles"
             />
             <app-metric-card
               label="Avg max positions"
               [value]="rpStats().avgMaxPositions"
               format="number"
               dotColor="#AF52DE"
+              caption="bounded profiles"
             />
             <app-metric-card
               label="SL required"
               [value]="rpStats().requireSL"
               format="number"
               [dotColor]="rpStats().requireSL === rpStats().total ? '#34C759' : '#FF9500'"
+              [caption]="'of ' + rpStats().total + ' profiles'"
             />
             <app-metric-card
               label="TP required"
               [value]="rpStats().requireTP"
               format="number"
               [dotColor]="rpStats().requireTP === rpStats().total ? '#34C759' : '#FF9500'"
+              [caption]="'of ' + rpStats().total + ' profiles'"
             />
             <app-metric-card
-              label="With min RR"
+              label="Min R:R set"
               [value]="rpStats().withMinRR"
               format="number"
               dotColor="#5AC8FA"
+              [caption]="'of ' + rpStats().total + ' profiles'"
             />
           </div>
 
@@ -582,86 +595,95 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
             <app-chart-card
               title="Drawdown limits by profile"
               [subtitle]="
-                'Daily DD vs total DD — green = today\\u0027s cap, red = lifetime cap' +
-                (rpStats().unlimited > 0
-                  ? ' · ' + rpStats().unlimited + ' unlimited profile(s) omitted'
-                  : '')
+                'Daily vs total cap' +
+                (rpStats().unlimited > 0 ? ' · ' + rpStats().unlimited + ' unlimited omitted' : '')
               "
               [options]="drawdownChartOptions()"
               height="280px"
             />
             <app-chart-card
-              title="Sizing parameters by profile"
-              subtitle="Risk per trade · max symbol exposure · max lot · positions (unlimited values left blank)"
+              title="Sizing limits by profile"
+              subtitle="One panel per limit, each on its own scale · grey = unlimited"
               [options]="sizingChartOptions()"
               height="280px"
             />
           </div>
 
-          <!-- Feature / protection matrix -->
+          <!-- Protection guards — the signal-validation flags per profile. The sizing and
+               drawdown figures live in the table below; each figure is shown once. -->
           @if (profilesSample().length > 0) {
             <section class="rp-matrix">
               <header class="rp-matrix-head">
-                <h3>Protection feature matrix</h3>
-                <span class="muted">
-                  Required guards on signal validation — green ✓, gray inactive
-                </span>
+                <h3>Protection guards</h3>
+                <span class="muted">Checks a signal must pass under each profile</span>
               </header>
-              <table class="rp-matrix-table">
-                <thead>
-                  <tr>
-                    <th>Profile</th>
-                    <th class="num">Risk/Trade</th>
-                    <th class="num">Symbol exp.</th>
-                    <th>SL required</th>
-                    <th>TP required</th>
-                    <th class="num">Min SL pips</th>
-                    <th class="num">Min TP pips</th>
-                    <th class="num">Min RR</th>
-                    <th class="num">Recov. mult.</th>
-                    <th>Default</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (p of profilesSample(); track p.id) {
+              <div class="rp-matrix-scroll">
+                <table class="rp-matrix-table rp-guards">
+                  <thead>
                     <tr>
-                      <td class="mono">{{ p.name }}</td>
-                      <td class="num mono">{{ fmtPct(p.maxRiskPerTradePct) }}</td>
-                      <td class="num mono">{{ fmtPct(p.maxSymbolExposurePct) }}</td>
-                      <td>
-                        <span class="rp-pill" [class.on]="p.requireStopLoss">
-                          {{ p.requireStopLoss ? '✓' : '—' }}
-                        </span>
-                      </td>
-                      <td>
-                        <span class="rp-pill" [class.on]="p.requireTakeProfit">
-                          {{ p.requireTakeProfit ? '✓' : '—' }}
-                        </span>
-                      </td>
-                      <td class="num mono">
-                        {{ p.minStopLossDistancePips > 0 ? p.minStopLossDistancePips : '—' }}
-                      </td>
-                      <td class="num mono">
-                        {{ p.minTakeProfitDistancePips > 0 ? p.minTakeProfitDistancePips : '—' }}
-                      </td>
-                      <td class="num mono">
-                        {{ p.minRiskRewardRatio > 0 ? p.minRiskRewardRatio.toFixed(2) : '—' }}
-                      </td>
-                      <td class="num mono">{{ p.recoveryLotSizeMultiplier.toFixed(2) }}×</td>
-                      <td>
-                        @if (p.isDefault) {
-                          <span class="rp-pill default">Default</span>
-                        } @else {
-                          <span class="muted">—</span>
-                        }
-                      </td>
+                      <th>Profile</th>
+                      <th class="center">Stop loss</th>
+                      <th class="center">Take profit</th>
+                      <th class="num" title="Minimum stop-loss distance">Min SL</th>
+                      <th class="num" title="Minimum take-profit distance">Min TP</th>
+                      <th class="num">Min R:R</th>
+                      <th
+                        class="num"
+                        title="Lot-size multiplier applied while recovering from drawdown"
+                      >
+                        Recovery lots
+                      </th>
                     </tr>
-                  }
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    @for (p of profilesSample(); track p.id) {
+                      <tr>
+                        <td>
+                          <span class="rp-name" [title]="p.name ?? ''">{{ p.name }}</span>
+                          @if (p.isDefault) {
+                            <span class="rp-pill default">Default</span>
+                          }
+                        </td>
+                        <td class="center">
+                          <span class="rp-pill" [class.on]="p.requireStopLoss">
+                            {{ p.requireStopLoss ? '✓ Required' : 'Optional' }}
+                          </span>
+                        </td>
+                        <td class="center">
+                          <span class="rp-pill" [class.on]="p.requireTakeProfit">
+                            {{ p.requireTakeProfit ? '✓ Required' : 'Optional' }}
+                          </span>
+                        </td>
+                        <td class="num" [class.dim]="p.minStopLossDistancePips <= 0">
+                          {{
+                            p.minStopLossDistancePips > 0
+                              ? p.minStopLossDistancePips + ' pips'
+                              : '—'
+                          }}
+                        </td>
+                        <td class="num" [class.dim]="p.minTakeProfitDistancePips <= 0">
+                          {{
+                            p.minTakeProfitDistancePips > 0
+                              ? p.minTakeProfitDistancePips + ' pips'
+                              : '—'
+                          }}
+                        </td>
+                        <td class="num" [class.dim]="p.minRiskRewardRatio <= 0">
+                          {{ p.minRiskRewardRatio > 0 ? p.minRiskRewardRatio.toFixed(2) : '—' }}
+                        </td>
+                        <td class="num">{{ p.recoveryLotSizeMultiplier.toFixed(2) }}×</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
             </section>
           }
 
+          <header class="rp-section-head">
+            <h3>Sizing &amp; drawdown limits</h3>
+            <span class="muted">Click a profile to edit it</span>
+          </header>
           <app-data-table
             #table
             [columnDefs]="columns"
@@ -1288,10 +1310,14 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
          viewport; align-items:start keeps short tiles from stretching. */
       .rp-kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-2);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
         margin-bottom: var(--space-4);
-        align-items: start;
+      }
+      @media (max-width: 900px) {
+        .rp-kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
       .rp-orphan-summary td {
         background: rgba(255, 149, 0, 0.06);
@@ -1312,7 +1338,7 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
 
       .rp-charts {
         display: grid;
-        grid-template-columns: 1fr 1.4fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
         gap: var(--space-3);
         margin-bottom: var(--space-4);
       }
@@ -1328,6 +1354,31 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
         border-radius: var(--radius-md);
         overflow: hidden;
         margin-bottom: var(--space-4);
+        box-shadow: var(--shadow-sm);
+      }
+      .rp-matrix-scroll {
+        overflow-x: auto;
+      }
+      .rp-section-head {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-3);
+        margin: 0 0 var(--space-2);
+      }
+      .rp-section-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .rp-name {
+        display: inline-block;
+        max-width: 340px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        vertical-align: middle;
+        font-weight: var(--font-semibold);
+        margin-right: var(--space-2);
       }
       /* Form panel inside the tab — keep its own breathing room. */
       .panel {
@@ -1342,7 +1393,7 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
       }
       .rp-matrix-head h3 {
         margin: 0;
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .rp-matrix-head .muted {
@@ -1355,26 +1406,51 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
       }
       .rp-matrix-table th,
       .rp-matrix-table td {
-        padding: 8px var(--space-3);
+        padding: 9px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
         font-size: var(--text-xs);
+      }
+      .rp-matrix-table.rp-guards th {
+        white-space: nowrap;
+      }
+      .rp-matrix-table.rp-guards td {
+        font-size: var(--text-sm);
+        white-space: nowrap;
+      }
+      .rp-matrix-table th:first-child,
+      .rp-matrix-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .rp-matrix-table th:last-child,
+      .rp-matrix-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .rp-matrix-table tbody tr:hover td {
+        background: var(--bg-primary);
+      }
+      .rp-matrix-table .center {
+        text-align: center;
+      }
+      .rp-matrix-table td.dim {
+        color: var(--text-tertiary);
       }
       .rp-matrix-table tbody tr:last-child td {
         border-bottom: none;
       }
       .rp-matrix-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
         font-size: 10.5px;
         font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
       }
       .rp-matrix-table th.num,
       .rp-matrix-table td.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+        width: 1%;
       }
       .rp-matrix-table .mono {
         font-family: 'SF Mono', 'Fira Code', monospace;
@@ -1383,12 +1459,14 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        padding: 2px 8px;
+        padding: 1px 8px;
         min-width: 28px;
         border-radius: var(--radius-full);
         background: var(--bg-tertiary);
         color: var(--text-tertiary);
         font-size: 11px;
+        line-height: 18px;
+        vertical-align: middle;
         font-weight: var(--font-semibold);
       }
       .rp-pill.on {
@@ -1640,10 +1718,14 @@ export class RiskProfilesPageComponent implements OnInit {
     };
   });
 
-  /** Short y-axis label: "Conservative (Account 18)" → "Conservative (Acc…". */
-  private shortName(r: RiskProfileDto): string {
+  /**
+   * Chart category label: the full name, de-duplicated with the id when two profiles share one.
+   * The axis truncates it to its pixel width (with an ellipsis) instead of a fixed 18 characters.
+   */
+  private chartName(r: RiskProfileDto): string {
     const n = r.name ?? `#${r.id}`;
-    return n.length > 18 ? `${n.slice(0, 17)}…` : n;
+    const clash = this.profilesSample().filter((x) => (x.name ?? `#${x.id}`) === n).length > 1;
+    return clash ? `${n} #${r.id}` : n;
   }
 
   /** Profiles with real (non-sentinel) limits — the only ones a bar chart can show. */
@@ -1663,17 +1745,28 @@ export class RiskProfilesPageComponent implements OnInit {
         axisPointer: { type: 'shadow' },
         valueFormatter: (v) => `${Number(v).toFixed(1)}%`,
       },
-      legend: { top: 0, textStyle: { fontSize: 10 } },
-      grid: { top: 30, right: 40, bottom: 30, left: 130 },
+      legend: {
+        top: 0,
+        right: 0,
+        icon: 'circle',
+        itemWidth: 8,
+        itemHeight: 8,
+        textStyle: { fontSize: 10, color: '#6E6E73' },
+      },
+      grid: { top: 30, right: 24, bottom: 24, left: 168 },
       xAxis: {
         type: 'value',
-        max: 100,
-        axisLabel: { fontSize: 10, formatter: '{value}%' },
+        // Headroom for the value labels; a fixed 0-100 axis squashed 3-20% caps into slivers.
+        max: (v: { max: number }) => Math.ceil(v.max * 1.25),
+        axisLabel: { fontSize: 10, color: '#6E6E73', formatter: '{value}%' },
+        splitLine: { lineStyle: { color: 'rgba(127,127,127,0.12)' } },
       },
       yAxis: {
         type: 'category',
-        data: rows.map((r) => this.shortName(r)).reverse(),
-        axisLabel: { fontSize: 10 },
+        data: rows.map((r) => this.chartName(r)).reverse(),
+        axisTick: { show: false },
+        axisLine: { show: false },
+        axisLabel: { fontSize: 11, color: '#6E6E73', width: 156, overflow: 'truncate' },
       },
       series: [
         {
@@ -1683,6 +1776,13 @@ export class RiskProfilesPageComponent implements OnInit {
           itemStyle: { color: '#34C759', borderRadius: [0, 4, 4, 0] },
           barWidth: 9,
           barGap: '20%',
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: '{c}%',
+          },
         },
         {
           name: 'Total DD',
@@ -1690,85 +1790,160 @@ export class RiskProfilesPageComponent implements OnInit {
           data: rows.map((r) => +r.maxTotalDrawdownPct.toFixed(2)).reverse(),
           itemStyle: { color: '#FF3B30', borderRadius: [0, 4, 4, 0] },
           barWidth: 9,
+          label: {
+            show: true,
+            position: 'right',
+            fontSize: 10,
+            color: '#6E6E73',
+            formatter: '{c}%',
+          },
         },
       ],
     };
   });
 
+  /**
+   * Small multiples: one horizontal-bar panel per sizing limit, each on its own scale, sharing the
+   * profile axis. The old single chart put % bars and lot / position lines on two y-axes under
+   * diagonal truncated names. Sentinel ("unlimited") values draw as a full-width grey bar labelled
+   * "Unlimited" so one 1,000,000-position profile cannot flatten every real value to the baseline.
+   */
   sizingChartOptions = computed<EChartsOption>(() => {
     const rows = this.profilesSample();
     if (rows.length === 0) return {};
-    const names = rows.map((r) => this.shortName(r));
-    // Sentinel limits are dropped (null → gap) so one Unrestricted profile's
-    // 1,000,000 positions cannot flatten every real value to the baseline.
-    const pct = (v: number) => (this.isUnlimitedPct(v) ? null : +v.toFixed(2));
-    const count = (v: number) => (this.isUnlimitedCount(v) ? null : v);
-    return {
-      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-      legend: { top: 0, textStyle: { fontSize: 10 } },
-      grid: { top: 40, right: 56, bottom: 48, left: 56 },
-      xAxis: {
-        type: 'category',
-        data: names,
-        axisLabel: { fontSize: 10, interval: 0, rotate: 30 },
+    const names = rows.map((r) => this.chartName(r));
+    const nf = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 });
+    const panels: {
+      title: string;
+      color: string;
+      value: (r: RiskProfileDto) => number;
+      unlimited: (v: number) => boolean;
+      fmt: (v: number) => string;
+    }[] = [
+      {
+        title: 'Risk / trade',
+        color: '#FF9500',
+        value: (r) => r.maxRiskPerTradePct,
+        unlimited: (v) => this.isUnlimitedPct(v),
+        fmt: (v) => `${nf.format(v)}%`,
       },
-      yAxis: [
-        {
-          type: 'value',
-          name: '%',
-          nameTextStyle: { fontSize: 10 },
-          axisLabel: { fontSize: 10 },
-          // 15% headroom so the topmost value label ("119.65") is not clipped.
-          max: (v: { max: number }) => Math.ceil(v.max * 1.15),
+      {
+        title: 'Symbol exposure',
+        color: '#AF52DE',
+        value: (r) => r.maxSymbolExposurePct,
+        unlimited: (v) => this.isUnlimitedPct(v),
+        fmt: (v) => `${nf.format(v)}%`,
+      },
+      {
+        title: 'Max positions',
+        color: '#0071E3',
+        value: (r) => r.maxOpenPositions,
+        unlimited: (v) => this.isUnlimitedCount(v),
+        fmt: (v) => nf.format(v),
+      },
+      {
+        title: 'Max lot',
+        color: '#5AC8FA',
+        value: (r) => r.maxLotSizePerTrade,
+        unlimited: (v) => this.isUnlimitedCount(v),
+        fmt: (v) => nf.format(v),
+      },
+    ];
+    // Percent layout: a label column, then four equal panels with a gutter between them.
+    const labelPct = 22;
+    const gapPct = 2.5;
+    const panelPct = (100 - labelPct - gapPct * 3 - 1) / 4;
+    const leftOf = (i: number) => labelPct + i * (panelPct + gapPct);
+    const text = '#6E6E73';
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: any) => {
+          const panel = panels[p.seriesIndex];
+          const raw = panel.value(rows[p.dataIndex]);
+          const shown = panel.unlimited(raw) ? 'Unlimited' : panel.fmt(raw);
+          return `<b>${rpEsc(rows[p.dataIndex].name ?? '')}</b><br/>${p.marker} ${panel.title}: ${shown}`;
         },
-        {
-          type: 'value',
-          name: 'count',
-          position: 'right',
-          nameTextStyle: { fontSize: 10 },
-          axisLabel: { fontSize: 10 },
+      },
+      title: panels.map((panel, i) => ({
+        text: panel.title,
+        left: `${leftOf(i)}%`,
+        top: 0,
+        textStyle: { fontSize: 11, fontWeight: 600, color: text },
+      })),
+      grid: panels.map((_, i) => ({
+        left: `${leftOf(i)}%`,
+        width: `${panelPct}%`,
+        top: 26,
+        bottom: 6,
+        containLabel: false,
+      })),
+      xAxis: panels.map((panel, i) => {
+        const bounded = rows.map(panel.value).filter((v) => !panel.unlimited(v));
+        const max = bounded.length > 0 ? Math.max(...bounded) : 1;
+        return {
+          type: 'value' as const,
+          gridIndex: i,
+          // Headroom for the value label printed after the longest bar.
+          max: max > 0 ? max * 1.7 : 1,
+          axisLabel: { show: false },
+          axisTick: { show: false },
+          axisLine: { show: false },
           splitLine: { show: false },
-          max: (v: { max: number }) => Math.ceil(v.max * 1.15),
-        },
-      ],
-      series: [
-        {
-          name: 'Risk / trade %',
-          type: 'bar',
-          data: rows.map((r) => pct(r.maxRiskPerTradePct)),
-          itemStyle: { color: '#FF9500', borderRadius: [4, 4, 0, 0] },
+        };
+      }),
+      yAxis: panels.map((_, i) => ({
+        type: 'category' as const,
+        gridIndex: i,
+        data: names,
+        inverse: true,
+        axisTick: { show: false },
+        axisLine: { show: i === 0 ? false : true, lineStyle: { color: 'rgba(127,127,127,0.2)' } },
+        axisLabel:
+          i === 0
+            ? { fontSize: 11, color: text, width: 150, overflow: 'truncate' as const }
+            : { show: false },
+      })),
+      series: panels.map((panel, i) => {
+        const bounded = rows.map(panel.value).filter((v) => !panel.unlimited(v));
+        const max = bounded.length > 0 ? Math.max(...bounded) : 1;
+        return {
+          name: panel.title,
+          type: 'bar' as const,
+          xAxisIndex: i,
+          yAxisIndex: i,
           barWidth: 12,
-        },
-        {
-          name: 'Max symbol exp. %',
-          type: 'bar',
-          data: rows.map((r) => pct(r.maxSymbolExposurePct)),
-          itemStyle: { color: '#AF52DE', borderRadius: [4, 4, 0, 0] },
-          barWidth: 12,
-        },
-        {
-          name: 'Max positions',
-          type: 'line',
-          yAxisIndex: 1,
-          data: rows.map((r) => count(r.maxOpenPositions)),
-          connectNulls: false,
-          symbol: 'circle',
-          symbolSize: 8,
-          lineStyle: { color: '#0071E3', width: 2 },
-          itemStyle: { color: '#0071E3' },
-        },
-        {
-          name: 'Max lot',
-          type: 'line',
-          yAxisIndex: 1,
-          data: rows.map((r) => count(r.maxLotSizePerTrade)),
-          connectNulls: false,
-          symbol: 'rect',
-          symbolSize: 8,
-          lineStyle: { color: '#5AC8FA', width: 2, type: 'dashed' },
-          itemStyle: { color: '#5AC8FA' },
-        },
-      ],
+          // A 40-lot cap beside a 10,000-lot one still reads as a bar, not an empty row.
+          barMinHeight: 3,
+          data: rows.map((r) => {
+            const v = panel.value(r);
+            if (panel.unlimited(v)) {
+              return {
+                value: max * 1.7,
+                itemStyle: { color: 'rgba(142,142,147,0.16)', borderRadius: [0, 4, 4, 0] },
+                label: {
+                  show: true,
+                  position: 'insideLeft' as const,
+                  formatter: 'Unlimited',
+                  fontSize: 10,
+                  color: text,
+                },
+              };
+            }
+            return {
+              value: v,
+              itemStyle: { color: panel.color, borderRadius: [0, 4, 4, 0] },
+              label: {
+                show: true,
+                position: 'right' as const,
+                formatter: () => panel.fmt(v),
+                fontSize: 10,
+                color: text,
+              },
+            };
+          }),
+        };
+      }),
     };
   });
 
@@ -2388,118 +2563,83 @@ export class RiskProfilesPageComponent implements OnInit {
 
   /**
    * Every column has to fit the card at 1440px. The shared table sizes columns to fit but never
-   * below their minWidth (88 by default), and 14 columns at 88 + a 240px name ran ~270px past the
-   * card: Min RR and Default sat off to the right behind a scrollbar-less grid, names were still
-   * cut mid-word and "Risk/Trd" (no space to break at) wrapped as "RISK/TR D". Long names now wrap
-   * onto a second line, the flag columns are as narrow as their content, and the header breaks
-   * between words.
+   * below their minWidth (88 by default) and wraps headers by default. The table now carries the
+   * sizing + drawdown limits only — SL / TP / Min R:R / recovery multiplier live in the
+   * Protection guards board above — so nine columns fit on one header line (wrapping is turned
+   * off per column). The name column is wide enough for the current profile names; a longer one
+   * is clipped with the full name as a tooltip.
    */
   readonly columns: ColDef<RiskProfileDto>[] = [
     {
       headerName: 'Name',
       field: 'name',
       flex: 1,
-      minWidth: 170,
+      minWidth: 325,
       tooltipField: 'name',
-      wrapText: true,
-      autoHeight: true,
-      cellStyle: { lineHeight: '1.35', paddingTop: '8px', paddingBottom: '8px' },
+      wrapHeaderText: false,
+      cellRenderer: (p: { value: string | null; data?: RiskProfileDto }) => {
+        const name = rpEsc(p.value ?? (p.data ? `#${p.data.id}` : ''));
+        const badge = p.data?.isDefault
+          ? ` <span style="background:rgba(0,113,227,0.12);color:var(--tone-blue);padding:0 8px;margin-left:6px;border-radius:999px;font-size:11px;font-weight:600;line-height:20px">Default</span>`
+          : '';
+        // One block-level span that may shrink inside the flex cell (min-width:0), so a long name ends in "…".
+        return (
+          `<span style="display:block;flex:1 1 auto;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
+          `<span style="font-weight:600">${name}</span>${badge}</span>`
+        );
+      },
     },
     {
-      headerName: 'Max Lot',
+      headerName: 'Max lot',
       field: 'maxLotSizePerTrade',
       width: 90,
-      minWidth: 84,
+      wrapHeaderText: false,
       valueFormatter: (p) => (p.value as number)?.toFixed(2) ?? '-',
     },
     {
-      headerName: 'Max Pos',
+      headerName: 'Positions',
+      headerTooltip: 'Max open positions',
       field: 'maxOpenPositions',
-      width: 90,
-      minWidth: 84,
+      width: 100,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtCount(p.value as number | null),
     },
     {
-      headerName: 'Daily Trd',
+      headerName: 'Trades / day',
+      headerTooltip: 'Max trades per day',
       field: 'maxDailyTrades',
-      width: 90,
-      minWidth: 84,
+      width: 122,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtCount(p.value as number | null),
     },
     {
       headerName: 'Risk / trade',
       field: 'maxRiskPerTradePct',
-      width: 90,
-      minWidth: 84,
+      width: 118,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Daily DD',
       field: 'maxDailyDrawdownPct',
-      width: 90,
-      minWidth: 84,
+      width: 100,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
       headerName: 'Total DD',
       field: 'maxTotalDrawdownPct',
-      width: 90,
-      minWidth: 84,
+      width: 100,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
     },
     {
-      headerName: 'Sym exp.',
+      headerName: 'Per symbol',
+      headerTooltip: 'Max exposure to any one symbol',
       field: 'maxSymbolExposurePct',
-      width: 90,
-      minWidth: 84,
+      width: 112,
+      wrapHeaderText: false,
       valueFormatter: (p) => this.fmtPct(p.value as number | null),
-    },
-    {
-      headerName: 'Recov. mult.',
-      field: 'recoveryLotSizeMultiplier',
-      width: 80,
-      minWidth: 76,
-      valueFormatter: (p) => (p.value != null ? `${(p.value as number).toFixed(2)}×` : '-'),
-    },
-    {
-      headerName: 'SL',
-      field: 'requireStopLoss',
-      width: 56,
-      minWidth: 52,
-      headerTooltip: 'Stop loss required',
-      cellRenderer: (p: { value: unknown }) =>
-        p.value
-          ? `<span style="color:var(--tone-green);font-weight:700">✓</span>`
-          : `<span style="color:#8E8E93">—</span>`,
-    },
-    {
-      headerName: 'TP',
-      field: 'requireTakeProfit',
-      width: 56,
-      minWidth: 52,
-      headerTooltip: 'Take profit required',
-      cellRenderer: (p: { value: unknown }) =>
-        p.value
-          ? `<span style="color:var(--tone-green);font-weight:700">✓</span>`
-          : `<span style="color:#8E8E93">—</span>`,
-    },
-    {
-      headerName: 'Min RR',
-      field: 'minRiskRewardRatio',
-      width: 76,
-      minWidth: 72,
-      valueFormatter: (p) =>
-        p.value != null && (p.value as number) > 0 ? (p.value as number).toFixed(2) : '—',
-    },
-    {
-      headerName: 'Default',
-      field: 'isDefault',
-      width: 90,
-      minWidth: 88,
-      cellRenderer: (p: { value: unknown }) =>
-        p.value
-          ? `<span style="background:rgba(0,113,227,0.12);color:var(--tone-blue);padding:2px 8px;border-radius:999px;font-size:12px;font-weight:600">Default</span>`
-          : '',
     },
   ];
 
@@ -2695,6 +2835,14 @@ interface GlobalOptionRow extends GlobalOptionSpec {
   /** Whether the key already exists in EngineConfig (vs showing the default). */
   exists: boolean;
   saving: boolean;
+}
+
+/** Cell-renderer / tooltip strings go straight into innerHTML; profile names must be escaped. */
+function rpEsc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
 }
 
 function emptyPager() {

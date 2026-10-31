@@ -84,24 +84,30 @@ import {
           [value]="dataUnavailable() ? null : brokers().length"
           format="number"
           dotColor="#0071E3"
+          [caption]="accounts().length + ' trading accounts'"
         />
         <app-metric-card
           label="Active accounts"
           [value]="dataUnavailable() ? null : activeAccountsCount()"
           format="number"
           [dotColor]="inactiveAccountsCount() > 0 ? '#FF9500' : '#34C759'"
+          [caption]="inactiveAccountsCount() + ' inactive'"
         />
         <app-metric-card
           label="Active EAs"
           [value]="dataUnavailable() ? null : activeEaCount()"
           format="number"
           [dotColor]="anyEaDisconnected() ? '#FF3B30' : '#34C759'"
+          [caption]="
+            anyEaDisconnected() ? disconnectedEaCount() + ' disconnected' : 'all connected'
+          "
         />
         <app-metric-card
           label="Total balance"
           [value]="dataUnavailable() ? null : totalBalance()"
           format="currency"
           dotColor="#0071E3"
+          caption="active accounts only"
         />
         <app-metric-card
           label="Total equity"
@@ -115,6 +121,7 @@ import {
           [value]="dataUnavailable() ? null : totalMarginUsed()"
           format="currency"
           [dotColor]="overallMarginUtilizationPct() > 80 ? '#FF3B30' : '#FF9500'"
+          [caption]="overallMarginUtilizationPct().toFixed(1) + '% of equity'"
         />
       </div>
 
@@ -131,7 +138,8 @@ import {
         <section class="brokers-section">
           <header class="section-head">
             <h3>Brokers</h3>
-            <span class="muted">
+            <span class="count-chip">{{ brokers().length }}</span>
+            <span class="muted head-note">
               grouped by broker server family · money totals cover active accounts only ·
               {{ inactiveAccountsCount() }} inactive account(s) · {{ disconnectedEaCount() }}
               disconnected EA(s) · refreshes every 15s
@@ -140,7 +148,11 @@ import {
           @if (brokers().length > 0) {
             <div class="broker-grid">
               @for (b of brokers(); track b.key) {
-                <article class="broker-card">
+                <article
+                  class="broker-card"
+                  [class.down]="b.disconnectedEas > 0"
+                  [class.live]="b.activeEas > 0 && b.disconnectedEas === 0"
+                >
                   <header class="broker-head">
                     <div class="broker-title">
                       <a class="broker-id" [routerLink]="['/brokers', b.slug]">{{ b.key }} ›</a>
@@ -290,7 +302,8 @@ import {
         <section class="brokers-section">
           <header class="section-head">
             <h3>Trading accounts</h3>
-            <span class="muted">{{ accounts().length }} record(s) · sorted by broker, then ID</span>
+            <span class="count-chip">{{ accounts().length }}</span>
+            <span class="muted head-note">sorted by broker, then ID</span>
           </header>
           @if (accounts().length > 0) {
             <div class="table-scroll">
@@ -305,8 +318,8 @@ import {
                     <th class="num">Balance</th>
                     <th class="num">Equity</th>
                     <th class="num">Margin used</th>
-                    <th class="num">Margin avail.</th>
-                    <th class="num">Util %</th>
+                    <th class="num" title="Free margin">Margin free</th>
+                    <th class="num" title="Margin used as % of equity">Util</th>
                     <th>Status</th>
                     <th class="num">Last sync</th>
                   </tr>
@@ -314,15 +327,17 @@ import {
                 <tbody>
                   @for (a of sortedAccounts(); track a.id) {
                     <tr>
-                      <td class="mono">{{ a.id }}</td>
+                      <td class="mono id-cell">{{ a.id }}</td>
                       <td>
-                        {{ brokerKeyOf(a) }}
+                        <span class="cell-main">{{ brokerKeyOf(a) }}</span>
                         @if (a.brokerServer) {
-                          <span class="muted nowrap">· {{ a.brokerServer }}</span>
+                          <span class="cell-sub">{{ a.brokerServer }}</span>
                         }
                       </td>
                       <td class="mono">{{ a.accountId ?? '—' }}</td>
-                      <td>{{ a.accountName ?? '—' }}</td>
+                      <td class="name-cell" [title]="a.accountName ?? ''">
+                        {{ a.accountName ?? '—' }}
+                      </td>
                       <td>
                         <span class="mode-pill" [attr.data-mode]="accountMode(a).cls">
                           {{ accountMode(a).label }}
@@ -376,9 +391,8 @@ import {
         <section class="brokers-section">
           <header class="section-head">
             <h3>EA instances</h3>
-            <span class="muted"
-              >{{ eaInstances().length }} record(s) · sorted by account, then instance</span
-            >
+            <span class="count-chip">{{ eaInstances().length }}</span>
+            <span class="muted head-note">sorted by account, then instance</span>
           </header>
           @if (eaInstances().length > 0) {
             <div class="table-scroll">
@@ -391,13 +405,15 @@ import {
                     <th>Owned symbols</th>
                     <th>Registered</th>
                     <th>Last heartbeat</th>
-                    <th class="num">Heartbeat age</th>
+                    <th class="num" title="Heartbeat age">HB age</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (ea of sortedEaInstances(); track ea.instanceId) {
                     <tr>
-                      <td class="mono ea-instance" [title]="ea.instanceId">{{ ea.instanceId }}</td>
+                      <td class="mono ea-instance" [title]="ea.instanceId">
+                        {{ shortInstanceId(ea.instanceId) }}
+                      </td>
                       <td class="mono">{{ ea.tradingAccountId }}</td>
                       <td>
                         <span
@@ -451,408 +467,7 @@ import {
       }
     </div>
   `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-      .page {
-        padding: var(--space-2) 0;
-      }
-
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-5);
-        border: none;
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-1);
-        text-decoration: none;
-      }
-      .inactive-note {
-        display: block;
-        font-size: 11px;
-      }
-      .btn:active {
-        transform: scale(0.97);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      .btn-secondary {
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-      }
-
-      /* ── KPI strip ────────────────────────────────────────────── */
-      /* minmax(0, 1fr) — a bare 1fr track can't shrink below its content's
-         min-width, which is what pushed the eight-tile row 235px past the
-         content column. Six equal tracks that may shrink to zero never do. */
-      .kpi-strip {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin-top: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1200px) {
-        .kpi-strip {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .kpi-strip {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* ── Sections ─────────────────────────────────────────────── */
-      .brokers-section {
-        margin-top: var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .section-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .section-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      code {
-        font-size: 11px;
-        background: var(--bg-tertiary);
-        padding: 1px 4px;
-        border-radius: 3px;
-      }
-
-      /* ── Broker cards grid ────────────────────────────────────── */
-      .broker-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-      }
-      .broker-card {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .broker-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .broker-title {
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .broker-id {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-sm);
-        font-weight: var(--font-bold);
-        color: var(--text-primary);
-        text-decoration: none;
-      }
-      .broker-id:hover {
-        color: var(--accent);
-      }
-      .broker-server {
-        font-size: 10.5px;
-        color: var(--text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .broker-tags {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: flex-end;
-        gap: 4px;
-        flex-shrink: 0;
-      }
-      .tag {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        padding: 2px 8px;
-        border-radius: 999px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-      }
-      /* Account-type palette shared by the card tags and the table pills:
-         real money = green, demo = blue, contest = purple, paper = grey. */
-      .tag.real,
-      .mode-pill[data-mode='real'] {
-        background: rgba(52, 199, 89, 0.14);
-        color: #15803d;
-      }
-      .tag.demo,
-      .mode-pill[data-mode='demo'] {
-        background: rgba(0, 113, 227, 0.14);
-        color: var(--tone-blue);
-      }
-      .tag.contest,
-      .mode-pill[data-mode='contest'] {
-        background: rgba(175, 82, 222, 0.14);
-        color: #6f2dbd;
-      }
-      .tag.paper,
-      .mode-pill[data-mode='paper'] {
-        background: rgba(142, 142, 147, 0.16);
-        color: var(--text-secondary);
-      }
-
-      .broker-stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px var(--space-3);
-        margin: 0;
-      }
-      .broker-stats > div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-      }
-      .broker-stats dt {
-        font-size: 9.5px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .broker-stats dd {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .util-bar {
-        position: relative;
-        height: 6px;
-        background: rgba(142, 142, 147, 0.18);
-        border-radius: 3px;
-        overflow: hidden;
-        margin-bottom: 2px;
-      }
-      .util-fill {
-        position: absolute;
-        top: 0;
-        bottom: 0;
-        left: 0;
-        background: #0071e3;
-        border-radius: 3px;
-      }
-      .util-fill.med {
-        background: #ff9500;
-      }
-      .util-fill.high {
-        background: #ff3b30;
-      }
-
-      .broker-fleet {
-        border-top: 1px dashed var(--border);
-        padding-top: var(--space-2);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .fleet-title,
-      .symbols-title {
-        font-size: 9.5px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-semibold);
-      }
-      .fleet-pills {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-      .pill {
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: rgba(142, 142, 147, 0.14);
-        color: var(--text-secondary);
-      }
-      .pill.active {
-        background: rgba(52, 199, 89, 0.14);
-        color: #15803d;
-      }
-      .pill.active.empty {
-        background: rgba(142, 142, 147, 0.14);
-        color: var(--text-secondary);
-      }
-      .pill.idle {
-        background: rgba(255, 149, 0, 0.14);
-        color: var(--tone-amber);
-      }
-      .pill.down {
-        background: rgba(255, 59, 48, 0.14);
-        color: #b91c1c;
-      }
-
-      .broker-symbols {
-        border-top: 1px dashed var(--border);
-        padding-top: var(--space-2);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .symbol-chips {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-      .symbol-chip {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: 10.5px;
-        font-weight: var(--font-medium);
-        padding: 1px 6px;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
-        color: var(--text-secondary);
-      }
-      .symbol-chip.small {
-        font-size: 10px;
-        padding: 0 5px;
-      }
-
-      /* ── Tables ───────────────────────────────────────────────── */
-      /* Twelve columns don't fit every viewport; scroll the table inside
-         its card rather than letting it widen the page. */
-      .table-scroll {
-        overflow-x: auto;
-      }
-      .grid-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .nowrap {
-        white-space: nowrap;
-      }
-      .grid-table th,
-      .grid-table td {
-        padding: var(--space-2) var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .grid-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .grid-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .grid-table th.num,
-      .grid-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      /* Instance ids are "LASC-MULTI-10-9480-1342…4849480": the numeric
-         suffix is the part that tells instances apart, so a mid-string
-         ellipsis hid exactly the distinguishing bit. Wrap at the hyphens
-         instead and keep the whole id readable. */
-      .grid-table .ea-instance {
-        max-width: 260px;
-        font-size: 11px;
-        overflow-wrap: anywhere;
-        line-height: 1.35;
-      }
-
-      .mode-pill,
-      .status-pill {
-        display: inline-block;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        padding: 2px 10px;
-        border-radius: 999px;
-        background: rgba(142, 142, 147, 0.14);
-        color: var(--text-secondary);
-        white-space: nowrap;
-      }
-      .status-pill.active {
-        background: rgba(52, 199, 89, 0.14);
-        color: #15803d;
-      }
-      .status-pill.idle {
-        background: rgba(255, 149, 0, 0.14);
-        color: var(--tone-amber);
-      }
-      .status-pill.down,
-      .status-pill.inactive {
-        background: rgba(255, 59, 48, 0.14);
-        color: #b91c1c;
-      }
-
-      /* ── Shared utility ───────────────────────────────────────── */
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-variant-numeric: tabular-nums;
-      }
-      .profit {
-        color: var(--profit, #15803d);
-      }
-      .loss {
-        color: var(--loss, #b91c1c);
-      }
-      .empty-state {
-        padding: var(--space-6) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: var(--space-1);
-        text-align: center;
-      }
-      .empty-hint {
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        max-width: 480px;
-        line-height: 1.5;
-      }
-    `,
-  ],
+  styleUrl: './brokers-page.component.scss',
 })
 export class BrokersPageComponent implements OnInit, OnDestroy {
   /** Expose Math for percentage clamps in the template. */
@@ -1025,5 +640,18 @@ export class BrokersPageComponent implements OnInit, OnDestroy {
 
   formatAge(sec: number): string {
     return formatAge(sec);
+  }
+
+  /**
+   * One-line instance id. Ids look like "LASC-MULTI-6210-134253940642976210-A107699364": the
+   * 18-digit terminal hash in the middle is the only part too long to show, so it keeps its last
+   * six digits; the prefix, symbol and the account suffix that tell instances apart stay whole.
+   * The full id is on the cell's tooltip.
+   */
+  shortInstanceId(id: string): string {
+    return id
+      .split('-')
+      .map((part) => (/^\d{12,}$/.test(part) ? '…' + part.slice(-6) : part))
+      .join('-');
   }
 }

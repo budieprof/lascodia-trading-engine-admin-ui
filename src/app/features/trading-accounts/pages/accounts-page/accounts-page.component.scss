@@ -1,0 +1,534 @@
+// Trading Accounts list — board / panel family look (see drift-report + venue pages).
+
+.page {
+  padding: var(--space-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-variant-numeric: tabular-nums;
+}
+.muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+// ── KPI strip (shared metric-card tiles) ──
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin-top: var(--space-1);
+}
+@media (max-width: 720px) {
+  .kpi-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+// ── Section / board shells ──
+.acct-section,
+.board,
+.panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+
+  h3 {
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+  }
+}
+.count-chip {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+}
+
+// ── Active account cards ──
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.acct-card {
+  --env: #8e8e93;
+  position: relative;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  transition:
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--env);
+    opacity: 0.85;
+  }
+  &[data-env='Live'] {
+    --env: #ff9500;
+  }
+  &[data-env='Paper'] {
+    --env: #0071e3;
+  }
+  &:hover {
+    box-shadow: var(--shadow-md);
+  }
+}
+.acct-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.acct-name {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.acct-pills {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.acct-pill {
+  flex-shrink: 0;
+  padding: 0 6px;
+  line-height: 16px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: var(--font-bold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(0, 113, 227, 0.12);
+  color: #0040dd;
+
+  &.live {
+    background: rgba(255, 149, 0, 0.14);
+    color: #c93400;
+  }
+  &.demo {
+    background: rgba(142, 142, 147, 0.14);
+    color: var(--text-secondary);
+  }
+}
+.acct-equity {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  white-space: nowrap;
+}
+.acct-equity-label {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  font-weight: var(--font-medium);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+}
+.acct-rows {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.acct-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+
+  dt {
+    color: var(--text-tertiary);
+  }
+  dd {
+    margin: 0;
+    color: var(--text-secondary);
+  }
+}
+// Broker and sync time stack: side by side they truncated "Exness Technologies Ltd".
+.acct-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  min-width: 0;
+}
+.acct-foot-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.acct-foot-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #aeaeb2;
+
+  &.on {
+    background: #34c759;
+  }
+}
+
+// ── Inactive accounts: collapsed compact list ──
+.acct-section.quiet {
+  background: var(--bg-primary);
+  box-shadow: none;
+
+  .section-head {
+    border-bottom: none;
+  }
+  .mini-grid {
+    border-top: 1px solid var(--border);
+  }
+}
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+
+  h3 {
+    color: var(--text-secondary);
+  }
+  &:hover h3 {
+    color: var(--text-primary);
+  }
+}
+.chev {
+  display: inline-block;
+  width: 12px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  transition: transform 0.15s ease;
+
+  &.open {
+    transform: rotate(90deg);
+  }
+}
+.mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+}
+.mini-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.mini-top,
+.mini-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.mini-name {
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mini-eq {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+
+  &.zero {
+    color: var(--text-tertiary);
+  }
+}
+.mini-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+// ── Charts row: bar chart + account-mix panel ──
+.charts-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: stretch;
+}
+@media (max-width: 1100px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+}
+.panel {
+  padding: var(--card-padding);
+}
+.panel-head {
+  margin-bottom: var(--space-4);
+
+  h3 {
+    margin: 0;
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+  }
+  p {
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+  }
+}
+.panel-empty {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-sm);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+.mix-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.mix-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.mix-big {
+  font-size: 30px;
+  font-weight: var(--font-semibold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.mix-big-label {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+.mix-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.mix-group-title {
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.mix-stack {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--bg-tertiary);
+
+  span {
+    display: block;
+    min-width: 3px;
+  }
+}
+.mix-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-4);
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-sm);
+  }
+  li.dim {
+    opacity: 0.45;
+  }
+}
+.mix-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.mix-name {
+  color: var(--text-secondary);
+}
+.mix-count {
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+}
+.mix-pct {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+// ── Breakdown boards ──
+.breakdown-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+// Side by side only where both tables fit: at 1440px six money columns in a
+// split row were cut off mid-header ("MARGIN USE…").
+@media (max-width: 1700px) {
+  .breakdown-row {
+    grid-template-columns: 1fr;
+  }
+}
+.board-scroll {
+  overflow-x: auto;
+}
+.board-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+
+  th,
+  td {
+    padding: 9px var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  th:first-child,
+  td:first-child {
+    padding-left: var(--space-4);
+  }
+  th:last-child,
+  td:last-child {
+    padding-right: var(--space-4);
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  tbody tr:hover {
+    background: var(--bg-primary);
+  }
+  th {
+    background: var(--bg-primary);
+    color: var(--text-tertiary);
+    font-size: 10.5px;
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .strong {
+    font-weight: var(--font-semibold);
+  }
+  .zero {
+    color: var(--text-tertiary);
+  }
+}
+.active-col {
+  width: 150px;
+}
+.active-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.track {
+  display: block;
+  width: 70px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+
+  i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: #34c759;
+  }
+}
+.empty-msg {
+  padding: var(--space-4);
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+// ── Main grid: tighter cell padding so every column fits the 1440px column ──
+.acct-grid-table ::ng-deep .ag-theme-alpine {
+  --ag-cell-horizontal-padding: 12px;
+}

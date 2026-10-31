@@ -179,18 +179,21 @@ import {
           [value]="sampleError() ? null : cpStats().total"
           format="number"
           dotColor="#0071E3"
+          [caption]="nonPairsCaption()"
         />
         <app-metric-card
           label="Active"
           [value]="sampleError() ? null : cpStats().active"
           format="number"
-          dotColor="#34C759"
+          [dotColor]="cpStats().active > 0 ? '#34C759' : undefined"
+          caption="tradeable now"
         />
         <app-metric-card
           label="Inactive"
           [value]="sampleError() ? null : cpStats().inactive"
           format="number"
-          [dotColor]="cpStats().inactive > 0 ? '#FF9500' : '#34C759'"
+          [dotColor]="cpStats().inactive > 0 ? '#FF9500' : undefined"
+          [caption]="cpStats().inactive > 0 ? 'switched off' : 'none switched off'"
         />
         <app-metric-card
           label="Base currencies"
@@ -210,6 +213,7 @@ import {
           [value]="sampleError() ? null : cpStats().usdPairs"
           format="number"
           dotColor="#FF2D55"
+          [caption]="'of ' + (cpStats().total - cpStats().nonPairs) + ' FX pairs'"
         />
       </div>
 
@@ -258,46 +262,73 @@ import {
           <section class="cp-matrix">
             <header class="cp-matrix-head">
               <h3>Currency exposure matrix</h3>
-              <span class="muted">Sorted by total appearances</span>
+              <span class="count-chip">{{ exposureRows().length }}</span>
+              <span class="muted head-note">
+                <i class="key base"></i> as base <i class="key quote"></i> as quote · sorted by
+                total appearances
+              </span>
             </header>
-            <table class="cp-matrix-table">
-              <thead>
-                <tr>
-                  <th>Currency</th>
-                  <th class="num">As base</th>
-                  <th class="num">As quote</th>
-                  <th class="num">Total pairs</th>
-                  <th class="num">Active pairs</th>
-                  <th>Pairs</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of exposureRows(); track row.currency) {
+            <div class="board-scroll">
+              <table class="cp-matrix-table">
+                <thead>
                   <tr>
-                    <td class="mono">{{ row.currency }}</td>
-                    <td class="num mono">{{ row.asBase }}</td>
-                    <td class="num mono">{{ row.asQuote }}</td>
-                    <td class="num mono">{{ row.total }}</td>
-                    <td class="num mono">{{ row.activeCount }}</td>
-                    <td class="cp-pair-list">
-                      @for (sym of row.pairs; track sym) {
-                        <span class="cp-pill">{{ sym }}</span>
-                      }
-                    </td>
+                    <th>Currency</th>
+                    <th class="num">As base</th>
+                    <th class="num">As quote</th>
+                    <th class="mix-col">Split</th>
+                    <th class="num">Total</th>
+                    <th class="num">Active</th>
+                    <th>Pairs</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (row of exposureRows(); track row.currency) {
+                    <tr>
+                      <td class="mono strong">{{ row.currency }}</td>
+                      <td class="num" [class.zero]="row.asBase === 0">{{ row.asBase }}</td>
+                      <td class="num" [class.zero]="row.asQuote === 0">{{ row.asQuote }}</td>
+                      <td class="mix-col">
+                        <span
+                          class="mix-bar"
+                          [style.width.px]="mixWidth(row.total)"
+                          [title]="row.asBase + ' as base · ' + row.asQuote + ' as quote'"
+                        >
+                          @if (row.asBase > 0) {
+                            <i class="base" [style.flex]="row.asBase"></i>
+                          }
+                          @if (row.asQuote > 0) {
+                            <i class="quote" [style.flex]="row.asQuote"></i>
+                          }
+                        </span>
+                      </td>
+                      <td class="num strong">{{ row.total }}</td>
+                      <td class="num" [class.warn]="row.activeCount < row.total">
+                        {{ row.activeCount }}
+                      </td>
+                      <td>
+                        <div class="cp-pair-list">
+                          @for (sym of row.pairs; track sym) {
+                            <span class="cp-pill">{{ sym }}</span>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           </section>
         }
       }
 
-      <app-data-table
-        #table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-        (rowClick)="openEdit($event)"
-      />
+      <div class="cp-grid">
+        <app-data-table
+          #table
+          [columnDefs]="columns"
+          [fetchData]="fetchData"
+          (rowClick)="openEdit($event)"
+        />
+      </div>
 
       <app-confirm-dialog
         [open]="showDeleteDialog()"
@@ -315,242 +346,7 @@ import {
       />
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        border: none;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      .btn-secondary {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .btn-destructive {
-        background: var(--loss);
-        color: white;
-        margin-right: auto;
-      }
-      .panel {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .panel-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .panel-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .close {
-        background: transparent;
-        border: none;
-        font-size: 20px;
-        color: var(--text-secondary);
-        cursor: pointer;
-        width: 32px;
-        height: 32px;
-        border-radius: var(--radius-full);
-      }
-      .close:hover {
-        background: var(--bg-tertiary);
-      }
-      .panel-body {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-4);
-        padding: var(--space-5);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-      }
-      .field.checkbox {
-        flex-direction: row;
-        align-items: center;
-      }
-      .field.checkbox label {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .field label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-1);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-      }
-      .input {
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .actions {
-        grid-column: 1 / -1;
-        display: flex;
-        gap: var(--space-2);
-        justify-content: flex-end;
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--border);
-        margin-top: var(--space-2);
-      }
-      .spin {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: white;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-      }
-
-      /* Currency-pairs density additions */
-      /* minmax(0, 1fr): a bare 1fr track refuses to shrink below its content,
-         which is how a tile row escapes the content column. */
-      .cp-kpis {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-2);
-        align-items: start;
-      }
-      @media (max-width: 1200px) {
-        .cp-kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .cp-kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      .cp-charts {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .cp-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .cp-matrix {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .cp-matrix-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .cp-matrix-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .cp-matrix-head .muted,
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .cp-matrix-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .cp-matrix-table th,
-      .cp-matrix-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .cp-matrix-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .cp-matrix-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .cp-matrix-table th.num,
-      .cp-matrix-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .cp-matrix-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .cp-pair-list {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 4px;
-      }
-      .cp-pill {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: 10.5px;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    `,
-  ],
+  styleUrl: './currency-pairs-page.component.scss',
 })
 export class CurrencyPairsPageComponent implements OnInit {
   private readonly service = inject(CurrencyPairsService);
@@ -616,6 +412,18 @@ export class CurrencyPairsPageComponent implements OnInit {
       nonPairs: rows.length - fx.length,
     };
   });
+
+  /** "+ 4 index symbols" style context for the Total pairs tile. */
+  readonly nonPairsCaption = computed(() => {
+    const n = this.cpStats().nonPairs;
+    return n > 0 ? `incl. ${n} index symbol${n === 1 ? '' : 's'}` : 'all currency pairs';
+  });
+
+  /** Split-bar width scaled to the busiest currency, so bar length reads as exposure. */
+  mixWidth(total: number): number {
+    const max = this.exposureRows()[0]?.total ?? 0;
+    return max > 0 ? Math.max(8, Math.round((total / max) * 100)) : 0;
+  }
 
   /**
    * Category axis for a handful of 3-letter currency codes. `interval: 0`
@@ -800,13 +608,20 @@ export class CurrencyPairsPageComponent implements OnInit {
   });
 
   readonly columns: ColDef<CurrencyPairDto>[] = [
-    { headerName: 'Symbol', field: 'symbol', flex: 1, minWidth: 110 },
-    { headerName: 'Base', field: 'baseCurrency', width: 90 },
-    { headerName: 'Quote', field: 'quoteCurrency', width: 90 },
+    {
+      headerName: 'Symbol',
+      field: 'symbol',
+      flex: 1,
+      minWidth: 96,
+      cellStyle: { fontWeight: '600' },
+    },
+    { headerName: 'Base', field: 'baseCurrency', width: 70, minWidth: 70 },
+    { headerName: 'Quote', field: 'quoteCurrency', width: 74, minWidth: 74 },
     {
       headerName: 'Class',
       field: 'symbol',
-      width: 100,
+      width: 92,
+      minWidth: 92,
       valueGetter: (p: any) => this.classifyPair(p.data),
       cellRenderer: (p: { value: string }) => {
         const map: Record<string, { bg: string; color: string }> = {
@@ -822,12 +637,21 @@ export class CurrencyPairsPageComponent implements OnInit {
         return `<span style="background:${v.bg};color:${v.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
       },
     },
-    { headerName: 'Digits', field: 'decimalPlaces', width: 90, minWidth: 90 },
+    {
+      headerName: 'Digits',
+      field: 'decimalPlaces',
+      width: 72,
+      minWidth: 72,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
+    },
     {
       headerName: 'Pip size',
       field: 'decimalPlaces',
-      width: 100,
-      minWidth: 100,
+      width: 88,
+      minWidth: 88,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) => {
         const d = p.value as number;
         if (d == null) return '—';
@@ -838,36 +662,46 @@ export class CurrencyPairsPageComponent implements OnInit {
     {
       headerName: 'Contract size',
       field: 'contractSize',
-      width: 130,
-      minWidth: 130,
+      width: 132,
+      minWidth: 132,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => formatCount(p.value as number | null | undefined),
     },
     {
       headerName: 'Min lot',
       field: 'minLotSize',
-      width: 100,
-      minWidth: 100,
+      width: 84,
+      minWidth: 84,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => formatLots(p.value as number | null | undefined),
     },
     {
       headerName: 'Max lot',
       field: 'maxLotSize',
-      width: 110,
-      minWidth: 110,
+      width: 92,
+      minWidth: 92,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => formatLots(p.value as number | null | undefined),
     },
     {
       headerName: 'Lot step',
       field: 'lotStep',
-      width: 100,
-      minWidth: 100,
+      width: 86,
+      minWidth: 86,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => formatLots(p.value as number | null | undefined),
     },
     {
       headerName: 'Lot steps',
       field: 'maxLotSize',
-      width: 110,
-      minWidth: 110,
+      width: 94,
+      minWidth: 94,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueGetter: (p: any) =>
         (p.data?.maxLotSize ?? 0) > 0
           ? Math.round((p.data.maxLotSize - (p.data.minLotSize ?? 0)) / (p.data.lotStep || 1))
@@ -878,7 +712,8 @@ export class CurrencyPairsPageComponent implements OnInit {
     {
       headerName: 'Status',
       field: 'isActive',
-      width: 110,
+      width: 96,
+      minWidth: 96,
       cellRenderer: (p: { value: unknown }) => {
         const active = Boolean(p.value);
         const bg = active ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
@@ -1011,6 +846,12 @@ export class CurrencyPairsPageComponent implements OnInit {
     });
   }
 }
+
+/**
+ * Numeric cells: tabular figures so digits line up down the column. The theme makes .ag-cell a
+ * flex row, so the rightAligned type's text-align alone never moved the value — justify it too.
+ */
+const NUM_CELL = { fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' };
 
 /* One number format per page: counts get thousands separators, lot sizes
    get separators plus exactly two decimals — "100,000" beside "49999" and

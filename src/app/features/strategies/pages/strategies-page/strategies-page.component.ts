@@ -318,95 +318,38 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
               (retry)="retryAnalytics()"
             />
           }
-          <!-- KPI strip — derived from a fleet-wide analytics sample -->
+          <!-- KPI strip — derived from a fleet-wide analytics sample. The per-status counts
+               live on the status filter in the table toolbar; the tiles carry what the
+               filter cannot (coverage, risk mapping) and fold the rarer statuses into captions. -->
           <div class="strat-kpis">
-            <app-metric-card
-              label="Total"
-              [value]="strategyAnalytics().total"
-              format="number"
-              dotColor="#0071E3"
-            />
             <app-metric-card
               label="Active"
               [value]="strategyAnalytics().active"
               format="number"
               dotColor="#34C759"
+              [caption]="kpiCaptions().active"
             />
             <app-metric-card
               label="Paused"
               [value]="strategyAnalytics().paused"
               format="number"
               dotColor="#FF9500"
-            />
-            <app-metric-card
-              label="Stopped"
-              [value]="strategyAnalytics().stopped"
-              format="number"
-              dotColor="#8E8E93"
-            />
-            <app-metric-card
-              label="Backtesting"
-              [value]="strategyAnalytics().backtesting"
-              format="number"
-              dotColor="#5AC8FA"
+              [caption]="kpiCaptions().paused"
             />
             <app-metric-card
               label="Symbols"
               [value]="strategyAnalytics().symbols"
               format="number"
               dotColor="#AF52DE"
-            />
-            <app-metric-card
-              label="Types"
-              [value]="strategyAnalytics().types"
-              format="number"
-              dotColor="#FF2D55"
+              [caption]="kpiCaptions().symbols"
             />
             <app-metric-card
               label="Risk-mapped"
               [value]="strategyAnalytics().withRiskProfile"
               format="number"
               dotColor="#30D158"
+              [caption]="kpiCaptions().risk"
             />
-          </div>
-
-          <!-- Filter chips: status quick-filter for the table below -->
-          <div class="filter-chips">
-            <button
-              class="chip"
-              [class.active]="statusFilter() === 'all'"
-              (click)="setStatusFilter('all')"
-            >
-              All <span class="chip-count">{{ strategyAnalytics().total }}</span>
-            </button>
-            <button
-              class="chip"
-              [class.active]="statusFilter() === 'Active'"
-              (click)="setStatusFilter('Active')"
-            >
-              Active <span class="chip-count">{{ strategyAnalytics().active }}</span>
-            </button>
-            <button
-              class="chip"
-              [class.active]="statusFilter() === 'Paused'"
-              (click)="setStatusFilter('Paused')"
-            >
-              Paused <span class="chip-count">{{ strategyAnalytics().paused }}</span>
-            </button>
-            <button
-              class="chip"
-              [class.active]="statusFilter() === 'Stopped'"
-              (click)="setStatusFilter('Stopped')"
-            >
-              Stopped <span class="chip-count">{{ strategyAnalytics().stopped }}</span>
-            </button>
-            <button
-              class="chip"
-              [class.active]="statusFilter() === 'Backtesting'"
-              (click)="setStatusFilter('Backtesting')"
-            >
-              Backtesting <span class="chip-count">{{ strategyAnalytics().backtesting }}</span>
-            </button>
           </div>
 
           <!-- The table is the page; the five distribution charts are
@@ -418,6 +361,22 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
             [selectable]="true"
             (rowClick)="onRowClick($event)"
           >
+            <!-- Status quick-filter for the table, beside its search box. -->
+            <div toolbar class="seg" role="group" aria-label="Filter by status">
+              @for (f of statusFilters; track f.value) {
+                <button
+                  type="button"
+                  [class.on]="statusFilter() === f.value"
+                  [attr.aria-pressed]="statusFilter() === f.value"
+                  (click)="setStatusFilter(f.value)"
+                >
+                  @if (f.color) {
+                    <span class="seg-dot" [style.background]="f.color"></span>
+                  }
+                  {{ f.label }}<span class="n">{{ statusCount(f.value) }}</span>
+                </button>
+              }
+            </div>
             <ng-template #bulkActions let-rows let-clear="clear">
               <button
                 type="button"
@@ -474,14 +433,14 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
             <button
               type="button"
               class="fold-toggle"
+              [class.open]="showAnalytics()"
               (click)="showAnalytics.set(!showAnalytics())"
               [attr.aria-expanded]="showAnalytics()"
             >
-              <span class="fold-chev">{{ showAnalytics() ? '▾' : '▸' }}</span>
-              Fleet analytics
-              <span class="muted small"
-                >status · symbol · type · timeframe · creation activity</span
-              >
+              <span class="fold-chev" aria-hidden="true">›</span>
+              <span class="fold-title">Fleet analytics</span>
+              <span class="fold-sub">status · symbol · type · timeframe · creation activity</span>
+              <span class="fold-action">{{ showAnalytics() ? 'Hide charts' : 'Show charts' }}</span>
             </button>
           </section>
 
@@ -529,65 +488,45 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
                over the last 24h. Surfaces which gates are dropping the most signals so
                operators know where to tune thresholds. -->
           @if (rejectionSummary().length > 0) {
-            <section
-              class="rejection-card"
-              style="background:var(--bg-secondary,#fff);border:1px solid var(--border,#e5e5ea);border-radius:12px;padding:16px;margin-bottom:16px;"
-            >
-              <header
-                style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"
-              >
-                <div>
-                  <h3 style="margin:0;font-size:14px;font-weight:600;">
-                    Filtered Signals (last 24h)
-                  </h3>
-                  <span style="font-size:11px;color:var(--text-tertiary,#8e8e93);">
-                    Top rejection tuples — high counts mean a gate is over-strict or a strategy is
-                    consistently misaligned with the gate.
-                  </span>
+            <section class="board">
+              <header class="board-head">
+                <div class="board-title">
+                  <h3>Filtered signals</h3>
+                  <span class="count-chip">last 24h</span>
                 </div>
+                <span class="board-hint">
+                  Top rejection tuples — high counts mean a gate is over-strict or a strategy is
+                  consistently misaligned with the gate.
+                </span>
                 <!-- A bare link-button gave no sign that the click re-fetched anything. -->
                 <app-refresh-button
+                  class="head-right"
                   variant="outline"
                   [refreshing]="rejectionSummaryLoading()"
                   (refresh)="loadRejectionSummary()"
                 />
               </header>
-              <div style="overflow-x:auto;">
-                <table style="width:100%;font-size:12px;border-collapse:collapse;">
+              <div class="board-scroll">
+                <table class="board-table">
                   <thead>
-                    <tr style="text-align:left;color:var(--text-secondary,#636366);">
-                      <th style="padding:6px 8px;font-weight:500;">Strategy</th>
-                      <th style="padding:6px 8px;font-weight:500;">Symbol</th>
-                      <th style="padding:6px 8px;font-weight:500;">Stage</th>
-                      <th style="padding:6px 8px;font-weight:500;">Reason</th>
-                      <th style="padding:6px 8px;font-weight:500;text-align:right;">Count</th>
+                    <tr>
+                      <th>Strategy</th>
+                      <th>Symbol</th>
+                      <th>Stage</th>
+                      <th>Reason</th>
+                      <th class="num">Count</th>
                     </tr>
                   </thead>
                   <tbody>
                     @for (r of rejectionSummary(); track $index) {
-                      <tr style="border-top:1px solid var(--border,#f0f0f0);">
-                        <td style="padding:6px 8px;">
-                          {{ r.strategyId === 0 ? '—' : '#' + r.strategyId }}
+                      <tr>
+                        <td class="id">{{ r.strategyId === 0 ? '—' : '#' + r.strategyId }}</td>
+                        <td class="sym">{{ r.symbol }}</td>
+                        <td>
+                          <span class="stage-pill">{{ r.stage }}</span>
                         </td>
-                        <td style="padding:6px 8px;font-family:'SF Mono',Menlo,monospace;">
-                          {{ r.symbol }}
-                        </td>
-                        <td style="padding:6px 8px;">
-                          <span
-                            style="background:rgba(0,113,227,0.14);color:var(--accent);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:500;"
-                            >{{ r.stage }}</span
-                          >
-                        </td>
-                        <td
-                          style="padding:6px 8px;font-family:'SF Mono',Menlo,monospace;color:var(--text-secondary,#636366);"
-                        >
-                          {{ r.reason }}
-                        </td>
-                        <td
-                          style="padding:6px 8px;text-align:right;font-variant-numeric:tabular-nums;font-weight:500;"
-                        >
-                          {{ r.count | number }}
-                        </td>
+                        <td class="reason">{{ r.reason }}</td>
+                        <td class="num strong">{{ r.count | number }}</td>
                       </tr>
                     }
                   </tbody>
@@ -816,440 +755,7 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
       <app-clone-strategy-dialog [strategy]="cloneTarget()" (closed)="cloneTarget.set(null)" />
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-      }
-      /* The global \`.page > *\` entry animation leaves a transform on every
-         direct child, which turns a fixed-position overlay into one that is
-         clipped to (and scrolls with) its parent. Overlays opt out. */
-      .page > .overlay {
-        animation: none;
-      }
-      .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.5);
-        backdrop-filter: blur(3px);
-        -webkit-backdrop-filter: blur(3px);
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-4);
-      }
-      .dialog {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        width: min(560px, 96vw);
-        max-height: 90vh;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-      }
-      .dialog-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: var(--space-3);
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .dialog-title {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .dialog-sub {
-        margin: var(--space-1) 0 0;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .dialog-close {
-        background: transparent;
-        border: none;
-        font-size: 1.5rem;
-        line-height: 1;
-        padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        cursor: pointer;
-        flex-shrink: 0;
-      }
-      .dialog-close:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .dialog-body {
-        padding: var(--space-4) var(--space-5);
-        overflow-y: auto;
-        flex: 1 1 auto;
-        min-height: 0;
-      }
-      .dialog-foot {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-2);
-        padding: var(--space-3) var(--space-5);
-        border-top: 1px solid var(--border);
-        background: var(--bg-secondary);
-        position: sticky;
-        bottom: 0;
-      }
-      .form-group {
-        margin-bottom: var(--space-4);
-      }
-      .form-group:last-child {
-        margin-bottom: 0;
-      }
-      .form-label {
-        display: block;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-1);
-      }
-      .required {
-        color: var(--loss);
-      }
-      .form-input {
-        width: 100%;
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        box-sizing: border-box;
-      }
-      .form-input:focus {
-        outline: none;
-        border-color: var(--accent);
-      }
-      .form-hint {
-        display: block;
-        margin-top: var(--space-1);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .form-hint code {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .analytics-fold {
-        margin: var(--space-3) 0;
-      }
-      .fold-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-2);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        padding: 6px 14px;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-primary);
-        font-family: inherit;
-        cursor: pointer;
-      }
-      .fold-toggle:hover {
-        background: var(--bg-tertiary);
-      }
-      .fold-chev {
-        color: var(--text-tertiary);
-      }
-
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-5);
-        border: none;
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-1);
-      }
-      .btn:active {
-        transform: scale(0.97);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      /* A disabled Apply (no template / no symbols) looked exactly like an enabled one. */
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-        transform: none;
-      }
-
-      .selector-bar {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        margin-bottom: var(--space-6);
-        padding: var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-      }
-
-      .selector-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        white-space: nowrap;
-      }
-
-      .selector-input {
-        flex: 1;
-        max-width: 400px;
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        cursor: pointer;
-      }
-
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-        gap: var(--space-4);
-        margin-bottom: var(--space-6);
-      }
-
-      .chart-grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-4);
-      }
-
-      .empty-monitor {
-        text-align: center;
-        padding: var(--space-16);
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-      }
-
-      @media (max-width: 900px) {
-        .chart-grid {
-          grid-template-columns: 1fr;
-        }
-        .kpi-grid {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      /* List-tab analytics: KPI strip, filter chips, chart rows */
-      .strat-kpis {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
-        margin: var(--space-2) 0 var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 720px) {
-        .strat-kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      .filter-chips {
-        display: flex;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-        margin-bottom: var(--space-3);
-      }
-      .chip {
-        padding: 6px 14px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        font-family: inherit;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        transition: all 0.15s ease;
-      }
-      .chip:hover {
-        color: var(--text-primary);
-        border-color: var(--text-tertiary);
-      }
-      .chip.active {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .chip-count {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        background: rgba(0, 0, 0, 0.06);
-      }
-      .chip.active .chip-count {
-        background: rgba(255, 255, 255, 0.22);
-        color: #fff;
-      }
-
-      .strat-chart-row {
-        display: grid;
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      .strat-chart-row.three {
-        grid-template-columns: 1fr 1fr 1fr;
-      }
-      .strat-chart-row.two {
-        grid-template-columns: 1fr 1fr;
-      }
-      @media (max-width: 1100px) {
-        .strat-chart-row.three,
-        .strat-chart-row.two {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Monitor-tab dense KPI grid (12 cards) + health strip */
-      .monitor-kpis {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: var(--space-2);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1400px) {
-        .monitor-kpis {
-          grid-template-columns: repeat(4, 1fr);
-        }
-      }
-      @media (max-width: 720px) {
-        .monitor-kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      .meta-pill {
-        padding: 3px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-      }
-      .meta-pill.active {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .meta-pill.subtle {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-
-      .health-strip {
-        display: grid;
-        grid-template-columns: repeat(5, 1fr);
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .health-strip {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      .health-cell {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .hc-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .hc-value {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .hc-value.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-variant-numeric: tabular-nums;
-      }
-      .hc-value.pill {
-        align-self: flex-start;
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-      }
-      .hc-healthy {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .hc-warning,
-      .hc-degraded {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-      .hc-critical,
-      .hc-failed {
-        background: rgba(255, 59, 48, 0.14);
-        color: #d70015;
-      }
-      .hc-unknown {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-
-      .empty-monitor .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-        max-width: 480px;
-        margin: var(--space-2) auto 0;
-      }
-      .spinner {
-        width: 28px;
-        height: 28px;
-        border: 2.5px solid var(--border);
-        border-top-color: var(--accent);
-        border-radius: 50%;
-        margin: 0 auto var(--space-3);
-        animation: spin 0.8s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    `,
-  ],
+  styleUrl: './strategies-page.component.scss',
 })
 export class StrategiesPageComponent {
   private readonly strategiesService = inject(StrategiesService);
@@ -1584,6 +1090,43 @@ export class StrategiesPageComponent {
     };
   });
 
+  /** Status quick-filter segments (the table toolbar). `value` is what `setStatusFilter` receives. */
+  readonly statusFilters: { value: string; label: string; color: string | null }[] = [
+    { value: 'all', label: 'All', color: null },
+    { value: 'Active', label: 'Active', color: '#34C759' },
+    { value: 'Paused', label: 'Paused', color: '#FF9500' },
+    { value: 'Stopped', label: 'Stopped', color: '#8E8E93' },
+    { value: 'Backtesting', label: 'Backtesting', color: '#5AC8FA' },
+  ];
+
+  statusCount(value: string): number {
+    const a = this.strategyAnalytics();
+    switch (value) {
+      case 'Active':
+        return a.active;
+      case 'Paused':
+        return a.paused;
+      case 'Stopped':
+        return a.stopped;
+      case 'Backtesting':
+        return a.backtesting;
+      default:
+        return a.total;
+    }
+  }
+
+  /** One-line context under each KPI tile; none while the sample is empty (unknown, not zero). */
+  readonly kpiCaptions = computed(() => {
+    const a = this.strategyAnalytics();
+    if (a.total === 0) return { active: null, paused: null, symbols: null, risk: null };
+    return {
+      active: `of ${a.total} strateg${a.total === 1 ? 'y' : 'ies'}`,
+      paused: `${a.stopped} stopped · ${a.backtesting} backtesting`,
+      symbols: `${a.types} strategy type${a.types === 1 ? '' : 's'}`,
+      risk: `of ${a.total} have a risk profile`,
+    };
+  });
+
   statusDonutOptions = computed<EChartsOption>(() => {
     const a = this.strategyAnalytics();
     if (a.total === 0) return {};
@@ -1800,49 +1343,86 @@ export class StrategiesPageComponent {
       // character against a log line to be sure it is the same strategy.
       field: 'id',
       headerName: 'ID',
-      width: 88,
+      width: 72,
       minWidth: 72,
       flex: 0,
       cellRenderer: (p: any) =>
         p.value == null
           ? '—'
-          : `<span style="font-variant-numeric:tabular-nums;color:var(--text-secondary)">#${p.value}</span>`,
+          : `<span style="font-variant-numeric:tabular-nums;color:var(--text-tertiary)">#${p.value}</span>`,
     },
     // The grid is wider than the card and scrolls; at 160px every generated name was cut to
     // "CompositeML-EURUSD" / "EURUSD Trend MACD \" — the name is what the operator reads, so it
-    // gets the room (full name in the tooltip).
-    { field: 'name', headerName: 'Name', flex: 2, minWidth: 260, tooltipField: 'name' },
+    // gets the room: the widest column, ellipsis at a word-safe width, and the full name plus the
+    // description in the tooltip. The muted second line is the description, which the list did
+    // not show anywhere else.
+    {
+      field: 'name',
+      headerName: 'Name',
+      // 260 keeps ID…Lifecycle + Clone inside the card at 1440px; ellipsis + tooltip cover the rest.
+      flex: 2,
+      minWidth: 260,
+      cellRenderer: (p: any) => {
+        const row = p.data as StrategyDto | undefined;
+        if (!row) return '';
+        const name = row.name?.trim() || '—';
+        const desc = row.description?.trim() ?? '';
+        const ell = 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+        return (
+          `<span style="display:flex;flex-direction:column;justify-content:center;height:100%;min-width:0;line-height:1.3">` +
+          `<span style="${ell};font-weight:500;color:var(--text-primary)">${esc(name)}</span>` +
+          (desc
+            ? `<span style="${ell};font-size:11.5px;color:var(--text-tertiary)">${esc(desc)}</span>`
+            : '') +
+          `</span>`
+        );
+      },
+      tooltipValueGetter: (p: any) => {
+        const row = p.data as StrategyDto | undefined;
+        if (!row) return null;
+        const desc = row.description?.trim();
+        return desc ? `${row.name ?? ''}\n\n${desc}` : row.name;
+      },
+    },
     {
       field: 'symbol',
       headerName: 'Symbol',
-      flex: 1,
-      minWidth: 100,
+      flex: 0,
+      width: 92,
+      minWidth: 92,
       // A Custom strategy (LLM Spot Analysis) has no single symbol — "—", not a blank cell.
       valueFormatter: (p: any) => p.value || '—',
     },
     {
       field: 'timeframe',
       headerName: 'Timeframe',
-      flex: 1,
-      // 90px wrapped the header mid-word ("TIMEFRA ME").
-      minWidth: 108,
+      flex: 0,
+      // 90px wrapped the header mid-word ("TIMEFRA ME"); the grid's fit-to-width pass shrinks a
+      // column to its minWidth, so the minimum is what holds the header on one line.
+      width: 100,
+      minWidth: 100,
       valueFormatter: (p: any) => this.enumLabel.transform(p.value, 'timeframe'),
     },
     {
       field: 'strategyType',
       headerName: 'Type',
-      flex: 1.5,
-      minWidth: 140,
+      flex: 0,
+      width: 116,
+      minWidth: 116,
       valueFormatter: (p: any) => this.enumLabel.transform(p.value),
     },
     {
       field: 'status',
       headerName: 'Status',
-      flex: 1,
+      flex: 0,
+      width: 100,
       minWidth: 100,
       cellRenderer: (p: any) => {
         const variant = this.getStatusVariant(p.value);
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${variant.bg};color:${variant.color}">${p.value}</span>`;
+        return (
+          `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 9px;border-radius:9999px;font-size:12px;font-weight:600;line-height:22px;background:${variant.bg};color:${variant.color}">` +
+          `<span style="width:6px;height:6px;border-radius:50%;background:${variant.color}"></span>${esc(String(p.value ?? '—'))}</span>`
+        );
       },
     },
     {
@@ -1852,9 +1432,11 @@ export class StrategiesPageComponent {
       // costs one extra round-trip per page (not per row).
       field: 'healthSeries',
       // "Health (24m)" printed as "HEALTH (24M)" — read as 24 months; it is the last 24 snapshots.
-      headerName: 'Health trend',
-      headerTooltip: 'The latest 24 health-snapshot scores, oldest left',
-      width: 140,
+      // "Health trend" wrapped onto two header lines at this width; the tooltip carries the rest.
+      headerName: 'Health',
+      headerTooltip: 'Health trend — the latest 24 health-snapshot scores, oldest left',
+      width: 92,
+      minWidth: 92,
       sortable: false,
       filter: false,
       // SparklineCellComponent owns the visual; suppresses AG Grid warning
@@ -1866,22 +1448,30 @@ export class StrategiesPageComponent {
         const v = p.value as number[] | undefined;
         return Array.isArray(v) && v.length > 0 ? v.map((n) => n.toFixed(2)).join(',') : '';
       },
-      cellRenderer: SparklineCellComponent,
-      cellRendererParams: {
-        domain: [0, 1],
-        color: '#34C759',
-        label: 'Health score',
-      } satisfies SparklineCellRendererParams,
+      // Fewer than two points draws nothing; a faint dash keeps a column of "no snapshots yet"
+      // rows quiet instead of a stack of full-strength dashes.
+      cellRendererSelector: (p: any) =>
+        Array.isArray(p.value) && p.value.length >= 2
+          ? {
+              component: SparklineCellComponent,
+              params: {
+                domain: [0, 1],
+                color: '#34C759',
+                label: 'Health score',
+              } satisfies SparklineCellRendererParams,
+            }
+          : { component: () => QUIET_DASH },
     },
     {
       field: 'lifecycleStage',
       headerName: 'Lifecycle',
-      flex: 1,
-      minWidth: 110,
+      flex: 0,
+      width: 112,
+      minWidth: 112,
       cellRenderer: (p: any) => {
         const stage = (p.value as string | undefined) ?? '—';
         const variant = lifecycleVariant(stage);
-        return `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:9999px;font-size:11px;font-weight:600;background:${variant.bg};color:${variant.color}">${stage}</span>`;
+        return `<span style="display:inline-flex;align-items:center;padding:0 8px;border-radius:9999px;font-size:11px;font-weight:600;line-height:20px;background:${variant.bg};color:${variant.color}">${esc(stage)}</span>`;
       },
     },
     {
@@ -1999,8 +1589,9 @@ export class StrategiesPageComponent {
       // this does not also open the detail page.
       colId: 'actions',
       headerName: '',
-      width: 96,
-      minWidth: 96,
+      // A quiet ghost button (styled in the component SCSS) instead of a bordered button on every row.
+      width: 84,
+      minWidth: 84,
       flex: 0,
       sortable: false,
       filter: false,
@@ -2008,7 +1599,7 @@ export class StrategiesPageComponent {
       pinned: 'right',
       cellRenderer: (p: any) =>
         p.data
-          ? `<button type="button" data-action="clone" data-no-row-click title="Clone #${p.data.id} to another symbol or timeframe" style="border:1px solid var(--border,#e5e5ea);background:var(--bg-primary,#fff);color:var(--accent,#0071e3);border-radius:6px;padding:0 10px;height:24px;font-size:12px;cursor:pointer">Clone…</button>`
+          ? `<button type="button" class="strat-row-action" data-action="clone" data-no-row-click title="Clone #${p.data.id} to another symbol or timeframe" aria-label="Clone #${p.data.id}"><span aria-hidden="true">⧉</span>Clone</button>`
           : '',
       onCellClicked: (params: any) => {
         const target = params.event?.target as HTMLElement | undefined;
@@ -2811,6 +2402,17 @@ function computeEligibility(row: StrategyDto, aug: StrategyRowAugment): Activati
 // `backtestReturnPct`, in PERCENT — see LatestStrategyRunsDto. It is already a
 // percent; multiplying by 100 is the bug that made backtest #844 (+$10.89 on
 // $10,000 = 0.1089%) print as "+10.89%".
+
+/** Cell-renderer strings go straight into innerHTML; payload-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+/** Empty-cell marker for rows with no data yet — present but out of the way. */
+const QUIET_DASH = '<span style="color:var(--text-tertiary);opacity:0.55">—</span>';
 
 /** Same sentinel rule as the backtests page: ≤ −100% or beyond ±1000% is a wiped-out / corrupt run. */
 function isWipedOutReturnPct(pct: number): boolean {

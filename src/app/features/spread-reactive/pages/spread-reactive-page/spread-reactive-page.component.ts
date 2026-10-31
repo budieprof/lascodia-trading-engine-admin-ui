@@ -26,6 +26,7 @@ import { BaselineFloorsTabComponent } from '@features/spread-reactive/components
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 
 /**
  * Spread-reactive subsystem: config + live state dashboard.
@@ -49,6 +50,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
     PageHeaderComponent,
     ConfirmDialogComponent,
     RefreshButtonComponent,
+    MetricCardComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -63,6 +65,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
                says what clicking DOES. The old green-outlined "■ Disable" read
                as "enabled and healthy". -->
           <span class="state-badge" [class.on]="cfg.enabled">
+            <span class="state-dot" aria-hidden="true"></span>
             {{ cfg.enabled ? 'Enabled' : 'Disabled' }}
           </span>
           <button
@@ -72,7 +75,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
             [disabled]="saving()"
             (click)="confirmAction.set('toggle')"
           >
-            {{ cfg.enabled ? '■ Disable' : '▶ Enable' }}
+            {{ cfg.enabled ? 'Disable' : 'Enable' }}
           </button>
         }
       </app-page-header>
@@ -144,9 +147,47 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
 
       <!-- ───────── Live state ───────── -->
       @if (activeTab() === 'state') {
-        <section class="card">
+        <!-- Summary tiles: "162 pairs observed" over a wall of grey WARMING
+             pills looked healthy; these say how many pairs actually have a
+             floor and how many are normal / warming / elevated. -->
+        @if (stateRows().length > 0) {
+          <div class="sr-kpis" role="status">
+            <app-metric-card
+              label="Pairs tracked"
+              [value]="stateRows().length"
+              [dotColor]="stateSummary().withBaseline === 0 ? '#ff9500' : '#0a84ff'"
+              [caption]="stateSummary().withBaseline + ' with a floor'"
+            />
+            <app-metric-card
+              label="Normal"
+              [value]="stateSummary().normal"
+              [dotColor]="stateSummary().normal > 0 ? '#34c759' : ''"
+              caption="spread within its floor band"
+            />
+            <app-metric-card
+              label="Warming"
+              [value]="stateSummary().warming"
+              [caption]="
+                stateSummary().noSample > 0
+                  ? stateSummary().noSample + ' with no sample yet'
+                  : 'building a baseline'
+              "
+            />
+            <app-metric-card
+              label="Elevated"
+              [value]="stateSummary().elevated"
+              [dotColor]="stateSummary().elevated > 0 ? '#ff3b30' : ''"
+              [caption]="
+                stateSummary().elevated > 0 ? 'SL widening may be active' : 'no spread spikes'
+              "
+            />
+          </div>
+        }
+
+        <section class="card state-card">
           <div class="status-head">
-            <h2>Live state</h2>
+            <h2>Pairs</h2>
+            <span class="count-chip">{{ filteredStateRows().length }}</span>
             <span class="status-meta">
               <input
                 type="search"
@@ -165,95 +206,51 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
               />
             </span>
           </div>
-          <!-- Summary strip: "162 pairs observed" over a wall of grey WARMING
-               pills looked healthy; this says how many pairs actually have a
-               baseline and how many are still warming / elevated. -->
-          @if (stateRows().length > 0) {
-            <div class="state-summary" role="status">
-              <span
-                class="summary-item"
-                [class.warn]="stateSummary().withBaseline === 0"
-                title="Pairs with a persistent floor — the anchor Elevated / Normal is judged against. Pairs without one stand down."
-                >{{ stateSummary().withBaseline }} of {{ stateRows().length }} pairs have a
-                floor</span
-              >
-              <span class="summary-item">
-                <span class="condition-pill normal">{{ stateSummary().normal }}</span> normal
-              </span>
-              <span class="summary-item">
-                <span class="condition-pill warming">{{ stateSummary().warming }}</span> warming
-              </span>
-              <span class="summary-item">
-                <span class="condition-pill elevated">{{ stateSummary().elevated }}</span> elevated
-              </span>
-              @if (stateSummary().noSample > 0) {
-                <span class="summary-item muted small">
-                  {{ stateSummary().noSample }} with no sample yet
-                </span>
-              }
-            </div>
-          }
-          <!-- Table headers always visible — the empty-state hint sits
-             inside a colspan'd row so the operator never sees the
-             section's structure collapse on a freshly-restarted engine
-             (the store is in-memory and re-warms over ~30 s of ticks). -->
-          <div class="state-table-wrap">
-            <table class="state-table">
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Symbol</th>
-                  <!-- The engine stores the latest tick's spread on every tick but
-                       re-classifies only once per worker pass, so a row could read
-                       ELEVATED at 0.5 × floor (or NORMAL at 3 ×) for up to one loop.
-                       The figure under the pill is the spread the verdict was decided on
-                       (conditionSpread, engine 2026-10-19). -->
-                  <th
-                    [attr.title]="
-                      'From the worker’s last evaluation (every ' +
-                      (serverConfig()?.loopIntervalSeconds ?? '?') +
-                      ' s); the figure under it is the spread that verdict was decided on. Spread and × floor are the latest tick, so for up to one pass they can differ.'
-                    "
-                  >
-                    Condition
-                  </th>
-                  <th class="num">Spread</th>
-                  <th class="num">Floor</th>
-                  <th class="num">Baseline (median)</th>
-                  <th class="num">× floor</th>
-                  <th class="num">Samples</th>
-                  <th
-                    class="num"
-                    [attr.title]="
-                      'Consecutive samples at or below floor × revert ratio. An active bump reverts after ' +
-                      (revertSamples() ?? '?') +
-                      ' in a row.'
-                    "
-                  >
-                    Calm run
-                  </th>
-                  <th>Last sample</th>
-                </tr>
-              </thead>
-              <tbody>
-                @if (stateRows().length === 0) {
-                  <tr class="empty-row">
-                    <td colspan="10" class="muted small empty-cell">
-                      No telemetry yet. State warms up as ticks arrive from active EA instances —
-                      typically populates within 30 s of engine start.
-                    </td>
+
+          @if (pagedStateRows().length > 0) {
+            <div class="state-table-wrap">
+              <table class="state-table">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Symbol</th>
+                    <!-- The engine stores the latest tick's spread on every tick but
+                         re-classifies only once per worker pass, so a row could read
+                         ELEVATED at 0.5 × floor (or NORMAL at 3 ×) for up to one loop.
+                         The figure under the pill is the spread the verdict was decided on
+                         (conditionSpread, engine 2026-10-19). -->
+                    <th
+                      [attr.title]="
+                        'From the worker’s last evaluation (every ' +
+                        (serverConfig()?.loopIntervalSeconds ?? '?') +
+                        ' s); the figure under it is the spread that verdict was decided on. Spread and × floor are the latest tick, so for up to one pass they can differ.'
+                      "
+                    >
+                      Condition
+                    </th>
+                    <th class="num">Spread</th>
+                    <th class="num">Floor</th>
+                    <th class="num">Baseline (median)</th>
+                    <th class="num">× floor</th>
+                    <th class="num">Samples</th>
+                    <th
+                      class="num"
+                      [attr.title]="
+                        'Consecutive samples at or below floor × revert ratio. An active bump reverts after ' +
+                        (revertSamples() ?? '?') +
+                        ' in a row.'
+                      "
+                    >
+                      Calm run
+                    </th>
+                    <th>Last sample</th>
                   </tr>
-                } @else if (pagedStateRows().length === 0) {
-                  <tr class="empty-row">
-                    <td colspan="10" class="muted small empty-cell">
-                      No pair matches “{{ stateFilter() }}”.
-                    </td>
-                  </tr>
-                } @else {
+                </thead>
+                <tbody>
                   @for (r of pagedStateRows(); track r.tradingAccountId + ':' + r.symbol) {
                     <tr [class.row-elevated]="r.condition === 'Elevated'">
-                      <td class="mono small">{{ r.tradingAccountId }}</td>
-                      <td class="mono">{{ r.symbol }}</td>
+                      <td class="mono small dim">{{ r.tradingAccountId }}</td>
+                      <td class="mono strong">{{ r.symbol }}</td>
                       <td>
                         <span
                           class="condition-pill"
@@ -302,49 +299,93 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
                       </td>
                       <td class="num mono">{{ r.sampleCount }}</td>
                       <td class="num mono">{{ r.consecutiveCalmSamples }}</td>
-                      <td class="mono small" [class.muted]="staleRow(r)">
+                      <td class="small" [class.muted]="staleRow(r)">
                         {{ sampleAge(r) }}
                       </td>
                     </tr>
                   }
+                </tbody>
+              </table>
+            </div>
+          } @else if (stateRows().length === 0) {
+            <!-- The store is in-memory and re-warms over ~30 s of ticks after an
+                 engine restart, so an empty list is a waiting state, not an error. -->
+            <div class="empty-state">
+              <span class="empty-icon" aria-hidden="true">◌</span>
+              <h3>No telemetry yet</h3>
+              <p>
+                State warms up as ticks arrive from active EA instances — typically populates within
+                30 s of engine start.
+              </p>
+            </div>
+          } @else if (stateFilter().trim()) {
+            <div class="empty-state">
+              <h3>No pair matches “{{ stateFilter().trim() }}”</h3>
+              <p>Filter matches a symbol or a trading-account id.</p>
+              <button type="button" class="btn" (click)="onStateFilter('')">Clear filter</button>
+            </div>
+          } @else {
+            <!-- Every pair is a never-sampled one hidden behind "Show them". -->
+            <div class="empty-state">
+              <span class="empty-icon pulse" aria-hidden="true"></span>
+              <h3>Waiting for spread samples</h3>
+              <p>
+                {{ unsampled().count }} pairs ({{ unsampled().symbols }} symbols on accounts
+                {{ unsampled().accounts.join(', ') }}) have a floor but no spread sample yet. A pair
+                appears here once its EA streams spread samples for that symbol; until then it
+                stands by as Warming.
+              </p>
+              <button type="button" class="btn" (click)="showUnsampled.set(true); statePage.set(1)">
+                Show all {{ unsampled().count }} waiting pairs
+              </button>
+            </div>
+          }
+
+          @if (pagedStateRows().length > 0 && unsampled().count > 0 && !stateFilter().trim()) {
+            <div class="unsampled-note">
+              <span class="muted small">
+                @if (showUnsampled()) {
+                  Including {{ unsampled().count }} pairs with no spread sample yet.
+                } @else {
+                  {{ unsampled().count }} more pairs ({{ unsampled().symbols }} symbols on accounts
+                  {{ unsampled().accounts.join(', ') }}) have a floor but no spread sample yet:
+                  their EA has not streamed that symbol since the engine started, so they stand by
+                  as Warming. They are hidden here.
                 }
-              </tbody>
-            </table>
-          </div>
-          @if (unsampled().count > 0 && !stateFilter().trim()) {
-            <p class="muted small unsampled-note">
-              @if (!showUnsampled()) {
-                {{ unsampled().count }} more pairs ({{ unsampled().symbols }} symbols on accounts
-                {{ unsampled().accounts.join(', ') }}) have a floor but no spread sample yet: their EA has not streamed
-                that symbol since the engine started, so they stand by as Warming. They are hidden here.
-              }
-              <button type="button" class="btn ghost" (click)="showUnsampled.set(!showUnsampled()); statePage.set(1)">
+              </span>
+              <button
+                type="button"
+                class="btn"
+                (click)="showUnsampled.set(!showUnsampled()); statePage.set(1)"
+              >
                 {{ showUnsampled() ? 'Hide pairs with no sample' : 'Show them' }}
               </button>
-            </p>
+            </div>
           }
           @if (statePageCount() > 1) {
             <div class="pager">
-              <button
-                type="button"
-                class="btn ghost"
-                [disabled]="statePage() <= 1"
-                (click)="statePage.set(statePage() - 1)"
-              >
-                ‹ Prev
-              </button>
               <span class="muted small">
                 Page {{ statePage() }} of {{ statePageCount() }} ·
                 {{ filteredStateRows().length }} pairs
               </span>
-              <button
-                type="button"
-                class="btn ghost"
-                [disabled]="statePage() >= statePageCount()"
-                (click)="statePage.set(statePage() + 1)"
-              >
-                Next ›
-              </button>
+              <span class="pages">
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="statePage() <= 1"
+                  (click)="statePage.set(statePage() - 1)"
+                >
+                  ‹ Prev
+                </button>
+                <button
+                  type="button"
+                  class="btn"
+                  [disabled]="statePage() >= statePageCount()"
+                  (click)="statePage.set(statePage() + 1)"
+                >
+                  Next ›
+                </button>
+              </span>
             </div>
           }
         </section>
@@ -768,355 +809,7 @@ import { RefreshButtonComponent } from '@shared/components/refresh-button/refres
       />
     </div>
   `,
-  styles: [
-    `
-      /*
-       * Fill the viewport width — no max-width cap, no centering.  The
-       * embedded SL audit table is wide (15 cols) and the operator
-       * wants the whole viewport for content.  Padding stays at
-       * var(--space-4) so content isn't pressed against the screen
-       * edges, and min-width: 0 lets the contained grid + table shrink
-       * past their natural intrinsic width when the viewport is narrow.
-       */
-      .page {
-        width: 100%;
-        padding: var(--space-4, 16px);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4, 16px);
-        min-width: 0;
-      }
-      .muted {
-        color: var(--text-secondary, var(--text-muted, #888));
-      }
-      .small {
-        font-size: 0.85em;
-      }
-      .state-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: 4px 10px;
-        border-radius: var(--radius-full, 999px);
-        font-size: var(--text-xs, 12px);
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        margin-right: 8px;
-      }
-      .state-badge.on {
-        background: color-mix(in srgb, var(--profit) 18%, transparent);
-        color: var(--profit);
-      }
-      /* Enable = primary action; Disable = destructive outline. */
-      .power-btn {
-        padding: 8px 14px;
-        border-radius: 6px;
-        border: 1px solid var(--accent);
-        background: var(--accent);
-        color: #fff;
-        cursor: pointer;
-        font-weight: 600;
-      }
-      .power-btn.on {
-        background: transparent;
-        border-color: var(--loss);
-        color: var(--loss);
-      }
-      .power-btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .card {
-        background: var(--bg-secondary, var(--card-bg, #fff));
-        border: 1px solid var(--border, #e3e3e3);
-        border-radius: var(--radius-md, 8px);
-        padding: var(--card-padding, 14px 16px);
-      }
-      /* Configuration grid — 2 columns on wide screens, single-column
-         on narrow.  440px min-width matches the EA detail page's
-         positions+orders grid so cards feel consistent across pages. */
-      .config-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
-        gap: var(--space-4, 16px);
-      }
-      .config-grid > .card {
-        margin: 0;
-      }
-      .card h2 {
-        margin: 0 0 4px;
-        font-size: 1.05em;
-      }
-      .grid-2 {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 12px 16px;
-        margin-top: 10px;
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .field > span {
-        font-weight: 600;
-        font-size: 0.9em;
-      }
-      /* Dark inputs on the app surface tokens — var(--input-bg, #fff) fell
-         through to white with pale values, unreadable on the dark theme. */
-      .field input,
-      .field select {
-        padding: 6px 8px;
-        border-radius: 4px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font: inherit;
-      }
-      .actions-row {
-        position: sticky;
-        bottom: 0;
-        z-index: 2;
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        gap: 10px;
-        /* Right padding clears the floating "Ask" assistant pill (fixed, bottom-right,
-           ~100px wide): it sat squarely on top of Save in this sticky footer. */
-        padding: 10px var(--assistant-fab-clearance, 132px) 10px 14px;
-        margin: 0 calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-4, 16px));
-        background: var(--bg-secondary);
-        border-top: 1px solid var(--border);
-      }
-      .actions-row.dirty {
-        border-top-color: var(--warning);
-      }
-      .actions-row .muted {
-        margin-right: auto;
-      }
-      .btn {
-        padding: 8px 14px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        cursor: pointer;
-      }
-      .btn.primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .btn:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .banner {
-        padding: 10px 14px;
-        border-radius: 6px;
-      }
-      /* Theme tokens: the light-only pink / mint fallbacks (no --error-bg or
-         --success-bg token exists) painted pale slabs on the dark theme. */
-      .banner.error {
-        background: color-mix(in srgb, var(--loss) 12%, transparent);
-        color: var(--loss);
-      }
-      .banner.ok {
-        background: color-mix(in srgb, var(--profit) 14%, transparent);
-        color: var(--profit);
-      }
-      .status-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 12px;
-      }
-      .status-head h2 {
-        margin: 0;
-      }
-      .status-meta {
-        display: inline-flex;
-        align-items: center;
-        gap: 10px;
-      }
-      .state-filter {
-        padding: 6px 10px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font: inherit;
-        font-size: var(--text-sm, 13px);
-        min-width: 200px;
-      }
-      .state-summary {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 14px;
-        margin-top: 10px;
-        padding: 8px 12px;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--bg-tertiary);
-        font-size: var(--text-sm, 13px);
-      }
-      .summary-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .summary-item.warn {
-        color: var(--warning);
-        font-weight: 600;
-      }
-      .pager {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        margin-top: 10px;
-      }
-      .tab-badge.dirty {
-        background: color-mix(in srgb, var(--warning) 22%, transparent);
-        color: var(--warning);
-      }
-      .condition-pill {
-        padding: 2px 8px;
-        border-radius: 8px;
-        font-size: 11px;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.4px;
-        background: var(--bg-tertiary, #eee);
-        color: var(--text-secondary, #555);
-      }
-      .condition-pill.warming {
-        background: color-mix(in srgb, #9aa0a6 22%, transparent);
-        color: #555e66;
-      }
-      .condition-pill.normal {
-        background: color-mix(in srgb, #1d8a3e 22%, transparent);
-        color: #1d8a3e;
-      }
-      .condition-pill.elevated {
-        background: color-mix(in srgb, #ff453a 22%, transparent);
-        color: #c93631;
-      }
-      .decided-on {
-        display: block;
-        margin-top: 2px;
-        font-family: ui-monospace, SFMono-Regular, monospace;
-        font-size: 10px;
-        color: var(--text-tertiary);
-        white-space: nowrap;
-      }
-      .state-table-wrap {
-        overflow-x: auto;
-        margin-top: 10px;
-      }
-      .state-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .state-table th,
-      .state-table td {
-        padding: 6px 10px;
-        text-align: left;
-        border-bottom: 1px solid var(--border, #eee);
-        white-space: nowrap;
-      }
-      .state-table th {
-        font-size: 12px;
-        font-weight: 600;
-        color: var(--text-secondary, #555);
-      }
-      .state-table .num {
-        text-align: right;
-      }
-      .state-table .mono {
-        font-family: var(--font-mono, ui-monospace, monospace);
-      }
-      .state-table .small {
-        font-size: 0.85em;
-      }
-      .row-elevated {
-        background: color-mix(in srgb, #ff453a 6%, transparent);
-      }
-      .empty-cell {
-        padding: var(--space-4, 16px);
-        text-align: center;
-        font-style: italic;
-      }
-      /* Tabs — underline-style with the same accent the page-header uses.
-         The page's flex gap (var(--space-4)) handles the breathing room
-         between this strip and the section card below; no negative margin. */
-      .tabs {
-        display: flex;
-        gap: 4px;
-        border-bottom: 1px solid var(--border, #e3e3e3);
-        padding: 0;
-      }
-      .tab {
-        appearance: none;
-        background: transparent;
-        border: 0;
-        border-bottom: 2px solid transparent;
-        padding: 10px 16px;
-        font-size: var(--text-sm, 14px);
-        font-weight: var(--font-medium, 500);
-        color: var(--text-secondary, #666);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        transition:
-          color 120ms,
-          border-color 120ms;
-      }
-      .tab:hover {
-        color: var(--text-primary, #222);
-      }
-      .tab.active {
-        color: var(--text-primary, #222);
-        border-bottom-color: var(--accent, #0a84ff);
-      }
-      .tab-count {
-        background: var(--bg-tertiary, #eee);
-        color: var(--text-secondary, #666);
-        font-size: 11px;
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-weight: 600;
-      }
-      .tab-badge {
-        font-size: 10px;
-        padding: 1px 7px;
-        border-radius: 999px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.4px;
-      }
-      .tab-badge.elevated {
-        background: color-mix(in srgb, #ff453a 22%, transparent);
-        color: #c93631;
-      }
-      .btn.ghost {
-        background: transparent;
-      }
-      .floor-source-tag {
-        margin-left: 4px;
-        padding: 1px 4px;
-        border-radius: 4px;
-        background: color-mix(in srgb, #0a84ff 22%, transparent);
-        color: #0863c1;
-        font-size: 10px;
-        font-weight: 700;
-      }
-    `,
-  ],
+  styleUrl: './spread-reactive-page.component.scss',
 })
 export class SpreadReactivePageComponent {
   private readonly service = inject(SpreadReactiveService);
@@ -1191,7 +884,9 @@ export class SpreadReactivePageComponent {
   protected readonly filteredStateRows = computed(() => {
     const q = this.stateFilter().trim().toUpperCase();
     if (!q)
-      return this.showUnsampled() ? this.stateRows() : this.stateRows().filter((r) => this.hasSample(r));
+      return this.showUnsampled()
+        ? this.stateRows()
+        : this.stateRows().filter((r) => this.hasSample(r));
     return this.stateRows().filter(
       (r) => r.symbol.toUpperCase().includes(q) || String(r.tradingAccountId).includes(q),
     );

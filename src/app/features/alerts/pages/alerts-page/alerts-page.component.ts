@@ -31,6 +31,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import type { EChartsOption } from 'echarts';
 
@@ -66,6 +67,17 @@ const ALERT_TYPES: AlertType[] = [
 ];
 
 const SEVERITIES: AlertSeverity[] = ['Info', 'Medium', 'High', 'Critical'];
+
+/** Severity-mix panel order and colours (Critical red, High amber — matching the pills). */
+const SEVERITY_DISPLAY_ORDER: AlertSeverity[] = ['Critical', 'High', 'Medium', 'Info'];
+const SEVERITY_COLOR: Record<AlertSeverity, string> = {
+  Critical: '#FF3B30',
+  High: '#FF9500',
+  Medium: '#0A84FF',
+  Info: '#8E8E93',
+};
+
+const NUMBER_FMT = new Intl.NumberFormat('en-US');
 
 export interface ChannelDef {
   channel: AlertChannel;
@@ -183,7 +195,12 @@ export const CHANNEL_DEFS: ChannelDef[] = [
       { key: 'EmailAlertOptions:ToAddress', label: 'To address', type: 'text', required: true },
       { key: 'EmailAlertOptions:FromAddress', label: 'From address', type: 'text', required: true },
       { key: 'EmailAlertOptions:FromName', label: 'From name', type: 'text' },
-      ...deliveryPolicyFields('Email', { min: 'Medium', immediate: 'Critical', digest: 60, perHour: 6 }),
+      ...deliveryPolicyFields('Email', {
+        min: 'Medium',
+        immediate: 'Critical',
+        digest: 60,
+        perHour: 6,
+      }),
     ],
   },
   {
@@ -230,7 +247,12 @@ export const CHANNEL_DEFS: ChannelDef[] = [
         hint: 'Numeric for users/groups, @channelname for public channels',
       },
       { key: 'TelegramAlertOptions:TimeoutSeconds', label: 'Timeout (s)', type: 'number' },
-      ...deliveryPolicyFields('Telegram', { min: 'Info', immediate: 'Info', digest: 0, perHour: 0 }),
+      ...deliveryPolicyFields('Telegram', {
+        min: 'Info',
+        immediate: 'Info',
+        digest: 0,
+        perHour: 0,
+      }),
     ],
   },
 ];
@@ -248,6 +270,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
     EmptyStateComponent,
     ErrorStateComponent,
     ChartCardComponent,
+    MetricCardComponent,
     RelativeTimePipe,
     ModalA11yDirective,
   ],
@@ -259,64 +282,116 @@ export const CHANNEL_DEFS: ChannelDef[] = [
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
         <!-- ── Rules tab ─────────────────────────────────────────────── -->
         @if (activeTab() === 'rules') {
-          <!-- 8-card KPI strip — fleet-wide rule roll-ups -->
+          <!-- 8-tile KPI strip (4 × 2) — fleet-wide rule roll-ups -->
           <div class="alerts-kpis">
-            <div class="alerts-kpi">
-              <span class="kpi-label">Total rules</span>
-              <span class="kpi-value">{{ alerts().length }}</span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Active</span>
-              <span class="kpi-value good">{{ ruleStats().active }}</span>
-            </div>
+            <app-metric-card
+              label="Total rules"
+              [value]="alerts().length"
+              dotColor="#0071E3"
+              [caption]="typeCount() + ' alert types'"
+            />
+            <app-metric-card
+              label="Active"
+              [value]="ruleStats().active"
+              [dotColor]="ruleStats().active > 0 ? '#34C759' : ''"
+              [caption]="pct(ruleStats().active, alerts().length) + ' of rules open'"
+            />
             <!-- Inactive rows are almost all incidents the engine raised and then auto-resolved
                  (AutoResolvedAt set) — they used to be counted as "Paused" (1,376 of them). -->
-            <div
-              class="alerts-kpi"
-              [title]="
-                ruleStats().resolved +
-                ' auto-resolved by the engine · ' +
-                ruleStats().paused +
-                ' paused by an operator'
+            <app-metric-card
+              label="Resolved / paused"
+              [value]="ruleStats().resolved"
+              [displayValue]="fmtN(ruleStats().resolved) + ' / ' + fmtN(ruleStats().paused)"
+              [caption]="'auto-resolved / by an operator'"
+            />
+            <app-metric-card
+              label="Critical"
+              [value]="ruleStats().critical"
+              [dotColor]="ruleStats().critical > 0 ? '#FF3B30' : ''"
+              [caption]="pct(ruleStats().critical, alerts().length) + ' of rules'"
+            />
+            <app-metric-card
+              label="High"
+              [value]="ruleStats().high"
+              [dotColor]="ruleStats().high > 0 ? '#FF9500' : ''"
+              [caption]="pct(ruleStats().high, alerts().length) + ' of rules'"
+            />
+            <app-metric-card
+              label="Medium / Info"
+              [value]="ruleStats().mediumOrInfo"
+              [caption]="pct(ruleStats().mediumOrInfo, alerts().length) + ' of rules'"
+            />
+            <app-metric-card
+              label="Symbols covered"
+              [value]="ruleStats().symbolCount"
+              [caption]="'+ ' + fmtN(systemWideCount()) + ' system-wide rules'"
+            />
+            <app-metric-card
+              label="Triggered < 1h"
+              [value]="ruleStats().recentlyTriggered"
+              [dotColor]="ruleStats().recentlyTriggered > 0 ? '#FF3B30' : ''"
+              [caption]="
+                latestTriggeredAt()
+                  ? 'latest ' + (latestTriggeredAt() | relativeTime)
+                  : 'no firings yet'
               "
-            >
-              <span class="kpi-label">Resolved / paused</span>
-              <span class="kpi-value muted-val">
-                {{ ruleStats().resolved }} / {{ ruleStats().paused }}
-              </span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Critical</span>
-              <span class="kpi-value bad">{{ ruleStats().critical }}</span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">High</span>
-              <span class="kpi-value warn">{{ ruleStats().high }}</span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Medium / Info</span>
-              <span class="kpi-value">{{ ruleStats().mediumOrInfo }}</span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Symbols covered</span>
-              <span class="kpi-value">{{ ruleStats().symbolCount }}</span>
-            </div>
-            <div class="alerts-kpi">
-              <span class="kpi-label">Triggered &lt; 1h</span>
-              <span class="kpi-value" [class.warn]="ruleStats().recentlyTriggered > 0">
-                {{ ruleStats().recentlyTriggered }}
-              </span>
-            </div>
+            />
           </div>
 
-          <!-- 3-col chart row: severity donut + by symbol + by alert type -->
+          <!-- 3-col row: severity mix + by symbol + by alert type -->
           <div class="alerts-charts">
-            <app-chart-card
-              title="Severity distribution"
-              [subtitle]="severitySubtitle()"
-              [options]="severityDonutOptions()"
-              height="240px"
-            />
+            <section class="sev-panel">
+              <header class="sev-panel-head">
+                <h3>Severity mix</h3>
+                <p>Share of rules by severity, and how many are still active</p>
+              </header>
+              @if (alerts().length > 0) {
+                <div class="sev-body">
+                  <div class="sev-headline">
+                    <span class="sev-big">{{ fmtN(alerts().length) }}</span>
+                    <span class="sev-big-label">rules</span>
+                  </div>
+                  <div class="sev-stack" role="img" [attr.aria-label]="severitySubtitle()">
+                    @for (row of severityMix(); track row.severity) {
+                      <span
+                        [style.width.%]="row.share"
+                        [style.background]="row.color"
+                        [title]="row.severity + ': ' + fmtN(row.count)"
+                      ></span>
+                    }
+                  </div>
+                  <ul class="sev-rows">
+                    @for (row of severityMix(); track row.severity) {
+                      <li>
+                        <span class="sev-dot" [style.background]="row.color"></span>
+                        <span class="sev-name">{{ row.severity }}</span>
+                        <span class="sev-track">
+                          <i [style.width.%]="row.share" [style.background]="row.color"></i>
+                        </span>
+                        <span class="sev-count">{{ fmtN(row.count) }}</span>
+                        <span class="sev-pct">{{ pct(row.count, alerts().length) }}</span>
+                      </li>
+                    }
+                  </ul>
+                  <div class="sev-foot">
+                    <div class="open-track">
+                      <i [style.width.%]="(ruleStats().active / alerts().length) * 100"></i>
+                    </div>
+                    <div class="open-legend">
+                      <span
+                        ><b>{{ fmtN(ruleStats().active) }}</b> active</span
+                      >
+                      <span
+                        ><b>{{ fmtN(alerts().length - ruleStats().active) }}</b> resolved or
+                        paused</span
+                      >
+                    </div>
+                  </div>
+                </div>
+              } @else {
+                <p class="sev-empty">No rules yet.</p>
+              }
+            </section>
             <app-chart-card
               title="Rules by symbol"
               [subtitle]="bySymbolSubtitle()"
@@ -332,7 +407,8 @@ export const CHANNEL_DEFS: ChannelDef[] = [
           </div>
 
           <!-- Recently triggered feed — a fixed count of rows, no scroll box
-               (the old 320px box showed seven rows and half of an eighth). -->
+               (the old 320px box showed seven rows and half of an eighth). Each
+               row opens the rule's editor, like the old "Open" button did. -->
           @if (recentlyTriggered().length > 0) {
             <section class="recent-trig">
               <header class="rt-head">
@@ -341,20 +417,29 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                   Last {{ recentlyTriggered().length }} firing{{
                     recentlyTriggered().length === 1 ? '' : 's'
                   }}
-                  — newest first
+                  — newest first · click to open
                 </span>
               </header>
               <ul class="rt-list">
                 @for (a of recentlyTriggered(); track a.id) {
-                  <li class="rt-item" [attr.data-sev]="a.severity">
-                    <span class="rt-sev pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
-                    <span class="rt-type mono">{{ a.alertType }}</span>
-                    <span class="rt-symbol mono">{{ a.symbol ?? 'system-wide' }}</span>
-                    <span class="rt-time">
-                      {{ a.lastTriggeredAt ? (a.lastTriggeredAt | relativeTime) : '—' }}
-                    </span>
-                    <span class="rt-cd">cooldown {{ fmtDuration(a.cooldownSeconds) }}</span>
-                    <button class="btn btn-ghost rt-btn" (click)="openEditRule(a)">Open</button>
+                  <li>
+                    <button type="button" class="rt-item" (click)="openEditRule(a)">
+                      <span class="rt-sev">
+                        <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
+                      </span>
+                      <span class="rt-type">{{ a.alertType }}</span>
+                      <span class="rt-symbol" [class.sys]="!a.symbol">{{
+                        a.symbol ?? 'System-wide'
+                      }}</span>
+                      <span class="rt-cond" [title]="summarizeCondition(a.conditionJson)">{{
+                        summarizeCondition(a.conditionJson)
+                      }}</span>
+                      <span class="rt-time">
+                        {{ a.lastTriggeredAt ? (a.lastTriggeredAt | relativeTime) : '—' }}
+                      </span>
+                      <span class="rt-cd">cooldown {{ fmtDuration(a.cooldownSeconds) }}</span>
+                      <span class="rt-open">Open ›</span>
+                    </button>
                   </li>
                 }
               </ul>
@@ -404,92 +489,121 @@ export const CHANNEL_DEFS: ChannelDef[] = [
               (retry)="loadAlerts()"
             />
           } @else if (filteredAlerts().length > 0) {
-            <div class="rules-grid">
-              @for (a of pagedAlerts(); track a.id) {
-                <article class="rule-card" [class.paused]="!a.isActive">
-                  <header class="rule-head">
-                    <div class="rule-title">
-                      <h4>{{ a.alertType }}</h4>
-                      <span class="muted">{{ a.symbol ?? 'system-wide' }}</span>
-                    </div>
-                    <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
-                    @if (!a.isActive) {
-                      @if (a.autoResolvedAt) {
-                        <span
-                          class="pill pill-paused"
-                          [title]="
-                            'Auto-resolved by the engine ' + (a.autoResolvedAt | relativeTime)
-                          "
-                          >Resolved</span
-                        >
-                      } @else {
-                        <span class="pill pill-paused">Paused</span>
-                      }
+            <div class="rules-table-wrap">
+              <table class="rules-table">
+                <thead>
+                  <tr>
+                    <th class="col-sev">Severity</th>
+                    <th class="col-type">Rule type</th>
+                    <th class="col-scope">Scope</th>
+                    <th>Condition</th>
+                    <th class="col-num">Cooldown</th>
+                    <th class="col-when">Last triggered</th>
+                    <th class="col-status">Status</th>
+                    <th class="col-actions"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (a of pagedAlerts(); track a.id) {
+                    <tr [class.inactive]="!a.isActive">
+                      <td class="col-sev">
+                        <span class="pill" [attr.data-sev]="a.severity">{{ a.severity }}</span>
+                      </td>
+                      <td class="col-type">
+                        <span class="rule-type" [title]="a.alertType">{{ a.alertType }}</span>
+                      </td>
+                      <td class="col-scope">
+                        @if (a.symbol) {
+                          <span class="scope-sym">{{ a.symbol }}</span>
+                        } @else {
+                          <span class="scope-sys">System-wide</span>
+                        }
+                      </td>
+                      <!-- One-line human summary of the condition; the raw JSON
+                           is behind a toggle. Nine thousand cards each carrying a
+                           clipped JSON blob was unreadable. -->
+                      <td class="col-cond">
+                        <div class="condition-row">
+                          <span
+                            class="condition-summary"
+                            [title]="summarizeCondition(a.conditionJson)"
+                          >
+                            {{ summarizeCondition(a.conditionJson) }}
+                          </span>
+                          <button
+                            type="button"
+                            class="link-btn"
+                            (click)="toggleJson(a.id)"
+                            [attr.aria-expanded]="isJsonOpen(a.id)"
+                          >
+                            {{ isJsonOpen(a.id) ? 'Hide JSON' : 'JSON' }}
+                          </button>
+                        </div>
+                        @if (a.deduplicationKey) {
+                          <span class="dedup" [title]="'Dedup key: ' + a.deduplicationKey">
+                            {{ a.deduplicationKey }}
+                          </span>
+                        }
+                      </td>
+                      <td class="col-num">{{ fmtDuration(a.cooldownSeconds) }}</td>
+                      <td class="col-when" [title]="a.lastTriggeredAt ?? 'never'">
+                        @if (a.lastTriggeredAt) {
+                          {{ a.lastTriggeredAt | relativeTime }}
+                        } @else {
+                          <span class="dim">never</span>
+                        }
+                      </td>
+                      <td class="col-status">
+                        @if (a.isActive) {
+                          <span class="status-dot on">Active</span>
+                        } @else if (a.autoResolvedAt) {
+                          <span
+                            class="status-dot"
+                            [title]="
+                              'Auto-resolved by the engine ' + (a.autoResolvedAt | relativeTime)
+                            "
+                            >Resolved</span
+                          >
+                        } @else {
+                          <span class="status-dot paused">Paused</span>
+                        }
+                      </td>
+                      <td class="col-actions">
+                        <span class="row-actions">
+                          <button class="row-btn" (click)="openEditRule(a)">Edit</button>
+                          <!-- An auto-resolved incident is closed, not paused: there is nothing to resume
+                               (the engine raises a fresh one if the condition returns). -->
+                          @if (a.isActive || !a.autoResolvedAt) {
+                            <button
+                              class="row-btn"
+                              (click)="askToggleActive(a)"
+                              [disabled]="busy()"
+                            >
+                              {{ a.isActive ? 'Pause' : 'Resume' }}
+                            </button>
+                          }
+                          <button
+                            class="row-btn danger"
+                            (click)="askDeleteRule(a)"
+                            [disabled]="busy()"
+                          >
+                            Delete
+                          </button>
+                        </span>
+                      </td>
+                    </tr>
+                    @if (isJsonOpen(a.id)) {
+                      <tr class="json-row">
+                        <td colspan="8">
+                          <pre class="condition mono">{{
+                            formatConditionJson(a.conditionJson)
+                          }}</pre>
+                        </td>
+                      </tr>
                     }
-                  </header>
-
-                  <!-- One-line human summary of the condition; the raw JSON
-                       is behind a toggle. Nine thousand cards each carrying a
-                       clipped JSON blob was unreadable. -->
-                  <div class="condition-row">
-                    <span class="condition-summary" [title]="summarizeCondition(a.conditionJson)">
-                      {{ summarizeCondition(a.conditionJson) }}
-                    </span>
-                    <button
-                      type="button"
-                      class="link-btn"
-                      (click)="toggleJson(a.id)"
-                      [attr.aria-expanded]="isJsonOpen(a.id)"
-                    >
-                      {{ isJsonOpen(a.id) ? 'Hide JSON' : 'JSON' }}
-                    </button>
-                  </div>
-                  @if (isJsonOpen(a.id)) {
-                    <pre class="condition mono">{{ formatConditionJson(a.conditionJson) }}</pre>
                   }
-
-                  <dl class="rule-meta">
-                    <div>
-                      <dt>Cooldown</dt>
-                      <dd>{{ fmtDuration(a.cooldownSeconds) }}</dd>
-                    </div>
-                    <div>
-                      <dt>Dedup key</dt>
-                      <dd class="trunc" [title]="a.deduplicationKey ?? ''">
-                        {{ a.deduplicationKey ?? '—' }}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Last triggered</dt>
-                      <dd class="trunc" [title]="a.lastTriggeredAt ?? 'never'">
-                        {{ a.lastTriggeredAt ? (a.lastTriggeredAt | relativeTime) : 'never' }}
-                      </dd>
-                    </div>
-                  </dl>
-
-                  <footer class="rule-actions">
-                    <button class="btn btn-ghost" (click)="openEditRule(a)">Edit</button>
-                    <!-- An auto-resolved incident is closed, not paused: there is nothing to resume
-                         (the engine raises a fresh one if the condition returns). -->
-                    @if (a.isActive || !a.autoResolvedAt) {
-                      <button
-                        class="btn btn-ghost"
-                        (click)="askToggleActive(a)"
-                        [disabled]="busy()"
-                      >
-                        {{ a.isActive ? 'Pause' : 'Resume' }}
-                      </button>
-                    }
-                    <button
-                      class="btn btn-destructive"
-                      (click)="askDeleteRule(a)"
-                      [disabled]="busy()"
-                    >
-                      Delete
-                    </button>
-                  </footer>
-                </article>
-              }
+                </tbody>
+              </table>
             </div>
 
             <!-- Pagination — client-side over filteredAlerts. Total respects
@@ -533,7 +647,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                 class="input pager-size"
                 [ngModel]="rulesPageSize()"
                 (ngModelChange)="onPageSizeChange($event)"
-                aria-label="Cards per page"
+                aria-label="Rules per page"
               >
                 <option [ngValue]="12">12 / page</option>
                 <option [ngValue]="24">24 / page</option>
@@ -755,7 +869,9 @@ export const CHANNEL_DEFS: ChannelDef[] = [
                           >
                             <option value="">Default ({{ f.defaultValue }})</option>
                             @for (o of f.options ?? []; track o) {
-                              <option [value]="o" [selected]="getValue(f.key) === o">{{ o }}</option>
+                              <option [value]="o" [selected]="getValue(f.key) === o">
+                                {{ o }}
+                              </option>
                             }
                           </select>
                         } @else {
@@ -940,816 +1056,7 @@ export const CHANNEL_DEFS: ChannelDef[] = [
       />
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        border: none;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      .btn-ghost {
-        background: transparent;
-        border: 1px solid var(--border);
-      }
-      /* Outline danger — red text on a red tint read as a disabled button. */
-      .btn-destructive {
-        background: transparent;
-        color: var(--loss);
-        border: 1px solid var(--loss);
-      }
-      .btn-destructive:hover:not(:disabled) {
-        background: rgba(255, 59, 48, 0.08);
-      }
-      .link-btn {
-        background: transparent;
-        border: none;
-        padding: 0;
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--accent);
-        cursor: pointer;
-        font-family: inherit;
-        white-space: nowrap;
-      }
-      .link-btn:hover {
-        text-decoration: underline;
-      }
-      .input {
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      textarea.input {
-        height: auto;
-        padding: var(--space-2) var(--space-3);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-        resize: vertical;
-      }
-      .req {
-        color: var(--loss);
-        margin-left: 2px;
-      }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-
-      .rules-toolbar {
-        display: flex;
-        gap: var(--space-3);
-        align-items: center;
-        flex-wrap: wrap;
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--space-3);
-      }
-      .spacer {
-        flex: 1;
-      }
-      /* Wide enough for its own placeholder ("Search symbol or dedup key…"). */
-      .rules-search {
-        flex: 1 1 280px;
-        min-width: 260px;
-        max-width: 420px;
-      }
-
-      /* Alerts-page density additions. Eight tiles as two rows of four, so
-         labels stay on one line and tiles match the width used elsewhere. */
-      .alerts-kpis {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin-bottom: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 720px) {
-        .alerts-kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .alerts-kpi {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .alerts-kpi .kpi-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .alerts-kpi .kpi-value {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .alerts-kpi .kpi-value.good {
-        color: var(--profit);
-      }
-      .alerts-kpi .kpi-value.bad {
-        color: var(--loss);
-      }
-      .alerts-kpi .kpi-value.warn {
-        color: #c93400;
-      }
-      .alerts-kpi .kpi-value.muted-val {
-        color: var(--text-tertiary);
-      }
-
-      .alerts-charts {
-        display: grid;
-        grid-template-columns: 1fr 1.2fr 1.4fr;
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .alerts-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .recent-trig {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-        margin-bottom: var(--space-3);
-      }
-      .rt-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .rt-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .rt-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-      .rt-item {
-        display: grid;
-        grid-template-columns: 90px 1.4fr 1fr 1fr 1fr 80px;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 8px var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .rt-item:last-child {
-        border-bottom: none;
-      }
-      .rt-sev {
-        text-align: center;
-      }
-      .rt-type {
-        font-weight: var(--font-semibold);
-      }
-      .rt-cd {
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .rt-time {
-        color: var(--text-secondary);
-      }
-      .rt-btn {
-        padding: 4px 12px;
-        height: 26px;
-        font-size: 11px;
-      }
-
-      /* Rules-grid pagination */
-      .rules-pager {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        margin-top: var(--space-4);
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        flex-wrap: wrap;
-      }
-      .pager-controls {
-        display: flex;
-        gap: 4px;
-        align-items: center;
-      }
-      .pager-btn {
-        height: 30px;
-        min-width: 32px;
-        padding: 0 var(--space-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        font-size: 12px;
-        font-weight: var(--font-medium);
-      }
-      .pager-btn:hover:not(:disabled) {
-        color: var(--text-primary);
-        border-color: var(--text-tertiary);
-      }
-      .pager-btn.active {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .pager-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      .pager-ellipsis {
-        padding: 0 var(--space-1);
-        color: var(--text-tertiary);
-        font-size: 12px;
-      }
-      .pager-size {
-        height: 30px;
-        padding: 0 var(--space-2);
-        font-size: 12px;
-      }
-
-      /* Channels-tab density additions */
-      .ch-kpis {
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-      }
-      @media (max-width: 1100px) {
-        .ch-kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 600px) {
-        .ch-kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      .ch-toolbar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--space-3);
-        flex-wrap: wrap;
-      }
-      .ch-toolbar .channel-intro {
-        margin: 0;
-        flex: 1;
-      }
-      .ch-actions {
-        display: flex;
-        gap: var(--space-2);
-      }
-
-      .ch-history {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-        margin-bottom: var(--space-3);
-      }
-      .ch-history-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .ch-history-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .ch-clear {
-        margin-left: auto;
-        height: 26px;
-        padding: 0 var(--space-3);
-        font-size: 11px;
-      }
-      .ch-history-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 240px;
-        overflow-y: auto;
-      }
-      .ch-history-item {
-        display: grid;
-        grid-template-columns: 24px 100px 1fr auto;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 6px var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .ch-history-item:last-child {
-        border-bottom: none;
-      }
-      .ch-history-item[data-ok='true'] .ch-row-icon {
-        color: var(--profit);
-        font-weight: var(--font-bold);
-      }
-      .ch-history-item[data-ok='false'] .ch-row-icon {
-        color: var(--loss);
-        font-weight: var(--font-bold);
-      }
-      .ch-row-channel {
-        font-weight: var(--font-semibold);
-      }
-      .ch-row-dest {
-        color: var(--text-secondary);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .ch-row-time {
-        color: var(--text-tertiary);
-      }
-
-      /* Per-card completeness row */
-      .ch-fillrow {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-2) 0;
-        border-bottom: 1px solid var(--border);
-        margin-bottom: var(--space-3);
-        flex-wrap: wrap;
-      }
-      .ch-fill {
-        flex: 1;
-        min-width: 160px;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .ch-fill-track {
-        height: 4px;
-        background: var(--bg-tertiary);
-        border-radius: 2px;
-        overflow: hidden;
-      }
-      .ch-fill-bar {
-        height: 100%;
-        background: var(--accent);
-        transition: width 0.2s ease;
-      }
-      .ch-fill-bar.full {
-        background: var(--profit);
-      }
-      .ch-fill-label {
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .ch-dirty {
-        font-size: 10px;
-        font-weight: var(--font-bold);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-        letter-spacing: 0.04em;
-      }
-      .ch-timeout {
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-
-      .rules-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-        gap: var(--space-4);
-      }
-      .rule-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .rule-card.paused {
-        opacity: 0.65;
-      }
-      .rule-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .rule-title {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .rule-title h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .pill {
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .pill[data-sev='Critical'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .pill[data-sev='High'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-      }
-      .pill[data-sev='Medium'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--accent);
-      }
-      .pill[data-sev='Info'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .pill-paused {
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .pill[data-state='on'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .pill[data-state='off'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: #c93400;
-      }
-      /* Configured but switched off: credentials exist, nothing is sent. */
-      .pill[data-state='disabled'] {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .condition-row {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-2);
-        min-width: 0;
-      }
-      .condition-summary {
-        flex: 1;
-        min-width: 0;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .condition {
-        margin: 0;
-        padding: var(--space-2) var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
-        color: var(--text-primary);
-        white-space: pre-wrap;
-        word-break: break-word;
-        max-height: 220px;
-        overflow: auto;
-      }
-      .rule-meta {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin: 0;
-      }
-      .rule-meta > div {
-        min-width: 0;
-      }
-      .rule-meta dt {
-        font-size: 10px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .rule-meta dd {
-        margin: 2px 0 0;
-        font-size: var(--text-xs);
-        color: var(--text-primary);
-      }
-      .rule-meta dd.trunc {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .rule-actions {
-        display: flex;
-        gap: var(--space-2);
-        justify-content: flex-end;
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--border);
-      }
-
-      .channel-intro {
-        max-width: 60ch;
-      }
-      .channel-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-        gap: var(--space-4);
-      }
-      .channel-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        transition:
-          opacity 0.15s ease,
-          border-color 0.15s ease;
-      }
-      /* When the channel is disabled, dim the body and tint the border so it's
-         visually obvious without hiding any controls. */
-      .channel-card.channel-disabled {
-        opacity: 0.65;
-        border-color: rgba(255, 149, 0, 0.45);
-      }
-      .channel-card.channel-disabled .channel-fields,
-      .channel-card.channel-disabled .channel-preview,
-      .channel-card.channel-disabled .ch-fillrow {
-        opacity: 0.7;
-      }
-      .channel-head {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .channel-head-row {
-        display: flex;
-        gap: var(--space-2);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .channel-head h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        flex: 1;
-        min-width: 0;
-      }
-      .channel-head-row .ch-toggle {
-        margin-left: auto;
-      }
-      .channel-desc {
-        margin: 0;
-      }
-
-      /* Per-channel enable/disable toggle (iOS-style switch). */
-      .ch-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-        user-select: none;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-      }
-      .ch-toggle input {
-        position: absolute;
-        opacity: 0;
-        pointer-events: none;
-        width: 0;
-        height: 0;
-      }
-      .ch-toggle-track {
-        position: relative;
-        display: inline-block;
-        width: 32px;
-        height: 18px;
-        background: var(--text-tertiary);
-        border-radius: 999px;
-        transition: background 0.15s ease;
-      }
-      .ch-toggle-thumb {
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 14px;
-        height: 14px;
-        background: #fff;
-        border-radius: 50%;
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-        transition: transform 0.15s ease;
-      }
-      .ch-toggle.on .ch-toggle-track {
-        background: var(--profit, #34c759);
-      }
-      .ch-toggle.on .ch-toggle-thumb {
-        transform: translateX(14px);
-      }
-      .ch-toggle.on .ch-toggle-label {
-        color: var(--profit, #248a3d);
-      }
-      .ch-toggle.off .ch-toggle-label {
-        color: #c93400;
-      }
-      .ch-toggle:has(input:disabled) {
-        cursor: not-allowed;
-        opacity: 0.5;
-      }
-      .ch-toggle:focus-within .ch-toggle-track {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-      .channel-preview {
-        padding: 4px var(--space-3);
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      /* minmax(0, 1fr) + width:100% on the inputs: a grid track defaults to
-         min-content width, so a text input's intrinsic size pushed the
-         right-hand column (PORT / PASSWORD / TIMEOUT / CHAT ID) past the
-         card border. */
-      .channel-fields {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--space-3);
-      }
-      .channel-fields .field-checkbox {
-        grid-column: 1 / -1;
-      }
-      .channel-fields .input {
-        width: 100%;
-        min-width: 0;
-        box-sizing: border-box;
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 0;
-      }
-      .field-checkbox {
-        flex-direction: row;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .field-label {
-        font-size: 11px;
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .hint {
-        font-size: 10.5px;
-      }
-      .channel-actions {
-        display: flex;
-        gap: var(--space-2);
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--border);
-      }
-      .test-result {
-        font-size: var(--text-xs);
-        padding: var(--space-2) var(--space-3);
-        border-radius: var(--radius-sm);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .test-result[data-ok='true'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: #248a3d;
-      }
-      .test-result[data-ok='false'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-
-      .modal-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 100;
-      }
-      .modal {
-        width: 100%;
-        max-width: 560px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        max-height: 90vh;
-        overflow: auto;
-      }
-      .modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .modal-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-      }
-      .btn-close {
-        background: transparent;
-        border: none;
-        font-size: 22px;
-        cursor: pointer;
-        color: var(--text-tertiary);
-      }
-      .rule-form {
-        padding: var(--space-4) var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .form-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-      }
-      .modal-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-2);
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--border);
-      }
-    `,
-  ],
+  styleUrls: ['./alerts-page.component.scss', './alerts-page.rules.scss'],
 })
 export class AlertsPageComponent {
   private readonly alertsService = inject(AlertsService);
@@ -1909,35 +1216,40 @@ export class AlertsPageComponent {
     };
   });
 
-  severityDonutOptions = computed<EChartsOption>(() => {
+  /**
+   * The severity-mix panel (replaces the donut): one row per severity present, in
+   * Critical → Info order, with its count and share of all rules.
+   */
+  readonly severityMix = computed(() => {
     const counts: Record<string, number> = { Critical: 0, High: 0, Medium: 0, Info: 0 };
-    for (const a of this.alerts()) {
-      counts[a.severity] = (counts[a.severity] ?? 0) + 1;
-    }
-    if (this.alerts().length === 0) return {};
-    const colors: Record<string, string> = {
-      Critical: '#FF3B30',
-      High: '#FF9500',
-      Medium: '#5AC8FA',
-      Info: '#8E8E93',
-    };
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: Object.entries(counts)
-            .map(([k, v]) => ({ name: k, value: v, itemStyle: { color: colors[k] } }))
-            .filter((d) => d.value > 0),
-        },
-      ],
-    };
+    for (const a of this.alerts()) counts[a.severity] = (counts[a.severity] ?? 0) + 1;
+    const total = this.alerts().length;
+    return SEVERITY_DISPLAY_ORDER.filter((sev) => counts[sev] > 0).map((sev) => ({
+      severity: sev,
+      count: counts[sev],
+      share: total > 0 ? (counts[sev] / total) * 100 : 0,
+      color: SEVERITY_COLOR[sev],
+    }));
   });
+
+  /** Distinct alert types among the rules — the "Total rules" tile caption. */
+  readonly typeCount = computed(() => new Set(this.alerts().map((a) => a.alertType)).size);
+
+  /** Rules with no symbol (fleet-wide) — not counted by "Symbols covered". */
+  readonly systemWideCount = computed(() => this.alerts().filter((a) => !a.symbol).length);
+
+  /** Newest firing across all rules, for the "Triggered < 1h" caption. */
+  readonly latestTriggeredAt = computed(() => this.recentlyTriggered()[0]?.lastTriggeredAt ?? '');
+
+  fmtN(n: number): string {
+    return NUMBER_FMT.format(n);
+  }
+
+  pct(n: number, total: number): string {
+    if (total <= 0) return '0%';
+    const p = (n / total) * 100;
+    return p > 0 && p < 1 ? '<1%' : `${p.toFixed(0)}%`;
+  }
 
   bySymbolOptions = computed<EChartsOption>(() => {
     const map: Record<string, number> = {};

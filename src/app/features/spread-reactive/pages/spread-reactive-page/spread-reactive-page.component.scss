@@ -1,0 +1,470 @@
+/*
+ * Fill the viewport width — no max-width cap, no centering.  The
+ * embedded SL audit table is wide (15 cols) and the operator
+ * wants the whole viewport for content.  Padding stays at
+ * var(--space-4) so content isn't pressed against the screen
+ * edges, and min-width: 0 lets the contained grid + table shrink
+ * past their natural intrinsic width when the viewport is narrow.
+ */
+.page {
+  width: 100%;
+  padding: var(--space-4, 16px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+  min-width: 0;
+}
+.muted {
+  color: var(--text-secondary, var(--text-muted, #888));
+}
+.small {
+  font-size: 0.85em;
+}
+.state-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--radius-full, 999px);
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  margin-right: 8px;
+}
+.state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+}
+.state-badge.on {
+  background: color-mix(in srgb, var(--profit) 14%, transparent);
+  color: var(--profit);
+}
+.state-badge.on .state-dot {
+  background: var(--profit);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--profit) 22%, transparent);
+}
+/* Enable = primary action; Disable = quiet destructive button. */
+.power-btn {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: var(--text-sm, 13px);
+  font-weight: 600;
+}
+.power-btn.on {
+  background: var(--bg-primary);
+  border-color: var(--border);
+  color: var(--loss);
+}
+.power-btn.on:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--loss) 8%, transparent);
+  border-color: color-mix(in srgb, var(--loss) 40%, transparent);
+}
+.power-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.card {
+  background: var(--bg-secondary, var(--card-bg, #fff));
+  border: 1px solid var(--border, #e3e3e3);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--card-padding, 14px 16px);
+  box-shadow: var(--shadow-sm);
+}
+/* ── Live state ── */
+.sr-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3, 12px);
+}
+@media (max-width: 900px) {
+  .sr-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+/* The table card runs edge to edge: the head, notes and pager carry their own padding. */
+.card.state-card {
+  padding: 0;
+  overflow: hidden;
+}
+.count-chip {
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold, 600);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full, 999px);
+  padding: 1px 8px;
+}
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: var(--space-2, 8px);
+  padding: var(--space-8, 40px) var(--space-6, 24px);
+}
+.empty-state h3 {
+  margin: 0;
+  font-size: var(--text-base, 15px);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.empty-state p {
+  margin: 0 0 var(--space-2, 8px);
+  max-width: 560px;
+  font-size: var(--text-sm, 13px);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.empty-icon {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--text-tertiary);
+}
+.empty-icon.pulse {
+  width: 12px;
+  height: 12px;
+  margin-bottom: var(--space-2, 8px);
+  border-radius: 50%;
+  background: var(--warning);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--warning) 20%, transparent);
+}
+.unsampled-note {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4, 16px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-top: 1px solid var(--border);
+  background: var(--bg-primary);
+}
+.unsampled-note .btn {
+  flex: none;
+}
+/* Configuration grid — 2 columns on wide screens, single-column
+   on narrow.  440px min-width matches the EA detail page's
+   positions+orders grid so cards feel consistent across pages. */
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  gap: var(--space-4, 16px);
+}
+.config-grid > .card {
+  margin: 0;
+}
+.card h2 {
+  margin: 0 0 4px;
+  font-size: 1.05em;
+}
+.grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-top: 10px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field > span {
+  font-weight: 600;
+  font-size: 0.9em;
+}
+/* Dark inputs on the app surface tokens — var(--input-bg, #fff) fell
+   through to white with pale values, unreadable on the dark theme. */
+.field input,
+.field select {
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+.actions-row {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  /* Right padding clears the floating "Ask" assistant pill (fixed, bottom-right,
+     ~100px wide): it sat squarely on top of Save in this sticky footer. */
+  padding: 10px var(--assistant-fab-clearance, 132px) 10px 14px;
+  margin: 0 calc(-1 * var(--space-4, 16px)) calc(-1 * var(--space-4, 16px));
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+.actions-row.dirty {
+  border-top-color: var(--warning);
+}
+.actions-row .muted {
+  margin-right: auto;
+}
+.btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: var(--text-sm, 13px);
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.btn:hover:not(:disabled):not(.primary) {
+  background: var(--bg-tertiary);
+}
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.banner {
+  padding: 10px 14px;
+  border-radius: 6px;
+}
+/* Theme tokens: the light-only pink / mint fallbacks (no --error-bg or
+   --success-bg token exists) painted pale slabs on the dark theme. */
+.banner.error {
+  background: color-mix(in srgb, var(--loss) 12%, transparent);
+  color: var(--loss);
+}
+.banner.ok {
+  background: color-mix(in srgb, var(--profit) 14%, transparent);
+  color: var(--profit);
+}
+.status-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-bottom: 1px solid var(--border);
+}
+.status-head h2 {
+  margin: 0;
+  font-size: var(--text-base, 15px);
+}
+.status-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.state-filter {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-full, 999px);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm, 13px);
+  min-width: 200px;
+}
+.state-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-tertiary);
+  font-size: var(--text-sm, 13px);
+}
+.summary-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.summary-item.warn {
+  color: var(--warning);
+  font-weight: 600;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: var(--space-2, 8px) var(--space-4, 16px);
+  border-top: 1px solid var(--border);
+}
+.pager .pages {
+  display: inline-flex;
+  gap: var(--space-1, 4px);
+}
+.pager .btn {
+  padding: 4px 10px;
+  font-size: var(--text-xs, 12px);
+}
+.tab-badge.dirty {
+  background: color-mix(in srgb, var(--warning) 22%, transparent);
+  color: var(--warning);
+}
+.condition-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-full, 999px);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  background: var(--bg-tertiary, #eee);
+  color: var(--text-secondary, #555);
+}
+.condition-pill.warming {
+  background: color-mix(in srgb, #9aa0a6 22%, transparent);
+  color: #555e66;
+}
+.condition-pill.normal {
+  background: color-mix(in srgb, #1d8a3e 22%, transparent);
+  color: #1d8a3e;
+}
+.condition-pill.elevated {
+  background: color-mix(in srgb, #ff453a 22%, transparent);
+  color: #c93631;
+}
+.decided-on {
+  display: block;
+  margin-top: 2px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.state-table-wrap {
+  overflow-x: auto;
+}
+.state-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.state-table th,
+.state-table td {
+  padding: 8px var(--space-3, 12px);
+  text-align: left;
+  border-bottom: 1px solid var(--border, #eee);
+  white-space: nowrap;
+  font-size: var(--text-sm, 13px);
+}
+.state-table th:first-child,
+.state-table td:first-child {
+  padding-left: var(--space-4, 16px);
+}
+.state-table th:last-child,
+.state-table td:last-child {
+  padding-right: var(--space-4, 16px);
+}
+.state-table th {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  background: var(--bg-primary);
+}
+.state-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.state-table tbody tr:hover td {
+  background: var(--bg-primary);
+}
+.state-table .dim {
+  color: var(--text-tertiary);
+}
+.state-table .strong {
+  font-weight: 600;
+}
+.state-table .num {
+  text-align: right;
+}
+.state-table .mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.state-table .small {
+  font-size: 0.85em;
+}
+.row-elevated {
+  background: color-mix(in srgb, #ff453a 6%, transparent);
+}
+/* Tabs — underline-style with the same accent the page-header uses.
+   The page's flex gap (var(--space-4)) handles the breathing room
+   between this strip and the section card below; no negative margin. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border, #e3e3e3);
+  padding: 0;
+}
+.tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 10px 16px;
+  font-size: var(--text-sm, 14px);
+  font-weight: var(--font-medium, 500);
+  color: var(--text-secondary, #666);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    color 120ms,
+    border-color 120ms;
+}
+.tab:hover {
+  color: var(--text-primary, #222);
+}
+.tab.active {
+  color: var(--text-primary, #222);
+  border-bottom-color: var(--accent, #0a84ff);
+}
+.tab-count {
+  background: var(--bg-tertiary, #eee);
+  color: var(--text-secondary, #666);
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.tab-badge {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.tab-badge.elevated {
+  background: color-mix(in srgb, #ff453a 22%, transparent);
+  color: #c93631;
+}
+.btn.ghost {
+  background: transparent;
+}
+.floor-source-tag {
+  margin-left: 4px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #0a84ff 22%, transparent);
+  color: #0863c1;
+  font-size: 10px;
+  font-weight: 700;
+}

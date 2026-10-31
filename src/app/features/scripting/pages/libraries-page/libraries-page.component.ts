@@ -124,28 +124,35 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         <button type="button" class="btn btn-primary" (click)="startNew()">+ New library</button>
       </app-page-header>
 
-      <div class="filters">
-        <input
-          class="field-input"
-          type="search"
-          placeholder="Publisher"
-          [value]="publisherFilter()"
-          (change)="publisherFilter.set($any($event.target).value.trim()); load()"
-          aria-label="Filter by publisher"
-        />
-        <input
-          class="field-input"
-          type="search"
-          placeholder="Name"
-          [value]="nameFilter()"
-          (change)="nameFilter.set($any($event.target).value.trim()); load()"
-          aria-label="Filter by name"
-        />
+      <div class="filters" role="search">
+        <label class="search-box">
+          <span class="sr-only">Filter by publisher</span>
+          <input
+            class="field-input"
+            type="search"
+            placeholder="Publisher"
+            [value]="publisherFilter()"
+            (change)="publisherFilter.set($any($event.target).value.trim()); load()"
+            aria-label="Filter by publisher"
+          />
+        </label>
+        <label class="search-box">
+          <span class="sr-only">Filter by name</span>
+          <input
+            class="field-input"
+            type="search"
+            placeholder="Name"
+            [value]="nameFilter()"
+            (change)="nameFilter.set($any($event.target).value.trim()); load()"
+            aria-label="Filter by name"
+          />
+        </label>
         @if (myPublisher(); as me) {
           <button
             type="button"
-            class="btn btn-sm"
-            [class.btn-primary]="publisherFilter() === me"
+            class="toggle"
+            [class.on]="publisherFilter() === me"
+            [attr.aria-pressed]="publisherFilter() === me"
             (click)="toggleMine(me)"
             [title]="'Only libraries published as ' + me"
           >
@@ -153,8 +160,16 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
           </button>
         }
         <span class="grow"></span>
-        <button type="button" class="btn btn-ghost btn-sm" (click)="load()" [disabled]="loading()">
-          Refresh
+        <span class="list-count"
+          >{{ libraries().length }} {{ libraries().length === 1 ? 'library' : 'libraries' }}</span
+        >
+        <button
+          type="button"
+          class="btn btn-outline btn-sm"
+          (click)="load()"
+          [disabled]="loading()"
+        >
+          <span aria-hidden="true" [class.spin]="loading()">↻</span> Refresh
         </button>
       </div>
 
@@ -185,18 +200,18 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
                   }}</span>
                 }
                 @if (lib.exports?.length) {
-                  <span class="muted small">{{ lib.exports!.length }} exports</span>
+                  <span class="meta-text">{{ lib.exports!.length }} exports</span>
+                }
+                <!-- Built-in libraries ship with the engine and carry the Unix epoch as their
+                     timestamp, which read "almost 57 years ago". -->
+                @if (lib.updatedAt && !isBuiltin(lib) && hasRealTimestamp(lib.updatedAt)) {
+                  <span class="meta-text when">{{ lib.updatedAt | relativeTime }}</span>
+                } @else if (isBuiltin(lib)) {
+                  <span class="meta-text when">Ships with the engine</span>
                 }
               </span>
               @if (lib.description) {
                 <span class="lib-desc">{{ lib.description }}</span>
-              }
-              <!-- Built-in libraries ship with the engine and carry the Unix epoch as their
-                   timestamp, which read "almost 57 years ago". -->
-              @if (lib.updatedAt && !isBuiltin(lib) && hasRealTimestamp(lib.updatedAt)) {
-                <span class="muted small">{{ lib.updatedAt | relativeTime }}</span>
-              } @else if (isBuiltin(lib)) {
-                <span class="muted small">Ships with the engine</span>
               }
             </button>
           }
@@ -587,12 +602,79 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
       .filters {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 8px 10px;
         margin-bottom: 12px;
         flex-wrap: wrap;
+        padding: 10px 12px;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md, 12px);
+        box-shadow: var(--shadow-sm);
       }
-      .filters .field-input {
+      .search-box {
+        position: relative;
         width: 200px;
+      }
+      .search-box::before {
+        content: '⌕';
+        position: absolute;
+        left: 11px;
+        top: 50%;
+        transform: translateY(-52%);
+        color: var(--text-tertiary);
+        font-size: 15px;
+        pointer-events: none;
+      }
+      .search-box .field-input {
+        width: 100%;
+        height: 32px;
+        padding-left: 30px;
+        border-radius: var(--radius-full);
+      }
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+      }
+      .toggle {
+        display: inline-flex;
+        align-items: center;
+        height: 32px;
+        padding: 0 14px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: 12px;
+        font-weight: var(--font-medium);
+        cursor: pointer;
+      }
+      .toggle:hover {
+        color: var(--text-primary);
+      }
+      .toggle.on {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.08);
+      }
+      .list-count {
+        font-size: 12px;
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .btn-outline {
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        height: 32px;
+      }
+      .spin {
+        display: inline-block;
+        animation: sx-spin 0.7s linear infinite;
       }
       .grow {
         flex: 1;
@@ -623,6 +705,7 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         display: flex;
         flex-direction: column;
         gap: 6px;
+        padding: 2px 4px 2px 2px;
         min-height: 0;
         overflow-y: auto;
       }
@@ -637,26 +720,32 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
       .lib-row {
         display: flex;
         flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
+        align-items: stretch;
+        gap: 5px;
+        flex-shrink: 0;
         padding: 10px 12px;
         border: 1px solid var(--border);
-        border-radius: 10px;
-        background: var(--bg-primary);
+        border-radius: var(--radius-md, 12px);
+        background: var(--bg-secondary);
         color: var(--text-primary);
         font: inherit;
         text-align: left;
         cursor: pointer;
+        transition:
+          border-color 0.12s ease,
+          box-shadow 0.12s ease;
       }
       .lib-row:hover {
-        background: var(--bg-secondary);
+        border-color: var(--text-tertiary);
       }
       .lib-row.is-selected {
         border-color: var(--accent);
-        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.12);
+        box-shadow:
+          inset 3px 0 0 var(--accent),
+          0 0 0 3px rgba(0, 113, 227, 0.1);
       }
       .lib-path {
-        font-size: 13px;
+        font-size: 12.5px;
         font-weight: 600;
       }
       .lib-meta {
@@ -665,8 +754,23 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         gap: 6px;
         flex-wrap: wrap;
       }
+      .lib-meta .chip,
+      .detail-head .chip {
+        height: 18px;
+        padding: 0 7px;
+        font-size: 10.5px;
+      }
+      .meta-text {
+        font-size: 11px;
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .meta-text.when {
+        margin-left: auto;
+      }
       .lib-desc {
         font-size: 12px;
+        line-height: 1.45;
         color: var(--text-secondary);
         display: -webkit-box;
         -webkit-line-clamp: 2;
@@ -674,13 +778,14 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         overflow: hidden;
       }
       .panel {
-        background: var(--bg-primary);
+        background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md, 12px);
+        box-shadow: var(--shadow-sm);
         padding: 16px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 12px;
         flex: 1;
         min-height: 0;
         overflow-y: auto;
@@ -712,18 +817,23 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         gap: 8px;
         flex-wrap: wrap;
       }
+      .detail-head .panel-title {
+        font-size: 16px;
+      }
       .desc {
         margin: 0;
+        max-width: 90ch;
         font-size: 13px;
+        line-height: 1.5;
         color: var(--text-secondary);
       }
       .import-line {
         display: flex;
         align-items: center;
         gap: 8px;
-        padding: 6px 10px;
+        padding: 4px 6px 4px 12px;
         border-radius: 8px;
-        background: var(--bg-secondary);
+        background: var(--bg-primary);
         border: 1px solid var(--border);
       }
       .import-line code {
@@ -764,9 +874,11 @@ const DRAFT_UNSAVED = 'The library draft has unsaved changes';
         vertical-align: top;
       }
       .exports th {
-        font-size: 11px;
+        font-size: 10.5px;
         font-weight: 600;
-        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
       }
       .draft-fields {
         display: grid;
