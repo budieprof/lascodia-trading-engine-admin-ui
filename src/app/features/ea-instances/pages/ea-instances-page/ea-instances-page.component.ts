@@ -1,8 +1,8 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { catchError, map, of, switchMap } from 'rxjs';
+import { catchError, from, map, mergeMap, of, switchMap, toArray } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { EAAdminService } from '@core/services/ea-admin.service';
@@ -28,6 +28,7 @@ import {
   fleetStatusOf,
   type FleetStatus,
 } from '../../current-fleet';
+import { verdictTone, wantsHealth } from '../../selfheal/selfheal.logic';
 
 /**
  * 'current' (the default) = every live instance (Active, or ShuttingDown inside the liveness
@@ -225,9 +226,16 @@ const STATUS_RANK: Record<FleetStatus, number> = {
                     <span class="status-dot" [attr.data-status]="statusOf(i)"></span>
                     <h4 [title]="i.instanceId">{{ i.instanceId }}</h4>
                   </div>
-                  <span class="pill" [attr.data-status]="statusOf(i)">{{
-                    statusLabel(statusOf(i))
-                  }}</span>
+                  <span class="head-pills">
+                    @if (healthOf(i); as h) {
+                      <span class="health-pill" [attr.data-tone]="h.tone" [title]="h.title">{{
+                        h.verdict
+                      }}</span>
+                    }
+                    <span class="pill" [attr.data-status]="statusOf(i)">{{
+                      statusLabel(statusOf(i))
+                    }}</span>
+                  </span>
                 </header>
                 <dl class="info">
                   <div>
@@ -316,6 +324,7 @@ const STATUS_RANK: Record<FleetStatus, number> = {
               <thead>
                 <tr>
                   <th>Status</th>
+                  <th>Health</th>
                   <th>Instance</th>
                   <th>Account</th>
                   <th class="num">Equity</th>
@@ -339,6 +348,15 @@ const STATUS_RANK: Record<FleetStatus, number> = {
                       <span class="pill" [attr.data-status]="statusOf(i)">
                         {{ statusLabel(statusOf(i)) }}
                       </span>
+                    </td>
+                    <td>
+                      @if (healthOf(i); as h) {
+                        <span class="health-pill" [attr.data-tone]="h.tone" [title]="h.title">{{
+                          h.verdict
+                        }}</span>
+                      } @else {
+                        <span class="muted">—</span>
+                      }
                     </td>
                     <td class="mono name" [title]="i.instanceId">{{ i.instanceId }}</td>
                     <td class="mono">{{ i.tradingAccountId }}</td>
@@ -693,6 +711,32 @@ const STATUS_RANK: Record<FleetStatus, number> = {
       .status-dot[data-status='Disconnected'] {
         background: var(--loss);
       }
+      .head-pills {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+      }
+      .health-pill {
+        font-size: var(--text-xs);
+        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        font-weight: var(--font-semibold);
+        background: rgba(120, 120, 128, 0.14);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .health-pill[data-tone='ok'] {
+        background: rgba(52, 199, 89, 0.14);
+        color: var(--tone-green);
+      }
+      .health-pill[data-tone='warn'] {
+        background: rgba(255, 149, 0, 0.14);
+        color: var(--tone-amber);
+      }
+      .health-pill[data-tone='bad'] {
+        background: rgba(255, 59, 48, 0.14);
+        color: var(--tone-red);
+      }
       .pill {
         padding: 2px 8px;
         border-radius: var(--radius-full);
@@ -976,6 +1020,60 @@ export class EAInstancesPageComponent {
       refreshOn: ['positionOpened', 'positionClosed', 'orderFilled', 'emergencyFlatten'],
     },
   );
+
+  /**
+   * The engine's health verdict per row (self-heal C7 `health`). One request per recent instance
+   * (heartbeat in the last 7 days, not deregistered), four at a time, once a minute; a row whose
+   * check fails just shows no verdict.
+   */
+  private readonly healthResource = createPolledResource(
+    () => {
+      const now = Date.now();
+      const ids = (this.resource.value() ?? [])
+        .filter((r) => wantsHealth(r, now))
+        .map((r) => r.instanceId)
+        .slice(0, 40);
+      if (ids.length === 0) return of(new Map<string, RowHealth>());
+      return from(ids).pipe(
+        mergeMap(
+          (id) =>
+            this.admin.getHealth(id).pipe(
+              map((r) => (r.status && r.data ? ([id, r.data] as const) : null)),
+              catchError(() => of(null)),
+            ),
+          4,
+        ),
+        toArray(),
+        map((pairs) => {
+          const m = new Map<string, RowHealth>();
+          for (const p of pairs) {
+            if (!p) continue;
+            const [id, h] = p;
+            const worst = h.problems.find((x) => x.severity === 'error') ?? h.problems[0];
+            m.set(id, {
+              verdict: h.verdict,
+              tone: verdictTone(h.verdict),
+              title: worst ? worst.text : 'No problems.',
+            });
+          }
+          return m;
+        }),
+      );
+    },
+    { intervalMs: 60_000, equal: (a, b) => sameHealth(a, b) },
+  );
+
+  /** Refetch verdicts once the fleet list first arrives (the first run saw an empty list). */
+  private healthPrimed = false;
+  private readonly _primeHealth = effect(() => {
+    if (this.healthPrimed || (this.resource.value() ?? []).length === 0) return;
+    this.healthPrimed = true;
+    this.healthResource.refresh();
+  });
+
+  protected healthOf(i: EAFleetItem): RowHealth | null {
+    return this.healthResource.value()?.get(i.instanceId) ?? null;
+  }
 
   /**
    * Phase-3A: refresh the fleet list after a fan-out completes so the
@@ -1405,4 +1503,20 @@ export class EAInstancesPageComponent {
     if (!a?.lastSyncedAt) return 'No broker snapshot yet';
     return `Last broker sync: ${new Date(a.lastSyncedAt).toLocaleString()}`;
   }
+}
+
+interface RowHealth {
+  verdict: string;
+  tone: string;
+  title: string;
+}
+
+function sameHealth(a: Map<string, RowHealth> | null, b: Map<string, RowHealth> | null): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.size !== b.size) return false;
+  for (const [k, v] of a) {
+    const w = b.get(k);
+    if (!w || w.verdict !== v.verdict || w.title !== v.title) return false;
+  }
+  return true;
 }

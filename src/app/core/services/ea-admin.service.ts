@@ -42,6 +42,19 @@ import type {
   UpdateEASpreadPadRequest,
   UpdateInstanceConfigRequest,
 } from '@core/api/api.types';
+import type {
+  EAAutoHealDto,
+  EACommandHistoryItem,
+  EAHealEventDto,
+  EAHealthDto,
+  EATerminalDto,
+  EATerminalJobResult,
+  HostLogKind,
+  TerminalJobDto,
+} from '@core/api/ea-selfheal.types';
+
+/** Background reads (polls) never raise an error toast — the panels show their own state. */
+const SILENT = { silent: true } as const;
 
 /**
  * EA admin-management API client.  Covers the engine's `/admin/ea/...` surface
@@ -240,6 +253,126 @@ export class EAAdminService {
     return this.api.post<ResponseData<AdminCommandQueueResult>>(
       `${this.base}/${encodeURIComponent(instanceId)}/retry-queue/purge`,
       this.withInstanceId(instanceId, body),
+    );
+  }
+
+  // ── Self-heal program (C3 / C7): manage the instance and its terminal ──────
+
+  private path(instanceId: string, rest: string): string {
+    return `${this.base}/${encodeURIComponent(instanceId)}/${rest}`;
+  }
+
+  /** GET commands — newest first; `[]` past the end. */
+  listCommands(
+    instanceId: string,
+    page = 1,
+    pageSize = 25,
+  ): Observable<ResponseData<EACommandHistoryItem[]>> {
+    return this.api.get<ResponseData<EACommandHistoryItem[]>>(
+      this.path(instanceId, `commands?page=${page}&pageSize=${pageSize}`),
+      SILENT,
+    );
+  }
+
+  /** GET commands/{commandId} — polled after sending one until its status is final. */
+  getCommand(instanceId: string, commandId: number): Observable<ResponseData<EACommandHistoryItem>> {
+    return this.api.get<ResponseData<EACommandHistoryItem>>(
+      this.path(instanceId, `commands/${commandId}`),
+      SILENT,
+    );
+  }
+
+  /** C3 22 ForceRecovery — never clears an operator halt (the engine refuses it with a sentence). */
+  forceRecovery(
+    instanceId: string,
+    body: { reason?: string | null } = {},
+  ): Observable<ResponseData<AdminCommandQueueResult>> {
+    return this.api.post<ResponseData<AdminCommandQueueResult>>(
+      this.path(instanceId, 'force-recovery'),
+      body,
+    );
+  }
+
+  /** C3 23 SetInputs — rewrites the EA's restart-required inputs and reloads the EA on them. */
+  setInputs(
+    instanceId: string,
+    body: { inputs: Record<string, string | number | boolean>; reason?: string | null },
+  ): Observable<ResponseData<AdminCommandQueueResult>> {
+    return this.api.post<ResponseData<AdminCommandQueueResult>>(
+      this.path(instanceId, 'inputs'),
+      body,
+    );
+  }
+
+  /** GET terminal — host, install, desired state, auto-heal, supervisor runtime, beacon. */
+  getTerminal(instanceId: string): Observable<ResponseData<EATerminalDto>> {
+    return this.api.get<ResponseData<EATerminalDto>>(this.path(instanceId, 'terminal'), SILENT);
+  }
+
+  /** POST terminal/{start|stop|restart} — a host-supervisor job. Stop also sets desired state Stopped. */
+  terminalAction(
+    instanceId: string,
+    action: 'start' | 'stop' | 'restart',
+    reason?: string | null,
+  ): Observable<ResponseData<EATerminalJobResult>> {
+    return this.api.post<ResponseData<EATerminalJobResult>>(
+      this.path(instanceId, `terminal/${action}`),
+      { reason: reason ?? null },
+    );
+  }
+
+  /** PUT autoheal — the instance's and its terminal's switch. */
+  setAutoHeal(instanceId: string, enabled: boolean): Observable<ResponseData<EAAutoHealDto>> {
+    return this.api.put<ResponseData<EAAutoHealDto>>(this.path(instanceId, 'autoheal'), {
+      enabled,
+    });
+  }
+
+  /** POST deploy — put a release (blank = latest) on the terminal, then restart its EAs on it. */
+  deployEa(
+    instanceId: string,
+    body: { releaseId?: number | null; restartAfter?: boolean } = {},
+  ): Observable<ResponseData<EATerminalJobResult>> {
+    return this.api.post<ResponseData<EATerminalJobResult>>(this.path(instanceId, 'deploy'), {
+      releaseId: body.releaseId ?? null,
+      restartAfter: body.restartAfter ?? true,
+    });
+  }
+
+  /** POST host-logs — ask the host supervisor for a log tail; read it from the job's result. */
+  requestHostLogs(
+    instanceId: string,
+    kind: HostLogKind,
+    lines: number,
+  ): Observable<ResponseData<EATerminalJobResult>> {
+    return this.api.post<ResponseData<EATerminalJobResult>>(this.path(instanceId, 'host-logs'), {
+      kind,
+      lines,
+    });
+  }
+
+  /** GET heal-events — the auto-heal ladder's steps, newest first. */
+  listHealEvents(
+    instanceId: string,
+    page = 1,
+    pageSize = 50,
+  ): Observable<ResponseData<EAHealEventDto[]>> {
+    return this.api.get<ResponseData<EAHealEventDto[]>>(
+      this.path(instanceId, `heal-events?page=${page}&pageSize=${pageSize}`),
+      SILENT,
+    );
+  }
+
+  /** GET health — verdict + plain-language problems with their one-click fixes. */
+  getHealth(instanceId: string): Observable<ResponseData<EAHealthDto>> {
+    return this.api.get<ResponseData<EAHealthDto>>(this.path(instanceId, 'health'), SILENT);
+  }
+
+  /** GET admin/terminals/jobs/{jobId} — a host job with its status and result. */
+  getTerminalJob(jobId: string): Observable<ResponseData<TerminalJobDto>> {
+    return this.api.get<ResponseData<TerminalJobDto>>(
+      `/admin/terminals/jobs/${encodeURIComponent(jobId)}`,
+      SILENT,
     );
   }
 

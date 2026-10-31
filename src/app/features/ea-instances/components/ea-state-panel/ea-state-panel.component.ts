@@ -25,7 +25,7 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
   template: `
     <section class="panel" aria-label="EA live state">
       <header class="panel-head">
-        <h3>Live state</h3>
+        <h3>{{ stale() ? 'Last known state' : 'Live state' }}</h3>
         <span class="meta">
           @if (lastUpdated()) {
             updated {{ lastUpdated() | relativeTime }} ·
@@ -57,7 +57,14 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
           pick up the upgrade.
         </p>
       } @else {
-        <div class="grid">
+        @if (stale()) {
+          <!-- A silent EA's envelope is history, not the present: never show RUNNING as current. -->
+          <p class="stale-banner" role="status">
+            <strong>{{ staleLabel() || 'Last known state' }}</strong> — the EA has not reported since,
+            so these values may no longer be true.
+          </p>
+        }
+        <div class="grid" [class.is-stale]="stale()">
           @for (cell of cells(); track cell.key) {
             <article class="cell" [attr.data-tone]="cell.tone">
               <span class="dot" [attr.data-tone]="cell.tone"></span>
@@ -101,6 +108,19 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
       }
       .muted {
         color: var(--text-tertiary);
+      }
+      .stale-banner {
+        margin: 0;
+        padding: 8px 12px;
+        border-left: 3px solid var(--tone-amber, #ff9500);
+        background: rgba(255, 149, 0, 0.08);
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        color: var(--text-secondary);
+      }
+      .grid.is-stale {
+        opacity: 0.6;
+        filter: grayscale(0.7);
       }
       .grid {
         display: grid;
@@ -185,6 +205,10 @@ export class EAStatePanelComponent {
    * account card with no unit and no separators.
    */
   readonly currency = input<string | null>(null);
+  /** The heartbeat is old: render the envelope as "last known", not as the present. */
+  readonly stale = input(false);
+  /** e.g. "Last known (7 min ago)". */
+  readonly staleLabel = input('');
 
   /** Six placeholder cells while the envelope is in flight. */
   protected readonly skeletonCells = computed(() => Array.from({ length: 6 }, (_, i) => i));
