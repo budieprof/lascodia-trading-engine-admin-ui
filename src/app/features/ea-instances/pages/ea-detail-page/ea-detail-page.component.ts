@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -9,7 +10,7 @@ import {
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { catchError, finalize, map, of } from 'rxjs';
 
 import { EAInstancesService } from '@core/services/ea-instances.service';
@@ -46,6 +47,15 @@ import { EAPendingOrdersPanelComponent } from '../../components/ea-pending-order
 import { EALogsPanelComponent } from '../../components/ea-logs-panel/ea-logs-panel.component';
 import { EARejectionsPanelComponent } from '../../components/ea-rejections-panel/ea-rejections-panel.component';
 import { FLEET_STATUS_LABELS, fleetStatusOf } from '../../current-fleet';
+import { EaOpsService } from '../../selfheal/ea-ops.service';
+import { EaHealthCardComponent } from '../../selfheal/ea-health-card.component';
+import { EaActionResultsComponent } from '../../selfheal/ea-action-results.component';
+import { EaTerminalCardComponent } from '../../selfheal/ea-terminal-card.component';
+import { EaDiagnosticsComponent } from '../../selfheal/ea-diagnostics.component';
+import { EaCommandHistoryComponent } from '../../selfheal/ea-command-history.component';
+import { EaHealTimelineComponent } from '../../selfheal/ea-heal-timeline.component';
+import { EaHostLogsComponent } from '../../selfheal/ea-host-logs.component';
+import { heartbeatFreshness } from '../../selfheal/selfheal.logic';
 
 /**
  * The instance this page shows. `id` is the numeric row id, known only for Active instances (the
@@ -76,6 +86,8 @@ interface ConfigForm {
   selector: 'app-ea-detail-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // One results tray + settled stream for every panel on this page.
+  providers: [EaOpsService],
   imports: [
     DatePipe,
     DecimalPipe,
@@ -98,6 +110,13 @@ interface ConfigForm {
     EARejectionsPanelComponent,
     ModalA11yDirective,
     RefreshButtonComponent,
+    EaHealthCardComponent,
+    EaActionResultsComponent,
+    EaTerminalCardComponent,
+    EaDiagnosticsComponent,
+    EaCommandHistoryComponent,
+    EaHealTimelineComponent,
+    EaHostLogsComponent,
   ],
   template: `
     <div class="page">
@@ -152,6 +171,13 @@ interface ConfigForm {
       } @else if (!ea()) {
         <app-empty-state title="EA instance not found" [description]="notFoundMessage()" />
       } @else {
+        <!-- Self-heal: the engine's verdict first, then the outcome of whatever the operator just did. -->
+        <app-ea-health-card
+          [instanceId]="ea()!.instanceId"
+          [diag]="adminState()?.diag ?? null"
+          [refreshTick]="refreshTick()"
+        />
+        <app-ea-action-results />
         @if (ea()!.status !== 'Active') {
           <!-- A Disconnected / ShuttingDown / Deregistered instance is shown as a record, not as
                a live EA: commands queued below wait for a heartbeat that may never come. -->
@@ -190,6 +216,9 @@ interface ConfigForm {
               <span [class.stale]="heartbeatStale()">
                 {{ ea()!.lastHeartbeat | relativeTime }}
               </span>
+              @if (freshness().stale) {
+                <span class="stale small"> · everything below is the last known state</span>
+              }
             </dd>
             <dt>Registered</dt>
             <dd>{{ ea()!.registeredAt | date: 'yyyy-MM-dd HH:mm UTC' }}</dd>
@@ -203,6 +232,17 @@ interface ConfigForm {
             </dd>
           </dl>
         </section>
+
+        <!-- Self-heal: the terminal (host supervisor) and the EA's own diagnostics. -->
+        <div class="ea-selfheal-grid">
+          <app-ea-terminal-card [instanceId]="ea()!.instanceId" [refreshTick]="refreshTick()" />
+          <app-ea-diagnostics
+            [diag]="adminState()?.diag ?? null"
+            [stale]="freshness().stale"
+            [staleLabel]="freshness().label"
+            [nowMs]="now()"
+          />
+        </div>
 
         <!-- ── Control-panel grid ───────────────────────────────────────
              The four operator panels below (Trading, Fill mode, Breakeven
@@ -948,6 +988,8 @@ interface ConfigForm {
           [lastUpdated]="adminLastStateUpdatedAt()"
           [loading]="detailLoading()"
           [currency]="account()?.currency ?? null"
+          [stale]="freshness().stale && !!adminState()"
+          [staleLabel]="freshnessTitle()"
         />
 
         <!-- Phase-5b admin: live open positions + working orders, narrowed
@@ -976,11 +1018,14 @@ interface ConfigForm {
           (commandQueued)="onCommandQueued($event)"
         />
 
+        <app-ea-command-history [instanceId]="ea()!.instanceId" [refreshTick]="refreshTick()" />
+
         <!-- Phase-4 admin: hot-reload input editor + read-only inspection -->
         <app-ea-config-panel
           [instanceId]="ea()!.instanceId"
           [inputs]="adminInputs()"
           [loading]="detailLoading()"
+          [restartReady]="adminState()?.diag?.restartTemplateSeeded ?? null"
           (configPushed)="onCommandQueued('configPush')"
         />
 
@@ -997,6 +1042,10 @@ interface ConfigForm {
         <div class="ea-logs-audit-grid" id="ea-logs">
           <app-ea-logs-panel [instanceId]="ea()!.instanceId" />
           <app-ea-audit-timeline [instanceId]="ea()!.instanceId" />
+        </div>
+        <div class="ea-logs-audit-grid">
+          <app-ea-host-logs [instanceId]="ea()!.instanceId" />
+          <app-ea-heal-timeline [instanceId]="ea()!.instanceId" [refreshTick]="refreshTick()" />
         </div>
         <app-ea-rejections-panel [instanceId]="ea()!.instanceId" />
       }
@@ -1525,6 +1574,14 @@ interface ConfigForm {
          safety-audit timeline so they share one row instead of each
          taking full width.  Stretch heights so the two tables align;
          collapse to 1-up below 720px combined min-cell width. */
+      .ea-selfheal-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+        gap: var(--space-3);
+      }
+      .ea-selfheal-grid > * {
+        min-width: 0;
+      }
       .ea-logs-audit-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
@@ -2149,8 +2206,33 @@ export class EaDetailPageComponent {
   private logsFocused = false;
 
   private readonly pageContext = inject(PageContextService);
+  private readonly ops = inject(EaOpsService);
+
+  /** Bumped by Refresh so the self-heal panels refetch with the rest of the page. */
+  protected readonly refreshTick = signal(0);
+  /** Page clock (5 s) for staleness wording. */
+  protected readonly now = signal(Date.now());
+
+  /**
+   * Heartbeat freshness on the engine's line (120 s). When stale, every panel that shows the
+   * envelope says "last known (N min ago)" instead of presenting it as the present.
+   */
+  protected readonly freshness = computed(() =>
+    heartbeatFreshness(
+      this.detailResource.value()?.lastHeartbeat ?? this.ea()?.lastHeartbeat ?? null,
+      this.now(),
+    ),
+  );
+  protected readonly freshnessTitle = computed(() => {
+    const f = this.freshness();
+    return f.label ? f.label.charAt(0).toUpperCase() + f.label.slice(1) : '';
+  });
 
   constructor() {
+    const clock = setInterval(() => this.now.set(Date.now()), 5000);
+    inject(DestroyRef).onDestroy(() => clearInterval(clock));
+    // Whatever an action changed (state, terminal, config) shows as soon as it has an outcome.
+    this.ops.settled$.pipe(takeUntilDestroyed()).subscribe(() => this.onCommandQueued('settled'));
     this.pageContext.publish(() => ({
       headline: `EA instance ${this.ea()?.instanceId ?? '#' + (this.routeKey() || '?')} detail`,
       record: { kind: 'eaInstance', id: this.id() ?? 0 },
@@ -2351,6 +2433,7 @@ export class EaDetailPageComponent {
 
   /** Manual refresh — kick every resource at once instead of just the list. */
   protected refreshAll(): void {
+    this.refreshTick.update((n) => n + 1);
     this.resource.refresh();
     this.fleetResource.refresh();
     this.detailResource.refresh();
@@ -2391,7 +2474,7 @@ export class EaDetailPageComponent {
     const ts = Date.parse(hb);
     if (Number.isNaN(ts)) return false;
     // 60-second heartbeat-timeout per engine docs; flag rows past 90s as stale.
-    return Date.now() - ts > 90_000;
+    return this.now() - ts > 90_000;
   });
 
   // ── Account-card helpers ─────────────────────────────────────────────
@@ -2548,11 +2631,13 @@ export class EaDetailPageComponent {
       .subscribe({
         next: (res) => {
           if (res.status) {
-            this.notify.success(
-              intent === 'disable'
-                ? `Trading disabled for EA ${ea.instanceId}.`
-                : `Trading re-enabled for EA ${ea.instanceId}.`,
-            );
+            const label = intent === 'disable' ? 'Disable trading' : 'Enable trading';
+            if (res.data?.commandId != null) {
+              this.ops.trackCommand(ea.instanceId, res.data.commandId, label);
+              this.notify.info(`${label} sent — waiting for the EA's answer.`);
+            } else {
+              this.notify.success(`${label} queued for EA ${ea.instanceId}.`);
+            }
             this.auditTrail
               .create({
                 entityType: 'EAInstance',

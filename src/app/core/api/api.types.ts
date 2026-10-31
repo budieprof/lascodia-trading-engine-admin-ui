@@ -3,6 +3,7 @@ import type {
   ScriptInputValues,
   StrategyAuthoringMode,
 } from './scripting.types';
+import type { EADiag } from './ea-selfheal.types';
 
 // ============================================================
 // Response Wrappers
@@ -2134,6 +2135,8 @@ export interface EAStatePayload {
   marketState?: 'OPEN' | 'CLOSED' | 'UNKNOWN' | string;
   /** Phase-4: current values of the EA's configuration inputs. */
   inputs?: EAConfigInputs;
+  /** Self-heal C1 (EA v8.47.259+): plain diagnostics — permissions, auth, recovery, templates. */
+  diag?: EADiag;
   // Defensive: tolerate future EA-added keys.
   [key: string]: unknown;
 }

@@ -19,6 +19,17 @@ import { EAAdminService } from '@core/services/ea-admin.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { EAConfigInputs, UpdateInstanceConfigRequest } from '@core/api/api.types';
 import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.component';
+import { EaOpsService } from '../../selfheal/ea-ops.service';
+import { EaActionDialogComponent } from '../../selfheal/ea-action-dialog.component';
+import {
+  RESTART_BADGED_INPUTS,
+  RESTART_INPUTS,
+  buildSetInputs,
+  isInputEdited,
+  validateInputEdit,
+  type InputEdit,
+  type InputType,
+} from '../../selfheal/selfheal.logic';
 
 /**
  * Phase-4 EA configuration editor.  Two tabs:
@@ -27,9 +38,10 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
  *     current value (from the heartbeat envelope), an editable input, and
  *     a "Hot-reloadable" badge.  Only dirty fields (non-empty, non-equal to
  *     current) are sent on submit.
- *   - **Read-only** — frozen Inp* declarations (engine URL, symbols, magic
- *     number, etc.).  Displayed for reference with a "Restart required"
- *     badge; no edit controls.
+ *   - **Restart required** — Inp* declarations the EA reads at attach time
+ *     (engine URL, magic number, DLL bridge, …) plus the restart-badged
+ *     fields. Changed through SetInputs (C3 23): the EA rewrites its chart
+ *     template and reloads itself on the new values.
  *
  * The component is purely client-side: it inspects `inputs()` for current
  * values and posts to `EAAdminService.updateInstanceConfig`.  Parent page
@@ -40,7 +52,7 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
   selector: 'app-ea-config-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SkeletonComponent],
+  imports: [FormsModule, SkeletonComponent, EaActionDialogComponent],
   template: `
     <section class="panel" aria-label="EA configuration">
       <header class="panel-head">
@@ -63,8 +75,8 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
             (click)="tab.set('readonly')"
             [attr.aria-selected]="tab() === 'readonly'"
           >
-            Read-only
-            <span class="badge tone-muted">{{ READ_ONLY_FIELDS.length }}</span>
+            Restart required
+            <span class="badge tone-muted">{{ restartFields.length }}</span>
           </button>
         </div>
       </header>
@@ -348,26 +360,148 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
           </div>
         }
       } @else {
-        <!-- One note covers every card: a "restart required" badge on all
-             fourteen was fourteen copies of the same sentence, wrapping
-             onto two lines in the narrower cards. -->
+        <!-- Restart-required inputs: changed here through SetInputs (C3 23), which rewrites the
+             EA's chart template and reloads the EA on it — no terminal access needed. -->
         <p class="hint muted">
-          Every value here is read at attach-time and cached on objects that don't expose live
-          setters — a restart is required to change any of them. Re-attach the EA in MT5 after
-          editing the input dialog to apply changes.
+          The EA reads these only when it starts. Change them here and press
+          <strong>Apply &amp; restart</strong>: the engine sends the new values, the EA saves them
+          into its chart template and reloads itself on them (offline for a few seconds). Blank =
+          keep the current value.
         </p>
-        <div class="form-grid">
-          @for (field of READ_ONLY_FIELDS; track field.key) {
-            <div class="ro-field">
-              <span class="field-label">{{ field.label }}</span>
-              @if (readOnlyValue(field.key); as v) {
-                <span class="ro-value mono" [class.muted]="v.empty">{{ v.text }}</span>
-              }
-            </div>
-          }
+        @if (restartReady() === false) {
+          <p class="ro-blocker" role="note">
+            Remote restart is not ready on this EA (its chart template is not saved yet), so input
+            changes cannot be applied. Restart the terminal from the Terminal card first — the EA
+            saves its template when it starts.
+          </p>
+        }
+        @for (section of restartSections; track section.title) {
+          <h4 class="ro-section">{{ section.title }}</h4>
+          <div class="form-grid">
+            @for (field of section.fields; track field.key) {
+              <div
+                class="ro-field"
+                [class.ro-dirty]="restartDirty(field)"
+                [class.ro-danger]="field.dangerous"
+              >
+                <span class="field-label">
+                  {{ field.label }}
+                  <code class="field-key">{{ field.inp }}</code>
+                </span>
+                @if (readOnlyValue(field.key); as v) {
+                  <span class="ro-value mono" [class.muted]="v.empty">now: {{ v.text }}</span>
+                }
+                @switch (field.type) {
+                  @case ('b') {
+                    <select
+                      class="input"
+                      [ngModel]="restartEdits[field.key]"
+                      (ngModelChange)="setRestartEdit(field.key, $event)"
+                      [disabled]="applyingInputs()"
+                    >
+                      <option [ngValue]="undefined">— keep current —</option>
+                      <option [ngValue]="true">yes</option>
+                      <option [ngValue]="false">no</option>
+                    </select>
+                  }
+                  @case ('s') {
+                    <input
+                      type="text"
+                      class="input"
+                      autocomplete="off"
+                      placeholder="keep current"
+                      [ngModel]="restartEdits[field.key]"
+                      (ngModelChange)="setRestartEdit(field.key, $event)"
+                      [disabled]="applyingInputs()"
+                    />
+                  }
+                  @default {
+                    <input
+                      type="text"
+                      inputmode="decimal"
+                      class="input"
+                      autocomplete="off"
+                      placeholder="keep current"
+                      [ngModel]="restartEdits[field.key]"
+                      (ngModelChange)="setRestartEdit(field.key, $event)"
+                      [disabled]="applyingInputs()"
+                    />
+                  }
+                }
+                @if (restartError(field); as err) {
+                  <span class="ro-error">{{ err }}</span>
+                }
+                @if (field.warning && (field.dangerous || restartDirty(field))) {
+                  <span class="ro-warning">{{ field.warning }}</span>
+                }
+              </div>
+            }
+          </div>
+        }
+        <div class="ro-foot">
+          <span class="muted small">
+            @if (restartChangeCount() === 0) {
+              No changes.
+            } @else {
+              {{ restartChangeCount() }} change{{ restartChangeCount() === 1 ? '' : 's' }} ready.
+            }
+          </span>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="clearRestartEdits()"
+            [disabled]="restartChangeCount() === 0 || applyingInputs()"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            class="btn btn-primary"
+            (click)="askApplyInputs()"
+            [disabled]="
+              restartChangeCount() === 0 ||
+              restartHasErrors() ||
+              applyingInputs() ||
+              restartReady() === false
+            "
+          >
+            Apply &amp; restart
+          </button>
         </div>
       }
     </section>
+
+    <app-ea-action-dialog
+      [open]="confirmingInputs()"
+      title="Apply inputs and restart the EA"
+      description="The EA saves these values into its chart template and reloads itself on them. It is offline for a few seconds; open positions keep their stop loss and take profit.
+
+If a value stops the EA from starting, its health card shows why and the old values can be applied again from here — unless the EA can no longer reach the engine (a wrong engine URL)."
+      [warning]="dangerWarning()"
+      confirmLabel="Apply &amp; restart"
+      [tone]="dangerWarning() ? 'bad' : 'warn'"
+      [askReason]="true"
+      [reasonRequired]="!!dangerWarning()"
+      [busy]="applyingInputs()"
+      [confirmDisabled]="!!dangerWarning() && !dangerAck"
+      (confirmed)="applyInputs($event)"
+      (cancelled)="confirmingInputs.set(false)"
+    >
+      <ul class="change-list">
+        @for (c of pendingChanges(); track c.key) {
+          <li>
+            <span>{{ c.label }}</span>
+            <span class="mono">{{ c.from }}</span> → <strong class="mono">{{ c.to }}</strong>
+          </li>
+        }
+      </ul>
+      @if (dangerWarning()) {
+        <label class="ack">
+          <input type="checkbox" [(ngModel)]="dangerAck" />
+          <span>I understand what changing these does.</span>
+        </label>
+      }
+    </app-ea-action-dialog>
   `,
   styles: [
     `
@@ -506,6 +640,63 @@ import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.compo
         font-weight: var(--font-medium);
         font-variant-numeric: tabular-nums;
         overflow-wrap: anywhere;
+      }
+      .ro-section {
+        margin: var(--space-2) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .ro-field .input {
+        margin-top: 4px;
+      }
+      .ro-dirty {
+        border-color: var(--accent);
+      }
+      .ro-danger .field-label {
+        color: var(--tone-red);
+      }
+      .ro-error {
+        font-size: var(--text-xs);
+        color: var(--tone-red);
+      }
+      .ro-warning {
+        font-size: var(--text-xs);
+        color: var(--tone-amber);
+      }
+      .ro-blocker {
+        margin: 0;
+        padding: 8px 12px;
+        border-left: 3px solid var(--tone-amber, #ff9500);
+        background: rgba(255, 149, 0, 0.08);
+        font-size: var(--text-sm);
+      }
+      .ro-foot {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        gap: var(--space-3);
+        padding-top: var(--space-2);
+        border-top: 1px solid var(--border);
+      }
+      .change-list {
+        margin: 0;
+        padding-left: 18px;
+        font-size: var(--text-sm);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .change-list li span:first-child {
+        margin-right: 8px;
+        color: var(--text-secondary);
+      }
+      .ack {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        font-size: var(--text-sm);
       }
       .ro-value.muted {
         color: var(--text-tertiary);
@@ -1005,6 +1196,11 @@ export class EAConfigPanelComponent {
    */
   readonly loading = input(false);
   @Output() readonly configPushed = new EventEmitter<void>();
+  /** C1 `diag.restartTemplateSeeded`: false = SetInputs cannot work; null = not reported. */
+  readonly restartReady = input<boolean | null>(null);
+
+  /** Follows the command each push / input change queues (provided by the EA detail page). */
+  private readonly ops = inject(EaOpsService, { optional: true });
 
   /** Six placeholder rows for the loading skeleton — enough to fill the panel. */
   protected readonly skeletonFields = computed(() => Array.from({ length: 6 }, (_, i) => i));
@@ -1543,28 +1739,138 @@ export class EAConfigPanelComponent {
 
   protected readonly HOT_RELOAD_FIELDS = this.HOT_RELOAD_GROUPS.flatMap((g) => g.fields);
 
-  protected readonly READ_ONLY_FIELDS: readonly ReadOnlyField[] = [
-    // Truly load-bearing — changing mid-flight breaks identity, transport
-    // re-bind, or concurrency invariants.  Surfaced here as inspection-only
-    // so operators can see the current value without poking the EA host.
-    { key: 'engineBaseUrl', label: 'Engine base URL' },
-    // symbols was moved to the editable tab (Phase-13).  Kept commented
-    // here so future maintainers can quickly trace the migration.
-    // { key: 'symbols',                  label: 'Symbols (CSV)' },
-    { key: 'symbolMapping', label: 'Broker→Engine symbol map' },
-    { key: 'timeframes', label: 'Timeframes' },
-    { key: 'instanceLabel', label: 'Instance label' },
-    { key: 'magicNumber', label: 'Magic number' },
-    { key: 'useAsyncOrders', label: 'Use async orders' },
-    { key: 'useDllTransport', label: 'Use DLL transport' },
-    { key: 'dllBridgeHost', label: 'DLL bridge host (override)' },
-    { key: 'dllBridgePort', label: 'DLL bridge port (override)' },
-    { key: 'dllBridgeUseTls', label: 'DLL bridge TLS' },
-    { key: 'dllBridgeStrictTls', label: 'DLL bridge strict TLS' },
-    { key: 'dllBridgeCertFingerprint', label: 'DLL bridge cert fingerprint (SHA-256)' },
-    { key: 'coordinatorStaleSec', label: 'Coordinator stale (s)' },
-    { key: 'casEscalateThreshold', label: 'CAS escalate threshold' },
+  // The attach-time inputs (engine URL, magic number, DLL bridge, …) live in RESTART_INPUTS
+  // (selfheal.logic.ts) with the EA's own input names, so the Restart-required tab can change them.
+
+  // ── Restart-required inputs (C3 SetInputs) ───────────────────────────
+
+  /**
+   * Two sections: inputs the EA reads only at attach time, and the
+   * restart-badged fields of the Editable tab (a config push stores them but
+   * they only take effect after a restart — SetInputs does both at once).
+   */
+  protected readonly restartSections: readonly {
+    title: string;
+    fields: readonly RestartField[];
+  }[] = [
+    {
+      title: 'Read when the EA starts',
+      fields: RESTART_INPUTS.map((d) => ({ ...d })),
+    },
+    {
+      title: 'Also take effect only after a restart',
+      fields: Object.entries(RESTART_BADGED_INPUTS).map(([key, v]) => ({
+        key,
+        inp: v.inp,
+        type: v.type,
+        label: this.HOT_RELOAD_FIELDS.find((f) => f.key === key)?.label ?? key,
+      })),
+    },
   ];
+  protected readonly restartFields: readonly RestartField[] = this.restartSections.flatMap(
+    (s) => s.fields,
+  );
+
+  protected restartEdits: Record<string, InputEdit> = {};
+  private readonly restartRevision = signal(0);
+  protected readonly confirmingInputs = signal(false);
+  protected readonly applyingInputs = signal(false);
+  protected dangerAck = false;
+
+  protected setRestartEdit(key: string, value: InputEdit): void {
+    if (value === '' || value === undefined) delete this.restartEdits[key];
+    else this.restartEdits[key] = value;
+    this.restartRevision.update((n) => n + 1);
+  }
+
+  protected clearRestartEdits(): void {
+    this.restartEdits = {};
+    this.restartRevision.update((n) => n + 1);
+  }
+
+  protected restartDirty(field: RestartField): boolean {
+    this.restartRevision();
+    return isInputEdited(field, this.restartEdits[field.key], this.inputs()?.[field.key]);
+  }
+
+  protected restartError(field: RestartField): string | null {
+    this.restartRevision();
+    if (!this.restartDirty(field)) return null;
+    return validateInputEdit(field, this.restartEdits[field.key]);
+  }
+
+  private readonly restartBuild = computed(() => {
+    this.restartRevision();
+    return buildSetInputs(
+      this.restartFields.map((f) => ({ key: f.key, inp: f.inp, label: f.label, type: f.type })),
+      this.restartEdits,
+      (this.inputs() ?? null) as Record<string, unknown> | null,
+    );
+  });
+  protected readonly restartChangeCount = computed(
+    () => this.restartBuild().changed.length + Object.keys(this.restartBuild().errors).length,
+  );
+  protected readonly restartHasErrors = computed(
+    () => Object.keys(this.restartBuild().errors).length > 0,
+  );
+
+  protected readonly pendingChanges = computed(() => {
+    const b = this.restartBuild();
+    return b.changed.map((key) => {
+      const f = this.restartFields.find((x) => x.key === key)!;
+      const edit = this.restartEdits[key];
+      const fmt = (v: unknown) =>
+        v == null || v === '' ? '(blank)' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v);
+      return { key, label: f.label, from: fmt(this.inputs()?.[key]), to: fmt(edit) };
+    });
+  });
+
+  protected readonly dangerWarning = computed(() => {
+    const keys = new Set(this.restartBuild().changed);
+    const dangerous = this.restartFields.filter((f) => f.dangerous && keys.has(f.key));
+    return dangerous.length ? dangerous.map((f) => `${f.label}: ${f.warning}`).join(' ') : null;
+  });
+
+  protected askApplyInputs(): void {
+    if (this.restartChangeCount() === 0 || this.restartHasErrors()) return;
+    this.dangerAck = false;
+    this.confirmingInputs.set(true);
+  }
+
+  protected applyInputs(reason: string): void {
+    const { inputs, changed, errors } = this.restartBuild();
+    if (changed.length === 0 || Object.keys(errors).length > 0) return;
+    if (this.dangerWarning() && !this.dangerAck) return;
+    const id = this.instanceId();
+    this.applyingInputs.set(true);
+    this.admin
+      .setInputs(id, { inputs, reason: reason || null })
+      .pipe(
+        finalize(() => {
+          this.applyingInputs.set(false);
+          this.cdr.markForCheck();
+        }),
+      )
+      .subscribe({
+        next: (res) => {
+          if (res.status && res.data) {
+            if (this.ops) {
+              this.ops.trackCommand(id, res.data.commandId, `Change ${changed.length} input${changed.length === 1 ? '' : 's'} + restart`);
+              this.notify.info("Input change sent — the EA answers, then restarts on the new values.");
+            } else {
+              this.notify.success(`Input change queued (command #${res.data.commandId}).`);
+            }
+            this.confirmingInputs.set(false);
+            this.clearRestartEdits();
+            this.configPushed.emit();
+          } else {
+            this.notify.error(res.message ?? 'The engine refused the input change.');
+          }
+        },
+        error: (err: { error?: { message?: string } }) =>
+          this.notify.error(err?.error?.message ?? 'Input change could not be sent.'),
+      });
+  }
 
   // ── Field helpers ──────────────────────────────────────────────────────
 
@@ -1817,9 +2123,14 @@ export class EAConfigPanelComponent {
       .subscribe({
         next: (res) => {
           if (res.status) {
-            this.notify.success(
-              `Config push queued (${fields.length} field${fields.length === 1 ? '' : 's'}).`,
-            );
+            const label = `Config change (${fields.length} field${fields.length === 1 ? '' : 's'})`;
+            if (this.ops) {
+              // The push answers a sentence, not a command id: find the command it queued.
+              this.ops.trackLatestCommand(this.instanceId(), 'UpdateConfig', label);
+              this.notify.info(`${label} sent — waiting for the EA's answer.`);
+            } else {
+              this.notify.success(`${label} queued.`);
+            }
             for (const f of fields) delete this.edits[f.key];
             this.markEdited();
             this.configPushed.emit();
@@ -1922,7 +2233,12 @@ interface FieldGroup {
   fields: readonly FieldDef[];
 }
 
-interface ReadOnlyField {
+
+interface RestartField {
   key: string;
+  inp: string;
   label: string;
+  type: InputType;
+  warning?: string;
+  dangerous?: boolean;
 }

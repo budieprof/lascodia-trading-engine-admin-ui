@@ -16,6 +16,7 @@ import { finalize } from 'rxjs';
 
 import { EAAdminService } from '@core/services/ea-admin.service';
 import { NotificationService } from '@core/notifications/notification.service';
+import { EaOpsService } from '../../selfheal/ea-ops.service';
 import type { Observable } from 'rxjs';
 import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types';
 
@@ -46,7 +47,8 @@ import type { AdminCommandQueueResult, ResponseData } from '@core/api/api.types'
       <header class="panel-head">
         <h3>Operator controls</h3>
         <span class="meta muted">
-          Commands queue through /admin/ea/{{ instanceId() }} ; the EA dispatches on its next poll.
+          The EA picks each command up on its next poll (about 2 s); its answer appears under
+          “Your actions” and in Command history.
         </span>
       </header>
 
@@ -514,6 +516,8 @@ export class EAControlPanelComponent {
   private readonly admin = inject(EAAdminService);
   private readonly notify = inject(NotificationService);
   private readonly cdr = inject(ChangeDetectorRef);
+  /** Follows each command to its real outcome (provided by the EA detail page). */
+  private readonly ops = inject(EaOpsService, { optional: true });
 
   protected readonly safetyActions: readonly Action[] = [
     {
@@ -714,9 +718,13 @@ export class EAControlPanelComponent {
         next: (res) => {
           if (res.status) {
             const action = this.findAction(key);
-            this.notify.success(
-              `${action?.label ?? 'Command'} queued (id ${this.formatCommandId(res.data)}).`,
-            );
+            const label = action?.label ?? 'Command';
+            if (this.ops && res.data?.commandId != null) {
+              this.ops.trackCommand(id, res.data.commandId, label);
+              this.notify.info(`${label} sent — waiting for the EA's answer.`);
+            } else {
+              this.notify.success(`${label} queued (id ${this.formatCommandId(res.data)}).`);
+            }
             this.commandQueued.emit(key);
             const el = this.dialogRef?.nativeElement;
             if (el?.open) el.close();
