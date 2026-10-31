@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ORDER_STAGES,
   chartGeometry,
+  countUpFrame,
   ema,
   ladder,
   nextCandle,
@@ -33,6 +34,21 @@ describe('landing logic', () => {
       expect(c.l).toBeLessThanOrEqual(Math.min(c.o, c.c));
       if (i > 0) expect(c.o).toBe(bars[i - 1].c);
     });
+  });
+
+  it('count-up frames scale the first number and keep the rest of the text', () => {
+    expect(countUpFrame('< 3 s', 0)).toBe('< 0 s');
+    expect(countUpFrame('< 3 s', 1)).toBe('< 3 s');
+    expect(countUpFrame('7', 2)).toBe('7');
+    expect(countUpFrame('100%', 0.5)).toBe('88%');
+    expect(countUpFrame('no digits', 0.3)).toBe('no digits');
+  });
+
+  it('with an anchor the walk stays near it however long it runs', () => {
+    const rnd = seededRandom(20261028);
+    let open = 1.0842;
+    for (let i = 0; i < 20000; i++) open = nextCandle(open, rnd, 0.0004, 1.0842).c;
+    expect(Math.abs(open - 1.0842)).toBeLessThan(0.01);
   });
 
   it('a ticking bar keeps its open and contains its close', () => {

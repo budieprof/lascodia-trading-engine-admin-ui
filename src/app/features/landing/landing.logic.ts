@@ -32,9 +32,18 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
-/** One new bar opening at `open`; a gentle upward drift keeps the illustration optimistic but not cartoonish. */
-export function nextCandle(open: number, rnd: () => number, step = 0.0004): Candle {
-  const drift = step * 0.12;
+/**
+ * One new bar opening at `open`; a gentle upward drift keeps the illustration optimistic but not cartoonish.
+ * With an `anchor` the drift also pulls back toward it, so a tab left open for hours stays near a believable
+ * price instead of walking EURUSD to 2.1 (+97%, seen 2026-10-31).
+ */
+export function nextCandle(
+  open: number,
+  rnd: () => number,
+  step = 0.0004,
+  anchor?: number,
+): Candle {
+  const drift = step * 0.12 + (anchor === undefined ? 0 : (anchor - open) * 0.04);
   const c = open + (rnd() - 0.47) * step * 2 + drift;
   const h = Math.max(open, c) + rnd() * step * 0.8;
   const l = Math.min(open, c) - rnd() * step * 0.8;
@@ -205,6 +214,19 @@ export function mergePlanOffers(
 function offerPriceParts(o: PlanOffer): { price: string; priceNote: string } {
   const priceNote = o.interval === 'month' ? 'per month' : o.interval === 'year' ? 'per year' : '';
   return { price: planPrice(o.priceAmount, o.currency, null), priceNote };
+}
+
+/**
+ * One frame of a count-up: the first whole number in `target` scaled by eased progress `t` (0..1), the rest of
+ * the text untouched — "< 3 s" at t=0 is "< 0 s", at t=1 exactly "< 3 s".
+ */
+export function countUpFrame(target: string, t: number): string {
+  const m = /\d+/.exec(target);
+  if (!m) return target;
+  const clamped = Math.max(0, Math.min(1, t));
+  const eased = 1 - Math.pow(1 - clamped, 3);
+  const n = Math.round(Number(m[0]) * eased);
+  return target.slice(0, m.index) + n + target.slice(m.index + m[0].length);
 }
 
 export function formatPrice(p: number): string {

@@ -41,6 +41,34 @@ export const STATS: { value: string; label: string }[] = [
   { value: '5', label: 'coordination protocols formally model-checked' },
 ];
 
+/** The hero ticker: shipped capabilities only, two rows that scroll opposite ways. */
+export const TICKER: string[][] = [
+  [
+    'Order-book ladder',
+    'Footprint charts',
+    'Cumulative volume delta',
+    'Volume profiles',
+    'Bar replay',
+    'Pine backtests with real costs',
+    'Walk-forward tests',
+    'Paper trading',
+    'Plain-language AI analysis',
+    'Self-arming watches',
+  ],
+  [
+    'Kill switches',
+    'News blackouts',
+    'Dead-man switch',
+    'Exactly-once signals',
+    'Four-eyes approvals',
+    'SSO & SCIM',
+    'Signed exports',
+    'Telegram & webhook alerts',
+    'Broker reconciliation',
+    'Any MetaTrader 5 broker',
+  ],
+];
+
 export const FEATURES: Feature[] = [
   {
     icon: 'chart',
@@ -281,7 +309,7 @@ export interface Plan {
   priceNote: string;
   blurb: string;
   points: string[];
-  /** `upgrade`: a real paid offer — the main button ("Start free, upgrade anytime"). */
+  /** `upgrade`: a real paid offer — the main button ("Start free"). */
   cta: 'primary' | 'contact' | 'upgrade';
   featured?: boolean;
 }

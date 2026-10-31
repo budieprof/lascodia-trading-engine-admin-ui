@@ -5,6 +5,7 @@ import type { PlanOffer } from '@features/billing/billing.types';
 import { FAQS, PLANS, SALES_EMAIL, SECURITY } from '../landing.content';
 import { mergePlanOffers, type PrimaryCta } from '../landing.logic';
 import { RevealDirective } from '../reveal.directive';
+import { SpotlightDirective } from '../spotlight.directive';
 import { LandingIconComponent } from './landing-icon.component';
 
 /** Security & governance, plans, and the FAQ — the sections a buyer reads last before deciding. */
@@ -12,7 +13,7 @@ import { LandingIconComponent } from './landing-icon.component';
   selector: 'lp-trust',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, RevealDirective, LandingIconComponent],
+  imports: [RouterLink, RevealDirective, SpotlightDirective, LandingIconComponent],
   template: `
     <section class="lp-section" id="security" aria-labelledby="lp-sec-title">
       <div class="lp-container">
@@ -26,7 +27,7 @@ import { LandingIconComponent } from './landing-icon.component';
         </header>
         <div class="sec">
           @for (s of security; track s.title; let i = $index) {
-            <div class="sec__item" [lpReveal]="(i % 3) * 80">
+            <div class="lp-card sec__item" [lpReveal]="(i % 3) * 80" lpSpot>
               <span class="lp-icon-tile"><lp-icon [name]="s.icon" /></span>
               <h3>{{ s.title }}</h3>
               <p>{{ s.body }}</p>
@@ -59,6 +60,7 @@ import { LandingIconComponent } from './landing-icon.component';
               class="lp-card pl__card"
               [class.pl__card--featured]="p.featured"
               [lpReveal]="i * 90"
+              lpSpot
             >
               @if (p.featured) {
                 <span class="pl__badge">For growing desks</span>
@@ -76,7 +78,7 @@ import { LandingIconComponent } from './landing-icon.component';
                   [class.lp-btn--ghost]="!p.featured"
                   [routerLink]="cta().route"
                 >
-                  {{ cta().kind === 'signup' ? 'Start free, upgrade anytime' : 'Request access' }}
+                  {{ cta().kind === 'signup' ? 'Start free' : 'Request access' }}
                 </a>
               } @else if (p.cta === 'contact' && salesEmail) {
                 <a
@@ -137,7 +139,17 @@ import { LandingIconComponent } from './landing-icon.component';
       .sec {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
-        gap: 48px 40px;
+        gap: 20px;
+      }
+      .sec__item {
+        padding: 28px;
+        transition:
+          transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+          box-shadow 0.35s;
+      }
+      .sec__item:hover {
+        transform: translateY(-3px);
+        box-shadow: var(--lp-shadow-lg);
       }
       .sec__item h3 {
         margin: 18px 0 8px;
@@ -211,8 +223,19 @@ import { LandingIconComponent } from './landing-icon.component';
         font-size: 14px;
         color: var(--lp-ink-3);
       }
+      .pl__card {
+        transition:
+          transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+          box-shadow 0.35s;
+      }
+      .pl__card:hover {
+        transform: translateY(-4px);
+        box-shadow: var(--lp-shadow-lg);
+      }
       .pl__btn {
         width: 100%;
+        white-space: normal;
+        text-align: center;
         margin-bottom: 28px;
       }
 

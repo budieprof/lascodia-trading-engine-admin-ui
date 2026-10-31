@@ -12,15 +12,15 @@
 
 .hc {
   position: relative;
+  z-index: 1;
   overflow: hidden;
   border-radius: 22px;
   color: var(--hc-ink);
   background:
     radial-gradient(120% 80% at 10% 0%, rgba(61, 139, 255, 0.16), transparent 55%),
     radial-gradient(90% 70% at 100% 100%, rgba(123, 92, 255, 0.14), transparent 60%), #0a0c12;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.06);
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.4),
     0 1px 0 rgba(255, 255, 255, 0.08) inset,
     0 50px 100px -30px rgba(10, 40, 120, 0.55),
     0 30px 60px -30px rgba(0, 0, 0, 0.6);
@@ -454,5 +454,56 @@
 @media (max-width: 420px) {
   .hc__tabs b:nth-child(n + 3) {
     display: none;
+  }
+}
+
+.hc-frame {
+  position: relative;
+}
+// A slow comet of light runs round the frame (the 1 px ring), with a soft halo behind it.
+.hc-glow,
+.hc-halo {
+  position: absolute;
+  inset: -1px;
+  border-radius: 23px;
+  overflow: hidden;
+  pointer-events: none;
+  &::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 200%;
+    aspect-ratio: 1;
+    background: conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      #3d8bff 40deg,
+      #13c2e8 80deg,
+      transparent 130deg,
+      transparent 180deg,
+      #7b5cff 230deg,
+      #3d8bff 270deg,
+      transparent 320deg
+    );
+    transform: translate(-50%, -50%) rotate(0deg);
+    animation: hc-spin 9s linear infinite;
+  }
+}
+.hc-halo {
+  inset: -10px;
+  border-radius: 32px;
+  filter: blur(28px);
+  opacity: 0.4;
+}
+@keyframes hc-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hc-glow::before,
+  .hc-halo::before {
+    animation: none;
   }
 }
