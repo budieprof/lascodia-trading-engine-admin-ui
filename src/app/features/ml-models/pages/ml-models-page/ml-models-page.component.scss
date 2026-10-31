@@ -1,0 +1,534 @@
+/* ML Models — KPI tiles, chart row, boards and pills (shared by every tab,
+   tuned for the Model Registry). Kept out of the inline styles so each
+   stylesheet stays under the anyComponentStyle budget. */
+
+/* ── KPI strip ─────────────────────────────────────────────────── */
+.ml-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+/* The registry's eight tiles go one row only where each keeps its hint
+   readable; below that they sit 4 × 2. */
+@media (min-width: 1760px) {
+  .reg-kpis {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .ml-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ab-funnel {
+  margin-top: var(--space-3);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .ab-funnel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ab-pairs {
+  margin-top: var(--space-3);
+  overflow-x: auto;
+}
+.ab-pairs h4 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+.ab-pairs table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.ab-pairs th,
+.ab-pairs td {
+  text-align: left;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.ab-pairs th {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-weight: var(--font-medium);
+}
+.ab-pairs .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ab-pairs .reason-cell {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* Tile: tone stripe on the left edge. The registry sets tone-* on the tile;
+   the other tabs colour the value, and :has() lifts that to the stripe. */
+.ml-kpi {
+  --tone: var(--text-tertiary);
+  position: relative;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+.ml-kpi::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--tone);
+  opacity: 0.35;
+}
+.ml-kpi.tone-good,
+.ml-kpi:has(.ml-kpi-value.good) {
+  --tone: var(--profit);
+}
+.ml-kpi.tone-bad,
+.ml-kpi:has(.ml-kpi-value.bad) {
+  --tone: var(--loss);
+}
+.ml-kpi.tone-info,
+.ml-kpi:has(.ml-kpi-value.info) {
+  --tone: var(--accent);
+}
+.ml-kpi:has(.ml-kpi-value.warn-val) {
+  --tone: var(--warning);
+}
+.ml-kpi.tone-good::before,
+.ml-kpi.tone-bad::before,
+.ml-kpi.tone-info::before,
+.ml-kpi:has(.good, .bad, .info, .warn-val)::before {
+  opacity: 1;
+}
+.ml-kpi-label {
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Values sit on a shared baseline across the row even if a label wraps. */
+.ml-kpi-value {
+  margin-top: auto;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.ml-kpi-value.good,
+.tone-good .ml-kpi-value {
+  color: var(--profit);
+}
+.ml-kpi-value.bad,
+.tone-bad .ml-kpi-value {
+  color: var(--loss);
+}
+.ml-kpi-value.warn-val {
+  color: #c93400;
+}
+.ml-kpi-value.info {
+  color: var(--accent);
+}
+.ml-kpi-value.muted-val {
+  color: var(--text-tertiary);
+}
+.kpi-hint {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.notice.warn {
+  background: rgba(255, 149, 0, 0.1);
+  border: 1px solid rgba(255, 149, 0, 0.36);
+  color: #c93400;
+}
+
+/* ── Chart row ─────────────────────────────────────────────────── */
+.ml-charts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1.2fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .ml-charts {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Status mix — stacked bar + one row per status (drift-report pattern). */
+.mix-panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--card-padding);
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.mix-panel header {
+  margin-bottom: var(--space-4);
+}
+.mix-panel h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+}
+.mix-panel header p {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.mix-body {
+  height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.mix-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+.mix-big {
+  font-size: 30px;
+  font-weight: var(--font-semibold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.mix-stack {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  gap: 2px;
+  background: var(--bg-tertiary);
+}
+.mix-stack span {
+  display: block;
+  min-width: 3px;
+}
+.mix-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 1;
+}
+.mix-rows li {
+  display: grid;
+  grid-template-columns: 8px 76px 1fr 44px 44px;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+.mix-rows li.zero {
+  opacity: 0.5;
+}
+.mix-rows .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.mix-track {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+}
+.mix-track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+.mix-count {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--font-semibold);
+}
+.mix-pct {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.mix-empty {
+  height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Boards ────────────────────────────────────────────────────── */
+/* start-aligned so a one-sentence panel does not stretch to the height
+   of the table beside it */
+.ml-board-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .ml-board-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ml-board {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+  min-width: 0;
+}
+.ml-board-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.ml-board-head h3 {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+}
+.ml-board-head .muted {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.board-scroll {
+  overflow-x: auto;
+}
+.board-empty {
+  margin: 0;
+  padding: var(--space-5) var(--space-4);
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+.ml-board-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.ml-board-table th,
+.ml-board-table td {
+  padding: 8px var(--space-3);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+}
+.ml-board-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.ml-board-table tbody tr {
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.ml-board-table tbody tr.static {
+  cursor: default;
+}
+.ml-board-table tbody tr:hover {
+  background: var(--bg-tertiary);
+}
+.ml-board-table th {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ml-board-table th.num,
+.ml-board-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ml-board-table .mono {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+.ml-board-table .trunc {
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ml-board-table .profit {
+  color: var(--profit);
+}
+.ml-board-table .loss {
+  color: var(--loss);
+}
+
+/* Registry boards — drift-report table look. */
+.reg-table th,
+.reg-table td {
+  padding: 9px 10px;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.reg-table th {
+  background: var(--bg-primary);
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+}
+.reg-table th:first-child,
+.reg-table td:first-child {
+  padding-left: var(--space-4);
+}
+.reg-table th:last-child,
+.reg-table td:last-child {
+  padding-right: var(--space-4);
+}
+.reg-table tbody tr:hover {
+  background: var(--bg-primary);
+}
+.reg-table .sym {
+  font-weight: var(--font-semibold);
+}
+.reg-table .tf {
+  margin-left: 6px;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.reg-table .ver {
+  color: var(--text-secondary);
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Half-width performer boards: tighter gutters so six columns fit at 1440px. */
+.perf th,
+.perf td {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.perf td {
+  font-size: 12px;
+}
+.perf .ml-pill {
+  padding: 2px 7px;
+}
+.reg-table .ver .mono {
+  font-size: 12px;
+}
+.reg-table .ver-tag {
+  margin-left: 6px;
+  font-size: 9.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+}
+.reg-table .strong {
+  font-weight: var(--font-semibold);
+}
+.reg-table .zero {
+  color: var(--text-tertiary);
+  opacity: 0.6;
+}
+
+/* ── Pills ─────────────────────────────────────────────────────── */
+.ml-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+/* Status dot in the pill's own colour. */
+.ml-pill.with-dot::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ml-pill[data-status='Active'],
+.ml-pill.on {
+  background: rgba(52, 199, 89, 0.14);
+  color: #248a3d;
+}
+.ml-pill[data-status='Training'] {
+  background: rgba(0, 113, 227, 0.12);
+  color: #0040dd;
+}
+.ml-pill[data-status='Candidate'] {
+  background: rgba(175, 82, 222, 0.14);
+  color: #8944ab;
+}
+.ml-pill[data-status='Failed'] {
+  background: rgba(255, 59, 48, 0.14);
+  color: #d70015;
+}
+.ml-pill[data-status='Superseded'] {
+  background: rgba(142, 142, 147, 0.14);
+  color: #636366;
+}
+.ml-pill[data-status='Running'],
+.ml-pill[data-status='Processing'] {
+  background: rgba(0, 113, 227, 0.12);
+  color: #0040dd;
+}
+.ml-pill[data-status='Completed'] {
+  background: rgba(52, 199, 89, 0.14);
+  color: #248a3d;
+}
+.ml-pill[data-decision='promoted'] {
+  background: rgba(52, 199, 89, 0.14);
+  color: #248a3d;
+}
+.ml-pill[data-decision='flagged'] {
+  background: rgba(255, 149, 0, 0.14);
+  color: #c93400;
+}
+.ml-pill[data-decision='rejected'] {
+  background: rgba(255, 59, 48, 0.14);
+  color: #d70015;
+}
+.ml-pill[data-decision='pending'] {
+  background: rgba(0, 113, 227, 0.12);
+  color: #0040dd;
+}
+.ml-pill.warn {
+  background: rgba(255, 149, 0, 0.14);
+  color: #c93400;
+}

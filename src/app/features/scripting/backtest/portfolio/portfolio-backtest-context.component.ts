@@ -1,12 +1,4 @@
-import {
-  ChangeDetectionStrategy,
-  Component,
-  computed,
-  inject,
-  input,
-  output,
-  signal,
-} from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { catchError, map, of } from 'rxjs';
 
@@ -19,12 +11,20 @@ import {
   FeatureStateComponent,
   type FeatureRequirement,
 } from '@shared/components/feedback/feature-state.component';
-import {
-  FactTilesComponent,
-  type FactTile,
-} from '@features/strategies/components/fact-tiles/fact-tiles.component';
 import { ago, count, day } from '@features/strategies/util/figures';
 import { isScriptStrategy } from '../../shared/script-strategy';
+
+/** One KPI tile: `value` already formatted; `caption` says what it means; `tone` colours the stripe. */
+interface ContextTile {
+  label: string;
+  value: string;
+  caption?: string | null;
+  tone?: 'info' | 'good' | 'warn' | null;
+  /** Tooltip with the exact definition of the figure. */
+  title?: string | null;
+  route?: string | null;
+  query?: Record<string, string> | null;
+}
 
 /** Engine defaults of the PortfolioBacktest:* keys (used only when the key has no row). */
 const DEFAULTS: Record<string, string> = {
@@ -43,10 +43,28 @@ const DEFAULTS: Record<string, string> = {
   selector: 'app-portfolio-backtest-context',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, FeatureStateComponent, FactTilesComponent],
+  imports: [RouterLink, FeatureStateComponent],
   template: `
-    <app-fact-tiles [tiles]="tiles()" />
+    <div class="kpis" role="list">
+      @for (t of tiles(); track t.label) {
+        <div class="kpi" role="listitem" [attr.data-tone]="t.tone ?? null" [title]="t.title ?? ''">
+          <span class="kpi-label">{{ t.label }}</span>
+          @if (t.route) {
+            <a class="kpi-value link" [routerLink]="t.route" [queryParams]="t.query ?? undefined">{{
+              t.value
+            }}</a>
+          } @else {
+            <span class="kpi-value">{{ t.value }}</span>
+          }
+          @if (t.caption) {
+            <span class="kpi-hint" [title]="t.caption">{{ t.caption }}</span>
+          }
+        </div>
+      }
+    </div>
 
+    <!-- With no run yet, explain the feature. Queuing starts from the page header's "New portfolio
+         backtest" button, which the detail line points at; a second button here duplicated it. -->
     @if (runCount() === 0) {
       <app-feature-state
         [kind]="enabled() === false ? 'off' : 'waiting'"
@@ -69,29 +87,22 @@ const DEFAULTS: Record<string, string> = {
           },
         ]"
       />
-      @if (canQueue()) {
-        <div class="cta">
-          <button type="button" class="btn btn-primary" (click)="start.emit()">
-            Start a portfolio backtest
-          </button>
-        </div>
-      }
     }
 
     <section class="card" aria-labelledby="pf-recent-title">
       <header class="head">
         <h2 id="pf-recent-title" class="title">Recent single-strategy backtests</h2>
-        <span class="muted small">the evidence each member brings — newest first</span>
+        <span class="hint">the evidence each member brings — newest first</span>
         <span class="spacer"></span>
-        <a routerLink="/backtests" class="small">All backtests →</a>
+        <a routerLink="/backtests" class="all">All backtests →</a>
       </header>
       @if (recent() === null) {
-        <p class="muted">Loading…</p>
+        <p class="empty">Loading…</p>
       } @else if (recent()!.length === 0) {
-        <p class="muted">No backtest is on record yet.</p>
+        <p class="empty">No backtest is on record yet.</p>
       } @else {
         <div class="table-wrap">
-          <table>
+          <table class="grid">
             <thead>
               <tr>
                 <th>Run</th>
@@ -101,42 +112,51 @@ const DEFAULTS: Record<string, string> = {
                 <th class="num">Trades</th>
                 <th class="num" title="Percent of the initial balance">Return</th>
                 <th class="num" title="Percent of peak equity">Max DD</th>
-                <th>Completed</th>
+                <th class="num">Completed</th>
               </tr>
             </thead>
             <tbody>
               @for (b of recent(); track b.id) {
                 <tr>
                   <td>
-                    <a [routerLink]="['/backtests', b.id]" class="mono">#{{ b.id }}</a>
+                    <a [routerLink]="['/backtests', b.id]" class="run-id">#{{ b.id }}</a>
                   </td>
-                  <td>
+                  <td class="name-cell">
                     @if (b.strategyId && known(b.strategyId)) {
-                      <a [routerLink]="['/strategies', b.strategyId]">{{ nameOf(b.strategyId) }}</a>
+                      <a
+                        class="name"
+                        [routerLink]="['/strategies', b.strategyId]"
+                        [title]="nameOf(b.strategyId)"
+                        >{{ nameOf(b.strategyId) }}</a
+                      >
                     } @else if (b.strategyId) {
-                      #{{ b.strategyId }} <span class="muted small">(deleted)</span>
+                      <span class="name dim">#{{ b.strategyId }} (deleted)</span>
                     } @else {
-                      —
+                      <span class="dim">—</span>
                     }
                   </td>
-                  <td>{{ b.symbol }} {{ b.timeframe }}</td>
-                  <td>{{ b.status }}</td>
-                  <td class="num">{{ b.totalTrades ?? '—' }}</td>
+                  <td class="nowrap">
+                    <span class="sym">{{ b.symbol }}</span>
+                    <span class="tf">{{ b.timeframe }}</span>
+                  </td>
+                  <td>
+                    <span class="dot" [attr.data-status]="b.status">{{ b.status }}</span>
+                  </td>
+                  <td class="num" [class.dim]="!b.totalTrades">{{ b.totalTrades ?? '—' }}</td>
                   <td
                     class="num"
-                    [class.profit]="(b.totalReturn ?? 0) > 0"
-                    [class.loss]="(b.totalReturn ?? 0) < 0"
+                    [class.profit]="(b.totalReturn ?? 0) > 0 && b.totalTrades !== 0"
+                    [class.loss]="(b.totalReturn ?? 0) < 0 && b.totalTrades !== 0"
+                    [class.dim]="
+                      !hasNum(b.totalReturn) || b.totalTrades === 0 || b.totalReturn === 0
+                    "
                   >
-                    {{
-                      b.totalReturn == null || b.totalTrades === 0
-                        ? '—'
-                        : (b.totalReturn > 0 ? '+' : '') + b.totalReturn.toFixed(2) + '%'
-                    }}
+                    {{ b.totalTrades === 0 ? '—' : signedPct(b.totalReturn) }}
                   </td>
-                  <td class="num">
-                    {{ b.maxDrawdownPct == null ? '—' : b.maxDrawdownPct.toFixed(2) + '%' }}
+                  <td class="num" [class.dim]="!b.maxDrawdownPct">
+                    {{ plainPct(b.maxDrawdownPct) }}
                   </td>
-                  <td class="small">{{ day(b.completedAt) }}</td>
+                  <td class="num when">{{ day(b.completedAt) }}</td>
                 </tr>
               }
             </tbody>
@@ -152,67 +172,173 @@ const DEFAULTS: Record<string, string> = {
         flex-direction: column;
         gap: var(--space-4);
       }
-      .cta {
-        display: flex;
-        justify-content: flex-end;
-        margin-top: calc(-1 * var(--space-2));
+
+      /* KPI strip — same family as the Drift Report tiles: tone stripe, label, figure, one-line caption. */
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-3);
       }
-      .card {
-        padding: var(--space-4) var(--space-5);
+      .kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
+        box-shadow: var(--shadow-sm);
+      }
+      .kpi::before {
+        content: '';
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .kpi[data-tone='info'] {
+        --tone: var(--accent);
+      }
+      .kpi[data-tone='good'] {
+        --tone: var(--profit);
+      }
+      .kpi[data-tone='warn'] {
+        --tone: var(--warning);
+      }
+      .kpi[data-tone]::before {
+        opacity: 1;
+      }
+      .kpi-label {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-value {
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        text-decoration: none;
+        align-self: flex-start;
+      }
+      a.kpi-value:hover {
+        color: var(--accent);
+      }
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .card {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
       }
       .head {
         display: flex;
         align-items: baseline;
-        gap: 8px;
         flex-wrap: wrap;
+        gap: var(--space-1) var(--space-3);
+        padding: var(--space-4) var(--space-5) var(--space-3);
       }
       .title {
         margin: 0;
         font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
+      .hint {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
       .spacer {
         flex: 1;
       }
+      .all {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        text-decoration: none;
+        padding: 3px 10px;
+        border-radius: var(--radius-full);
+      }
+      .all:hover {
+        background: rgba(0, 113, 227, 0.08);
+      }
+      .empty {
+        margin: 0;
+        padding: var(--space-6) var(--space-4);
+        text-align: center;
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+      }
+
+      /* Board table: small uppercase headers, tabular figures, muted zeros. */
       .table-wrap {
         overflow-x: auto;
       }
-      table {
+      table.grid {
         width: 100%;
         border-collapse: collapse;
         font-size: var(--text-sm);
+        table-layout: auto;
       }
-      th,
-      td {
-        padding: 6px 8px;
+      .grid th,
+      .grid td {
+        padding: 9px var(--space-3);
         border-bottom: 1px solid var(--border);
         text-align: left;
-        font-weight: normal;
+        vertical-align: middle;
+      }
+      .grid th:first-child,
+      .grid td:first-child {
+        padding-left: var(--space-5);
+      }
+      .grid th:last-child,
+      .grid td:last-child {
+        padding-right: var(--space-5);
+      }
+      .grid th {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        background: var(--bg-primary);
         white-space: nowrap;
       }
-      thead th {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
+      .grid tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .grid tbody tr:hover td {
+        background: var(--bg-primary);
       }
       .num {
-        text-align: right;
+        text-align: right !important;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
-      .muted {
+      .nowrap {
+        white-space: nowrap;
+      }
+      .dim {
         color: var(--text-tertiary);
-        margin: 0;
-      }
-      .small {
-        font-size: var(--text-xs);
-      }
-      .mono {
-        font-family: var(--font-mono);
       }
       .profit {
         color: var(--profit);
@@ -220,9 +346,88 @@ const DEFAULTS: Record<string, string> = {
       .loss {
         color: var(--loss);
       }
-      a {
+      .run-id {
+        font-family: var(--font-mono, ui-monospace, monospace);
+        font-size: 12.5px;
+        font-weight: var(--font-semibold);
         color: var(--accent);
         text-decoration: none;
+      }
+      .run-id:hover {
+        text-decoration: underline;
+      }
+      .name-cell {
+        width: 100%;
+        max-width: 0;
+      }
+      .name {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-primary);
+        text-decoration: none;
+      }
+      a.name:hover {
+        color: var(--accent);
+        text-decoration: underline;
+      }
+      .sym {
+        font-weight: var(--font-semibold);
+      }
+      .tf {
+        margin-left: 6px;
+        font-size: 10.5px;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        padding: 1px 6px;
+        border-radius: 4px;
+      }
+      .when {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+
+      /* Status dot. */
+      .dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .dot::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .dot[data-status='Completed']::before {
+        background: var(--profit);
+        opacity: 1;
+      }
+      .dot[data-status='Running'] {
+        color: var(--accent);
+      }
+      .dot[data-status='Running']::before {
+        background: var(--accent);
+        opacity: 1;
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.18);
+      }
+      .dot[data-status='Failed'] {
+        color: var(--loss);
+      }
+      .dot[data-status='Failed']::before {
+        background: var(--loss);
+        opacity: 1;
+      }
+      .dot[data-status='Cancelled']::before {
+        background: var(--warning);
+        opacity: 1;
       }
     `,
   ],
@@ -236,9 +441,23 @@ export class PortfolioBacktestContextComponent {
   /** Runs in the page's list (null while it loads). */
   readonly runCount = input<number | null>(null);
   readonly canQueue = input(false);
-  readonly start = output<void>();
 
   protected readonly day = day;
+
+  /** A present, finite figure (null and undefined both read as "no figure"). */
+  protected hasNum(v: number | null | undefined): v is number {
+    return typeof v === 'number' && Number.isFinite(v);
+  }
+
+  /** "+1.23%" / "-0.45%", or "—" when there is no figure. */
+  protected signedPct(v: number | null | undefined): string {
+    return this.hasNum(v) ? `${v > 0 ? '+' : ''}${v.toFixed(2)}%` : '—';
+  }
+
+  /** "3.63%", or "—" when there is no figure. */
+  protected plainPct(v: number | null | undefined): string {
+    return this.hasNum(v) ? `${v.toFixed(2)}%` : '—';
+  }
   private readonly settings = signal<Record<string, string | null>>({});
   private readonly scriptStrategies = signal<StrategyDto[] | null>(null);
   private readonly strategyNames = signal<Map<number, string>>(new Map());
@@ -348,7 +567,7 @@ export class PortfolioBacktestContextComponent {
     ];
   });
 
-  protected readonly tiles = computed<FactTile[]>(() => {
+  protected readonly tiles = computed<ContextTile[]>(() => {
     const scripts = this.scriptStrategies();
     const newest = this.recent()?.[0];
     return [
@@ -356,11 +575,13 @@ export class PortfolioBacktestContextComponent {
         label: 'Portfolio runs',
         value: this.runCount() === null ? '…' : count(this.runCount()),
         caption: this.runCount() === 0 ? 'none queued yet' : 'newest 50 listed below',
+        tone: this.runCount() ? 'info' : null,
       },
       {
         label: 'Script strategies',
         value: scripts === null ? '—' : count(scripts.length),
         caption: 'can be portfolio members',
+        tone: scripts === null ? null : scripts.length >= 2 ? 'good' : 'warn',
         route: '/strategies',
       },
       {
@@ -377,6 +598,7 @@ export class PortfolioBacktestContextComponent {
         caption: newest
           ? `newest #${newest.id} · ${ago(newest.completedAt ?? newest.queuedAt)}`
           : null,
+        tone: this.backtestTotal() ? 'info' : null,
         route: '/backtests',
       },
     ];

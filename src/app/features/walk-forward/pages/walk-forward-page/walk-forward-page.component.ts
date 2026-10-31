@@ -15,6 +15,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { Observable, map, merge, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -37,8 +38,78 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
-import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/analytics-sample';
+
+/** Status colours shared by the mix panel and the runs table. */
+const STATUS_COLOR: Record<string, string> = {
+  Completed: '#34C759',
+  Running: '#0071E3',
+  Pending: '#5AC8FA',
+  Queued: '#8E8E93',
+  Cancelled: '#8E8E93',
+  Abandoned: '#FF9500',
+  Failed: '#FF3B30',
+};
+/** Display order wherever statuses are listed side by side; unknown statuses follow. */
+const STATUS_ORDER = Object.keys(STATUS_COLOR);
+
+/** The per-strategy board shows this many rows (the leaderboard's height) until "Show all". */
+const COLLAPSED_ROWS = 8;
+
+function relative(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
+/** Cell-renderer strings go straight into innerHTML; data-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+// AG Grid cells sit outside this component's style scope, so the renderers style inline.
+function statusPillHtml(status: unknown): string {
+  if (status == null || status === '') return '';
+  const s = String(status);
+  const c = STATUS_COLOR[s] ?? '#8E8E93';
+  return (
+    `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:999px;` +
+    `background:${c}1f;color:${c};font-size:12px;font-weight:600;line-height:22px">` +
+    `<span style="width:6px;height:6px;border-radius:50%;background:${c}"></span>${esc(s)}</span>`
+  );
+}
+
+function idHtml(v: unknown): string {
+  return `<span style="color:var(--text-tertiary);font-variant-numeric:tabular-nums">#${esc(String(v ?? ''))}</span>`;
+}
+
+/** Absolute UTC date with the year, and the relative time beneath it. */
+function dateHtml(iso: string | null | undefined, abs: string): string {
+  if (!iso) return `<span style="color:var(--text-tertiary)">—</span>`;
+  return (
+    `<span style="display:inline-block;vertical-align:middle;line-height:1.3">` +
+    `<span style="font-variant-numeric:tabular-nums">${esc(abs)}</span><br/>` +
+    `<span style="font-size:11px;color:var(--text-tertiary)">${esc(relative(iso))}</span></span>`
+  );
+}
+
+const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
+
+/** Tabular number cell, green/red by sign — for the OOS Sharpe column. */
+function signedStyle(v: unknown): Record<string, string> {
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  return n > 0
+    ? { ...NUM_CELL, color: 'var(--profit)' }
+    : n < 0
+      ? { ...NUM_CELL, color: 'var(--loss)' }
+      : NUM_CELL;
+}
 
 @Component({
   selector: 'app-walk-forward-page',
@@ -167,74 +238,111 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
         </p>
       }
       <!-- KPI strip — fleet-wide walk-forward posture. "—" until the sample lands: a row of
-           zeros beside a table of 2,973 runs read as "no runs". -->
-      <div class="wf-kpis">
-        <div class="wf-kpi">
+           zeros beside a table of 2,973 runs read as "no runs". Tones carry meaning only:
+           failures red, Sharpe by sign. -->
+      <div class="dr-kpis">
+        <div class="dr-kpi">
           <span class="kpi-label">Total runs</span>
           <span class="kpi-value">{{ ready() ? fmtInt(sampleTotal()) : '—' }}</span>
-        </div>
-        <div class="wf-kpi">
-          <span class="kpi-label">Completed</span>
-          <span class="kpi-value" [class.good]="ready() && wfStats().completed > 0">{{
-            ready() ? wfStats().completed : '—'
-          }}</span>
-        </div>
-        <div class="wf-kpi">
-          <span class="kpi-label">Failed</span>
-          <span
-            class="kpi-value"
-            [class.bad]="ready() && wfStats().failed > 0"
-            [class.good]="ready() && wfStats().failed === 0"
-          >
-            {{ ready() ? wfStats().failed : '—' }}
+          <span class="kpi-hint" [title]="latestStart().abs">
+            {{ latestStart().rel ? 'latest started ' + latestStart().rel : 'none started yet' }}
           </span>
         </div>
-        <div class="wf-kpi">
+        <div class="dr-kpi">
+          <span class="kpi-label">Completed</span>
+          <span class="kpi-value">{{ ready() ? fmtInt(wfStats().completed) : '—' }}</span>
+          <span class="kpi-hint">{{ pct(wfStats().completed, wfStats().total) }} of runs</span>
+        </div>
+        <div class="dr-kpi" [class.tone-bad]="ready() && wfStats().failed > 0">
+          <span class="kpi-label">Failed</span>
+          <span class="kpi-value">{{ ready() ? fmtInt(wfStats().failed) : '—' }}</span>
+          <span class="kpi-hint">{{ pct(wfStats().failed, wfStats().total) }} of runs</span>
+        </div>
+        <div
+          class="dr-kpi"
+          [class.tone-good]="wfStats().avgOos !== null && wfStats().avgOos! > 0"
+          [class.tone-bad]="wfStats().avgOos !== null && wfStats().avgOos! < 0"
+        >
           <span class="kpi-label" title="Mean out-of-sample Sharpe ratio across each run's windows"
             >Avg OOS Sharpe</span
           >
-          <span
-            class="kpi-value"
-            [class.good]="wfStats().avgOos !== null && wfStats().avgOos! > 0"
-            [class.bad]="wfStats().avgOos !== null && wfStats().avgOos! < 0"
-          >
-            {{ sharpe(wfStats().avgOos) }}
-          </span>
+          <span class="kpi-value">{{ sharpe(wfStats().avgOos) }}</span>
+          <span class="kpi-hint">over {{ fmtInt(scoredRuns()) }} scored completed runs</span>
         </div>
-        <div class="wf-kpi">
+        <div
+          class="dr-kpi"
+          [class.tone-good]="wfStats().bestOos !== null && wfStats().bestOos! > 0"
+          [class.tone-bad]="wfStats().bestOos !== null && wfStats().bestOos! < 0"
+        >
           <span class="kpi-label">Best OOS Sharpe</span>
-          <span
-            class="kpi-value"
-            [class.good]="wfStats().bestOos !== null && wfStats().bestOos! > 0"
-            [class.bad]="wfStats().bestOos !== null && wfStats().bestOos! < 0"
-          >
-            {{ sharpe(wfStats().bestOos) }}
+          <span class="kpi-value">{{ sharpe(wfStats().bestOos) }}</span>
+          <span class="kpi-hint">
+            @if (topOos()[0]; as b) {
+              best: #{{ b.id }} · {{ b.symbol ?? '—' }} {{ b.timeframe }}
+            } @else {
+              no scored runs yet
+            }
           </span>
         </div>
-        <div class="wf-kpi">
+        <div class="dr-kpi">
           <span class="kpi-label">Avg consistency</span>
           <span class="kpi-value">
             {{ wfStats().avgConsistency !== null ? wfStats().avgConsistency!.toFixed(3) : '—' }}
           </span>
+          <span class="kpi-hint">σ of window Sharpes · lower = steadier</span>
         </div>
-        <div class="wf-kpi">
+        <div class="dr-kpi">
           <span class="kpi-label">Avg IS days</span>
-          <span class="kpi-value">{{ ready() ? wfStats().avgIs : '—' }}</span>
+          <span class="kpi-value">{{ ready() ? fmtInt(wfStats().avgIs) : '—' }}</span>
+          <span class="kpi-hint">in-sample window length</span>
         </div>
-        <div class="wf-kpi">
+        <div class="dr-kpi">
           <span class="kpi-label">Avg OOS days</span>
-          <span class="kpi-value">{{ ready() ? wfStats().avgOosDays : '—' }}</span>
+          <span class="kpi-value">{{ ready() ? fmtInt(wfStats().avgOosDays) : '—' }}</span>
+          <span class="kpi-hint">out-of-sample window length</span>
         </div>
       </div>
 
-      <!-- 3-col chart row -->
-      <div class="wf-charts">
-        <app-chart-card
-          title="Status distribution"
-          subtitle="Completed · Failed · Running · Pending"
-          [options]="statusDonutOptions()"
-          height="240px"
-        />
+      <!-- 3-col chart row: status breakdown + OOS Sharpe histogram + runs by symbol -->
+      <div class="dr-charts">
+        <section class="mix-panel">
+          <header class="mix-head">
+            <h3>Status distribution</h3>
+            <p>Share of sampled runs by status</p>
+          </header>
+          @if (statusMix().length > 0) {
+            <div class="mix-body">
+              <div class="mix-headline">
+                <span class="mix-big">{{ fmtInt(wfStats().total) }}</span>
+                <span class="mix-big-label">runs</span>
+              </div>
+              <div class="mix-stack" role="img" [attr.aria-label]="mixLabel()">
+                @for (r of statusMix(); track r.name) {
+                  <span
+                    [style.width.%]="r.pct"
+                    [style.background]="r.color"
+                    [title]="r.name + ': ' + fmtInt(r.count)"
+                  ></span>
+                }
+              </div>
+              <ul class="mix-rows">
+                @for (r of statusMix(); track r.name) {
+                  <li>
+                    <span class="dot" [style.background]="r.color"></span>
+                    <span class="mix-name">{{ r.name }}</span>
+                    <span class="mix-track">
+                      <i [style.width.%]="r.pct" [style.background]="r.color"></i>
+                    </span>
+                    <span class="mix-count">{{ fmtInt(r.count) }}</span>
+                    <span class="mix-pct">{{ pct(r.count, wfStats().total) }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <p class="mix-empty">{{ ready() ? 'No walk-forward runs yet.' : 'Loading…' }}</p>
+          }
+        </section>
         <app-chart-card
           title="OOS Sharpe distribution"
           subtitle="Completed runs · mean out-of-sample Sharpe, bins from −10 to +5, outliers pooled at the edges"
@@ -249,98 +357,110 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
         />
       </div>
 
-      <!-- 2-col tables: top performers + per-strategy breakdown -->
-      <div class="wf-board-row">
-        <section class="wf-board">
-          <header class="wf-board-head">
+      <!-- 2-col boards: top performers + per-strategy breakdown. Start-aligned so the
+           eight-row leaderboard never stretches to the breakdown's height. -->
+      <div class="dr-board-row">
+        <section class="dr-board">
+          <header class="dr-board-head">
             <h3>Top performers</h3>
             <span class="muted">Highest mean OOS Sharpe across completed runs</span>
           </header>
           @if (topOos().length > 0) {
-            <table class="wf-board-table">
-              <thead>
-                <tr>
-                  <th>Run</th>
-                  <th>Strategy</th>
-                  <th>Symbol</th>
-                  <th>TF</th>
-                  <th class="num">Avg OOS Sharpe</th>
-                  <th class="num">Consistency</th>
-                  <th class="num">IS / OOS</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of topOos(); track r.id) {
-                  <tr (click)="goToDetail(r)">
-                    <td class="mono">#{{ r.id }}</td>
-                    <td class="mono">#{{ r.strategyId }}</td>
-                    <td class="mono">{{ r.symbol }}</td>
-                    <td class="mono">{{ r.timeframe }}</td>
-                    <td
-                      class="num mono"
-                      [class.profit]="(r.averageOutOfSampleScore ?? 0) > 0"
-                      [class.loss]="(r.averageOutOfSampleScore ?? 0) < 0"
-                    >
-                      {{ sharpe(r.averageOutOfSampleScore) }}
-                    </td>
-                    <td class="num mono">
-                      {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
-                    </td>
-                    <td class="num mono">{{ r.inSampleDays }} / {{ r.outOfSampleDays }}</td>
+            <div class="board-scroll">
+              <table class="dr-board-table">
+                <thead>
+                  <tr>
+                    <th>Run</th>
+                    <th>Strategy</th>
+                    <th>Market</th>
+                    <th class="num" title="Mean out-of-sample Sharpe across the run's windows">
+                      Avg OOS
+                    </th>
+                    <th class="num">Consistency</th>
+                    <th class="num" title="In-sample / out-of-sample window days">IS / OOS</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (r of topOos(); track r.id) {
+                    <tr class="clickable" (click)="goToDetail(r)">
+                      <td class="id">#{{ r.id }}</td>
+                      <td class="id">#{{ r.strategyId }}</td>
+                      <td>
+                        <span class="sym-strong">{{ r.symbol }}</span>
+                        <span class="tf">{{ r.timeframe }}</span>
+                      </td>
+                      <td
+                        class="num strong"
+                        [class.pos]="(r.averageOutOfSampleScore ?? 0) > 0"
+                        [class.neg]="(r.averageOutOfSampleScore ?? 0) < 0"
+                      >
+                        {{ sharpe(r.averageOutOfSampleScore) }}
+                      </td>
+                      <td class="num">
+                        {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
+                      </td>
+                      <td class="num dim-cell">{{ r.inSampleDays }} / {{ r.outOfSampleDays }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           } @else {
-            <p class="muted" style="padding: var(--space-4)">
-              No completed runs with OOS scores yet.
-            </p>
+            <p class="muted board-empty">No completed runs with OOS scores yet.</p>
           }
         </section>
 
-        <section class="wf-board">
-          <header class="wf-board-head">
+        <section class="dr-board">
+          <header class="dr-board-head">
             <h3>Per-strategy breakdown</h3>
-            <span class="muted">
-              Outcomes grouped by strategy id ·
-              {{ perStrategyBreakdown().length }} total
-            </span>
+            <span class="count-chip">{{ fmtInt(perStrategyBreakdown().length) }}</span>
+            <span class="muted">Outcomes by strategy id · OOS = mean out-of-sample Sharpe</span>
           </header>
           @if (perStrategyBreakdown().length > 0) {
-            <div class="wf-scroll wf-scroll-x">
-              <table class="wf-board-table sticky-head">
+            <div class="board-scroll" [class.capped]="showAllStrategies()">
+              <table class="dr-board-table">
                 <thead>
                   <tr>
                     <th>Strategy</th>
                     <th class="num">Runs</th>
-                    <th class="num">Completed</th>
-                    <th class="num">Failed</th>
-                    <th class="num">Avg OOS Sharpe</th>
-                    <th class="num">Best OOS Sharpe</th>
+                    <th class="num"><span class="dot ok"></span>Completed</th>
+                    <th class="num"><span class="dot fail"></span>Failed</th>
+                    <th class="num" title="Mean out-of-sample Sharpe over completed runs">
+                      Avg OOS
+                    </th>
+                    <th class="num" title="Best mean out-of-sample Sharpe">Best OOS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of perStrategyBreakdown(); track row.strategyId) {
+                  @for (row of visibleStrategies(); track row.strategyId) {
                     <tr>
-                      <td class="mono">#{{ row.strategyId }}</td>
-                      <td class="num mono">{{ row.runs }}</td>
-                      <td class="num mono" [class.profit]="row.completed > 0">
-                        {{ row.completed }}
-                      </td>
-                      <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
+                      <td class="sym">#{{ row.strategyId }}</td>
+                      <td class="num strong">{{ fmtInt(row.runs) }}</td>
                       <td
-                        class="num mono"
-                        [class.profit]="(row.avgOos ?? 0) > 0"
-                        [class.loss]="(row.avgOos ?? 0) < 0"
+                        class="num"
+                        [class.zero]="row.completed === 0"
+                        [class.pos]="row.completed > 0"
                       >
-                        {{ sharpe(row.avgOos) }}
+                        {{ row.completed > 0 ? fmtInt(row.completed) : '–' }}
+                      </td>
+                      <td class="num" [class.zero]="row.failed === 0" [class.neg]="row.failed > 0">
+                        {{ row.failed > 0 ? fmtInt(row.failed) : '–' }}
                       </td>
                       <td
-                        class="num mono"
-                        [class.profit]="(row.bestOos ?? 0) > 0"
-                        [class.loss]="(row.bestOos ?? 0) < 0"
+                        class="num"
+                        [class.zero]="row.avgOos === null"
+                        [class.pos]="(row.avgOos ?? 0) > 0"
+                        [class.neg]="(row.avgOos ?? 0) < 0"
                       >
-                        {{ sharpe(row.bestOos) }}
+                        {{ row.avgOos !== null ? sharpe(row.avgOos) : '–' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.zero]="row.bestOos === null && row.wipedOut === 0"
+                        [class.pos]="(row.bestOos ?? 0) > 0"
+                        [class.neg]="(row.bestOos ?? 0) < 0"
+                      >
+                        {{ row.bestOos !== null ? sharpe(row.bestOos) : '–' }}
                         @if (row.wipedOut > 0) {
                           <span
                             class="wiped-pill"
@@ -354,14 +474,43 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
                 </tbody>
               </table>
             </div>
+            @if (perStrategyBreakdown().length > collapsedRows) {
+              <footer class="board-foot" [class.raised]="showAllStrategies()">
+                <span class="muted">{{
+                  showAllStrategies()
+                    ? 'All ' +
+                      fmtInt(perStrategyBreakdown().length) +
+                      ' strategies · scroll the table'
+                    : 'Top ' +
+                      collapsedRows +
+                      ' of ' +
+                      fmtInt(perStrategyBreakdown().length) +
+                      ' by run count'
+                }}</span>
+                <button
+                  type="button"
+                  class="link-btn"
+                  (click)="showAllStrategies.set(!showAllStrategies())"
+                >
+                  {{ showAllStrategies() ? 'Show top ' + collapsedRows : 'Show all' }}
+                </button>
+              </footer>
+            }
+          } @else {
+            <p class="muted board-empty">{{ ready() ? 'No runs to group yet.' : 'Loading…' }}</p>
           }
         </section>
       </div>
 
-      <section class="wf-board">
-        <header class="wf-board-head">
+      <section class="dr-board">
+        <header class="dr-board-head">
           <h3>All walk-forward runs</h3>
-          <span class="muted">Server-paged — click any row for the detail page</span>
+          @if (ready()) {
+            <span class="count-chip">{{ fmtInt(sampleTotal()) }}</span>
+          }
+          <span class="muted head-right"
+            >Server-paged · click any row for the detail page · UTC</span
+          >
         </header>
         <app-data-table
           #runsTable
@@ -379,7 +528,7 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
+        gap: var(--space-4);
       }
       .btn {
         height: 36px;
@@ -492,12 +641,448 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
         }
       }
 
-      /* Walk-Forward density additions */
-      .wf-kpis {
+      /* ── Shared list-page look (same as Drift Report) ───────────── */
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .dot.ok {
+        background: #34c759;
+      }
+      .dot.fail {
+        background: #ff3b30;
+      }
+      .dot.warn {
+        background: #ff9500;
+      }
+      th .dot {
+        width: 6px;
+        height: 6px;
+        margin-right: 5px;
+        vertical-align: 1px;
+      }
+
+      /* KPI strip: two rows of four keep every label on one line. */
+      .dr-kpis {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      @media (max-width: 720px) {
+        .dr-kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .dr-kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .dr-kpi::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .dr-kpi.tone-bad {
+        --tone: #d70015;
+      }
+      .dr-kpi.tone-warn {
+        --tone: var(--warning);
+      }
+      .dr-kpi.tone-info {
+        --tone: var(--accent);
+      }
+      .dr-kpi.tone-good {
+        --tone: var(--profit);
+      }
+      .dr-kpi[class*='tone-']::before {
+        opacity: 1;
+      }
+      .kpi-label {
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-value {
+        font-size: 26px;
+        line-height: 1.2;
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
+      }
+      .tone-bad .kpi-value {
+        color: #d70015;
+      }
+      .tone-warn .kpi-value {
+        color: var(--warning);
+      }
+      .tone-good .kpi-value {
+        color: var(--profit);
+      }
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-hint.warn {
+        color: var(--warning);
+        cursor: help;
+      }
+
+      /* Chart row */
+      .dr-charts {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
+        gap: var(--space-3);
         align-items: start;
+      }
+      @media (max-width: 1100px) {
+        .dr-charts {
+          grid-template-columns: 1fr;
+        }
+      }
+      .mix-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+      }
+      .mix-head {
+        margin-bottom: var(--space-4);
+      }
+      .mix-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .mix-head p {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .mix-body {
+        height: 240px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .mix-headline {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .mix-big {
+        font-size: 30px;
+        font-weight: var(--font-semibold);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+      }
+      .mix-big-label {
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+      .mix-stack {
+        display: flex;
+        height: 14px;
+        border-radius: 7px;
+        overflow: hidden;
+        gap: 2px;
+        background: var(--bg-tertiary);
+      }
+      .mix-stack span {
+        display: block;
+        min-width: 3px;
+      }
+      .mix-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        overflow-y: auto;
+      }
+      .mix-rows li {
+        display: grid;
+        grid-template-columns: 8px minmax(84px, auto) 1fr 52px 40px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .mix-name {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+      .mix-sub {
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .mix-sub.bad {
+        color: #d70015;
+      }
+      .mix-track {
+        display: block;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        overflow: hidden;
+      }
+      .mix-track i {
+        display: block;
+        height: 100%;
+        min-width: 2px;
+        border-radius: 3px;
+      }
+      .mix-count {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--font-semibold);
+      }
+      .mix-pct {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .mix-empty {
+        height: 240px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+      }
+
+      /* Boards: start-aligned so a short board never stretches to its neighbour's height. */
+      .dr-board-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      .dr-board-row.single {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      @media (max-width: 1100px) {
+        .dr-board-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      .dr-board {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+      }
+      .dr-board-head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .dr-board-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+      }
+      .head-right {
+        margin-left: auto;
+      }
+      .count-chip {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+      }
+      .board-empty {
+        margin: 0;
+        padding: var(--space-5) var(--space-4);
+      }
+      .board-scroll {
+        overflow-x: auto;
+      }
+      /* Expanded long boards scroll inside exactly twelve rows (33px head + 12 × 36px rows), so
+         the cut always falls on a row boundary; the sticky head keeps the columns labelled. */
+      .board-scroll.capped {
+        max-height: 465px;
+        overflow-y: auto;
+      }
+      .board-scroll.capped thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .dr-board-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .dr-board-table th,
+      .dr-board-table td {
+        height: 36px;
+        padding: 0 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .dr-board-table th {
+        height: 33px;
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .dr-board-table th:first-child,
+      .dr-board-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .dr-board-table th:last-child,
+      .dr-board-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .dr-board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .dr-board-table tbody tr:hover {
+        background: var(--bg-primary);
+      }
+      .dr-board-table tr.clickable {
+        cursor: pointer;
+      }
+      .dr-board-table .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        width: 1%;
+      }
+      .dr-board-table .id {
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+        width: 1%;
+      }
+      .dr-board-table .sym {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .dim-cell {
+        color: var(--text-secondary);
+      }
+      .dr-board-table .name-cell {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .dr-board-table .strong {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .zero {
+        color: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .dr-board-table .pos {
+        color: var(--profit);
+      }
+      .dr-board-table .neg {
+        color: var(--loss);
+      }
+      .dr-board-table .warn {
+        color: #c93400;
+      }
+      .mix-col {
+        width: 130px;
+      }
+      .mix-bar {
+        display: flex;
+        width: 110px;
+        height: 8px;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--bg-tertiary);
+        gap: 1px;
+      }
+      .mix-bar i {
+        display: block;
+        height: 100%;
+      }
+      .mix-bar .ok {
+        background: #34c759;
+      }
+      .mix-bar .fail {
+        background: #ff3b30;
+      }
+      .mix-bar .warn {
+        background: #ff9500;
+      }
+      .board-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+      }
+      .board-foot.raised {
+        box-shadow: 0 -8px 10px -8px rgba(0, 0, 0, 0.18);
+        position: relative;
+      }
+      .link-btn {
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+      }
+      .link-btn:hover {
+        background: rgba(0, 113, 227, 0.08);
       }
       .wiped-note {
         margin: 0;
@@ -518,151 +1103,14 @@ import { analyticsSampleSize, newestRowsRequest } from '@features/backtests/anal
         color: var(--warning);
         font-size: 10px;
         font-weight: var(--font-semibold);
-        font-family: inherit;
       }
-      .wf-scroll-x {
-        overflow-x: auto;
-      }
-      @media (max-width: 720px) {
-        .wf-kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      .wf-kpi {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .kpi-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .kpi-value {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-value.good {
-        color: var(--profit);
-      }
-      .kpi-value.bad {
-        color: var(--loss);
-      }
-
-      .wf-charts {
-        display: grid;
-        grid-template-columns: 1fr 1.2fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .wf-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .wf-board-row {
-        display: grid;
-        grid-template-columns: 1.6fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .wf-board-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .wf-board {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .wf-board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .wf-board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
+      .sym-strong {
         font-weight: var(--font-semibold);
       }
-      .wf-board-head .muted {
-        color: var(--text-tertiary);
+      .tf {
+        margin-left: 6px;
         font-size: var(--text-xs);
-      }
-      .wf-board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .wf-board-table th,
-      .wf-board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .wf-board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .wf-board-table tbody tr {
-        cursor: pointer;
-        transition: background 0.1s;
-      }
-      .wf-board-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      .wf-board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-      }
-      .wf-board-table th.num,
-      .wf-board-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .wf-board-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .wf-board-table .profit {
-        color: var(--profit);
-      }
-      .wf-board-table .loss {
-        color: var(--loss);
-      }
-      .wf-board-table .bad {
-        color: var(--loss);
-      }
-
-      /* Cap tall breakdown tables; sticky header keeps the columns labelled
-         while the operator scrolls through 100+ strategies. */
-      .wf-scroll {
-        max-height: 360px;
-        overflow-y: auto;
-      }
-      .wf-board-table.sticky-head thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .muted {
         color: var(--text-tertiary);
-        font-size: var(--text-xs);
       }
     `,
   ],
@@ -752,37 +1200,67 @@ export class WalkForwardPageComponent implements OnInit {
     };
   });
 
-  statusDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
-    for (const r of this.wfSample()) {
+  readonly collapsedRows = COLLAPSED_ROWS;
+  readonly showAllStrategies = signal(false);
+
+  /** Runs per status, in display order — the "Status distribution" breakdown. */
+  readonly statusMix = computed(() => {
+    const rows = this.wfSample();
+    const counts = new Map<string, number>();
+    for (const r of rows) {
       const k = String(r.status);
-      counts[k] = (counts[k] ?? 0) + 1;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    if (Object.keys(counts).length === 0) return {};
-    const colors: Record<string, string> = {
-      Completed: '#34C759',
-      Failed: '#FF3B30',
-      Running: '#0071E3',
-      Pending: '#5AC8FA',
+    const rank = (k: string) => {
+      const i = STATUS_ORDER.indexOf(k);
+      return i < 0 ? STATUS_ORDER.length : i;
     };
+    return [...counts.entries()]
+      .sort((x, y) => rank(x[0]) - rank(y[0]) || y[1] - x[1])
+      .map(([name, count]) => ({
+        name,
+        count,
+        pct: rows.length > 0 ? (count / rows.length) * 100 : 0,
+        color: STATUS_COLOR[name] ?? '#8E8E93',
+      }));
+  });
+
+  /** How many runs the OOS averages are taken over (completed, finite, not corrupt). */
+  readonly scoredRuns = computed(() => this.wfSample().filter((r) => hasUsableScore(r)).length);
+
+  readonly latestStart = computed(() => {
+    let best: string | null = null;
+    let bestMs = 0;
+    for (const r of this.wfSample()) {
+      const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+      if (Number.isFinite(t) && t > bestMs) {
+        bestMs = t;
+        best = r.startedAt;
+      }
+    }
+    if (!best) return { rel: '', abs: '' };
     return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          label: { show: false },
-          data: Object.entries(counts).map(([name, value]) => ({
-            name,
-            value,
-            itemStyle: { color: colors[name] ?? '#8E8E93' },
-          })),
-        },
-      ],
+      rel: relative(best),
+      abs: `${this.datePipe.transform(best, 'MMM d, yyyy HH:mm', 'UTC')} UTC`,
     };
   });
+
+  readonly visibleStrategies = computed(() => {
+    const rows = this.perStrategyBreakdown();
+    return this.showAllStrategies() ? rows : rows.slice(0, COLLAPSED_ROWS);
+  });
+
+  pct(n: number, total: number): string {
+    if (total <= 0) return '–';
+    const p = (n / total) * 100;
+    return p > 0 && p < 1 ? '<1%' : p < 100 && p > 99 ? '>99%' : `${p.toFixed(0)}%`;
+  }
+
+  mixLabel(): string {
+    return this.statusMix()
+      .map((r) => `${r.name} ${this.fmtInt(r.count)}`)
+      .join(' · ');
+  }
 
   oosHistogramOptions = computed<EChartsOption>(() => {
     // Completed runs only (a failed run's score is whatever the engine
@@ -874,7 +1352,8 @@ export class WalkForwardPageComponent implements OnInit {
           data: entries
             .map(([, v]) => ({
               value: v,
-              itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
+              // Same series colour as the Backtesting page's runs-by-symbol chart.
+              itemStyle: { color: '#0071E3', borderRadius: [0, 4, 4, 0] },
             }))
             .reverse(),
           barWidth: 14,
@@ -951,33 +1430,64 @@ export class WalkForwardPageComponent implements OnInit {
   });
 
   // Widths sized to header + value so nothing wraps mid-word ("CONSISTENC Y"); dates in UTC — a
-  // window ending 2026-09-30T23:00Z printed "Oct 1" in the browser's zone.
+  // window ending 2026-09-30T23:00Z printed "Oct 1" in the browser's zone. Symbol is the one
+  // flexible column, so spare width never pools in an empty last column. Cell renderers return
+  // HTML strings rendered by AG Grid outside this component's style scope, so they style inline.
+  private readonly utcDay = (p: { value: unknown }) =>
+    this.datePipe.transform(p.value as string, 'MMM d, yyyy', 'UTC') ?? '-';
+
   readonly columnDefs: ColDef<WalkForwardRunDto>[] = [
-    { field: 'id', headerName: 'Run', width: 80, minWidth: 72 },
-    { field: 'strategyId', headerName: 'Strategy', width: 100, minWidth: 96 },
-    { field: 'symbol', headerName: 'Symbol', width: 100, minWidth: 92 },
-    { field: 'timeframe', headerName: 'TF', width: 70, minWidth: 64 },
+    {
+      field: 'id',
+      headerName: 'Run',
+      width: 80,
+      minWidth: 72,
+      cellRenderer: (p: { value: number }) => idHtml(p.value),
+    },
+    {
+      field: 'strategyId',
+      headerName: 'Strategy',
+      width: 110,
+      minWidth: 108,
+      cellRenderer: (p: { value: number }) => idHtml(p.value),
+    },
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      flex: 1,
+      minWidth: 88,
+      cellStyle: { fontWeight: '600' },
+    },
+    {
+      field: 'timeframe',
+      headerName: 'TF',
+      width: 60,
+      minWidth: 56,
+      cellStyle: { color: 'var(--text-secondary)' },
+    },
     {
       field: 'fromDate',
       headerName: 'From (UTC)',
       width: 120,
       minWidth: 112,
-      valueFormatter: (p) =>
-        this.datePipe.transform(p.value as string, 'MMM d, yyyy', 'UTC') ?? '-',
+      cellStyle: NUM_CELL,
+      valueFormatter: this.utcDay,
     },
     {
       field: 'toDate',
       headerName: 'To (UTC)',
       width: 120,
       minWidth: 112,
-      valueFormatter: (p) =>
-        this.datePipe.transform(p.value as string, 'MMM d, yyyy', 'UTC') ?? '-',
+      cellStyle: NUM_CELL,
+      valueFormatter: this.utcDay,
     },
     {
       field: 'averageOutOfSampleScore',
       headerName: 'Avg OOS',
       width: 100,
       minWidth: 92,
+      type: 'rightAligned',
+      cellStyle: (p) => signedStyle(p.value),
       valueFormatter: (p) => this.decimalPipe.transform(p.value as number, '1.2-2') ?? '-',
     },
     {
@@ -985,23 +1495,24 @@ export class WalkForwardPageComponent implements OnInit {
       headerName: 'Consistency',
       width: 132,
       minWidth: 128,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => this.decimalPipe.transform(p.value as number, '1.2-2') ?? '-',
     },
     {
       field: 'status',
       headerName: 'Status',
-      width: 118,
-      minWidth: 112,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Walk-forward status' },
+      width: 124,
+      minWidth: 118,
+      cellRenderer: (p: { value: unknown }) => statusPillHtml(p.value),
     },
     {
       field: 'startedAt',
       headerName: 'Started (UTC)',
-      flex: 1,
-      minWidth: 130,
-      valueFormatter: (p) =>
-        this.datePipe.transform(p.value as string, 'MMM d, HH:mm', 'UTC') ?? '-',
+      width: 156,
+      minWidth: 148,
+      cellRenderer: (p: { value: string | null }) =>
+        dateHtml(p.value, this.datePipe.transform(p.value, 'MMM d, yyyy HH:mm', 'UTC') ?? '-'),
     },
   ];
 

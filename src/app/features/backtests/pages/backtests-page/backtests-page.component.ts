@@ -9,14 +9,14 @@ import {
   OnInit,
 } from '@angular/core';
 import { Router } from '@angular/router';
-import { DecimalPipe, formatDate } from '@angular/common';
+import { DecimalPipe, NgTemplateOutlet, formatDate } from '@angular/common';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 import { Observable, map } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { TabsComponent } from '@shared/components/ui/tabs/tabs.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
-import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { BacktestsService } from '@core/services/backtests.service';
 import { WalkForwardService } from '@core/services/walk-forward.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -40,6 +40,118 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
   return r.totalTrades != null && r.totalTrades > 0;
 }
 
+/** Status colours shared by the mix panel and the runs tables. */
+const STATUS_COLOR: Record<string, string> = {
+  Completed: '#34C759',
+  Running: '#0071E3',
+  Pending: '#5AC8FA',
+  Queued: '#8E8E93',
+  Cancelled: '#8E8E93',
+  Abandoned: '#FF9500',
+  Failed: '#FF3B30',
+};
+/** Display order wherever statuses are listed side by side; unknown statuses follow. */
+const STATUS_ORDER = Object.keys(STATUS_COLOR);
+
+/** Long per-symbol boards show this many rows (the leaderboard's height) until "Show all". */
+const COLLAPSED_ROWS = 8;
+
+const numberFmt = new Intl.NumberFormat('en-US');
+const fmt = (n: number): string => numberFmt.format(n);
+
+function relative(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
+/** Cell-renderer strings go straight into innerHTML; data-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+// AG Grid cells sit outside this component's style scope, so the renderers style inline.
+function statusPillHtml(status: unknown): string {
+  if (status == null || status === '') return '';
+  const s = String(status);
+  const c = STATUS_COLOR[s] ?? '#8E8E93';
+  return (
+    `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:999px;` +
+    `background:${c}1f;color:${c};font-size:12px;font-weight:600;line-height:22px">` +
+    `<span style="width:6px;height:6px;border-radius:50%;background:${c}"></span>${esc(s)}</span>`
+  );
+}
+
+function idHtml(v: unknown): string {
+  return `<span style="color:var(--text-tertiary);font-variant-numeric:tabular-nums">#${esc(String(v ?? ''))}</span>`;
+}
+
+/** Absolute UTC date with the year, and the relative time beneath it. */
+function dateHtml(iso: string | null | undefined, abs: string): string {
+  if (!iso) return `<span style="color:var(--text-tertiary)">—</span>`;
+  return (
+    `<span style="display:inline-block;vertical-align:middle;line-height:1.3">` +
+    `<span style="font-variant-numeric:tabular-nums">${esc(abs)}</span><br/>` +
+    `<span style="font-size:11px;color:var(--text-tertiary)">${esc(relative(iso))}</span></span>`
+  );
+}
+
+const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
+
+/** Tabular number cell, green/red by sign — for return / score columns. */
+function signedStyle(v: unknown): Record<string, string> {
+  const n = typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  return n > 0
+    ? { ...NUM_CELL, color: 'var(--profit)' }
+    : n < 0
+      ? { ...NUM_CELL, color: 'var(--loss)' }
+      : NUM_CELL;
+}
+
+function statusMixRows(rows: { status: unknown }[]) {
+  const counts = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r.status);
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  const rank = (k: string) => {
+    const i = STATUS_ORDER.indexOf(k);
+    return i < 0 ? STATUS_ORDER.length : i;
+  };
+  return [...counts.entries()]
+    .sort((a, b) => rank(a[0]) - rank(b[0]) || b[1] - a[1])
+    .map(([name, count]) => ({
+      name,
+      count,
+      pct: rows.length > 0 ? (count / rows.length) * 100 : 0,
+      color: STATUS_COLOR[name] ?? '#8E8E93',
+    }));
+}
+
+/** Newest timestamp among `isos`, as a relative phrase plus its absolute UTC form for the tooltip. */
+function latestOf(isos: (string | null | undefined)[]): { rel: string; abs: string } {
+  let best: string | null = null;
+  let bestMs = 0;
+  for (const iso of isos) {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (Number.isFinite(t) && t > bestMs) {
+      bestMs = t;
+      best = iso!;
+    }
+  }
+  if (!best) return { rel: '', abs: '' };
+  return {
+    rel: relative(best),
+    abs: `${formatDate(best, 'MMM d, yyyy HH:mm', 'en-US', 'UTC')} UTC`,
+  };
+}
+
 @Component({
   selector: 'app-backtests-page',
   standalone: true,
@@ -51,6 +163,7 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
     ChartCardComponent,
     FormsModule,
     DecimalPipe,
+    NgTemplateOutlet,
   ],
   template: `
     <div class="page">
@@ -130,6 +243,48 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab" />
 
+      <!-- Status breakdown panel shared by both tabs: total, stacked strip, one row per status. -->
+      <ng-template #statusMixTpl let-rows let-total="total">
+        <section class="mix-panel">
+          <header class="mix-head">
+            <h3>Status distribution</h3>
+            <p>Share of sampled runs by status</p>
+          </header>
+          @if (total > 0) {
+            <div class="mix-body">
+              <div class="mix-headline">
+                <span class="mix-big">{{ fmt(total) }}</span>
+                <span class="mix-big-label">runs</span>
+              </div>
+              <div class="mix-stack" role="img" [attr.aria-label]="mixLabel(rows)">
+                @for (r of rows; track r.name) {
+                  <span
+                    [style.width.%]="r.pct"
+                    [style.background]="r.color"
+                    [title]="r.name + ': ' + fmt(r.count)"
+                  ></span>
+                }
+              </div>
+              <ul class="mix-rows">
+                @for (r of rows; track r.name) {
+                  <li>
+                    <span class="dot" [style.background]="r.color"></span>
+                    <span class="mix-name">{{ r.name }}</span>
+                    <span class="mix-track">
+                      <i [style.width.%]="r.pct" [style.background]="r.color"></i>
+                    </span>
+                    <span class="mix-count">{{ fmt(r.count) }}</span>
+                    <span class="mix-pct">{{ pct(r.count, total) }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <p class="mix-empty">No runs yet.</p>
+          }
+        </section>
+      </ng-template>
+
       @if (activeTab() === 'backtests') {
         @if (btSampleState() !== 'ready') {
           <p class="sample-note" [class.sample-note-error]="btSampleState() === 'error'">
@@ -146,59 +301,61 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
               {{ btSampleTotal() | number }} runs; the table below pages through all of them.
             </p>
           }
-          <!-- 8-card KPI strip -->
-          <div class="bt-kpis">
-            <div class="bt-kpi">
+          <!-- 8-tile KPI strip. Tones carry meaning only: failures red, returns by sign. -->
+          <div class="dr-kpis">
+            <div class="dr-kpi">
               <span class="kpi-label">Total runs</span>
               <span class="kpi-value">{{ btSampleTotal() | number }}</span>
+              <span class="kpi-hint" [title]="btLatest().abs">
+                {{ btLatest().rel ? 'latest completed ' + btLatest().rel : 'none completed yet' }}
+              </span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Completed</span>
-              <span class="kpi-value good">{{ btStats().completed }}</span>
+              <span class="kpi-value">{{ fmt(btStats().completed) }}</span>
+              <span class="kpi-hint">{{ pct(btStats().completed, btStats().total) }} of runs</span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi" [class.tone-bad]="btStats().failed > 0">
               <span class="kpi-label">Failed</span>
-              <span
-                class="kpi-value"
-                [class.bad]="btStats().failed > 0"
-                [class.good]="btStats().failed === 0"
-              >
-                {{ btStats().failed }}
-              </span>
+              <span class="kpi-value">{{ fmt(btStats().failed) }}</span>
+              <span class="kpi-hint">{{ pct(btStats().failed, btStats().total) }} of runs</span>
             </div>
-            <div class="bt-kpi">
+            <div
+              class="dr-kpi"
+              [class.tone-good]="btStats().avgReturn !== null && btStats().avgReturn! > 0"
+              [class.tone-bad]="btStats().avgReturn !== null && btStats().avgReturn! < 0"
+            >
               <span class="kpi-label">Avg total return</span>
-              <span
-                class="kpi-value"
-                [class.good]="btStats().avgReturn !== null && btStats().avgReturn! > 0"
-                [class.bad]="btStats().avgReturn !== null && btStats().avgReturn! < 0"
-              >
-                {{ signedPct(btStats().avgReturn) }}
-              </span>
+              <span class="kpi-value">{{ signedPct(btStats().avgReturn) }}</span>
               @if (btStats().wipedOut > 0) {
                 <span
-                  class="kpi-note"
+                  class="kpi-hint warn"
                   title="Runs whose simulated balance went to or below zero. They are counted in the totals but excluded from every average and from the histogram, because one wiped-out run swamps hundreds of real ones."
                 >
                   {{ btStats().wipedOut }} wiped-out run{{ btStats().wipedOut === 1 ? '' : 's' }}
                   excluded
                 </span>
+              } @else {
+                <span class="kpi-hint">mean of every run with a return</span>
               }
             </div>
-            <div class="bt-kpi">
+            <div
+              class="dr-kpi"
+              [class.tone-good]="btStats().bestReturn !== null && btStats().bestReturn! > 0"
+              [class.tone-bad]="btStats().bestReturn !== null && btStats().bestReturn! < 0"
+            >
               <span class="kpi-label">Best return</span>
-              <span
-                class="kpi-value"
-                [class.good]="btStats().bestReturn !== null && btStats().bestReturn! > 0"
-                [class.bad]="btStats().bestReturn !== null && btStats().bestReturn! < 0"
-              >
-                {{ signedPct(btStats().bestReturn) }}
+              <span class="kpi-value">{{ signedPct(btStats().bestReturn) }}</span>
+              <span class="kpi-hint">
+                @if (btBestRun(); as b) {
+                  best: #{{ b.id }} · {{ b.symbol ?? '—' }} {{ b.timeframe }}
+                } @else {
+                  no returns yet
+                }
               </span>
             </div>
-            <div class="bt-kpi">
-              <span class="kpi-label" title="Over runs that closed at least one trade"
-                >Avg win rate</span
-              >
+            <div class="dr-kpi">
+              <span class="kpi-label">Avg win rate</span>
               <span class="kpi-value">
                 {{
                   btStats().avgWinRate !== null
@@ -206,28 +363,37 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
                     : '—'
                 }}
               </span>
+              <span class="kpi-hint">over runs that closed a trade</span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Avg trades</span>
               <span class="kpi-value">{{
-                btStats().avgTrades !== null ? btStats().avgTrades : '—'
+                btStats().avgTrades !== null ? fmt(btStats().avgTrades!) : '—'
               }}</span>
+              <span class="kpi-hint">closed trades per run</span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Symbols × strategies</span>
               <span class="kpi-value"
-                >{{ btStats().symbolCount }} × {{ btStats().strategyCount }}</span
+                >{{ fmt(btStats().symbolCount) }} × {{ fmt(btStats().strategyCount) }}</span
               >
+              <span class="kpi-hint">
+                @if (btPerSymbol()[0]; as top) {
+                  most runs: {{ top.symbol }} ({{ fmt(top.runs) }})
+                } @else {
+                  no runs yet
+                }
+              </span>
             </div>
           </div>
 
           <!-- 3-col chart row -->
-          <div class="bt-charts">
-            <app-chart-card
-              title="Status distribution"
-              subtitle="Completed · Failed · Running · Pending"
-              [options]="btStatusDonutOptions()"
-              height="240px"
+          <div class="dr-charts">
+            <ng-container
+              *ngTemplateOutlet="
+                statusMixTpl;
+                context: { $implicit: btStatusMix(), total: btStats().total }
+              "
             />
             <app-chart-card
               title="Return distribution"
@@ -243,67 +409,70 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
             />
           </div>
 
-          <!-- 2-col tables: top performers + per-symbol -->
-          <div class="bt-board-row">
-            <section class="bt-board">
-              <header class="bt-board-head">
+          <!-- 2-col boards: top performers + per-symbol -->
+          <div class="dr-board-row">
+            <section class="dr-board">
+              <header class="dr-board-head">
                 <h3>Top performers</h3>
                 <span class="muted">Highest total return across completed runs</span>
               </header>
               @if (btTopReturns().length > 0) {
-                <table class="bt-board-table">
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Strategy</th>
-                      <th>Symbol</th>
-                      <th class="num">Return</th>
-                      <th class="num">PF</th>
-                      <th class="num">Sharpe</th>
-                      <th class="num">Max DD</th>
-                      <th class="num">Trades</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (r of btTopReturns(); track r.id) {
-                      <tr (click)="onBacktestClick(r)">
-                        <td class="mono">#{{ r.id }}</td>
-                        <td class="mono">#{{ r.strategyId }}</td>
-                        <td class="mono">{{ r.symbol }}</td>
-                        <td
-                          class="num mono"
-                          [class.profit]="(r.totalReturn ?? 0) > 0"
-                          [class.loss]="(r.totalReturn ?? 0) < 0"
-                        >
-                          {{ signedPct(r.totalReturn) }}
-                        </td>
-                        <td class="num mono">{{ fmtProfitFactor(r.profitFactor) }}</td>
-                        <td class="num mono">
-                          {{ r.sharpeRatio !== null ? r.sharpeRatio.toFixed(2) : '—' }}
-                        </td>
-                        <td class="num mono loss">
-                          {{ r.maxDrawdownPct !== null ? r.maxDrawdownPct.toFixed(2) + '%' : '—' }}
-                        </td>
-                        <td class="num mono">{{ r.totalTrades ?? '—' }}</td>
+                <div class="board-scroll">
+                  <table class="dr-board-table">
+                    <thead>
+                      <tr>
+                        <th>Run</th>
+                        <th>Strategy</th>
+                        <th>Symbol</th>
+                        <th class="num">Return</th>
+                        <th class="num">PF</th>
+                        <th class="num">Sharpe</th>
+                        <th class="num">Max DD</th>
+                        <th class="num">Trades</th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      @for (r of btTopReturns(); track r.id) {
+                        <tr class="clickable" (click)="onBacktestClick(r)">
+                          <td class="id">#{{ r.id }}</td>
+                          <td class="id">#{{ r.strategyId }}</td>
+                          <td class="sym">{{ r.symbol }}</td>
+                          <td
+                            class="num strong"
+                            [class.pos]="(r.totalReturn ?? 0) > 0"
+                            [class.neg]="(r.totalReturn ?? 0) < 0"
+                          >
+                            {{ signedPct(r.totalReturn) }}
+                          </td>
+                          <td class="num">{{ fmtProfitFactor(r.profitFactor) }}</td>
+                          <td class="num">
+                            {{ r.sharpeRatio !== null ? r.sharpeRatio.toFixed(2) : '—' }}
+                          </td>
+                          <td class="num dim-cell">
+                            {{
+                              r.maxDrawdownPct !== null ? r.maxDrawdownPct.toFixed(2) + '%' : '—'
+                            }}
+                          </td>
+                          <td class="num">{{ r.totalTrades ?? '—' }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
               } @else {
-                <p class="muted" style="padding: var(--space-4)">
-                  No completed runs with measurable returns yet.
-                </p>
+                <p class="muted board-empty">No completed runs with measurable returns yet.</p>
               }
             </section>
 
-            <section class="bt-board">
-              <header class="bt-board-head">
+            <section class="dr-board">
+              <header class="dr-board-head">
                 <h3>Per-symbol breakdown</h3>
-                <span class="muted">Avg metrics grouped by symbol</span>
+                <span class="count-chip">{{ fmt(btPerSymbol().length) }}</span>
+                <span class="muted">Averages grouped by symbol</span>
               </header>
               @if (btPerSymbol().length > 0) {
-                <div class="bt-board-scroll">
-                  <table class="bt-board-table">
+                <div class="board-scroll" [class.capped]="showAllBtSymbols()">
+                  <table class="dr-board-table">
                     <thead>
                       <tr>
                         <th>Symbol</th>
@@ -314,41 +483,66 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
                       </tr>
                     </thead>
                     <tbody>
-                      @for (row of btPerSymbol(); track row.symbol) {
+                      @for (row of visible(btPerSymbol(), showAllBtSymbols()); track row.symbol) {
                         <tr>
-                          <td class="mono">{{ row.symbol }}</td>
-                          <td class="num mono">{{ row.runs }}</td>
+                          <td class="sym">{{ row.symbol }}</td>
+                          <td class="num strong">{{ fmt(row.runs) }}</td>
                           <td
-                            class="num mono"
-                            [class.profit]="row.avgReturn !== null && row.avgReturn > 0"
-                            [class.loss]="row.avgReturn !== null && row.avgReturn < 0"
+                            class="num"
+                            [class.pos]="row.avgReturn !== null && row.avgReturn > 0"
+                            [class.neg]="row.avgReturn !== null && row.avgReturn < 0"
                           >
                             {{ signedPct(row.avgReturn) }}
                           </td>
                           <td
-                            class="num mono"
-                            [class.profit]="row.bestReturn !== null && row.bestReturn > 0"
-                            [class.loss]="row.bestReturn !== null && row.bestReturn < 0"
+                            class="num"
+                            [class.pos]="row.bestReturn !== null && row.bestReturn > 0"
+                            [class.neg]="row.bestReturn !== null && row.bestReturn < 0"
                           >
                             {{ signedPct(row.bestReturn) }}
                           </td>
-                          <td class="num mono">
-                            {{ row.avgSharpe !== null ? row.avgSharpe.toFixed(2) : '—' }}
+                          <td class="num" [class.zero]="row.avgSharpe === null">
+                            {{ row.avgSharpe !== null ? row.avgSharpe.toFixed(2) : '–' }}
                           </td>
                         </tr>
                       }
                     </tbody>
                   </table>
                 </div>
+                @if (btPerSymbol().length > collapsedRows) {
+                  <footer class="board-foot" [class.raised]="showAllBtSymbols()">
+                    <span class="muted">{{
+                      showAllBtSymbols()
+                        ? 'All ' + fmt(btPerSymbol().length) + ' symbols · scroll the table'
+                        : 'Top ' +
+                          collapsedRows +
+                          ' of ' +
+                          fmt(btPerSymbol().length) +
+                          ' by run count'
+                    }}</span>
+                    <button
+                      type="button"
+                      class="link-btn"
+                      (click)="showAllBtSymbols.set(!showAllBtSymbols())"
+                    >
+                      {{ showAllBtSymbols() ? 'Show top ' + collapsedRows : 'Show all' }}
+                    </button>
+                  </footer>
+                }
               }
             </section>
           </div>
         }
 
-        <section class="bt-board bt-runs">
-          <header class="bt-board-head">
+        <section class="dr-board bt-runs">
+          <header class="dr-board-head">
             <h3>All backtest runs</h3>
-            <span class="muted">Server-paged — click any row for the detail page</span>
+            @if (btSampleState() === 'ready') {
+              <span class="count-chip">{{ fmt(btSampleTotal()) }}</span>
+            }
+            <span class="muted head-right"
+              >Server-paged · click any row for the detail page · UTC</span
+            >
           </header>
           <app-data-table
             #btTable
@@ -376,80 +570,87 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
               table below pages through all of them.
             </p>
           }
-          <div class="bt-kpis">
-            <div class="bt-kpi">
+          <div class="dr-kpis">
+            <div class="dr-kpi">
               <span class="kpi-label">Total runs</span>
               <span class="kpi-value">{{ wfSampleTotal() | number }}</span>
-            </div>
-            <div class="bt-kpi">
-              <span class="kpi-label">Completed</span>
-              <span class="kpi-value good">{{ wfStats().completed }}</span>
-            </div>
-            <div class="bt-kpi">
-              <span class="kpi-label">Failed</span>
-              <span
-                class="kpi-value"
-                [class.bad]="wfStats().failed > 0"
-                [class.good]="wfStats().failed === 0"
-              >
-                {{ wfStats().failed }}
+              <span class="kpi-hint" [title]="wfLatest().abs">
+                {{ wfLatest().rel ? 'latest started ' + wfLatest().rel : 'none started yet' }}
               </span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
+              <span class="kpi-label">Completed</span>
+              <span class="kpi-value">{{ fmt(wfStats().completed) }}</span>
+              <span class="kpi-hint">{{ pct(wfStats().completed, wfStats().total) }} of runs</span>
+            </div>
+            <div class="dr-kpi" [class.tone-bad]="wfStats().failed > 0">
+              <span class="kpi-label">Failed</span>
+              <span class="kpi-value">{{ fmt(wfStats().failed) }}</span>
+              <span class="kpi-hint">{{ pct(wfStats().failed, wfStats().total) }} of runs</span>
+            </div>
+            <div
+              class="dr-kpi"
+              [class.tone-good]="wfStats().avgOosScore !== null && wfStats().avgOosScore! > 0"
+              [class.tone-bad]="wfStats().avgOosScore !== null && wfStats().avgOosScore! < 0"
+            >
               <span
                 class="kpi-label"
                 title="Mean out-of-sample Sharpe ratio across each run's windows"
                 >Avg OOS Sharpe</span
               >
-              <span
-                class="kpi-value"
-                [class.good]="wfStats().avgOosScore !== null && wfStats().avgOosScore! > 0"
-                [class.bad]="wfStats().avgOosScore !== null && wfStats().avgOosScore! < 0"
-              >
-                {{ signedRatio(wfStats().avgOosScore) }}
-              </span>
+              <span class="kpi-value">{{ signedRatio(wfStats().avgOosScore) }}</span>
               @if (wfStats().corrupt > 0) {
                 <span
-                  class="kpi-note"
+                  class="kpi-hint warn"
                   title="Runs whose OOS Sharpe or consistency is not a real number (non-finite, a Sharpe beyond ±100, or a negative deviation). They are counted in the totals but excluded from every average, the histogram and the leaderboards."
                 >
                   {{ wfStats().corrupt }} corrupt run{{ wfStats().corrupt === 1 ? '' : 's' }}
                   excluded
                 </span>
+              } @else {
+                <span class="kpi-hint">mean across each run's windows</span>
               }
             </div>
-            <div class="bt-kpi">
+            <div
+              class="dr-kpi"
+              [class.tone-good]="wfStats().bestOosScore !== null && wfStats().bestOosScore! > 0"
+              [class.tone-bad]="wfStats().bestOosScore !== null && wfStats().bestOosScore! < 0"
+            >
               <span class="kpi-label">Best OOS Sharpe</span>
-              <span
-                class="kpi-value"
-                [class.good]="wfStats().bestOosScore !== null && wfStats().bestOosScore! > 0"
-                [class.bad]="wfStats().bestOosScore !== null && wfStats().bestOosScore! < 0"
-              >
-                {{ signedRatio(wfStats().bestOosScore) }}
+              <span class="kpi-value">{{ signedRatio(wfStats().bestOosScore) }}</span>
+              <span class="kpi-hint">
+                @if (wfTopOos()[0]; as b) {
+                  best: #{{ b.id }} · {{ b.symbol ?? '—' }} {{ b.timeframe }}
+                } @else {
+                  no scored runs yet
+                }
               </span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Avg consistency</span>
               <span class="kpi-value">
                 {{ wfStats().avgConsistency !== null ? wfStats().avgConsistency!.toFixed(3) : '—' }}
               </span>
+              <span class="kpi-hint">σ of window Sharpes · lower = steadier</span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Avg IS days</span>
-              <span class="kpi-value">{{ wfStats().avgIsDays }}</span>
+              <span class="kpi-value">{{ fmt(wfStats().avgIsDays) }}</span>
+              <span class="kpi-hint">in-sample window length</span>
             </div>
-            <div class="bt-kpi">
+            <div class="dr-kpi">
               <span class="kpi-label">Avg OOS days</span>
-              <span class="kpi-value">{{ wfStats().avgOosDays }}</span>
+              <span class="kpi-value">{{ fmt(wfStats().avgOosDays) }}</span>
+              <span class="kpi-hint">out-of-sample window length</span>
             </div>
           </div>
 
-          <div class="bt-charts">
-            <app-chart-card
-              title="Status distribution"
-              subtitle="Completed · Failed · Running · Pending"
-              [options]="wfStatusDonutOptions()"
-              height="240px"
+          <div class="dr-charts">
+            <ng-container
+              *ngTemplateOutlet="
+                statusMixTpl;
+                context: { $implicit: wfStatusMix(), total: wfStats().total }
+              "
             />
             <app-chart-card
               title="OOS score distribution"
@@ -465,62 +666,63 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
             />
           </div>
 
-          <div class="bt-board-row">
-            <section class="bt-board">
-              <header class="bt-board-head">
+          <div class="dr-board-row">
+            <section class="dr-board">
+              <header class="dr-board-head">
                 <h3>Top performers</h3>
                 <span class="muted">Highest avg OOS score across completed runs</span>
               </header>
               @if (wfTopOos().length > 0) {
-                <table class="bt-board-table">
-                  <thead>
-                    <tr>
-                      <th>Run</th>
-                      <th>Strategy</th>
-                      <th>Symbol</th>
-                      <th class="num">Avg OOS</th>
-                      <th class="num">Consistency</th>
-                      <th class="num">IS days</th>
-                      <th class="num">OOS days</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (r of wfTopOos(); track r.id) {
-                      <tr (click)="onWalkForwardClick(r)">
-                        <td class="mono">#{{ r.id }}</td>
-                        <td class="mono">#{{ r.strategyId }}</td>
-                        <td class="mono">{{ r.symbol }}</td>
-                        <td
-                          class="num mono"
-                          [class.profit]="(r.averageOutOfSampleScore ?? 0) > 0"
-                          [class.loss]="(r.averageOutOfSampleScore ?? 0) < 0"
-                        >
-                          {{ signedRatio(r.averageOutOfSampleScore) }}
-                        </td>
-                        <td class="num mono">
-                          {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
-                        </td>
-                        <td class="num mono">{{ r.inSampleDays }}</td>
-                        <td class="num mono">{{ r.outOfSampleDays }}</td>
+                <div class="board-scroll">
+                  <table class="dr-board-table">
+                    <thead>
+                      <tr>
+                        <th>Run</th>
+                        <th>Strategy</th>
+                        <th>Symbol</th>
+                        <th class="num">Avg OOS</th>
+                        <th class="num">Consistency</th>
+                        <th class="num">IS days</th>
+                        <th class="num">OOS days</th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      @for (r of wfTopOos(); track r.id) {
+                        <tr class="clickable" (click)="onWalkForwardClick(r)">
+                          <td class="id">#{{ r.id }}</td>
+                          <td class="id">#{{ r.strategyId }}</td>
+                          <td class="sym">{{ r.symbol }}</td>
+                          <td
+                            class="num strong"
+                            [class.pos]="(r.averageOutOfSampleScore ?? 0) > 0"
+                            [class.neg]="(r.averageOutOfSampleScore ?? 0) < 0"
+                          >
+                            {{ signedRatio(r.averageOutOfSampleScore) }}
+                          </td>
+                          <td class="num">
+                            {{ r.scoreConsistency !== null ? r.scoreConsistency.toFixed(3) : '—' }}
+                          </td>
+                          <td class="num">{{ r.inSampleDays }}</td>
+                          <td class="num">{{ r.outOfSampleDays }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
               } @else {
-                <p class="muted" style="padding: var(--space-4)">
-                  No completed runs with OOS scores yet.
-                </p>
+                <p class="muted board-empty">No completed runs with OOS scores yet.</p>
               }
             </section>
 
-            <section class="bt-board">
-              <header class="bt-board-head">
+            <section class="dr-board">
+              <header class="dr-board-head">
                 <h3>Per-symbol breakdown</h3>
-                <span class="muted">Avg metrics grouped by symbol</span>
+                <span class="count-chip">{{ fmt(wfPerSymbol().length) }}</span>
+                <span class="muted">Averages grouped by symbol</span>
               </header>
               @if (wfPerSymbol().length > 0) {
-                <div class="bt-board-scroll">
-                  <table class="bt-board-table">
+                <div class="board-scroll" [class.capped]="showAllWfSymbols()">
+                  <table class="dr-board-table">
                     <thead>
                       <tr>
                         <th>Symbol</th>
@@ -531,41 +733,66 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
                       </tr>
                     </thead>
                     <tbody>
-                      @for (row of wfPerSymbol(); track row.symbol) {
+                      @for (row of visible(wfPerSymbol(), showAllWfSymbols()); track row.symbol) {
                         <tr>
-                          <td class="mono">{{ row.symbol }}</td>
-                          <td class="num mono">{{ row.runs }}</td>
+                          <td class="sym">{{ row.symbol }}</td>
+                          <td class="num strong">{{ fmt(row.runs) }}</td>
                           <td
-                            class="num mono"
-                            [class.profit]="row.avgOos !== null && row.avgOos > 0"
-                            [class.loss]="row.avgOos !== null && row.avgOos < 0"
+                            class="num"
+                            [class.pos]="row.avgOos !== null && row.avgOos > 0"
+                            [class.neg]="row.avgOos !== null && row.avgOos < 0"
                           >
                             {{ signedRatio(row.avgOos) }}
                           </td>
                           <td
-                            class="num mono"
-                            [class.profit]="row.bestOos !== null && row.bestOos > 0"
-                            [class.loss]="row.bestOos !== null && row.bestOos < 0"
+                            class="num"
+                            [class.pos]="row.bestOos !== null && row.bestOos > 0"
+                            [class.neg]="row.bestOos !== null && row.bestOos < 0"
                           >
                             {{ signedRatio(row.bestOos) }}
                           </td>
-                          <td class="num mono">
-                            {{ row.avgConsistency !== null ? row.avgConsistency.toFixed(3) : '—' }}
+                          <td class="num" [class.zero]="row.avgConsistency === null">
+                            {{ row.avgConsistency !== null ? row.avgConsistency.toFixed(3) : '–' }}
                           </td>
                         </tr>
                       }
                     </tbody>
                   </table>
                 </div>
+                @if (wfPerSymbol().length > collapsedRows) {
+                  <footer class="board-foot" [class.raised]="showAllWfSymbols()">
+                    <span class="muted">{{
+                      showAllWfSymbols()
+                        ? 'All ' + fmt(wfPerSymbol().length) + ' symbols · scroll the table'
+                        : 'Top ' +
+                          collapsedRows +
+                          ' of ' +
+                          fmt(wfPerSymbol().length) +
+                          ' by run count'
+                    }}</span>
+                    <button
+                      type="button"
+                      class="link-btn"
+                      (click)="showAllWfSymbols.set(!showAllWfSymbols())"
+                    >
+                      {{ showAllWfSymbols() ? 'Show top ' + collapsedRows : 'Show all' }}
+                    </button>
+                  </footer>
+                }
               }
             </section>
           </div>
         }
 
-        <section class="bt-board">
-          <header class="bt-board-head">
+        <section class="dr-board bt-runs">
+          <header class="dr-board-head">
             <h3>All walk-forward runs</h3>
-            <span class="muted">Server-paged — click any row for the detail page</span>
+            @if (wfSampleState() === 'ready') {
+              <span class="count-chip">{{ fmt(wfSampleTotal()) }}</span>
+            }
+            <span class="muted head-right"
+              >Server-paged · click any row for the detail page · UTC</span
+            >
           </header>
           <app-data-table
             [columnDefs]="walkForwardColumns"
@@ -582,7 +809,7 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-3);
+        gap: var(--space-4);
       }
       .btn-primary {
         height: 36px;
@@ -675,164 +902,454 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
         gap: var(--space-3);
       }
 
-      /* Backtests density additions. Eight tiles in two rows of four —
-         eight across squeezed labels to two lines and made every tile a
-         different width from the KPI rows on other pages. */
-      .bt-kpis {
+      /* ── Shared list-page look (same as Drift Report) ───────────── */
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .dot.ok {
+        background: #34c759;
+      }
+      .dot.fail {
+        background: #ff3b30;
+      }
+      .dot.warn {
+        background: #ff9500;
+      }
+      th .dot {
+        width: 6px;
+        height: 6px;
+        margin-right: 5px;
+        vertical-align: 1px;
+      }
+
+      /* KPI strip: two rows of four keep every label on one line. */
+      .dr-kpis {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-2);
-        align-items: start;
+        gap: var(--space-3);
       }
       @media (max-width: 720px) {
-        .bt-kpis {
+        .dr-kpis {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
-      .bt-kpi {
+      .dr-kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
+      }
+      .dr-kpi::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .dr-kpi.tone-bad {
+        --tone: #d70015;
+      }
+      .dr-kpi.tone-warn {
+        --tone: var(--warning);
+      }
+      .dr-kpi.tone-info {
+        --tone: var(--accent);
+      }
+      .dr-kpi.tone-good {
+        --tone: var(--profit);
+      }
+      .dr-kpi[class*='tone-']::before {
+        opacity: 1;
       }
       .kpi-label {
-        font-size: 10px;
+        font-size: 10.5px;
         font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .kpi-note {
-        display: block;
-        margin-top: 2px;
-        font-size: 10px;
-        color: var(--warning, #d69e2e);
-        cursor: help;
+        letter-spacing: 0.05em;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .kpi-value {
-        font-size: var(--text-xl);
+        font-size: 26px;
+        line-height: 1.2;
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
       }
-      .kpi-value.good {
+      .tone-bad .kpi-value {
+        color: #d70015;
+      }
+      .tone-warn .kpi-value {
+        color: var(--warning);
+      }
+      .tone-good .kpi-value {
         color: var(--profit);
       }
-      .kpi-value.bad {
-        color: var(--loss);
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .kpi-hint.warn {
+        color: var(--warning);
+        cursor: help;
       }
 
-      .bt-charts {
+      /* Chart row */
+      .dr-charts {
         display: grid;
-        grid-template-columns: 1fr 1.2fr 1fr;
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .bt-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* align-items:start — the Top performers card used to stretch to the
-         height of the per-symbol table beside it, leaving ~330px of empty
-         card below its eight rows. */
-      .bt-board-row {
-        display: grid;
-        grid-template-columns: 1.6fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
         gap: var(--space-3);
         align-items: start;
       }
       @media (max-width: 1100px) {
-        .bt-board-row {
+        .dr-charts {
           grid-template-columns: 1fr;
         }
       }
+      .mix-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+      }
+      .mix-head {
+        margin-bottom: var(--space-4);
+      }
+      .mix-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .mix-head p {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .mix-body {
+        height: 240px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .mix-headline {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .mix-big {
+        font-size: 30px;
+        font-weight: var(--font-semibold);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+      }
+      .mix-big-label {
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+      .mix-stack {
+        display: flex;
+        height: 14px;
+        border-radius: 7px;
+        overflow: hidden;
+        gap: 2px;
+        background: var(--bg-tertiary);
+      }
+      .mix-stack span {
+        display: block;
+        min-width: 3px;
+      }
+      .mix-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        overflow-y: auto;
+      }
+      .mix-rows li {
+        display: grid;
+        grid-template-columns: 8px minmax(84px, auto) 1fr 52px 40px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .mix-name {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+      .mix-sub {
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .mix-sub.bad {
+        color: #d70015;
+      }
+      .mix-track {
+        display: block;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        overflow: hidden;
+      }
+      .mix-track i {
+        display: block;
+        height: 100%;
+        min-width: 2px;
+        border-radius: 3px;
+      }
+      .mix-count {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--font-semibold);
+      }
+      .mix-pct {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .mix-empty {
+        height: 240px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+      }
 
-      .bt-board {
+      /* Boards: start-aligned so a short board never stretches to its neighbour's height. */
+      .dr-board-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: var(--space-3);
+        align-items: start;
+      }
+      .dr-board-row.single {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      @media (max-width: 1100px) {
+        .dr-board-row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+      .dr-board {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+      }
+      .dr-board-head {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .dr-board-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+      }
+      .head-right {
+        margin-left: auto;
+      }
+      .count-chip {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+      }
+      .board-empty {
+        margin: 0;
+        padding: var(--space-5) var(--space-4);
+      }
+      .board-scroll {
+        overflow-x: auto;
+      }
+      /* Expanded long boards scroll inside exactly twelve rows (33px head + 12 × 36px rows), so
+         the cut always falls on a row boundary; the sticky head keeps the columns labelled. */
+      .board-scroll.capped {
+        max-height: 465px;
+        overflow-y: auto;
+      }
+      .board-scroll.capped thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+      }
+      .dr-board-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
+      }
+      .dr-board-table th,
+      .dr-board-table td {
+        height: 36px;
+        padding: 0 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .dr-board-table th {
+        height: 33px;
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .dr-board-table th:first-child,
+      .dr-board-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .dr-board-table th:last-child,
+      .dr-board-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .dr-board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .dr-board-table tbody tr:hover {
+        background: var(--bg-primary);
+      }
+      .dr-board-table tr.clickable {
+        cursor: pointer;
+      }
+      .dr-board-table .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        width: 1%;
+      }
+      .dr-board-table .id {
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+        width: 1%;
+      }
+      .dr-board-table .sym {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .dim-cell {
+        color: var(--text-secondary);
+      }
+      .dr-board-table .name-cell {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .dr-board-table .strong {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .zero {
+        color: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .dr-board-table .pos {
+        color: var(--profit);
+      }
+      .dr-board-table .neg {
+        color: var(--loss);
+      }
+      .dr-board-table .warn {
+        color: #c93400;
+      }
+      .mix-col {
+        width: 130px;
+      }
+      .mix-bar {
+        display: flex;
+        width: 110px;
+        height: 8px;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--bg-tertiary);
+        gap: 1px;
+      }
+      .mix-bar i {
+        display: block;
+        height: 100%;
+      }
+      .mix-bar .ok {
+        background: #34c759;
+      }
+      .mix-bar .fail {
+        background: #ff3b30;
+      }
+      .mix-bar .warn {
+        background: #ff9500;
+      }
+      .board-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+      }
+      .board-foot.raised {
+        box-shadow: 0 -8px 10px -8px rgba(0, 0, 0, 0.18);
+        position: relative;
+      }
+      .link-btn {
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+      }
+      .link-btn:hover {
+        background: rgba(0, 113, 227, 0.08);
       }
       /* Twelve columns in a ~1,110px card: at the grid's 18px cell padding the single-word
          headers still broke mid-word ("STRATEG Y", "TRADE S", "SHARP E") at their minimums.
          12px leaves every header and value on its line without widening the minimums. */
       .bt-runs ::ng-deep .ag-theme-alpine {
         --ag-cell-horizontal-padding: 12px;
-      }
-      .bt-board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .bt-board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .bt-board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .bt-board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .bt-board-table th,
-      .bt-board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .bt-board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .bt-board-table tbody tr {
-        cursor: pointer;
-        transition: background 0.1s;
-      }
-      .bt-board-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      .bt-board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .bt-board-table th.num,
-      .bt-board-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .bt-board-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        white-space: nowrap;
-      }
-      .bt-board-table .profit {
-        color: var(--profit);
-      }
-      .bt-board-table .loss {
-        color: var(--loss);
-      }
-      /* The per-symbol table (25+ rows) scrolls inside roughly the height of the eight-row
-         leaderboard beside it — at full height it left a ~600px black hole under that card. */
-      .bt-board-scroll {
-        max-height: 312px;
-        overflow-y: auto;
-      }
-      .bt-board-scroll thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
       }
       .sample-note {
         margin: 0;
@@ -841,10 +1358,6 @@ function hasTrades(r: { totalTrades: number | null }): boolean {
       }
       .sample-note-error {
         color: var(--loss);
-      }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
       }
     `,
   ],
@@ -952,6 +1465,42 @@ export class BacktestsPageComponent implements OnInit {
     this.onStrategyIdChange(this.formData.strategyId);
   }
 
+  // ── Presentation helpers ──────────────────────────────────────────
+  readonly fmt = fmt;
+  readonly collapsedRows = COLLAPSED_ROWS;
+  readonly showAllBtSymbols = signal(false);
+  readonly showAllWfSymbols = signal(false);
+
+  readonly btStatusMix = computed(() => statusMixRows(this.btSample()));
+  readonly wfStatusMix = computed(() => statusMixRows(this.wfSample()));
+  readonly btLatest = computed(() => latestOf(this.btSample().map((r) => r.completedAt)));
+  readonly wfLatest = computed(() => latestOf(this.wfSample().map((r) => r.startedAt)));
+
+  /** The run behind "Best return" — the same wiped-out exclusion the tile applies. */
+  readonly btBestRun = computed(() => {
+    let best: BacktestRunDto | null = null;
+    for (const r of this.btSample()) {
+      if (r.totalReturn == null || BacktestsPageComponent.isWipedOut(r)) continue;
+      if (!best || r.totalReturn > (best.totalReturn ?? -Infinity)) best = r;
+    }
+    return best;
+  });
+
+  /** A long board's rows: the first COLLAPSED_ROWS, or all of them once expanded. */
+  visible<T>(rows: T[], all: boolean): T[] {
+    return all ? rows : rows.slice(0, COLLAPSED_ROWS);
+  }
+
+  pct(n: number, total: number): string {
+    if (total <= 0) return '0%';
+    const p = (n / total) * 100;
+    return p > 0 && p < 1 ? '<1%' : p < 100 && p > 99 ? '>99%' : `${p.toFixed(0)}%`;
+  }
+
+  mixLabel(rows: { name: string; count: number }[]): string {
+    return rows.map((r) => `${r.name} ${fmt(r.count)}`).join(' · ');
+  }
+
   // ── Backtest analytics ─────────────────────────────────────────────
 
   /**
@@ -1054,38 +1603,6 @@ export class BacktestsPageComponent implements OnInit {
       avgTrades: tradesCount > 0 ? Math.round(tradesSum / tradesCount) : null,
       symbolCount: symbols.size,
       strategyCount: strategies.size,
-    };
-  });
-
-  btStatusDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
-    for (const r of this.btSample()) {
-      const k = String(r.status);
-      counts[k] = (counts[k] ?? 0) + 1;
-    }
-    if (Object.keys(counts).length === 0) return {};
-    const colors: Record<string, string> = {
-      Completed: '#34C759',
-      Failed: '#FF3B30',
-      Running: '#0071E3',
-      Pending: '#5AC8FA',
-    };
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          label: { show: false },
-          data: Object.entries(counts).map(([name, value]) => ({
-            name,
-            value,
-            itemStyle: { color: colors[name] ?? '#8E8E93' },
-          })),
-        },
-      ],
     };
   });
 
@@ -1362,38 +1879,6 @@ export class BacktestsPageComponent implements OnInit {
     };
   });
 
-  wfStatusDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
-    for (const r of this.wfSample()) {
-      const k = String(r.status);
-      counts[k] = (counts[k] ?? 0) + 1;
-    }
-    if (Object.keys(counts).length === 0) return {};
-    const colors: Record<string, string> = {
-      Completed: '#34C759',
-      Failed: '#FF3B30',
-      Running: '#0071E3',
-      Pending: '#5AC8FA',
-    };
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          label: { show: false },
-          data: Object.entries(counts).map(([name, value]) => ({
-            name,
-            value,
-            itemStyle: { color: colors[name] ?? '#8E8E93' },
-          })),
-        },
-      ],
-    };
-  });
-
   wfOosHistogram = computed<{ options: EChartsOption; subtitle: string }>(() => {
     const scores = this.wfSample()
       .filter((r) => r.averageOutOfSampleScore != null && !BacktestsPageComponent.isWfCorrupt(r))
@@ -1586,34 +2071,70 @@ export class BacktestsPageComponent implements OnInit {
     }
   }
 
+  /**
+   * "$981.7M" for balances of a million and up — the backtester does not stop at ruin or riches,
+   * so "$981,724,811.27" pushed the column wide. Below a million the full "$10,003.01" stays.
+   * The full value is always on the cell's tooltip.
+   */
+  private fmtMoneyCompact(v: number | null | undefined): string {
+    if (v == null || !Number.isFinite(v)) return '—';
+    if (Math.abs(v) < 1_000_000) return this.fmtMoney(v);
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(v);
+  }
+
+  private dateCell = (p: { value: string | null }) =>
+    dateHtml(p.value, p.value ? this.fmtDate(p.value) : '—');
+
   // Thirteen columns at the table's 88px default minimum overflowed the ~1,110px card: the grid
   // scrolled sideways, "Final" printed "$10,000.0(" and "Completed" sat off the edge, and
   // STRATEGY wrapped mid-word. Symbol and timeframe now share one column, and every column carries
   // its own minimum (sized to its header and widest value) so sizeColumnsToFit lands inside the card.
+  // Market is the one flexible column, so spare width never pools in an empty last column.
+  // Cell renderers return HTML strings rendered by AG Grid outside this component's style
+  // scope, so they style inline.
   backtestColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70, minWidth: 64 },
-    { field: 'strategyId', headerName: 'Strategy', width: 100, minWidth: 96 },
+    {
+      field: 'id',
+      headerName: 'ID',
+      width: 76,
+      minWidth: 70,
+      cellRenderer: (p: any) => idHtml(p.value),
+    },
+    {
+      field: 'strategyId',
+      headerName: 'Strategy',
+      width: 100,
+      minWidth: 96,
+      cellRenderer: (p: any) => idHtml(p.value),
+    },
     {
       field: 'symbol',
       headerName: 'Market',
-      width: 125,
-      minWidth: 112,
+      flex: 1,
+      minWidth: 120,
+      cellStyle: { fontWeight: '600' },
       valueFormatter: (p: any) =>
         p.data ? `${p.data.symbol ?? '—'} · ${p.data.timeframe ?? '—'}` : (p.value ?? '—'),
     },
     {
       field: 'status',
       headerName: 'Status',
-      width: 118,
-      minWidth: 110,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Run status' },
+      width: 124,
+      minWidth: 118,
+      cellRenderer: (p: any) => statusPillHtml(p.value),
     },
     {
       field: 'totalTrades',
       headerName: 'Trades',
-      width: 80,
+      width: 82,
       minWidth: 76,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) => (p.value != null ? p.value : '—'),
     },
     // Win rate, PF and Sharpe of a run that closed no trade are not measured (the engine stores
@@ -1621,90 +2142,137 @@ export class BacktestsPageComponent implements OnInit {
     {
       field: 'winRate',
       headerName: 'Win %',
-      width: 76,
-      minWidth: 70,
+      width: 78,
+      minWidth: 72,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) =>
         p.value != null && (!p.data || hasTrades(p.data)) ? `${(p.value * 100).toFixed(1)}%` : '—',
     },
     {
       field: 'profitFactor',
       headerName: 'PF',
-      width: 66,
-      minWidth: 60,
+      width: 68,
+      minWidth: 62,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) =>
         !p.data || hasTrades(p.data) ? this.fmtProfitFactor(p.value) : '—',
     },
     {
       field: 'sharpeRatio',
       headerName: 'Sharpe',
-      width: 80,
+      width: 82,
       minWidth: 76,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) =>
         p.value != null && (!p.data || hasTrades(p.data)) ? p.value.toFixed(2) : '—',
     },
     {
       field: 'maxDrawdownPct',
       headerName: 'Max DD',
-      width: 84,
+      width: 86,
       minWidth: 80,
+      type: 'rightAligned',
+      cellStyle: { ...NUM_CELL, color: 'var(--text-secondary)' },
       valueFormatter: (p: any) => (p.value != null ? `${p.value.toFixed(2)}%` : '—'),
     },
     {
       field: 'totalReturn',
       headerName: 'Return',
-      width: 92,
-      minWidth: 88,
+      width: 96,
+      minWidth: 90,
+      type: 'rightAligned',
+      cellStyle: (p: any) => signedStyle(p.value),
       valueFormatter: (p: any) => this.signedPct(p.value),
     },
     {
       field: 'finalBalance',
       headerName: 'Final',
-      width: 130,
-      minWidth: 124,
-      valueFormatter: (p: any) => this.fmtMoney(p.value),
+      width: 112,
+      minWidth: 104,
+      type: 'rightAligned',
+      cellRenderer: (p: any) =>
+        `<span title="${esc(this.fmtMoney(p.value))}" style="font-variant-numeric:tabular-nums">` +
+        `${esc(this.fmtMoneyCompact(p.value))}</span>`,
     },
     {
       field: 'completedAt',
       headerName: 'Completed (UTC)',
-      flex: 1,
-      minWidth: 136,
-      valueFormatter: (p: any) => this.fmtDate(p.value),
+      width: 170,
+      minWidth: 160,
+      cellRenderer: this.dateCell,
     },
   ];
 
   walkForwardColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'strategyId', headerName: 'Strategy', width: 105 },
-    { field: 'symbol', headerName: 'Symbol', width: 100 },
-    { field: 'timeframe', headerName: 'TF', width: 70 },
+    {
+      field: 'id',
+      headerName: 'ID',
+      width: 76,
+      minWidth: 70,
+      cellRenderer: (p: any) => idHtml(p.value),
+    },
+    {
+      field: 'strategyId',
+      headerName: 'Strategy',
+      width: 100,
+      minWidth: 96,
+      cellRenderer: (p: any) => idHtml(p.value),
+    },
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      flex: 1,
+      minWidth: 100,
+      cellStyle: { fontWeight: '600' },
+    },
+    { field: 'timeframe', headerName: 'TF', width: 70, minWidth: 64 },
     {
       field: 'status',
       headerName: 'Status',
-      width: 120,
+      width: 124,
+      minWidth: 118,
       // Same pill as the backtests tab — Failed was plain text here.
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Run status' },
+      cellRenderer: (p: any) => statusPillHtml(p.value),
     },
-    { field: 'inSampleDays', headerName: 'IS days', width: 95 },
-    { field: 'outOfSampleDays', headerName: 'OOS days', width: 105 },
+    {
+      field: 'inSampleDays',
+      headerName: 'IS days',
+      width: 95,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
+    },
+    {
+      field: 'outOfSampleDays',
+      headerName: 'OOS days',
+      width: 105,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
+    },
     {
       field: 'averageOutOfSampleScore',
       headerName: 'Avg OOS Sharpe',
       width: 130,
+      type: 'rightAligned',
+      cellStyle: (p: any) => signedStyle(p.value),
       valueFormatter: (p: any) => this.signedRatio(p.value),
     },
     {
       field: 'scoreConsistency',
       headerName: 'Consistency',
-      width: 135,
+      width: 125,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p: any) => (p.value != null ? p.value.toFixed(3) : '—'),
     },
     {
       field: 'startedAt',
       headerName: 'Started (UTC)',
-      flex: 1,
-      minWidth: 150,
-      valueFormatter: (p: any) => this.fmtDate(p.value),
+      width: 170,
+      minWidth: 160,
+      cellRenderer: this.dateCell,
     },
   ];
 

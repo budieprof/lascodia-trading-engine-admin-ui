@@ -24,6 +24,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
 import { catchError, map, of, switchMap, throttleTime } from 'rxjs';
 import type { EChartsOption } from 'echarts';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 
 import { createPolledResource } from '@core/polling/polled-resource';
 
@@ -70,6 +71,57 @@ const ANALYTICS_SAMPLE_CAP = 5000;
 
 /** Engine sentinel symbol for MAML / cross-symbol average-weight initialisers. */
 const CROSS_SYMBOL_SENTINEL = 'ALL';
+
+/** One colour per registry status, shared by the status-mix panel and the pills. */
+const STATUS_COLOR: Record<string, string> = {
+  Active: '#34C759',
+  Training: '#0A84FF',
+  Candidate: '#AF52DE',
+  Superseded: '#8E8E93',
+  Failed: '#FF3B30',
+};
+
+function relativeTime(iso: string): string {
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
+/** Cell-renderer strings go straight into innerHTML; data-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+/**
+ * Engine versions read `{Symbol}_{TF}_[{Regime}_]{RunId}_{yyyyMMddHHmmss}[_challenger]`.
+ * Symbol, timeframe and trained-at already have their own columns, so the short
+ * form keeps what is left: the training run ("#81172") as the head and any
+ * regime / "challenger" marker as tags. Anything that does not follow the
+ * pattern is shown as-is; the full value is always the tooltip.
+ */
+function modelVersionParts(
+  version: string | null | undefined,
+  symbol: string | null | undefined,
+  timeframe: unknown,
+): { head: string; tags: string[] } {
+  if (!version) return { head: '—', tags: [] };
+  let rest = version;
+  const prefix = `${symbol ?? ''}_${String(timeframe ?? '')}_`;
+  if (symbol && timeframe && rest.startsWith(prefix)) rest = rest.slice(prefix.length);
+  const parts = rest.split('_').filter((p) => p && !/^\d{14}$/.test(p));
+  const run = parts.find((p) => /^\d+$/.test(p));
+  if (!run) return { head: version, tags: [] };
+  return { head: `#${run}`, tags: parts.filter((p) => p !== run) };
+}
+
+const VERSION_TAG_STYLE =
+  'font-family:var(--font-sans,inherit);font-size:9.5px;font-weight:600;text-transform:uppercase;' +
+  'letter-spacing:.04em;color:var(--text-tertiary);margin-left:6px';
 
 /**
  * Human label + colour key for the engine's PromotionDecision enum. The enum
@@ -119,6 +171,9 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
     MlAbTestDetailComponent,
     MlArchLeaderboardComponent,
   ],
+  // Registry-tab chrome (KPI tiles, boards, pills) lives in the .scss; the
+  // inline block below holds everything else, each under the style budget.
+  styleUrl: './ml-models-page.component.scss',
   template: `
     <div class="page">
       <app-page-header
@@ -133,48 +188,59 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
             <!-- KPI strip — fleet-wide model registry roll-ups. Zero is neutral:
                  only a non-zero count earns a colour, so an empty Failed tile
                  does not read as good news and an empty Active tile not as bad. -->
-            <div class="ml-kpis">
+            <div class="ml-kpis reg-kpis">
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Total models</span>
                 <span class="ml-kpi-value">{{ modelStats().total | number }}</span>
-              </div>
-              <div class="ml-kpi">
-                <!-- Cross-pair starting-weight templates (Symbol "ALL") are active rows in the
-                     registry but never trade; the list leaves them out, so say how many. -->
-                <span
-                  class="ml-kpi-label"
-                  [attr.title]="
-                    templateModelCount()
-                      ? 'Per-pair models only. ' +
-                        templateModelCount() +
-                        ' cross-pair starting-weight template(s) are also active: new per-pair models start from them; they never trade.'
-                      : null
-                  "
-                  >Active{{
-                    templateModelCount()
-                      ? ' · +' + templateModelCount() + ' templates not listed'
-                      : ''
-                  }}</span
-                >
-                <span class="ml-kpi-value" [class.good]="modelStats().active > 0">
-                  {{ modelStats().active | number }}
+                <span class="kpi-hint">
+                  {{ modelStats().candidate | number }} candidate{{
+                    modelStats().candidate === 1 ? '' : 's'
+                  }}
                 </span>
               </div>
-              <div class="ml-kpi">
+              <!-- Cross-pair starting-weight templates (Symbol "ALL") are active rows in the
+                   registry but never trade; the list leaves them out, so say how many. -->
+              <div
+                class="ml-kpi"
+                [class.tone-good]="modelStats().active > 0"
+                [attr.title]="
+                  templateModelCount()
+                    ? 'Per-pair models only. ' +
+                      templateModelCount() +
+                      ' cross-pair starting-weight template(s) are also active: new per-pair models start from them; they never trade.'
+                    : null
+                "
+              >
+                <span class="ml-kpi-label">Active</span>
+                <span class="ml-kpi-value">{{ modelStats().active | number }}</span>
+                <span class="kpi-hint">
+                  {{
+                    templateModelCount()
+                      ? '+' + templateModelCount() + ' templates not listed'
+                      : share(modelStats().active, modelStats().total) + ' of models'
+                  }}
+                </span>
+              </div>
+              <div class="ml-kpi" [class.tone-info]="modelStats().training > 0">
                 <span class="ml-kpi-label">Training</span>
-                <span class="ml-kpi-value" [class.info]="modelStats().training > 0">
-                  {{ modelStats().training | number }}
-                </span>
+                <span class="ml-kpi-value">{{ modelStats().training | number }}</span>
+                <span class="kpi-hint">{{
+                  modelStats().training > 0 ? 'in progress' : 'none in progress'
+                }}</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Superseded</span>
-                <span class="ml-kpi-value muted-val">{{ modelStats().superseded | number }}</span>
+                <span class="ml-kpi-value">{{ modelStats().superseded | number }}</span>
+                <span class="kpi-hint"
+                  >{{ share(modelStats().superseded, modelStats().total) }} of models</span
+                >
               </div>
-              <div class="ml-kpi">
+              <div class="ml-kpi" [class.tone-bad]="modelStats().failed > 0">
                 <span class="ml-kpi-label">Failed</span>
-                <span class="ml-kpi-value" [class.bad]="modelStats().failed > 0">
-                  {{ modelStats().failed | number }}
-                </span>
+                <span class="ml-kpi-value">{{ modelStats().failed | number }}</span>
+                <span class="kpi-hint"
+                  >{{ share(modelStats().failed, modelStats().total) }} of models</span
+                >
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Avg accuracy</span>
@@ -185,33 +251,79 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                       : '—'
                   }}
                 </span>
+                <span class="kpi-hint">direction · 50% = coin flip</span>
               </div>
               <div class="ml-kpi">
                 <span class="ml-kpi-label">Best accuracy</span>
-                <span class="ml-kpi-value" [class.good]="modelStats().bestAccuracy !== null">
+                <span class="ml-kpi-value">
                   {{
                     modelStats().bestAccuracy !== null
                       ? modelStats().bestAccuracy!.toFixed(1) + '%'
                       : '—'
                   }}
                 </span>
+                <span class="kpi-hint">
+                  @if (topPerformers()[0]; as best) {
+                    {{ best.symbol }} {{ best.timeframe }}
+                  } @else {
+                    no scored models
+                  }
+                </span>
               </div>
               <div class="ml-kpi">
-                <span class="ml-kpi-label">Symbols × timeframes</span>
+                <span class="ml-kpi-label">Coverage</span>
                 <span class="ml-kpi-value">
                   {{ modelStats().symbolCount }} × {{ modelStats().timeframeCount }}
                 </span>
+                <span class="kpi-hint">symbols × timeframes</span>
               </div>
             </div>
 
-            <!-- 3-col chart row: status donut + accuracy histogram + models by symbol -->
+            <!-- 3-col chart row: status mix + accuracy histogram + models by symbol -->
             <div class="ml-charts">
-              <app-chart-card
-                title="Status distribution"
-                subtitle="Active · Training · Candidate · Superseded · Failed"
-                [options]="statusDonutOptions()"
-                height="240px"
-              />
+              <section class="mix-panel">
+                <header>
+                  <h3>Status distribution</h3>
+                  <p>Share of the registry in each lifecycle state</p>
+                </header>
+                @if (modelStats().total > 0) {
+                  <div class="mix-body">
+                    <div class="mix-headline">
+                      <span class="mix-big">{{ modelStats().total | number }}</span>
+                      <span class="muted">models</span>
+                    </div>
+                    <div class="mix-stack" role="img" aria-label="Model status mix">
+                      @for (s of statusMix(); track s.name) {
+                        @if (s.count > 0) {
+                          <span
+                            [style.width.%]="(s.count / modelStats().total) * 100"
+                            [style.background]="s.color"
+                            [title]="s.name + ': ' + s.count"
+                          ></span>
+                        }
+                      }
+                    </div>
+                    <ul class="mix-rows">
+                      @for (s of statusMix(); track s.name) {
+                        <li [class.zero]="s.count === 0">
+                          <span class="dot" [style.background]="s.color"></span>
+                          <span>{{ s.name }}</span>
+                          <span class="mix-track"
+                            ><i
+                              [style.width.%]="(s.count / modelStats().total) * 100"
+                              [style.background]="s.color"
+                            ></i
+                          ></span>
+                          <span class="mix-count">{{ s.count | number }}</span>
+                          <span class="mix-pct">{{ share(s.count, modelStats().total) }}</span>
+                        </li>
+                      }
+                    </ul>
+                  </div>
+                } @else {
+                  <p class="muted mix-empty">Loading model analytics…</p>
+                }
+              </section>
               <app-chart-card
                 title="Accuracy distribution"
                 subtitle="Histogram of direction accuracy across the fleet"
@@ -228,93 +340,61 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
 
             <!-- 2-col rows: top performers + underperformers -->
             <div class="ml-board-row">
-              <section class="ml-board">
-                <header class="ml-board-head">
-                  <h3>Top performers</h3>
-                  <span class="muted">Highest direction accuracy across all models</span>
-                </header>
-                @if (topPerformers().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>TF</th>
-                        <th>Version</th>
-                        <th class="num">Accuracy</th>
-                        <th class="num">RMSE</th>
-                        <th class="num">Samples</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (m of topPerformers(); track m.id) {
-                        <tr (click)="onModelSelect(m)">
-                          <td class="mono">{{ m.symbol }}</td>
-                          <td class="mono">{{ m.timeframe }}</td>
-                          <td class="mono trunc" [title]="m.modelVersion ?? ''">
-                            {{ m.modelVersion }}
-                          </td>
-                          <td class="num mono profit">{{ pct(m.directionAccuracy) }}</td>
-                          <td class="num mono">
-                            {{ m.magnitudeRMSE !== null ? m.magnitudeRMSE.toFixed(2) : '—' }}
-                          </td>
-                          <td class="num mono">{{ m.trainingSamples }}</td>
-                          <td>
-                            <span class="ml-pill" [attr.data-status]="m.status">{{
-                              m.status
-                            }}</span>
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                } @else {
-                  <p class="muted" style="padding: var(--space-4)">Loading model analytics…</p>
-                }
-              </section>
-
-              <section class="ml-board">
-                <header class="ml-board-head">
-                  <h3>Underperformers</h3>
-                  <span class="muted">Lowest direction accuracy — candidates for retraining</span>
-                </header>
-                @if (underperformers().length > 0) {
-                  <table class="ml-board-table">
-                    <thead>
-                      <tr>
-                        <th>Symbol</th>
-                        <th>TF</th>
-                        <th>Version</th>
-                        <th class="num">Accuracy</th>
-                        <th class="num">RMSE</th>
-                        <th class="num">Samples</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (m of underperformers(); track m.id) {
-                        <tr (click)="onModelSelect(m)">
-                          <td class="mono">{{ m.symbol }}</td>
-                          <td class="mono">{{ m.timeframe }}</td>
-                          <td class="mono trunc" [title]="m.modelVersion ?? ''">
-                            {{ m.modelVersion }}
-                          </td>
-                          <td class="num mono loss">{{ pct(m.directionAccuracy) }}</td>
-                          <td class="num mono">
-                            {{ m.magnitudeRMSE !== null ? m.magnitudeRMSE.toFixed(2) : '—' }}
-                          </td>
-                          <td class="num mono">{{ m.trainingSamples }}</td>
-                          <td>
-                            <span class="ml-pill" [attr.data-status]="m.status">{{
-                              m.status
-                            }}</span>
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                }
-              </section>
+              @for (b of performerBoards(); track b.title) {
+                <section class="ml-board">
+                  <header class="ml-board-head">
+                    <h3>{{ b.title }}</h3>
+                    <span class="muted">{{ b.sub }}</span>
+                  </header>
+                  @if (b.rows.length > 0) {
+                    <div class="board-scroll">
+                      <table class="ml-board-table reg-table perf">
+                        <thead>
+                          <tr>
+                            <th>Model</th>
+                            <th>Version</th>
+                            <th class="num">Accuracy</th>
+                            <th class="num">RMSE</th>
+                            <th class="num">Samples</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (m of b.rows; track m.id) {
+                            <tr (click)="onModelSelect(m)">
+                              <td class="nowrap">
+                                <span class="sym">{{ m.symbol }}</span>
+                                <span class="tf">{{ m.timeframe }}</span>
+                              </td>
+                              <td class="ver" [title]="m.modelVersion ?? ''">
+                                @let v = versionParts(m);
+                                <span class="mono">{{ v.head }}</span>
+                                @for (t of v.tags; track $index) {
+                                  <span class="ver-tag">{{ t }}</span>
+                                }
+                              </td>
+                              <td class="num strong" [class.profit]="b.good" [class.loss]="!b.good">
+                                {{ pct(m.directionAccuracy) }}
+                              </td>
+                              <td class="num" [class.zero]="m.magnitudeRMSE === null">
+                                {{ m.magnitudeRMSE !== null ? m.magnitudeRMSE.toFixed(2) : '–' }}
+                              </td>
+                              <td class="num">{{ m.trainingSamples | number }}</td>
+                              <td>
+                                <span class="ml-pill with-dot" [attr.data-status]="m.status">{{
+                                  m.status
+                                }}</span>
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    </div>
+                  } @else {
+                    <p class="muted board-empty">Loading model analytics…</p>
+                  }
+                </section>
+              }
             </div>
 
             <!-- Per-symbol/TF summary table -->
@@ -326,51 +406,67 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
                 </span>
               </header>
               @if (perSymbolBreakdown().length > 0) {
-                <table class="ml-board-table">
-                  <thead>
-                    <tr>
-                      <th>Symbol</th>
-                      <th class="num">Models</th>
-                      <th class="num">Active</th>
-                      <th class="num">Failed</th>
-                      <th class="num">Best accuracy</th>
-                      <th class="num">Avg accuracy</th>
-                      <th class="num">Total samples</th>
-                      <th>Coverage</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (row of perSymbolBreakdown(); track row.symbol) {
+                <div class="board-scroll">
+                  <table class="ml-board-table reg-table">
+                    <thead>
                       <tr>
-                        <td class="mono">
-                          {{ row.symbol }}
-                          @if (row.isCrossSymbol) {
-                            <span class="muted"> · cross-symbol initialisers</span>
-                          }
-                        </td>
-                        <td class="num mono">{{ row.count | number }}</td>
-                        <td class="num mono">{{ row.active | number }}</td>
-                        <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
-                        <td class="num mono" [class.profit]="row.bestAccuracy !== null">
-                          {{ row.bestAccuracy !== null ? row.bestAccuracy.toFixed(1) + '%' : '—' }}
-                        </td>
-                        <td class="num mono">
-                          {{ row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '—' }}
-                        </td>
-                        <td class="num mono">{{ row.totalSamples | number }}</td>
-                        <td>
-                          <span
-                            class="ml-pill"
-                            [class.on]="row.active > 0"
-                            [class.warn]="row.active === 0"
-                          >
-                            {{ row.active > 0 ? 'Has active' : 'No active' }}
-                          </span>
-                        </td>
+                        <th>Symbol</th>
+                        <th class="num">Models</th>
+                        <th class="num">Active</th>
+                        <th class="num">Failed</th>
+                        <th class="num">Best accuracy</th>
+                        <th class="num">Avg accuracy</th>
+                        <th class="num">Total samples</th>
+                        <th>Coverage</th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      @for (row of perSymbolBreakdown(); track row.symbol) {
+                        <tr class="static">
+                          <td>
+                            <span class="sym">{{ row.symbol }}</span>
+                            @if (row.isCrossSymbol) {
+                              <span class="muted"> · cross-symbol initialisers</span>
+                            }
+                          </td>
+                          <td class="num strong">{{ row.count | number }}</td>
+                          <td
+                            class="num"
+                            [class.zero]="row.active === 0"
+                            [class.profit]="row.active > 0"
+                          >
+                            {{ row.active > 0 ? (row.active | number) : '–' }}
+                          </td>
+                          <td
+                            class="num"
+                            [class.zero]="row.failed === 0"
+                            [class.loss]="row.failed > 0"
+                          >
+                            {{ row.failed > 0 ? (row.failed | number) : '–' }}
+                          </td>
+                          <td class="num" [class.zero]="row.bestAccuracy === null">
+                            {{
+                              row.bestAccuracy !== null ? row.bestAccuracy.toFixed(1) + '%' : '–'
+                            }}
+                          </td>
+                          <td class="num" [class.zero]="row.avgAccuracy === null">
+                            {{ row.avgAccuracy !== null ? row.avgAccuracy.toFixed(1) + '%' : '–' }}
+                          </td>
+                          <td class="num">{{ row.totalSamples | number }}</td>
+                          <td>
+                            <span
+                              class="ml-pill with-dot"
+                              [class.on]="row.active > 0"
+                              [class.warn]="row.active === 0"
+                            >
+                              {{ row.active > 0 ? 'Has active' : 'No active' }}
+                            </span>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
               }
             </section>
 
@@ -2393,269 +2489,6 @@ function windowLabel(noun: string, sampleSize: number, total: number): string {
         color: var(--text-secondary);
       }
 
-      /* ML Models density additions — registry tab */
-      .ml-kpis {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
-      }
-      @media (max-width: 720px) {
-        .ml-kpis {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      .ab-funnel {
-        margin-top: var(--space-3);
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-      }
-      @media (max-width: 900px) {
-        .ab-funnel {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .ab-pairs {
-        margin-top: var(--space-3);
-        overflow-x: auto;
-      }
-      .ab-pairs h4 {
-        margin: 0 0 var(--space-2);
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .ab-pairs table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-sm);
-      }
-      .ab-pairs th,
-      .ab-pairs td {
-        text-align: left;
-        padding: 6px 10px;
-        border-bottom: 1px solid var(--border);
-      }
-      .ab-pairs th {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .ab-pairs .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .ab-pairs .reason-cell {
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-      }
-      .ml-kpi {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-height: 68px;
-      }
-      .ml-kpi-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      /* Values sit on a shared baseline across the row even if a label wraps. */
-      .ml-kpi-value {
-        margin-top: auto;
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .ml-kpi-value.good {
-        color: var(--profit);
-      }
-      .ml-kpi-value.bad {
-        color: var(--loss);
-      }
-      .ml-kpi-value.warn-val {
-        color: #c93400;
-      }
-      .ml-kpi-value.info {
-        color: var(--accent);
-      }
-      .ml-kpi-value.muted-val {
-        color: var(--text-tertiary);
-      }
-
-      .notice {
-        padding: var(--space-3) var(--space-4);
-        border-radius: var(--radius-md);
-        font-size: var(--text-sm);
-        line-height: 1.4;
-      }
-      .notice.warn {
-        background: rgba(255, 149, 0, 0.1);
-        border: 1px solid rgba(255, 149, 0, 0.36);
-        color: #c93400;
-      }
-
-      .ml-charts {
-        display: grid;
-        grid-template-columns: 1fr 1.4fr 1.2fr;
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .ml-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* start-aligned so a one-sentence panel does not stretch to the height
-         of the table beside it */
-      .ml-board-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .ml-board-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .ml-board {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .ml-board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .ml-board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .ml-board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .ml-board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .ml-board-table th,
-      .ml-board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .ml-board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .ml-board-table tbody tr {
-        cursor: pointer;
-        transition: background 0.1s;
-      }
-      .ml-board-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      .ml-board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .ml-board-table th.num,
-      .ml-board-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .ml-board-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .ml-board-table .trunc {
-        max-width: 110px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .ml-board-table .profit {
-        color: var(--profit);
-      }
-      .ml-board-table .loss {
-        color: var(--loss);
-      }
-
-      .ml-pill {
-        display: inline-flex;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .ml-pill[data-status='Active'],
-      .ml-pill.on {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .ml-pill[data-status='Training'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
-      }
-      .ml-pill[data-status='Failed'] {
-        background: rgba(255, 59, 48, 0.14);
-        color: #d70015;
-      }
-      .ml-pill[data-status='Superseded'] {
-        background: rgba(142, 142, 147, 0.14);
-        color: #636366;
-      }
-      .ml-pill[data-status='Running'],
-      .ml-pill[data-status='Processing'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
-      }
-      .ml-pill[data-status='Completed'] {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .ml-pill[data-decision='promoted'] {
-        background: rgba(52, 199, 89, 0.14);
-        color: #248a3d;
-      }
-      .ml-pill[data-decision='flagged'] {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-      .ml-pill[data-decision='rejected'] {
-        background: rgba(255, 59, 48, 0.14);
-        color: #d70015;
-      }
-      .ml-pill[data-decision='pending'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0040dd;
-      }
-      .ml-pill.warn {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-
       /* Model metadata strip on the Monitor tab */
       .model-meta {
         display: grid;
@@ -3093,6 +2926,9 @@ export class MlModelsPageComponent implements OnInit {
   private readonly datePipe = new DatePipe('en-US');
   private readonly formatGridDate = (p: { value: string | null }) =>
     p.value ? (this.datePipe.transform(p.value, 'MMM d, HH:mm') ?? '—') : '—';
+  /** Registry rows span months, so the registry's dates carry the year. */
+  private readonly formatGridDateWithYear = (p: { value: string | null }) =>
+    p.value ? (this.datePipe.transform(p.value, 'd MMM yyyy, HH:mm') ?? '—') : '—';
 
   private readonly registryTable = viewChild<DataTableComponent<MLModelDto>>('registryTable');
   private readonly trainingTable = viewChild<DataTableComponent<MLTrainingRunDto>>('trainingTable');
@@ -3220,30 +3056,44 @@ export class MlModelsPageComponent implements OnInit {
     };
   });
 
-  statusDonutOptions = computed<EChartsOption>(() => {
+  /** Status rows for the stacked status-mix panel, in lifecycle order. */
+  statusMix = computed(() => {
     const s = this.modelStats();
-    if (s.total === 0) return {};
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: [
-            { value: s.active, name: 'Active', itemStyle: { color: '#34C759' } },
-            { value: s.training, name: 'Training', itemStyle: { color: '#5AC8FA' } },
-            { value: s.candidate, name: 'Candidate', itemStyle: { color: '#AF52DE' } },
-            { value: s.superseded, name: 'Superseded', itemStyle: { color: '#8E8E93' } },
-            { value: s.failed, name: 'Failed', itemStyle: { color: '#FF3B30' } },
-          ].filter((d) => d.value > 0),
-        },
-      ],
-    };
+    return [
+      { name: 'Active', count: s.active, color: STATUS_COLOR['Active'] },
+      { name: 'Training', count: s.training, color: STATUS_COLOR['Training'] },
+      { name: 'Candidate', count: s.candidate, color: STATUS_COLOR['Candidate'] },
+      { name: 'Superseded', count: s.superseded, color: STATUS_COLOR['Superseded'] },
+      { name: 'Failed', count: s.failed, color: STATUS_COLOR['Failed'] },
+    ];
   });
+
+  /** The two performer boards share one table layout; only the slice and tone differ. */
+  performerBoards = computed(() => [
+    {
+      title: 'Top performers',
+      sub: 'Highest direction accuracy across all models',
+      good: true,
+      rows: this.topPerformers(),
+    },
+    {
+      title: 'Underperformers',
+      sub: 'Lowest direction accuracy — candidates for retraining',
+      good: false,
+      rows: this.underperformers(),
+    },
+  ]);
+
+  /** "12 of 902" → "1.3%"; a zero total reads as a dash rather than NaN. */
+  share(n: number, total: number): string {
+    if (!total) return '—';
+    const p = (n / total) * 100;
+    return `${p > 0 && p < 0.1 ? '<0.1' : p.toFixed(1)}%`;
+  }
+
+  versionParts(m: MLModelDto): { head: string; tags: string[] } {
+    return modelVersionParts(m.modelVersion, m.symbol, m.timeframe);
+  }
 
   accuracyHistogramOptions = computed<EChartsOption>(() => {
     const accuracies = this.modelsSample()
@@ -4627,15 +4477,32 @@ export class MlModelsPageComponent implements OnInit {
   // Grid pills colour through the theme's --tone-* tokens: the light-theme hexes they replace
   // (#0040DD blue, #636366 grey, #D70015 red) were ~2-3:1 on the dark background.
   registryColumns: ColDef<MLModelDto>[] = [
-    { headerName: 'Symbol', field: 'symbol', width: 100, minWidth: 96 },
-    { headerName: 'TF', headerTooltip: 'Timeframe', field: 'timeframe', width: 64, minWidth: 64 },
-    // Versions look like "EURUSD_H1_20260905…" — 90px showed "EURUSD_H".
+    {
+      headerName: 'Symbol',
+      field: 'symbol',
+      width: 96,
+      minWidth: 92,
+      cellStyle: { fontWeight: '600' },
+    },
+    { headerName: 'TF', headerTooltip: 'Timeframe', field: 'timeframe', width: 60, minWidth: 56 },
+    // Versions look like "EURUSD_H1_81172_20260922162012" — the symbol, TF and
+    // timestamp repeat other columns, so the cell shows the short form and the
+    // tooltip the full name. Version (flex) absorbs the slack.
     {
       headerName: 'Version',
+      headerTooltip: 'Training run # and variant; hover a cell for the full version name',
       field: 'modelVersion',
       flex: 1,
-      minWidth: 192,
+      minWidth: 140,
       tooltipField: 'modelVersion',
+      cellRenderer: (p: { value: string | null; data?: MLModelDto }) => {
+        const { head, tags } = modelVersionParts(p.value, p.data?.symbol, p.data?.timeframe);
+        return (
+          `<span style="white-space:nowrap"><span style="font-family:'SF Mono','Fira Code',monospace;font-size:12px">${esc(head)}</span>` +
+          tags.map((t) => `<span style="${VERSION_TAG_STYLE}">${esc(t)}</span>`).join('') +
+          `</span>`
+        );
+      },
     },
     {
       headerName: 'Status',
@@ -4643,27 +4510,26 @@ export class MlModelsPageComponent implements OnInit {
       width: 124,
       minWidth: 124,
       cellRenderer: (params: { value: string }) => {
-        const colorMap: Record<string, { bg: string; color: string }> = {
-          Training: { bg: 'rgba(0,113,227,0.12)', color: 'var(--tone-blue)' },
-          // The engine's MLModelStatus also has Candidate; unmapped statuses
-          // used to fall back to the Failed red.
-          Candidate: { bg: 'rgba(175,82,222,0.14)', color: 'var(--tone-purple)' },
-          Active: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
-          Superseded: { bg: 'rgba(142,142,147,0.12)', color: 'var(--tone-grey)' },
-          Failed: { bg: 'rgba(255,59,48,0.12)', color: 'var(--tone-red)' },
-        };
-        const s = colorMap[params.value] ?? {
-          bg: 'rgba(142,142,147,0.12)',
-          color: 'var(--tone-grey)',
-        };
-        return `<span style="color:${s.color};background:${s.bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap">${params.value}</span>`;
+        // The engine's MLModelStatus also has Candidate; unmapped statuses
+        // used to fall back to the Failed red — they now read grey.
+        const c = STATUS_COLOR[params.value] ?? STATUS_COLOR['Superseded'];
+        const text =
+          params.value === 'Superseded' || !STATUS_COLOR[params.value]
+            ? 'var(--text-secondary)'
+            : c;
+        return (
+          `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:999px;` +
+          `background:${c}1f;color:${text};font-size:12px;font-weight:600;line-height:22px;white-space:nowrap">` +
+          `<span style="width:6px;height:6px;border-radius:50%;background:${c}"></span>${esc(String(params.value ?? ''))}</span>`
+        );
       },
     },
     {
       headerName: 'Architecture',
       field: 'learnerArchitecture',
-      width: 128,
-      minWidth: 120,
+      // 140: at 128 the header broke mid-word ("ARCHITECTUR / E").
+      width: 140,
+      minWidth: 140,
       valueFormatter: (p: { value: string | null }) => p.value ?? '—',
       cellStyle: { fontFamily: "'SF Mono', 'Menlo', monospace", fontSize: '12px' },
     },
@@ -4674,35 +4540,55 @@ export class MlModelsPageComponent implements OnInit {
       // 104: at 96 the header still broke mid-word ("ACCURAC Y").
       width: 104,
       minWidth: 104,
-      valueFormatter: (p: { value: number | null }) =>
-        p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—',
+      type: 'rightAligned',
+      cellRenderer: (p: { value: number | null }) => {
+        if (p.value == null) return `<span style="color:var(--text-tertiary)">–</span>`;
+        // 50% is coin-flip: below it reads red, the rest stays neutral.
+        const color = p.value < 0.5 ? 'color:var(--loss);' : '';
+        return `<span style="${color}font-weight:600;font-variant-numeric:tabular-nums">${(p.value * 100).toFixed(1)}%</span>`;
+      },
     },
     {
       headerName: 'Mag. RMSE',
+      headerTooltip: 'Magnitude RMSE',
       field: 'magnitudeRMSE',
-      width: 100,
-      minWidth: 96,
-      valueFormatter: (p: { value: number | null }) => (p.value != null ? p.value.toFixed(4) : '—'),
+      width: 108,
+      minWidth: 108,
+      type: 'rightAligned',
+      cellRenderer: (p: { value: number | null }) =>
+        p.value != null
+          ? `<span style="font-variant-numeric:tabular-nums">${p.value.toFixed(4)}</span>`
+          : `<span style="color:var(--text-tertiary)">–</span>`,
     },
-    { headerName: 'Samples', field: 'trainingSamples', width: 92, minWidth: 92 },
+    {
+      headerName: 'Samples',
+      field: 'trainingSamples',
+      width: 96,
+      minWidth: 96,
+      type: 'rightAligned',
+      cellStyle: { fontVariantNumeric: 'tabular-nums' },
+      valueFormatter: (p: { value: number | null }) =>
+        p.value != null ? p.value.toLocaleString('en-US') : '–',
+    },
     {
       headerName: 'Active',
       field: 'isActive',
       width: 84,
       minWidth: 84,
-      cellRenderer: (params: { value: boolean }) => {
-        const color = params.value ? 'var(--tone-green)' : 'var(--tone-grey)';
-        const bg = params.value ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
-        const label = params.value ? 'Yes' : 'No';
-        return `<span style="color:${color};background:${bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
-      },
+      // "No" is the norm for almost every row, so it stays quiet; "Yes" is what the eye hunts for.
+      cellRenderer: (params: { value: boolean }) =>
+        params.value
+          ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 9px;border-radius:999px;background:rgba(52,199,89,.14);color:var(--tone-green);font-size:12px;font-weight:600;line-height:22px"><span style="width:6px;height:6px;border-radius:50%;background:#34C759;box-shadow:0 0 0 3px rgba(52,199,89,.2)"></span>Yes</span>`
+          : `<span style="color:var(--text-tertiary)">–</span>`,
     },
     {
-      headerName: 'Trained At',
+      headerName: 'Trained at',
       field: 'trainedAt',
-      width: 128,
-      minWidth: 124,
-      valueFormatter: this.formatGridDate,
+      width: 152,
+      minWidth: 152,
+      cellStyle: { fontVariantNumeric: 'tabular-nums', color: 'var(--text-secondary)' },
+      valueFormatter: this.formatGridDateWithYear,
+      tooltipValueGetter: (p) => (p.value ? relativeTime(String(p.value)) : null),
     },
   ];
 

@@ -12,6 +12,7 @@ import { DatePipe, DecimalPipe } from '@angular/common';
 import { catchError, map, of, Observable } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
 import type { EChartsOption } from 'echarts';
+import { formatDistanceToNow, parseISO } from 'date-fns';
 
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
 import { StrategiesService } from '@core/services/strategies.service';
@@ -34,7 +35,78 @@ import {
   FormFieldComponent,
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
-import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
+
+/** Status colours shared by the mix panel, the boards and the runs table. */
+const STATUS_COLOR: Record<string, string> = {
+  Completed: '#34C759',
+  Approved: '#AF52DE',
+  Running: '#0071E3',
+  Pending: '#5AC8FA',
+  Queued: '#8E8E93',
+  Abandoned: '#FF9500',
+  Rejected: '#8E8E93',
+  Cancelled: '#8E8E93',
+  Failed: '#FF3B30',
+};
+/** Display order wherever statuses are listed side by side; unknown statuses follow. */
+const STATUS_ORDER = Object.keys(STATUS_COLOR);
+
+const TRIGGER_COLOR: Record<string, string> = {
+  Manual: '#0071E3',
+  Scheduled: '#5AC8FA',
+  AutoDegrading: '#AF52DE',
+};
+
+/** The per-strategy board shows this many rows until "Show all" is pressed. */
+const COLLAPSED_ROWS = 10;
+
+const numberFmt = new Intl.NumberFormat('en-US');
+const fmt = (n: number): string => numberFmt.format(n);
+
+function relative(iso: string | null | undefined): string {
+  if (!iso) return '';
+  try {
+    return formatDistanceToNow(parseISO(iso), { addSuffix: true });
+  } catch {
+    return '';
+  }
+}
+
+/** Cell-renderer strings go straight into innerHTML; data-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+// AG Grid cells sit outside this component's style scope, so the renderers style inline.
+function statusPillHtml(status: unknown): string {
+  if (status == null || status === '') return '';
+  const s = String(status);
+  const c = STATUS_COLOR[s] ?? '#8E8E93';
+  return (
+    `<span style="display:inline-flex;align-items:center;gap:6px;padding:0 10px;border-radius:999px;` +
+    `background:${c}1f;color:${c};font-size:12px;font-weight:600;line-height:22px">` +
+    `<span style="width:6px;height:6px;border-radius:50%;background:${c}"></span>${esc(s)}</span>`
+  );
+}
+
+function idHtml(v: unknown): string {
+  return `<span style="color:var(--text-tertiary);font-variant-numeric:tabular-nums">#${esc(String(v ?? ''))}</span>`;
+}
+
+/** Absolute UTC date with the year, and the relative time beneath it. */
+function dateHtml(iso: string | null | undefined, abs: string): string {
+  if (!iso) return `<span style="color:var(--text-tertiary)">—</span>`;
+  return (
+    `<span style="display:inline-block;vertical-align:middle;line-height:1.3">` +
+    `<span style="font-variant-numeric:tabular-nums">${esc(abs)}</span><br/>` +
+    `<span style="font-size:11px;color:var(--text-tertiary)">${esc(relative(iso))}</span></span>`
+  );
+}
+
+const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
 
 @Component({
   selector: 'app-optimizations-page',
@@ -171,85 +243,174 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 
       <!-- KPI strip — roll-ups over the analytics sample. The first tile names
            the window honestly (the sample is capped at 5,000 most-recent runs). -->
-      <div class="op-kpis">
-        <div class="op-kpi">
-          <span class="kpi-label">{{ windowLabel() }}</span>
-          <span class="kpi-value">{{ optStats().total | number }}</span>
+      <div class="dr-kpis">
+        <div class="dr-kpi">
+          <span class="kpi-label" [title]="windowLabel()">{{ windowLabel() }}</span>
+          <span class="kpi-value">{{ fmt(optStats().total) }}</span>
+          <span class="kpi-hint">across {{ fmt(optStats().strategiesCovered) }} strategies</span>
         </div>
-        <div class="op-kpi">
+        <div class="dr-kpi" [class.tone-info]="optStats().running > 0">
           <span class="kpi-label">Running</span>
-          <span class="kpi-value" [class.info]="optStats().running > 0">
-            {{ optStats().running | number }}
+          <span class="kpi-value">{{ fmt(optStats().running) }}</span>
+          <span class="kpi-hint" [title]="latestStartAbs()">
+            {{ latestStartRel() ? 'last start ' + latestStartRel() : 'no runs started' }}
           </span>
         </div>
-        <div class="op-kpi">
+        <div class="dr-kpi">
           <span class="kpi-label">Completed</span>
-          <span class="kpi-value" [class.good]="optStats().completed > 0">
-            {{ optStats().completed | number }}
-          </span>
+          <span class="kpi-value">{{ fmt(optStats().completed) }}</span>
+          <span class="kpi-hint">{{ pct(optStats().completed, optStats().total) }} of runs</span>
         </div>
-        <div class="op-kpi">
+        <div class="dr-kpi" [class.tone-bad]="optStats().failed > 0">
           <span class="kpi-label">Failed</span>
-          <span class="kpi-value" [class.bad]="optStats().failed > 0">
-            {{ optStats().failed | number }}
-          </span>
+          <span class="kpi-value">{{ fmt(optStats().failed) }}</span>
+          <span class="kpi-hint">{{ pct(optStats().failed, optStats().total) }} of runs</span>
         </div>
-        <div class="op-kpi">
+        <div class="dr-kpi" [class.tone-warn]="optStats().abandoned > 0">
           <span class="kpi-label">Abandoned</span>
-          <span class="kpi-value" [class.warn]="optStats().abandoned > 0">
-            {{ optStats().abandoned | number }}
-          </span>
+          <span class="kpi-value">{{ fmt(optStats().abandoned) }}</span>
+          <span class="kpi-hint">{{ pct(optStats().abandoned, optStats().total) }} of runs</span>
         </div>
-        <div class="op-kpi">
+        <div class="dr-kpi">
           <span class="kpi-label">Approved</span>
-          <span class="kpi-value" [class.good]="optStats().approved > 0">
-            {{ optStats().approved | number }}
+          <span class="kpi-value">{{ fmt(optStats().approved) }}</span>
+          <span class="kpi-hint">
+            {{
+              optStats().completed > 0
+                ? pct(optStats().approved, optStats().completed) + ' of completed'
+                : 'nothing completed to approve'
+            }}
           </span>
         </div>
-        <div class="op-kpi">
+        <div
+          class="dr-kpi"
+          [class.tone-bad]="optStats().failureRate !== null && optStats().failureRate! >= 50"
+          [class.tone-warn]="
+            optStats().failureRate !== null &&
+            optStats().failureRate! > 0 &&
+            optStats().failureRate! < 50
+          "
+        >
           <span class="kpi-label">Failure rate</span>
-          <span
-            class="kpi-value"
-            [class.bad]="optStats().failureRate !== null && optStats().failureRate! >= 50"
-            [class.warn]="
-              optStats().failureRate !== null &&
-              optStats().failureRate! > 0 &&
-              optStats().failureRate! < 50
-            "
-          >
+          <span class="kpi-value">
             {{ optStats().failureRate !== null ? optStats().failureRate!.toFixed(1) + '%' : '—' }}
           </span>
+          <span class="kpi-hint">
+            of {{ fmt(optStats().completed + optStats().failed + optStats().abandoned) }} finished
+            runs
+          </span>
         </div>
-        <div class="op-kpi">
+        <div
+          class="dr-kpi"
+          [class.tone-good]="optStats().avgLift !== null && optStats().avgLift! > 0"
+          [class.tone-bad]="optStats().avgLift !== null && optStats().avgLift! < 0"
+        >
           <span class="kpi-label">Avg lift (completed)</span>
-          <span
-            class="kpi-value"
-            [class.good]="optStats().avgLift !== null && optStats().avgLift! > 0"
-            [class.bad]="optStats().avgLift !== null && optStats().avgLift! < 0"
-          >
+          <span class="kpi-value">
             @if (optStats().avgLift !== null) {
               {{ optStats().avgLift! >= 0 ? '+' : '' }}{{ optStats().avgLift! | number: '1.3-3' }}
             } @else {
               —
             }
           </span>
+          <span class="kpi-hint">
+            @if (topLifts()[0]; as best) {
+              best: #{{ best.id }} ({{ signedLift(best) }})
+            } @else {
+              no completed runs with a score
+            }
+          </span>
         </div>
       </div>
 
-      <!-- 3-col chart row -->
-      <div class="op-charts">
-        <app-chart-card
-          title="Status distribution"
-          subtitle="Share of runs by status in the window"
-          [options]="optStatusDonutOptions()"
-          height="240px"
-        />
-        <app-chart-card
-          title="By trigger type"
-          subtitle="Manual · Scheduled · AutoDegrading"
-          [options]="optByTriggerOptions()"
-          height="240px"
-        />
+      <!-- Chart row: status mix + trigger mix + daily activity. The two mixes are
+           HTML breakdowns rather than charts: a 99%-one-colour donut and a bar
+           chart with a 3-run bar beside a 4,997-run bar said nothing a row of
+           counts doesn't say better. -->
+      <div class="dr-charts">
+        <section class="mix-panel">
+          <header class="mix-head">
+            <h3>Status distribution</h3>
+            <p>Share of runs by status in the window</p>
+          </header>
+          @if (statusMix().length > 0) {
+            <div class="mix-body">
+              <div class="mix-headline">
+                <span class="mix-big">{{ fmt(optStats().total) }}</span>
+                <span class="mix-big-label">runs</span>
+              </div>
+              <div class="mix-stack" role="img" [attr.aria-label]="mixLabel(statusMix())">
+                @for (r of statusMix(); track r.name) {
+                  <span
+                    [style.width.%]="r.pct"
+                    [style.background]="r.color"
+                    [title]="r.name + ': ' + fmt(r.count)"
+                  ></span>
+                }
+              </div>
+              <ul class="mix-rows">
+                @for (r of statusMix(); track r.name) {
+                  <li>
+                    <span class="dot" [style.background]="r.color"></span>
+                    <span class="mix-name">{{ r.name }}</span>
+                    <span class="mix-track">
+                      <i [style.width.%]="r.pct" [style.background]="r.color"></i>
+                    </span>
+                    <span class="mix-count">{{ fmt(r.count) }}</span>
+                    <span class="mix-pct">{{ pct(r.count, optStats().total) }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <p class="mix-empty">No optimization runs yet.</p>
+          }
+        </section>
+        <section class="mix-panel">
+          <header class="mix-head">
+            <h3>By trigger type</h3>
+            <p>What queued the runs, and how many of each failed</p>
+          </header>
+          @if (triggerMix().length > 0) {
+            <div class="mix-body">
+              <div class="mix-headline">
+                <span class="mix-big">{{ fmt(triggerMix().length) }}</span>
+                <span class="mix-big-label"
+                  >trigger type{{ triggerMix().length === 1 ? '' : 's' }}</span
+                >
+              </div>
+              <div class="mix-stack" role="img" [attr.aria-label]="mixLabel(triggerMix())">
+                @for (r of triggerMix(); track r.name) {
+                  <span
+                    [style.width.%]="r.pct"
+                    [style.background]="r.color"
+                    [title]="r.name + ': ' + fmt(r.count)"
+                  ></span>
+                }
+              </div>
+              <ul class="mix-rows">
+                @for (r of triggerMix(); track r.name) {
+                  <li>
+                    <span class="dot" [style.background]="r.color"></span>
+                    <span class="mix-name">
+                      {{ r.name }}
+                      <span class="mix-sub" [class.bad]="r.failed > 0">
+                        {{ r.failed > 0 ? fmt(r.failed) + ' failed' : 'none failed' }}
+                      </span>
+                    </span>
+                    <span class="mix-track">
+                      <i [style.width.%]="r.pct" [style.background]="r.color"></i>
+                    </span>
+                    <span class="mix-count">{{ fmt(r.count) }}</span>
+                    <span class="mix-pct">{{ pct(r.count, optStats().total) }}</span>
+                  </li>
+                }
+              </ul>
+            </div>
+          } @else {
+            <p class="mix-empty">No optimization runs yet.</p>
+          }
+        </section>
         <app-chart-card
           title="Activity (last 14 days)"
           subtitle="Daily optimization-run starts"
@@ -262,21 +423,21 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
 
       <!-- 2-col tables: biggest lifts + per-strategy breakdown. With no lifts to rank the left
            panel is one sentence, so the per-strategy table takes the full width instead of
-           clipping its last two columns in a third of the page. -->
-      <div class="op-board-row" [class.lifts-empty]="topLifts().length === 0">
-        <section class="op-board">
-          <header class="op-board-head">
+           clipping its last two columns in half the page. -->
+      <div class="dr-board-row" [class.single]="topLifts().length === 0">
+        <section class="dr-board">
+          <header class="dr-board-head">
             <h3>Biggest health-score lifts</h3>
             <span class="muted">Completed runs where the search beat the baseline the most</span>
           </header>
           @if (topLifts().length > 0) {
-            <div class="op-table-scroll">
-              <table class="op-board-table">
+            <div class="board-scroll">
+              <table class="dr-board-table">
                 <thead>
                   <tr>
                     <th>Run</th>
-                    <th class="num">Strategy</th>
-                    <th class="num">Iterations</th>
+                    <th>Strategy</th>
+                    <th class="num">Iter.</th>
                     <th class="num">Baseline</th>
                     <th class="num">Best</th>
                     <th class="num">Δ</th>
@@ -285,92 +446,120 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                 </thead>
                 <tbody>
                   @for (r of topLifts(); track r.id) {
-                    <tr (click)="select(r)">
-                      <td class="mono">#{{ r.id }}</td>
-                      <td class="num" [title]="'Strategy #' + r.strategyId">
+                    <tr class="clickable" (click)="select(r)">
+                      <td class="id">#{{ r.id }}</td>
+                      <td class="name-cell" [title]="'Strategy #' + r.strategyId">
                         {{ strategyName(r.strategyId) }}
                       </td>
-                      <td class="num mono">{{ r.iterations | number }}</td>
-                      <td class="num mono">
+                      <td class="num">{{ r.iterations | number }}</td>
+                      <td class="num">
                         {{
                           r.baselineHealthScore !== null
                             ? (r.baselineHealthScore | number: '1.3-3')
                             : '—'
                         }}
                       </td>
-                      <td class="num mono">
+                      <td class="num">
                         {{
                           r.bestHealthScore !== null ? (r.bestHealthScore | number: '1.3-3') : '—'
                         }}
                       </td>
                       <td
-                        class="num mono"
-                        [class.profit]="(r.bestHealthScore ?? 0) > (r.baselineHealthScore ?? 0)"
-                        [class.loss]="(r.bestHealthScore ?? 0) < (r.baselineHealthScore ?? 0)"
+                        class="num strong"
+                        [class.pos]="(r.bestHealthScore ?? 0) > (r.baselineHealthScore ?? 0)"
+                        [class.neg]="(r.bestHealthScore ?? 0) < (r.baselineHealthScore ?? 0)"
                       >
-                        @if (r.bestHealthScore !== null && r.baselineHealthScore !== null) {
-                          {{ r.bestHealthScore - r.baselineHealthScore >= 0 ? '+' : ''
-                          }}{{ r.bestHealthScore - r.baselineHealthScore | number: '1.3-3' }}
-                        } @else {
-                          —
-                        }
+                        {{ signedLift(r) }}
                       </td>
-                      <td class="mono">{{ r.triggerType }}</td>
+                      <td class="dim-cell">{{ r.triggerType }}</td>
                     </tr>
                   }
                 </tbody>
               </table>
             </div>
           } @else {
-            <p class="muted" style="padding: var(--space-4)">
-              No completed runs with measurable lift yet.
-            </p>
+            <p class="muted board-empty">No completed runs with measurable lift yet.</p>
           }
         </section>
 
-        <section class="op-board">
-          <header class="op-board-head">
+        <section class="dr-board">
+          <header class="dr-board-head">
             <h3>Per-strategy breakdown</h3>
-            <span class="muted">Runs and outcomes grouped by strategy</span>
+            <span class="count-chip">{{ fmt(perStrategyBreakdown().length) }}</span>
+            <span class="muted">Runs and outcomes grouped by strategy, most runs first</span>
           </header>
           @if (perStrategyBreakdown().length > 0) {
-            <div class="op-table-scroll">
-              <table class="op-board-table">
+            <div class="board-scroll" [class.capped]="showAllStrategies()">
+              <table class="dr-board-table">
                 <thead>
                   <tr>
                     <th>Strategy</th>
                     <th class="num">Runs</th>
-                    <th class="num">Completed</th>
-                    <th class="num">Failed</th>
-                    <th class="num">Abandoned</th>
-                    <th class="num" title="Average iterations per run">Avg iter.</th>
+                    @if (topLifts().length === 0) {
+                      <th class="mix-col">Outcome</th>
+                    }
+                    <th class="num"><span class="dot ok"></span>Completed</th>
+                    <th class="num"><span class="dot fail"></span>Failed</th>
+                    <th class="num"><span class="dot warn"></span>Abandoned</th>
+                    <th class="num" title="Average iterations per completed run">Avg iter.</th>
                     <th class="num">Best lift</th>
                   </tr>
                 </thead>
                 <tbody>
-                  @for (row of perStrategyBreakdown(); track row.strategyId) {
+                  @for (row of visibleStrategies(); track row.strategyId) {
                     <tr>
-                      <td [title]="'Strategy #' + row.strategyId">
+                      <td class="name-cell" [title]="'Strategy #' + row.strategyId">
                         {{ strategyName(row.strategyId) }}
                       </td>
-                      <td class="num mono">{{ row.runs | number }}</td>
-                      <td class="num mono" [class.profit]="row.completed > 0">
-                        {{ row.completed }}
+                      <td class="num strong">{{ fmt(row.runs) }}</td>
+                      @if (topLifts().length === 0) {
+                        <td class="mix-col">
+                          <span class="mix-bar">
+                            @if (row.completed > 0) {
+                              <i class="ok" [style.width.%]="(row.completed / row.runs) * 100"></i>
+                            }
+                            @if (row.failed > 0) {
+                              <i class="fail" [style.width.%]="(row.failed / row.runs) * 100"></i>
+                            }
+                            @if (row.abandoned > 0) {
+                              <i
+                                class="warn"
+                                [style.width.%]="(row.abandoned / row.runs) * 100"
+                              ></i>
+                            }
+                          </span>
+                        </td>
+                      }
+                      <td
+                        class="num"
+                        [class.zero]="row.completed === 0"
+                        [class.pos]="row.completed > 0"
+                      >
+                        {{ row.completed > 0 ? fmt(row.completed) : '–' }}
                       </td>
-                      <td class="num mono" [class.loss]="row.failed > 0">{{ row.failed }}</td>
-                      <td class="num mono" [class.warn]="row.abandoned > 0">{{ row.abandoned }}</td>
-                      <td class="num mono">
-                        {{ row.avgIterations !== null ? row.avgIterations.toFixed(1) : '—' }}
+                      <td class="num" [class.zero]="row.failed === 0" [class.neg]="row.failed > 0">
+                        {{ row.failed > 0 ? fmt(row.failed) : '–' }}
                       </td>
                       <td
-                        class="num mono"
-                        [class.profit]="row.bestLift !== null && row.bestLift > 0"
-                        [class.loss]="row.bestLift !== null && row.bestLift < 0"
+                        class="num"
+                        [class.zero]="row.abandoned === 0"
+                        [class.warn]="row.abandoned > 0"
+                      >
+                        {{ row.abandoned > 0 ? fmt(row.abandoned) : '–' }}
+                      </td>
+                      <td class="num" [class.zero]="row.avgIterations === null">
+                        {{ row.avgIterations !== null ? row.avgIterations.toFixed(1) : '–' }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.zero]="row.bestLift === null"
+                        [class.pos]="row.bestLift !== null && row.bestLift > 0"
+                        [class.neg]="row.bestLift !== null && row.bestLift < 0"
                       >
                         @if (row.bestLift !== null) {
                           {{ row.bestLift >= 0 ? '+' : '' }}{{ row.bestLift | number: '1.3-3' }}
                         } @else {
-                          —
+                          –
                         }
                       </td>
                     </tr>
@@ -378,14 +567,43 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
                 </tbody>
               </table>
             </div>
+            @if (perStrategyBreakdown().length > collapsedRows) {
+              <footer class="board-foot" [class.raised]="showAllStrategies()">
+                <span class="muted">
+                  {{
+                    showAllStrategies()
+                      ? 'All ' +
+                        fmt(perStrategyBreakdown().length) +
+                        ' strategies · scroll the table'
+                      : 'Top ' +
+                        collapsedRows +
+                        ' of ' +
+                        fmt(perStrategyBreakdown().length) +
+                        ' by run count'
+                  }}
+                </span>
+                <button
+                  type="button"
+                  class="link-btn"
+                  (click)="showAllStrategies.set(!showAllStrategies())"
+                >
+                  {{ showAllStrategies() ? 'Show top ' + collapsedRows : 'Show all' }}
+                </button>
+              </footer>
+            }
+          } @else {
+            <p class="muted board-empty">No runs to group yet.</p>
           }
         </section>
       </div>
 
-      <section class="op-board">
-        <header class="op-board-head">
+      <section class="dr-board">
+        <header class="dr-board-head">
           <h3>All optimization runs</h3>
-          <span class="muted">Server-paged — click any row for params + lift detail</span>
+          <span class="count-chip">{{ fmt(optsTotal()) }}</span>
+          <span class="muted head-right"
+            >Server-paged · click any row for params + lift detail · UTC</span
+          >
         </header>
         <app-data-table
           #table
@@ -514,7 +732,7 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: var(--space-5);
+        gap: var(--space-4);
       }
       .btn {
         height: 36px;
@@ -679,173 +897,448 @@ import { StatusPillCellComponent } from '@shared/components/data-table/cell-rend
         color: var(--text-primary);
         word-break: break-word;
       }
-      /* Two rows of four keep every label on one line; eight across forced
-         two-line labels at common widths. */
-      .op-kpis {
+      /* ── Shared list-page look (same as Drift Report) ───────────── */
+      .muted {
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        flex: none;
+      }
+      .dot.ok {
+        background: #34c759;
+      }
+      .dot.fail {
+        background: #ff3b30;
+      }
+      .dot.warn {
+        background: #ff9500;
+      }
+      th .dot {
+        width: 6px;
+        height: 6px;
+        margin-right: 5px;
+        vertical-align: 1px;
+      }
+
+      /* KPI strip: two rows of four keep every label on one line. */
+      .dr-kpis {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
       }
       @media (max-width: 720px) {
-        .op-kpis {
-          grid-template-columns: repeat(2, 1fr);
+        .dr-kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
       }
-      .op-kpi {
+      .dr-kpi {
+        --tone: var(--text-tertiary);
+        position: relative;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
         display: flex;
         flex-direction: column;
-        gap: 4px;
-        min-height: 68px;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+        box-shadow: var(--shadow-sm);
       }
-      .op-kpi .kpi-label {
-        font-size: 10px;
+      .dr-kpi::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--tone);
+        opacity: 0.35;
+      }
+      .dr-kpi.tone-bad {
+        --tone: #d70015;
+      }
+      .dr-kpi.tone-warn {
+        --tone: var(--warning);
+      }
+      .dr-kpi.tone-info {
+        --tone: var(--accent);
+      }
+      .dr-kpi.tone-good {
+        --tone: var(--profit);
+      }
+      .dr-kpi[class*='tone-']::before {
+        opacity: 1;
+      }
+      .kpi-label {
+        font-size: 10.5px;
         font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
       }
-      .op-kpi .kpi-value {
-        margin-top: auto;
-        font-size: var(--text-xl);
+      .kpi-value {
+        font-size: 26px;
+        line-height: 1.2;
         font-weight: var(--font-semibold);
         color: var(--text-primary);
         font-variant-numeric: tabular-nums;
+        letter-spacing: -0.01em;
+        white-space: nowrap;
       }
-      .op-kpi .kpi-value.good {
+      .tone-bad .kpi-value {
+        color: #d70015;
+      }
+      .tone-warn .kpi-value {
+        color: var(--warning);
+      }
+      .tone-good .kpi-value {
         color: var(--profit);
       }
-      .op-kpi .kpi-value.bad {
-        color: var(--loss);
+      .kpi-hint {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
-      .op-kpi .kpi-value.warn {
-        color: #c93400;
-      }
-      .op-kpi .kpi-value.info {
-        color: var(--accent);
+      .kpi-hint.warn {
+        color: var(--warning);
+        cursor: help;
       }
 
-      .op-charts {
+      /* Chart row */
+      .dr-charts {
         display: grid;
-        grid-template-columns: 1fr 1fr 1.4fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.2fr);
         gap: var(--space-3);
         align-items: start;
       }
       @media (max-width: 1100px) {
-        .op-charts {
+        .dr-charts {
           grid-template-columns: 1fr;
         }
       }
-
-      /* start-aligned: a one-sentence "no lifts yet" panel must not stretch
-         to the height of the per-strategy table beside it */
-      .op-board-row {
+      .mix-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        padding: var(--card-padding);
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
+      }
+      .mix-head {
+        margin-bottom: var(--space-4);
+      }
+      .mix-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .mix-head p {
+        margin: var(--space-1) 0 0;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .mix-body {
+        height: 240px;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+      }
+      .mix-headline {
+        display: flex;
+        align-items: baseline;
+        gap: var(--space-2);
+      }
+      .mix-big {
+        font-size: 30px;
+        font-weight: var(--font-semibold);
+        line-height: 1;
+        font-variant-numeric: tabular-nums;
+        letter-spacing: -0.02em;
+      }
+      .mix-big-label {
+        color: var(--text-secondary);
+        font-size: var(--text-sm);
+      }
+      .mix-stack {
+        display: flex;
+        height: 14px;
+        border-radius: 7px;
+        overflow: hidden;
+        gap: 2px;
+        background: var(--bg-tertiary);
+      }
+      .mix-stack span {
+        display: block;
+        min-width: 3px;
+      }
+      .mix-rows {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+        overflow-y: auto;
+      }
+      .mix-rows li {
         display: grid;
-        grid-template-columns: 1.5fr 1fr;
+        grid-template-columns: 8px minmax(84px, auto) 1fr 52px 40px;
+        align-items: center;
+        gap: var(--space-2);
+        font-size: var(--text-sm);
+      }
+      .mix-name {
+        display: flex;
+        flex-direction: column;
+        line-height: 1.25;
+        white-space: nowrap;
+      }
+      .mix-sub {
+        font-size: 11px;
+        color: var(--text-tertiary);
+      }
+      .mix-sub.bad {
+        color: #d70015;
+      }
+      .mix-track {
+        display: block;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
+        overflow: hidden;
+      }
+      .mix-track i {
+        display: block;
+        height: 100%;
+        min-width: 2px;
+        border-radius: 3px;
+      }
+      .mix-count {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        font-weight: var(--font-semibold);
+      }
+      .mix-pct {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
+      }
+      .mix-empty {
+        height: 240px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0;
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-sm);
+      }
+
+      /* Boards: start-aligned so a short board never stretches to its neighbour's height. */
+      .dr-board-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--space-3);
         align-items: start;
       }
-      .op-board-row.lifts-empty {
-        grid-template-columns: 1fr;
+      .dr-board-row.single {
+        grid-template-columns: minmax(0, 1fr);
       }
       @media (max-width: 1100px) {
-        .op-board-row {
-          grid-template-columns: 1fr;
+        .dr-board-row {
+          grid-template-columns: minmax(0, 1fr);
         }
       }
-
-      .op-board {
+      .dr-board {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
+        box-shadow: var(--shadow-sm);
+        min-width: 0;
       }
-      .op-board-head {
+      .dr-board-head {
         display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
+        align-items: center;
+        flex-wrap: wrap;
+        gap: var(--space-1) var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
       }
-      .op-board-head h3 {
+      .dr-board-head h3 {
         margin: 0;
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
-      }
-      .op-board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .op-board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .op-board-table th,
-      .op-board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .op-board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .op-board-table tbody tr {
-        cursor: pointer;
-        transition: background 0.1s;
-      }
-      .op-board-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      .op-board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
         white-space: nowrap;
+      }
+      .head-right {
+        margin-left: auto;
+      }
+      .count-chip {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+      }
+      .board-empty {
+        margin: 0;
+        padding: var(--space-5) var(--space-4);
+      }
+      .board-scroll {
+        overflow-x: auto;
+      }
+      /* Expanded long boards scroll inside exactly twelve rows (33px head + 12 × 36px rows), so
+         the cut always falls on a row boundary; the sticky head keeps the columns labelled. */
+      .board-scroll.capped {
+        max-height: 465px;
+        overflow-y: auto;
+      }
+      .board-scroll.capped thead th {
         position: sticky;
         top: 0;
         z-index: 1;
       }
-      /* Bound the Biggest-lifts + Per-strategy panels — these used to
-         render every row inline, so the page stretched to ~12k px tall
-         when the per-strategy breakdown had hundreds of rows. Each
-         table becomes a scroll surface; the sticky thead above keeps
-         the column labels pinned while the operator scrolls inside the
-         panel. The third "All optimization runs" section is server-
-         paged via app-data-table and stays uncapped. */
-      .op-table-scroll {
-        max-height: 420px;
-        overflow: auto;
+      .dr-board-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: var(--text-sm);
       }
-      .op-board-table th.num,
-      .op-board-table td.num {
+      .dr-board-table th,
+      .dr-board-table td {
+        height: 36px;
+        padding: 0 10px;
+        text-align: left;
+        border-bottom: 1px solid var(--border);
+        white-space: nowrap;
+      }
+      .dr-board-table th {
+        height: 33px;
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .dr-board-table th:first-child,
+      .dr-board-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .dr-board-table th:last-child,
+      .dr-board-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .dr-board-table tbody tr:last-child td {
+        border-bottom: none;
+      }
+      .dr-board-table tbody tr:hover {
+        background: var(--bg-primary);
+      }
+      .dr-board-table tr.clickable {
+        cursor: pointer;
+      }
+      .dr-board-table .num {
         text-align: right;
         font-variant-numeric: tabular-nums;
+        width: 1%;
       }
-      .op-board-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
+      .dr-board-table .id {
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+        width: 1%;
       }
-      .op-board-table .profit {
+      .dr-board-table .sym {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .dim-cell {
+        color: var(--text-secondary);
+      }
+      .dr-board-table .name-cell {
+        max-width: 260px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .dr-board-table .strong {
+        font-weight: var(--font-semibold);
+      }
+      .dr-board-table .zero {
+        color: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .dr-board-table .pos {
         color: var(--profit);
       }
-      .op-board-table .loss {
+      .dr-board-table .neg {
         color: var(--loss);
       }
-      .op-board-table .warn {
+      .dr-board-table .warn {
         color: #c93400;
       }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
+      .mix-col {
+        width: 130px;
+      }
+      .mix-bar {
+        display: flex;
+        width: 110px;
+        height: 8px;
+        border-radius: 4px;
+        overflow: hidden;
+        background: var(--bg-tertiary);
+        gap: 1px;
+      }
+      .mix-bar i {
+        display: block;
+        height: 100%;
+      }
+      .mix-bar .ok {
+        background: #34c759;
+      }
+      .mix-bar .fail {
+        background: #ff3b30;
+      }
+      .mix-bar .warn {
+        background: #ff9500;
+      }
+      .board-foot {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-3);
+        padding: var(--space-2) var(--space-4);
+        border-top: 1px solid var(--border);
+      }
+      .board-foot.raised {
+        box-shadow: 0 -8px 10px -8px rgba(0, 0, 0, 0.18);
+        position: relative;
+      }
+      .link-btn {
+        border: none;
+        background: none;
+        color: var(--accent);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+        padding: 4px 8px;
+        border-radius: var(--radius-sm);
+      }
+      .link-btn:hover {
+        background: rgba(0, 113, 227, 0.08);
       }
 
       .detail {
@@ -1089,83 +1582,88 @@ export class OptimizationsPageComponent implements OnInit {
     };
   });
 
-  optStatusDonutOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
+  readonly fmt = fmt;
+  readonly collapsedRows = COLLAPSED_ROWS;
+  readonly showAllStrategies = signal(false);
+
+  /** Runs per status, in display order — the "Status distribution" breakdown. */
+  readonly statusMix = computed(() => {
+    const counts = new Map<string, number>();
     for (const r of this.optsSample()) {
       const k = String(r.status);
-      counts[k] = (counts[k] ?? 0) + 1;
+      counts.set(k, (counts.get(k) ?? 0) + 1);
     }
-    if (Object.keys(counts).length === 0) return {};
-    const colors: Record<string, string> = {
-      Running: '#0071E3',
-      Completed: '#34C759',
-      Approved: '#AF52DE',
-      Abandoned: '#FF9500',
-      Failed: '#FF3B30',
+    const total = this.optsSample().length;
+    const rank = (k: string) => {
+      const i = STATUS_ORDER.indexOf(k);
+      return i < 0 ? STATUS_ORDER.length : i;
     };
-    return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
-      series: [
-        {
-          type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '45%'],
-          avoidLabelOverlap: true,
-          label: { show: false },
-          data: Object.entries(counts).map(([name, value]) => ({
-            name,
-            value,
-            itemStyle: { color: colors[name] ?? '#8E8E93' },
-          })),
-        },
-      ],
-    };
+    return [...counts.entries()]
+      .sort((a, b) => rank(a[0]) - rank(b[0]) || b[1] - a[1])
+      .map(([name, count]) => ({
+        name,
+        count,
+        pct: total > 0 ? (count / total) * 100 : 0,
+        color: STATUS_COLOR[name] ?? '#8E8E93',
+      }));
   });
 
-  optByTriggerOptions = computed<EChartsOption>(() => {
-    const counts: Record<string, number> = {};
+  /** Runs per trigger type, most first, with how many of each failed. */
+  readonly triggerMix = computed(() => {
+    const groups = new Map<string, { count: number; failed: number }>();
     for (const r of this.optsSample()) {
       const k = String(r.triggerType ?? 'unknown');
-      counts[k] = (counts[k] ?? 0) + 1;
+      const g = groups.get(k) ?? { count: 0, failed: 0 };
+      g.count++;
+      if (String(r.status) === 'Failed') g.failed++;
+      groups.set(k, g);
     }
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    if (entries.length === 0) return {};
-    return {
-      grid: { top: 10, right: 40, bottom: 30, left: 100 },
-      xAxis: {
-        type: 'value',
-        // Counts are integers and the range is small; without these the axis
-        // drew a dozen ticks that collided into "1,00200800000".
-        minInterval: 1,
-        splitNumber: 4,
-        axisLabel: {
-          fontSize: 10,
-          color: '#6E6E73',
-          formatter: (v: number) => (Number.isInteger(v) ? v.toLocaleString('en-US') : ''),
-        },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
-      },
-      yAxis: {
-        type: 'category',
-        data: entries.map(([k]) => k).reverse(),
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-      },
-      series: [
-        {
-          type: 'bar',
-          data: entries
-            .map(([, v]) => ({
-              value: v,
-              itemStyle: { color: '#AF52DE', borderRadius: [0, 4, 4, 0] },
-            }))
-            .reverse(),
-          barWidth: 14,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
-        },
-      ],
-    };
+    const total = this.optsSample().length;
+    return [...groups.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([name, g]) => ({
+        name,
+        count: g.count,
+        failed: g.failed,
+        pct: total > 0 ? (g.count / total) * 100 : 0,
+        color: TRIGGER_COLOR[name] ?? '#8E8E93',
+      }));
   });
+
+  private readonly latestStart = computed(() => {
+    let latest: string | null = null;
+    let latestMs = 0;
+    for (const r of this.optsSample()) {
+      const t = r.startedAt ? Date.parse(r.startedAt) : NaN;
+      if (Number.isFinite(t) && t > latestMs) {
+        latestMs = t;
+        latest = r.startedAt;
+      }
+    }
+    return latest;
+  });
+  readonly latestStartRel = computed(() => relative(this.latestStart()));
+  readonly latestStartAbs = computed(() => {
+    const iso = this.latestStart();
+    return iso ? `${this.datePipe.transform(iso, 'MMM d, yyyy HH:mm', 'UTC')} UTC` : '';
+  });
+
+  pct(n: number, total: number): string {
+    if (total <= 0) return '0%';
+    const p = (n / total) * 100;
+    return p > 0 && p < 1 ? '<1%' : p < 100 && p > 99 ? '>99%' : `${p.toFixed(0)}%`;
+  }
+
+  mixLabel(rows: { name: string; count: number }[]): string {
+    return rows.map((r) => `${r.name} ${fmt(r.count)}`).join(' · ');
+  }
+
+  /** "+0.123" / "−0.045" / "—": best minus baseline health score. */
+  signedLift(r: OptimizationRunDto): string {
+    if (r.bestHealthScore == null || r.baselineHealthScore == null) return '—';
+    const d = r.bestHealthScore - r.baselineHealthScore;
+    return `${d >= 0 ? '+' : ''}${d.toFixed(3)}`;
+  }
 
   optActivityOptions = computed<EChartsOption>(() => {
     // UTC days on both sides: local midnight through toISOString() keyed east-of-UTC browsers one
@@ -1291,6 +1789,11 @@ export class OptimizationsPageComponent implements OnInit {
       .sort((a, b) => b.runs - a.runs);
   });
 
+  readonly visibleStrategies = computed(() => {
+    const rows = this.perStrategyBreakdown();
+    return this.showAllStrategies() ? rows : rows.slice(0, COLLAPSED_ROWS);
+  });
+
   ngOnInit(): void {
     this.loadOptimizationsAnalyticsSample();
   }
@@ -1324,47 +1827,80 @@ export class OptimizationsPageComponent implements OnInit {
     triggerType: ['Manual', Validators.required],
   });
 
+  // Cell renderers return HTML strings rendered by AG Grid outside this component's style
+  // scope, so they style inline. Strategy is the one flexible column; the rest are sized to
+  // header + widest value so no column is left as a wide empty band.
   readonly columns: ColDef<OptimizationRunDto>[] = [
-    { headerName: 'ID', field: 'id', width: 90 },
+    {
+      headerName: 'ID',
+      field: 'id',
+      width: 90,
+      cellRenderer: (p: { value: number }) => idHtml(p.value),
+    },
     {
       headerName: 'Strategy',
       field: 'strategyId',
       flex: 1,
-      minWidth: 160,
+      minWidth: 180,
       valueFormatter: (p) => this.strategyName(p.value as number),
       tooltipValueGetter: (p) => `Strategy #${p.value}`,
+      cellStyle: { fontWeight: '600' },
     },
-    { headerName: 'Trigger', field: 'triggerType', width: 130 },
+    {
+      headerName: 'Trigger',
+      field: 'triggerType',
+      width: 140,
+      cellStyle: { color: 'var(--text-secondary)' },
+    },
     {
       headerName: 'Iterations',
       field: 'iterations',
       width: 110,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => (p.value as number).toLocaleString('en-US'),
     },
     {
       headerName: 'Baseline',
       field: 'baselineHealthScore',
       width: 110,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => (p.value as number | null)?.toFixed(2) ?? '—',
     },
     {
       headerName: 'Best',
       field: 'bestHealthScore',
       width: 110,
+      type: 'rightAligned',
+      // Green/red against the run's own baseline: the lift is the point of the search.
+      cellStyle: (p) => {
+        const best = p.value as number | null;
+        const base = p.data?.baselineHealthScore ?? null;
+        const color =
+          best == null || base == null
+            ? null
+            : best > base
+              ? 'var(--profit)'
+              : best < base
+                ? 'var(--loss)'
+                : null;
+        return color ? { ...NUM_CELL, color } : NUM_CELL;
+      },
       valueFormatter: (p) => (p.value as number | null)?.toFixed(2) ?? '—',
     },
     {
       headerName: 'Status',
       field: 'status',
       width: 140,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Optimization status' },
+      cellRenderer: (p: { value: unknown }) => statusPillHtml(p.value),
     },
     {
-      headerName: 'Started',
+      headerName: 'Started (UTC)',
       field: 'startedAt',
-      width: 170,
-      valueFormatter: (p) => this.datePipe.transform(p.value as string, 'MMM d, HH:mm') ?? '-',
+      width: 190,
+      cellRenderer: (p: { value: string | null }) =>
+        dateHtml(p.value, this.datePipe.transform(p.value, 'MMM d, yyyy HH:mm', 'UTC') ?? '—'),
     },
   ];
 
