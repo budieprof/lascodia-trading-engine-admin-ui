@@ -4,6 +4,8 @@
  * `GET machine/enrollments/{id}/progress` (both `accounts.read`).
  */
 
+import type { DaemonProgress } from './add-computer.types';
+
 export type EaDownloadSource = 'engine' | 'external' | 'none';
 
 /** `GET onboarding/ea/latest` (`accounts.read`): a published EA build, without its bytes. */
@@ -97,6 +99,12 @@ export interface EnrollmentHint {
 export interface EnrollmentProgress {
   tokenId: number;
   label: string;
+  /** `EaTerminal` (one EA) or `Daemon` (a computer running the host supervisor); absent from older engines = EA. */
+  kind?: 'EaTerminal' | 'Daemon' | string;
+  /** Daemon tokens: the computer and what it found (null until the supervisor registered). */
+  daemon?: DaemonProgress | null;
+  /** Daemon tokens: when the installer last downloaded the supervisor with this line (null = never). */
+  bundleDownloadedAtUtc?: string | null;
   tokenStatus: string;
   createdAtUtc: string;
   expiresAtUtc: string;

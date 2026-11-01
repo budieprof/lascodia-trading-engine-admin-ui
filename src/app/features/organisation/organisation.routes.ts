@@ -55,6 +55,14 @@ export const ORGANISATION_ROUTES: Routes = [
       import('./connect/terminal-wizard-page.component').then((m) => m.TerminalWizardPageComponent),
   },
   {
+    // "Add a computer" (self-heal program C9): one line installs the host supervisor; live pairing progress.
+    path: 'terminals/add-computer',
+    canActivate: [canAccessPath('organisation/terminals/add-computer')],
+    data: { breadcrumb: 'Add a computer' },
+    loadComponent: () =>
+      import('./connect/add-computer-page.component').then((m) => m.AddComputerPageComponent),
+  },
+  {
     path: 'settings',
     canActivate: [canAccessPath('organisation/settings')],
     data: { breadcrumb: 'Settings' },
