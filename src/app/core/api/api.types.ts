@@ -2983,6 +2983,10 @@ export interface DeadLetterDto {
   isResolved: boolean;
   createdAt: string;
   resolvedAt: string | null;
+  /** `operator`, `operator-replay` or `DeadLetterAutoResolveWorker`; null for rows resolved before it was recorded. */
+  resolvedBy: string | null;
+  /** Why it was resolved — for an automatic resolution, the evidence. */
+  resolutionNote: string | null;
 }
 
 /**

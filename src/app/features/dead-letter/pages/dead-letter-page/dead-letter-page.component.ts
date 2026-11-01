@@ -456,12 +456,15 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                     <td class="time" [title]="a.createdAt">
                       {{ a.createdAt | relativeTime }}
                     </td>
-                    <td class="time">
-                      <!-- The engine stores no resolve time (DeadLetterEvent has no ResolvedAt). -->
+                    <td class="time" [title]="a.resolutionNote ?? ''">
+                      <!-- Rows resolved before the engine recorded ResolvedAt (2026-11-01) have no time. -->
                       @if (a.resolvedAt) {
                         {{ a.resolvedAt | relativeTime }}
+                        @if (isAutoResolved(a)) {
+                          <span class="auto-pill">auto</span>
+                        }
                       } @else if (a.isResolved) {
-                        <span title="The engine does not record when a dead letter was resolved"
+                        <span title="Resolved before the engine recorded when"
                           >time not recorded</span
                         >
                       } @else {
@@ -561,7 +564,18 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
                     }
                   </dd>
                 </div>
+                @if (s.resolvedBy) {
+                  <div>
+                    <dt>Resolved by</dt>
+                    <dd>{{ resolvedByLabel(s) }}</dd>
+                  </div>
+                }
               </dl>
+              @if (s.resolutionNote) {
+                <p class="resolution-note" [class.auto]="isAutoResolved(s)">
+                  {{ s.resolutionNote }}
+                </p>
+              }
               <div class="detail-blocks">
                 <div class="block">
                   <h4>Error message</h4>
@@ -1022,6 +1036,28 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
       .status-pill[data-status='Unresolved'] {
         background: color-mix(in srgb, var(--tone-red) 16%, transparent);
         color: var(--tone-red);
+      }
+      .auto-pill {
+        margin-left: 4px;
+        padding: 0 6px;
+        border-radius: var(--radius-full);
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        background: rgba(0, 113, 227, 0.12);
+        color: var(--accent);
+      }
+      .resolution-note {
+        margin: 0 0 var(--space-3);
+        padding: 8px 12px;
+        border-radius: var(--radius-sm);
+        border-left: 3px solid var(--border);
+        background: var(--bg-tertiary);
+        font-size: var(--text-sm);
+        line-height: 1.45;
+      }
+      .resolution-note.auto {
+        border-left-color: var(--accent);
+        background: rgba(0, 113, 227, 0.07);
       }
       .status-pill[data-status='Resolved'] {
         background: color-mix(in srgb, var(--tone-green) 16%, transparent);
@@ -1492,6 +1528,24 @@ export class DeadLetterPageComponent {
     });
   }
 
+  /** Resolved by the engine's DeadLetterAutoResolveWorker (superseded from current state). */
+  isAutoResolved(dl: DeadLetterDto): boolean {
+    return dl.resolvedBy === 'DeadLetterAutoResolveWorker';
+  }
+
+  resolvedByLabel(dl: DeadLetterDto): string {
+    switch (dl.resolvedBy) {
+      case 'operator':
+        return 'An operator (Resolve)';
+      case 'operator-replay':
+        return 'An operator (Replay)';
+      case 'DeadLetterAutoResolveWorker':
+        return 'The engine, automatically — superseded';
+      default:
+        return dl.resolvedBy ?? '—';
+    }
+  }
+
   resolve(dl: DeadLetterDto): void {
     this.busy.set(true);
     this.service.resolve(dl.id).subscribe({
@@ -1507,6 +1561,8 @@ export class DeadLetterPageComponent {
               ...dl,
               isResolved: true,
               resolvedAt: new Date().toISOString(),
+              resolvedBy: 'operator',
+              resolutionNote: 'Marked resolved by an operator without replaying.',
             });
           }
           this.resource.refresh();

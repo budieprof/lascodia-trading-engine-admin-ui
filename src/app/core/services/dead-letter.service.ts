@@ -20,12 +20,14 @@ interface DeadLetterWireRow {
   attempts?: number;
   deadLetteredAt?: string;
   isResolved?: boolean;
+  resolvedAt?: string | null;
+  resolvedBy?: string | null;
+  resolutionNote?: string | null;
   // Tolerate the names api.types.ts expects in case the engine is ever aligned
   // to them — whichever one is present wins.
   attemptCount?: number;
   createdAt?: string;
   payloadJson?: string | null;
-  resolvedAt?: string | null;
 }
 
 function toDeadLetterDto(row: DeadLetterWireRow): DeadLetterDto {
@@ -40,6 +42,8 @@ function toDeadLetterDto(row: DeadLetterWireRow): DeadLetterDto {
     isResolved: row.isResolved ?? false,
     createdAt: row.createdAt ?? row.deadLetteredAt ?? '',
     resolvedAt: row.resolvedAt ?? null,
+    resolvedBy: row.resolvedBy ?? null,
+    resolutionNote: row.resolutionNote ?? null,
   };
 }
 
