@@ -474,6 +474,12 @@ export const routes: Routes = [
           import('@features/performance/performance.routes').then((m) => m.PERFORMANCE_ROUTES),
       },
       {
+        path: 'risk',
+        canActivate: [canAccessPath('risk')],
+        data: { breadcrumb: 'Portfolio Risk' },
+        loadChildren: () => import('@features/risk/risk.routes').then((m) => m.RISK_ROUTES),
+      },
+      {
         path: 'drawdown-recovery',
         canActivate: [canAccessPath('drawdown-recovery')],
         data: { breadcrumb: 'Drawdown Recovery' },
