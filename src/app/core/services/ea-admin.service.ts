@@ -351,6 +351,22 @@ export class EAAdminService {
     });
   }
 
+  /**
+   * POST prune-files — clean up old files on the host. `dryRun` (default) only
+   * lists them (job `resultData`, see `PruneFilesResult`); the real run needs
+   * the job id of a succeeded dry run of the same terminal from the last 30 min.
+   */
+  pruneFiles(
+    instanceId: string,
+    body: { dryRun: boolean; dryRunJobId?: string | null; reason?: string | null },
+  ): Observable<ResponseData<EATerminalJobResult>> {
+    return this.api.post<ResponseData<EATerminalJobResult>>(this.path(instanceId, 'prune-files'), {
+      dryRun: body.dryRun,
+      dryRunJobId: body.dryRunJobId ?? null,
+      reason: body.reason ?? null,
+    });
+  }
+
   /** GET heal-events — the auto-heal ladder's steps, newest first. */
   listHealEvents(
     instanceId: string,
