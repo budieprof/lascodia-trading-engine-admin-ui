@@ -24,10 +24,12 @@ import {
   credentialFieldsFor,
   credentialLabel,
   credentialTone,
+  externalIdHint,
   healthTone,
   orderTypeName,
   quantityUnitName,
   tifName,
+  venueSuggestions,
   type CredentialField,
 } from '../venues.logic';
 import type {
@@ -157,6 +159,7 @@ const EMPTY: ConnectionsData = {
         subtitle="Execution accounts at exchanges and brokers, their API credentials (write-only) and adapter health. MT5 accounts need none: their Expert Advisor is the adapter."
       >
         <a class="btn btn-secondary" routerLink="/connections/drift">Reconciliation drift</a>
+        <a class="btn btn-secondary" routerLink="/connections/fx-routing">FX routing</a>
         <button
           *lscCan="'accounts.manage'"
           type="button"
@@ -219,7 +222,12 @@ const EMPTY: ConnectionsData = {
               </label>
               <label class="field">
                 <span class="label">Adapter</span>
-                <select class="select" name="c-kind" [(ngModel)]="c.adapterKind">
+                <select
+                  class="select"
+                  name="c-kind"
+                  [(ngModel)]="c.adapterKind"
+                  (ngModelChange)="suggestVenue(c, $event)"
+                >
                   <option value="">Choose…</option>
                   @for (a of venueAdapters(); track a.kind) {
                     <option [value]="a.kind">{{ a.kind }}</option>
@@ -227,11 +235,26 @@ const EMPTY: ConnectionsData = {
                 </select>
               </label>
               <label class="field">
-                <span class="label">Venue (e.g. binance, cme)</span>
-                <input class="input" name="c-venue" maxlength="64" [(ngModel)]="c.venue" />
+                <span class="label">{{
+                  c.adapterKind === 'fix44' ? 'FIX profile (venue)' : 'Venue (e.g. binance, cme)'
+                }}</span>
+                <input
+                  class="input"
+                  name="c-venue"
+                  maxlength="64"
+                  list="c-venue-options"
+                  [(ngModel)]="c.venue"
+                />
+                <datalist id="c-venue-options">
+                  @for (v of venueOptions(c.adapterKind); track v) {
+                    <option [value]="v"></option>
+                  }
+                </datalist>
               </label>
               <label class="field">
-                <span class="label">Venue account id (optional)</span>
+                <span class="label">{{
+                  externalHint(c.adapterKind) ?? 'Venue account id (optional)'
+                }}</span>
                 <input
                   class="input"
                   name="c-ext"
@@ -884,6 +907,21 @@ export class ConnectionsPageComponent {
 
   unit(v: string | number): string {
     return quantityUnitName(v);
+  }
+
+  venueOptions(kind: string): string[] {
+    return venueSuggestions(kind);
+  }
+
+  externalHint(kind: string): string | null {
+    const h = externalIdHint(kind);
+    return h ? `Venue account id — ${h}` : null;
+  }
+
+  /** FX kinds have one obvious venue code (FIX: the gateway profile — the first one is a placeholder to change). */
+  suggestVenue(c: { venue: string }, kind: string): void {
+    const s = venueSuggestions(kind);
+    if (!c.venue.trim() && s.length === 1) c.venue = s[0];
   }
 
   startCreate(): void {

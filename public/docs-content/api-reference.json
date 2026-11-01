@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1130,
+  "endpointCount": 1131,
   "groups": [
     {
       "name": "Admin auth",
@@ -5742,6 +5742,16 @@
           "rateLimit": "api",
           "parameters": [],
           "response": "ResponseData<List<ExecutionAdapterDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/fx/routing",
+          "summary": "gaps/routing: the FX routes beyond MT5 (OANDA, cTrader, FIX 4.4) — their switches with value, default and last change, venues, live sessions, the FIX gateway's sessions, symbol-mapping coverage, the EA-parity gate decisions and the operator-only steps. Read-only; switches are changed through PUT config.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "rateLimit": "api",
+          "parameters": [],
+          "response": "ResponseData<FxRoutingStatusDto>"
         },
         {
           "method": "GET",

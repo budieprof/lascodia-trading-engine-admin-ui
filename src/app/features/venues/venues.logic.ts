@@ -13,7 +13,13 @@ import type {
 
 // ── Enum names (exec-gateway DTOs carry numbers or names) ─────────────────────────────────────────
 
-const DRIFT_KINDS = ['EngineOnlyPosition', 'VenueOnlyPosition', 'QuantityMismatch', 'EngineOnlyOrder', 'VenueOnlyOrder'];
+const DRIFT_KINDS = [
+  'EngineOnlyPosition',
+  'VenueOnlyPosition',
+  'QuantityMismatch',
+  'EngineOnlyOrder',
+  'VenueOnlyOrder',
+];
 const ORDER_TYPES = ['Market', 'Limit', 'Stop', 'StopLimit'];
 const TIFS = ['Gtc', 'Ioc', 'Fok', 'Day'];
 const QUANTITY_UNITS = ['Lots', 'Contracts', 'Shares', 'Coins'];
@@ -89,6 +95,8 @@ export function unitWord(unit: string | null | undefined, qty = 2): string {
       return one ? 'share' : 'shares';
     case 'coins':
       return one ? 'coin' : 'coins';
+    case 'units':
+      return one ? 'unit' : 'units';
     default:
       return one ? 'lot' : 'lots';
   }
@@ -118,7 +126,16 @@ export function credentialFieldsFor(kind: string): CredentialField[] {
       { name: 'apiSecret', label: 'Private key (EC PEM)', multiline: true },
     ];
   if (k.startsWith('binance'))
-    return [key, secret, { name: 'privateKeyPem', label: 'Ed25519 private key (PEM)', multiline: true, optional: true }];
+    return [
+      key,
+      secret,
+      {
+        name: 'privateKeyPem',
+        label: 'Ed25519 private key (PEM)',
+        multiline: true,
+        optional: true,
+      },
+    ];
   if (k === 'tradovate')
     return [
       { name: 'apiKey', label: 'User name' },
@@ -132,9 +149,51 @@ export function credentialFieldsFor(kind: string): CredentialField[] {
       { name: 'apiSecret', label: 'Password' },
     ];
   if (k === 'ib') return [{ name: 'apiKey', label: 'Client Portal access token' }];
+  // gaps/routing — FX routes beyond MT5 (engine Application/Execution/Adapters/Fx).
+  if (k === 'oanda') return [{ name: 'apiKey', label: 'Personal access token (v20)' }];
+  if (k === 'ctrader')
+    return [
+      { name: 'apiKey', label: 'Open API client id' },
+      { name: 'apiSecret', label: 'Open API client secret' },
+      { name: 'accessToken', label: 'OAuth access token (trading scope)' },
+    ];
+  if (k === 'fix44')
+    return [
+      { name: 'apiKey', label: 'SenderCompID' },
+      { name: 'apiSecret', label: 'Password (554)' },
+      { name: 'username', label: 'Username (553) — default SenderCompID', optional: true },
+      { name: 'targetCompId', label: 'TargetCompID — default from the profile', optional: true },
+      { name: 'senderSubId', label: 'SenderSubID', optional: true },
+      { name: 'targetSubId', label: 'TargetSubID', optional: true },
+    ];
   // Tradier signs every call with one bearer access token; there is no secret.
   if (k === 'tradier') return [{ name: 'apiKey', label: 'Access token' }];
   return [key, secret];
+}
+
+/** The FIX gateway's venue profiles (LascodiaFixGateway/profiles): a fix44 account's venue is one of them. */
+export const FIX_PROFILES = ['fix-generic', 'lmax', 'ctrader-fix', 'currenex', 'integral'] as const;
+
+/** Venue codes that fit an adapter kind (the create form's suggestions; free text stays allowed). */
+export function venueSuggestions(kind: string): string[] {
+  const k = kind.toLowerCase();
+  if (k === 'fix44') return [...FIX_PROFILES];
+  if (k === 'oanda' || k === 'ctrader') return [k];
+  return [];
+}
+
+/** What the "venue account id" means for an adapter kind (FX routes need it). */
+export function externalIdHint(kind: string): string | null {
+  switch (kind.toLowerCase()) {
+    case 'oanda':
+      return 'the v20 account id, e.g. 101-004-1234567-001 (required)';
+    case 'ctrader':
+      return 'the ctidTraderAccountId (required)';
+    case 'fix44':
+      return 'Account(1) value, if the venue requires one';
+    default:
+      return null;
+  }
 }
 
 /** The fields to send: trimmed, empty optional ones dropped; null when a required one is missing. */
@@ -257,7 +316,13 @@ export function emptyFee(assetClass: FeeAssetClass = 'Future'): FeeScheduleField
 export function feeFieldsFor(assetClass: FeeAssetClass): (keyof FeeScheduleFields)[] {
   switch (assetClass) {
     case 'Future':
-      return ['commissionPerContract', 'exchangeFeePerContract', 'clearingFeePerContract', 'regulatoryFeePerContract', 'slippageTicks'];
+      return [
+        'commissionPerContract',
+        'exchangeFeePerContract',
+        'clearingFeePerContract',
+        'regulatoryFeePerContract',
+        'slippageTicks',
+      ];
     case 'Crypto':
       return ['makerFeeBps', 'takerFeeBps', 'tierMinVolume30d'];
     default:
@@ -297,8 +362,10 @@ export const FEE_LABELS: Partial<Record<keyof FeeScheduleFields, string>> = {
 /** The engine's validation, mirrored so the form says what is wrong before it is sent (the engine has the last word). */
 export function feeProblems(f: FeeScheduleFields): string[] {
   const p: string[] = [];
-  if (!/^[A-Za-z0-9:._-]{1,64}$/.test(f.code.trim())) p.push('Code: letters, digits and : . _ - only (e.g. cme:ES).');
-  if (!/^[A-Za-z0-9._-]{1,32}$/.test(f.venue.trim())) p.push('Venue: an exchange or broker id (e.g. cme, binance).');
+  if (!/^[A-Za-z0-9:._-]{1,64}$/.test(f.code.trim()))
+    p.push('Code: letters, digits and : . _ - only (e.g. cme:ES).');
+  if (!/^[A-Za-z0-9._-]{1,32}$/.test(f.venue.trim()))
+    p.push('Venue: an exchange or broker id (e.g. cme, binance).');
   if (!/^[A-Za-z]{3,8}$/.test(f.currency.trim())) p.push('Currency: an ISO code or coin.');
   if (!f.source.trim()) p.push('Say where the numbers come from.');
   for (const k of feeFieldsFor(f.assetClass)) {
@@ -306,24 +373,42 @@ export function feeProblems(f: FeeScheduleFields): string[] {
     if (v === null) continue;
     const min = k === 'makerFeeBps' ? -100 : 0;
     if (!Number.isFinite(v) || v < min) p.push(`${FEE_LABELS[k] ?? k} must be at least ${min}.`);
-    if ((k === 'makerFeeBps' || k === 'takerFeeBps' || k === 'commissionBps') && v > 1000) p.push(`${FEE_LABELS[k]} is at most 1000 bps.`);
+    if ((k === 'makerFeeBps' || k === 'takerFeeBps' || k === 'commissionBps') && v > 1000)
+      p.push(`${FEE_LABELS[k]} is at most 1000 bps.`);
   }
   const has = (keys: (keyof FeeScheduleFields)[]) => keys.some((k) => f[k] !== null);
   const ok =
     f.assetClass === 'Future'
-      ? has(['commissionPerContract', 'exchangeFeePerContract', 'clearingFeePerContract', 'regulatoryFeePerContract'])
+      ? has([
+          'commissionPerContract',
+          'exchangeFeePerContract',
+          'clearingFeePerContract',
+          'regulatoryFeePerContract',
+        ])
       : f.assetClass === 'Crypto'
         ? has(['makerFeeBps', 'takerFeeBps'])
-        : has(['commissionPerShare', 'commissionBps', 'secFeePerMillion', 'finraTafPerShare', 'borrowFeeAnnualPct']);
+        : has([
+            'commissionPerShare',
+            'commissionBps',
+            'secFeePerMillion',
+            'finraTafPerShare',
+            'borrowFeeAnnualPct',
+          ]);
   if (!ok) p.push('Give at least one fee of the asset class.');
-  if (f.effectiveToUtc && Date.parse(f.effectiveToUtc) <= Date.parse(f.effectiveFromUtc)) p.push('The end must be after the start.');
+  if (f.effectiveToUtc && Date.parse(f.effectiveToUtc) <= Date.parse(f.effectiveFromUtc))
+    p.push('The end must be after the start.');
   return p;
 }
 
 /** Only the asset class's own amounts are sent; the others are cleared (a futures row carries no bps). */
 export function feeBody(f: FeeScheduleFields): FeeScheduleFields {
   const keep = new Set(feeFieldsFor(f.assetClass));
-  const out = { ...f, code: f.code.trim(), venue: f.venue.trim().toLowerCase(), currency: f.currency.trim().toUpperCase() };
+  const out = {
+    ...f,
+    code: f.code.trim(),
+    venue: f.venue.trim().toLowerCase(),
+    currency: f.currency.trim().toUpperCase(),
+  };
   for (const k of NUMERIC_FEE_FIELDS) if (!keep.has(k)) (out as Record<string, unknown>)[k] = null;
   return out;
 }
@@ -353,7 +438,10 @@ export function feeSummary(f: FeeScheduleFields): string {
   switch (f.assetClass) {
     case 'Future': {
       const sum =
-        (f.commissionPerContract ?? 0) + (f.exchangeFeePerContract ?? 0) + (f.clearingFeePerContract ?? 0) + (f.regulatoryFeePerContract ?? 0);
+        (f.commissionPerContract ?? 0) +
+        (f.exchangeFeePerContract ?? 0) +
+        (f.clearingFeePerContract ?? 0) +
+        (f.regulatoryFeePerContract ?? 0);
       return `${Math.round(sum * 100) / 100} ${f.currency} per contract per side`;
     }
     case 'Crypto':
@@ -369,7 +457,11 @@ export function feeSummary(f: FeeScheduleFields): string {
 
 // ── Margin requirements ───────────────────────────────────────────────────────────────────────────
 
-export const MARGIN_KINDS: readonly MarginKind[] = ['FuturesContract', 'CryptoLeverageTier', 'Equity'];
+export const MARGIN_KINDS: readonly MarginKind[] = [
+  'FuturesContract',
+  'CryptoLeverageTier',
+  'Equity',
+];
 
 export function emptyMargin(kind: MarginKind = 'FuturesContract'): MarginRequirementFields {
   return {
@@ -395,9 +487,20 @@ export function emptyMargin(kind: MarginKind = 'FuturesContract'): MarginRequire
 export function marginFieldsFor(kind: MarginKind): (keyof MarginRequirementFields)[] {
   switch (kind) {
     case 'FuturesContract':
-      return ['initialMargin', 'maintenanceMargin', 'intradayInitialMargin', 'intradayMaintenanceMargin'];
+      return [
+        'initialMargin',
+        'maintenanceMargin',
+        'intradayInitialMargin',
+        'intradayMaintenanceMargin',
+      ];
     case 'CryptoLeverageTier':
-      return ['notionalFloor', 'notionalCap', 'maxLeverage', 'maintenanceMarginRate', 'maintenanceAmount'];
+      return [
+        'notionalFloor',
+        'notionalCap',
+        'maxLeverage',
+        'maintenanceMarginRate',
+        'maintenanceAmount',
+      ];
     default:
       return ['initialMarginRate', 'maintenanceMarginRate'];
   }
@@ -419,27 +522,40 @@ export const MARGIN_LABELS: Partial<Record<keyof MarginRequirementFields, string
 /** The shape each margin model needs (mirrors the engine's validator). */
 export function marginProblems(m: MarginRequirementFields): string[] {
   const p: string[] = [];
-  if (!/^[A-Za-z0-9!._-]{1,32}$/.test(m.symbol.trim())) p.push('Symbol: the instrument (ESZ6, BTC-USDT-PERP, AAPL) or a futures root (ES).');
+  if (!/^[A-Za-z0-9!._-]{1,32}$/.test(m.symbol.trim()))
+    p.push('Symbol: the instrument (ESZ6, BTC-USDT-PERP, AAPL) or a futures root (ES).');
   if (!/^[A-Za-z]{3,8}$/.test(m.currency.trim())) p.push('Currency: an ISO code or coin.');
   if (!m.source.trim()) p.push('Say where the numbers come from.');
   for (const k of marginFieldsFor(m.kind)) {
     const v = m[k] as number | null;
-    if (v !== null && (!Number.isFinite(v) || v < 0)) p.push(`${MARGIN_LABELS[k] ?? k} cannot be negative.`);
+    if (v !== null && (!Number.isFinite(v) || v < 0))
+      p.push(`${MARGIN_LABELS[k] ?? k} cannot be negative.`);
   }
   if (m.kind === 'FuturesContract') {
     if (!(m.initialMargin! > 0)) p.push('A futures row needs the initial margin per contract.');
-    if (!(m.maintenanceMargin! > 0)) p.push('A futures row needs the maintenance margin per contract.');
-    if (m.initialMargin !== null && m.maintenanceMargin !== null && m.maintenanceMargin > m.initialMargin)
+    if (!(m.maintenanceMargin! > 0))
+      p.push('A futures row needs the maintenance margin per contract.');
+    if (
+      m.initialMargin !== null &&
+      m.maintenanceMargin !== null &&
+      m.maintenanceMargin > m.initialMargin
+    )
       p.push('Maintenance margin cannot exceed the initial margin.');
   } else if (m.kind === 'CryptoLeverageTier') {
-    if (m.notionalFloor === null) p.push('A leverage tier needs its notional floor (0 for the first tier).');
+    if (m.notionalFloor === null)
+      p.push('A leverage tier needs its notional floor (0 for the first tier).');
     if (!(m.maxLeverage! >= 1 && m.maxLeverage! <= 500)) p.push('Max leverage between 1 and 500.');
-    if (!(m.maintenanceMarginRate! > 0 && m.maintenanceMarginRate! < 1)) p.push('Maintenance rate between 0 and 1.');
+    if (!(m.maintenanceMarginRate! > 0 && m.maintenanceMarginRate! < 1))
+      p.push('Maintenance rate between 0 and 1.');
     else if (m.maxLeverage && m.maintenanceMarginRate! >= 1 / m.maxLeverage)
-      p.push('The maintenance rate must be below 1 ÷ max leverage, or a position would open already liquidated.');
-    if (m.notionalCap !== null && m.notionalFloor !== null && m.notionalCap <= m.notionalFloor) p.push('The cap must be above the floor.');
+      p.push(
+        'The maintenance rate must be below 1 ÷ max leverage, or a position would open already liquidated.',
+      );
+    if (m.notionalCap !== null && m.notionalFloor !== null && m.notionalCap <= m.notionalFloor)
+      p.push('The cap must be above the floor.');
   } else {
-    if (m.initialMarginRate === null && m.maintenanceMarginRate === null) p.push('Give an initial or a maintenance rate.');
+    if (m.initialMarginRate === null && m.maintenanceMarginRate === null)
+      p.push('Give an initial or a maintenance rate.');
     for (const r of [m.initialMarginRate, m.maintenanceMarginRate])
       if (r !== null && (r < 0 || r > 1)) p.push('Rates are fractions between 0 and 1.');
   }
@@ -448,7 +564,12 @@ export function marginProblems(m: MarginRequirementFields): string[] {
 
 export function marginBody(m: MarginRequirementFields): MarginRequirementFields {
   const keep = new Set(marginFieldsFor(m.kind));
-  const out = { ...m, symbol: m.symbol.trim().toUpperCase(), venue: m.venue.trim(), currency: m.currency.trim().toUpperCase() };
+  const out = {
+    ...m,
+    symbol: m.symbol.trim().toUpperCase(),
+    venue: m.venue.trim(),
+    currency: m.currency.trim().toUpperCase(),
+  };
   for (const k of [
     'initialMargin',
     'maintenanceMargin',

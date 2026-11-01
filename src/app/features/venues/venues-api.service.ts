@@ -18,6 +18,7 @@ import type {
   InstrumentCandleState,
   InstrumentCandleReadiness,
   FuturesCatalogRoot,
+  FxRoutingStatus,
   MarginImportResult,
   MarginRequirement,
   MarginRequirementFields,
@@ -63,6 +64,11 @@ export class VenuesApiService {
     return settled(
       this.api.get<ResponseData<ExecutionAdapter[]>>('/execution/adapters', SILENT),
     ).pipe(map((r) => r ?? []));
+  }
+
+  /** gaps/routing: the FX routes beyond MT5 — switches, venues, sessions, FIX gateway, mappings, gate decisions. */
+  fxRouting(): Observable<FxRoutingStatus> {
+    return settled(this.api.get<ResponseData<FxRoutingStatus>>('/execution/fx/routing', SILENT));
   }
 
   accounts(): Observable<ExecutionAccount[]> {
@@ -275,7 +281,10 @@ export class VenuesApiService {
   /** Engine pages program; a 404 (older engine) is the caller's to absorb. */
   instrumentCandleReadiness(): Observable<InstrumentCandleReadiness> {
     return settled(
-      this.api.get<ResponseData<InstrumentCandleReadiness>>('/instrument-candles/readiness', SILENT),
+      this.api.get<ResponseData<InstrumentCandleReadiness>>(
+        '/instrument-candles/readiness',
+        SILENT,
+      ),
     );
   }
 

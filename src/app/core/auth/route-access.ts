@@ -69,6 +69,7 @@ export const ROUTE_ACCESS = {
   // (accounts.manage / accounts.connect).
   connections: rule(P.AccountsRead), // GET execution/accounts, execution-console/health
   'connections/drift': rule(P.AccountsRead), // GET execution/reconciliation
+  'connections/fx-routing': rule(P.AccountsRead), // GET execution/fx/routing (gaps/routing)
   // Multi-asset WS7 7.10: exchange reference data. A parent with either child's read; writes are platform.data.manage.
   reference: rule(P.MarketdataRead, P.RiskRead),
   'reference/fee-schedules': rule(P.MarketdataRead), // GET reference/fee-schedules
