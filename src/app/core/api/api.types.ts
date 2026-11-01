@@ -451,7 +451,9 @@ export type AlertType =
   | 'ChartAlert'
   | 'ScriptParityDrift'
   // Gaps program surveillance: one row per organisation and detector, raised/resolved by SurveillanceWorker.
-  | 'SurveillanceAlert';
+  | 'SurveillanceAlert'
+  // Gaps program risk: stress scenario breach or margin forecast within the alert buffer.
+  | 'PortfolioRisk';
 
 export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 
