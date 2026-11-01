@@ -1,0 +1,734 @@
+// Drawdown Recovery page. Tokens only, so light and dark both read.
+
+.page {
+  padding: var(--space-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.muted {
+  color: var(--text-tertiary);
+}
+
+// ── Restriction callout (every tab but Accounts) ──
+// A button so the whole callout routes to the Accounts tab; children are spans
+// laid out as blocks, which keeps the markup valid phrasing content.
+.restricted-banner {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px var(--space-4);
+  width: 100%;
+  margin: var(--space-3) 0 0;
+  padding: 10px 14px 10px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-md);
+  background: rgba(255, 149, 0, 0.07);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &.has-halt {
+    border-left-color: var(--loss);
+    background: rgba(255, 59, 48, 0.06);
+  }
+  &:hover {
+    background: rgba(255, 149, 0, 0.12);
+  }
+  &.has-halt:hover {
+    background: rgba(255, 59, 48, 0.1);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+}
+.rb-head {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+.rb-go {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  font-size: var(--text-xs);
+  font-weight: var(--font-medium);
+  color: var(--accent);
+  white-space: nowrap;
+}
+.rb-groups {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rb-group {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.rb-group .mode-badge {
+  min-width: 60px;
+  text-align: center;
+}
+.rb-acct {
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+.rb-acct:not(:last-child)::after {
+  content: ',';
+  color: var(--text-tertiary);
+}
+.rb-id {
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.rb-sub {
+  grid-column: 1 / -1;
+  display: block;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+.rb-groups.inactive .rb-acct {
+  color: var(--text-secondary);
+}
+
+// ── Live scope row ──
+.scope-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.scope-select {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+
+  select {
+    padding: 6px 32px 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    max-width: 320px;
+  }
+}
+.lbl-up {
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+.window-note {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.window-note .capped {
+  color: var(--tone-amber);
+}
+
+// ── Hero ──
+.hero-section {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: var(--space-6);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-6);
+  box-shadow: var(--shadow-sm);
+  align-items: center;
+}
+.hero-gauge {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+}
+// The gauge is a chart-card so its text follows the ECharts theme; strip the
+// nested card chrome so it reads as part of the hero, not a card in a card.
+.hero-gauge ::ng-deep .chart-card {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+.hero-gauge ::ng-deep .chart-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+.gauge-zones {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 10.5px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  li.on {
+    color: var(--text-primary);
+    font-weight: var(--font-semibold);
+  }
+  i {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex: none;
+  }
+}
+.hero-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+.recovery-badge-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+}
+.recovery-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-1) var(--space-4);
+  border-radius: var(--radius-full);
+  font-size: var(--text-base);
+  font-weight: var(--font-semibold);
+
+  &.normal {
+    background: rgba(52, 199, 89, 0.14);
+    color: var(--tone-green);
+  }
+  &.reduced {
+    background: rgba(255, 149, 0, 0.14);
+    color: var(--tone-amber);
+  }
+  &.halted {
+    background: rgba(255, 59, 48, 0.14);
+    color: var(--tone-red);
+  }
+}
+.equity-comparison {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+.equity-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+
+  &.delta {
+    padding-left: var(--space-6);
+    border-left: 1px solid var(--border);
+  }
+}
+.equity-value {
+  font-size: var(--text-xl);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+
+  &.peak {
+    color: var(--text-secondary);
+  }
+  &.loss {
+    color: var(--loss);
+  }
+}
+.equity-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.equity-divider {
+  display: flex;
+  align-items: center;
+  padding-bottom: 4px;
+  color: var(--text-tertiary);
+  font-size: 18px;
+}
+.meta-row {
+  display: flex;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 1024px) {
+  .hero-section {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ── KPI strip ──
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-3);
+  align-items: stretch;
+}
+@media (max-width: 1400px) {
+  .kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 720px) {
+  .kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+// ── Chart rows ──
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+.info-row {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 1100px) {
+  .chart-row,
+  .info-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+// ── Cards: one header style for thresholds, transitions and accounts ──
+.panel {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+
+  h3 {
+    margin: 0;
+    font-size: var(--text-sm);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+  }
+}
+.card-sub {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.t-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: 1px;
+}
+.t-mode {
+  font-weight: var(--font-semibold);
+  white-space: nowrap;
+}
+.t-range {
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+.t-now {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+}
+.trans-table tr.active td {
+  background: var(--bg-tertiary);
+}
+.t-source {
+  margin: 0;
+  padding: 8px var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  line-height: 1.5;
+
+  code {
+    font-size: 10.5px;
+  }
+}
+details.method {
+  border-top: 1px solid var(--border);
+
+  summary {
+    padding: 8px var(--space-4);
+    cursor: pointer;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    color: var(--accent);
+  }
+  p {
+    margin: 0;
+    padding: 0 var(--space-4) var(--space-3);
+    font-size: var(--text-xs);
+    line-height: 1.55;
+    color: var(--text-secondary);
+  }
+  code {
+    font-size: 10.5px;
+  }
+}
+
+// ── Accounts tab ──
+.accounts-card {
+  margin-top: var(--space-3);
+}
+.accounts-head {
+  align-items: center;
+  justify-content: flex-start;
+}
+.accounts-head .toggle-inactive {
+  margin-left: auto;
+}
+.toggle-inactive {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.accounts-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.accounts-table td {
+  vertical-align: middle;
+  height: 40px;
+}
+.acct-name {
+  font-weight: var(--font-semibold);
+  margin-right: 6px;
+}
+.acct-meta {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.row-restricted td:first-child {
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+.row-halted td:first-child {
+  box-shadow: inset 3px 0 0 var(--loss);
+}
+.chip-inactive {
+  margin-left: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  padding: 0 6px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.last-rec {
+  white-space: nowrap;
+}
+.rebased {
+  display: block;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+// One badge shape for every mode; colour carries the severity.
+.mode-badge {
+  display: inline-block;
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  background: rgba(128, 128, 128, 0.18);
+  color: var(--text-secondary);
+  white-space: nowrap;
+
+  &[data-mode='Normal'] {
+    background: rgba(52, 199, 89, 0.14);
+    color: var(--tone-green);
+  }
+  &[data-mode='Reduced'] {
+    background: rgba(255, 149, 0, 0.16);
+    color: var(--tone-amber);
+  }
+  &[data-mode='Halted'] {
+    background: rgba(255, 59, 48, 0.16);
+    color: var(--tone-red);
+  }
+}
+.mode-stale {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--tone-amber);
+}
+
+// Releasing is a recovery, not a destructive act — neutral secondary styling.
+.release-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  font-size: var(--text-xs);
+  font-weight: var(--font-semibold);
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+
+  &:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  &:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+}
+.release-note,
+.release-error {
+  margin: var(--space-3) 0 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.release-note {
+  background: rgba(52, 199, 89, 0.08);
+  border-left: 3px solid var(--profit);
+}
+.release-error {
+  background: rgba(255, 59, 48, 0.08);
+  border-left: 3px solid var(--loss);
+}
+
+// ── Tables ──
+.trans-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+.trans-table {
+  width: 100%;
+  border-collapse: collapse;
+
+  th,
+  td {
+    padding: 7px var(--space-3);
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-size: var(--text-xs);
+  }
+  th:first-child,
+  td:first-child {
+    padding-left: var(--space-4);
+  }
+  th:last-child,
+  td:last-child {
+    padding-right: var(--space-4);
+  }
+  thead th {
+    background: var(--bg-primary);
+    color: var(--text-tertiary);
+    font-size: 10.5px;
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .mono {
+    font-family: var(--font-mono);
+  }
+  .acct-cell {
+    max-width: 180px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .warn {
+    color: var(--tone-amber);
+    font-weight: var(--font-semibold);
+  }
+  .bad {
+    color: var(--loss);
+    font-weight: var(--font-semibold);
+  }
+}
+.empty {
+  display: block;
+  padding: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+
+  strong {
+    display: block;
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    margin-bottom: 2px;
+  }
+}
+.empty.good strong {
+  color: var(--tone-green);
+}
+
+// ── History-tab chart toolbar + dialogs ──
+.history-chart-wrap {
+  position: relative;
+}
+.add-note {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  z-index: 2;
+}
+.btn {
+  padding: 6px 14px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium);
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.btn-sm {
+  padding: 4px 12px;
+  font-size: var(--text-xs);
+}
+.btn-primary {
+  background: var(--accent);
+  color: white;
+
+  &:disabled {
+    opacity: 0.5;
+  }
+}
+.btn-secondary {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.btn-ghost {
+  background: transparent;
+  color: var(--text-secondary);
+  border-color: var(--border);
+}
+.annot-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.annot-dialog {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5) var(--space-6);
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+
+  h4 {
+    margin: 0;
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+  }
+  &.release-dialog {
+    max-width: 480px;
+  }
+}
+.release-copy {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+
+  input,
+  textarea {
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-family: inherit;
+    resize: vertical;
+  }
+}
+.lbl {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.annot-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

@@ -1,4 +1,11 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -81,26 +88,6 @@ const STATUS_RANK: Record<FleetStatus, number> = {
       <!-- Phase-3A: fleet bulk-ops bar above the per-instance grid -->
       <app-fleet-actions-bar (commandQueued)="onFleetCommandQueued($event)" />
 
-      <!-- Engine-wide fleet config row: trading window + pending-signal
-           re-validation + spread-pad master. Auto-fit grid (stacks on narrow). -->
-      <div class="fleet-config-row">
-        <!-- Fleet-wide trading window — auto-rejects signals + optionally
-             flattens positions at window exit. UTC-clock, fleet-scoped. -->
-        <app-ea-trading-window-panel />
-
-        <!-- Engine-wide pending-signal re-validation — park LLM recs whose
-             entry is far from market and re-validate when price returns. -->
-        <app-ea-pending-signal-reval-panel />
-
-        <!-- Engine-wide master for SpreadPadder — AND-ed with each account's
-             per-EA toggle on the EA detail page. -->
-        <app-ea-spread-pad-master-panel />
-
-        <!-- Single-source candle guard — designate which instance streams each
-             symbol's candles so cross-broker feeds can't collide into dup bars. -->
-        <app-ea-candle-source-panel />
-      </div>
-
       @if (loading()) {
         <app-card-skeleton [lines]="6" />
       } @else if (instances().length > 0) {
@@ -109,7 +96,6 @@ const STATUS_RANK: Record<FleetStatus, number> = {
              nothing), so the counts are the chart.  Dots only colour a
              non-zero count that means something; zero stays neutral. -->
         <div class="tiles tiles-6" aria-label="Fleet status">
-          <app-metric-card label="Registered" [value]="instances().length" format="number" />
           <app-metric-card
             label="Active"
             [value]="activeCount()"
@@ -122,11 +108,14 @@ const STATUS_RANK: Record<FleetStatus, number> = {
             format="number"
             [dotColor]="dotFor(idleCount(), '#FF9500')"
           />
+          <!-- Most Disconnected rows are old registrations an EA replaced long ago; only the
+               ones still in the current fleet colour the tile. -->
           <app-metric-card
             label="Disconnected"
             [value]="disconnectedCount()"
             format="number"
-            [dotColor]="dotFor(disconnectedCount(), '#FF3B30')"
+            [dotColor]="dotFor(currentDisconnectedCount(), '#FF3B30')"
+            [caption]="currentDisconnectedCount() + ' in the current fleet'"
           />
           <!-- Finished registrations, not a problem: grey whatever the count. -->
           <app-metric-card
@@ -136,6 +125,7 @@ const STATUS_RANK: Record<FleetStatus, number> = {
             [dotColor]="neutralDot"
           />
           <app-metric-card label="Live accounts" [value]="uniqueAccounts().size" format="number" />
+          <app-metric-card label="Registered" [value]="instances().length" format="number" />
         </div>
 
         <div class="tiles tiles-4" aria-label="Symbol coverage">
@@ -163,13 +153,10 @@ const STATUS_RANK: Record<FleetStatus, number> = {
           />
         </div>
 
-        <app-chart-card
-          title="Symbols owned per live EA"
-          subtitle="How the {{ uniqueOwnedSymbols().size }} unique symbols are distributed"
-          [options]="symbolsPerEAOptions()"
-          height="260px"
-        />
-
+        <h2 class="section-title">
+          Instances
+          <span class="section-hint">Open one for its health, commands, settings and logs</span>
+        </h2>
         <!-- Toolbar -->
         <div class="toolbar">
           <input
@@ -509,6 +496,13 @@ const STATUS_RANK: Record<FleetStatus, number> = {
           </section>
         }
 
+        <app-chart-card
+          title="Symbols owned per live EA"
+          subtitle="How the {{ uniqueOwnedSymbols().size }} unique symbols are distributed"
+          [options]="symbolsPerEAOptions()"
+          height="260px"
+        />
+
         <p class="note">
           Dead EAs mark their symbols <code>DATA_UNAVAILABLE</code> after ~60s without a heartbeat.
           Symbols are reassigned automatically when a new EA registers.
@@ -519,6 +513,30 @@ const STATUS_RANK: Record<FleetStatus, number> = {
           description="Register an Expert Advisor from MT5 to populate this view."
         />
       }
+
+      <h2 class="section-title">
+        Fleet-wide settings
+        <span class="section-hint">Engine-wide; each applies to every EA instance</span>
+      </h2>
+      <!-- Engine-wide fleet config row: trading window + pending-signal
+           re-validation + spread-pad master. Auto-fit grid (stacks on narrow). -->
+      <div class="fleet-config-row">
+        <!-- Fleet-wide trading window — auto-rejects signals + optionally
+             flattens positions at window exit. UTC-clock, fleet-scoped. -->
+        <app-ea-trading-window-panel />
+
+        <!-- Engine-wide pending-signal re-validation — park LLM recs whose
+             entry is far from market and re-validate when price returns. -->
+        <app-ea-pending-signal-reval-panel />
+
+        <!-- Engine-wide master for SpreadPadder — AND-ed with each account's
+             per-EA toggle on the EA detail page. -->
+        <app-ea-spread-pad-master-panel />
+
+        <!-- Single-source candle guard — designate which instance streams each
+             symbol's candles so cross-broker feeds can't collide into dup bars. -->
+        <app-ea-candle-source-panel />
+      </div>
     </div>
   `,
   styles: [
@@ -595,27 +613,54 @@ const STATUS_RANK: Record<FleetStatus, number> = {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
       }
-      .view-toggle {
+      /* Segmented toggles (view mode, coverage filter): house .seg look. */
+      .view-toggle,
+      .cov-filter {
         display: inline-flex;
+        gap: 2px;
+        padding: 3px;
         background: var(--bg-tertiary);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
       }
-      .view-toggle button {
-        height: 36px;
-        padding: 0 var(--space-3);
-        background: transparent;
+      .view-toggle button,
+      .cov-filter button {
         border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
         font-size: var(--text-xs);
         font-weight: var(--font-medium);
-        color: var(--text-secondary);
+        padding: 5px 12px;
+        border-radius: var(--radius-full);
         cursor: pointer;
+        white-space: nowrap;
       }
-      .view-toggle button.active {
+      .view-toggle button:hover,
+      .cov-filter button:hover {
+        color: var(--text-primary);
+      }
+      .view-toggle button.active,
+      .cov-filter button.active {
         background: var(--bg-primary);
         color: var(--text-primary);
         box-shadow: var(--shadow-sm);
+      }
+      .section-title {
+        margin: var(--space-2) 0 calc(-1 * var(--space-2));
+        padding-top: var(--space-3);
+        border-top: 1px solid var(--border);
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 4px var(--space-3);
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .section-hint {
+        font-size: var(--text-xs);
+        font-weight: 400;
+        color: var(--text-tertiary);
       }
 
       /* Cards grid */
@@ -924,25 +969,6 @@ const STATUS_RANK: Record<FleetStatus, number> = {
       }
       .cov-filter {
         margin-left: auto;
-        display: inline-flex;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        border: 1px solid var(--border);
-      }
-      .cov-filter button {
-        height: 30px;
-        padding: 0 var(--space-3);
-        background: transparent;
-        border: none;
-        font-size: 11px;
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .cov-filter button.active {
-        background: var(--bg-primary);
-        color: var(--text-primary);
       }
       /* Collapsed: the preview rows fit without scrolling, so nothing is
          clipped silently.  Expanded: cap the height and scroll — the footer
@@ -1214,6 +1240,12 @@ export class EAInstancesPageComponent {
   readonly disconnectedCount = computed(
     () => this.instances().filter((i) => i.status === 'Disconnected').length,
   );
+  /** Disconnected rows that are still part of the current fleet (see currentFleetIds). */
+  readonly currentDisconnectedCount = computed(() => {
+    const current = this.currentSet();
+    return this.instances().filter((i) => i.status === 'Disconnected' && current.has(i.instanceId))
+      .length;
+  });
   readonly deregisteredCount = computed(
     () => this.instances().filter((i) => this.statusOf(i) === 'Deregistered').length,
   );

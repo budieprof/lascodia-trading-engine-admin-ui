@@ -6,6 +6,9 @@
 export const SELFHEAL_PANEL_STYLES = `
   :host { display: block; }
   .panel {
+    /* Fill the grid cell so side-by-side panels end on the same line. */
+    height: 100%;
+    box-sizing: border-box;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -72,6 +75,19 @@ export const SELFHEAL_PANEL_STYLES = `
   }
   .kv dd { margin: 0; color: var(--text-primary); min-width: 0; overflow-wrap: anywhere; }
   .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+  /* Base button: these panels used .btn / .btn-secondary with no rule in reach, so every
+     terminal and fix action rendered as bare text. */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    padding: 6px 14px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary);
+    font: inherit; font-size: var(--text-sm); font-weight: var(--font-medium);
+    white-space: nowrap; cursor: pointer;
+  }
+  .btn:hover:not(:disabled) { background: var(--bg-tertiary); }
+  .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); border-color: transparent; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
   .btn-sm { padding: 4px 12px; font-size: var(--text-xs); }
   .btn-danger {
     background: var(--tone-red, #ff3b30);

@@ -188,8 +188,9 @@ interface ConfigForm {
             they will never run.
           </p>
         }
-        <section class="overview-grid">
-          <dl class="kv">
+        <!-- Registration facts on one strip: label over value, one row on a wide screen. -->
+        <dl class="facts-strip" aria-label="Instance facts">
+          <div class="fact">
             <dt>Status</dt>
             <dd>
               <span class="status-pill" [attr.data-status]="ea()!.status">{{
@@ -201,39 +202,68 @@ interface ConfigForm {
                 <span class="coord-pill">coordinator</span>
               }
             </dd>
-            <dt>Instance id</dt>
-            <dd class="mono">{{ ea()!.instanceId }}</dd>
-            <dt>Trading account</dt>
-            <dd class="mono">#{{ ea()!.tradingAccountId }}</dd>
-            <dt>EA version</dt>
-            <dd class="mono small">{{ ea()!.eaVersion }}</dd>
-            <dt>Chart</dt>
-            <dd class="mono">{{ ea()!.chartSymbol }} · {{ ea()!.chartTimeframe }}</dd>
-          </dl>
-          <dl class="kv">
+          </div>
+          <div class="fact">
             <dt>Last heartbeat</dt>
             <dd [title]="ea()!.lastHeartbeat | date: 'yyyy-MM-dd HH:mm:ss UTC'">
               <span [class.stale]="heartbeatStale()">
                 {{ ea()!.lastHeartbeat | relativeTime }}
               </span>
-              @if (freshness().stale) {
-                <span class="stale small"> · everything below is the last known state</span>
-              }
             </dd>
+          </div>
+          <div class="fact">
+            <dt>Trading account</dt>
+            <dd class="mono">#{{ ea()!.tradingAccountId }}</dd>
+          </div>
+          <div class="fact">
+            <dt>Chart</dt>
+            <dd class="mono">{{ ea()!.chartSymbol }} · {{ ea()!.chartTimeframe }}</dd>
+          </div>
+          <div class="fact">
+            <dt>EA version</dt>
+            <dd class="mono">{{ ea()!.eaVersion }}</dd>
+          </div>
+          <div class="fact">
             <dt>Registered</dt>
-            <dd>{{ ea()!.registeredAt | date: 'yyyy-MM-dd HH:mm UTC' }}</dd>
+            <dd class="num">{{ ea()!.registeredAt | date: 'yyyy-MM-dd HH:mm' }} UTC</dd>
+          </div>
+          <div class="fact">
             <dt>Deregistered</dt>
-            <dd>
+            <dd class="num">
               @if (ea()!.deregisteredAt) {
-                {{ ea()!.deregisteredAt | date: 'yyyy-MM-dd HH:mm UTC' }}
+                {{ ea()!.deregisteredAt | date: 'yyyy-MM-dd HH:mm' }} UTC
               } @else {
                 <span class="muted">—</span>
               }
             </dd>
-          </dl>
-        </section>
+          </div>
+          <div class="fact fact-wide">
+            <dt>Instance id</dt>
+            <dd class="mono">{{ ea()!.instanceId }}</dd>
+          </div>
+        </dl>
+        @if (freshness().stale) {
+          <p class="stale-note" role="status">
+            The EA has not reported since its last heartbeat — everything below is the last known
+            state.
+          </p>
+        }
+
+        <!-- Jump links: the page runs ~11,000px; each button scrolls to its section. -->
+        <nav class="jump" aria-label="Sections on this page">
+          <span class="jump-label">Jump to</span>
+          @for (s of sections; track s.id) {
+            <button type="button" (click)="jumpTo(s.id)">{{ s.label }}</button>
+          }
+        </nav>
 
         <!-- Self-heal: the terminal (host supervisor) and the EA's own diagnostics. -->
+        <h2 class="section-title" id="sec-terminal">
+          Terminal &amp; diagnostics
+          <span class="section-hint"
+            >The MT5 terminal on its host, and the EA's own self-checks</span
+          >
+        </h2>
         <div class="ea-selfheal-grid">
           <app-ea-terminal-card [instanceId]="ea()!.instanceId" [refreshTick]="refreshTick()" />
           <app-ea-diagnostics
@@ -244,85 +274,90 @@ interface ConfigForm {
           />
         </div>
 
+        <h2 class="section-title" id="sec-trading">
+          Trading &amp; execution settings
+          <span class="section-hint"
+            >Saved per account; the EA picks changes up on its next poll</span
+          >
+        </h2>
+        <!-- ── Trading enable / disable ─────────────────────────────────
+           Operator-facing wrapper over the COMPLIANCE safety stop:
+           "Disable trading" halts new order placement (open positions
+           keep their trailing stops); "Enable trading" clears it.  The
+           posture is read from the live-state envelope so the control
+           reflects the EA's *actual* state — including auto-recovering
+           stops and kill switches it can't itself clear — rather than
+           just the last command we queued.  The richer per-category /
+           kill-switch / flatten actions still live in Operator controls
+           below. -->
+        <section class="trading-control" [attr.data-state]="tradingPosture()">
+          <div class="tc-info">
+            <div class="tc-headline">
+              <span class="tc-label">Trading</span>
+              @switch (tradingPosture()) {
+                @case ('enabled') {
+                  <span class="tc-pill ok">Enabled</span>
+                }
+                @case ('disabled-compliance') {
+                  <span class="tc-pill bad">Disabled</span>
+                }
+                @case ('disabled-auto') {
+                  <span class="tc-pill warn">Paused · {{ safetyCategory() }}</span>
+                }
+                @case ('disabled-kill') {
+                  <span class="tc-pill bad">Disabled · kill switch</span>
+                }
+                @default {
+                  <span class="tc-pill muted">—</span>
+                }
+              }
+            </div>
+            <span class="tc-desc muted small">
+              @switch (tradingPosture()) {
+                @case ('disabled-compliance') {
+                  New orders halted by an operator safety stop. Open positions keep running.
+                }
+                @case ('disabled-auto') {
+                  Auto-recovering safety stop — clears itself once its condition resolves. Manage in
+                  Operator controls below.
+                }
+                @case ('disabled-kill') {
+                  Kill switch is active. Release it from Operator controls below to resume.
+                }
+                @default {
+                  Halt new order placement without touching open positions.
+                }
+              }
+            </span>
+          </div>
+          <div class="tc-actions">
+            @if (tradingPosture() === 'disabled-compliance') {
+              <button
+                type="button"
+                class="action-btn ok"
+                (click)="askEnableTrading()"
+                [disabled]="submitting()"
+              >
+                Enable trading
+              </button>
+            } @else if (tradingPosture() === 'enabled' || tradingPosture() === 'unknown') {
+              <button
+                type="button"
+                class="action-btn warn"
+                (click)="askDisableTrading()"
+                [disabled]="submitting()"
+              >
+                Disable trading
+              </button>
+            }
+          </div>
+        </section>
         <!-- ── Control-panel grid ───────────────────────────────────────
              The four operator panels below (Trading, Fill mode, Breakeven
              exit, Daily profit target) used to stack full-width.  Wrapped
              into a 2-up responsive grid so the page is denser on wide
              screens; collapses to 1-up below the min-cell width. -->
         <div class="ea-cards-grid">
-          <!-- ── Trading enable / disable ─────────────────────────────────
-             Operator-facing wrapper over the COMPLIANCE safety stop:
-             "Disable trading" halts new order placement (open positions
-             keep their trailing stops); "Enable trading" clears it.  The
-             posture is read from the live-state envelope so the control
-             reflects the EA's *actual* state — including auto-recovering
-             stops and kill switches it can't itself clear — rather than
-             just the last command we queued.  The richer per-category /
-             kill-switch / flatten actions still live in Operator controls
-             below. -->
-          <section class="trading-control" [attr.data-state]="tradingPosture()">
-            <div class="tc-info">
-              <div class="tc-headline">
-                <span class="tc-label">Trading</span>
-                @switch (tradingPosture()) {
-                  @case ('enabled') {
-                    <span class="tc-pill ok">Enabled</span>
-                  }
-                  @case ('disabled-compliance') {
-                    <span class="tc-pill bad">Disabled</span>
-                  }
-                  @case ('disabled-auto') {
-                    <span class="tc-pill warn">Paused · {{ safetyCategory() }}</span>
-                  }
-                  @case ('disabled-kill') {
-                    <span class="tc-pill bad">Disabled · kill switch</span>
-                  }
-                  @default {
-                    <span class="tc-pill muted">—</span>
-                  }
-                }
-              </div>
-              <span class="tc-desc muted small">
-                @switch (tradingPosture()) {
-                  @case ('disabled-compliance') {
-                    New orders halted by an operator safety stop. Open positions keep running.
-                  }
-                  @case ('disabled-auto') {
-                    Auto-recovering safety stop — clears itself once its condition resolves. Manage
-                    in Operator controls below.
-                  }
-                  @case ('disabled-kill') {
-                    Kill switch is active. Release it from Operator controls below to resume.
-                  }
-                  @default {
-                    Halt new order placement without touching open positions.
-                  }
-                }
-              </span>
-            </div>
-            <div class="tc-actions">
-              @if (tradingPosture() === 'disabled-compliance') {
-                <button
-                  type="button"
-                  class="action-btn ok"
-                  (click)="askEnableTrading()"
-                  [disabled]="submitting()"
-                >
-                  Enable trading
-                </button>
-              } @else if (tradingPosture() === 'enabled' || tradingPosture() === 'unknown') {
-                <button
-                  type="button"
-                  class="action-btn warn"
-                  (click)="askDisableTrading()"
-                  [disabled]="submitting()"
-                >
-                  Disable trading
-                </button>
-              }
-            </div>
-          </section>
-
           <!-- ── Fill mode toggle ─────────────────────────────────────────
              Per-EA execution-mode switch. Controls whether the engine emits
              the signal's structural entry price on the pending-execution
@@ -391,36 +426,38 @@ interface ConfigForm {
                   Limit
                 </button>
               </div>
-              <div class="fm-status small">
-                @if (savingFillMode()) {
-                  <span class="muted">Saving…</span>
-                } @else if (fillModeSaveError()) {
-                  <span class="bad">{{ fillModeSaveError() }}</span>
-                } @else if (fillModeSaved()) {
-                  <span class="ok">Saved · takes effect on next EA poll</span>
-                } @else if (fillModeDirty()) {
-                  <span class="muted">Unsaved change</span>
-                } @else {
-                  <span class="muted">Default · Market</span>
-                }
-              </div>
-              <div class="fm-buttons">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="resetFillMode()"
-                  [disabled]="!fillModeDirty() || savingFillMode()"
-                >
-                  Revert
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-primary"
-                  (click)="saveFillMode()"
-                  [disabled]="!fillModeDirty() || savingFillMode()"
-                >
-                  {{ savingFillMode() ? 'Saving…' : 'Save' }}
-                </button>
+              <div class="set-foot">
+                <div class="fm-status small">
+                  @if (savingFillMode()) {
+                    <span class="muted">Saving…</span>
+                  } @else if (fillModeSaveError()) {
+                    <span class="bad">{{ fillModeSaveError() }}</span>
+                  } @else if (fillModeSaved()) {
+                    <span class="ok">Saved · takes effect on next EA poll</span>
+                  } @else if (fillModeDirty()) {
+                    <span class="muted">Unsaved change</span>
+                  } @else {
+                    <span class="muted">Default · Market</span>
+                  }
+                </div>
+                <div class="fm-buttons">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="resetFillMode()"
+                    [disabled]="!fillModeDirty() || savingFillMode()"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    (click)="saveFillMode()"
+                    [disabled]="!fillModeDirty() || savingFillMode()"
+                  >
+                    {{ savingFillMode() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -532,36 +569,38 @@ interface ConfigForm {
                   </span>
                 </div>
               }
-              <div class="fm-status small">
-                @if (savingSpreadPad()) {
-                  <span class="muted">Saving…</span>
-                } @else if (spreadPadSaveError()) {
-                  <span class="bad">{{ spreadPadSaveError() }}</span>
-                } @else if (spreadPadSaved()) {
-                  <span class="ok">Saved · takes effect on next pad evaluation</span>
-                } @else if (spreadPadDirty()) {
-                  <span class="muted">Unsaved change</span>
-                } @else {
-                  <span class="muted">Default · Off</span>
-                }
-              </div>
-              <div class="fm-buttons">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="resetSpreadPad()"
-                  [disabled]="!spreadPadDirty() || savingSpreadPad()"
-                >
-                  Revert
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-primary"
-                  (click)="saveSpreadPad()"
-                  [disabled]="!spreadPadDirty() || savingSpreadPad()"
-                >
-                  {{ savingSpreadPad() ? 'Saving…' : 'Save' }}
-                </button>
+              <div class="set-foot">
+                <div class="fm-status small">
+                  @if (savingSpreadPad()) {
+                    <span class="muted">Saving…</span>
+                  } @else if (spreadPadSaveError()) {
+                    <span class="bad">{{ spreadPadSaveError() }}</span>
+                  } @else if (spreadPadSaved()) {
+                    <span class="ok">Saved · takes effect on next pad evaluation</span>
+                  } @else if (spreadPadDirty()) {
+                    <span class="muted">Unsaved change</span>
+                  } @else {
+                    <span class="muted">Default · Off</span>
+                  }
+                </div>
+                <div class="fm-buttons">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="resetSpreadPad()"
+                    [disabled]="!spreadPadDirty() || savingSpreadPad()"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    (click)="saveSpreadPad()"
+                    [disabled]="!spreadPadDirty() || savingSpreadPad()"
+                  >
+                    {{ savingSpreadPad() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
               </div>
             </div>
           </section>
@@ -698,36 +737,38 @@ interface ConfigForm {
                   </p>
                 </div>
 
-                <div class="be-status small">
-                  @if (savingBe()) {
-                    <span class="muted">Saving…</span>
-                  } @else if (beSaveError()) {
-                    <span class="bad">{{ beSaveError() }}</span>
-                  } @else if (beSaved()) {
-                    <span class="ok">Saved · takes effect on next PositionWorker cycle</span>
-                  } @else if (beDirty()) {
-                    <span class="muted">Unsaved change</span>
-                  } @else {
-                    <span class="muted">Default · both off</span>
-                  }
-                </div>
-                <div class="be-buttons">
-                  <button
-                    type="button"
-                    class="btn btn-secondary"
-                    (click)="resetBe()"
-                    [disabled]="!beDirty() || savingBe()"
-                  >
-                    Revert
-                  </button>
-                  <button
-                    type="button"
-                    class="btn btn-primary"
-                    (click)="saveBe()"
-                    [disabled]="!beDirty() || savingBe()"
-                  >
-                    {{ savingBe() ? 'Saving…' : 'Save' }}
-                  </button>
+                <div class="set-foot">
+                  <div class="be-status small">
+                    @if (savingBe()) {
+                      <span class="muted">Saving…</span>
+                    } @else if (beSaveError()) {
+                      <span class="bad">{{ beSaveError() }}</span>
+                    } @else if (beSaved()) {
+                      <span class="ok">Saved · takes effect on next PositionWorker cycle</span>
+                    } @else if (beDirty()) {
+                      <span class="muted">Unsaved change</span>
+                    } @else {
+                      <span class="muted">Default · both off</span>
+                    }
+                  </div>
+                  <div class="be-buttons">
+                    <button
+                      type="button"
+                      class="btn btn-secondary"
+                      (click)="resetBe()"
+                      [disabled]="!beDirty() || savingBe()"
+                    >
+                      Revert
+                    </button>
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      (click)="saveBe()"
+                      [disabled]="!beDirty() || savingBe()"
+                    >
+                      {{ savingBe() ? 'Saving…' : 'Save' }}
+                    </button>
+                  </div>
                 </div>
               } @else {
                 <span class="muted small">Loading…</span>
@@ -785,54 +826,62 @@ interface ConfigForm {
                   />
                 </label>
               </div>
-              <div class="dpt-status small">
-                @if (savingDpt()) {
-                  <span class="muted">Saving…</span>
-                } @else if (dptSaveError()) {
-                  <span class="bad">{{ dptSaveError() }}</span>
-                } @else if (dptSaved()) {
-                  <span class="ok">Saved · takes effect on next EA poll</span>
-                } @else if (dptDirty()) {
-                  <span class="muted">Unsaved change</span>
-                } @else if (!dptLoaded()) {
-                  <span class="muted">Loading current target…</span>
-                } @else if (dptEnabled()) {
-                  <span class="muted">Armed</span>
-                } @else {
-                  <span class="muted">Disabled</span>
-                }
-              </div>
-              <div class="dpt-buttons">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="disableDpt()"
-                  [disabled]="savingDpt() || !dptEnabled()"
-                >
-                  Disable
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="resetDpt()"
-                  [disabled]="savingDpt() || !dptDirty()"
-                >
-                  Revert
-                </button>
-                <button
-                  type="button"
-                  class="btn btn-primary"
-                  (click)="saveDpt()"
-                  [disabled]="savingDpt() || !dptDirty()"
-                >
-                  {{ savingDpt() ? 'Saving…' : 'Save' }}
-                </button>
+              <div class="set-foot">
+                <div class="dpt-status small">
+                  @if (savingDpt()) {
+                    <span class="muted">Saving…</span>
+                  } @else if (dptSaveError()) {
+                    <span class="bad">{{ dptSaveError() }}</span>
+                  } @else if (dptSaved()) {
+                    <span class="ok">Saved · takes effect on next EA poll</span>
+                  } @else if (dptDirty()) {
+                    <span class="muted">Unsaved change</span>
+                  } @else if (!dptLoaded()) {
+                    <span class="muted">Loading current target…</span>
+                  } @else if (dptEnabled()) {
+                    <span class="muted">Armed</span>
+                  } @else {
+                    <span class="muted">Disabled</span>
+                  }
+                </div>
+                <div class="dpt-buttons">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="disableDpt()"
+                    [disabled]="savingDpt() || !dptEnabled()"
+                  >
+                    Disable
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    (click)="resetDpt()"
+                    [disabled]="savingDpt() || !dptDirty()"
+                  >
+                    Revert
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-primary"
+                    (click)="saveDpt()"
+                    [disabled]="savingDpt() || !dptDirty()"
+                  >
+                    {{ savingDpt() ? 'Saving…' : 'Save' }}
+                  </button>
+                </div>
               </div>
             </div>
           </section>
         </div>
         <!-- /.ea-cards-grid -->
 
+        <h2 class="section-title" id="sec-account">
+          Account
+          <span class="section-hint"
+            >Broker-synced balance, margin and the symbols this instance owns</span
+          >
+        </h2>
         <!-- ── Account snapshot ─────────────────────────────────────────
              Broker-synced balance/equity/margin envelope for the EA's
              trading account.  Polled on the same cadence as the rest of
@@ -868,7 +917,7 @@ interface ConfigForm {
                   <span class="tile-ccy">{{ acct.currency }}</span>
                 </div>
               </div>
-              <div class="acct-tile">
+              <div class="acct-tile" [class.pos]="acct.profit > 0" [class.neg]="acct.profit < 0">
                 <div class="tile-label">Equity</div>
                 <div
                   class="tile-value mono"
@@ -900,7 +949,11 @@ interface ConfigForm {
                   </div>
                 }
               </div>
-              <div class="acct-tile">
+              <div
+                class="acct-tile"
+                [class.warn]="marginLevelWarn(acct)"
+                [class.neg]="marginLevelDanger(acct)"
+              >
                 <div class="tile-label">Margin level</div>
                 <div
                   class="tile-value mono"
@@ -982,6 +1035,12 @@ interface ConfigForm {
           }
         </section>
 
+        <h2 class="section-title" id="sec-state">
+          Live state &amp; positions
+          <span class="section-hint"
+            >What the EA reported in its latest heartbeat, and what it holds</span
+          >
+        </h2>
         <!-- Phase-1 admin: rich-state envelope visualization -->
         <app-ea-state-panel
           [state]="adminState()"
@@ -1012,6 +1071,12 @@ interface ConfigForm {
           />
         </div>
 
+        <h2 class="section-title" id="sec-commands">
+          Commands
+          <span class="section-hint"
+            >Safety and maintenance commands, and what the EA answered</span
+          >
+        </h2>
         <!-- Phase-1/2/3 admin: operator control surface (9 actions, inline confirm dialogs) -->
         <app-ea-control-panel
           [instanceId]="ea()!.instanceId"
@@ -1020,6 +1085,12 @@ interface ConfigForm {
 
         <app-ea-command-history [instanceId]="ea()!.instanceId" [refreshTick]="refreshTick()" />
 
+        <h2 class="section-title" id="sec-config">
+          EA inputs &amp; profiles
+          <span class="section-hint"
+            >Change this EA's inputs, or capture and apply saved profiles</span
+          >
+        </h2>
         <!-- Phase-4 admin: hot-reload input editor + read-only inspection -->
         <app-ea-config-panel
           [instanceId]="ea()!.instanceId"
@@ -1037,6 +1108,12 @@ interface ConfigForm {
           (profileApplied)="onCommandQueued('configPush')"
         />
 
+        <h2 class="section-title" id="sec-logs">
+          Logs &amp; history
+          <span class="section-hint"
+            >EA log tail, safety audit, host logs, auto-heal and rejected signals</span
+          >
+        </h2>
         <!-- Logs (Phase-9) + Audit timeline (Phase-2A) side-by-side on
              wide screens; collapse to stacked below the min-cell width. -->
         <div class="ea-logs-audit-grid" id="ea-logs">
@@ -1285,895 +1362,7 @@ interface ConfigForm {
       }
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .inactive-banner {
-        margin: 0;
-        padding: var(--space-3) var(--space-4);
-        border: 1px solid rgba(255, 149, 0, 0.35);
-        border-left: 3px solid var(--warning, #ff9500);
-        border-radius: var(--radius-md);
-        background: rgba(255, 149, 0, 0.08);
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .inactive-banner strong {
-        color: var(--text-primary);
-      }
-      .overview-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .kv {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 8px var(--space-3);
-        margin: 0;
-        font-size: var(--text-sm);
-      }
-      .kv dt {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .kv dd {
-        margin: 0;
-        color: var(--text-primary);
-      }
-      .mono {
-        font-family: var(--font-mono);
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-      .small {
-        font-size: var(--text-xs);
-      }
-      .stale {
-        color: var(--tone-red);
-      }
-      .status-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--tone-blue);
-      }
-      .status-pill[data-status='Active'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .status-pill[data-status='Inactive'],
-      .status-pill[data-status='Stale'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .status-pill[data-status='Disconnected'],
-      .status-pill[data-status='Failed'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .coord-pill {
-        font-size: var(--text-xs);
-        padding: 2px 6px;
-        border-radius: var(--radius-sm);
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--tone-blue);
-        margin-left: 6px;
-      }
-      /* ── Page-header version pill ────────────────────────────────────
-         Sits next to the InstanceId in the page title so operators can
-         spot which EA build is reporting without scanning the metadata
-         strip. Quiet styling — slate background, monospace — so a stale
-         vs. current version reads at a glance but doesn't compete with
-         the status pill below. */
-      .version-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary, rgba(120, 120, 128, 0.16));
-        color: var(--text-secondary);
-        border: 1px solid var(--border);
-        font-weight: var(--font-medium);
-        letter-spacing: var(--tracking-tight);
-        line-height: 1.4;
-      }
-      /* ── Account snapshot card ───────────────────────────────────── */
-      .account-block {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .account-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-      }
-      .account-title {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .account-title h3 {
-        margin: 0;
-        font-size: var(--text-md);
-      }
-      .account-meta {
-        color: var(--text-tertiary);
-      }
-      .account-sync {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .sync-ts {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      .tag {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        padding: 2px 8px;
-        border-radius: 8px;
-        font-weight: 600;
-      }
-      .tag--paper {
-        background: rgba(175, 82, 222, 0.15);
-        color: #af52de;
-      }
-      .account-tiles {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-2);
-      }
-      .acct-tile {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .tile-label {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .tile-value {
-        font-size: var(--text-lg);
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-      }
-      .tile-ccy {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        font-weight: 400;
-        margin-left: 4px;
-      }
-      .tile-delta {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .tile-up {
-        color: var(--positive, #34c759);
-      }
-      .tile-down {
-        color: var(--loss, #ff3b30);
-      }
-      .tile-warn {
-        color: #ff9500;
-      }
-      .account-kv {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-2) var(--space-4);
-        margin: 0;
-        padding-top: var(--space-2);
-        border-top: 1px dashed var(--border);
-      }
-      .kv-pair {
-        min-width: 0;
-      }
-      .account-kv dt {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        margin-bottom: 2px;
-      }
-      .account-kv dd {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-
-      .symbols-block {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .symbols-block h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .symbol-chips {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px;
-      }
-      .symbol-chip {
-        display: inline-block;
-        padding: 4px 10px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-      }
-      /* ── Control-panel grid ────────────────────────────────────────
-         Wraps the four operator panels (Trading, Fill mode, Breakeven
-         exit, DPT) into a responsive multi-column grid so they don't
-         each take a full row.  Cells stretch to match the tallest
-         sibling in the row (CSS Grid default) — sacrifices some
-         whitespace inside short panels for visual uniformity across
-         each row. */
-      .ea-cards-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
-        gap: var(--space-3);
-      }
-      /* Ensure each child panel fills its grid cell vertically AND
-         pins its content to the top — otherwise the row-flex panels'
-         default align-items: center vertically centres their content
-         inside the stretched card, leaving even whitespace top and
-         bottom.  We want the whitespace at the bottom so the row
-         reads as a clean top-aligned card grid. */
-      .ea-cards-grid > section {
-        height: 100%;
-        align-items: flex-start;
-        align-content: flex-start;
-      }
-      /* Five cards in a two-column grid left the last one alone at half
-         width; the profit-target card takes the full row instead. */
-      .ea-cards-grid > .dpt-panel {
-        grid-column: 1 / -1;
-      }
-      /* ── Logs + Audit timeline side-by-side ────────────────────────
-         2-up grid wrapping the Phase-9 live log tail and the Phase-2A
-         safety-audit timeline so they share one row instead of each
-         taking full width.  Stretch heights so the two tables align;
-         collapse to 1-up below 720px combined min-cell width. */
-      .ea-selfheal-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
-        gap: var(--space-3);
-      }
-      .ea-selfheal-grid > * {
-        min-width: 0;
-      }
-      .ea-logs-audit-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-        gap: var(--space-3);
-      }
-      .ea-logs-audit-grid > * {
-        min-width: 0;
-      }
-      /* ── Open positions + Pending orders side-by-side ──────────────
-         Same shape as the logs/audit grid above — 2-up on wide,
-         collapse on narrow.  min-width: 0 on children keeps a wide
-         table column from busting the cell. */
-      .ea-positions-orders-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-        gap: var(--space-3);
-      }
-      .ea-positions-orders-grid > * {
-        min-width: 0;
-      }
-      /* ── Trading enable/disable control ──────────────────────────── */
-      /* One neutral card style for every operator panel: the state pill in
-         each headline carries the colour, so a second accent stripe on the
-         card edge only competed with it (four cards, four colours, no key). */
-      .trading-control {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-4);
-        flex-wrap: wrap;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .tc-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 240px;
-      }
-      .tc-headline {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .tc-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .tc-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .tc-pill.ok {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .tc-pill.warn {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .tc-pill.bad {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .tc-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
-        color: var(--text-tertiary);
-      }
-      .tc-desc {
-        max-width: 60ch;
-      }
-      .tc-actions {
-        display: flex;
-        gap: var(--space-2);
-        flex-shrink: 0;
-      }
-      /* ── Fill mode toggle ───────────────────────────────────────── */
-      .fill-mode-panel {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-4);
-        flex-wrap: wrap;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .fm-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 240px;
-      }
-      .fm-headline {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .fm-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .fm-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .fm-pill.ok {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .fm-pill.warn {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .fm-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
-        color: var(--text-tertiary);
-      }
-      .fm-desc {
-        max-width: 60ch;
-      }
-      .fm-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        align-items: flex-end;
-        flex-shrink: 0;
-      }
-      .fm-toggle {
-        display: inline-flex;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        background: var(--bg-primary);
-      }
-      .fm-toggle.is-loading {
-        opacity: 0.5;
-      }
-      .fm-opt {
-        appearance: none;
-        background: transparent;
-        border: none;
-        padding: 8px 18px;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-        min-width: 80px;
-      }
-      .fm-opt + .fm-opt {
-        border-left: 1px solid var(--border);
-      }
-      .fm-opt.active {
-        background: var(--bg-elevated, rgba(0, 113, 227, 0.12));
-        color: var(--accent-fg, #0040dd);
-        font-weight: var(--font-semibold);
-      }
-      .fm-opt:disabled {
-        cursor: not-allowed;
-        opacity: 0.55;
-      }
-      .fm-multiplier {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        align-items: flex-end;
-        max-width: 360px;
-      }
-      .fm-mult-label {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .fm-mult-name {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-      }
-      .fm-mult-input {
-        width: 80px;
-        padding: 6px 8px;
-        font-size: var(--text-sm);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .fm-mult-hint {
-        text-align: right;
-        line-height: 1.4;
-      }
-      .fm-status {
-        min-height: 1.2em;
-      }
-      .fm-status .ok {
-        color: var(--tone-green);
-      }
-      .fm-status .bad {
-        color: var(--tone-red);
-      }
-      .fm-buttons {
-        display: flex;
-        gap: var(--space-2);
-      }
-      /* ── Breakeven exit panel ─────────────────────────────────────── */
-      .be-panel {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--space-4);
-        flex-wrap: wrap;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .be-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 240px;
-        max-width: 32ch;
-      }
-      .be-headline {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .be-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .be-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .be-pill.warn {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .be-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
-        color: var(--text-tertiary);
-      }
-      .be-desc {
-        max-width: 60ch;
-      }
-      .be-actions {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        flex-grow: 1;
-        min-width: 280px;
-        max-width: 520px;
-      }
-      .be-section {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 8px 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-      }
-      .be-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        cursor: pointer;
-        user-select: none;
-      }
-      .be-section-name {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .be-fields {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-3);
-        padding-left: 24px;
-      }
-      .be-fields.disabled {
-        opacity: 0.5;
-      }
-      .be-field {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .be-field input {
-        width: 70px;
-        padding: 4px 6px;
-        font-size: var(--text-sm);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-      }
-      .be-field input:disabled {
-        background: var(--bg-secondary);
-        cursor: not-allowed;
-      }
-      .be-unit {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        font-weight: var(--font-medium);
-      }
-      .be-status {
-        min-height: 1.2em;
-      }
-      .be-status .ok {
-        color: var(--tone-green);
-      }
-      .be-status .bad {
-        color: var(--tone-red);
-      }
-      .be-buttons {
-        display: flex;
-        gap: var(--space-2);
-        align-self: flex-end;
-      }
-      /* ── Daily profit target card ── mirrors the fill-mode panel ── */
-      .dpt-panel {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-4);
-        flex-wrap: wrap;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .dpt-panel.is-hit {
-        background: rgba(48, 176, 199, 0.06);
-      }
-      .dpt-info {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 240px;
-      }
-      .dpt-headline {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-      }
-      .dpt-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .dpt-pill {
-        font-size: var(--text-xs);
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .dpt-pill.on {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-        text-transform: none;
-        letter-spacing: 0;
-      }
-      .dpt-pill.hit {
-        background: rgba(48, 176, 199, 0.16);
-        color: #0a7a8c;
-      }
-      .dpt-pill.muted {
-        background: rgba(0, 0, 0, 0.06);
-        color: var(--text-tertiary);
-      }
-      .dpt-desc {
-        max-width: 62ch;
-      }
-      .dpt-actions {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        align-items: flex-end;
-        flex-shrink: 0;
-      }
-      .dpt-inputs {
-        display: flex;
-        gap: var(--space-2);
-        align-items: flex-end;
-      }
-      .dpt-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .dpt-field span {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .dpt-field input {
-        width: 130px;
-        padding: 6px 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-variant-numeric: tabular-nums;
-      }
-      .dpt-field input:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .dpt-status {
-        min-height: 1.2em;
-      }
-      .dpt-status .ok {
-        color: var(--tone-green);
-      }
-      .dpt-status .bad {
-        color: var(--tone-red);
-      }
-      .dpt-buttons {
-        display: flex;
-        gap: var(--space-2);
-      }
-      .action-btn {
-        padding: 10px 20px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-      }
-      .action-btn.ok {
-        color: var(--tone-green);
-      }
-      .action-btn.ok:hover:not(:disabled) {
-        background: #34c759;
-        color: #fff;
-      }
-      .action-btn.warn {
-        color: var(--tone-amber);
-      }
-      .action-btn.warn:hover:not(:disabled) {
-        background: #c93400;
-        color: #fff;
-      }
-      .action-btn:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .modal-overlay {
-        position: fixed;
-        inset: 0;
-        background: var(--backdrop-scrim, rgba(0, 0, 0, 0.45));
-        display: grid;
-        place-items: center;
-        z-index: 1000;
-      }
-      .modal {
-        background: var(--bg-primary);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        max-width: 480px;
-        width: 90%;
-        padding: var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .modal.wide {
-        max-width: 720px;
-      }
-      .modal-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .modal-head h2 {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      .close-btn {
-        background: none;
-        border: none;
-        font-size: 24px;
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .modal-target {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .modal-desc {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .config-fieldset {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
-        margin: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .config-fieldset legend {
-        padding: 0 6px;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .form-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-3);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .field span {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .field input,
-      .field textarea {
-        padding: 6px 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-variant-numeric: tabular-nums;
-      }
-      .field textarea {
-        resize: vertical;
-        min-height: 48px;
-        font-family: inherit;
-      }
-      .modal-foot {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
-      }
-      .btn-primary {
-        padding: 8px 18px;
-        border-radius: var(--radius-sm);
-        background: var(--accent);
-        color: #fff;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        border: none;
-        cursor: pointer;
-      }
-      .btn-primary:disabled {
-        background: var(--bg-tertiary, #d1d1d6);
-        cursor: not-allowed;
-      }
-    `,
-  ],
+  styleUrl: './ea-detail-page.component.scss',
 })
 export class EaDetailPageComponent {
   private readonly service = inject(EAInstancesService);
@@ -2207,6 +1396,21 @@ export class EaDetailPageComponent {
 
   private readonly pageContext = inject(PageContextService);
   private readonly ops = inject(EaOpsService);
+
+  /** In-page jump links, in page order (ids are the section headings in the template). */
+  protected readonly sections = [
+    { id: 'sec-terminal', label: 'Terminal' },
+    { id: 'sec-trading', label: 'Trading settings' },
+    { id: 'sec-account', label: 'Account' },
+    { id: 'sec-state', label: 'Live state & positions' },
+    { id: 'sec-commands', label: 'Commands' },
+    { id: 'sec-config', label: 'Inputs & profiles' },
+    { id: 'sec-logs', label: 'Logs & history' },
+  ] as const;
+
+  protected jumpTo(id: string): void {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
 
   /** Bumped by Refresh so the self-heal panels refetch with the rest of the page. */
   protected readonly refreshTick = signal(0);

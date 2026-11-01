@@ -1,0 +1,760 @@
+.page {
+  padding: var(--space-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-height: 0;
+}
+
+/* ── Loading / empty states ──────────────────────────────── */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.skeleton-block {
+  height: 60px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  animation: pulse 1.5s ease infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.empty-row {
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+/* ── Stats strip (replaces 8-card KPI grid) ──────────────── */
+.stats-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.stat {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+}
+.stat strong {
+  color: var(--text-primary);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+/* "restart-required" is a property of a key, not a problem — it stays neutral. Only unsaved
+   edits (work that will be lost) are toned. */
+.stat.ok strong {
+  color: var(--tone-green);
+}
+.stat.bad {
+  color: var(--tone-red);
+}
+.stat.bad strong {
+  color: var(--tone-red);
+}
+.stat + .stat::before {
+  content: '·';
+  margin-right: var(--space-3);
+  color: var(--text-tertiary);
+}
+.overview-toggle {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 3px 10px;
+  font-size: 11px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.overview-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+.chevron {
+  font-size: 9px;
+  transition: transform 0.15s ease;
+}
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+/* ── Optional overview row (hidden by default) ───────────── */
+.chart-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+}
+@media (max-width: 1100px) {
+  .chart-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Toolbar ────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.search-wrap {
+  position: relative;
+  flex: 1 1 320px;
+  min-width: 260px;
+  display: inline-flex;
+  align-items: center;
+}
+.search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-tertiary);
+  font-size: 14px;
+  pointer-events: none;
+}
+.search {
+  width: 100%;
+  height: 32px;
+  padding: 0 56px 0 30px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.search:focus {
+  border-color: var(--accent);
+}
+.search-clear {
+  position: absolute;
+  right: 36px;
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 5px;
+}
+.search-clear:hover {
+  color: var(--text-primary);
+}
+.search-shortcut {
+  position: absolute;
+  right: 8px;
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: var(--radius-sm);
+}
+.input {
+  height: 32px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: var(--text-xs);
+  outline: none;
+}
+.input:focus {
+  border-color: var(--accent);
+}
+.toolbar-spacer {
+  flex: 1;
+}
+.save-btn.primary {
+  height: 32px;
+  padding: 0 var(--space-3);
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: var(--font-semibold);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.save-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.save-btn.primary:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+
+/* ── Master-detail body ─────────────────────────────────── */
+.body {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: var(--space-3);
+  height: min(74vh, 760px);
+  min-height: 480px;
+}
+@media (max-width: 900px) {
+  .body {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  /* Stacked, the 164-row category list pushed the keys ~5,000px down a 24,782px page. */
+  .sidebar {
+    max-height: 300px;
+  }
+}
+
+/* ── Sidebar ─────────────────────────────────────────────── */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.sb-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 8px var(--space-3);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  border-bottom: 1px solid var(--border);
+}
+.sb-head .muted {
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+.sb-filter {
+  appearance: none;
+  margin: 8px var(--space-2);
+  height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  outline: none;
+}
+.sb-filter:focus {
+  border-color: var(--accent);
+}
+.sb-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px var(--space-3);
+  padding: 0 var(--space-3) 6px;
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.sb-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.sb-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cat {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition:
+    background 0.1s ease,
+    color 0.1s ease;
+}
+.cat:hover {
+  background: var(--bg-tertiary);
+}
+.cat.active {
+  background: color-mix(in srgb, var(--accent, #0071e3) 14%, transparent);
+  color: var(--accent, #0071e3);
+  font-weight: var(--font-semibold);
+}
+.cat-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-badges {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.cat-count {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+.cat.active .cat-count {
+  color: var(--accent, #0071e3);
+}
+.dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+.dot.bad {
+  background: var(--loss);
+}
+.dot.warn {
+  background: var(--warning);
+}
+.empty-cat {
+  padding: 12px;
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+/* ── Editor (right pane) ─────────────────────────────────── */
+.editor {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.editor-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.editor-title h3 {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+}
+.editor-title .muted {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  margin-left: 8px;
+}
+.small {
+  font-size: var(--text-xs);
+}
+.muted {
+  color: var(--text-tertiary);
+}
+
+/* ── Config table ────────────────────────────────────────── */
+.table-scroll {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+.config-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.config-table th {
+  text-align: left;
+  padding: 6px var(--space-3);
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.config-table td {
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.config-table tbody tr:hover {
+  background: var(--bg-primary);
+}
+.config-table tbody tr:last-child td {
+  border-bottom: none;
+}
+.row-dirty {
+  background: rgba(0, 113, 227, 0.07) !important;
+  box-shadow: inset 3px 0 0 0 var(--accent, #0071e3);
+}
+
+/* Fixed layout with declared widths. The auto layout let the key + value minimums outgrow the
+   ~840px keys panel at 1440px, so the Save column sat past the panel edge and was clipped. Type
+   and reload behaviour now live under the value (they describe it), which frees the room the two
+   pill columns took for the value itself — a full ISO timestamp fits without truncation. */
+.config-table {
+  table-layout: fixed;
+}
+.col-key {
+  width: 42%;
+}
+.col-value {
+  width: auto;
+}
+.col-updated {
+  width: 108px;
+}
+.col-actions {
+  width: 92px;
+  text-align: right;
+  white-space: nowrap;
+}
+.config-table td.col-key,
+.config-table td.col-value {
+  vertical-align: top;
+}
+.config-table td.col-updated,
+.config-table td.col-actions {
+  vertical-align: top;
+  padding-top: 10px;
+}
+
+.config-key {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 12px;
+  color: var(--text-primary);
+  display: block;
+  /* break-all split tokens anywhere; anywhere + the <wbr> after each
+     ":" means the browser prefers the section boundary and only
+     splits inside a segment when a single segment is wider than the
+     column. */
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+.key-sep {
+  color: var(--text-tertiary);
+}
+.config-desc {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  display: block;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+/* Two lines by default. Seven-line descriptions repeated on every
+   row of a category pushed the value column off the fold. */
+.config-desc.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.desc-toggle {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 1px;
+  font-family: inherit;
+  font-size: 10.5px;
+  color: var(--accent, #0071e3);
+  cursor: pointer;
+}
+.desc-toggle:hover {
+  text-decoration: underline;
+}
+.config-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.config-input:focus {
+  border-color: var(--accent);
+}
+.config-textarea {
+  height: 28px;
+  resize: vertical;
+  padding: 5px 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 11px;
+}
+.config-textarea:focus {
+  height: 120px;
+  white-space: pre;
+  overflow: auto;
+}
+/* Type + reload behaviour, quiet text under the value (they were two coloured pill columns). */
+.value-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+.value-meta .sep {
+  opacity: 0.6;
+}
+.value-meta .reload-cold {
+  color: var(--tone-amber);
+}
+.badge {
+  display: inline-flex;
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+}
+.badge--neutral {
+  background: rgba(255, 149, 0, 0.14);
+  color: var(--tone-amber);
+}
+.updated-text {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.link-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.review-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(2px);
+}
+.review {
+  width: min(640px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+.review h3 {
+  margin: 0;
+  font-size: var(--text-base);
+}
+.review-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 240px;
+  overflow: auto;
+  font-size: var(--text-xs);
+}
+.review-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.review-key {
+  word-break: break-all;
+}
+.review-vals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.review-old,
+.review-new {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-old {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+}
+.review-new {
+  color: var(--text-primary);
+  font-weight: var(--font-semibold);
+}
+.review-note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.review-field textarea {
+  resize: vertical;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font: inherit;
+}
+.review-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+.review-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+.reset-btn.wide {
+  width: auto;
+  padding: 0 12px;
+}
+.save-btn.small {
+  height: 24px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 52px;
+}
+.save-btn.small:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+/* Idle rows: a quiet outline, so 250 grey "Save" blocks no longer compete with the one row
+   that actually has an edit. */
+.save-btn.small:disabled {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--text-tertiary);
+  cursor: not-allowed;
+}
+.reset-btn {
+  height: 24px;
+  width: 24px;
+  margin-right: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+}
+.reset-btn:hover {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+.spinner {
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.capped-footer {
+  position: sticky;
+  bottom: 0;
+  padding: 8px var(--space-4);
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  text-align: center;
+}

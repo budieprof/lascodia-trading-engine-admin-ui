@@ -37,6 +37,7 @@ import { SecurityApiService } from '@features/security/security-api.service';
 import type { RoleBuildSkew } from '@features/security/security.types';
 import { ago } from '@features/iam/shared/admin-context.logic';
 import type { EAInstanceDto } from '@core/api/api.types';
+import { attentionItems, eventTypeLabel } from './engine-overview.logic';
 
 /**
  * One-screen engine health summary. Two presentation modes:
@@ -91,9 +92,13 @@ import type { EAInstanceDto } from '@core/api/api.types';
       @if (loading() && !status()) {
         <app-card-skeleton [lines]="6" />
       } @else {
-        <!-- Engine status row — engine card stays prominent, KPIs flow to its right -->
-        <section class="row status-row">
-          <div class="status-card" [attr.data-running]="status()?.isRunning ? '1' : '0'">
+        <!-- Headline: is the engine up, and does anything need a look? Worst first. -->
+        <section
+          class="status-card"
+          [attr.data-running]="status()?.isRunning ? '1' : '0'"
+          aria-label="Engine status"
+        >
+          <div class="status-id">
             <div class="status-dot"></div>
             <div class="status-text">
               <span class="status-label">Engine</span>
@@ -105,6 +110,33 @@ import type { EAInstanceDto } from '@core/api/api.types';
               }
             </div>
           </div>
+          <div class="attention">
+            @if (attention().length === 0) {
+              <span class="all-clear">Nothing needs attention.</span>
+            } @else {
+              <span class="att-label">Needs a look</span>
+              @for (a of attention(); track a.text) {
+                @if (a.target === null) {
+                  <span class="att" [attr.data-tone]="a.tone">{{ a.text }}</span>
+                } @else {
+                  <button
+                    type="button"
+                    class="att"
+                    [attr.data-tone]="a.tone"
+                    [title]="
+                      a.target === 'dlq' ? 'Open the dead-letter queue' : 'Open worker health'
+                    "
+                    (click)="a.target === 'dlq' ? goDeadLetters() : goWorkers()"
+                  >
+                    {{ a.text }}
+                  </button>
+                }
+              }
+            }
+          </div>
+        </section>
+
+        <section class="kpi-row">
           <div class="kpi">
             <span class="label">Active strategies</span>
             <span class="value">{{ status()?.activeStrategies ?? '—' }}</span>
@@ -117,19 +149,32 @@ import type { EAInstanceDto } from '@core/api/api.types';
             <span class="label">Pending orders</span>
             <span class="value">{{ status()?.pendingOrders ?? '—' }}</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" [class.warn]="paperMode() === true">
             <span class="label">Paper mode</span>
             <span class="value" [title]="paperMode() === null ? '' : paperModeHint()">
               {{ paperModeLabel() }}
             </span>
+            @if (paperMode() !== null) {
+              <span class="hint">{{
+                paperMode() ? 'orders are simulated' : 'orders go to brokers'
+              }}</span>
+            }
           </div>
           <div class="kpi">
             <span class="label">Total workers</span>
             <span class="value">{{ workerSnapshots().length }}</span>
+            @if (workerSnapshots().length > 0) {
+              <span class="hint">{{ workerCounts().Healthy }} healthy</span>
+            }
           </div>
-          <div class="kpi">
+          <!-- Uncoloured until the fleet has reported: 0 workers is unknown, not 0% healthy. -->
+          <div
+            class="kpi"
+            [class.pos]="workerSnapshots().length > 0 && healthyPct() >= 95"
+            [class.warn]="workerSnapshots().length > 0 && healthyPct() < 95 && healthyPct() >= 80"
+            [class.neg]="workerSnapshots().length > 0 && healthyPct() < 80"
+          >
             <span class="label">Healthy %</span>
-            <!-- Uncoloured until the fleet has reported: 0 workers is unknown, not 0% healthy. -->
             <span
               class="value"
               [class.good]="workerSnapshots().length > 0 && healthyPct() >= 95"
@@ -138,12 +183,20 @@ import type { EAInstanceDto } from '@core/api/api.types';
             >
               {{ workerSnapshots().length > 0 ? healthyPct().toFixed(0) + '%' : '—' }}
             </span>
+            @if (workerSnapshots().length > 0) {
+              <span class="hint">{{
+                workerCounts().Failed + workerCounts().Degraded === 0
+                  ? '0 failed / degraded'
+                  : workerCounts().Failed + workerCounts().Degraded + ' failed / degraded'
+              }}</span>
+            }
           </div>
           @if (canSeeDeadLetters()) {
-            <div class="kpi">
+            <div class="kpi" [class.warn]="dlqTotal() > 0">
               <span class="label">Unresolved DLQ</span>
               <!-- The queue's total, not the 25 rows the panel below lists. -->
               <span class="value" [class.bad]="dlqTotal() > 0">{{ dlqTotal() }}</span>
+              <span class="hint">{{ dlqTotal() > 0 ? 'to retry or discard' : 'queue clean' }}</span>
             </div>
           }
         </section>
@@ -156,7 +209,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
             @if (workerStatusEntries().length >= 3) {
               <app-chart-card
                 title="Worker status"
-                subtitle="Healthy · Degraded · Failed · Idle distribution"
+                [subtitle]="workerSnapshots().length + ' workers'"
                 [options]="workerDonutOptions()"
                 height="240px"
               />
@@ -164,7 +217,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
               <div class="panel compact-stat">
                 <header class="panel-head">
                   <h3>Worker status</h3>
-                  <span class="muted small">Healthy · Degraded · Failed · Idle</span>
+                  <span class="head-hint">{{ workerSnapshots().length }} workers</span>
                 </header>
                 @if (workerStatusEntries().length === 0) {
                   <p class="muted small">No worker snapshots reported yet.</p>
@@ -186,25 +239,25 @@ import type { EAInstanceDto } from '@core/api/api.types';
             @if (canSeeDeadLetters()) {
               @if (dlqTypeEntries().length >= 3) {
                 <app-chart-card
-                  title="DLQ by event type"
-                  subtitle="Unresolved events grouped by type"
+                  title="Dead letters by type"
+                  subtitle="Unresolved"
                   [options]="dlqEventTypeOptions()"
                   height="240px"
                 />
               } @else {
                 <div class="panel compact-stat">
                   <header class="panel-head">
-                    <h3>DLQ by event type</h3>
-                    <span class="muted small">Unresolved events grouped by type</span>
+                    <h3>Dead letters by type</h3>
+                    <span class="head-hint">unresolved</span>
                   </header>
                   @if (dlqTypeEntries().length === 0) {
                     <p class="muted small">No unresolved dead-letters.</p>
                   } @else {
                     <ul class="stat-list">
-                      @for (e of dlqTypeEntries(); track e.name) {
+                      @for (e of dlqTypeEntries(); track e.raw) {
                         <li>
                           <span class="stat-swatch" [style.background]="e.color"></span>
-                          <span class="stat-name mono">{{ e.name }}</span>
+                          <span class="stat-name" [title]="e.raw">{{ e.name }}</span>
                           <span class="stat-value">{{ e.value }}</span>
                           <span class="stat-share muted">{{ e.share.toFixed(0) }}%</span>
                         </li>
@@ -216,16 +269,16 @@ import type { EAInstanceDto } from '@core/api/api.types';
 
               @if (dlqAttemptEntries().length >= 3) {
                 <app-chart-card
-                  title="DLQ retry distribution"
-                  subtitle="Attempt counts on unresolved rows"
+                  title="Retry attempts"
+                  subtitle="Unresolved rows"
                   [options]="dlqAttemptHistogram()"
                   height="240px"
                 />
               } @else {
                 <div class="panel compact-stat">
                   <header class="panel-head">
-                    <h3>DLQ retry distribution</h3>
-                    <span class="muted small">Attempt counts on unresolved rows</span>
+                    <h3>Retry attempts</h3>
+                    <span class="head-hint">unresolved rows</span>
                   </header>
                   @if (dlqAttemptEntries().length === 0) {
                     <p class="muted small">No unresolved dead-letters.</p>
@@ -279,7 +332,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
               </div>
             </div>
             @if (worstWorkers().length > 0) {
-              <p class="muted small list-caption">
+              <p class="list-caption">
                 Showing {{ worstWorkers().length }} of {{ nonHealthyCount() }} non-healthy
                 {{ nonHealthyCount() === 1 ? 'worker' : 'workers' }} — failed first, then degraded,
                 then idle.
@@ -288,7 +341,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
                 @for (w of worstWorkers(); track w.name) {
                   <li class="worker-item" [attr.data-status]="w.status.toLowerCase()">
                     <span class="status-pill">{{ w.status }}</span>
-                    <span class="worker-name">{{ w.name }}</span>
+                    <span class="worker-name" [title]="w.name">{{ w.name }}</span>
                     @if (w.lastErrorMessage) {
                       <span class="worker-msg" [title]="w.lastErrorMessage">
                         {{ w.lastErrorMessage }}
@@ -317,7 +370,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
                   description="No unresolved dead-letter rows in the last 25 events."
                 />
               } @else {
-                <p class="muted small list-caption">
+                <p class="list-caption">
                   {{ dlqTotal() }} unresolved {{ dlqTotal() === 1 ? 'row' : 'rows'
                   }}{{
                     dlqTotal() > deadLetters().length
@@ -330,19 +383,22 @@ import type { EAInstanceDto } from '@core/api/api.types';
                   @for (d of deadLetters(); track d.id) {
                     <li class="dlq-item" [class.busy]="dlqBusy().has(d.id)">
                       <div class="dlq-main">
-                        <span class="dlq-type" [title]="d.errorMessage ?? ''">
-                          {{ d.eventType ?? 'unknown' }}
-                        </span>
-                        <span class="dlq-meta muted small">
+                        <div class="dlq-title">
+                          <span class="dlq-type">{{ eventLabel(d.eventType) }}</span>
+                          <span class="dlq-raw" [title]="d.eventType ?? ''"
+                            >#{{ d.id }} · {{ d.eventType ?? 'unknown' }}</span
+                          >
+                        </div>
+                        <span class="dlq-meta">
                           <span class="dlq-attempts" [class.hot]="d.attemptCount >= 3">
                             {{ d.attemptCount }}
                             {{ d.attemptCount === 1 ? 'attempt' : 'attempts' }}
                           </span>
                           · {{ d.createdAt | relativeTime }}
-                          @if (d.errorMessage) {
-                            · <span class="dlq-err">{{ d.errorMessage }}</span>
-                          }
                         </span>
+                        @if (d.errorMessage) {
+                          <span class="dlq-err" [title]="d.errorMessage">{{ d.errorMessage }}</span>
+                        }
                       </div>
                       <div class="dlq-actions">
                         <button
@@ -372,11 +428,11 @@ import type { EAInstanceDto } from '@core/api/api.types';
       }
 
       @if (!wallMode()) {
-        <div class="ctx-row">
-          <section class="ctx">
-            <header class="ctx-head">
+        <div class="row">
+          <section class="panel">
+            <header class="panel-head">
               <h3>Engine processes</h3>
-              <a routerLink="/releases">Builds →</a>
+              <a class="link" routerLink="/releases">Builds →</a>
             </header>
             @if (builds(); as b) {
               <ul class="ctx-list">
@@ -386,12 +442,12 @@ import type { EAInstanceDto } from '@core/api/api.types';
                     <strong>{{ roleLabel(r.role) }}</strong>
                     <span class="ctx-muted"
                       >started {{ ago(r.startedAtUtc) }} · last seen {{ ago(r.lastSeenAtUtc) }} ·
-                      build {{ r.buildId.slice(0, 8) }}</span
+                      build <span class="mono">{{ r.buildId.slice(0, 8) }}</span></span
                     >
                   </li>
                 }
               </ul>
-              <p class="ctx-muted">
+              <p class="ctx-note" [class.skew]="b.hasSkew">
                 {{
                   b.hasSkew
                     ? b.distinctBuilds +
@@ -400,13 +456,13 @@ import type { EAInstanceDto } from '@core/api/api.types';
                 }}
               </p>
             } @else {
-              <p class="ctx-muted">The process list needs operator access, or is loading.</p>
+              <p class="ctx-note">The process list needs operator access, or is loading.</p>
             }
           </section>
-          <section class="ctx">
-            <header class="ctx-head">
+          <section class="panel">
+            <header class="panel-head">
               <h3>Connected terminals</h3>
-              <a routerLink="/ea-instances">EA instances →</a>
+              <a class="link" routerLink="/ea-instances">EA instances →</a>
             </header>
             @if (terminals().length) {
               <ul class="ctx-list">
@@ -422,7 +478,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
                 }
               </ul>
             } @else {
-              <p class="ctx-muted">
+              <p class="ctx-note">
                 No terminal is connected. The engine trades MT5 accounts only through connected EAs.
               </p>
             }
@@ -444,598 +500,7 @@ import type { EAInstanceDto } from '@core/api/api.types';
       />
     </div>
   `,
-  styles: [
-    `
-      .ctx-row {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-        gap: var(--space-3);
-      }
-      .ctx {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3) var(--space-4);
-      }
-      .ctx-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-      }
-      .ctx-head h3 {
-        margin: 0 0 var(--space-2);
-        font-size: var(--text-base);
-      }
-      .ctx-head a {
-        font-size: var(--text-sm);
-        color: var(--accent);
-      }
-      .ctx-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: grid;
-        gap: 6px;
-        font-size: var(--text-sm);
-      }
-      .ctx-dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--profit);
-        margin-right: 6px;
-      }
-      .ctx-dot.stale {
-        background: var(--warning);
-      }
-      .ctx-muted {
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-        margin-left: 6px;
-      }
-      p.ctx-muted {
-        margin: var(--space-2) 0 0;
-      }
-
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-
-      /* ── Wall display mode ─────────────────────────────────────── */
-      .page.wall {
-        padding: var(--space-3) var(--space-4);
-        gap: var(--space-3);
-        background: var(--bg-primary);
-        min-height: 100vh;
-      }
-      .wall-bar {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        padding-bottom: var(--space-2);
-        border-bottom: 1px solid var(--border);
-      }
-      .wall-bar h1 {
-        margin: 0;
-        font-size: 2rem;
-        font-weight: var(--font-semibold);
-        letter-spacing: -0.01em;
-      }
-      .wall-meta {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .refresh {
-        font-family: var(--font-mono);
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .btn-ghost {
-        background: transparent;
-        border: 1px solid var(--border);
-        color: var(--text-secondary);
-        border-radius: var(--radius-full);
-        padding: 4px 14px;
-        cursor: pointer;
-        font-size: var(--text-sm);
-      }
-
-      .btn-secondary {
-        height: 32px;
-        padding: 0 var(--space-3);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        color: var(--text-primary);
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        font-size: var(--text-sm);
-      }
-      .btn-secondary:hover {
-        background: var(--bg-secondary);
-        border-color: var(--accent);
-      }
-
-      .row {
-        display: grid;
-        gap: var(--space-4);
-      }
-      /* Status row now carries 8 cells (engine card + 7 KPIs). The engine
-         card stays wider via 1.4fr; the rest split the remaining width. */
-      .status-row {
-        grid-template-columns: minmax(220px, 1.4fr) repeat(7, 1fr);
-      }
-      .row:not(.status-row):not(.charts-row) {
-        /* minmax(0, …): a bare 1fr track is minmax(auto, 1fr) and grows to
-           fit an unbreakable child instead of letting it clip. */
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      }
-      @media (max-width: 1400px) {
-        .status-row {
-          grid-template-columns: minmax(220px, 1.4fr) repeat(3, 1fr);
-        }
-      }
-      @media (max-width: 900px) {
-        .status-row {
-          grid-template-columns: repeat(2, 1fr);
-        }
-        /* minmax(0, …) here too: a bare 1fr let the unbreakable DLQ error line widen the
-           single column to ~2,000px at tablet width. */
-        .row:not(.status-row):not(.charts-row) {
-          grid-template-columns: minmax(0, 1fr);
-        }
-      }
-      @media (max-width: 560px) {
-        .status-row {
-          grid-template-columns: 1fr;
-        }
-      }
-      /* Wall keeps the dense grid even on narrow viewports — operators
-         project this onto large screens so the smallest source viewport
-         is still wide. */
-      .page.wall .status-row {
-        grid-template-columns: minmax(280px, 1.6fr) repeat(7, 1fr);
-        gap: var(--space-3);
-      }
-
-      .status-card {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-4);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-secondary);
-      }
-      .status-card[data-running='1'] {
-        border-color: rgba(52, 199, 89, 0.4);
-        background: rgba(52, 199, 89, 0.06);
-      }
-      .status-card[data-running='0'] {
-        border-color: rgba(255, 59, 48, 0.4);
-        background: rgba(255, 59, 48, 0.06);
-      }
-      .status-dot {
-        width: 12px;
-        height: 12px;
-        border-radius: 50%;
-        background: #636366;
-      }
-      .page.wall .status-dot {
-        width: 32px;
-        height: 32px;
-      }
-      .status-card[data-running='1'] .status-dot {
-        background: #34c759;
-        box-shadow: 0 0 0 4px rgba(52, 199, 89, 0.15);
-      }
-      .page.wall .status-card[data-running='1'] .status-dot {
-        box-shadow: 0 0 0 8px rgba(52, 199, 89, 0.18);
-        animation: pulse-green 2s ease-in-out infinite;
-      }
-      .status-card[data-running='0'] .status-dot {
-        background: #ff3b30;
-      }
-      .page.wall .status-card[data-running='0'] .status-dot {
-        animation: pulse-red 1s ease-in-out infinite;
-      }
-      @keyframes pulse-green {
-        0%,
-        100% {
-          box-shadow: 0 0 0 8px rgba(52, 199, 89, 0.18);
-        }
-        50% {
-          box-shadow: 0 0 0 14px rgba(52, 199, 89, 0.06);
-        }
-      }
-      @keyframes pulse-red {
-        0%,
-        100% {
-          box-shadow: 0 0 0 8px rgba(255, 59, 48, 0.25);
-        }
-        50% {
-          box-shadow: 0 0 0 14px rgba(255, 59, 48, 0.08);
-        }
-      }
-      .status-text {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .status-label {
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-      }
-      .page.wall .status-label {
-        font-size: var(--text-base);
-      }
-      .status-value {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      .page.wall .status-value {
-        font-size: 3rem;
-        line-height: 1;
-        letter-spacing: -0.02em;
-      }
-      .status-meta {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .page.wall .status-meta {
-        font-size: var(--text-sm);
-      }
-
-      .kpi {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        gap: 4px;
-        padding: var(--space-4);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-secondary);
-      }
-      .label {
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-      }
-      .page.wall .label {
-        font-size: var(--text-sm);
-      }
-      .value {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .value.good {
-        color: var(--profit);
-      }
-      .value.warn {
-        color: var(--tone-amber);
-      }
-      .value.bad {
-        color: var(--loss);
-      }
-      .page.wall .value {
-        font-size: 3.4rem;
-        line-height: 1;
-        letter-spacing: -0.02em;
-      }
-
-      /* 3-col chart row (compact mode only — wall mode keeps the 2-panel layout) */
-      .charts-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .charts-row {
-          grid-template-columns: minmax(0, 1fr);
-        }
-      }
-
-      .panel {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .panel-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-      }
-      .panel-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .page.wall .panel-head h3 {
-        font-size: 1.4rem;
-      }
-      .link {
-        font-size: var(--text-sm);
-        color: var(--accent);
-        cursor: pointer;
-        background: none;
-        border: none;
-        padding: 0;
-        font-family: inherit;
-      }
-      .link:hover {
-        text-decoration: underline;
-      }
-      .muted {
-        color: var(--text-secondary);
-      }
-      .small {
-        font-size: var(--text-sm);
-      }
-
-      .worker-totals {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
-      }
-      .bucket {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 2px;
-        padding: var(--space-2) var(--space-1);
-        border-radius: var(--radius-sm);
-        background: var(--bg-tertiary);
-      }
-      /* Theme tones: the fixed light-theme hues (#0040dd idle, #c93400 degraded) were near
-         invisible on the dark panel. */
-      .bucket[data-bucket='healthy'] {
-        color: var(--tone-green);
-      }
-      .bucket[data-bucket='degraded'] {
-        color: var(--tone-amber);
-      }
-      .bucket[data-bucket='failed'] {
-        color: var(--tone-red);
-      }
-      .bucket[data-bucket='idle'] {
-        color: var(--tone-blue);
-      }
-      .bucket.zero {
-        color: var(--text-tertiary);
-      }
-      .list-caption {
-        margin: 0;
-      }
-
-      /* Compact stat list — the below-three-categories replacement for a chart card. */
-      .compact-stat {
-        min-height: 0;
-      }
-      .stat-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .stat-list li {
-        display: grid;
-        grid-template-columns: 10px 1fr auto auto;
-        align-items: center;
-        gap: var(--space-2);
-        padding: 8px 10px;
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        font-size: var(--text-sm);
-      }
-      .stat-list.no-swatch li {
-        grid-template-columns: 1fr auto auto;
-      }
-      .stat-swatch {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-      }
-      .stat-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .stat-name.mono {
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-      }
-      .stat-value {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .stat-share {
-        font-size: var(--text-xs);
-        font-variant-numeric: tabular-nums;
-        min-width: 3ch;
-        text-align: right;
-      }
-      .bucket-count {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .page.wall .bucket-count {
-        font-size: 3rem;
-        line-height: 1;
-      }
-      .bucket-label {
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .page.wall .bucket-label {
-        font-size: var(--text-sm);
-      }
-
-      .worker-list,
-      .dlq-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .worker-item {
-        display: grid;
-        grid-template-columns: 80px 1fr;
-        gap: var(--space-2);
-        padding: 6px 8px;
-        font-size: var(--text-sm);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-      }
-      .page.wall .worker-item {
-        grid-template-columns: 110px 1fr;
-        font-size: var(--text-base);
-        padding: 8px 12px;
-      }
-      .worker-msg {
-        grid-column: 2;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .status-pill {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        padding: 2px 6px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        background: rgba(142, 142, 147, 0.12);
-        color: var(--tone-grey);
-      }
-      .page.wall .status-pill {
-        font-size: var(--text-sm);
-        padding: 4px 10px;
-      }
-      .worker-item[data-status='degraded'] .status-pill {
-        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
-        color: var(--tone-amber);
-      }
-      .worker-item[data-status='failed'] .status-pill {
-        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
-        color: var(--tone-red);
-      }
-      .worker-item[data-status='idle'] .status-pill {
-        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
-        color: var(--tone-blue);
-      }
-      .worker-name {
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        color: var(--text-primary);
-      }
-      .page.wall .worker-name {
-        font-size: var(--text-sm);
-      }
-
-      .dlq-item {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        padding: 6px 8px;
-        background: var(--bg-primary);
-        border-radius: var(--radius-sm);
-      }
-      .dlq-item.busy {
-        opacity: 0.6;
-      }
-      .page.wall .dlq-item {
-        padding: 8px 12px;
-        font-size: var(--text-base);
-      }
-      .dlq-main {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .dlq-type {
-        font-family: var(--font-mono);
-        font-size: var(--text-xs);
-        color: var(--text-primary);
-      }
-      .page.wall .dlq-type {
-        font-size: var(--text-sm);
-      }
-      .dlq-meta {
-        /* As a flex item its min-width defaulted to the full unbroken error
-           text, which pushed the card and the page to 2,729px wide. */
-        display: block;
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .dlq-attempts {
-        font-weight: var(--font-semibold);
-      }
-      /* Escalation colour only once retries are actually piling up. */
-      .dlq-attempts.hot {
-        color: var(--tone-amber);
-      }
-      .dlq-err {
-        font-family: var(--font-mono);
-      }
-      .dlq-actions {
-        display: flex;
-        gap: 6px;
-        flex-shrink: 0;
-      }
-      .btn-mini {
-        height: 26px;
-        padding: 0 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-mini:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .btn-mini.danger {
-        color: var(--loss);
-        border-color: rgba(255, 59, 48, 0.35);
-      }
-      .btn-mini.danger:hover:not(:disabled) {
-        background: rgba(255, 59, 48, 0.08);
-      }
-      .btn-mini:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-    `,
-  ],
+  styleUrl: './engine-overview-page.component.scss',
 })
 export class EngineOverviewPageComponent {
   private readonly auth = inject(AuthService);
@@ -1104,7 +569,7 @@ export class EngineOverviewPageComponent {
   readonly dlqEventTypeOptions = computed<EChartsOption>(() => {
     const counts: Record<string, number> = {};
     for (const d of this.deadLetters()) {
-      const k = d.eventType ?? 'unknown';
+      const k = eventTypeLabel(d.eventType);
       counts[k] = (counts[k] ?? 0) + 1;
     }
     const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
@@ -1202,8 +667,9 @@ export class EngineOverviewPageComponent {
     const palette = ['#FF3B30', '#FF9500', '#AF52DE', '#FFCC00', '#5AC8FA', '#0071E3', '#8E8E93'];
     return Object.entries(counts)
       .sort((a, b) => b[1] - a[1])
-      .map(([name, value], i) => ({
-        name,
+      .map(([raw, value], i) => ({
+        raw,
+        name: eventTypeLabel(raw),
         value,
         color: palette[i % palette.length],
         share: total > 0 ? (value / total) * 100 : 0,
@@ -1239,6 +705,21 @@ export class EngineOverviewPageComponent {
   readonly paperModeHint = computed(() =>
     this.paperMode() ? 'Paper mode: orders are simulated' : 'Live trading: orders go to brokers',
   );
+
+  /** The headline chips: what needs a look, worst first (idle listed but neutral). */
+  readonly attention = computed(() => {
+    const c = this.workerCounts();
+    const s = this.status();
+    return attentionItems({
+      running: s ? s.isRunning : null,
+      failed: c.Failed,
+      degraded: c.Degraded,
+      idle: c.Idle,
+      dlqTotal: this.canSeeDeadLetters() ? this.dlqTotal() : null,
+    });
+  });
+
+  protected readonly eventLabel = eventTypeLabel;
 
   readonly nonHealthyCount = computed(
     () => this.workerSnapshots().filter((w) => w.status !== 'Healthy').length,

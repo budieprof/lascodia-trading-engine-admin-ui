@@ -35,35 +35,51 @@ import {
         subtitle="Simulated execution with no broker contact"
       />
 
-      <div class="status-card">
+      <!-- The engine-wide switch. On is the unusual state (live accounts stop trading), so it reads
+           amber, not green. -->
+      <section
+        class="status-card"
+        [class.on]="service.isPaperMode()"
+        aria-label="Engine paper mode"
+      >
         <div class="status-header">
-          <div class="status-text">
-            <span class="status-label">Paper Trading is</span>
-            <span
-              class="status-value"
-              [class.on]="service.isPaperMode()"
-              [class.off]="!service.isPaperMode()"
+          <div class="status-main">
+            <span class="status-kicker">Engine-wide paper mode</span>
+            <div class="status-text">
+              <span class="status-label">Paper Trading is</span>
+              <span
+                class="status-value"
+                [class.on]="service.isPaperMode()"
+                [class.off]="!service.isPaperMode()"
+              >
+                {{ service.isPaperMode() ? 'ENABLED' : 'DISABLED' }}
+              </span>
+              <span class="mode-pill" [class.on]="service.isPaperMode()">
+                {{ service.isPaperMode() ? 'Every order simulated' : 'Live trading' }}
+              </span>
+            </div>
+            @if (service.status()?.changedAt) {
+              <div class="changed-at">
+                Last changed {{ service.status()!.changedAt | date: 'd MMM yyyy, HH:mm:ss' }}
+              </div>
+            }
+          </div>
+          <div class="toggle-wrap">
+            <span class="toggle-caption">{{ service.isPaperMode() ? 'On' : 'Off' }}</span>
+            <button
+              type="button"
+              class="toggle-switch"
+              [class.active]="service.isPaperMode()"
+              [disabled]="busy()"
+              (click)="confirmToggle()"
+              role="switch"
+              [attr.aria-checked]="service.isPaperMode()"
+              aria-label="Engine paper mode"
             >
-              {{ service.isPaperMode() ? 'ENABLED' : 'DISABLED' }}
-            </span>
+              <span class="toggle-knob"></span>
+            </button>
           </div>
-          <button
-            type="button"
-            class="toggle-switch"
-            [class.active]="service.isPaperMode()"
-            [disabled]="busy()"
-            (click)="confirmToggle()"
-            role="switch"
-            [attr.aria-checked]="service.isPaperMode()"
-          >
-            <span class="toggle-knob"></span>
-          </button>
         </div>
-        @if (service.status()?.changedAt) {
-          <div class="changed-at">
-            Last changed: {{ service.status()!.changedAt | date: 'MMM d, yyyy HH:mm:ss' }}
-          </div>
-        }
         <p class="explain">
           <code>Engine:PaperMode</code> is the engine-wide switch: while it is on, EVERY order is
           filled by a simulated broker and none reaches an MT5 account. It is
@@ -74,12 +90,12 @@ import {
           }}. It is a trading-behaviour switch; strategies that are not yet trusted are paper-traded
           on their own (below) without it.
         </p>
-      </div>
+      </section>
 
       <app-paper-track-record />
 
-      <div class="backfill-card">
-        <h3 class="section-title">Backfill Simulated Executions</h3>
+      <section class="backfill-card">
+        <h3 class="section-title">Backfill simulated executions</h3>
         <p class="muted">
           Replay historical candles through an approved strategy's signal pipeline to generate
           synthetic paper executions for TCA, slippage, and fill-quality analysis.
@@ -101,11 +117,11 @@ import {
             @if (busy()) {
               <span class="spin"></span>
             } @else {
-              Trigger Backfill
+              Trigger backfill
             }
           </button>
         </form>
-      </div>
+      </section>
 
       <app-confirm-dialog
         [open]="showConfirm()"
@@ -123,186 +139,7 @@ import {
       />
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .explain {
-        margin: var(--space-3) 0 0;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        line-height: 1.5;
-        max-width: 900px;
-      }
-      .explain code {
-        font-size: var(--text-xs);
-      }
-      .status-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-8);
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .status-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-      .status-text {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-      }
-      .status-label {
-        font-size: var(--text-lg);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .status-value {
-        font-size: 32px;
-        font-weight: var(--font-semibold);
-        letter-spacing: var(--tracking-tight);
-      }
-      .status-value.on {
-        color: var(--profit);
-      }
-      .status-value.off {
-        color: var(--text-tertiary);
-      }
-      .changed-at {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .toggle-switch {
-        position: relative;
-        width: 64px;
-        height: 34px;
-        border-radius: 17px;
-        border: none;
-        background: #e5e5ea;
-        cursor: pointer;
-        transition: background 0.25s ease;
-        padding: 0;
-        flex-shrink: 0;
-      }
-      .toggle-switch:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .toggle-switch.active {
-        background: var(--profit);
-      }
-      .toggle-knob {
-        position: absolute;
-        top: 3px;
-        left: 3px;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: white;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-        transition: transform 0.25s ease;
-      }
-      .toggle-switch.active .toggle-knob {
-        transform: translateX(30px);
-      }
-      .backfill-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-5);
-        box-shadow: var(--shadow-sm);
-      }
-      .section-title {
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        margin: 0 0 var(--space-2);
-      }
-      .muted {
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-        margin: 0 0 var(--space-4);
-      }
-      .backfill-form {
-        display: flex;
-        gap: var(--space-3);
-        align-items: flex-end;
-        flex-wrap: wrap;
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        min-width: 280px;
-        flex: 1 1 280px;
-      }
-      .field label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-1);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-      }
-      .input {
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        border: none;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        gap: var(--space-1);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .spin {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: white;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-    `,
-  ],
+  styleUrl: './paper-trading-page.component.scss',
 })
 export class PaperTradingPageComponent implements OnInit {
   protected readonly service = inject(PaperTradingService);

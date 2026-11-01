@@ -41,6 +41,9 @@ interface MartingaleAsk {
   onCancel?: () => void;
 }
 
+/** Which symbols the table shows — a filter over rows already loaded. */
+type SymbolFilter = 'all' | 'laddered' | 'overrides' | 'chain';
+
 /** Fleet-wide open chains, read when a mode switch is asked. */
 interface ModeChainSummary {
   count: number;
@@ -69,22 +72,25 @@ interface ModeChainSummary {
     ToggleComponent,
     ModalA11yDirective,
   ],
+  styleUrl: './martingale-page.scss',
   template: `
-    <app-page-header
-      title="Martingale Ladders"
-      subtitle="Per-symbol recovery ladders, opted in one account and one symbol at a time."
-    />
-
     <!--
       This page configures what the ladder WILL do; the internals page explains what it HAS done.
       The link sits at the top because "why is this chain at depth 3?" is usually the question
       that brought an operator here in the first place.
     -->
-    <p class="internals-link">
-      <a routerLink="/martingale/internals">
+    <app-page-header
+      title="Martingale Ladders"
+      subtitle="Per-symbol recovery ladders, opted in one account and one symbol at a time."
+    >
+      <a
+        class="btn-ghost internals-link"
+        routerLink="/martingale/internals"
+        title="Chains, ledgers and next-rung previews"
+      >
         Open ladder internals → chains, ledgers and next-rung previews
       </a>
-    </p>
+    </app-page-header>
 
     <!--
       The mode banner sits ABOVE the account picker on purpose: it is fleet-wide, so putting it
@@ -113,24 +119,25 @@ interface ModeChainSummary {
               }
             }
           </span>
-          <span class="mode-scope">fleet-wide · every account</span>
-        </div>
-
-        <div class="mode-actions">
-          @for (m of modes; track m) {
-            <button
-              type="button"
-              class="mode-btn"
-              [class.sel]="m === v.mode"
-              [disabled]="savingMode() || m === v.mode"
-              (click)="changeMode(m)"
-            >
-              {{ m }}
-            </button>
-          }
-          @if (savingMode()) {
-            <span class="saving">Saving…</span>
-          }
+          <div class="mode-actions">
+            <span class="mode-scope">fleet-wide · every account</span>
+            <div class="mode-seg" role="group" aria-label="Martingale mode">
+              @for (m of modes; track m) {
+                <button
+                  type="button"
+                  class="mode-btn"
+                  [class.sel]="m === v.mode"
+                  [disabled]="savingMode() || m === v.mode"
+                  (click)="changeMode(m)"
+                >
+                  {{ m }}
+                </button>
+              }
+            </div>
+            @if (savingMode()) {
+              <span class="saving">Saving…</span>
+            }
+          </div>
         </div>
       </section>
     }
@@ -142,6 +149,9 @@ interface ModeChainSummary {
           <option [value]="a.id">#{{ a.id }} — {{ a.accountName || a.accountId }}</option>
         }
       </select>
+      <span class="acct-hint">
+        Profile defaults and symbol switches below apply to this account's ladders.
+      </span>
       @if (saving()) {
         <span class="saving">Saving…</span>
       }
@@ -167,25 +177,25 @@ interface ModeChainSummary {
         toggle below is inert while it is off, and the flag is shared with any account on the
         same profile.
       -->
-      <section class="gate" [class.gate-off]="!v.profileMartingaleEnabled">
+      <section class="gate card" [class.gate-off]="!v.profileMartingaleEnabled">
         <div class="gate-head">
-          <span class="dot" [class.on]="v.profileMartingaleEnabled"></span>
-          <strong>Risk profile:</strong>
-          <span>{{ v.riskProfileName || '—' }}</span>
-          <span class="pill" [class.on]="v.profileMartingaleEnabled">
+          <span class="dot" [class.ok]="v.profileMartingaleEnabled"></span>
+          <span class="gate-k">Risk profile</span>
+          <strong class="gate-name">{{ v.riskProfileName || '—' }}</strong>
+          <span class="pill" [class.ok]="v.profileMartingaleEnabled">
             {{ v.profileMartingaleEnabled ? 'martingale allowed' : 'martingale disabled' }}
           </span>
         </div>
 
         @if (!v.profileMartingaleEnabled) {
-          <p class="gate-note">
+          <p class="callout warn gate-note">
             Every symbol toggle below is inert until this profile allows martingale. Enable it on
             the Risk Profiles page.
           </p>
         }
 
         @if (v.accountsSharingProfile.length > 0) {
-          <p class="gate-note warn">
+          <p class="callout warn gate-note">
             <strong
               >{{ v.accountsSharingProfile.length }} other account(s) share this profile</strong
             >
@@ -202,86 +212,119 @@ interface ModeChainSummary {
           previously reachable only by direct database update, which is the invisible-config trap
           this codebase has already been bitten by twice.
         -->
-        <div class="pform">
-          <label class="fld master">
-            <ui-toggle [(ngModel)]="pf.enabled" [disabled]="savingProfile()" />
-            <span>Allow martingale on this profile</span>
-            <span class="pill" [class.on]="pf.enabled">{{ pf.enabled ? 'allowed' : 'off' }}</span>
-          </label>
+        <div class="pgrid">
+          <div class="pform">
+            <div class="pswitches">
+              <label class="fld master">
+                <ui-toggle [(ngModel)]="pf.enabled" [disabled]="savingProfile()" />
+                <span>Allow martingale on this profile</span>
+                <span class="pill" [class.ok]="pf.enabled">{{
+                  pf.enabled ? 'allowed' : 'off'
+                }}</span>
+              </label>
 
-          <label
-            class="fld"
-            title="Recovery rungs allowed after the opening loss. The opening loss is depth 0 and does not count, so a cap of 2 permits two recovery trades and a fully-lost chain has lost three times."
+              <label class="fld master">
+                <ui-toggle [(ngModel)]="pf.abandonAtCap" [disabled]="savingProfile()" />
+                <span>Abandon at depth cap</span>
+                <span class="pill" [class.ok]="pf.abandonAtCap" [class.bad]="!pf.abandonAtCap">
+                  {{ pf.abandonAtCap ? 'bounded' : 'unbounded' }}
+                </span>
+              </label>
+            </div>
+
+            <div class="pfields">
+              <label
+                class="fld"
+                title="Recovery rungs allowed after the opening loss. The opening loss is depth 0 and does not count, so a cap of 2 permits two recovery trades and a fully-lost chain has lost three times."
+              >
+                <span>Depth cap (recovery rungs)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="20"
+                  step="1"
+                  [(ngModel)]="pf.maxDepth"
+                  (ngModelChange)="onDepthChange($event)"
+                />
+              </label>
+
+              <label class="fld">
+                <span>Target profit (R)</span>
+                <input type="number" min="0" max="10" step="0.1" [(ngModel)]="pf.targetProfitR" />
+              </label>
+
+              <label class="fld">
+                <span>Max stake (% equity)</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max="100"
+                  step="0.5"
+                  [(ngModel)]="pf.maxStakePctEquity"
+                />
+              </label>
+
+              <label class="fld">
+                <span>Chain age cap (h)</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="8760"
+                  step="1"
+                  [(ngModel)]="pf.maxChainAgeHours"
+                />
+              </label>
+            </div>
+          </div>
+
+          <!--
+            The projected worst case is computed client-side from the DRAFT depth, so it moves as
+            the operator types. Showing it only after saving would mean the number that decides
+            whether a cap is safe arrives after the decision.
+          -->
+          <div
+            class="kpi proj"
+            [class.neg]="!pf.abandonAtCap || projectedWorstCase() >= v.haltedDrawdownPct"
+            [class.warn]="
+              pf.abandonAtCap &&
+              projectedWorstCase() >= v.reducedDrawdownPct &&
+              projectedWorstCase() < v.haltedDrawdownPct
+            "
+            [class.pos]="pf.abandonAtCap && projectedWorstCase() < v.reducedDrawdownPct"
           >
-            <span>Depth cap (recovery rungs)</span>
-            <input
-              type="number"
-              min="1"
-              max="20"
-              step="1"
-              [(ngModel)]="pf.maxDepth"
-              (ngModelChange)="onDepthChange($event)"
-            />
-          </label>
-
-          <label class="fld">
-            <span>Target profit (R)</span>
-            <input type="number" min="0" max="10" step="0.1" [(ngModel)]="pf.targetProfitR" />
-          </label>
-
-          <label class="fld">
-            <span>Max stake (% equity)</span>
-            <input
-              type="number"
-              min="0.01"
-              max="100"
-              step="0.5"
-              [(ngModel)]="pf.maxStakePctEquity"
-            />
-          </label>
-
-          <label class="fld">
-            <span>Chain age cap (h)</span>
-            <input type="number" min="1" max="8760" step="1" [(ngModel)]="pf.maxChainAgeHours" />
-          </label>
-
-          <label class="fld master">
-            <ui-toggle [(ngModel)]="pf.abandonAtCap" [disabled]="savingProfile()" />
-            <span>Abandon at depth cap</span>
-            <span class="pill" [class.on]="pf.abandonAtCap" [class.danger-pill]="!pf.abandonAtCap">
-              {{ pf.abandonAtCap ? 'bounded' : 'unbounded' }}
-            </span>
-          </label>
+            <div class="k-label">Worst case (draft)</div>
+            <div
+              class="k-value"
+              [class.danger]="!pf.abandonAtCap || projectedWorstCase() >= v.haltedDrawdownPct"
+            >
+              {{ projectedWorstCase() | number: '1.0-1' }}%
+              <span class="k-unit">of equity</span>
+            </div>
+            <p
+              class="proj-copy"
+              [class.danger]="projectedWorstCase() >= v.haltedDrawdownPct"
+              [class.warn]="
+                projectedWorstCase() >= v.reducedDrawdownPct &&
+                projectedWorstCase() < v.haltedDrawdownPct
+              "
+            >
+              Worst case at {{ pf.maxDepth }} recovery rung{{ pf.maxDepth === 1 ? '' : 's' }} (the
+              opening loss plus every rung losing) on {{ v.baseRiskPerTradePct }}% base risk:
+              <b>{{ projectedWorstCase() | number: '1.0-1' }}%</b> of equity
+              @if (!pf.abandonAtCap) {
+                <b> — unbounded, the depth cap is disabled</b>
+              } @else if (projectedWorstCase() >= v.haltedDrawdownPct) {
+                — past the {{ v.haltedDrawdownPct }}% Halted threshold. A chain this deep halts the
+                account before it can finish recovering.
+              } @else if (projectedWorstCase() >= v.reducedDrawdownPct) {
+                — past the {{ v.reducedDrawdownPct }}% Reduced threshold, but inside the
+                {{ v.haltedDrawdownPct }}% halt boundary.
+              } @else {
+                — inside both drawdown thresholds.
+              }
+            </p>
+          </div>
         </div>
-
-        <!--
-          The projected worst case is computed client-side from the DRAFT depth, so it moves as the
-          operator types. Showing it only after saving would mean the number that decides whether a
-          cap is safe arrives after the decision.
-        -->
-        <p
-          class="proj"
-          [class.danger]="projectedWorstCase() >= v.haltedDrawdownPct"
-          [class.warn]="
-            projectedWorstCase() >= v.reducedDrawdownPct &&
-            projectedWorstCase() < v.haltedDrawdownPct
-          "
-        >
-          Worst case at {{ pf.maxDepth }} recovery rung{{ pf.maxDepth === 1 ? '' : 's' }} (the
-          opening loss plus every rung losing) on {{ v.baseRiskPerTradePct }}% base risk:
-          <b>{{ projectedWorstCase() | number: '1.0-1' }}%</b> of equity
-          @if (!pf.abandonAtCap) {
-            <b> — unbounded, the depth cap is disabled</b>
-          } @else if (projectedWorstCase() >= v.haltedDrawdownPct) {
-            — past the {{ v.haltedDrawdownPct }}% Halted threshold. A chain this deep halts the
-            account before it can finish recovering.
-          } @else if (projectedWorstCase() >= v.reducedDrawdownPct) {
-            — past the {{ v.reducedDrawdownPct }}% Reduced threshold, but inside the
-            {{ v.haltedDrawdownPct }}% halt boundary.
-          } @else {
-            — inside both drawdown thresholds.
-          }
-        </p>
 
         <!--
           Deliberately a secondary button: saving defaults is bookkeeping. The
@@ -298,17 +341,22 @@ interface ModeChainSummary {
             {{ savingProfile() ? 'Saving…' : 'Save profile defaults' }}
           </button>
           <button type="button" class="ghost" (click)="resetProfileForm()">Reset</button>
+          <span class="pactions-hint">Every save asks for confirmation first.</span>
         </div>
       </section>
 
       @if (openChains().length > 0) {
-        <section class="chains">
-          <h2>Open chains</h2>
+        <section class="chains card">
+          <div class="chains-head">
+            <h2>Open chains</h2>
+            <a class="btn-link" routerLink="/martingale/internals">Ledgers →</a>
+          </div>
           <ul>
             @for (s of openChains(); track s.symbol) {
               <li>
                 <b>{{ s.symbol }}</b>
-                depth {{ s.chainDepth }}, owing {{ s.chainDeficitAmount | number: '1.2-2' }} (target
+                depth {{ s.chainDepth }}, owing
+                <span class="neg">{{ s.chainDeficitAmount | number: '1.2-2' }}</span> (target
                 {{ s.chainTargetAmount | number: '1.2-2' }})
               </li>
             }
@@ -322,201 +370,233 @@ interface ModeChainSummary {
       @if (v.symbols.length === 0) {
         <app-empty-state title="No currency pairs configured." />
       } @else {
-        <!--
-          With no per-symbol override every row repeats the profile defaults, so
-          say that once above the table and mute the inherited cells — the eye
-          then lands on the two things that vary: the ladder switch and any
-          override that has been set.
-        -->
-        <p class="table-summary">
-          <b>{{ v.symbols.length }} symbols</b> · <b>{{ enabledCount() }}</b> laddered ·
-          @if (overrideCount() === 0) {
-            all inherit the profile defaults (depth {{ v.defaultMaxDepth }} ·
-            {{ v.defaultWorstCaseDrawdownPct | number: '1.0-1' }}% worst case ·
-            {{ v.defaultTargetProfitR }}R · {{ v.defaultMaxStakePctEquity }}% stake)
+        <section class="symbols card flush">
+          <div class="sym-bar">
+            <!--
+              With no per-symbol override every row repeats the profile defaults, so
+              say that once above the table and mute the inherited cells — the eye
+              then lands on the two things that vary: the ladder switch and any
+              override that has been set.
+            -->
+            <p class="table-summary">
+              <b>{{ v.symbols.length }} symbols</b> · <b>{{ enabledCount() }}</b> laddered ·
+              @if (overrideCount() === 0) {
+                all inherit the profile defaults (depth {{ v.defaultMaxDepth }} ·
+                {{ v.defaultWorstCaseDrawdownPct | number: '1.0-1' }}% worst case ·
+                {{ v.defaultTargetProfitR }}R · {{ v.defaultMaxStakePctEquity }}% stake)
+              } @else {
+                <b>{{ overrideCount() }}</b> with overrides; muted values inherit the profile
+                defaults
+              }
+            </p>
+            <div class="seg" role="group" aria-label="Show symbols">
+              @for (f of symFilters; track f.key) {
+                <button
+                  type="button"
+                  [class.on]="symFilter() === f.key"
+                  (click)="symFilter.set(f.key)"
+                >
+                  {{ f.label }}<span class="n">{{ symCount(f.key) }}</span>
+                </button>
+              }
+            </div>
+          </div>
+          @if (shownSymbols().length === 0) {
+            <div class="empty">
+              <strong>No symbols match this view.</strong>
+              Switch to All to see every symbol on this account.
+            </div>
           } @else {
-            <b>{{ overrideCount() }}</b> with overrides; muted values inherit the profile defaults
-          }
-        </p>
-        <div class="table-wrap">
-          <table class="mtg">
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th>Ladder</th>
-                <th class="n">Depth cap</th>
-                <th class="n">Worst case</th>
-                <th class="n">Target</th>
-                <th class="n">Max stake</th>
-                <th>Chain</th>
-                <th class="c">Tune</th>
-              </tr>
-            </thead>
-            <tbody>
-              <!--
-                Rows are keyed on (symbol, rowRev): the switch is a control-value
-                accessor that flips its own visual state on click, so when the
-                operator dismisses the reason prompt the model stays false
-                while the knob shows "on". Bumping rowRev re-creates the row and
-                the switch re-reads the model.
-              -->
-              @for (s of v.symbols; track s.symbol + ':' + rowRev()) {
-                <tr [class.active]="s.effectivelyActive">
-                  <td class="sym">{{ s.symbol }}</td>
-                  <td>
-                    <div class="ladder-cell">
-                      <ui-toggle
-                        [ngModel]="s.enabled"
-                        (ngModelChange)="toggle(s, $event)"
-                        [disabled]="saving() || (!s.enabled && !v.profileMartingaleEnabled)"
-                        [attr.aria-label]="'Ladder ' + s.symbol"
-                      />
-                      @if (s.effectivelyActive) {
-                        <span class="pill on">enabled</span>
-                      } @else if (s.enabled) {
-                        <span class="pill inert-pill" title="Profile does not allow martingale"
-                          >inert</span
-                        >
-                      } @else {
-                        <span class="pill">off</span>
-                      }
-                    </div>
-                  </td>
-                  <td class="n" [class.inherit]="(s.maxDepthOverride ?? null) === null">
-                    {{ s.effectiveMaxDepth }}
-                  </td>
+            <div class="table-wrap">
+              <table class="mtg">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Ladder</th>
+                    <th class="n">Depth cap</th>
+                    <th class="n">Worst case</th>
+                    <th class="n">Target</th>
+                    <th class="n">Max stake</th>
+                    <th>Chain</th>
+                    <th class="c">Tune</th>
+                  </tr>
+                </thead>
+                <tbody>
                   <!--
-                    Worst case is shown on every row, not just enabled ones, because it is the
-                    number that decides whether the depth cap is safe: a rung is exempt from
-                    Reduced recovery, so these caps are all that keeps a chain inside the halt
-                    boundary. The threshold is the profile's own Halted %, not a hard-coded 20.
+                    Rows are keyed on (symbol, rowRev): the switch is a control-value
+                    accessor that flips its own visual state on click, so when the
+                    operator dismisses the reason prompt the model stays false
+                    while the knob shows "on". Bumping rowRev re-creates the row and
+                    the switch re-reads the model.
                   -->
-                  <td
-                    class="n"
-                    [class.inherit]="(s.maxDepthOverride ?? null) === null"
-                    [class.danger]="s.worstCaseDrawdownPct >= v.haltedDrawdownPct"
-                    [class.warn]="
-                      s.worstCaseDrawdownPct >= v.reducedDrawdownPct &&
-                      s.worstCaseDrawdownPct < v.haltedDrawdownPct
-                    "
-                  >
-                    {{ s.worstCaseDrawdownPct | number: '1.0-1' }}%
-                  </td>
-                  <td class="n" [class.inherit]="(s.targetProfitROverride ?? null) === null">
-                    {{ s.effectiveTargetProfitR }}R
-                  </td>
-                  <td class="n" [class.inherit]="(s.maxStakePctEquityOverride ?? null) === null">
-                    {{ s.effectiveMaxStakePctEquity }}%
-                  </td>
-                  <td>
-                    @if (s.hasOpenChain) {
-                      <span class="chain">
-                        depth {{ s.chainDepth }} · owing
-                        {{ s.chainDeficitAmount | number: '1.0-0' }}
-                      </span>
-                    } @else {
-                      <span class="muted">—</span>
-                    }
-                  </td>
-                  <td class="c">
-                    <button type="button" class="link" (click)="startEdit(s)">
-                      {{ hasOverrides(s) ? 'Overrides ✎' : 'Override' }}
-                    </button>
-                  </td>
-                </tr>
-
-                @if (editing() === s.symbol) {
-                  <tr class="editrow">
-                    <td colspan="8">
-                      <!--
-                        An empty field means INHERIT, not zero. Stated explicitly because a blank
-                        numeric input reading as 0 is exactly how a stake ceiling of 0 would get
-                        set — which abandons every chain on its first rung.
-                      -->
-                      <div class="edit">
-                        <span class="edit-title">{{ s.symbol }} overrides</span>
-                        <span class="edit-hint">blank = inherit the profile default</span>
-
-                        <label class="fld">
-                          <span>Depth cap</span>
-                          <input
-                            type="number"
-                            min="1"
-                            max="20"
-                            [(ngModel)]="ef.maxDepthOverride"
-                            [placeholder]="v.defaultMaxDepth"
+                  @for (s of shownSymbols(); track s.symbol + ':' + rowRev()) {
+                    <tr [class.active]="s.effectivelyActive">
+                      <td class="sym">{{ s.symbol }}</td>
+                      <td>
+                        <div class="ladder-cell">
+                          <ui-toggle
+                            [ngModel]="s.enabled"
+                            (ngModelChange)="toggle(s, $event)"
+                            [disabled]="saving() || (!s.enabled && !v.profileMartingaleEnabled)"
+                            [attr.aria-label]="'Ladder ' + s.symbol"
                           />
-                        </label>
-
-                        <label class="fld">
-                          <span>Target (R)</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="10"
-                            step="0.1"
-                            [(ngModel)]="ef.targetProfitROverride"
-                            [placeholder]="v.defaultTargetProfitR"
-                          />
-                        </label>
-
-                        <label class="fld">
-                          <span>Max stake (%)</span>
-                          <input
-                            type="number"
-                            min="0.01"
-                            max="100"
-                            step="0.5"
-                            [(ngModel)]="ef.maxStakePctEquityOverride"
-                            [placeholder]="v.defaultMaxStakePctEquity"
-                          />
-                        </label>
-
-                        <label class="fld">
-                          <span>Age cap (h)</span>
-                          <input
-                            type="number"
-                            min="1"
-                            max="8760"
-                            [(ngModel)]="ef.maxChainAgeHoursOverride"
-                            [placeholder]="v.defaultMaxChainAgeHours"
-                          />
-                        </label>
-
-                        <label
-                          class="fld"
-                          title="Round-trip broker cost per lot, in account currency. Subtracted from a rung's reward so a win recovers the deficit net of the commission the rung itself pays. Measure it from recent closes; blank models no cost."
-                        >
-                          <span>Cost /lot</span>
-                          <input
-                            type="number"
-                            min="0"
-                            max="10000"
-                            step="0.5"
-                            [(ngModel)]="ef.rungCostPerLotOverride"
-                            placeholder="0"
-                          />
-                        </label>
-
-                        <div class="edit-actions">
-                          <button type="button" (click)="saveOverrides(s)" [disabled]="saving()">
-                            Save
-                          </button>
-                          <button type="button" class="ghost" (click)="cancelEdit()">Cancel</button>
-                          @if (hasOverrides(s)) {
-                            <button type="button" class="ghost" (click)="clearOverrides(s)">
-                              Clear all
-                            </button>
+                          @if (s.effectivelyActive) {
+                            <span class="pill ok">enabled</span>
+                          } @else if (s.enabled) {
+                            <span class="pill warn" title="Profile does not allow martingale"
+                              >inert</span
+                            >
+                          } @else {
+                            <span class="pill">off</span>
                           }
                         </div>
-                      </div>
-                    </td>
-                  </tr>
-                }
-              }
-            </tbody>
-          </table>
-        </div>
+                      </td>
+                      <td class="n" [class.inherit]="(s.maxDepthOverride ?? null) === null">
+                        {{ s.effectiveMaxDepth }}
+                      </td>
+                      <!--
+                        Worst case is shown on every row, not just enabled ones, because it is the
+                        number that decides whether the depth cap is safe: a rung is exempt from
+                        Reduced recovery, so these caps are all that keeps a chain inside the halt
+                        boundary. The threshold is the profile's own Halted %, not a hard-coded 20.
+                      -->
+                      <td
+                        class="n"
+                        [class.inherit]="(s.maxDepthOverride ?? null) === null"
+                        [class.danger]="s.worstCaseDrawdownPct >= v.haltedDrawdownPct"
+                        [class.warn]="
+                          s.worstCaseDrawdownPct >= v.reducedDrawdownPct &&
+                          s.worstCaseDrawdownPct < v.haltedDrawdownPct
+                        "
+                      >
+                        {{ s.worstCaseDrawdownPct | number: '1.0-1' }}%
+                      </td>
+                      <td class="n" [class.inherit]="(s.targetProfitROverride ?? null) === null">
+                        {{ s.effectiveTargetProfitR }}R
+                      </td>
+                      <td
+                        class="n"
+                        [class.inherit]="(s.maxStakePctEquityOverride ?? null) === null"
+                      >
+                        {{ s.effectiveMaxStakePctEquity }}%
+                      </td>
+                      <td>
+                        @if (s.hasOpenChain) {
+                          <span class="chain">
+                            depth {{ s.chainDepth }} · owing
+                            {{ s.chainDeficitAmount | number: '1.0-0' }}
+                          </span>
+                        } @else {
+                          <span class="muted">—</span>
+                        }
+                      </td>
+                      <td class="c">
+                        <button type="button" class="link" (click)="startEdit(s)">
+                          {{ hasOverrides(s) ? 'Overrides ✎' : 'Override' }}
+                        </button>
+                      </td>
+                    </tr>
+
+                    @if (editing() === s.symbol) {
+                      <tr class="editrow">
+                        <td colspan="8">
+                          <!--
+                            An empty field means INHERIT, not zero. Stated explicitly because a blank
+                            numeric input reading as 0 is exactly how a stake ceiling of 0 would get
+                            set — which abandons every chain on its first rung.
+                          -->
+                          <div class="edit">
+                            <span class="edit-title">{{ s.symbol }} overrides</span>
+                            <span class="edit-hint">blank = inherit the profile default</span>
+
+                            <label class="fld">
+                              <span>Depth cap</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="20"
+                                [(ngModel)]="ef.maxDepthOverride"
+                                [placeholder]="v.defaultMaxDepth"
+                              />
+                            </label>
+
+                            <label class="fld">
+                              <span>Target (R)</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="10"
+                                step="0.1"
+                                [(ngModel)]="ef.targetProfitROverride"
+                                [placeholder]="v.defaultTargetProfitR"
+                              />
+                            </label>
+
+                            <label class="fld">
+                              <span>Max stake (%)</span>
+                              <input
+                                type="number"
+                                min="0.01"
+                                max="100"
+                                step="0.5"
+                                [(ngModel)]="ef.maxStakePctEquityOverride"
+                                [placeholder]="v.defaultMaxStakePctEquity"
+                              />
+                            </label>
+
+                            <label class="fld">
+                              <span>Age cap (h)</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="8760"
+                                [(ngModel)]="ef.maxChainAgeHoursOverride"
+                                [placeholder]="v.defaultMaxChainAgeHours"
+                              />
+                            </label>
+
+                            <label
+                              class="fld"
+                              title="Round-trip broker cost per lot, in account currency. Subtracted from a rung's reward so a win recovers the deficit net of the commission the rung itself pays. Measure it from recent closes; blank models no cost."
+                            >
+                              <span>Cost /lot</span>
+                              <input
+                                type="number"
+                                min="0"
+                                max="10000"
+                                step="0.5"
+                                [(ngModel)]="ef.rungCostPerLotOverride"
+                                placeholder="0"
+                              />
+                            </label>
+
+                            <div class="edit-actions">
+                              <button
+                                type="button"
+                                (click)="saveOverrides(s)"
+                                [disabled]="saving()"
+                              >
+                                Save
+                              </button>
+                              <button type="button" class="ghost" (click)="cancelEdit()">
+                                Cancel
+                              </button>
+                              @if (hasOverrides(s)) {
+                                <button type="button" class="ghost" (click)="clearOverrides(s)">
+                                  Clear all
+                                </button>
+                              }
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    }
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+        </section>
       }
     } @else {
       <app-empty-state title="Select an account to view its ladders." />
@@ -596,517 +676,6 @@ interface ModeChainSummary {
       </div>
     }
   `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-
-      .internals-link {
-        margin: 0 0 1rem;
-        font-size: 0.875rem;
-      }
-
-      /*
-       * Mode banner. Colour-coded by consequence rather than by state: Live is the only one that
-       * moves money, so it is the only one that reads as an alarm.
-       */
-      .mode {
-        border: 1px solid var(--border);
-        border-left-width: 4px;
-        border-radius: 12px;
-        padding: var(--space-3) var(--space-4);
-        margin-bottom: var(--space-4);
-        background: var(--bg-secondary);
-      }
-      .mode[data-mode='Live'] {
-        border-left-color: #ff3b30;
-        background: color-mix(in srgb, #ff3b30 7%, var(--bg-secondary));
-      }
-      .mode[data-mode='Shadow'] {
-        border-left-color: #0a84ff;
-      }
-      .mode[data-mode='Off'] {
-        border-left-color: #8e8e93;
-      }
-      .mode-row {
-        display: flex;
-        align-items: baseline;
-        flex-wrap: wrap;
-        gap: var(--space-2) var(--space-3);
-      }
-      .mode-badge {
-        font-weight: 700;
-        font-size: 12px;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        padding: 3px 10px;
-        border-radius: 999px;
-        background: color-mix(in srgb, currentColor 14%, transparent);
-      }
-      .mode[data-mode='Live'] .mode-badge {
-        color: #ff3b30;
-      }
-      .mode[data-mode='Shadow'] .mode-badge {
-        color: #0a84ff;
-      }
-      .mode[data-mode='Off'] .mode-badge {
-        color: #8e8e93;
-      }
-      .mode-copy {
-        font-size: 13px;
-        color: var(--text-secondary);
-        flex: 1 1 320px;
-      }
-      .mode-scope {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-      }
-      .mode-actions {
-        display: flex;
-        align-items: center;
-        gap: 0;
-        margin-top: var(--space-3);
-      }
-      .mode-actions .saving {
-        margin-left: var(--space-3);
-      }
-      /* Segmented control: the three modes read as one switch with a
-         selected segment, not three words of plain text. */
-      .mode-btn {
-        padding: 5px 14px;
-        border: 1px solid var(--border);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 13px;
-        cursor: pointer;
-        margin-right: -1px;
-      }
-      .mode-btn:first-of-type {
-        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-      }
-      .mode-btn:nth-of-type(3) {
-        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      }
-      .mode-btn:hover:not(:disabled) {
-        color: var(--text-primary);
-      }
-      .mode-btn.sel {
-        background: var(--accent);
-        border-color: var(--accent);
-        color: #fff;
-        font-weight: 600;
-        cursor: default;
-        position: relative;
-        z-index: 1;
-      }
-      .mode[data-mode='Live'] .mode-btn.sel {
-        background: #ff3b30;
-        border-color: #ff3b30;
-      }
-      .mode-btn:disabled:not(.sel) {
-        opacity: 0.5;
-        cursor: default;
-      }
-
-      .acct-bar {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        margin-bottom: var(--space-4);
-      }
-      .acct-bar select {
-        padding: 6px 10px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-      }
-      .saving {
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-
-      .banner {
-        padding: 10px 14px;
-        border-radius: 8px;
-        margin-bottom: var(--space-4);
-        font-size: 13px;
-      }
-      .banner.err {
-        background: color-mix(in srgb, #ff3b30 12%, transparent);
-        color: #ff3b30;
-        border: 1px solid color-mix(in srgb, #ff3b30 35%, transparent);
-      }
-      .banner.info {
-        display: flex;
-        align-items: flex-start;
-        gap: var(--space-3);
-        background: color-mix(in srgb, #0a84ff 10%, transparent);
-        color: var(--text-primary);
-        border: 1px solid color-mix(in srgb, #0a84ff 35%, transparent);
-      }
-      .notice-text {
-        flex: 1;
-        white-space: pre-line;
-      }
-      .notice-close {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        padding: 0 4px;
-      }
-
-      /* Confirmation dialog (see MartingaleAsk). */
-      .ask-backdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 1100;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-4);
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(2px);
-      }
-      .ask {
-        width: min(540px, 100%);
-        max-height: 90vh;
-        overflow: auto;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        padding: var(--space-5);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-top: 3px solid #0a84ff;
-        border-radius: 12px;
-        box-shadow: var(--shadow-lg);
-      }
-      .ask.danger {
-        border-top-color: #ff3b30;
-      }
-      .ask h3 {
-        margin: 0;
-        font-size: 1rem;
-      }
-      .ask p {
-        margin: 0;
-        font-size: 13px;
-        line-height: 1.5;
-        color: var(--text-secondary);
-      }
-      .ask-chains {
-        font-size: 12px;
-        padding: 8px 10px;
-        border-radius: 8px;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-      }
-      .ask-chains ul {
-        margin: 4px 0 0;
-        padding-left: 18px;
-      }
-      .ask-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .ask-field textarea {
-        resize: vertical;
-        padding: 6px 8px;
-        border-radius: 6px;
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font: inherit;
-      }
-      .ask-ack {
-        display: flex;
-        align-items: flex-start;
-        gap: 8px;
-        font-size: 13px;
-        color: var(--text-primary);
-      }
-      .ask-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-2);
-      }
-      .ask-actions .danger-btn {
-        background: #ff3b30;
-        border-color: #ff3b30;
-        color: #fff;
-      }
-
-      .gate {
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        padding: var(--space-4);
-        margin-bottom: var(--space-4);
-        background: var(--bg-secondary);
-      }
-      .gate-off {
-        border-color: color-mix(in srgb, #ff9500 40%, var(--border));
-      }
-      .gate-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-      }
-      .dot {
-        width: 9px;
-        height: 9px;
-        border-radius: 50%;
-        background: #8e8e93;
-      }
-      .dot.on {
-        background: #34c759;
-      }
-      .pill {
-        font-size: 11px;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: color-mix(in srgb, #8e8e93 18%, transparent);
-        color: var(--text-secondary);
-      }
-      .pill.on {
-        background: color-mix(in srgb, #34c759 18%, transparent);
-        color: var(--tone-green);
-      }
-      .pill.danger-pill {
-        background: color-mix(in srgb, #ff3b30 16%, transparent);
-        color: #ff3b30;
-      }
-      .pill.inert-pill {
-        background: color-mix(in srgb, #ff9500 18%, transparent);
-        color: #b25000;
-      }
-      .gate-note {
-        margin: var(--space-2) 0 0;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .gate-note.warn {
-        color: #b25000;
-      }
-      /* Profile default editor */
-      .pform {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-3) var(--space-4);
-        margin-top: var(--space-3);
-        align-items: flex-end;
-      }
-      .fld {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .fld.master {
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-        font-size: 13px;
-        color: var(--text-primary);
-        cursor: pointer;
-      }
-      .fld input[type='number'] {
-        width: 120px;
-        padding: 6px 8px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .proj {
-        margin: var(--space-3) 0 0;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .proj.warn {
-        color: #b25000;
-      }
-      .proj.danger {
-        color: #ff3b30;
-      }
-      .pactions {
-        display: flex;
-        gap: var(--space-2);
-        margin-top: var(--space-3);
-      }
-      .pactions button,
-      .edit-actions button,
-      .ask-actions button {
-        padding: 6px 14px;
-        border-radius: 8px;
-        border: 1px solid var(--border);
-        background: var(--accent, #0a84ff);
-        color: #fff;
-        font-size: 13px;
-        cursor: pointer;
-      }
-      .pactions button.secondary {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-weight: 600;
-      }
-      .pactions button.secondary:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-      }
-      .pactions button.ghost,
-      .edit-actions button.ghost,
-      .ask-actions button.ghost {
-        background: transparent;
-        color: var(--text-secondary);
-      }
-      .pactions button:disabled,
-      .ask-actions button:disabled {
-        opacity: 0.55;
-        cursor: default;
-      }
-
-      /* Per-symbol override editor */
-      button.link {
-        background: none;
-        border: none;
-        color: var(--accent, #0a84ff);
-        font-size: 12px;
-        cursor: pointer;
-        padding: 0;
-      }
-      tr.editrow > td {
-        background: var(--bg-secondary);
-      }
-      .edit {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: flex-end;
-        gap: var(--space-3) var(--space-4);
-        padding: var(--space-2) 0;
-      }
-      .edit-title {
-        font-weight: 600;
-        font-size: 13px;
-      }
-      .edit-hint {
-        font-size: 11px;
-        color: var(--text-tertiary);
-      }
-      .edit-actions {
-        display: flex;
-        gap: var(--space-2);
-      }
-
-      .chains {
-        border: 1px solid color-mix(in srgb, #ff9500 35%, var(--border));
-        border-radius: 12px;
-        padding: var(--space-4);
-        margin-bottom: var(--space-4);
-      }
-      .chains h2 {
-        margin: 0 0 var(--space-2);
-        font-size: 14px;
-      }
-      .chains ul {
-        margin: 0;
-        padding-left: 18px;
-        font-size: 13px;
-      }
-      .chains-note {
-        margin: var(--space-2) 0 0;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-
-      .table-summary {
-        margin: 0 0 var(--space-2);
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .table-summary b {
-        color: var(--text-primary);
-        font-weight: 600;
-      }
-      /* Wide content scrolls inside its own container so the page never scrolls sideways. */
-      .table-wrap {
-        overflow-x: auto;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-      }
-      table.mtg {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-      table.mtg th,
-      table.mtg td {
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        text-align: left;
-        white-space: nowrap;
-      }
-      table.mtg th {
-        background: var(--bg-tertiary);
-        font-weight: 600;
-        color: var(--text-secondary);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      table.mtg tbody tr:nth-child(even):not(.active):not(.editrow) {
-        background: color-mix(in srgb, var(--bg-tertiary) 45%, transparent);
-      }
-      table.mtg tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .n {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .c {
-        text-align: center;
-      }
-      .sym {
-        font-weight: 600;
-      }
-      .ladder-cell {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      tr.active {
-        background: color-mix(in srgb, #34c759 8%, transparent);
-      }
-      td.inherit {
-        color: var(--text-tertiary);
-      }
-      .danger {
-        color: #ff3b30;
-        font-weight: 700;
-      }
-      .warn {
-        color: #b25000;
-        font-weight: 600;
-      }
-      .chain {
-        color: #b25000;
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-    `,
-  ],
 })
 export class MartingalePageComponent {
   private readonly martingale = inject(MartingaleService);
@@ -1126,6 +695,36 @@ export class MartingalePageComponent {
   readonly overrideCount = computed(
     () => (this.view()?.symbols ?? []).filter((s) => this.hasOverrides(s)).length,
   );
+
+  // ── Client-side view over the symbols already loaded (no request) ─────────
+  readonly symFilters: readonly { key: SymbolFilter; label: string }[] = [
+    { key: 'all', label: 'All' },
+    { key: 'laddered', label: 'Switched on' },
+    { key: 'overrides', label: 'With overrides' },
+    { key: 'chain', label: 'Open chain' },
+  ];
+  readonly symFilter = signal<SymbolFilter>('all');
+  readonly shownSymbols = computed(() => {
+    const f = this.symFilter();
+    return (this.view()?.symbols ?? []).filter((s) => this.symbolInFilter(s, f));
+  });
+
+  symCount(f: SymbolFilter): number {
+    return (this.view()?.symbols ?? []).filter((s) => this.symbolInFilter(s, f)).length;
+  }
+
+  private symbolInFilter(s: MartingaleSymbolDto, f: SymbolFilter): boolean {
+    switch (f) {
+      case 'laddered':
+        return s.enabled;
+      case 'overrides':
+        return this.hasOverrides(s);
+      case 'chain':
+        return s.hasOpenChain;
+      default:
+        return true;
+    }
+  }
 
   readonly savingProfile = signal(false);
   readonly savingMode = signal(false);

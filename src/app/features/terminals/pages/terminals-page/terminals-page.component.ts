@@ -27,6 +27,12 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-terminal-wizard/add-broker-terminal-wizard.component';
 import { Router, RouterLink } from '@angular/router';
 import { supervisorUpdatePill, supervisorVersionText } from '../../supervisor-status.logic';
+import {
+  fleetSummary,
+  orderSessions,
+  runningOnInstall,
+  sessionTone,
+} from '../../terminals-page.logic';
 import { EAInstancesService } from '@core/services/ea-instances.service';
 import type { EAInstanceDto } from '@core/api/api.types';
 
@@ -89,7 +95,9 @@ interface RotatedKey {
         title="Terminals"
         subtitle="Launch, monitor and close MT5 terminals through the supervisor running on each computer."
       >
-        <a class="btn btn-primary" routerLink="/organisation/terminals/add-computer">Add a computer</a>
+        <a class="btn btn-primary btn-head" routerLink="/organisation/terminals/add-computer"
+          >Add a computer</a
+        >
         <!-- Bound to the resources' first-load flag, the old button never changed on a click. -->
         <app-refresh-button
           [refreshing]="daemonsResource.refreshing() || sessionsResource.refreshing()"
@@ -102,12 +110,93 @@ interface RotatedKey {
       @if (initialLoading()) {
         <app-card-skeleton [lines]="6" />
       } @else {
-        <!-- ── Daemons ───────────────────────────────────────────── -->
+        <!-- ── Fleet summary: the answer to "is anything wrong?" first ─────── -->
+        @if (summary(); as f) {
+          <section class="block" aria-label="Fleet summary">
+            <div class="kpis">
+              <div
+                class="kpi"
+                [class.pos]="f.daemonsTotal > 0 && f.daemonsOnline === f.daemonsTotal"
+                [class.neg]="f.daemonsOnline < f.daemonsTotal"
+              >
+                <div class="lbl">Computers online</div>
+                <div class="k-value">
+                  {{ f.daemonsOnline }} <span class="of">of {{ f.daemonsTotal }}</span>
+                </div>
+                <div class="k-hint">Supervisor daemons reporting in</div>
+              </div>
+              <div class="kpi" [class.pos]="f.running > 0">
+                <div class="lbl">Terminals running</div>
+                <div class="k-value">{{ f.running }}</div>
+                <div class="k-hint">
+                  @if (f.inFlight > 0) {
+                    {{ f.inFlight }} starting or stopping
+                  } @else {
+                    Launched by a supervisor
+                  }
+                </div>
+              </div>
+              <div class="kpi" [class.neg]="f.crashed > 0">
+                <div class="lbl">Crashed</div>
+                <div class="k-value">{{ f.crashed }}</div>
+                <div class="k-hint">
+                  {{ includeClosed ? 'Incl. the last 24 h' : 'Open sessions only' }} ·
+                  {{ f.closed }} closed
+                </div>
+              </div>
+              <div
+                class="kpi"
+                [class.pos]="activeEas().length > 0"
+                [class.warn]="eaInstances().length > 0 && activeEas().length === 0"
+              >
+                <div class="lbl">EA instances active</div>
+                <div class="k-value">
+                  {{ activeEas().length }} <span class="of">of {{ eaInstances().length }}</span>
+                </div>
+                <div class="k-hint">Sending heartbeats (any launch method)</div>
+              </div>
+            </div>
+
+            @if (f.attention.length > 0) {
+              <div class="attention" [class.bad]="hasBadAttention()" role="status">
+                <strong
+                  >{{ f.attention.length }} thing{{ f.attention.length === 1 ? '' : 's' }} need{{
+                    f.attention.length === 1 ? 's' : ''
+                  }}
+                  a look</strong
+                >
+                <ul>
+                  @for (a of f.attention; track $index) {
+                    <li>
+                      <span
+                        class="dot"
+                        [class.bad]="a.tone === 'bad'"
+                        [class.warn]="a.tone === 'warn'"
+                        >{{ a.text }}</span
+                      >
+                    </li>
+                  }
+                </ul>
+              </div>
+            } @else if (f.daemonsTotal > 0) {
+              <p class="allclear">
+                <span class="dot ok">All computers online, no crashed sessions.</span>
+              </p>
+            }
+          </section>
+        }
+
+        <!-- ── Computers (daemons) ───────────────────────────────────── -->
         <section class="block">
           <header class="block-head">
-            <h3>
-              Daemons <span class="count">{{ daemons().length }}</span>
-            </h3>
+            <div>
+              <h3>
+                Computers <span class="count">{{ daemons().length }}</span>
+              </h3>
+              <p class="block-sub">
+                The supervisor daemon on each host, its MT5 installs and controls.
+              </p>
+            </div>
           </header>
 
           @if (daemonsErr()) {
@@ -127,252 +216,305 @@ interface RotatedKey {
             <div class="cards">
               @for (d of daemons(); track d.id) {
                 <article class="card" [attr.data-online]="d.isOnline">
-                  <header class="card-head">
-                    <div>
-                      <h4>{{ d.name }}</h4>
-                      <p class="mono small muted">{{ d.daemonId }}</p>
-                    </div>
-                    <span class="status-pill" [attr.data-online]="d.isOnline">
-                      {{ d.isOnline ? 'online' : 'offline' }}
-                    </span>
-                  </header>
-                  <p class="small supervisor-line">
-                    <span class="muted">{{ supervisorText(d.supervisor) }}</span>
-                    @if (supervisorPill(d.supervisor); as pill) {
-                      <span class="sup-pill" [attr.data-tone]="pill.tone" [title]="pill.title">{{ pill.text }}</span>
+                  <!-- Identity + status -->
+                  <div class="card-sec">
+                    <header class="card-head">
+                      <div>
+                        <h4>{{ d.name }}</h4>
+                        <p class="ident mono">{{ d.daemonId }} · {{ d.baseUrl }}</p>
+                      </div>
+                      <div class="state">
+                        <span class="dot" [class.ok]="d.isOnline" [class.bad]="!d.isOnline">{{
+                          d.isOnline ? 'Online' : 'Offline'
+                        }}</span>
+                        <span
+                          class="small faint"
+                          [title]="
+                            'Last seen ' +
+                            (d.lastSeenAt | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') +
+                            ' UTC'
+                          "
+                          >seen {{ d.lastSeenAt | relativeTime }}</span
+                        >
+                      </div>
+                    </header>
+                    <p class="meta">
+                      <span>{{ supervisorText(d.supervisor) }}</span>
+                      @if (supervisorPill(d.supervisor); as pill) {
+                        <span
+                          class="pill"
+                          [class.ok]="pill.tone === 'ok'"
+                          [class.warn]="pill.tone === 'warn'"
+                          [class.bad]="pill.tone === 'bad'"
+                          [class.info]="pill.tone === 'info'"
+                          [title]="pill.title"
+                          >{{ pill.text }}</span
+                        >
+                      }
+                      <span class="sep">·</span>
+                      <span [title]="(d.registeredAt | date: 'yyyy-MM-dd HH:mm' : 'UTC') + ' UTC'"
+                        >Registered {{ d.registeredAt | date: 'yyyy-MM-dd' : 'UTC' }}</span
+                      >
+                    </p>
+                    @if (!d.isOnline) {
+                      <p class="offline-note">
+                        Not reporting in — launching, closing and the controls below are unavailable
+                        until it is back.
+                      </p>
                     }
-                  </p>
-                  <dl class="kv">
-                    <dt>Base URL</dt>
-                    <dd class="mono small">{{ d.baseUrl }}</dd>
-                    <dt>Registered</dt>
-                    <dd class="small">{{ d.registeredAt | date: 'yyyy-MM-dd HH:mm' }} UTC</dd>
-                    <dt>Last seen</dt>
-                    <dd class="small">
-                      <span [title]="d.lastSeenAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
-                        {{ d.lastSeenAt | relativeTime }}
-                      </span>
-                    </dd>
-                  </dl>
-                  <details class="installs">
-                    <summary>
-                      {{ d.installs.length }} install{{ d.installs.length === 1 ? '' : 's' }}
-                      advertised
-                    </summary>
-                    @for (i of d.installs; track i.installId) {
-                      <div class="install-row">
-                        <span class="mono small">{{ i.installId }}</span>
-                        <span class="small">{{ i.name }}</span>
-                        @if (i.brokerName) {
-                          <span class="small muted">· {{ i.brokerName }}</span>
-                        }
-                        @if (i.accountLogin) {
-                          <span class="small muted">· #{{ i.accountLogin }}</span>
-                        }
-                        @if (i.isDefault) {
-                          <span
-                            class="install-default-tag"
-                            title="Canonical source bundle — clone-mt5 reads from this install to seed every broker clone. Cannot be removed via the UI; the daemon refuses without an explicit ?force=true override."
-                          >
-                            default
-                          </span>
-                        } @else {
-                          <button
-                            type="button"
-                            class="install-row-delete"
-                            title="Remove from supervisor.yaml"
-                            [disabled]="deletingInstall() === d.id + ':' + i.installId"
-                            (click)="onDeleteInstall(d.id, i.installId)"
-                          >
-                            @if (deletingInstall() === d.id + ':' + i.installId) {
-                              …
-                            } @else {
-                              ×
+                  </div>
+
+                  <!-- Installs + launch -->
+                  <div class="card-sec">
+                    <div class="installs-head">
+                      <span class="lbl"
+                        >{{ d.installs.length }} install{{
+                          d.installs.length === 1 ? '' : 's'
+                        }}
+                        advertised</span
+                      >
+                    </div>
+                    @if (d.installs.length > 0) {
+                      <ul class="installs">
+                        @for (i of d.installs; track i.installId) {
+                          <li class="install-row">
+                            <span class="i-main">
+                              <span class="i-line">
+                                <span class="i-id">{{ i.installId }}</span>
+                                <span class="muted">{{ i.name }}</span>
+                              </span>
+                              @if (i.brokerName || i.accountLogin) {
+                                <span class="i-line faint">
+                                  {{ i.brokerName }}{{ i.brokerName && i.accountLogin ? ' · ' : ''
+                                  }}{{ i.accountLogin ? '#' + i.accountLogin : '' }}
+                                </span>
+                              }
+                            </span>
+                            @if (runningCount(d.id, i.installId); as n) {
+                              <span
+                                class="dot ok i-run"
+                                title="Sessions launched by this supervisor that are running now"
+                                >{{ n }} running</span
+                              >
                             }
-                          </button>
+                            @if (i.isDefault) {
+                              <span
+                                class="install-default-tag"
+                                title="Canonical source bundle — clone-mt5 reads from this install to seed every broker clone. Cannot be removed via the UI; the daemon refuses without an explicit ?force=true override."
+                              >
+                                default
+                              </span>
+                            } @else {
+                              <button
+                                type="button"
+                                class="install-row-delete"
+                                title="Remove from supervisor.yaml"
+                                [attr.aria-label]="'Remove install ' + i.installId"
+                                [disabled]="deletingInstall() === d.id + ':' + i.installId"
+                                (click)="onDeleteInstall(d.id, i.installId)"
+                              >
+                                @if (deletingInstall() === d.id + ':' + i.installId) {
+                                  …
+                                } @else {
+                                  ×
+                                }
+                              </button>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
+
+                    <form class="launch-form" (submit)="$event.preventDefault(); onLaunch(d)">
+                      <!-- The per-daemon value starts undefined, which left the
+                           select with nothing selected (a blank control) instead
+                           of the placeholder. Default it to '' on read. -->
+                      <select
+                        [ngModel]="launchInstallByDaemon[d.id] ?? ''"
+                        (ngModelChange)="launchInstallByDaemon[d.id] = $event"
+                        name="install-{{ d.id }}"
+                        class="input"
+                        [disabled]="!d.isOnline || launchingForDaemon() === d.id"
+                        aria-label="Install to launch"
+                      >
+                        <option value="" disabled>Choose an install to launch…</option>
+                        @for (i of d.installs; track i.installId) {
+                          <option [value]="i.installId">{{ i.installId }} · {{ i.name }}</option>
+                        }
+                      </select>
+                      <button
+                        type="submit"
+                        class="btn btn-primary"
+                        [disabled]="
+                          !d.isOnline ||
+                          !launchInstallByDaemon[d.id] ||
+                          launchingForDaemon() === d.id
+                        "
+                      >
+                        @if (launchingForDaemon() === d.id) {
+                          Launching…
+                        } @else {
+                          Launch terminal
+                        }
+                      </button>
+                    </form>
+                  </div>
+
+                  <!-- Phase-15 waves 1-3: add broker (wizard), observability, daemon ops.
+                       Confirms for the risky ones live in the handlers. -->
+                  <div class="card-sec">
+                    <div class="daemon-ops">
+                      <div class="grp">
+                        <!-- Opens the 3-stage Add Broker Terminal wizard; on Done we refresh
+                             the daemons list so the new install shows up above. -->
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          [disabled]="!d.isOnline"
+                          (click)="openWizardFor(d.id)"
+                        >
+                          + Add broker terminal
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          [class.on]="logsOpenFor() === d.id"
+                          [attr.aria-expanded]="logsOpenFor() === d.id"
+                          [disabled]="!d.isOnline"
+                          (click)="toggleLogs(d.id)"
+                        >
+                          @if (logsOpenFor() === d.id) {
+                            Hide logs
+                          } @else {
+                            View logs
+                          }
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-ghost btn-sm"
+                          [class.on]="orphansOpenFor() === d.id"
+                          [attr.aria-expanded]="orphansOpenFor() === d.id"
+                          [disabled]="!d.isOnline"
+                          (click)="toggleOrphans(d.id)"
+                          title="MT5 terminal64.exe processes running on the daemon host that the daemon is not tracking — typically pre-daemon manual launches or stale post-crash leftovers."
+                        >
+                          @if (orphansOpenFor() === d.id) {
+                            Hide orphans
+                          } @else {
+                            Orphan processes
+                          }
+                        </button>
+                      </div>
+                      <div class="grp">
+                        <button
+                          type="button"
+                          class="btn btn-secondary btn-sm"
+                          [disabled]="!d.isOnline || daemonOpInFlight() === d.id + ':restart'"
+                          (click)="onRestartDaemon(d.id, d.name)"
+                        >
+                          @if (daemonOpInFlight() === d.id + ':restart') {
+                            Restarting…
+                          } @else {
+                            Restart daemon
+                          }
+                        </button>
+                        <button
+                          type="button"
+                          class="btn btn-danger btn-sm"
+                          [disabled]="!d.isOnline || daemonOpInFlight() === d.id + ':rotate'"
+                          (click)="onRotateApiKey(d.id, d.name)"
+                        >
+                          @if (daemonOpInFlight() === d.id + ':rotate') {
+                            Rotating…
+                          } @else {
+                            Rotate API key
+                          }
+                        </button>
+                      </div>
+                    </div>
+
+                    @if (logsOpenFor() === d.id) {
+                      <div class="panel-head">
+                        <span class="lbl">Supervisor log · last 200 lines</span>
+                        <span class="small faint">refreshes every 5 s</span>
+                      </div>
+                      <pre class="logs-panel">{{ logsBuffer() || 'Loading…' }}</pre>
+                    }
+
+                    @if (orphansOpenFor() === d.id) {
+                      <div class="orphans-panel">
+                        <div class="panel-head">
+                          <span class="lbl">Orphan MT5 processes</span>
+                          <span class="small faint">rescans every 5 s</span>
+                        </div>
+                        @if (orphansLoading() && orphansBuffer().length === 0) {
+                          <p class="small muted">Scanning host for untracked terminal64.exe…</p>
+                        } @else if (orphansErr()) {
+                          <p class="small warn">{{ orphansErr() }}</p>
+                        } @else if (orphansBuffer().length === 0) {
+                          <p class="small muted">No orphan MT5 processes on this host.</p>
+                        } @else {
+                          <p class="small warn">
+                            {{ orphansBuffer().length }} untracked terminal64.exe — choose
+                            carefully; killing stops MT5 immediately and disconnects whatever was
+                            attached.
+                          </p>
+                          <table class="orphans-table">
+                            <thead>
+                              <tr>
+                                <th class="num">PID</th>
+                                <th>Install hint</th>
+                                <th>Started</th>
+                                <th>Executable</th>
+                                <th><span class="sr-only">Actions</span></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              @for (o of orphansBuffer(); track o.pid) {
+                                <tr>
+                                  <td class="num mono">{{ o.pid }}</td>
+                                  <td>
+                                    @if (o.installHint) {
+                                      <code>{{ o.installHint }}</code>
+                                    } @else {
+                                      <span class="muted">—</span>
+                                    }
+                                  </td>
+                                  <td class="num">{{ o.startedAt | date: 'yyyy-MM-dd HH:mm' }}</td>
+                                  <td class="exe-cell" [title]="o.exePath ?? o.cmdline">
+                                    {{ o.exePath ?? o.cmdline }}
+                                  </td>
+                                  <td class="actions">
+                                    <button
+                                      type="button"
+                                      class="btn btn-danger btn-sm"
+                                      [disabled]="killingOrphanPid() === o.pid"
+                                      (click)="onKillOrphan(d.id, o.pid, false)"
+                                    >
+                                      @if (killingOrphanPid() === o.pid) {
+                                        Killing…
+                                      } @else {
+                                        Kill
+                                      }
+                                    </button>
+                                    <button
+                                      type="button"
+                                      class="btn btn-danger btn-sm"
+                                      [disabled]="killingOrphanPid() === o.pid"
+                                      (click)="onKillOrphan(d.id, o.pid, true)"
+                                      title="SIGKILL immediately — use when MT5 is unresponsive."
+                                    >
+                                      Force
+                                    </button>
+                                  </td>
+                                </tr>
+                              }
+                            </tbody>
+                          </table>
                         }
                       </div>
                     }
-                  </details>
-
-                  <form class="launch-form" (submit)="$event.preventDefault(); onLaunch(d)">
-                    <!-- The per-daemon value starts undefined, which left the
-                         select with nothing selected (a blank control) instead
-                         of the placeholder. Default it to '' on read. -->
-                    <select
-                      [ngModel]="launchInstallByDaemon[d.id] ?? ''"
-                      (ngModelChange)="launchInstallByDaemon[d.id] = $event"
-                      name="install-{{ d.id }}"
-                      class="input"
-                      [disabled]="!d.isOnline || launchingForDaemon() === d.id"
-                      aria-label="Install to launch"
-                    >
-                      <option value="" disabled>Choose an install to launch…</option>
-                      @for (i of d.installs; track i.installId) {
-                        <option [value]="i.installId">{{ i.installId }} · {{ i.name }}</option>
-                      }
-                    </select>
-                    <button
-                      type="submit"
-                      class="btn btn-primary"
-                      [disabled]="
-                        !d.isOnline || !launchInstallByDaemon[d.id] || launchingForDaemon() === d.id
-                      "
-                    >
-                      @if (launchingForDaemon() === d.id) {
-                        Launching…
-                      } @else {
-                        Launch terminal
-                      }
-                    </button>
-                  </form>
-
-                  <!-- Phase-15 wave 1: opens the 3-stage Add Broker
-                       Terminal wizard.  The wizard handles clone-mt5
-                       + manual-step prompts + register-install; on
-                       Done we refresh the daemons list so the new
-                       install shows up in the dropdown above. -->
-                  <button
-                    type="button"
-                    class="btn btn-secondary btn-add-broker"
-                    [disabled]="!d.isOnline"
-                    (click)="openWizardFor(d.id)"
-                  >
-                    + Add broker terminal
-                  </button>
-
-                  <!-- Phase-15 waves 2 + 3: daemon ops + observability.
-                       Compact button strip with confirms for the
-                       destructive ones; logs/config open inline. -->
-                  <div class="daemon-ops">
-                    <button
-                      type="button"
-                      class="btn-link"
-                      [disabled]="!d.isOnline || daemonOpInFlight() === d.id + ':restart'"
-                      (click)="onRestartDaemon(d.id, d.name)"
-                    >
-                      @if (daemonOpInFlight() === d.id + ':restart') {
-                        Restarting…
-                      } @else {
-                        Restart daemon
-                      }
-                    </button>
-                    <span class="dot">·</span>
-                    <button
-                      type="button"
-                      class="btn-link warn"
-                      [disabled]="!d.isOnline || daemonOpInFlight() === d.id + ':rotate'"
-                      (click)="onRotateApiKey(d.id, d.name)"
-                    >
-                      @if (daemonOpInFlight() === d.id + ':rotate') {
-                        Rotating…
-                      } @else {
-                        Rotate API key
-                      }
-                    </button>
-                    <span class="dot">·</span>
-                    <button
-                      type="button"
-                      class="btn-link"
-                      [disabled]="!d.isOnline"
-                      (click)="toggleLogs(d.id)"
-                    >
-                      @if (logsOpenFor() === d.id) {
-                        Hide logs
-                      } @else {
-                        View logs
-                      }
-                    </button>
-                    <span class="dot">·</span>
-                    <button
-                      type="button"
-                      class="btn-link warn"
-                      [disabled]="!d.isOnline"
-                      (click)="toggleOrphans(d.id)"
-                      title="MT5 terminal64.exe processes running on the daemon host that the daemon is not tracking — typically pre-daemon manual launches or stale post-crash leftovers."
-                    >
-                      @if (orphansOpenFor() === d.id) {
-                        Hide orphans
-                      } @else {
-                        Orphan processes
-                      }
-                    </button>
                   </div>
-
-                  @if (logsOpenFor() === d.id) {
-                    <pre class="logs-panel">{{ logsBuffer() || 'Loading…' }}</pre>
-                  }
-
-                  @if (orphansOpenFor() === d.id) {
-                    <div class="orphans-panel">
-                      @if (orphansLoading()) {
-                        <p class="small muted">Scanning host for untracked terminal64.exe…</p>
-                      } @else if (orphansErr()) {
-                        <p class="small warn">{{ orphansErr() }}</p>
-                      } @else if (orphansBuffer().length === 0) {
-                        <p class="small muted">No orphan MT5 processes on this host.</p>
-                      } @else {
-                        <p class="small muted">
-                          {{ orphansBuffer().length }} untracked terminal64.exe — choose carefully;
-                          killing stops MT5 immediately and disconnects whatever was attached.
-                        </p>
-                        <table class="orphans-table">
-                          <thead>
-                            <tr>
-                              <th>PID</th>
-                              <th>Install hint</th>
-                              <th>Started</th>
-                              <th>Executable</th>
-                              <th></th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            @for (o of orphansBuffer(); track o.pid) {
-                              <tr>
-                                <td>
-                                  <code>{{ o.pid }}</code>
-                                </td>
-                                <td>
-                                  @if (o.installHint) {
-                                    <code>{{ o.installHint }}</code>
-                                  } @else {
-                                    <span class="muted">—</span>
-                                  }
-                                </td>
-                                <td>{{ o.startedAt | date: 'short' }}</td>
-                                <td class="exe-cell" [title]="o.exePath ?? o.cmdline">
-                                  {{ o.exePath ?? o.cmdline }}
-                                </td>
-                                <td class="actions">
-                                  <button
-                                    type="button"
-                                    class="btn-link warn"
-                                    [disabled]="killingOrphanPid() === o.pid"
-                                    (click)="onKillOrphan(d.id, o.pid, false)"
-                                  >
-                                    @if (killingOrphanPid() === o.pid) {
-                                      Killing…
-                                    } @else {
-                                      Kill
-                                    }
-                                  </button>
-                                  <button
-                                    type="button"
-                                    class="btn-link warn"
-                                    [disabled]="killingOrphanPid() === o.pid"
-                                    (click)="onKillOrphan(d.id, o.pid, true)"
-                                    title="SIGKILL immediately — use when MT5 is unresponsive."
-                                  >
-                                    Force
-                                  </button>
-                                </td>
-                              </tr>
-                            }
-                          </tbody>
-                        </table>
-                      }
-                    </div>
-                  }
                 </article>
               }
             </div>
@@ -382,9 +524,14 @@ interface RotatedKey {
         <!-- ── Sessions ───────────────────────────────────────────── -->
         <section class="block">
           <header class="block-head">
-            <h3>
-              Sessions <span class="count">{{ sessions().length }}</span>
-            </h3>
+            <div>
+              <h3>
+                Sessions <span class="count">{{ sessions().length }}</span>
+              </h3>
+              <p class="block-sub">
+                Terminals a supervisor launched. Crashed first, then running, then closed.
+              </p>
+            </div>
             <label class="check">
               <input
                 type="checkbox"
@@ -410,98 +557,113 @@ interface RotatedKey {
             <div class="ea-context">
               <h4>
                 EA instances connected now
-                <span class="muted"
+                <span class="count"
                   >{{ activeEas().length }} active of {{ eaInstances().length }}</span
                 >
               </h4>
               @if (activeEas().length === 0) {
-                <p class="muted">No EA instance is sending heartbeats.</p>
+                <p class="muted small">No EA instance is sending heartbeats.</p>
               } @else {
-                <table class="grid">
-                  <thead>
-                    <tr>
-                      <th>Instance</th>
-                      <th>Account</th>
-                      <th>Chart</th>
-                      <th>Symbols</th>
-                      <th>EA</th>
-                      <th>Heartbeat</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (e of activeEas(); track e.id) {
+                <div class="tablecard">
+                  <table class="grid">
+                    <thead>
                       <tr>
-                        <td>
-                          <a [routerLink]="['/ea-instances', e.id]">#{{ e.id }}</a
-                          >{{ e.isCoordinator ? ' · coordinator' : '' }}
-                        </td>
-                        <td>
-                          <a [routerLink]="['/trading-accounts', e.tradingAccountId]"
-                            >#{{ e.tradingAccountId }}</a
-                          >
-                        </td>
-                        <td>{{ e.chartSymbol }} {{ e.chartTimeframe }}</td>
-                        <td class="syms">{{ e.symbols }}</td>
-                        <td>{{ e.eaVersion }}</td>
-                        <td>{{ e.lastHeartbeat | relativeTime }}</td>
+                        <th>Instance</th>
+                        <th>Account</th>
+                        <th>Chart</th>
+                        <th>Symbols</th>
+                        <th>EA</th>
+                        <th>Heartbeat</th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      @for (e of activeEas(); track e.id) {
+                        <tr>
+                          <td>
+                            <a [routerLink]="['/ea-instances', e.id]">#{{ e.id }}</a
+                            >{{ e.isCoordinator ? ' · coordinator' : '' }}
+                          </td>
+                          <td>
+                            <a [routerLink]="['/trading-accounts', e.tradingAccountId]"
+                              >#{{ e.tradingAccountId }}</a
+                            >
+                          </td>
+                          <td>{{ e.chartSymbol }} {{ e.chartTimeframe }}</td>
+                          <td class="syms">{{ e.symbols }}</td>
+                          <td class="mono">{{ e.eaVersion }}</td>
+                          <td>{{ e.lastHeartbeat | relativeTime }}</td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
               }
             </div>
           } @else {
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Daemon</th>
-                  <th>Install</th>
-                  <th>PID</th>
-                  <th>Status</th>
-                  <th>Launched</th>
-                  <th>Last seen</th>
-                  <th>Reason</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of sessions(); track s.id) {
-                  <tr [attr.data-status]="s.status">
-                    <td class="mono small">{{ s.daemonName }}</td>
-                    <td class="mono small">{{ s.installId }}</td>
-                    <td class="mono small">{{ s.pid ?? '—' }}</td>
-                    <td>
-                      <span class="status-pill" [attr.data-status]="s.status">{{ s.status }}</span>
-                    </td>
-                    <td class="small">{{ s.launchedAt | date: 'yyyy-MM-dd HH:mm' }} UTC</td>
-                    <td class="small" [title]="s.lastSeenAt | date: 'yyyy-MM-dd HH:mm:ss UTC'">
-                      {{ s.lastSeenAt | relativeTime }}
-                    </td>
-                    <td class="small muted">{{ s.reason ?? '—' }}</td>
-                    <td>
-                      @if (s.stoppedAt === null && s.status !== 'Stopping') {
-                        <button
-                          type="button"
-                          class="btn btn-secondary btn-sm"
-                          (click)="askClose(s)"
-                          [disabled]="closingSessionId() === s.id"
-                        >
-                          @if (closingSessionId() === s.id) {
-                            Closing…
-                          } @else {
-                            Close
-                          }
-                        </button>
-                      }
-                    </td>
+            <div class="tablecard">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Status</th>
+                    <th>Computer</th>
+                    <th>Install</th>
+                    <th class="num">PID</th>
+                    <th>Launched</th>
+                    <th>Last seen</th>
+                    <th>Reason</th>
+                    <th><span class="sr-only">Actions</span></th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (s of orderedSessions(); track s.id) {
+                    <tr [attr.data-status]="s.status" [class.closed]="s.stoppedAt !== null">
+                      <td>
+                        <span
+                          class="dot"
+                          [class.ok]="tone(s.status) === 'ok'"
+                          [class.warn]="tone(s.status) === 'warn'"
+                          [class.bad]="tone(s.status) === 'bad'"
+                          >{{ s.status }}</span
+                        >
+                      </td>
+                      <td>{{ s.daemonName }}</td>
+                      <td class="mono">{{ s.installId }}</td>
+                      <td class="num mono">{{ s.pid ?? '—' }}</td>
+                      <td [title]="(s.launchedAt | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') + ' UTC'">
+                        {{ s.launchedAt | relativeTime }}
+                        <span class="sub"
+                          >{{ s.launchedAt | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC</span
+                        >
+                      </td>
+                      <td [title]="(s.lastSeenAt | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC') + ' UTC'">
+                        {{ s.lastSeenAt | relativeTime }}
+                      </td>
+                      <td class="muted">{{ s.reason ?? '—' }}</td>
+                      <td class="act">
+                        @if (s.stoppedAt === null && s.status !== 'Stopping') {
+                          <button
+                            type="button"
+                            class="btn btn-danger btn-sm"
+                            title="Stops this MT5 terminal — asks first"
+                            (click)="askClose(s)"
+                            [disabled]="closingSessionId() === s.id"
+                          >
+                            @if (closingSessionId() === s.id) {
+                              Closing…
+                            } @else {
+                              Close
+                            }
+                          </button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           }
         </section>
       }
-
       <!-- Phase-15 wave 1: the wizard is a top-layer <dialog> that lives
            outside the page-flow.  We pass the currently-selected daemon
            via wizardDaemonId(); the wizard reads the daemon id at open
@@ -577,450 +739,7 @@ interface RotatedKey {
       }
     </div>
   `,
-  styles: [
-    `
-      /* Same frame as every other page: the extra side padding indented this page's title 16px. */
-      .page {
-        max-width: var(--page-max-width);
-        margin: 0 auto;
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .ask-details {
-        margin: var(--space-2) 0 0;
-        padding-left: 18px;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        line-height: 1.45;
-      }
-      .key-overlay {
-        position: fixed;
-        inset: 0;
-        z-index: 1000;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: var(--space-4);
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(4px);
-      }
-      .key-dialog {
-        width: min(560px, 100%);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        padding: var(--space-5) var(--space-6);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-      }
-      .key-dialog h3 {
-        margin: 0;
-        font-size: var(--text-lg);
-      }
-      .key-dialog p {
-        margin: 0;
-      }
-      .key-row {
-        display: flex;
-        gap: var(--space-2);
-      }
-      .key-row .input {
-        flex: 1;
-        min-width: 0;
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-      }
-      .key-remediation {
-        white-space: pre-line;
-        color: var(--text-secondary);
-      }
-      .key-actions {
-        display: flex;
-        justify-content: flex-end;
-      }
-      .block {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .block-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .block-head h3 {
-        margin: 0;
-        font-size: var(--text-md);
-      }
-      .count {
-        font-size: var(--text-xs);
-        background: var(--bg-tertiary);
-        padding: 2px 8px;
-        border-radius: 999px;
-        color: var(--text-secondary);
-      }
-      .cards {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-        gap: var(--space-3);
-      }
-      .card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-left-width: 3px;
-        border-left-color: var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .card[data-online='true'] {
-        border-left-color: #34c759;
-      }
-      .card[data-online='false'] {
-        border-left-color: #ff9500;
-        opacity: 0.85;
-      }
-      .card-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: var(--space-2);
-      }
-      .card-head h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-      }
-      .card-head p {
-        margin: 2px 0 0;
-      }
-      .supervisor-line {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: var(--space-2);
-        margin: 0 0 var(--space-2);
-      }
-      .sup-pill {
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        border: 1px solid var(--border);
-      }
-      .sup-pill[data-tone='ok'] {
-        color: var(--success, #2e9e5b);
-        border-color: color-mix(in srgb, var(--success, #2e9e5b) 40%, transparent);
-      }
-      .sup-pill[data-tone='warn'] {
-        color: var(--warning, #d98e04);
-        border-color: color-mix(in srgb, var(--warning, #d98e04) 40%, transparent);
-      }
-      .sup-pill[data-tone='info'] {
-        color: var(--accent);
-        border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-      }
-      .sup-pill[data-tone='bad'] {
-        color: var(--danger, #d64545);
-        border-color: color-mix(in srgb, var(--danger, #d64545) 40%, transparent);
-      }
-      .status-pill {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        padding: 2px 8px;
-        border-radius: 999px;
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .status-pill[data-online='true'] {
-        background: #d4f4dc;
-        color: #1d8a3e;
-      }
-      .status-pill[data-online='false'] {
-        background: #fde0c2;
-        color: #b56b00;
-      }
-      .status-pill[data-status='Running'] {
-        background: #d4f4dc;
-        color: #1d8a3e;
-      }
-      .status-pill[data-status='Starting'],
-      .status-pill[data-status='Stopping'] {
-        background: #fff4e0;
-        color: #b56b00;
-      }
-      .status-pill[data-status='Stopped'] {
-        background: #e9e9eb;
-        color: #555;
-      }
-      .status-pill[data-status='Crashed'] {
-        background: #fde0de;
-        color: #c4290a;
-      }
-      .kv {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 4px 12px;
-        margin: 0;
-        font-size: var(--text-xs);
-      }
-      .kv dt {
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-size: 10px;
-      }
-      .kv dd {
-        margin: 0;
-      }
-      .installs {
-        background: var(--bg-primary);
-        padding: 8px 10px;
-        border-radius: var(--radius-sm);
-        font-size: var(--text-xs);
-      }
-      .installs summary {
-        cursor: pointer;
-        color: var(--text-secondary);
-      }
-      .install-row {
-        display: flex;
-        gap: 6px;
-        align-items: baseline;
-        padding: 4px 0;
-        border-top: 1px solid var(--border);
-        margin-top: 4px;
-      }
-      .install-row:first-of-type {
-        border-top: none;
-        margin-top: 8px;
-      }
-      .install-row-delete {
-        margin-left: auto;
-        background: none;
-        border: none;
-        cursor: pointer;
-        color: var(--text-secondary);
-        font-size: 14px;
-        line-height: 1;
-        padding: 0 6px;
-      }
-      .install-row-delete:hover:not(:disabled) {
-        color: #c93631;
-      }
-      .install-row-delete:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      .install-default-tag {
-        margin-left: auto;
-        padding: 2px 8px;
-        background: rgba(0, 113, 227, 0.1);
-        color: #0071e3;
-        border-radius: 10px;
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-weight: 600;
-        cursor: help;
-      }
-
-      /* Wave 2/3: daemon ops button strip + logs panel */
-      .daemon-ops {
-        margin-top: 8px;
-        padding-top: 8px;
-        border-top: 1px solid var(--border);
-        display: flex;
-        gap: 4px;
-        align-items: center;
-        font-size: 12px;
-      }
-      .daemon-ops .btn-link {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        padding: 2px 4px;
-        font-size: 12px;
-      }
-      .daemon-ops .btn-link:hover:not(:disabled) {
-        color: var(--text-primary);
-        text-decoration: underline;
-      }
-      .daemon-ops .btn-link.warn:hover:not(:disabled) {
-        color: #c93631;
-      }
-      .daemon-ops .btn-link:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      .daemon-ops .dot {
-        color: var(--text-secondary);
-      }
-      .logs-panel {
-        margin-top: 8px;
-        padding: 10px;
-        font-family: var(--font-mono, monospace);
-        font-size: 11px;
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-        border-radius: 6px;
-        max-height: 280px;
-        overflow: auto;
-        white-space: pre-wrap;
-        word-break: break-all;
-      }
-      .orphans-panel {
-        margin-top: 8px;
-        padding: 10px;
-        background: var(--bg-tertiary);
-        border-radius: 6px;
-      }
-      .orphans-panel .warn {
-        color: #c93631;
-      }
-      .orphans-table {
-        margin-top: 8px;
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-      }
-      .orphans-table th,
-      .orphans-table td {
-        padding: 6px 8px;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        vertical-align: top;
-      }
-      .orphans-table th {
-        font-weight: 600;
-        color: var(--text-secondary);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .orphans-table .exe-cell {
-        font-family: var(--font-mono, monospace);
-        font-size: 11px;
-        max-width: 320px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .orphans-table .actions {
-        white-space: nowrap;
-        display: flex;
-        gap: 8px;
-      }
-      .btn-add-broker {
-        margin-top: 6px;
-      }
-      .launch-form {
-        display: flex;
-        gap: var(--space-2);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .launch-form .input {
-        flex: 1;
-        min-width: 200px;
-        height: 32px;
-        padding: 0 10px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        border-radius: var(--radius-sm);
-        font-size: var(--text-sm);
-      }
-      .ea-context {
-        margin-top: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .ea-context a {
-        color: var(--accent);
-        text-decoration: none;
-      }
-      .ea-context h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-      }
-      .ea-context .syms {
-        max-width: 360px;
-        overflow-wrap: anywhere;
-        font-size: var(--text-xs);
-      }
-      .grid {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-xs);
-      }
-      .grid th,
-      .grid td {
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--border);
-        text-align: left;
-      }
-      .grid th {
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-size: 10px;
-      }
-      .check {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        cursor: pointer;
-      }
-      .btn {
-        height: 32px;
-        padding: 0 14px;
-        font-size: var(--text-sm);
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-      }
-      .btn-sm {
-        height: 28px;
-        padding: 0 10px;
-        font-size: var(--text-xs);
-      }
-      .btn-secondary {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        color: var(--text-primary);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: #fff;
-        border: 1px solid var(--accent);
-      }
-      .btn:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .mono {
-        font-family: var(--font-mono);
-      }
-      .small {
-        font-size: var(--text-xs);
-      }
-      .muted {
-        color: var(--text-secondary);
-      }
-    `,
-  ],
+  styleUrl: './terminals-page.scss',
 })
 export class TerminalsPageComponent {
   private readonly terminals = inject(TerminalsService);
@@ -1130,6 +849,17 @@ export class TerminalsPageComponent {
   protected readonly sessionsErr = signal<string | null>(null);
   protected readonly daemons = computed(() => this.daemonsResource.value() ?? []);
   protected readonly sessions = computed(() => this.sessionsResource.value() ?? []);
+
+  // Presentation only: the headline summary and attention-first order, from the rows above.
+  protected readonly summary = computed(() => fleetSummary(this.daemons(), this.sessions()));
+  protected readonly hasBadAttention = computed(() =>
+    this.summary().attention.some((a) => a.tone === 'bad'),
+  );
+  protected readonly orderedSessions = computed(() => orderSessions(this.sessions()));
+  protected readonly tone = sessionTone;
+  protected runningCount(daemonId: number, installId: string): number {
+    return runningOnInstall(this.sessions(), daemonId, installId);
+  }
 
   protected readonly loading = computed(
     () => this.daemonsResource.loading() || this.sessionsResource.loading(),

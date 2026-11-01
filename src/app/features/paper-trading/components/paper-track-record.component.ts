@@ -14,6 +14,7 @@ import {
   type FactTile,
 } from '@features/strategies/components/fact-tiles/fact-tiles.component';
 import { ago, count, day, fractionPct, money } from '@features/strategies/util/figures';
+import { enumLabel, statusTone } from '../paper-trading.logic';
 
 /**
  * The per-strategy paper track record: what Approved / PaperTrading strategies would have done live,
@@ -30,7 +31,7 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
     <section class="block">
       <header class="head">
         <h3>Strategy paper track record</h3>
-        <span class="muted"
+        <span class="hint"
           >live signals of strategies in a paper stage, simulated at the engine's costs — last
           {{ summary()?.days ?? 90 }} days</span
         >
@@ -39,13 +40,14 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
       @if (summary(); as s) {
         <app-fact-tiles [tiles]="tiles()" />
         @if (s.strategies.length === 0) {
-          <p class="muted">
-            No paper execution in the window. A strategy paper-trades once it is Approved (and
-            Paused) or put in the PaperTrading stage; {{ s.strategiesInPaperStage }} strateg{{
+          <div class="empty">
+            <strong>No paper execution in the window.</strong>
+            A strategy paper-trades once it is Approved (and Paused) or put in the PaperTrading
+            stage; {{ s.strategiesInPaperStage }} strateg{{
               s.strategiesInPaperStage === 1 ? 'y is' : 'ies are'
             }}
             in such a stage now.
-          </p>
+          </div>
         } @else {
           <div class="table-card">
             <table>
@@ -61,38 +63,59 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                   <th class="num" title="Net of simulated spread, slippage, commission and swap">
                     Net P&amp;L
                   </th>
-                  <th>Last</th>
+                  <th class="num">Last</th>
                 </tr>
               </thead>
               <tbody>
                 @for (r of s.strategies; track r.strategyId) {
-                  <tr>
+                  <tr [class.gone]="!linkable(r)">
                     <td class="name">
                       @if (linkable(r)) {
-                        <a [routerLink]="['/strategies', r.strategyId]">{{
-                          r.name ?? '#' + r.strategyId
-                        }}</a>
+                        <a
+                          class="nm"
+                          [routerLink]="['/strategies', r.strategyId]"
+                          [title]="r.name ?? ''"
+                          >{{ r.name ?? '#' + r.strategyId }}</a
+                        >
                       } @else {
-                        {{ r.name ?? '#' + r.strategyId }}
+                        <span class="nm" [title]="r.name ?? ''">{{
+                          r.name ?? '#' + r.strategyId
+                        }}</span>
                       }
-                      <span class="muted"> #{{ r.strategyId }} · {{ r.symbol }}</span>
+                      <span class="sub">#{{ r.strategyId }} · {{ r.symbol }}</span>
                     </td>
-                    <td>{{ r.status }} / {{ r.lifecycleStage }}</td>
+                    <td class="stage" [title]="r.status + ' / ' + r.lifecycleStage">
+                      <span class="pill" [attr.data-tone]="statusTone(r.status)">{{
+                        r.status
+                      }}</span>
+                      {{ enumLabel(r.lifecycleStage) }}
+                    </td>
                     <td class="num">{{ r.executions }}</td>
                     <td class="num">{{ r.closed }}</td>
-                    <td class="num">{{ r.open }}</td>
-                    <td class="num">{{ r.expired }}</td>
-                    <td class="num">{{ r.closed ? pct(r.wins / r.closed) : '—' }}</td>
-                    <td class="num" [class.profit]="r.netPnl > 0" [class.loss]="r.netPnl < 0">
-                      {{ money(r.netPnl, null, true) }}
+                    <td class="num" [class.dim]="r.open === 0">{{ r.open }}</td>
+                    <td class="num" [class.dim]="r.expired === 0">{{ r.expired }}</td>
+                    <td
+                      class="num"
+                      [title]="
+                        r.closed ? r.wins + ' of ' + r.closed + ' closed won' : 'nothing closed'
+                      "
+                    >
+                      {{ r.closed ? pct(r.wins / r.closed) : '—' }}
                     </td>
-                    <td>{{ ago(r.lastAtUtc) }}</td>
+                    <td
+                      class="num strong"
+                      [class.profit]="r.netPnl > 0"
+                      [class.loss]="r.netPnl < 0"
+                    >
+                      {{ r.closed ? money(r.netPnl, null, true) : '—' }}
+                    </td>
+                    <td class="num when" [title]="day(r.lastAtUtc)">{{ ago(r.lastAtUtc) }}</td>
                   </tr>
                 }
               </tbody>
             </table>
           </div>
-          <details>
+          <details class="method">
             <summary>Newest {{ s.recentExecutions.length }} paper executions</summary>
             <div class="table-card">
               <table>
@@ -104,7 +127,7 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                     <th>Side</th>
                     <th class="num">Lots</th>
                     <th class="num">Fill</th>
-                    <th>Filled</th>
+                    <th>Filled (UTC)</th>
                     <th>Status</th>
                     <th>Exit</th>
                     <th class="num">Net P&amp;L</th>
@@ -113,7 +136,12 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                 <tbody>
                   @for (e of s.recentExecutions; track e.id) {
                     <tr>
-                      <td class="mono">{{ e.id }}{{ e.isSynthetic ? ' (backfill)' : '' }}</td>
+                      <td class="mono">
+                        {{ e.id }}
+                        @if (e.isSynthetic) {
+                          <span class="pill">backfill</span>
+                        }
+                      </td>
                       <td>
                         @if (deletedIds().has(e.strategyId)) {
                           #{{ e.strategyId }}
@@ -122,12 +150,20 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
                         }
                       </td>
                       <td>{{ e.symbol }}</td>
-                      <td>{{ e.direction }}</td>
+                      <td>
+                        <span
+                          class="pill"
+                          [attr.data-tone]="
+                            e.direction === 'Buy' ? 'ok' : e.direction === 'Sell' ? 'bad' : null
+                          "
+                          >{{ e.direction }}</span
+                        >
+                      </td>
                       <td class="num">{{ e.lotSize }}</td>
                       <td class="num">{{ e.simulatedFillPrice }}</td>
                       <td>{{ day(e.simulatedFillAt) }}</td>
-                      <td>{{ e.status }}</td>
-                      <td>{{ e.exitReason ?? '—' }}</td>
+                      <td>{{ enumLabel(e.status) }}</td>
+                      <td>{{ e.exitReason ? enumLabel(e.exitReason) : '—' }}</td>
                       <td
                         class="num"
                         [class.profit]="(e.netPnl ?? 0) > 0"
@@ -143,21 +179,21 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
           </details>
         }
       } @else if (fallback(); as list) {
-        <p class="muted">
+        <p class="note">
           The paper summary is not available from this engine build yet. Strategies in a paper stage
           now:
         </p>
         @if (list.length === 0) {
-          <p class="muted">
-            None — a strategy paper-trades once it is Approved (Paused) or in the PaperTrading
-            stage.
-          </p>
+          <div class="empty">
+            <strong>None.</strong>
+            A strategy paper-trades once it is Approved (Paused) or in the PaperTrading stage.
+          </div>
         } @else {
           <ul>
             @for (s of list; track s.id) {
               <li>
                 <a [routerLink]="['/strategies', s.id]">{{ s.name }}</a>
-                <span class="muted"
+                <span class="hint"
                   >#{{ s.id }} · {{ s.symbol }} {{ s.timeframe }} · {{ s.status }} /
                   {{ s.lifecycleStage }}</span
                 >
@@ -166,92 +202,11 @@ import { ago, count, day, fractionPct, money } from '@features/strategies/util/f
           </ul>
         }
       } @else {
-        <p class="muted">Loading…</p>
+        <p class="note">Loading…</p>
       }
     </section>
   `,
-  styles: [
-    `
-      .block {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-      }
-      h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-        margin: 0;
-      }
-      .table-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow-x: auto;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-sm);
-      }
-      th,
-      td {
-        padding: 7px 10px;
-        border-bottom: 1px solid var(--border);
-        text-align: left;
-        white-space: nowrap;
-      }
-      th {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
-      }
-      td.name {
-        white-space: normal;
-        min-width: 260px;
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .mono {
-        font-family: var(--font-mono);
-      }
-      .profit {
-        color: var(--profit);
-      }
-      .loss {
-        color: var(--loss);
-      }
-      details summary {
-        cursor: pointer;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-2);
-      }
-      ul {
-        margin: 0;
-        padding-left: 18px;
-        font-size: var(--text-sm);
-      }
-      a {
-        color: var(--accent);
-        text-decoration: none;
-      }
-    `,
-  ],
+  styleUrl: './paper-track-record.component.scss',
 })
 export class PaperTrackRecordComponent {
   private readonly paper = inject(PaperTradingService);
@@ -262,6 +217,8 @@ export class PaperTrackRecordComponent {
   protected readonly money = money;
   protected readonly ago = ago;
   protected readonly day = day;
+  protected readonly enumLabel = enumLabel;
+  protected readonly statusTone = statusTone;
   /** A deleted strategy keeps its paper record but has no page (older engines only mark it in the name). */
   protected linkable(r: PaperStrategySummaryDto): boolean {
     return !r.strategyDeleted && !(r.name ?? '').endsWith('(deleted)');

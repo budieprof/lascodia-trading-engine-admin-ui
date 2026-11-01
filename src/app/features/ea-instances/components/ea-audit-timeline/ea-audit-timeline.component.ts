@@ -144,7 +144,12 @@ const SEVERITY_OPTIONS: ReadonlyArray<{ value: SeverityFilter; label: string }> 
   `,
   styles: [
     `
+      :host {
+        display: block;
+      }
       .panel {
+        height: 100%;
+        box-sizing: border-box;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -165,10 +170,17 @@ const SEVERITY_OPTIONS: ReadonlyArray<{ value: SeverityFilter; label: string }> 
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
+      /* Full width under the title, like the Logs panel beside it: the event-type
+         placeholder was cut off at its old width. */
       .filters {
         display: flex;
         gap: var(--space-2);
         align-items: center;
+        flex-wrap: wrap;
+        flex: 1 1 100%;
+      }
+      .filters input.input {
+        flex: 1 1 220px;
       }
       .input {
         height: 32px;
@@ -222,7 +234,7 @@ const SEVERITY_OPTIONS: ReadonlyArray<{ value: SeverityFilter; label: string }> 
         font-size: 10px;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        background: rgba(0, 0, 0, 0.05);
+        background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
       .sev[data-severity='INFO'] {

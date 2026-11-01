@@ -140,7 +140,8 @@ const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
       }
       .panel-head h3 {
         margin: 0 0 4px;
-        font-size: var(--text-base);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
       }
       .status-pill {
         padding: 3px 10px;

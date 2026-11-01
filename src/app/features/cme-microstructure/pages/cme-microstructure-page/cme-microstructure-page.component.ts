@@ -54,6 +54,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/components/cme-historic-analytics.component';
 import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
 import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic';
+import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.logic';
 
 /**
  * CME Microstructure operator panel (engine ADR-0021 / ADR-0022).
@@ -100,6 +101,56 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
           (retry)="load()"
         />
       } @else if (status(); as s) {
+        <!-- Headline: the subsystem's state in one line, read before the zero-filled tiles. The
+             hot tier, the imported (warm) tier and the newest recorded verdict answer different
+             questions, and each one alone has misled an operator. -->
+        <section class="headline" aria-label="CME subsystem summary">
+          <span class="hl-item">
+            <span class="hl-label">Live feed</span>
+            <span
+              class="dot"
+              [class.ok]="s.feedHealth.status === 'Live'"
+              [class.warn]="s.feedHealth.status === 'Stale'"
+            >
+              <strong>{{ feedStatusLabel(s.feedHealth.status) }}</strong>
+            </span>
+          </span>
+          <span class="hl-item">
+            <span class="hl-label">Imported history</span>
+            @if (s.warmTier.sessionCount > 0) {
+              <span class="dot ok">
+                <strong>{{ s.warmTier.sessionCount | number }} sessions</strong>
+                <span>· {{ s.warmTier.contracts.join(', ') }}</span>
+              </span>
+            } @else {
+              <span class="dot">
+                <strong>{{ s.warmTier.configured ? 'Empty' : 'Not configured' }}</strong>
+              </span>
+            }
+          </span>
+          <span class="hl-item">
+            <span class="hl-label">Latest verdict</span>
+            @if (latestRun(); as lr) {
+              @let lv = runVerdict(lr);
+              <span class="tag" [attr.data-state]="lv.state" [title]="lv.title">
+                <span aria-hidden="true">{{ lv.icon }}</span> {{ lv.label }}
+              </span>
+              <span class="muted small">#{{ lr.id }} · {{ lr.contract }}</span>
+            } @else {
+              <span class="muted">none recorded</span>
+            }
+          </span>
+          <span class="hl-item">
+            <span class="hl-label">Workers</span>
+            <span class="dot" [class.ok]="s.feedHealth.ingestEnabled">
+              ingest {{ s.feedHealth.ingestEnabled ? 'on' : 'off' }}
+            </span>
+            <span class="dot" [class.ok]="s.feedHealth.shadowMonitorEnabled">
+              shadow monitor {{ s.feedHealth.shadowMonitorEnabled ? 'on' : 'off' }}
+            </span>
+          </span>
+        </section>
+
         <!-- Hot-tier counts. No status dots: these are inventory numbers, not health signals —
              a zero here is expected after a bulk import (see the warm-tier callout). -->
         <section class="kpis">
@@ -109,8 +160,12 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             [value]="s.tradeCount"
             format="number"
           />
-          <app-metric-card label="Book snapshots" [value]="s.bookSnapshotCount" format="number" />
-          <app-metric-card label="Derived bars" [value]="s.barCount" format="number" />
+          <app-metric-card
+            label="Book snapshots (hot tier)"
+            [value]="s.bookSnapshotCount"
+            format="number"
+          />
+          <app-metric-card label="Derived bars (hot tier)" [value]="s.barCount" format="number" />
           <app-metric-card
             label="Shadow would-haves"
             [value]="s.shadowSignalCount"
@@ -118,13 +173,41 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
           />
         </section>
 
+        <!--
+          The hot tables are only a recent window; bulk-imported research slices live in the Parquet
+          warm tier. Reporting "no data" off the hot counts alone told an operator the purchase had
+          failed while 31M records sat on disk and the experiment was running against them.
+        -->
+        @if (s.warmTier.sessionCount) {
+          <section class="banner" data-tone="info">
+            <strong
+              >Warm tier holds {{ s.warmTier.sessionCount }} imported
+              {{ s.warmTier.sessionCount === 1 ? 'session' : 'sessions' }}.</strong
+            >
+            {{ s.warmTier.contracts.join(', ') }} · {{ s.warmTier.earliestSession }} →
+            {{ s.warmTier.latestSession }}. Raw tape and book live in Parquet (the system of
+            record); the hot tables above hold only the recent window the retention worker keeps, so
+            a zero there is expected after a bulk import — the experiment reads both tiers.
+          </section>
+        } @else if (!hasData()) {
+          <section class="banner">
+            <strong>No CME data ingested yet.</strong>
+            The subsystem ships disabled and inert: it needs a Databento slice plus
+            <code>Microstructure:Enabled=true</code> and an API key. Seeding the contract calendar
+            below is the prerequisite that makes the futures→spot resolver return anything.
+          </section>
+        }
+
         <!-- ── Feed health ───────────────────────────────────────────── -->
         <section class="card">
           <header class="card-head">
-            <h3>Feed health</h3>
-            <span class="feed-pill" [attr.data-status]="s.feedHealth.status">
-              {{ feedStatusLabel(s.feedHealth.status) }}
-            </span>
+            <div class="title-row">
+              <h3>Feed health</h3>
+              <span class="feed-pill" [attr.data-status]="s.feedHealth.status">
+                {{ feedStatusLabel(s.feedHealth.status) }}
+              </span>
+            </div>
+            <span class="muted small">Live hot-tier stream over the last 24 hours</span>
           </header>
 
           <p class="muted small">{{ feedStatusExplanation(s.feedHealth) }}</p>
@@ -133,7 +216,7 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             <div class="health-cell">
               <span class="hc-label">Newest bar age</span>
               <span class="hc-value">{{ formatAge(s.feedHealth.latestBarAgeSeconds) }}</span>
-              <span class="hc-sub">gate {{ s.feedHealth.maxFlowStalenessSeconds }}s</span>
+              <span class="hc-sub">freshness gate {{ s.feedHealth.maxFlowStalenessSeconds }}s</span>
             </div>
             <div class="health-cell">
               <span class="hc-label">Trades / 24h</span>
@@ -149,11 +232,15 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             </div>
             <div class="health-cell">
               <span class="hc-label">Ingest worker</span>
-              <span class="hc-value">{{ s.feedHealth.ingestEnabled ? 'On' : 'Off' }}</span>
+              <span class="hc-value dot" [class.ok]="s.feedHealth.ingestEnabled">{{
+                s.feedHealth.ingestEnabled ? 'On' : 'Off'
+              }}</span>
             </div>
             <div class="health-cell">
               <span class="hc-label">Shadow monitor</span>
-              <span class="hc-value">{{ s.feedHealth.shadowMonitorEnabled ? 'On' : 'Off' }}</span>
+              <span class="hc-value dot" [class.ok]="s.feedHealth.shadowMonitorEnabled">{{
+                s.feedHealth.shadowMonitorEnabled ? 'On' : 'Off'
+              }}</span>
             </div>
           </div>
         </section>
@@ -166,10 +253,11 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
           </header>
 
           @if (s.v11Models.length === 0) {
-            <p class="muted small">
-              No active model uses the V11 CME feature block yet. This is the expected state until a
-              training run completes with <code>MLTraining:UseV11CmeFlow</code> on — it is not a
-              fault, and models on earlier schemas keep serving normally.
+            <p class="empty-line">
+              <strong>No active model uses the V11 CME feature block yet.</strong> This is the
+              expected state until a training run completes with
+              <code>MLTraining:UseV11CmeFlow</code> on — it is not a fault, and models on earlier
+              schemas keep serving normally.
             </p>
           } @else {
             <p class="muted small">
@@ -209,32 +297,6 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             </div>
           }
         </section>
-
-        <!--
-          The hot tables are only a recent window; bulk-imported research slices live in the Parquet
-          warm tier. Reporting "no data" off the hot counts alone told an operator the purchase had
-          failed while 31M records sat on disk and the experiment was running against them.
-        -->
-        @if (status()?.warmTier?.sessionCount) {
-          <section class="banner" data-tone="info">
-            <strong
-              >Warm tier holds {{ status()!.warmTier.sessionCount }} imported
-              {{ status()!.warmTier.sessionCount === 1 ? 'session' : 'sessions' }}.</strong
-            >
-            {{ status()!.warmTier.contracts.join(', ') }} ·
-            {{ status()!.warmTier.earliestSession }} → {{ status()!.warmTier.latestSession }}. Raw
-            tape and book live in Parquet (the system of record); the hot tables above hold only the
-            recent window the retention worker keeps, so a zero there is expected after a bulk
-            import — the experiment reads both tiers.
-          </section>
-        } @else if (!hasData()) {
-          <section class="banner">
-            <strong>No CME data ingested yet.</strong>
-            The subsystem ships disabled and inert: it needs a Databento slice plus
-            <code>Microstructure:Enabled=true</code> and an API key. Seeding the contract calendar
-            below is the prerequisite that makes the futures→spot resolver return anything.
-          </section>
-        }
 
         <!-- ── Setup: seed + back-adjust ─────────────────────────────── -->
         <section class="card">
@@ -348,13 +410,21 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             @if (split().hiddenPast + split().hiddenFuture > 0) {
               <p class="muted small footnote">
                 @if (!showAllContracts()) {
-                  {{ split().shown.length }} of {{ s.contracts.length }} contracts shown — those with data, the front
-                  month and the ones expiring within ~6 months. Hidden: {{ split().hiddenPast }} expired and
-                  {{ split().hiddenFuture }} far-dated contracts with nothing ingested ({{ split().withData }} contracts
-                  hold any data).
+                  {{ split().shown.length }} of {{ s.contracts.length }} contracts shown — those
+                  with data, the front month and the ones expiring within ~6 months. Hidden:
+                  {{ split().hiddenPast }} expired and {{ split().hiddenFuture }} far-dated
+                  contracts with nothing ingested ({{ split().withData }} contracts hold any data).
                 }
-                <button type="button" class="btn btn-sm btn-secondary" (click)="showAllContracts.set(!showAllContracts())">
-                  {{ showAllContracts() ? 'Show only the relevant contracts' : 'Show all ' + s.contracts.length }}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-secondary"
+                  (click)="showAllContracts.set(!showAllContracts())"
+                >
+                  {{
+                    showAllContracts()
+                      ? 'Show only the relevant contracts'
+                      : 'Show all ' + s.contracts.length
+                  }}
                 </button>
               </p>
             }
@@ -406,8 +476,8 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
 
           @if (experiment(); as x) {
             @if (!x.ran) {
-              <p class="muted small">
-                Not scored — <code>{{ x.reason }}</code>
+              <p class="empty-line">
+                <strong>Not scored</strong> — <code>{{ x.reason }}</code>
                 @if (x.reason === 'no_data') {
                   · ingest a Databento slice for this contract/window first.
                 }
@@ -487,8 +557,14 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
               </div>
             }
           } @else {
-            <p class="muted small">
-              Run the experiment for an ingested contract/window to get a verdict.
+            <p class="empty-line">
+              <strong>No verdict in this session yet.</strong> Run the experiment for an ingested
+              contract and window to get one.
+              @if (latestRun(); as lr) {
+                The newest recorded run is #{{ lr.id }} ({{ lr.contract }},
+                {{ lr.createdAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC' }} UTC) — see Verdict history
+                below.
+              }
             </p>
           }
         </section>
@@ -507,9 +583,22 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             <span class="muted small">
               Every recorded run, newest first in the table; the charts read left-to-right in run
               order and share the run numbers. Identical consecutive re-runs are collapsed with a ×N
-              badge. A verdict that exists only in one HTTP response can't be revisited or compared
-              — and a decision that gates real money should be auditable long after the run.
+              badge.
             </span>
+            <details class="method">
+              <summary>Why runs are recorded, and how to read a verdict</summary>
+              <p>
+                A verdict that exists only in one HTTP response can't be revisited or compared — and
+                a decision that gates real money should be auditable long after the run.
+              </p>
+              <p>
+                <strong>Real ahead</strong> needs both the net and the per-trade delta to favour
+                real flow with at least one arm making money. <strong>Real lost less</strong> means
+                both arms lost: it shows which way a losing system fails, not that real flow carries
+                edge. <strong>Inconclusive</strong> means the net and per-trade comparisons point
+                different ways (selectivity, not signal quality).
+              </p>
+            </details>
           </header>
 
           @if (runs().length === 0) {
@@ -600,8 +689,8 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
                 <thead>
                   <tr>
                     <th class="num">#</th>
-                    <th>Run</th>
-                    <th>Window</th>
+                    <th>Run (UTC)</th>
+                    <th>Window (UTC)</th>
                     <th class="num">Sessions</th>
                     <th class="num">Real PF</th>
                     <th class="num">Proxy PF</th>
@@ -637,37 +726,36 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
                         <span class="muted small">· {{ r.contract }}</span>
                       </td>
                       <td class="muted small wrap">
-                        {{ r.fromUtc | date: 'yyyy-MM-dd' : 'UTC' }} –
-                        {{ r.toUtc | date: 'yyyy-MM-dd' : 'UTC' }}
+                        <span class="nw">{{ r.fromUtc | date: 'yyyy-MM-dd' : 'UTC' }} –</span>
+                        <span class="nw">{{ r.toUtc | date: 'yyyy-MM-dd' : 'UTC' }}</span>
                       </td>
                       <td class="num">{{ r.foldsScored }}</td>
                       <td class="num">{{ r.realProfitFactor | number: '1.2-2' }}</td>
                       <td class="num">{{ r.proxyProfitFactor | number: '1.2-2' }}</td>
-                      <td class="num">{{ r.oosNetPnlDelta | number: '1.2-2' }}</td>
-                      <td class="num">{{ r.oosPnlPerTradeDelta | number: '1.2-2' }}</td>
+                      <td
+                        class="num"
+                        [class.pos]="r.ran && r.oosNetPnlDelta > 0"
+                        [class.neg]="r.ran && r.oosNetPnlDelta < 0"
+                      >
+                        {{ signedUsd(r.oosNetPnlDelta) }}
+                      </td>
+                      <td
+                        class="num"
+                        [class.pos]="r.ran && r.oosPnlPerTradeDelta > 0"
+                        [class.neg]="r.ran && r.oosPnlPerTradeDelta < 0"
+                      >
+                        {{ signedUsd(r.oosPnlPerTradeDelta) }}
+                      </td>
                       <!-- Cost model, not signal. A crossing run and a passive run are different
                            experiments: on 6EM6 the round-trip spread was ~$12.50 against a ~$20-25
                            average trade, so execution dominated the result. -->
                       <td class="muted small">{{ r.passiveEntry ? 'Passive' : 'Crossing' }}</td>
                       <td>
                         <!-- Icon + label, never colour alone. -->
-                        @if (!r.ran) {
-                          <span class="tag" data-state="skipped">
-                            <span aria-hidden="true">○</span> {{ r.reason }}
-                          </span>
-                        } @else if (r.aggregateAndPerTradeDisagree) {
-                          <span class="tag" data-state="ambiguous">
-                            <span aria-hidden="true">⚠</span> Inconclusive
-                          </span>
-                        } @else if (r.oosNetPnlDelta > 0 && r.oosPnlPerTradeDelta > 0) {
-                          <span class="tag" data-state="real">
-                            <span aria-hidden="true">▲</span> Real ahead
-                          </span>
-                        } @else {
-                          <span class="tag" data-state="proxy">
-                            <span aria-hidden="true">▼</span> Proxy ahead
-                          </span>
-                        }
+                        @let v = runVerdict(r);
+                        <span class="tag" [attr.data-state]="v.state" [title]="v.title">
+                          <span aria-hidden="true">{{ v.icon }}</span> {{ v.label }}
+                        </span>
                       </td>
                     </tr>
                   }
@@ -680,8 +768,8 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
         <!-- ── Trades behind the verdict ─────────────────────────────── -->
         @if (runs().length > 0) {
           <section class="card">
-            <div class="toolbar">
-              <label class="field">
+            <app-cme-experiment-trades [runId]="tradeRunId()">
+              <label class="field" runPicker>
                 <span>Inspect run</span>
                 <select
                   id="trade-run"
@@ -697,8 +785,7 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
                   }
                 </select>
               </label>
-            </div>
-            <app-cme-experiment-trades [runId]="tradeRunId()" />
+            </app-cme-experiment-trades>
           </section>
         }
 
@@ -707,11 +794,11 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
           <header class="card-head">
             <h3>Simulator — synthetic tape &amp; depth</h3>
             <span class="muted small">
-              Exercises the pipeline before a real slice exists. <strong>NoEdge</strong> is the null
-              control (the experiment must find nothing); <strong>DeltaLeadsPrice</strong> plants a
-              lead-lag it must detect. Synthetic data validates the pipeline and the harness — it
-              can never prove a real edge. Rows are stamped <code>Source=Synthetic</code>; real data
-              is never touched.
+              Exercises the pipeline before a real slice exists. <strong>NoEdge</strong> is the
+              negative control (the experiment must find nothing);
+              <strong>DeltaLeadsPrice</strong> plants a lead-lag it must detect. Synthetic data
+              validates the pipeline and the harness — it can never prove a real edge. Rows are
+              stamped <code>Source=Synthetic</code>; real data is never touched.
             </span>
           </header>
 
@@ -739,7 +826,9 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
             >
               Generate synthetic data
             </button>
-            <span class="muted small">into {{ expContract || 'set a contract above' }}</span>
+            <span class="muted small toolbar-note"
+              >into {{ expContract || 'set a contract above' }}</span
+            >
           </div>
         </section>
 
@@ -756,7 +845,7 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
 
           @if (s.recentShadowSignals.length === 0) {
             <p class="empty-line">
-              No shadow signals yet — the monitor ships disabled
+              <strong>No shadow signals yet.</strong> The monitor ships disabled
               (<code>Microstructure:SignalEnabled=false</code>) and needs live CME flow.
             </p>
           } @else {
@@ -779,7 +868,7 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
                       <td>{{ sig.evaluatedAt | relativeTime }}</td>
                       <td>{{ sig.symbol }}</td>
                       <td>
-                        <span class="dot" [style.background]="dirColor(sig.direction)"></span>
+                        <span class="side-dot" [style.background]="dirColor(sig.direction)"></span>
                         {{ sig.direction }}
                       </td>
                       <td class="num">{{ sig.confidence | number: '1.2-2' }}</td>
@@ -814,428 +903,7 @@ import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic'
       />
     </div>
   `,
-  styles: [
-    `
-      .feed-pill {
-        padding: 3px 10px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-        border: 1px solid transparent;
-      }
-      .feed-pill[data-status='Live'] {
-        background: rgba(52, 199, 89, 0.14);
-        color: #34c759;
-        border-color: rgba(52, 199, 89, 0.35);
-      }
-      .feed-pill[data-status='Stale'] {
-        background: rgba(255, 149, 0, 0.14);
-        color: #ff9500;
-        border-color: rgba(255, 149, 0, 0.35);
-      }
-      .feed-pill[data-status='NoData'] {
-        background: rgba(142, 142, 147, 0.14);
-        color: #8e8e93;
-        border-color: rgba(142, 142, 147, 0.3);
-      }
-      .health-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-        gap: 12px;
-        margin-top: 12px;
-      }
-      .health-cell {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 10px 12px;
-        border: 1px solid var(--border, rgba(120, 120, 128, 0.24));
-        border-radius: 10px;
-      }
-      .hc-label {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        opacity: 0.65;
-      }
-      .hc-value {
-        font-size: 18px;
-        font-weight: 600;
-      }
-      .hc-sub {
-        font-size: 11px;
-        opacity: 0.55;
-      }
-      .flow-pill {
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 12px;
-        font-weight: 600;
-      }
-      .flow-pill[data-on='true'] {
-        background: rgba(255, 149, 0, 0.14);
-        color: #ff9500;
-      }
-      .flow-pill[data-on='false'] {
-        background: rgba(142, 142, 147, 0.14);
-        color: #8e8e93;
-      }
-
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 12px;
-        margin-bottom: 16px;
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 640px) {
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .banner {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-left: 3px solid #ff9500;
-        border-radius: var(--radius-lg);
-        padding: 12px 16px;
-        margin-bottom: 16px;
-        font-size: 13px;
-        color: var(--text-secondary);
-      }
-      .banner strong {
-        color: var(--text-primary);
-        margin-right: 6px;
-      }
-      .card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        padding: 16px;
-        margin-bottom: 16px;
-      }
-      /* Children hug their content: as a stretched column the feed-health pill filled the
-         card width and read as a disabled progress bar. */
-      .card-head {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        margin-bottom: 12px;
-      }
-      .card-head h3 {
-        margin: 0;
-        font-size: 15px;
-        font-weight: var(--font-bold);
-      }
-      .toolbar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 10px;
-        align-items: flex-end;
-        margin-bottom: 12px;
-      }
-      /* Every input carries a visible label — "600" and "2026080" meant nothing bare. */
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 3px;
-      }
-      .field > span {
-        font-size: 11px;
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .input {
-        height: 30px;
-        padding: 0 8px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-family: inherit;
-        font-size: 12px;
-        font-variant-numeric: tabular-nums;
-      }
-      .input.sm {
-        width: 140px;
-      }
-      /* Eight-digit seeds (20260808) clipped to seven in the 70px box. */
-      .input.md {
-        width: 110px;
-      }
-      .input.xs {
-        width: 70px;
-      }
-      /* Room for "#5 · 6EU6 · 2026-08-13 14:02" and the chevron. */
-      select.input.select-wide {
-        min-width: 280px;
-        width: auto;
-        padding-right: 28px;
-      }
-      .empty-line {
-        margin: 0;
-        padding: 12px 0 4px;
-        color: var(--text-tertiary);
-        font-size: 12.5px;
-      }
-      .footnote {
-        margin: 8px 0 0;
-      }
-      .dup-badge {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 0 6px;
-        border-radius: 999px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        font-size: 10.5px;
-        font-weight: 600;
-        color: var(--text-secondary);
-        cursor: help;
-      }
-      .table-wrap {
-        overflow-x: auto;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 13px;
-      }
-      th,
-      td {
-        padding: 8px 12px;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        white-space: nowrap;
-      }
-      td.wrap {
-        white-space: normal;
-        min-width: 7em;
-      }
-      th {
-        font-weight: var(--font-bold);
-        color: var(--text-secondary);
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      tr.front code {
-        font-weight: var(--font-bold);
-      }
-      .pill {
-        margin-left: 6px;
-        padding: 1px 6px;
-        border-radius: 999px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        font-size: 10px;
-        color: var(--text-tertiary);
-      }
-      .verdict {
-        border: 1px solid var(--border);
-        border-left: 3px solid #ff3b30;
-        border-radius: var(--radius-sm);
-        padding: 10px 14px;
-        margin-bottom: 12px;
-      }
-      .verdict[data-good='true'] {
-        border-left-color: #34c759;
-      }
-      .verdict-headline {
-        font-weight: var(--font-bold);
-        font-size: 14px;
-      }
-      .dot {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 4px;
-        vertical-align: middle;
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-      .small {
-        font-size: 12px;
-      }
-      .btn {
-        height: 30px;
-        padding: 0 12px;
-        border-radius: var(--radius-sm);
-        font-weight: var(--font-semibold);
-        font-size: 12px;
-        cursor: pointer;
-        font-family: inherit;
-        border: 1px solid var(--border);
-      }
-      .btn-secondary {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-      }
-      .btn:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-
-      /* ── Verdict caveats ──────────────────────────────────────────────
-         The delta alone is the most misleading number on this page, so the
-         qualifier is styled to be read, not skimmed past. */
-      .verdict-caveat {
-        display: flex;
-        gap: 8px;
-        align-items: flex-start;
-        margin: 10px 0 0;
-        padding: 8px 10px;
-        border-radius: 6px;
-        font-size: 12.5px;
-        line-height: 1.45;
-        background: rgba(250, 178, 25, 0.12);
-        border: 1px solid rgba(250, 178, 25, 0.4);
-        color: var(--text-primary);
-      }
-
-      /* ── Charts ───────────────────────────────────────────────────────
-         Series hues are the validated categorical slots 1 and 2 (blue,
-         orange): adjacent CVD ΔE 24.7 light / 26.8 dark, normal-vision
-         33.6 / 31.8, both clear of the floors and ≥3:1 on their surface.
-         Dark steps are re-stepped for the dark surface, not a flip. */
-      .chart-grid {
-        --series-real: #2a78d6;
-        --series-proxy: #eb6834;
-        --chart-axis: rgba(0, 0, 0, 0.22);
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-        gap: 18px;
-        margin-bottom: 4px;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root:not([data-theme='light']) .chart-grid {
-          --series-real: #3987e5;
-          --series-proxy: #d95926;
-          --chart-axis: rgba(255, 255, 255, 0.26);
-        }
-      }
-      :root[data-theme='dark'] .chart-grid {
-        --series-real: #3987e5;
-        --series-proxy: #d95926;
-        --chart-axis: rgba(255, 255, 255, 0.26);
-      }
-
-      .chart {
-        margin: 0;
-        min-width: 0;
-      }
-      .chart figcaption {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        margin-bottom: 6px;
-      }
-      .chart-title {
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--text-primary);
-      }
-      .plot {
-        display: grid;
-        grid-template-columns: 64px 1fr;
-        gap: 6px;
-      }
-      .yaxis {
-        position: relative;
-        font-variant-numeric: tabular-nums;
-        text-align: right;
-      }
-      .ytick {
-        position: absolute;
-        right: 0;
-        transform: translateY(-50%);
-        white-space: nowrap;
-      }
-      .ytick.zero {
-        color: var(--text-secondary);
-      }
-      .chart-svg {
-        width: 100%;
-        height: 120px;
-        display: block;
-        overflow: visible;
-      }
-      /* Recessive: the zero reference should orient, not compete with the data. */
-      .axis-zero {
-        stroke: var(--chart-axis);
-        stroke-width: 1;
-      }
-      .chart-xaxis {
-        display: flex;
-        justify-content: space-around;
-        margin-top: 2px;
-        margin-left: 70px;
-        font-variant-numeric: tabular-nums;
-      }
-
-      .legend {
-        display: flex;
-        gap: 16px;
-        margin: 4px 0 14px;
-        font-size: 12px;
-        color: var(--text-secondary);
-      }
-      .legend-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .swatch {
-        width: 10px;
-        height: 10px;
-        border-radius: 2px;
-        display: inline-block;
-      }
-
-      /* Verdict tags: icon + label, so state never rests on colour alone. */
-      .tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 11.5px;
-        font-weight: 600;
-        white-space: nowrap;
-      }
-      .tag[data-state='real'] {
-        background: rgba(12, 163, 12, 0.14);
-        color: #0ca30c;
-      }
-      .tag[data-state='proxy'] {
-        background: rgba(208, 59, 59, 0.14);
-        color: #d03b3b;
-      }
-      .tag[data-state='ambiguous'] {
-        background: rgba(250, 178, 25, 0.16);
-        color: #b07c00;
-      }
-      .tag[data-state='skipped'] {
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-      }
-      :root[data-theme='dark'] .tag[data-state='ambiguous'] {
-        color: #fab219;
-      }
-    `,
-  ],
+  styleUrl: './cme-microstructure-page.component.scss',
 })
 export class CmeMicrostructurePageComponent {
   private readonly cme = inject(CmeMicrostructureService);
@@ -1313,6 +981,12 @@ export class CmeMicrostructurePageComponent {
     }
     return groups;
   });
+
+  /** Newest recorded run — the headline's "latest verdict". */
+  protected readonly latestRun = computed<CmeExperimentRunDto | null>(() => this.runs()[0] ?? null);
+
+  protected readonly runVerdict = runVerdict;
+  protected readonly signedUsd = signedUsd;
 
   private sameResult(a: CmeExperimentRunDto, b: CmeExperimentRunDto): boolean {
     return (

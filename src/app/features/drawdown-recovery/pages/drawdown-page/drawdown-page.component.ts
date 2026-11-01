@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@a
 import { CurrencyPipe, DatePipe, DecimalPipe, formatDate } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { catchError, map, of, switchMap } from 'rxjs';
-import type { EChartsOption, SeriesOption } from 'echarts';
+import type { EChartsOption, LineSeriesOption, SeriesOption } from 'echarts';
 import type { ColDef } from 'ag-grid-community';
 
 import {
@@ -27,6 +27,15 @@ import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.componen
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { DataTableComponent } from '@shared/components/data-table/data-table.component';
+
+import {
+  formatDuration,
+  formatElapsed,
+  gaugeMax,
+  groupByMode,
+  plural,
+  type Elapsed,
+} from './drawdown-format';
 
 const MODES: RecoveryMode[] = ['Normal', 'Reduced', 'Halted'];
 
@@ -138,18 +147,6 @@ function totalSeconds(b: ModeSeconds): number {
   return b.Normal + b.Reduced + b.Halted;
 }
 
-function formatDuration(ms: number): string {
-  const mins = Math.round(ms / 60_000);
-  if (mins < 60) return `${mins} min`;
-  const hours = mins / 60;
-  if (hours < 48) {
-    const h = Math.floor(hours);
-    const m = mins - h * 60;
-    return m > 0 ? `${h} h ${m} min` : `${h} h`;
-  }
-  return `${(hours / 24).toFixed(1)} days`;
-}
-
 function formatSeconds(secs: number): string {
   return formatDuration(secs * 1000);
 }
@@ -205,36 +202,61 @@ function emptyChart(text: string): EChartsOption {
       <!-- Active and inactive accounts are told apart: an inactive account does not trade at all,
            so counting its stale halt among "not trading normally" made 8 of 5 live accounts. -->
       @if (restrictedAccounts().length > 0 && activeTab() !== 'accounts') {
-        <button class="restricted-banner" (click)="activeTab.set('accounts')">
-          @if (restrictedActive().length > 0) {
-            <span class="rb-count">{{ restrictedActive().length }}</span>
-            active account(s) not trading normally:
-            @for (a of restrictedActive(); track a.tradingAccountId) {
-              <span class="rb-acct">
-                {{ a.accountName }} <span class="rb-id">#{{ a.tradingAccountId }}</span>
-                <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{
-                  a.recoveryMode
-                }}</span>
-              </span>
+        <!-- Grouped by mode (Halted first) so the list reads as a status, not a run-on line. -->
+        <button
+          type="button"
+          class="restricted-banner"
+          [class.has-halt]="restrictedActiveHalted()"
+          (click)="activeTab.set('accounts')"
+        >
+          <span class="rb-head">
+            @if (restrictedActive().length > 0) {
+              {{ plural(restrictedActive().length, 'active account') }}
+              {{ restrictedActive().length === 1 ? 'is' : 'are' }} not trading normally
+            } @else {
+              No active account is restricted ·
+              {{ plural(restrictedInactive().length, 'inactive account') }} still
+              {{ restrictedInactive().length === 1 ? 'holds' : 'hold' }} a restriction
             }
-          }
-          @if (restrictedInactive().length > 0) {
-            <span class="rb-inactive">
-              @if (restrictedActive().length > 0) {
-                ·
-              }
-              {{ restrictedInactive().length }} inactive account(s) still hold a restriction:
-              @for (a of restrictedInactive(); track a.tradingAccountId) {
-                <span class="rb-acct">
-                  {{ a.accountName }} <span class="rb-id">#{{ a.tradingAccountId }}</span>
-                  <span class="mode-badge" [attr.data-mode]="a.recoveryMode">{{
-                    a.recoveryMode
-                  }}</span>
+          </span>
+          <span class="rb-go">Review on Accounts →</span>
+          @if (restrictedActive().length > 0) {
+            <span class="rb-groups">
+              @for (g of restrictedActiveGroups(); track g.mode) {
+                <span class="rb-group">
+                  <span class="mode-badge" [attr.data-mode]="g.mode">{{ g.mode }}</span>
+                  @for (a of g.items; track a.tradingAccountId) {
+                    <span class="rb-acct"
+                      >{{ a.accountName }}
+                      <span class="rb-id">#{{ a.tradingAccountId }}</span></span
+                    >
+                  }
                 </span>
               }
             </span>
           }
-          <span class="rb-go">Review →</span>
+          @if (restrictedInactive().length > 0) {
+            @if (restrictedActive().length > 0) {
+              <span class="rb-sub"
+                >{{ plural(restrictedInactive().length, 'inactive account') }} still
+                {{ restrictedInactive().length === 1 ? 'holds' : 'hold' }} a restriction · not
+                trading</span
+              >
+            }
+            <span class="rb-groups inactive">
+              @for (g of restrictedInactiveGroups(); track g.mode) {
+                <span class="rb-group">
+                  <span class="mode-badge" [attr.data-mode]="g.mode">{{ g.mode }}</span>
+                  @for (a of g.items; track a.tradingAccountId) {
+                    <span class="rb-acct"
+                      >{{ a.accountName }}
+                      <span class="rb-id">#{{ a.tradingAccountId }}</span></span
+                    >
+                  }
+                </span>
+              }
+            </span>
+          }
         </button>
       }
 
@@ -249,17 +271,16 @@ function emptyChart(text: string): EChartsOption {
             <p class="release-error">{{ err }}</p>
           }
 
-          <div class="card accounts-card">
-            <div class="accounts-head">
-              <div>
-                <h3>Recovery mode by account</h3>
-                <p class="card-note">
-                  Mode is read from the <code>DrawdownRecovery:ActiveMode</code> rows the risk
-                  checker enforces — not inferred — so what is shown here is what the engine
-                  applies. Releasing rebases the anchor to current equity; the all-time high-water
-                  mark is kept, so historical drawdown stays reportable.
-                </p>
-              </div>
+          <section class="panel accounts-card">
+            <header class="card-head accounts-head">
+              <h3>Recovery mode by account</h3>
+              <span class="accounts-summary">
+                @for (c of accountModeCounts(); track c.mode) {
+                  <span class="mode-badge" [attr.data-mode]="c.mode"
+                    >{{ c.count }} {{ c.mode }}</span
+                  >
+                }
+              </span>
               @if (hiddenAccountCount() > 0) {
                 <label class="toggle-inactive">
                   <input
@@ -270,7 +291,13 @@ function emptyChart(text: string): EChartsOption {
                   Show {{ hiddenAccountCount() }} inactive / never-evaluated
                 </label>
               }
-            </div>
+            </header>
+            <p class="t-source">
+              Mode is read from the <code>DrawdownRecovery:ActiveMode</code> rows the risk checker
+              enforces — not inferred — so what is shown here is what the engine applies. Releasing
+              rebases the anchor to current equity; the all-time high-water mark is kept, so
+              historical drawdown stays reportable.
+            </p>
 
             <table class="trans-table accounts-table">
               <thead>
@@ -286,11 +313,14 @@ function emptyChart(text: string): EChartsOption {
               </thead>
               <tbody>
                 @for (a of visibleAccounts(); track a.tradingAccountId) {
-                  <tr [class.row-restricted]="a.isRestricted">
+                  <tr
+                    [class.row-restricted]="a.isRestricted"
+                    [class.row-halted]="a.recoveryMode === 'Halted'"
+                  >
                     <td>
                       <span class="acct-name">{{ a.accountName }}</span>
-                      <span class="mono muted">
-                        #{{ a.tradingAccountId }} · {{ a.accountNumber }}</span
+                      <span class="acct-meta"
+                        >#{{ a.tradingAccountId }} · {{ a.accountNumber }}</span
                       >
                       @if (!a.isActive) {
                         <span class="chip-inactive">inactive</span>
@@ -323,14 +353,14 @@ function emptyChart(text: string): EChartsOption {
                     <td class="num">
                       {{ a.peakEquity !== null ? (a.peakEquity | number: '1.2-2') : '—' }}
                     </td>
-                    <td class="muted">
+                    <td class="muted last-rec">
                       {{ a.recordedAtUtc ? (a.recordedAtUtc | date: dateFmt) : 'never' }}
                       @if (a.peakRebasedAtUtc) {
                         <span
                           class="rebased"
                           [title]="a.peakRebaseReason ?? 'Anchor previously rebased'"
                         >
-                          · rebased {{ a.peakRebasedAtUtc | date: dateFmt }}
+                          Anchor rebased {{ a.peakRebasedAtUtc | date: dateFmt }}
                         </span>
                       }
                     </td>
@@ -358,7 +388,7 @@ function emptyChart(text: string): EChartsOption {
                 }
               </tbody>
             </table>
-          </div>
+          </section>
         }
       }
 
@@ -377,7 +407,7 @@ function emptyChart(text: string): EChartsOption {
           @if (snapshot(); as s) {
             <div class="scope-row">
               <label class="scope-select">
-                <span class="lbl">Account</span>
+                <span class="lbl-up">Account</span>
                 <select [ngModel]="liveAccountId()" (ngModelChange)="selectLiveAccount($event)">
                   <option [ngValue]="null">All accounts (aggregate)</option>
                   @for (a of accounts(); track a.tradingAccountId) {
@@ -392,7 +422,10 @@ function emptyChart(text: string): EChartsOption {
                   Analytics window: most recent {{ w.label }} · {{ w.rows | number }} snapshots
                   across {{ w.accounts }} account{{ w.accounts === 1 ? '' : 's' }}
                   @if (w.capped) {
-                    · {{ rowCap | number }}-snapshot cap reached, older history not loaded
+                    ·
+                    <span class="capped"
+                      >{{ rowCap | number }}-snapshot cap reached, older history not loaded</span
+                    >
                   }
                 </span>
               }
@@ -400,11 +433,25 @@ function emptyChart(text: string): EChartsOption {
 
             <div class="hero-section">
               <div class="hero-gauge">
-                <app-chart-card [options]="gaugeOptions()" height="210px" />
+                <app-chart-card [options]="gaugeOptions()" height="200px" />
+                <!-- The zones in words: colour alone does not say where a mode starts. -->
+                <ul class="gauge-zones" aria-label="Recovery thresholds">
+                  <li [class.on]="s.recoveryMode === 'Normal'">
+                    <i style="background: #34c759"></i>Normal &lt;
+                    {{ reducedPct() | number: '1.0-2' }}%
+                  </li>
+                  <li [class.on]="s.recoveryMode === 'Reduced'">
+                    <i style="background: #ff9500"></i>Reduced
+                    {{ reducedPct() | number: '1.0-2' }}–{{ haltedPct() | number: '1.0-2' }}%
+                  </li>
+                  <li [class.on]="s.recoveryMode === 'Halted'">
+                    <i style="background: #ff3b30"></i>Halted ≥ {{ haltedPct() | number: '1.0-2' }}%
+                  </li>
+                </ul>
               </div>
               <div class="hero-info">
                 <div class="recovery-badge-row">
-                  <span class="recovery-label">Recovery Mode</span>
+                  <span class="lbl-up">Recovery mode</span>
                   <span class="recovery-badge" [class]="s.recoveryMode.toLowerCase()">
                     {{ modeLabel(s.recoveryMode) }}
                   </span>
@@ -414,34 +461,38 @@ function emptyChart(text: string): EChartsOption {
                 </div>
                 <div class="equity-comparison">
                   <div class="equity-item">
-                    <span class="equity-label">Peak Equity</span>
+                    <span class="lbl-up">Peak equity</span>
                     <span class="equity-value peak">{{
                       s.peakEquity | currency: 'USD' : 'symbol' : '1.2-2'
                     }}</span>
                   </div>
-                  <div class="equity-divider"><span aria-hidden="true">↓</span></div>
+                  <div class="equity-divider"><span aria-hidden="true">→</span></div>
                   <div class="equity-item">
-                    <span class="equity-label">Current Equity</span>
+                    <span class="lbl-up">Current equity</span>
                     <span class="equity-value">{{
                       s.currentEquity | currency: 'USD' : 'symbol' : '1.2-2'
                     }}</span>
                   </div>
                   <div class="equity-item delta">
-                    <span class="equity-label">Drawdown Amount</span>
+                    <span class="lbl-up">Drawdown amount</span>
                     <span class="equity-value" [class.loss]="drawdownAmount() < 0">{{
                       drawdownAmount() | currency: 'USD' : 'symbol' : '1.2-2'
                     }}</span>
                   </div>
                 </div>
                 <div class="meta-row">
-                  <span class="muted">Recorded:</span>
-                  <span>{{ s.recordedAt | date: dateFmt }}</span>
+                  <span>{{ liveScopeNote() }}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>Recorded {{ s.recordedAt | date: dateFmt }} (local time)</span>
                 </div>
               </div>
             </div>
 
             <!-- 6-tile KPI strip — every figure is computed inside one account's series -->
             <div class="kpis">
+              <!-- Each caption says what the figure is measured over: the aggregate's current
+                   drawdown (summed equity) and the worst single-account reading are different
+                   quantities and read as a contradiction when unlabelled. -->
               <app-metric-card
                 label="Current drawdown"
                 [value]="s.drawdownPct"
@@ -449,36 +500,46 @@ function emptyChart(text: string): EChartsOption {
                 [colorByValue]="true"
                 [invertColor]="true"
                 [dotColor]="ddColor(s.drawdownPct)"
+                [caption]="
+                  liveAccountId() === null ? 'Fleet equity vs fleet peak' : 'Equity vs anchor peak'
+                "
               />
               <app-metric-card
-                label="Max drawdown in window"
+                label="Worst account drawdown in window"
                 [value]="maxDdInWindow()"
                 format="percent"
                 [dotColor]="ddColor(maxDdInWindow())"
+                [caption]="worstDdCaption()"
               />
               <app-metric-card
-                label="Days since peak"
-                [value]="daysSincePeak()"
-                format="number"
-                [dotColor]="daysSincePeak() === 0 ? '#34C759' : '#FF9500'"
+                label="Time since anchor peak"
+                [value]="null"
+                [displayValue]="sincePeakLabel()"
+                [dotColor]="sincePeak() === null ? '#34C759' : '#FF9500'"
+                [caption]="sincePeakCaption()"
               />
               <app-metric-card
-                label="Hours in {{ s.recoveryMode }}"
-                [value]="timeInCurrentModeHours()"
-                format="number"
+                label="Time in {{ s.recoveryMode }}"
+                [value]="null"
+                [displayValue]="timeInModeLabel()"
                 [dotColor]="modeColorFor(s.recoveryMode)"
+                [caption]="timeInModeCaption()"
               />
               <app-metric-card
                 label="Mode transitions in window"
                 [value]="modeTransitions().length"
                 format="number"
                 [dotColor]="modeTransitions().length > 5 ? '#FF9500' : '#34C759'"
+                [caption]="
+                  modeTransitions().length === 0 ? 'No mode changes' : 'Per account, see below'
+                "
               />
               <app-metric-card
                 label="Active accounts restricted"
                 [value]="restrictedActive().length"
                 format="number"
                 [dotColor]="restrictedActive().length > 0 ? '#FF3B30' : '#34C759'"
+                [caption]="'of ' + plural(accounts().length, 'active account')"
               />
             </div>
 
@@ -499,36 +560,61 @@ function emptyChart(text: string): EChartsOption {
 
             <!-- Threshold reference + recent mode transitions -->
             <div class="info-row">
-              <section class="threshold-card">
+              <section class="panel threshold-card">
                 <header class="card-head">
                   <h3>Recovery thresholds</h3>
-                  <span class="muted">When does the engine throttle back?</span>
+                  <span class="card-sub">When the engine throttles back</span>
                 </header>
-                <ul class="threshold-list">
-                  <li class="t-row" [class.active]="s.recoveryMode === 'Normal'">
-                    <span class="t-dot" style="background:#34C759"></span>
-                    <span class="t-label">Normal</span>
-                    <span class="t-range">DD &lt; {{ reducedPct() | number: '1.0-2' }}%</span>
-                    <span class="t-desc">Full size · all strategies trading</span>
-                  </li>
-                  <li class="t-row" [class.active]="s.recoveryMode === 'Reduced'">
-                    <span class="t-dot" style="background:#FF9500"></span>
-                    <span class="t-label">Reduced</span>
-                    <span class="t-range"
-                      >DD {{ reducedPct() | number: '1.0-2' }}–{{
-                        haltedPct() | number: '1.0-2'
-                      }}%</span
-                    >
-                    <span class="t-desc">Lot sizes scaled down · risk controls tighten</span>
-                  </li>
-                  <li class="t-row" [class.active]="s.recoveryMode === 'Halted'">
-                    <span class="t-dot" style="background:#FF3B30"></span>
-                    <span class="t-label">Halted</span>
-                    <span class="t-range">DD ≥ {{ haltedPct() | number: '1.0-2' }}%</span>
-                    <span class="t-desc">No new positions · existing positions managed</span>
-                  </li>
-                </ul>
-                <p class="t-note">
+                <table class="trans-table">
+                  <thead>
+                    <tr>
+                      <th>Mode</th>
+                      <th>Drawdown</th>
+                      <th>What the engine does</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr [class.active]="s.recoveryMode === 'Normal'">
+                      <td class="t-mode">
+                        <span class="t-dot" style="background: #34c759"></span>Normal
+                      </td>
+                      <td class="t-range">&lt; {{ reducedPct() | number: '1.0-2' }}%</td>
+                      <td>
+                        Full size · all strategies trading
+                        @if (s.recoveryMode === 'Normal') {
+                          <span class="t-now">now</span>
+                        }
+                      </td>
+                    </tr>
+                    <tr [class.active]="s.recoveryMode === 'Reduced'">
+                      <td class="t-mode">
+                        <span class="t-dot" style="background: #ff9500"></span>Reduced
+                      </td>
+                      <td class="t-range">
+                        {{ reducedPct() | number: '1.0-2' }}–{{ haltedPct() | number: '1.0-2' }}%
+                      </td>
+                      <td>
+                        Lot sizes scaled down · risk controls tighten
+                        @if (s.recoveryMode === 'Reduced') {
+                          <span class="t-now">now</span>
+                        }
+                      </td>
+                    </tr>
+                    <tr [class.active]="s.recoveryMode === 'Halted'">
+                      <td class="t-mode">
+                        <span class="t-dot" style="background: #ff3b30"></span>Halted
+                      </td>
+                      <td class="t-range">≥ {{ haltedPct() | number: '1.0-2' }}%</td>
+                      <td>
+                        No new positions · existing positions managed
+                        @if (s.recoveryMode === 'Halted') {
+                          <span class="t-now">now</span>
+                        }
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p class="t-source">
                   @if (thresholdsFromEngine()) {
                     Live values from <code>RiskCheckerOptions:ReducedDrawdownPct</code> /
                     <code>HaltedDrawdownPct</code>.
@@ -536,16 +622,21 @@ function emptyChart(text: string): EChartsOption {
                     Engine defaults — no <code>RiskCheckerOptions:*DrawdownPct</code> override is
                     set.
                   }
-                  A mode is assigned per account when its snapshot is recorded, and an operator
-                  release rebases the anchor without changing the all-time peak — so an account can
-                  sit above a threshold in a lower mode until its next evaluation.
                 </p>
+                <details class="method">
+                  <summary>Why an account can sit above a threshold in a lower mode</summary>
+                  <p>
+                    A mode is assigned per account when its snapshot is recorded, and an operator
+                    release rebases the anchor without changing the all-time peak — so an account
+                    can sit above a threshold in a lower mode until its next evaluation.
+                  </p>
+                </details>
               </section>
 
-              <section class="trans-card">
+              <section class="panel trans-card">
                 <header class="card-head">
                   <h3>Recent mode transitions</h3>
-                  <span class="muted"
+                  <span class="card-sub"
                     >{{ modeTransitions().length | number }} in the window, per account</span
                   >
                 </header>
@@ -589,8 +680,9 @@ function emptyChart(text: string): EChartsOption {
                     </table>
                   </div>
                 } @else {
-                  <span class="empty good">
-                    No mode transitions in the window — every account stayed in one mode.
+                  <span class="empty">
+                    <strong>No mode transitions in the window</strong>
+                    Every account stayed in one mode.
                   </span>
                 }
               </section>
@@ -682,10 +774,10 @@ function emptyChart(text: string): EChartsOption {
               [options]="historyDwellOptions()"
               [height]="historyDwellHeight()"
             />
-            <section class="trans-card">
+            <section class="panel trans-card">
               <header class="card-head">
                 <h3>Mode transitions on page</h3>
-                <span class="muted"
+                <span class="card-sub"
                   >{{ historyModeTransitions().length | number }} per account</span
                 >
               </header>
@@ -729,8 +821,9 @@ function emptyChart(text: string): EChartsOption {
                   </table>
                 </div>
               } @else {
-                <span class="empty good">
-                  No mode transitions on the loaded page — every account stayed in one mode.
+                <span class="empty">
+                  <strong>No mode transitions on the loaded page</strong>
+                  Every account stayed in one mode.
                 </span>
               }
             </section>
@@ -764,7 +857,7 @@ function emptyChart(text: string): EChartsOption {
             >
               <h4>Add note</h4>
               <label class="field">
-                <span class="lbl">When (UTC)</span>
+                <span class="lbl">When (your local time; stored as UTC)</span>
                 <input type="datetime-local" [(ngModel)]="annotWhen" name="when" required />
               </label>
               <label class="field">
@@ -841,614 +934,7 @@ function emptyChart(text: string): EChartsOption {
       }
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .annot-dialog.release-dialog {
-        max-width: 480px;
-      }
-      .release-copy {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        line-height: 1.5;
-      }
-      .rb-id {
-        color: var(--text-tertiary);
-        font-size: 0.9em;
-      }
-      /* Its own flex row: the banner's gap only spaces direct children, so the inactive
-         accounts ran together ("HaltedStandard #22"). */
-      .rb-inactive {
-        display: inline-flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-        color: var(--text-tertiary);
-      }
-      .scope-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-4);
-        flex-wrap: wrap;
-      }
-      .scope-select {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-2);
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .scope-select select {
-        padding: 6px 32px 6px 10px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        max-width: 320px;
-      }
-      .window-note {
-        font-size: var(--text-xs);
-      }
-      .hero-section {
-        display: grid;
-        grid-template-columns: 260px 1fr;
-        gap: var(--space-6);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-5) var(--space-6);
-        box-shadow: var(--shadow-sm);
-        align-items: center;
-      }
-      /* The gauge is a chart-card so its text follows the ECharts theme; strip the
-         nested card chrome so it reads as part of the hero, not a card in a card. */
-      .hero-gauge ::ng-deep .chart-card {
-        background: transparent;
-        border: none;
-        box-shadow: none;
-        padding: 0;
-      }
-      .hero-gauge ::ng-deep .chart-card:hover {
-        transform: none;
-        box-shadow: none;
-      }
-      .hero-info {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .recovery-badge-row {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        font-size: var(--text-xs);
-      }
-      .recovery-label {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .recovery-badge {
-        display: inline-flex;
-        align-items: center;
-        padding: var(--space-2) var(--space-4);
-        border-radius: var(--radius-full);
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .recovery-badge.normal {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .recovery-badge.reduced {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .recovery-badge.halted {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .equity-comparison {
-        display: flex;
-        align-items: center;
-        gap: var(--space-6);
-        flex-wrap: wrap;
-      }
-      .equity-item {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-      .equity-item.delta {
-        margin-left: var(--space-4);
-        padding-left: var(--space-4);
-        border-left: 1px solid var(--border);
-      }
-      .equity-label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .equity-value {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-      }
-      .equity-value.peak {
-        color: var(--text-secondary);
-      }
-      .equity-value.loss {
-        color: var(--loss);
-      }
-      .equity-divider {
-        display: flex;
-        align-items: center;
-        color: var(--text-tertiary);
-        font-size: 20px;
-      }
-      .meta-row {
-        display: flex;
-        gap: var(--space-2);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-      @media (max-width: 1024px) {
-        .hero-section {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* 6-tile KPI strip */
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1400px) {
-        .kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* 2-col chart row */
-      .chart-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .chart-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Threshold reference + transitions row */
-      .info-row {
-        display: grid;
-        grid-template-columns: 1fr 1.2fr;
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .info-row {
-          grid-template-columns: 1fr;
-        }
-      }
-      .threshold-card,
-      .trans-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .card-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .card-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .threshold-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-      }
-      .t-row {
-        display: grid;
-        grid-template-columns: 16px 72px 96px 1fr;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .t-row.active {
-        background: var(--bg-tertiary);
-      }
-      .t-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-      }
-      .t-label {
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .t-range {
-        font-family: 'SF Mono', 'Menlo', monospace;
-        color: var(--text-secondary);
-        white-space: nowrap;
-      }
-      .t-desc {
-        color: var(--text-tertiary);
-      }
-      .t-note {
-        margin: 0;
-        padding: var(--space-3) var(--space-4);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        line-height: 1.5;
-      }
-      .t-note code {
-        font-size: 10.5px;
-      }
-
-      /* ── Per-account recovery ─────────────────────────────────────────── */
-
-      .restricted-banner {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-        width: 100%;
-        margin: 0.75rem 0 0;
-        padding: 0.6rem 0.9rem;
-        border: 1px solid #ff9500;
-        border-radius: 8px;
-        background: rgba(255, 149, 0, 0.08);
-        color: inherit;
-        font: inherit;
-        text-align: left;
-        cursor: pointer;
-      }
-      .restricted-banner:hover {
-        background: rgba(255, 149, 0, 0.14);
-      }
-      .rb-count {
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-      }
-      .rb-acct {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        font-size: 0.85rem;
-      }
-      .rb-go {
-        margin-left: auto;
-        font-size: 0.82rem;
-        opacity: 0.8;
-        white-space: nowrap;
-      }
-
-      .accounts-card {
-        margin-top: 1rem;
-      }
-      .accounts-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: var(--space-4);
-      }
-      .accounts-head h3 {
-        margin: 0 0 var(--space-2);
-      }
-      .toggle-inactive {
-        display: inline-flex;
-        align-items: center;
-        gap: var(--space-2);
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .card-note {
-        margin: 0 0 0.9rem;
-        font-size: 0.82rem;
-        opacity: 0.75;
-        max-width: 78ch;
-      }
-      /* Every row is one line tall regardless of whether it carries a button. */
-      .accounts-table td {
-        vertical-align: middle;
-        height: 40px;
-      }
-      .acct-name {
-        font-weight: 600;
-      }
-      .row-restricted {
-        background: rgba(255, 59, 48, 0.05);
-      }
-      .chip-inactive {
-        margin-left: 0.4rem;
-        border: 1px solid rgba(128, 128, 128, 0.4);
-        border-radius: 999px;
-        padding: 0 0.4rem;
-        font-size: 0.7rem;
-        opacity: 0.75;
-      }
-
-      /* One badge shape for every mode; colour carries the severity. */
-      .mode-badge {
-        display: inline-block;
-        border-radius: 4px;
-        padding: 0.1rem 0.45rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-        background: rgba(128, 128, 128, 0.18);
-        color: var(--text-secondary);
-      }
-      .mode-badge[data-mode='Normal'] {
-        background: rgba(52, 199, 89, 0.18);
-        color: var(--tone-green);
-      }
-      .mode-badge[data-mode='Reduced'] {
-        background: rgba(255, 149, 0, 0.2);
-        color: #a86400;
-      }
-      .mode-badge[data-mode='Halted'] {
-        background: #ff3b30;
-        color: #fff;
-      }
-      .mode-stale {
-        display: block;
-        margin-top: 0.2rem;
-        font-size: 0.7rem;
-        opacity: 0.7;
-      }
-      .rebased {
-        opacity: 0.8;
-      }
-
-      /* Releasing is a recovery, not a destructive act — neutral secondary styling. */
-      .release-btn {
-        border: 1px solid var(--border);
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-        border-radius: var(--radius-sm);
-        padding: 3px 10px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        line-height: 1.4;
-        cursor: pointer;
-        white-space: nowrap;
-        font-family: inherit;
-      }
-      .release-btn:hover:not(:disabled) {
-        border-color: var(--accent);
-        color: var(--accent);
-      }
-      .release-btn:disabled {
-        opacity: 0.55;
-        cursor: default;
-      }
-
-      .release-note,
-      .release-error {
-        margin: 0.75rem 0 0;
-        padding: 0.55rem 0.8rem;
-        border-radius: 6px;
-        font-size: 0.85rem;
-      }
-      .release-note {
-        border: 1px solid #34c759;
-        background: rgba(52, 199, 89, 0.1);
-      }
-      .release-error {
-        border: 1px solid #ff3b30;
-        background: rgba(255, 59, 48, 0.1);
-      }
-
-      /* Transitions table */
-      .trans-scroll {
-        max-height: 320px;
-        overflow-y: auto;
-      }
-      .trans-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .trans-table th,
-      .trans-table td {
-        padding: 6px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .trans-table thead th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .trans-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .trans-table .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .trans-table .mono {
-        font-family: 'SF Mono', 'Menlo', monospace;
-      }
-      .trans-table .acct-cell {
-        max-width: 160px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .trans-table .warn {
-        color: var(--tone-amber);
-        font-weight: var(--font-semibold);
-      }
-      .trans-table .bad {
-        color: var(--loss);
-        font-weight: var(--font-semibold);
-      }
-      .mode-pill {
-        display: inline-flex;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-      }
-      .mode-pill[data-mode='Normal'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .mode-pill[data-mode='Reduced'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .mode-pill[data-mode='Halted'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .empty {
-        display: block;
-        padding: var(--space-4);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .empty.good {
-        color: var(--profit);
-      }
-
-      /* ── History-tab chart toolbar + annotation dialog ─────────────── */
-      .history-chart-wrap {
-        position: relative;
-      }
-      .add-note {
-        position: absolute;
-        top: var(--space-4);
-        right: var(--space-4);
-        z-index: 2;
-      }
-      .btn {
-        padding: 6px 14px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        border: 1px solid transparent;
-        cursor: pointer;
-        font-family: inherit;
-      }
-      .btn-sm {
-        padding: 4px 12px;
-        font-size: var(--text-xs);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:disabled {
-        opacity: 0.5;
-      }
-      .btn-secondary {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .btn-ghost {
-        background: transparent;
-        color: var(--text-secondary);
-        border-color: var(--border);
-      }
-      .annot-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(8px);
-        -webkit-backdrop-filter: blur(8px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-      }
-      .annot-dialog {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        padding: var(--space-5) var(--space-6);
-        width: 100%;
-        max-width: 440px;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .annot-dialog h4 {
-        margin: 0;
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-      .lbl {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .field input,
-      .field textarea {
-        padding: 8px 10px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        resize: vertical;
-      }
-      .annot-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-2);
-      }
-    `,
-  ],
+  styleUrl: './drawdown-page.scss',
 })
 export class DrawdownPageComponent {
   private readonly service = inject(DrawdownRecoveryService);
@@ -1561,6 +1047,19 @@ export class DrawdownPageComponent {
   readonly restrictedInactive = computed(() =>
     this.restrictedAccounts().filter((a) => !a.isActive),
   );
+
+  readonly restrictedActiveGroups = computed(() => groupByMode(this.restrictedActive()));
+  readonly restrictedInactiveGroups = computed(() => groupByMode(this.restrictedInactive()));
+  readonly restrictedActiveHalted = computed(() =>
+    this.restrictedActive().some((a) => a.recoveryMode === 'Halted'),
+  );
+
+  /** "2 Halted · 3 Reduced · 1 Normal" over the rows the table is showing. */
+  readonly accountModeCounts = computed(() =>
+    groupByMode(this.visibleAccounts()).map((g) => ({ mode: g.mode, count: g.items.length })),
+  );
+
+  readonly plural = plural;
 
   private readonly accountNames = computed(() => {
     const m = new Map<number, string>();
@@ -1758,65 +1257,122 @@ export class DrawdownPageComponent {
       this.liveAccountId() === null
         ? `one line per account`
         : this.accountLabel(this.liveAccountId());
-    return `${scope} · most recent ${w.label}`;
-  });
-
-  readonly maxDdInWindow = computed(() => {
-    let max = 0;
-    for (const r of this.liveRows()) if (r.drawdownPct > max) max = r.drawdownPct;
-    // Include the current snapshot — it might be fresher than the last
-    // analytics row, especially right after a sudden drop.
-    const s = this.snapshot();
-    if (s && s.drawdownPct > max) max = s.drawdownPct;
-    return max;
+    // The threshold lines do not stretch the axis, so say when one is off the top.
+    const offScale = this.maxDdInWindow() < this.haltedPct() * 0.8;
+    const halt = offScale ? ` · Halted line (${this.haltedPct()}%) above the plotted range` : '';
+    return `${scope} · most recent ${w.label}${halt}`;
   });
 
   /**
-   * Days since the account last stood at its anchor peak. Under the aggregate
-   * this is the longest such gap across accounts: an aggregate row sums equity,
-   * so no single snapshot can ever be compared against the summed peak.
+   * Highest drawdown any one account reached inside the loaded window (plus the
+   * current snapshot). Under the aggregate this is a per-account reading, not the
+   * fleet figure the gauge shows — the caption names the account so the two are
+   * not read as a contradiction.
    */
-  readonly daysSincePeak = computed(() => {
-    let worst = 0;
+  private readonly worstDd = computed(() => {
+    let max = 0;
+    let accountId: number | null = null;
+    for (const r of this.liveRows()) {
+      if (r.drawdownPct > max) {
+        max = r.drawdownPct;
+        accountId = accountOf(r);
+      }
+    }
+    // Include the current snapshot — it might be fresher than the last
+    // analytics row, especially right after a sudden drop.
+    const s = this.snapshot();
+    if (s && s.drawdownPct > max) {
+      max = s.drawdownPct;
+      accountId = this.liveAccountId() ?? 0;
+    }
+    return { pct: max, accountId };
+  });
+
+  readonly maxDdInWindow = computed(() => this.worstDd().pct);
+
+  readonly worstDdCaption = computed(() => {
+    const w = this.worstDd();
+    if (w.accountId === null) return 'No samples in the window';
+    if (this.liveAccountId() !== null) return 'Highest in loaded window';
+    return this.accountLabel(w.accountId);
+  });
+
+  /** "Fleet aggregate · 5 accounts" or the selected account's name. */
+  readonly liveScopeNote = computed(() => {
+    const id = this.liveAccountId();
+    if (id !== null) return this.accountLabel(id);
+    return `Fleet aggregate · ${plural(this.accounts().length, 'active account')}`;
+  });
+
+  /**
+   * Time since the account last stood at its anchor peak; null when every account
+   * in scope is at its peak now. Under the aggregate this is the longest such gap
+   * across accounts: an aggregate row sums equity, so no single snapshot can ever
+   * be compared against the summed peak. When the peak predates the loaded window
+   * the figure is only a minimum (`lowerBound`) — it used to floor to "0 days",
+   * which read as "at peak" for accounts 44% under it.
+   */
+  readonly sincePeak = computed<Elapsed | null>(() => {
+    let worst: Elapsed | null = null;
+    const now = Date.now();
     for (const rows of this.liveGroups().values()) {
       if (rows.length === 0) continue;
       const latest = rows[rows.length - 1];
       if (latest.currentEquity >= latest.peakEquity) continue;
-      let days: number | null = null;
+      let e: Elapsed | null = null;
       for (let i = rows.length - 1; i >= 0; i--) {
         if (rows[i].currentEquity >= latest.peakEquity * 0.9999) {
-          days = Math.floor((Date.now() - new Date(rows[i].recordedAt).getTime()) / DAY_MS);
+          e = { ms: now - new Date(rows[i].recordedAt).getTime(), lowerBound: false };
           break;
         }
       }
       // Peak predates the window: at least as old as the oldest row we hold.
-      if (days === null) {
-        days = Math.floor((Date.now() - new Date(rows[0].recordedAt).getTime()) / DAY_MS);
-      }
-      if (days > worst) worst = days;
+      e ??= { ms: now - new Date(rows[0].recordedAt).getTime(), lowerBound: true };
+      if (worst === null || e.ms > worst.ms) worst = e;
     }
     return worst;
   });
 
+  readonly sincePeakLabel = computed(() => formatElapsed(this.sincePeak(), 'At peak'));
+
+  readonly sincePeakCaption = computed(() => {
+    const e = this.sincePeak();
+    if (e === null) return 'Equity at anchor peak';
+    if (e.lowerBound) return 'Peak predates the window';
+    return this.liveAccountId() === null ? 'Longest across accounts' : 'Since equity was at peak';
+  });
+
   /**
-   * Continuous hours in the displayed mode. Under the aggregate the displayed
-   * mode is the worst one in the fleet, so the figure is taken from the
-   * account(s) currently in that mode — the longest such run.
+   * Continuous time in the displayed mode. Under the aggregate the displayed mode
+   * is the worst one in the fleet, so the figure is taken from the account(s)
+   * currently in that mode — the longest such run. A run that reaches back to the
+   * oldest loaded row is a minimum.
    */
-  readonly timeInCurrentModeHours = computed(() => {
+  readonly timeInMode = computed<Elapsed | null>(() => {
     const s = this.snapshot();
-    if (!s) return 0;
-    let longest = 0;
+    if (!s) return null;
+    let longest: Elapsed | null = null;
+    const now = Date.now();
     for (const rows of this.liveGroups().values()) {
       if (rows.length === 0 || rows[rows.length - 1].recoveryMode !== s.recoveryMode) continue;
-      let startedAt = new Date(rows[rows.length - 1].recordedAt).getTime();
-      for (let i = rows.length - 1; i >= 0 && rows[i].recoveryMode === s.recoveryMode; i--) {
-        startedAt = new Date(rows[i].recordedAt).getTime();
-      }
-      const hours = Math.round((Date.now() - startedAt) / (60 * 60 * 1000));
-      if (hours > longest) longest = hours;
+      let i = rows.length - 1;
+      while (i > 0 && rows[i - 1].recoveryMode === s.recoveryMode) i--;
+      const e: Elapsed = {
+        ms: now - new Date(rows[i].recordedAt).getTime(),
+        lowerBound: i === 0,
+      };
+      if (longest === null || e.ms > longest.ms) longest = e;
     }
     return longest;
+  });
+
+  readonly timeInModeLabel = computed(() => formatElapsed(this.timeInMode()));
+
+  readonly timeInModeCaption = computed(() => {
+    const e = this.timeInMode();
+    if (e === null) return 'Not in this mode in window';
+    if (e.lowerBound) return 'Began before the window';
+    return 'Longest continuous run';
   });
 
   private transitionsAcross(groups: Map<number, SnapshotRow[]>): ModeTransition[] {
@@ -1836,50 +1392,73 @@ export class DrawdownPageComponent {
 
   /**
    * Drawn in-page instead of the shared gauge: that component paints its value in
-   * a fixed dark grey that vanishes on the dark theme, has no needle, and puts its
-   * caption on the arc. This one follows the ECharts theme, colours the needle by
-   * mode, and keeps the arc open at the bottom for the caption.
+   * a fixed dark grey that vanishes on the dark theme and puts its caption on the
+   * arc. Two concentric rings: a thin outer ring carries the threshold zones, the
+   * thick inner ring fills to the current drawdown in the mode colour. The needle
+   * is gone — on a 0–120% scale a 14% needle was a short stub that read as
+   * nothing — and the value sits in the open centre with its caption beneath.
+   * The scale stops at 100%: drawdown cannot exceed it.
    */
   readonly gaugeOptions = computed<EChartsOption>(() => {
     const s = this.snapshot();
     const value = s?.drawdownPct ?? 0;
     const reduced = this.reducedPct();
     const halted = this.haltedPct();
-    const max = Math.max(Math.ceil((halted * 1.5) / 5) * 5, Math.ceil((value * 1.1) / 5) * 5);
+    const max = gaugeMax(value, halted);
     const mode: RecoveryMode = s?.recoveryMode ?? 'Normal';
+    const ring = {
+      type: 'gauge' as const,
+      startAngle: 210,
+      endAngle: -30,
+      min: 0,
+      max,
+      center: ['50%', '56%'],
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      pointer: { show: false },
+      anchor: { show: false },
+    };
     return {
       series: [
         {
-          type: 'gauge',
-          startAngle: 210,
-          endAngle: -30,
-          min: 0,
-          max,
-          radius: '95%',
-          center: ['50%', '55%'],
-          progress: { show: true, width: 12, itemStyle: { color: MODE_COLOR[mode] } },
+          ...ring,
+          radius: '98%',
+          progress: { show: false },
           axisLine: {
             lineStyle: {
-              width: 12,
+              width: 4,
               color: [
-                [reduced / max, 'rgba(52, 199, 89, 0.28)'],
-                [halted / max, 'rgba(255, 149, 0, 0.32)'],
-                [1, 'rgba(255, 59, 48, 0.32)'],
+                [Math.min(1, reduced / max), MODE_COLOR.Normal],
+                [Math.min(1, halted / max), MODE_COLOR.Reduced],
+                [1, MODE_COLOR.Halted],
               ],
             },
           },
-          axisTick: { show: false },
-          splitLine: { show: false },
-          axisLabel: { show: false },
-          pointer: { show: true, width: 4, length: '58%', itemStyle: { color: MODE_COLOR[mode] } },
-          anchor: { show: true, size: 8, itemStyle: { color: MODE_COLOR[mode] } },
-          // 72%, not 86%: at 86% the caption sat on the card's bottom edge and was clipped.
-          title: { show: true, offsetCenter: [0, '72%'], fontSize: 11 },
+          title: { show: false },
+          detail: { show: false },
+          data: [{ value: 0 }],
+          silent: true,
+        },
+        {
+          ...ring,
+          radius: '88%',
+          progress: {
+            show: true,
+            width: 14,
+            roundCap: true,
+            itemStyle: { color: MODE_COLOR[mode] },
+          },
+          axisLine: {
+            roundCap: true,
+            lineStyle: { width: 14, color: [[1, 'rgba(142, 142, 147, 0.2)']] },
+          },
+          title: { show: true, offsetCenter: [0, '30%'], fontSize: 11, color: '#8E8E93' },
           detail: {
             valueAnimation: true,
-            fontSize: 22,
+            fontSize: 24,
             fontWeight: 600,
-            offsetCenter: [0, '38%'],
+            offsetCenter: [0, '-4%'],
             formatter: (v: number) => `${v.toFixed(2)}%`,
             color: MODE_COLOR[mode],
           },
@@ -1918,6 +1497,25 @@ export class DrawdownPageComponent {
         },
       ],
     };
+    // Faint mode zones behind the lines, so where a line sits reads as a mode
+    // without hunting for the dashed threshold.
+    const markArea = {
+      silent: true,
+      data: [
+        [
+          { yAxis: 0, itemStyle: { color: 'rgba(52, 199, 89, 0.06)' } },
+          { yAxis: this.reducedPct() },
+        ],
+        [
+          { yAxis: this.reducedPct(), itemStyle: { color: 'rgba(255, 149, 0, 0.07)' } },
+          { yAxis: this.haltedPct() },
+        ],
+        [
+          { yAxis: this.haltedPct(), itemStyle: { color: 'rgba(255, 59, 48, 0.07)' } },
+          { yAxis: 100 },
+        ],
+      ],
+    } as unknown as LineSeriesOption['markArea'];
     const series: SeriesOption[] = [];
     let i = 0;
     for (const [id, rows] of groups) {
@@ -1933,12 +1531,27 @@ export class DrawdownPageComponent {
         itemStyle: { color },
         emphasis: { focus: 'series' },
         markLine: i === 0 ? markLine : undefined,
+        markArea: i === 0 ? markArea : undefined,
+        // Name + value at the line's end: with flat lines and six similar hues,
+        // colour alone could not tell which account sits where.
+        endLabel: {
+          show: true,
+          fontSize: 10,
+          color,
+          formatter: (p: { seriesName?: string; value?: unknown }) => {
+            const v = Array.isArray(p.value) ? Number(p.value[1]) : Number(p.value);
+            const name = p.seriesName ?? '';
+            const short = name.length > 14 ? `${name.slice(0, 13)}…` : name;
+            return `${short} ${v.toFixed(1)}%`;
+          },
+        },
+        labelLayout: { moveOverlap: 'shiftY' },
       });
       i++;
     }
     if (series.length === 0) return emptyChart('No drawdown samples in the window');
     return {
-      grid: { left: 44, right: 16, top: series.length > 1 ? 32 : 16, bottom: 28 },
+      grid: { left: 44, right: 118, top: series.length > 1 ? 32 : 16, bottom: 28 },
       tooltip: {
         trigger: 'axis',
         valueFormatter: (v) => `${Number(v).toFixed(2)}%`,
@@ -2249,6 +1862,7 @@ export class DrawdownPageComponent {
       field: 'drawdownPct',
       width: 140,
       type: 'numericColumn',
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) => (p.value as number)?.toFixed(2) + '%',
     },
     {
@@ -2256,6 +1870,7 @@ export class DrawdownPageComponent {
       field: 'currentEquity',
       width: 160,
       type: 'numericColumn',
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) =>
         (p.value as number)?.toLocaleString('en-US', {
           minimumFractionDigits: 2,
@@ -2267,6 +1882,7 @@ export class DrawdownPageComponent {
       field: 'peakEquity',
       width: 160,
       type: 'numericColumn',
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) =>
         (p.value as number)?.toLocaleString('en-US', {
           minimumFractionDigits: 2,

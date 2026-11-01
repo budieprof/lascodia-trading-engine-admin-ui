@@ -1,0 +1,512 @@
+@use '../../martingale-shared';
+
+h3 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+// ── Search box
+.search {
+  height: 30px;
+  min-width: 220px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-sm);
+
+  &:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+
+// ── Long-form method notes behind a disclosure
+details.method {
+  margin-top: var(--space-2);
+
+  summary {
+    cursor: pointer;
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    font-weight: var(--font-medium, 500);
+  }
+  summary:hover {
+    color: var(--text-primary);
+  }
+}
+
+// ── Text tones
+.pos {
+  color: var(--profit);
+}
+.dim {
+  color: var(--text-secondary);
+}
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+.ok-line {
+  color: var(--tone-green);
+}
+.warn-line {
+  color: var(--tone-amber);
+}
+.foot {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+// Header actions: snapshot time + refresh.
+.asof {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  align-self: center;
+}
+
+// Mode banner layout (colours live in the shared partial).
+.mode {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.mode-copy {
+  flex: 1 1 20rem;
+  font-size: var(--text-sm);
+}
+.mode-link {
+  font-size: var(--text-sm);
+  color: var(--accent);
+  text-decoration: none;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+// ── "Open right now": the headline answer.
+.now {
+  padding: var(--space-3) var(--space-4);
+}
+.now-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+
+  .dim {
+    font-size: var(--text-xs);
+  }
+}
+.now-empty {
+  margin: 0;
+  font-size: var(--text-sm);
+
+  b {
+    margin-right: 6px;
+  }
+}
+.now-row {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1.4fr) 6.5rem 12rem minmax(0, 2fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-sm);
+}
+.now-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.now-fig {
+  white-space: nowrap;
+
+  .k {
+    font-size: 10.5px;
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    margin-right: 4px;
+  }
+}
+.now-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+@media (max-width: 1000px) {
+  .now-row {
+    grid-template-columns: 1fr 1fr;
+  }
+  .now-fig {
+    text-align: left;
+  }
+}
+
+// ── Scoreboard: two money tiles span two columns and set larger.
+.totals {
+  display: grid;
+  grid-template-columns: 1.7fr 1.7fr repeat(4, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.kpi.primary {
+  .k-value {
+    font-size: 28px;
+    letter-spacing: -0.01em;
+  }
+}
+.kpi .k-value.pos {
+  color: var(--profit);
+}
+.kpi .k-value.neg {
+  color: var(--loss);
+}
+@media (max-width: 1100px) {
+  .totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 640px) {
+  .totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.totals-note {
+  margin-bottom: var(--space-4);
+}
+
+// ── Sweeper
+.sweeper-off {
+  border-left: 4px solid var(--loss);
+}
+.sweeper-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+.sweeper p {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+}
+.sweeper-line {
+  color: var(--text-secondary);
+  margin-bottom: 0 !important;
+}
+
+// ── Chains
+.chains-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+.chains-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.chains-sub {
+  margin: 4px 0 0;
+  font-size: var(--text-xs);
+}
+
+.chain {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  overflow: hidden;
+  background: var(--bg-primary);
+  scroll-margin-top: 80px;
+
+  &[data-status='Open'] {
+    border-left-color: var(--warning);
+  }
+  &[data-status='Recovered'] {
+    border-left-color: var(--profit);
+  }
+  &[data-status='Abandoned'] {
+    border-left-color: var(--loss);
+  }
+  // An operator reset is a deliberate write-off, not a ladder that ran out of road.
+  &[data-status='Abandoned'][data-reset='true'] {
+    border-left-color: var(--text-tertiary);
+  }
+}
+.chain-cols,
+.chain-head {
+  display: grid;
+  // 9.5rem: "Reset by operator" is the longest status label.
+  grid-template-columns: 9rem minmax(13rem, 2fr) 8rem 3rem 8rem 6.5rem minmax(6rem, 0.9fr) 1rem;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 12px;
+}
+.chain-cols {
+  margin-top: var(--space-3);
+  padding-top: 0;
+  padding-bottom: 2px;
+  padding-left: 16px;
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+.chain-head {
+  cursor: pointer;
+
+  &:hover {
+    background: var(--bg-secondary);
+  }
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+}
+.chain-status {
+  min-width: 0;
+  overflow: hidden;
+}
+.chain-title {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: var(--text-sm);
+}
+.chain-when {
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.chain-depth,
+.chain-money,
+.chain-pnl {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+.chain-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+.chain-toggle {
+  font-size: 1.1rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+@media (max-width: 1000px) {
+  .chain-cols {
+    display: none;
+  }
+  .chain-head {
+    grid-template-columns: 1fr 1fr;
+  }
+  .chain-head > .num {
+    text-align: left;
+  }
+}
+.chain-body {
+  padding: 0 14px 14px;
+  border-top: 1px solid var(--border);
+}
+
+.chain-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: var(--space-3) 0 0;
+
+  > div.wide {
+    grid-column: 1 / -1;
+  }
+  dt {
+    font-size: 10.5px;
+    font-weight: var(--font-semibold);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+  }
+  dd {
+    margin: 2px 0 0;
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+// Boxed explanations inside a chain: depth divergence, rung skip, next rung.
+.box {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-top: var(--space-3);
+  background: var(--bg-secondary);
+
+  h3 {
+    margin-top: 0;
+  }
+  p {
+    margin: 4px 0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+  }
+  &.warn {
+    border-left-color: var(--warning);
+  }
+  &.bad {
+    border-color: color-mix(in srgb, var(--loss) 45%, var(--border));
+    border-left-color: var(--loss);
+    background: color-mix(in srgb, var(--loss) 5%, var(--bg-secondary));
+  }
+  &.bad > h3:first-child {
+    color: var(--tone-red);
+  }
+  &.rung.bad > h3:first-child {
+    color: inherit;
+  }
+}
+.rung {
+  border-left-color: var(--profit);
+}
+
+// ── Tables: wide ones scroll inside their own box — the page never scrolls sideways.
+.table-scroll {
+  overflow-x: auto;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+th,
+td {
+  text-align: left;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+// Headers may wrap between words so ten laddered-symbol columns fit 1440px.
+th {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+  font-weight: var(--font-semibold);
+  white-space: normal;
+  vertical-align: bottom;
+}
+td.num,
+th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+tbody tr:last-child td {
+  border-bottom: none;
+}
+tr.inactive td {
+  opacity: 0.55;
+}
+.symbols h2 {
+  margin-bottom: var(--space-2);
+}
+
+// Secondary line inside a ledger cell: the broker close time under the apply time, and the
+// pre-reconciliation figure under a restated balance. Quiet by default, loud only when it
+// contradicts.
+.ledger .sub {
+  display: block;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-tertiary);
+  font-weight: 400;
+
+  &.bad-time {
+    color: var(--tone-amber);
+  }
+  &.restated {
+    font-style: italic;
+  }
+}
+.ledger td {
+  vertical-align: top;
+}
+
+// ── Manual reset
+.reset {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px dashed var(--border);
+  font-size: var(--text-sm);
+}
+.reset-reason {
+  flex: 1 1 18rem;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font: inherit;
+}
+.btn-danger,
+.btn-danger-outline,
+.btn-plain {
+  height: 30px;
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--font-medium, 500);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-danger {
+  border: 1px solid var(--loss);
+  background: var(--loss);
+  color: #fff;
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+.btn-danger-outline {
+  border: 1px solid var(--loss);
+  background: none;
+  color: var(--tone-red);
+}
+.btn-plain {
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text-primary);
+}

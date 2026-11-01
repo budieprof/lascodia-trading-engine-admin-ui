@@ -255,6 +255,9 @@ import type { EAPendingSignalRevalConfig } from '@core/api/api.types';
       .psr-panel {
         display: flex;
         align-items: flex-start;
+        /* Wrapped lines pack at the top: with the default the row's spare height opened a
+           tall blank band between the heading and the controls. */
+        align-content: flex-start;
         justify-content: space-between;
         gap: var(--space-4);
         flex-wrap: wrap;
