@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1086,
+  "endpointCount": 1101,
   "groups": [
     {
       "name": "Admin auth",
@@ -5428,6 +5428,269 @@
           "permission": "accounts.read",
           "parameters": [],
           "response": "ResponseData<List<ExecutionAccountReconciliation>>"
+        }
+      ]
+    },
+    {
+      "name": "Execution algo",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/algo-orders",
+          "summary": "The organisation's algorithmic parents, newest first (filters: status, account, signal, active only).",
+          "access": "permission",
+          "permission": "orders.read",
+          "parameters": [
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "tradeSignalId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "activeOnly",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "page",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "pageSize",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<AlgoOrderPageDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/algo-orders/{id}",
+          "summary": "One parent: its plan, children (fill progress) and timeline.",
+          "access": "permission",
+          "permission": "orders.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<AlgoOrderDetailDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/algo-orders/{id}/cancel",
+          "summary": "Cancels a parent: unsent children are withdrawn within seconds; children already at the broker stand.",
+          "access": "permission",
+          "permission": "orders.cancel",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/algo/router-decisions",
+          "summary": "The smart router's recent decisions — in Suggest mode, what Auto would have done.",
+          "access": "permission",
+          "permission": "orders.read",
+          "parameters": [
+            {
+              "name": "nonDirectOnly",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<RouterDecisionPageDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/algo/settings",
+          "summary": "The `Execution:Algo|SmartRouter|Allocation:*` settings (value, default, last change), the worker's status and what cannot be driven from the console. Changes go through `PUT config`.",
+          "access": "permission",
+          "permission": "orders.read",
+          "parameters": [],
+          "response": "ResponseData<ExecutionSettingsDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups",
+          "summary": "The organisation's allocation groups with their members.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<List<AllocationGroupDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups",
+          "summary": "Creates an allocation group (strategy, method, members).",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [],
+          "body": "SaveAllocationGroupCommand",
+          "response": "ResponseData<AllocationGroupDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups/preview",
+          "summary": "A hypothetical allocation of a draft group (the editor's unsaved values; writes nothing).",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "body": "PreviewAllocationQuery",
+          "response": "ResponseData<AllocationPreviewDto>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups/{id}",
+          "summary": "Retires an allocation group (its block orders stay as the record).",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups/{id}",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<AllocationGroupDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups/{id}",
+          "summary": "Updates an allocation group (all fields and the member list).",
+          "access": "permission",
+          "permission": "accounts.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SaveAllocationGroupCommand",
+          "response": "ResponseData<AllocationGroupDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/execution/allocation-groups/{id}/preview",
+          "summary": "A hypothetical allocation of a saved group's members (writes nothing).",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "PreviewAllocationQuery",
+          "response": "ResponseData<AllocationPreviewDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/blocks",
+          "summary": "Block orders, newest first (optionally one group's) — the allocation report.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [
+            {
+              "name": "allocationGroupId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<BlockOrderDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/execution/blocks/{id}",
+          "summary": "One block's allocation report: every member's share, fills and the average-price allocation.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<BlockOrderDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/execution/strategies/{strategyId}/algorithm",
+          "summary": "Sets how a strategy's orders are executed (Direct = one order per signal and account, as always).",
+          "access": "permission",
+          "permission": "strategies.edit",
+          "parameters": [
+            {
+              "name": "strategyId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SetStrategyExecutionAlgorithmCommand",
+          "response": "ResponseData<bool>"
         }
       ]
     },

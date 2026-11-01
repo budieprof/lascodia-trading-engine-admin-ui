@@ -18,7 +18,7 @@ export interface ManualTradeRequest {
   takeProfit: number | null;
   mode: TicketMode;
   /** Gaps program (execution): a LIVE ticket's execution algorithm (absent = Direct, one order). */
-  executionAlgorithm?: 'TWAP' | 'VWAP' | 'Iceberg' | 'Adaptive';
+  executionAlgorithm?: 'Direct' | 'TWAP' | 'VWAP' | 'Iceberg' | 'Adaptive';
   algoDurationSeconds?: number | null;
   algoSlices?: number | null;
   algoDisplayQuantity?: number | null;
