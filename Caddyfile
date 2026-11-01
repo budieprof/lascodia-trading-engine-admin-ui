@@ -25,9 +25,11 @@
 :8080 {
 	# ── Security headers at the edge (multi-tenancy f1-prod P1.5, 2026-10-20) ─────────────────────────
 	# HSTS for the public console host; browsers honour it only on HTTPS (via Cloudflare), so one
-	# site-wide line is safe on http://localhost:8080 too. The engine never sends HSTS itself. Start at
-	# one day, no includeSubDomains, no preload; raise to 30 d after a clean week, then 1 y.
-	header Strict-Transport-Security "max-age=86400"
+	# site-wide line is safe on http://localhost:8080 too. The engine never sends HSTS itself. Started at
+	# one day on 2026-10-20; one year + includeSubDomains since gaps program security (2026-11-01) — it
+	# covers only *.app.codiapay.com (none exist), never codiapay.com's other hosts. No preload: preload
+	# is a one-way door for the whole registrable domain and needs the apex to send HSTS too.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	# Engine responses: no MIME sniffing and no server banner, also on error answers.
 	@engine_response path /api/* /health*
@@ -197,7 +199,11 @@
 		# TO ROLL BACK: rename this header to `Content-Security-Policy-Report-Only`
 		# and `caddy reload`. That restores reporting without blocking, which is
 		# the right first move if a page ever breaks in a way CSP could explain.
-		header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		# Gaps program security (2026-11-01): no inline script. The console build emits none since admin-ui
+		# angular.json inlineCritical=false (the critical-CSS inliner's one-line <script> was the only one);
+		# apply this ONLY after that admin-ui release is live, or the stylesheets stay media=print. Residue:
+		# style-src keeps 'unsafe-inline' (Angular component <style> elements, charting/editor inline styles).
+		header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self' https: wss:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
 
 		header {
 			X-Content-Type-Options nosniff
