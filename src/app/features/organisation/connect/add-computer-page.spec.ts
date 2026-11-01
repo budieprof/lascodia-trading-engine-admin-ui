@@ -10,6 +10,9 @@ import { OrganisationApiService } from '../organisation-api.service';
 import { AddComputerPageComponent } from './add-computer-page.component';
 import type { SupervisorSetup } from './add-computer.types';
 
+const { save } = vi.hoisted(() => ({ save: vi.fn() }));
+vi.mock('@features/scripting/shared/download', () => ({ saveBlob: save }));
+
 ensureTestBed();
 
 const base = 'https://app.example.com/api/v1/lascodia-trading-engine';
@@ -33,6 +36,7 @@ const setup: SupervisorSetup = {
 function apiStub() {
   return {
     supervisorSetup: vi.fn(() => of(setup)),
+    downloadMacInstaller: vi.fn(() => of({ blob: new Blob(['pkg']), sha256: null, version: '1.0.0' })),
     createEnrollmentToken: vi.fn(() =>
       of({
         id: 77,
@@ -114,5 +118,33 @@ describe('AddComputerPageComponent', () => {
     const p = page();
     expect(p.tokenId()).toBe(77);
     expect(api.enrollmentProgress).toHaveBeenCalledWith(77);
+  });
+
+  it('offers the double-click installer on a Mac once it is published, named after the install code', async () => {
+    const withPkg: SupervisorSetup = {
+      ...setup,
+      macInstaller: { platform: 'macos-pkg', label: 'macOS installer (double-click)', available: true, version: '1.0.0', sizeBytes: 12_000, publishedAtUtc: null },
+      macInstallerFileNameTemplate: 'Lascodia Setup {token}.pkg',
+    };
+    api.supervisorSetup.mockReturnValue(of(withPkg));
+    save.mockClear();
+    const p = page();
+    p.os.set('windows');
+    expect(p.pkgOffered()).toBe(false);
+    p.os.set('macos');
+    expect(p.pkgOffered()).toBe(true);
+    p.label.set('Office Mac');
+    p.create();
+    p.downloadInstaller('lsc_enr_abcd1234_SECRET');
+    expect(api.downloadMacInstaller).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1]).toBe('Lascodia Setup lsc_enr_abcd1234_SECRET.pkg');
+    expect(p.downloadingPkg()).toBe(false);
+  });
+
+  it('does not offer the installer when the engine has not published one', () => {
+    const p = page();
+    p.os.set('macos');
+    expect(p.pkgOffered()).toBe(false);
   });
 });

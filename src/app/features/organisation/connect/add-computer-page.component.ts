@@ -18,6 +18,8 @@ import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { OrganisationApiService } from '../organisation-api.service';
 import { failureMessage } from '../organisation.logic';
+import { saveBlob } from '@features/scripting/shared/download';
+import { sha256Matches } from './terminal-wizard.logic';
 import type { EnrollmentTokenCreated } from '../organisation.types';
 import {
   COMPUTER_LABEL_MAX,
@@ -31,6 +33,11 @@ import {
   installCommand,
   installRunningText,
   isAllDone,
+  MAC_INSTALLER_STEPS,
+  MAC_INSTALLER_WHY_ASKED,
+  macInstallerAvailable,
+  macInstallerErrorText,
+  macInstallerFileName,
   nextDaemonPollMs,
   openShellSteps,
   osAvailability,
@@ -325,7 +332,9 @@ import type { EnrollmentProgress } from './terminal-wizard.types';
         @if (created(); as c) {
           <section class="card">
             <header class="card-head">
-              <h3><span class="num">2</span>Paste this line on the {{ osName() }}</h3>
+              <h3>
+                <span class="num">2</span>{{ pkgOffered() ? 'Install it on the Mac' : 'Paste this line on the ' + osName() }}
+              </h3>
             </header>
             <div class="card-body">
               @if (expiry().expired) {
@@ -338,6 +347,26 @@ import type { EnrollmentProgress } from './terminal-wizard.types';
                   </button>
                 </div>
               } @else if (command(); as cmd) {
+                @if (pkgOffered()) {
+                  <h4>Easiest: download the installer and double-click it</h4>
+                  <ol class="how">
+                    @for (s of installerSteps; track $index) {
+                      <li>{{ s }}</li>
+                    }
+                  </ol>
+                  <div class="actions">
+                    <button
+                      type="button"
+                      class="btn btn-primary"
+                      [disabled]="downloadingPkg()"
+                      (click)="downloadInstaller(c.token)"
+                    >
+                      {{ downloadingPkg() ? 'Downloading…' : 'Download the installer' }}
+                    </button>
+                  </div>
+                  <p class="small muted">{{ whyAsked }}</p>
+                  <h4>Or paste this line in Terminal</h4>
+                }
                 <div class="command">
                   <pre aria-label="Install line">{{ cmd }}</pre>
                   <button type="button" class="btn btn-primary" (click)="copy(cmd)">
@@ -543,6 +572,10 @@ export class AddComputerPageComponent {
     return c ? installCommand(this.setup.value(), this.os(), c.token) : null;
   });
   readonly shellSteps = computed(() => openShellSteps(this.os()));
+  readonly pkgOffered = computed(() => macInstallerAvailable(this.setup.value(), this.os()));
+  readonly downloadingPkg = signal(false);
+  protected readonly installerSteps = MAC_INSTALLER_STEPS;
+  protected readonly whyAsked = MAC_INSTALLER_WHY_ASKED;
 
   /** Re-evaluated every 30 s so the expiry line counts down. */
   private readonly now = signal(Date.now());
@@ -621,6 +654,34 @@ export class AddComputerPageComponent {
     clip.writeText(text).then(done, () =>
       this.notify.error('Copying was blocked by the browser: select the line and copy it by hand.'),
     );
+  }
+
+  /**
+   * Saves the double-click installer named after this line's install code: the package reads the
+   * code back from its own file name. Checked against the published SHA-256 before it is saved.
+   */
+  downloadInstaller(token: string): void {
+    if (!token || this.downloadingPkg()) return;
+    this.downloadingPkg.set(true);
+    this.api.downloadMacInstaller().subscribe({
+      next: async (file) => {
+        try {
+          const verdict = await sha256Matches(await file.blob.arrayBuffer(), file.sha256);
+          if (verdict === false) {
+            this.notify.error('The downloaded installer does not match the published file, so it was not saved. Try again.');
+            return;
+          }
+          saveBlob(file.blob, macInstallerFileName(this.setup.value(), token));
+          this.notify.success('Installer downloaded. Open it from your Downloads folder.');
+        } finally {
+          this.downloadingPkg.set(false);
+        }
+      },
+      error: (e) => {
+        this.downloadingPkg.set(false);
+        this.notify.error(macInstallerErrorText(e));
+      },
+    });
   }
 
   startOver(): void {

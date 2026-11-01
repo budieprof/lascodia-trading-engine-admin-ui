@@ -30,6 +30,17 @@ export interface SupervisorSetup {
   platforms: SupervisorPlatformBundle[];
   autoUpdate: boolean;
   enrollmentTokenHours: number;
+  /** The double-click macOS installer (platform `macos-pkg`); absent on an engine that predates it. */
+  macInstaller?: SupervisorPlatformBundle | null;
+  /** The name the installer is saved under, with `{token}` where the install code goes. */
+  macInstallerFileNameTemplate?: string | null;
+}
+
+/** The double-click macOS installer as downloaded (`GET onboarding/supervisor/installer`). */
+export interface MacInstallerFile {
+  blob: Blob;
+  sha256: string | null;
+  version: string | null;
 }
 
 /**

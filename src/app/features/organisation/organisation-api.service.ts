@@ -37,7 +37,7 @@ import type {
   EnrollmentProgress,
   TerminalSetup,
 } from './connect/terminal-wizard.types';
-import type { SupervisorSetup } from './connect/add-computer.types';
+import type { MacInstallerFile, SupervisorSetup } from './connect/add-computer.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
 interface OverrideWriteResponse extends ResponseData<number> {
@@ -176,6 +176,27 @@ export class OrganisationApiService {
    */
   supervisorSetup(): Observable<SupervisorSetup> {
     return this.get('/onboarding/supervisor/setup');
+  }
+
+  /**
+   * `accounts.connect`. The double-click macOS installer (`.pkg`), fetched with the session's
+   * credentials. The same file for everyone: the caller names it after the install code.
+   */
+  downloadMacInstaller(): Observable<MacInstallerFile> {
+    return this.http
+      .get(`${this.baseUrl}/onboarding/supervisor/installer`, {
+        responseType: 'blob',
+        observe: 'response',
+        withCredentials: true,
+        context: new HttpContext().set(SUPPRESS_ERROR_TOAST, true),
+      })
+      .pipe(
+        map((res) => ({
+          blob: res.body ?? new Blob([]),
+          sha256: res.headers.get('X-Content-SHA256')?.toLowerCase() ?? null,
+          version: res.headers.get('X-Bundle-Version'),
+        })),
+      );
   }
 
   /** `accounts.read`. Where one enrollment token stands, with the troubleshooting hints. */
