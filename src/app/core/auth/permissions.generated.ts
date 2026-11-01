@@ -541,6 +541,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'platform.deploy',
+    category: 'Platform staff',
+    description:
+      "Platform staff: deploy (or roll back) the money-path api from the console — a blue/green swap run by the engine host's supervisor, only while Ops:ConsoleDeploy:Enabled is on. Needs a fresh MFA sign-in.",
+    scopeable: false,
+    stepUp: true,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'platform.ea.releases.manage',
     category: 'Platform staff',
     description:
@@ -1040,6 +1050,7 @@ export const Permission = {
   OrdersRead: 'orders.read',
   PlatformBillingManage: 'platform.billing.manage',
   PlatformDataManage: 'platform.data.manage',
+  PlatformDeploy: 'platform.deploy',
   PlatformEaReleasesManage: 'platform.ea.releases.manage',
   PlatformElevationApprove: 'platform.elevation.approve',
   PlatformElevationRequest: 'platform.elevation.request',

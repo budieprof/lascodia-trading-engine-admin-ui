@@ -59,6 +59,8 @@ const ADDED_AFTER_CATALOG_V2: readonly string[] = [
   // Subscriber declarations (multi-asset WS8 8.2).
   'market-data/declarations',
   'market-data/declarations-review',
+  // Operations → Platform (engine gaps program, zero-downtime): GET ops/platform needs platform.infrastructure.manage.
+  'operations/platform',
 ];
 const TABLE_NOW: RouteTable = Object.fromEntries(
   Object.entries(ROUTE_ACCESS).filter(([path]) => !ADDED_AFTER_CATALOG_V2.includes(path)),

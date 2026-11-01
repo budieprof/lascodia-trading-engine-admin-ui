@@ -567,6 +567,15 @@
     "deprecated": false
   },
   {
+    "key": "platform.deploy",
+    "category": "Platform staff",
+    "description": "Platform staff: deploy (or roll back) the money-path api from the console — a blue/green swap run by the engine host's supervisor, only while Ops:ConsoleDeploy:Enabled is on. Needs a fresh MFA sign-in.",
+    "scopeable": false,
+    "stepUp": true,
+    "twoPerson": false,
+    "deprecated": false
+  },
+  {
     "key": "platform.ea.releases.manage",
     "category": "Platform staff",
     "description": "Platform staff: publish a build of the Lascodia Expert Advisor (.ex5) that organisation members download from the terminal connection wizard (the EA rollout does this after verifying the binary), and list the published builds.",

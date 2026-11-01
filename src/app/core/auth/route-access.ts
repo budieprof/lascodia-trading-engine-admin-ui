@@ -249,6 +249,9 @@ export const ROUTE_ACCESS = {
   // GET + POST platform/elevations (approving one also needs platform.elevation.approve, per row).
   'platform/elevations': { anyOf: [P.PlatformElevationRequest], staffOnly: true, bffOnly: true },
   'platform/impersonation': { anyOf: [P.PlatformImpersonate], staffOnly: true, bffOnly: true },
+  // Operations → Platform (gaps program, zero-downtime): GET ops/platform + host jobs need platform.infrastructure.manage
+  // (deploys additionally platform.deploy, checked on the page).
+  'operations/platform': { anyOf: [P.PlatformInfrastructureManage], staffOnly: true },
   // security-controls: GET platform/security/evidence-bundle (works with either sign-in).
   'platform/security-evidence': { anyOf: [P.PlatformSecurityEvidence], staffOnly: true },
   // security-controls: GET release-notes — every console user (Viewer and up, Billing).
