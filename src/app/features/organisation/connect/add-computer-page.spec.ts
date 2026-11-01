@@ -36,7 +36,7 @@ const setup: SupervisorSetup = {
 function apiStub() {
   return {
     supervisorSetup: vi.fn(() => of(setup)),
-    downloadMacInstaller: vi.fn(() => of({ blob: new Blob(['pkg']), sha256: null, version: '1.0.0' })),
+    downloadInstaller: vi.fn(() => of({ blob: new Blob(['pkg']), sha256: null, version: '1.0.0' })),
     createEnrollmentToken: vi.fn(() =>
       of({
         id: 77,
@@ -136,15 +136,40 @@ describe('AddComputerPageComponent', () => {
     p.label.set('Office Mac');
     p.create();
     p.downloadInstaller('lsc_enr_abcd1234_SECRET');
-    expect(api.downloadMacInstaller).toHaveBeenCalledTimes(1);
+    expect(api.downloadInstaller).toHaveBeenCalledTimes(1);
+    expect(api.downloadInstaller).toHaveBeenCalledWith('macos-pkg');
     await vi.waitFor(() => expect(save).toHaveBeenCalled());
     expect(save.mock.calls[0][1]).toBe('Lascodia Setup lsc_enr_abcd1234_SECRET.pkg');
     expect(p.downloadingPkg()).toBe(false);
   });
 
+  it('offers the double-click installer on Windows once it is published, as an .exe named after the code', async () => {
+    const withExe: SupervisorSetup = {
+      ...setup,
+      windowsInstaller: { platform: 'windows-exe', label: 'Windows installer (double-click)', available: true, version: '1.0.0', sizeBytes: 90_000, publishedAtUtc: null },
+      windowsInstallerFileNameTemplate: 'Lascodia Setup {token}.exe',
+    };
+    api.supervisorSetup.mockReturnValue(of(withExe));
+    api.downloadInstaller.mockClear();
+    save.mockClear();
+    const p = page();
+    p.os.set('macos');
+    expect(p.pkgOffered()).toBe(false);   // only the Windows one is published
+    p.os.set('windows');
+    expect(p.pkgOffered()).toBe(true);
+    p.label.set('Office PC');
+    p.create();
+    p.downloadInstaller('lsc_enr_abcd1234_SECRET');
+    expect(api.downloadInstaller).toHaveBeenCalledWith('windows-exe');
+    await vi.waitFor(() => expect(save).toHaveBeenCalled());
+    expect(save.mock.calls[0][1]).toBe('Lascodia Setup lsc_enr_abcd1234_SECRET.exe');
+  });
+
   it('does not offer the installer when the engine has not published one', () => {
     const p = page();
     p.os.set('macos');
+    expect(p.pkgOffered()).toBe(false);
+    p.os.set('windows');
     expect(p.pkgOffered()).toBe(false);
   });
 });

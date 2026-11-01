@@ -34,9 +34,13 @@ export interface SupervisorSetup {
   macInstaller?: SupervisorPlatformBundle | null;
   /** The name the installer is saved under, with `{token}` where the install code goes. */
   macInstallerFileNameTemplate?: string | null;
+  /** The double-click Windows installer (platform `windows-exe`); absent on an engine that predates it. */
+  windowsInstaller?: SupervisorPlatformBundle | null;
+  /** The name the Windows installer is saved under, with `{token}` where the install code goes. */
+  windowsInstallerFileNameTemplate?: string | null;
 }
 
-/** The double-click macOS installer as downloaded (`GET onboarding/supervisor/installer`). */
+/** A double-click installer as downloaded (`GET onboarding/supervisor/installer?platform=`). */
 export interface MacInstallerFile {
   blob: Blob;
   sha256: string | null;

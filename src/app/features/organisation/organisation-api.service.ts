@@ -179,12 +179,14 @@ export class OrganisationApiService {
   }
 
   /**
-   * `accounts.connect`. The double-click macOS installer (`.pkg`), fetched with the session's
-   * credentials. The same file for everyone: the caller names it after the install code.
+   * `accounts.connect`. A double-click installer — the macOS `.pkg` or the Windows `.exe` — fetched
+   * with the session's credentials. The same file for everyone: the caller names it after the
+   * install code.
    */
-  downloadMacInstaller(): Observable<MacInstallerFile> {
+  downloadInstaller(platform: 'macos-pkg' | 'windows-exe'): Observable<MacInstallerFile> {
     return this.http
       .get(`${this.baseUrl}/onboarding/supervisor/installer`, {
+        params: { platform },
         responseType: 'blob',
         observe: 'response',
         withCredentials: true,

@@ -92,6 +92,57 @@ export const MAC_INSTALLER_STEPS: readonly string[] = [
 export const MAC_INSTALLER_WHY_ASKED =
   'macOS asks because the installer is not signed with an Apple developer certificate. The installer still checks that the supervisor it downloads is the genuine file, and it runs the same steps as the install line.';
 
+/** The engine's default name for the downloaded Windows installer (`{token}` = the install code). */
+export const WINDOWS_INSTALLER_FILE_NAME = 'Lascodia Setup {token}.exe';
+
+/**
+ * What to do with the downloaded Windows installer. It is not signed with a code-signing
+ * certificate, so the browser may hold the download and SmartScreen stops the first open; the
+ * steps say how to let it through. No administrator rights are needed.
+ */
+export const WINDOWS_INSTALLER_STEPS: readonly string[] = [
+  'Do this on the Windows PC that runs MetaTrader 5. If you are reading this page on another computer, open it on that PC, or use the install line below instead.',
+  'Click "Download the installer". If the browser says the file is not commonly downloaded, open its downloads list (… in Edge, ⋮ in Chrome), choose Keep, then Keep anyway. Then open "Lascodia Setup … .exe" from your Downloads folder.',
+  'Windows says "Windows protected your PC". Click More info, then Run anyway. No administrator password is needed.',
+  'In the installer, click Install. It takes about a minute. Keep this page open: it shows the PC connecting.',
+];
+
+/** Why Windows asks — one sentence, shown under the steps. */
+export const WINDOWS_INSTALLER_WHY_ASKED =
+  'Windows asks because the installer is not signed with a code-signing certificate. The installer still checks that the supervisor it downloads is the genuine file, and it runs the same steps as the install line. IT departments can run it without any window: "Lascodia Setup … .exe" /S.';
+
+/** The engine platform of the double-click installer for an OS. */
+export function installerPlatform(os: ComputerOs): 'macos-pkg' | 'windows-exe' {
+  return os === 'macos' ? 'macos-pkg' : 'windows-exe';
+}
+
+/** Is a double-click installer offered for this OS (published on the engine)? */
+export function installerAvailable(setup: SupervisorSetup | null, os: ComputerOs): boolean {
+  return os === 'macos' ? macInstallerAvailable(setup, os) : !!setup?.windowsInstaller?.available;
+}
+
+/** The name the installer is saved under; the installer reads the install code back from it. */
+export function installerFileName(setup: SupervisorSetup | null, os: ComputerOs, token: string): string {
+  if (os === 'macos') return macInstallerFileName(setup, token);
+  const template = setup?.windowsInstallerFileNameTemplate || WINDOWS_INSTALLER_FILE_NAME;
+  return (template.includes('{token}') ? template : WINDOWS_INSTALLER_FILE_NAME).replace('{token}', token);
+}
+
+/** The steps for the downloaded installer on this OS. */
+export function installerSteps(os: ComputerOs): readonly string[] {
+  return os === 'macos' ? MAC_INSTALLER_STEPS : WINDOWS_INSTALLER_STEPS;
+}
+
+/** Why the OS asks before it opens the installer. */
+export function installerWhyAsked(os: ComputerOs): string {
+  return os === 'macos' ? MAC_INSTALLER_WHY_ASKED : WINDOWS_INSTALLER_WHY_ASKED;
+}
+
+/** Where the install line is pasted: "Terminal" / "PowerShell". */
+export function shellName(os: ComputerOs): string {
+  return os === 'macos' ? 'Terminal' : 'PowerShell';
+}
+
 /** What a failed installer download means for the person (the body is a Blob, so the status decides). */
 export function macInstallerErrorText(err: unknown): string {
   const status = (err as { status?: unknown } | null)?.status;
