@@ -12,7 +12,11 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { map } from 'rxjs';
 
-import { PositionsService, type EventExposureDto } from '@core/services/positions.service';
+import {
+  PositionsService,
+  type EventExposureDto,
+  type ExposedEventDto,
+} from '@core/services/positions.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -146,297 +150,160 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             "
           />
         } @else {
+          <div class="ev-list-head">
+            <h3>Releases ahead</h3>
+            <span class="count">{{ d.events.length }}</span>
+            <span class="hint"
+              >soonest first · each table lists the open positions sitting across it</span
+            >
+          </div>
           @for (ev of d.events; track ev.eventId) {
-            <div class="data-table-card">
-              <div class="board-head">
-                <div class="ev-title">
-                  <span class="ccy">{{ ev.currency }}</span>
-                  <strong>{{ ev.title }}</strong>
-                  <span class="impact" [class.high]="ev.impact === 'High'">{{ ev.impact }}</span>
-                  @if (!ev.hasConsensus) {
-                    <span
-                      class="no-consensus"
-                      title="No consensus forecast is published, so this release cannot be read in surprise terms at all."
-                      >no consensus</span
-                    >
-                  }
-                </div>
-                <div class="ev-meta">
-                  <span class="countdown" [class.imminent]="ev.minutesUntil <= 60">
-                    in {{ formatCountdown(ev.minutesUntil) }}
-                  </span>
-                  <span>{{ ev.scheduledAtUtc | date: 'MMM d HH:mm' : 'UTC' }} UTC</span>
-                  <span
-                    >{{ ev.positionCount }} position(s) ·
-                    {{ ev.totalLots | number: '1.0-2' }} lots</span
+            <section
+              class="ev-card"
+              [class.imminent]="ev.minutesUntil <= 60"
+              [attr.aria-label]="ev.currency + ' ' + ev.title"
+            >
+              <header class="ev-head">
+                <div class="ev-when" [class.imminent]="ev.minutesUntil <= 60">
+                  <span class="ev-in">in</span>
+                  <span class="ev-countdown">{{ formatCountdown(ev.minutesUntil) }}</span>
+                  <span class="ev-at"
+                    >{{ ev.scheduledAtUtc | date: 'EEE MMM d · HH:mm' : 'UTC' }} UTC</span
                   >
-                  @if (ev.unprotectedPositionCount > 0) {
-                    <span class="danger">{{ ev.unprotectedPositionCount }} without a stop</span>
-                  }
                 </div>
-              </div>
-
-              <table class="board-table">
-                <thead>
-                  <tr>
-                    <th>Position</th>
-                    <th>Symbol</th>
-                    <th>Dir</th>
-                    <th class="num">Lots</th>
-                    <th class="num">Unrealised</th>
-                    <th class="num">Age</th>
-                    <th>Stop</th>
-                    <th class="num">Acct</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (p of ev.positions; track p.positionId) {
-                    <tr [class.unprotected]="!p.hasStopLoss">
-                      <td>
-                        <a [routerLink]="['/positions', p.positionId]">#{{ p.positionId }}</a>
-                      </td>
-                      <td>{{ p.symbol }}</td>
-                      <td>{{ p.direction }}</td>
-                      <td class="num">{{ p.lots | number: '1.0-2' }}</td>
-                      <td
-                        class="num"
-                        [class.neg]="p.unrealizedPnL < 0"
-                        [class.pos]="p.unrealizedPnL > 0"
+                <div class="ev-main">
+                  <div class="ev-title">
+                    <span class="ccy">{{ ev.currency }}</span>
+                    <strong>{{ ev.title }}</strong>
+                    <span class="impact" [class.high]="ev.impact === 'High'">{{ ev.impact }}</span>
+                    @if (!ev.hasConsensus) {
+                      <span
+                        class="impact"
+                        title="No consensus forecast is published, so this release cannot be read in surprise terms at all."
+                        >no consensus</span
                       >
-                        {{ p.unrealizedPnL | number: '1.2-2' }}
-                      </td>
-                      <td class="num">{{ formatCountdown(p.ageMinutes) }}</td>
-                      <td>
-                        @if (p.hasStopLoss) {
-                          {{ p.stopLoss }}
-                        } @else {
-                          <span class="danger">none</span>
-                        }
-                      </td>
-                      <td class="num">{{ p.tradingAccountId }}</td>
+                    }
+                  </div>
+                  <div class="ev-facts">
+                    <span
+                      >Forecast <b>{{ ev.forecast ?? '—' }}</b></span
+                    >
+                    <span
+                      >Previous <b>{{ ev.previous ?? '—' }}</b></span
+                    >
+                  </div>
+                  <div
+                    class="ev-track"
+                    [title]="
+                      'Release lands ' +
+                      windowShare(ev.minutesUntil) +
+                      '% of the way into the ' +
+                      lookaheadLabel() +
+                      ' window'
+                    "
+                  >
+                    <span
+                      class="ev-track-fill"
+                      [style.width.%]="windowShare(ev.minutesUntil)"
+                    ></span>
+                  </div>
+                </div>
+                <dl class="ev-sum">
+                  <div>
+                    <dt>Positions</dt>
+                    <dd>{{ ev.positionCount }}</dd>
+                  </div>
+                  <div>
+                    <dt>Lots</dt>
+                    <dd>{{ ev.totalLots | number: '1.0-2' }}</dd>
+                  </div>
+                  <div>
+                    <dt>Unrealised</dt>
+                    <dd
+                      [class.pos]="ev.totalUnrealizedPnL > 0"
+                      [class.neg]="ev.totalUnrealizedPnL < 0"
+                    >
+                      {{ ev.totalUnrealizedPnL | number: '1.2-2' }}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Without a stop</dt>
+                    <dd [class.neg]="ev.unprotectedPositionCount > 0">
+                      {{ ev.unprotectedPositionCount }}
+                    </dd>
+                  </div>
+                </dl>
+              </header>
+
+              <div class="table-wrap">
+                <table class="ev-table">
+                  <thead>
+                    <tr>
+                      <th>Position</th>
+                      <th>Account</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th class="num">Lots</th>
+                      <th class="num">Unrealised</th>
+                      <th class="num">Stop</th>
+                      <th class="num">Target</th>
+                      <th class="num">Open for</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    @for (p of ev.positions; track p.positionId) {
+                      <tr [class.unprotected]="!p.hasStopLoss">
+                        <td>
+                          <a class="mono" [routerLink]="['/positions', p.positionId]"
+                            >#{{ p.positionId }}</a
+                          >
+                        </td>
+                        <td class="mono dim">#{{ p.tradingAccountId }}</td>
+                        <td class="strong">{{ p.symbol }}</td>
+                        <td>
+                          <span
+                            class="side"
+                            [class.long]="isLong(p.direction)"
+                            [class.short]="!isLong(p.direction)"
+                            >{{ p.direction }}</span
+                          >
+                        </td>
+                        <td class="num">{{ p.lots | number: '1.0-2' }}</td>
+                        <td
+                          class="num strong"
+                          [class.neg]="p.unrealizedPnL < 0"
+                          [class.pos]="p.unrealizedPnL > 0"
+                        >
+                          {{ p.unrealizedPnL | number: '1.2-2' }}
+                        </td>
+                        <td class="num mono">
+                          @if (p.hasStopLoss) {
+                            {{ price(p.stopLoss, ev, p.symbol) }}
+                          } @else {
+                            <span class="no-stop">none</span>
+                          }
+                        </td>
+                        <td class="num mono dim">{{ price(p.takeProfit, ev, p.symbol) }}</td>
+                        <td
+                          class="num dim"
+                          [title]="
+                            'Opened ' + (p.openedAtUtc | date: 'yyyy-MM-dd HH:mm' : 'UTC') + ' UTC'
+                          "
+                        >
+                          {{ formatCountdown(p.ageMinutes) }}
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </section>
           }
         }
       }
     </div>
   `,
-  styles: [
-    `
-      /* No global .btn-secondary exists (styles.scss only adds the press feel), so
-         "← Positions" rendered as bare text. Same pill as Signal exits. */
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        display: inline-flex;
-        align-items: center;
-        text-decoration: none;
-      }
-      .btn-secondary {
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-      }
-      .btn-secondary:hover {
-        background: var(--bg-tertiary);
-      }
-      /* Filter toolbar — venue-page family. */
-      .toolbar {
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: var(--space-2) var(--space-3);
-        margin-bottom: var(--space-4);
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        box-shadow: var(--shadow-sm);
-      }
-      .seg {
-        display: inline-flex;
-        gap: 2px;
-        padding: 3px;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
-      }
-      .seg button {
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font: inherit;
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        padding: 4px 12px;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        white-space: nowrap;
-      }
-      .seg button:hover {
-        color: var(--text-primary);
-      }
-      .seg button.on {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm);
-      }
-      .toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        height: 32px;
-        padding: 0 12px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        background: var(--bg-primary);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-        user-select: none;
-      }
-      .toggle input {
-        margin: 0;
-        accent-color: var(--accent);
-      }
-      .toggle.on {
-        border-color: var(--accent);
-        color: var(--accent);
-        background: rgba(0, 113, 227, 0.08);
-      }
-      .stamp {
-        margin-left: auto;
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-strip {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .kpi-strip {
-          grid-template-columns: repeat(3, 1fr);
-        }
-      }
-      @media (max-width: 640px) {
-        .kpi-strip {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      /* The engine's statistical caveat — a quiet note card. */
-      .basis {
-        display: flex;
-        gap: var(--space-3);
-        align-items: flex-start;
-        margin: 0 0 var(--space-5);
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-md);
-        color: var(--text-secondary);
-      }
-      .basis-icon {
-        flex: none;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 11px;
-        font-weight: 700;
-        font-style: italic;
-        font-family: Georgia, serif;
-        color: var(--text-secondary);
-        border: 1px solid var(--text-tertiary);
-        margin-top: 1px;
-      }
-      .basis-title {
-        display: block;
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        margin-bottom: 2px;
-      }
-      .basis p {
-        margin: 0;
-        font-size: var(--text-xs);
-        line-height: 1.55;
-        max-width: 110ch;
-      }
-      .data-table-card {
-        margin-bottom: 1.25rem;
-      }
-      .board-head {
-        display: flex;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-        align-items: baseline;
-      }
-      .ev-title {
-        display: flex;
-        gap: 0.5rem;
-        align-items: baseline;
-        flex-wrap: wrap;
-      }
-      .ev-meta {
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-        font-size: 0.8125rem;
-        opacity: 0.8;
-      }
-      .ccy {
-        font-weight: 600;
-        opacity: 0.7;
-      }
-      .impact,
-      .no-consensus {
-        font-size: 0.6875rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        padding: 0.1rem 0.4rem;
-        border-radius: 3px;
-        border: 1px solid currentColor;
-        opacity: 0.7;
-      }
-      .impact.high {
-        color: var(--warn, #d08700);
-        opacity: 1;
-      }
-      .countdown.imminent {
-        color: var(--warn, #d08700);
-        font-weight: 600;
-      }
-      .danger {
-        color: var(--danger, #c0392b);
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      td.pos {
-        color: var(--success, #1a7f37);
-      }
-      td.neg {
-        color: var(--danger, #c0392b);
-      }
-      tr.unprotected td {
-        background: color-mix(in srgb, var(--danger, #c0392b) 6%, transparent);
-      }
-    `,
-  ],
+  styleUrl: './event-exposure-page.component.scss',
 })
 export class EventExposurePageComponent {
   private readonly positions = inject(PositionsService);
@@ -491,6 +358,41 @@ export class EventExposurePageComponent {
       this.includeMedium();
       untracked(() => this.resource.refresh());
     });
+  }
+
+  protected readonly lookaheadLabel = computed(
+    () =>
+      this.lookaheadOptions.find((o) => o.hours === this.lookaheadHours())?.label ??
+      `${this.lookaheadHours()}h`,
+  );
+
+  /** How far into the look-ahead window the release lands, 0–100 (the bar under its title). */
+  protected windowShare(minutesUntil: number): number {
+    const total = this.lookaheadHours() * 60;
+    return total > 0 ? Math.round(Math.min(100, Math.max(2, (minutesUntil / total) * 100))) : 0;
+  }
+
+  /**
+   * A stop / target with as many decimals as the most precise price of that symbol in the release,
+   * so "1.119" and "1.11909" line up as "1.11900" and "1.11909".
+   */
+  protected price(v: number | null, ev: ExposedEventDto, symbol: string): string {
+    if (v === null || !Number.isFinite(v)) return '—';
+    const decimals = (x: number | null) =>
+      x === null ? 0 : (String(x).split('.')[1] ?? '').length;
+    const places = Math.min(
+      6,
+      Math.max(
+        ...ev.positions
+          .filter((p) => p.symbol === symbol)
+          .flatMap((p) => [decimals(p.stopLoss), decimals(p.takeProfit)]),
+      ),
+    );
+    return v.toFixed(places);
+  }
+
+  protected isLong(direction: string): boolean {
+    return /^(long|buy)$/i.test(direction);
   }
 
   protected formatCountdown(minutes: number): string {
