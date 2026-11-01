@@ -1,0 +1,95 @@
+// Operations → Platform: only what iam-page.scss does not already give (scoped to this component).
+.card {
+  margin-bottom: 16px;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+
+  h2 {
+    margin: 0;
+    font-size: 1rem;
+  }
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+
+  th,
+  td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border, rgba(127, 127, 127, 0.2));
+    vertical-align: top;
+  }
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  padding: 8px 12px;
+  margin: 0;
+
+  dt {
+    font-weight: 600;
+  }
+
+  dd {
+    margin: 0;
+  }
+}
+
+.log {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 12px;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.08));
+  border-radius: 6px;
+}
+
+.form {
+  display: grid;
+  gap: 8px;
+  padding: 8px 12px;
+
+  label {
+    display: grid;
+    gap: 4px;
+  }
+}
+
+.banner {
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--surface-sunken, rgba(127, 127, 127, 0.08));
+
+  &.bad {
+    border-left: 3px solid var(--danger, #d33);
+  }
+}
+
+.jobs {
+  margin: 0;
+  padding: 8px 28px;
+  font-size: 0.85rem;
+}
+
+.chip.ok {
+  color: var(--success, #2a7);
+}
+
+.chip.warn {
+  color: var(--warning, #c80);
+}
+
+.chip.bad {
+  color: var(--danger, #d33);
+}

@@ -148,6 +148,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Worker Health', route: '/worker-health', icon: navIcon.Cpu },
       { label: 'EA Instances', route: '/ea-instances', icon: navIcon.Satellite },
       { label: 'Terminals', route: '/terminals', icon: navIcon.Monitor },
+      { label: 'Platform Ops', route: '/operations/platform', icon: navIcon.Activity },
       { label: 'Config', route: '/engine-config', icon: navIcon.FileCog },
       { label: 'Audit Trail', route: '/audit-trail', icon: navIcon.Footprints },
       { label: 'Drawdown', route: '/drawdown-recovery', icon: navIcon.TrendingDown },

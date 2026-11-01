@@ -722,6 +722,17 @@ export const routes: Routes = [
         loadChildren: () => import('@features/prop/prop.routes').then((m) => m.PROP_ROUTES),
       },
       {
+        // Operations → Platform (engine gaps program, zero-downtime): blue/green money path, backups, alert
+        // delivery and the host actions the engine host's supervisor runs.
+        path: 'operations/platform',
+        canActivate: [canAccessPath('operations/platform')],
+        data: { breadcrumb: 'Platform operations' },
+        loadComponent: () =>
+          import('@features/operations/pages/platform-ops-page.component').then(
+            (m) => m.PlatformOpsPageComponent,
+          ),
+      },
+      {
         // Platform console (multi-tenancy W3, U3.6): organisations, elevated access, impersonation.
         path: 'platform',
         canActivate: [canAccessPath('platform')],
