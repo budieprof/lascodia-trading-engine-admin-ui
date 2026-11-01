@@ -9,6 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
@@ -74,6 +75,8 @@ type DirectionChip = 'all' | TradeDirection;
     EARejectionsPanelComponent,
     SignalPickupsPanelComponent,
     SignalExposurePanelComponent,
+    RouterLink,
+    RelativeTimePipe,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -395,83 +398,93 @@ type DirectionChip = 'all' | TradeDirection;
         </app-data-table>
       }
 
-      <!-- Detail modal -->
+      <!-- Detail modal: header (what / when), optional outcome banner, then the chart beside a
+           compact trade-plan panel; actions in a quiet footer. All times are UTC. -->
       @if (selectedDetail(); as s) {
-        <div class="drawer-backdrop" (click)="selectedDetail.set(null)">
-          <aside class="drawer" (click)="$event.stopPropagation()" aria-label="Signal details">
-            <header class="drawer-head">
-              <div class="head-titles">
-                <h2 class="head-title">
-                  <span class="signal-id">Signal #{{ s.id }}</span>
-                  <span class="symbol">{{ s.symbol }}</span>
+        <div class="sd-backdrop" (click)="selectedDetail.set(null)">
+          <aside
+            class="sd"
+            (click)="$event.stopPropagation()"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="sd-title"
+          >
+            <header class="sd-head">
+              <div class="sd-titles">
+                <div class="sd-title-row">
+                  <h2 id="sd-title" class="sd-symbol">{{ s.symbol }}</h2>
                   <span
-                    class="dir-chip"
-                    [class.dir-chip--buy]="s.direction === 'Buy'"
-                    [class.dir-chip--sell]="s.direction === 'Sell'"
+                    class="sd-dir"
+                    [class.sd-dir--buy]="s.direction === 'Buy'"
+                    [class.sd-dir--sell]="s.direction === 'Sell'"
+                    >{{ s.direction === 'Buy' ? '↑ Buy' : '↓ Sell' }}</span
                   >
-                    {{ s.direction === 'Buy' ? '↑ Buy' : '↓ Sell' }}
-                  </span>
-                  <span
-                    class="status-chip"
-                    [class.status-chip--pending]="s.status === 'Pending'"
-                    [class.status-chip--approved]="s.status === 'Approved'"
-                    [class.status-chip--rejected]="s.status === 'Rejected'"
-                    [class.status-chip--executed]="s.status === 'Executed'"
-                    [class.status-chip--expired]="s.status === 'Expired'"
-                    [class.status-chip--cancelled]="s.status === 'Cancelled'"
+                  <span class="sd-status" [attr.data-status]="s.status">{{ s.status }}</span>
+                </div>
+                <div class="sd-meta">
+                  <span>Signal #{{ s.id }}</span>
+                  <span class="sep">·</span>
+                  <a [routerLink]="['/strategies', s.strategyId]">Strategy #{{ s.strategyId }}</a>
+                  @if (s.orderId !== null) {
+                    <span class="sep">·</span>
+                    <a [routerLink]="['/orders', s.orderId]">Order #{{ s.orderId }}</a>
+                  }
+                  <span class="sep">·</span>
+                  <span [title]="(s.generatedAt | date: 'd MMM yyyy, HH:mm:ss' : 'UTC') + ' UTC'"
+                    >generated {{ s.generatedAt | relativeTime }}</span
                   >
-                    {{ s.status }}
-                  </span>
-                </h2>
-                <div class="head-sub">
-                  Generated {{ s.generatedAt | date: 'MMM d, HH:mm' }} UTC · expires
-                  {{ s.expiresAt | date: 'MMM d, HH:mm' }} UTC
                 </div>
               </div>
-              <button class="btn-close" (click)="selectedDetail.set(null)" aria-label="Close">
-                ×
-              </button>
+              <div class="sd-head-actions">
+                <a class="sd-link" [routerLink]="['/trade-signals', s.id]">Full page ↗</a>
+                <button
+                  type="button"
+                  class="sd-close"
+                  (click)="selectedDetail.set(null)"
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </div>
             </header>
 
-            <!-- Chart pane — Entry / SL / TP visualised over the bar window
-                 straddling generatedAt. Renders only when the signal has the
-                 minimum data needed (symbol + entry/SL/TP triple). Uses the
-                 shared SpotRecChart component (same one the Spot Analysis
-                 Report drawer + Signal Detail page use); timeframe defaults
-                 to H1 because the TradeSignalDto doesn't carry one today. -->
-            @if (canChart(s)) {
-              <section class="drawer-section">
-                <h4>Chart</h4>
-                <app-spot-rec-chart
-                  [symbol]="s.symbol ?? ''"
-                  [timeframe]="'H1'"
-                  [asOfUtc]="s.generatedAt"
-                  [recommendations]="chartRecsFor(s)"
-                />
-              </section>
+            @if (s.rejectionReason) {
+              <div class="sd-banner" [class.sd-banner--soft]="s.status === 'Expired'">
+                <span class="sd-banner-label">{{
+                  s.status === 'Expired' ? 'Why it expired' : 'Why it stopped'
+                }}</span>
+                <span class="sd-banner-text">{{ reasonText(s.rejectionReason) }}</span>
+                <code class="sd-banner-code">{{ s.rejectionReason }}</code>
+              </div>
             }
 
-            <section class="drawer-section">
-              <h4>Pricing</h4>
-              <dl class="drawer-grid">
-                <div>
-                  <dt>Entry</dt>
-                  <dd class="mono">{{ formatPrice(s.entryPrice, s) }}</dd>
-                </div>
-                <div>
-                  <dt>Stop loss</dt>
-                  <dd class="mono">{{ formatPrice(s.stopLoss, s) }}</dd>
-                </div>
-                <div>
-                  <dt>Take profit</dt>
-                  <dd class="mono">
-                    {{ formatPrice(s.takeProfit, s) }}
+            <div class="sd-body" [class.sd-body--nochart]="!canChart(s)">
+              <!-- Chart pane — Entry / SL / TP over the bar window straddling generatedAt, via the
+                   shared SpotRecChart (same as the Spot Analysis drawer and the Signal Detail page);
+                   H1 because the TradeSignalDto does not carry a timeframe today. -->
+              @if (canChart(s)) {
+                <section class="sd-chart">
+                  <app-spot-rec-chart
+                    [symbol]="s.symbol ?? ''"
+                    [timeframe]="'H1'"
+                    [asOfUtc]="s.generatedAt"
+                    [recommendations]="chartRecsFor(s)"
+                  />
+                </section>
+              }
+
+              <section class="sd-plan" aria-label="Trade plan">
+                <h4>Trade plan</h4>
+                <div class="sd-ladder">
+                  <div class="sd-rung sd-rung--tp">
+                    <span class="k">Take profit</span>
+                    <span class="v">{{ formatPrice(s.takeProfit, s) }}</span>
+                    <span class="d">{{ distanceText(s, s.takeProfit) }}</span>
                     @if (s.originalTakeProfit !== null && s.originalTakeProfit !== s.takeProfit) {
-                      <!-- Engine shrunk the LLM's TP via SpotAnalysisTakeProfitShrinkage.
-                           Show the original underneath so the operator sees the
-                           LLM's intent vs the executed plan. -->
+                      <!-- Engine shrunk the LLM's TP via SpotAnalysisTakeProfitShrinkage; the
+                           original stays visible so the operator sees intent vs executed plan. -->
                       <span
-                        class="tp-original"
+                        class="sd-tp-orig"
                         [title]="
                           'LLM proposed ' +
                           formatPrice(s.originalTakeProfit, s) +
@@ -481,122 +494,127 @@ type DirectionChip = 'all' | TradeDirection;
                           (tpReductionPct(s) ?? '0%') +
                           ' reduction of the profit-target distance) before the signal was filed.'
                         "
-                      >
-                        LLM original: {{ formatPrice(s.originalTakeProfit, s) }}
+                        >LLM original {{ formatPrice(s.originalTakeProfit, s) }}
                         @if (tpReductionPct(s); as pct) {
-                          <span class="tp-reduction">−{{ pct }}</span>
+                          <b>−{{ pct }}</b>
                         }
                       </span>
                     }
-                  </dd>
-                </div>
-                <div>
-                  <dt>Risk : Reward</dt>
-                  <dd class="mono">
-                    {{ formatRR(s) }}
-                    @if (hasImpossibleStop(s)) {
-                      <span class="rr-flag" [title]="impossibleStopHint">⚠ Impossible stop</span>
-                    }
-                  </dd>
-                </div>
-                <div>
-                  <dt>Lot size</dt>
-                  <dd class="mono">{{ s.suggestedLotSize | number: '1.2-2' }}</dd>
-                </div>
-                <div>
-                  <dt>Strategy confidence</dt>
-                  <dd class="mono">{{ (s.confidence * 100 | number: '1.1-1') + '%' }}</dd>
-                </div>
-              </dl>
-            </section>
-
-            <section class="drawer-section">
-              <h4>ML Scoring</h4>
-              @if (s.mlModelId !== null) {
-                <dl class="drawer-grid">
-                  <div>
-                    <dt>Model</dt>
-                    <dd class="mono">#{{ s.mlModelId }}</dd>
                   </div>
+                  <div class="sd-rung sd-rung--entry">
+                    <span class="k">Entry</span>
+                    <span class="v">{{ formatPrice(s.entryPrice, s) }}</span>
+                    <span class="d">{{ s.suggestedLotSize | number: '1.2-2' }} lots</span>
+                  </div>
+                  <div class="sd-rung sd-rung--sl">
+                    <span class="k">Stop loss</span>
+                    <span class="v">{{ formatPrice(s.stopLoss, s) }}</span>
+                    <span class="d">{{ distanceText(s, s.stopLoss) }}</span>
+                  </div>
+                </div>
+
+                <dl class="sd-facts">
                   <div>
-                    <dt>Predicted direction</dt>
-                    <dd
-                      [class.buy]="s.mlPredictedDirection === 'Buy'"
-                      [class.sell]="s.mlPredictedDirection === 'Sell'"
-                    >
-                      {{ s.mlPredictedDirection ?? '—' }}
-                      @if (s.mlPredictedDirection && s.mlPredictedDirection !== s.direction) {
-                        <span class="disagree-badge">disagrees</span>
+                    <dt>Risk : reward</dt>
+                    <dd>
+                      {{ formatRR(s) }}
+                      @if (hasImpossibleStop(s)) {
+                        <span class="sd-flag" [title]="impossibleStopHint">⚠ Impossible stop</span>
                       }
                     </dd>
                   </div>
                   <div>
-                    <dt>ML confidence</dt>
-                    <dd class="mono">
-                      {{
-                        s.mlConfidenceScore !== null
-                          ? (s.mlConfidenceScore * 100 | number: '1.1-1') + '%'
-                          : '—'
-                      }}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>Predicted magnitude</dt>
-                    <dd class="mono">
-                      {{
-                        s.mlPredictedMagnitude !== null
-                          ? (s.mlPredictedMagnitude | number: '1.2-2') + ' pips'
-                          : '—'
-                      }}
+                    <dt>Confidence</dt>
+                    <dd>
+                      {{ s.confidence * 100 | number: '1.1-1' }}%
+                      <span class="sd-meter"
+                        ><i [style.width.%]="clampPct(s.confidence * 100)"></i
+                      ></span>
                     </dd>
                   </div>
                 </dl>
-              } @else {
-                <p class="muted">No ML model active when this signal was scored.</p>
-              }
-            </section>
 
-            @if (s.rejectionReason) {
-              <section class="drawer-section">
-                <h4>Rejection reason</h4>
-                <pre class="reason mono">{{ s.rejectionReason }}</pre>
+                <h4>ML scoring</h4>
+                @if (s.mlModelId !== null) {
+                  <dl class="sd-facts">
+                    <div>
+                      <dt>Model</dt>
+                      <dd>#{{ s.mlModelId }}</dd>
+                    </div>
+                    <div>
+                      <dt>Predicts</dt>
+                      <dd
+                        [class.buy]="s.mlPredictedDirection === 'Buy'"
+                        [class.sell]="s.mlPredictedDirection === 'Sell'"
+                      >
+                        {{ s.mlPredictedDirection ?? '—' }}
+                        @if (s.mlPredictedDirection && s.mlPredictedDirection !== s.direction) {
+                          <span class="sd-disagree">disagrees</span>
+                        }
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>ML confidence</dt>
+                      <dd>
+                        {{
+                          s.mlConfidenceScore !== null
+                            ? (s.mlConfidenceScore * 100 | number: '1.1-1') + '%'
+                            : '—'
+                        }}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Magnitude</dt>
+                      <dd>
+                        {{
+                          s.mlPredictedMagnitude !== null
+                            ? (s.mlPredictedMagnitude | number: '1.2-2') + ' pips'
+                            : '—'
+                        }}
+                      </dd>
+                    </div>
+                  </dl>
+                } @else {
+                  <p class="sd-muted">No ML model was active when this signal was scored.</p>
+                }
+
+                <h4>Timeline (UTC)</h4>
+                <ol class="sd-timeline">
+                  <li>
+                    <span class="dot"></span>
+                    <span class="k">Generated</span>
+                    <span class="v">{{ s.generatedAt | date: 'd MMM, HH:mm:ss' : 'UTC' }}</span>
+                  </li>
+                  <li [class.past]="isPast(s.expiresAt)">
+                    <span class="dot"></span>
+                    <span class="k">{{ isPast(s.expiresAt) ? 'Expired' : 'Expires' }}</span>
+                    <span class="v">{{ s.expiresAt | date: 'd MMM, HH:mm:ss' : 'UTC' }}</span>
+                  </li>
+                </ol>
               </section>
-            }
-
-            <section class="drawer-section">
-              <h4>Lifecycle</h4>
-              <dl class="drawer-grid">
-                <div>
-                  <dt>Strategy id</dt>
-                  <dd class="mono">#{{ s.strategyId }}</dd>
-                </div>
-                <div>
-                  <dt>Order id</dt>
-                  <dd class="mono">{{ s.orderId !== null ? '#' + s.orderId : 'not placed' }}</dd>
-                </div>
-                <div>
-                  <dt>Generated</dt>
-                  <dd>{{ s.generatedAt | date: 'MMM d, HH:mm:ss' }}</dd>
-                </div>
-                <div>
-                  <dt>Expires</dt>
-                  <dd>{{ s.expiresAt | date: 'MMM d, HH:mm:ss' }}</dd>
-                </div>
-              </dl>
-            </section>
+            </div>
 
             @if (s.status !== 'Cancelled') {
-              <footer class="drawer-actions">
+              <footer class="sd-actions">
+                <span class="sd-actions-hint">
+                  @if (s.status === 'Pending') {
+                    Awaiting approval
+                  } @else {
+                    Cancelling also closes any position or pending order it opened.
+                  }
+                </span>
                 @if (s.status === 'Pending') {
                   <button
-                    class="btn btn-success"
+                    type="button"
+                    class="sd-btn sd-btn--approve"
                     (click)="approveSignal(s)"
                     [disabled]="processing()"
                   >
                     Approve
                   </button>
                   <button
-                    class="btn btn-danger"
+                    type="button"
+                    class="sd-btn sd-btn--danger"
                     (click)="rejectSignal(s)"
                     [disabled]="processing()"
                   >
@@ -604,7 +622,8 @@ type DirectionChip = 'all' | TradeDirection;
                   </button>
                 }
                 <button
-                  class="btn btn-danger"
+                  type="button"
+                  class="sd-btn sd-btn--danger"
                   (click)="cancelSignal(s)"
                   [disabled]="processing()"
                   title="Cancel the signal and close every position / pending order it opened"
@@ -672,6 +691,7 @@ type DirectionChip = 'all' | TradeDirection;
       </app-confirm-dialog>
     </div>
   `,
+  styleUrls: ['./signals-page.modal.scss'],
   styles: [
     `
       .page {
@@ -977,298 +997,6 @@ type DirectionChip = 'all' | TradeDirection;
       }
       .btn-danger:hover:not(:disabled) {
         background: rgba(255, 59, 48, 0.25);
-      }
-
-      /* Detail modal  centered card replacing the prior side-drawer.
-         Class names stay drawer-* because the content classes
-         (drawer-section / drawer-grid) ride along; only the outer chrome
-         was restyled to give the chart pane horizontal room and a more
-         readable Sensitivity-style head. */
-      .drawer-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.55);
-        backdrop-filter: blur(3px);
-        -webkit-backdrop-filter: blur(3px);
-        z-index: 100;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        padding: 1.5rem;
-        animation: scrimIn 0.12s ease-out;
-      }
-      @keyframes scrimIn {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
-      }
-      .drawer {
-        width: min(1060px, 96vw);
-        max-height: 92vh;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
-        display: flex;
-        flex-direction: column;
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-        animation: cardIn 0.16s ease-out;
-      }
-      @keyframes cardIn {
-        from {
-          opacity: 0;
-          transform: translateY(8px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(0);
-        }
-      }
-      .drawer-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 1rem;
-        padding: 1rem 1.25rem;
-        border-bottom: 1px solid var(--border);
-        background: var(--bg-primary);
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .head-titles {
-        min-width: 0;
-      }
-      .head-title {
-        margin: 0;
-        font-size: 1.05rem;
-        font-weight: 600;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-      }
-      .head-title .signal-id {
-        color: var(--text-secondary);
-        font-weight: 500;
-      }
-      .head-title .symbol {
-        color: var(--text-primary);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: 1rem;
-      }
-      /* Direction-tinted chip with subtle border + soft bg. */
-      .dir-chip {
-        font-size: 0.72rem;
-        font-weight: 600;
-        padding: 3px 8px;
-        border-radius: 4px;
-        line-height: 1.1;
-        letter-spacing: 0.02em;
-      }
-      .dir-chip--buy {
-        background: rgba(31, 138, 61, 0.14);
-        color: #1f8a3d;
-        border: 1px solid rgba(31, 138, 61, 0.35);
-      }
-      .dir-chip--sell {
-        background: rgba(196, 41, 10, 0.14);
-        color: #c4290a;
-        border: 1px solid rgba(196, 41, 10, 0.35);
-      }
-      /* Status chip; colour per terminal state. */
-      .status-chip {
-        font-size: 0.72rem;
-        font-weight: 600;
-        padding: 3px 8px;
-        border-radius: 4px;
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        letter-spacing: 0.02em;
-      }
-      .status-chip--pending {
-        background: rgba(255, 159, 10, 0.14);
-        color: #b75900;
-      }
-      .status-chip--approved {
-        background: rgba(0, 113, 227, 0.14);
-        color: #0071e3;
-      }
-      .status-chip--rejected {
-        background: rgba(196, 41, 10, 0.14);
-        color: #c4290a;
-      }
-      .status-chip--executed {
-        background: rgba(31, 138, 61, 0.14);
-        color: #1f8a3d;
-      }
-      .status-chip--expired {
-        background: rgba(110, 110, 115, 0.18);
-        color: var(--text-secondary);
-      }
-      .status-chip--cancelled {
-        background: rgba(175, 82, 222, 0.14);
-        color: #8944ab;
-      }
-      .cancel-reason {
-        display: flex;
-        flex-direction: column;
-        gap: 0.35rem;
-        margin-top: 0.75rem;
-        font-size: 0.8125rem;
-        color: var(--text-secondary);
-      }
-      .cancel-reason textarea {
-        font: inherit;
-        color: var(--text-primary);
-        background: var(--bg-secondary, transparent);
-        border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
-        border-radius: 8px;
-        padding: 0.5rem 0.625rem;
-        resize: vertical;
-      }
-      .head-sub {
-        margin-top: 0.3rem;
-        font-size: 0.78rem;
-        color: var(--text-secondary);
-      }
-      .btn-close {
-        background: transparent;
-        border: none;
-        font-size: 1.5rem;
-        cursor: pointer;
-        line-height: 1;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-        color: var(--text-secondary);
-        flex-shrink: 0;
-      }
-      .btn-close:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .drawer-section {
-        padding: 1rem 1.25rem;
-        border-bottom: 1px solid var(--border);
-      }
-      .drawer-section:last-of-type {
-        border-bottom: none;
-      }
-      .drawer-section h4 {
-        margin: 0 0 0.6rem;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: var(--text-secondary);
-        font-weight: 600;
-      }
-      /* Three-column grid on the wider modal so the Pricing / Lifecycle /
-         ML rows breathe; collapses to two columns on narrower viewports. */
-      .drawer-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-        gap: 0.85rem 1.5rem;
-        margin: 0;
-      }
-      .drawer-grid dt {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        margin: 0 0 2px;
-        font-weight: 600;
-      }
-      .drawer-grid dd {
-        margin: 0;
-        font-size: 0.92rem;
-        color: var(--text-primary);
-      }
-      .drawer-grid dd.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: 0.86rem;
-      }
-      /* Pre-shrinkage TP shown under the executed Take profit value when the
-         engine's SpotAnalysisTakeProfitShrinkage moved it. Muted + smaller so
-         the executed value stays the primary read; tooltip carries the full
-         explanation. */
-      .tp-original {
-        display: block;
-        margin-top: 2px;
-        font-size: 10px;
-        color: var(--text-tertiary);
-        cursor: help;
-      }
-      /* Reduction-percentage chip next to the LLM-original price. Amber so it
-         reads as an operator-applied adjustment, not an error. */
-      .tp-reduction {
-        margin-left: 4px;
-        padding: 0 4px;
-        border-radius: var(--radius-sm);
-        background: rgba(245, 158, 11, 0.12);
-        color: #f59e0b;
-        font-weight: var(--font-semibold);
-      }
-      .drawer-grid dd.buy {
-        color: var(--profit);
-        font-weight: var(--font-semibold);
-      }
-      .drawer-grid dd.sell {
-        color: var(--loss);
-        font-weight: var(--font-semibold);
-      }
-      .rr-flag {
-        display: inline-block;
-        margin-left: 8px;
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--loss);
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        font-family: inherit;
-        cursor: help;
-      }
-      .disagree-badge {
-        display: inline-block;
-        margin-left: 8px;
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        background: rgba(175, 82, 222, 0.12);
-        color: #8a2be2;
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .reason {
-        margin: 0;
-        padding: var(--space-2) var(--space-3);
-        background: rgba(255, 59, 48, 0.06);
-        border: 1px solid rgba(255, 59, 48, 0.2);
-        border-radius: var(--radius-sm);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-        white-space: pre-wrap;
-        word-break: break-word;
-      }
-      .drawer-actions {
-        padding: 1rem 1.25rem;
-        display: flex;
-        gap: 0.6rem;
-        background: var(--bg-secondary);
-        border-top: 1px solid var(--border);
-        position: sticky;
-        bottom: 0;
-        z-index: 1;
-      }
-      .drawer-actions .btn {
-        flex: 1;
-        height: 40px;
-        font-weight: 600;
       }
 
       /* Tighter horizontal cell padding so the fitted columns keep their headers on one line. */
@@ -2152,6 +1880,41 @@ export class SignalsPageComponent {
 
   // ── Helpers ──────────────────────────────────────────────────────────
   readonly impossibleStopHint = IMPOSSIBLE_STOP_HINT;
+
+  /** "ttl_elapsed_after_approval" → "TTL elapsed after approval" (the raw code is shown beside it). */
+  reasonText(code: string): string {
+    const words = code.replace(/[_-]+/g, ' ').trim().split(/\s+/);
+    const upper = new Set(['ttl', 'sl', 'tp', 'ea', 'ml', 'llm', 'atr', 'rr']);
+    const out = words.map((w) => (upper.has(w.toLowerCase()) ? w.toUpperCase() : w.toLowerCase()));
+    if (out.length && !upper.has(words[0].toLowerCase()))
+      out[0] = out[0][0].toUpperCase() + out[0].slice(1);
+    return out.join(' ');
+  }
+
+  /**
+   * Distance of a level from entry, signed by direction of travel: pips for 6-letter FX pairs
+   * (0.01 for JPY quotes, 0.0001 otherwise), price points for metals, indices and anything else.
+   */
+  distanceText(s: TradeSignalDto, level: number | null): string {
+    if (level === null || !Number.isFinite(level)) return '';
+    const diff = level - s.entryPrice;
+    const sym = (s.symbol ?? '').toUpperCase();
+    const fx = /^[A-Z]{6}$/.test(sym) && !sym.startsWith('XAU') && !sym.startsWith('XAG');
+    const sign = diff > 0 ? '+' : diff < 0 ? '−' : '';
+    if (fx) {
+      const pip = sym.endsWith('JPY') ? 0.01 : 0.0001;
+      return `${sign}${(Math.abs(diff) / pip).toFixed(1)} pips`;
+    }
+    return `${sign}${Math.abs(diff).toFixed(2)} pts`;
+  }
+
+  clampPct(v: number): number {
+    return Math.max(0, Math.min(100, v));
+  }
+
+  isPast(iso: string | null): boolean {
+    return !!iso && Date.parse(iso) <= Date.now();
+  }
 
   formatRR(s: TradeSignalDto | null): string {
     if (!s || s.stopLoss === null || s.takeProfit === null) return '—';
