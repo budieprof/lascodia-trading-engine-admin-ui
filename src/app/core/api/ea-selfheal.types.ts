@@ -56,6 +56,29 @@ export interface TerminalJobDto {
   followUpCommandIds: number[];
 }
 
+/** One file a PruneFiles job lists (dry run) or deleted (real run). */
+export interface PruneFileItem {
+  path: string;
+  bytes: number;
+  /** Plain words: "terminal journal older than 14 days", "instance LASC-… silent for 30+ days". */
+  reason: string;
+}
+
+/** `resultData` of a PruneFiles job (C6, the host supervisor's `prune.run`). */
+export interface PruneFilesResult {
+  dryRun: boolean;
+  /** Files selected (the dry run's list; the real run re-selects with the same rules). */
+  fileCount: number;
+  totalBytes: number;
+  deletedCount: number;
+  freedBytes: number;
+  /** `name: ErrorType`, at most 50. */
+  failures: string[];
+  /** At most 500; `truncated` says there were more. */
+  files: PruneFileItem[];
+  truncated: boolean;
+}
+
 /** Answer of every endpoint that queues host work. */
 export interface EATerminalJobResult {
   jobId: string;

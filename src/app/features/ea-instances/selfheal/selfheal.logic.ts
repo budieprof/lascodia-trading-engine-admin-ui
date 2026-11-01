@@ -11,6 +11,8 @@ import type {
   EAHealEventDto,
   EAInstallRuntime,
   EATerminalDto,
+  PruneFileItem,
+  PruneFilesResult,
   TerminalJobDto,
 } from '@core/api/ea-selfheal.types';
 
@@ -258,7 +260,7 @@ const JOB_WORDS: Record<string, string> = {
   RestartTerminal: 'Restart terminal',
   DeployEaBinary: 'Update EA',
   TailLog: 'Fetch host log',
-  PruneFiles: 'Prune old files',
+  PruneFiles: 'Clean up old files',
 };
 
 export function jobWords(type: string | null | undefined): string {
@@ -990,3 +992,104 @@ export function actionCopy(action: string, ctx: ActionContext = {}): ActionCopy 
       };
   }
 }
+
+// ── Clean up old files (PruneFiles, C6) ───────────────────────────────────
+
+/** Health-card fix actions that open the two-step clean-up instead of a plain confirm. */
+export const PRUNE_FILES_ACTION = 'prune-files';
+
+function num(v: unknown): number {
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+/** A PruneFiles job's `resultData`, tolerant of missing fields; null when it is not one. */
+export function parsePruneResult(data: Record<string, unknown> | null | undefined): PruneFilesResult | null {
+  if (!data || typeof data !== 'object' || typeof data['fileCount'] !== 'number') return null;
+  const files = Array.isArray(data['files'])
+    ? (data['files'] as unknown[])
+        .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+        .map(
+          (f): PruneFileItem => ({
+            path: typeof f['path'] === 'string' ? (f['path'] as string) : '',
+            bytes: num(f['bytes']),
+            reason: typeof f['reason'] === 'string' ? (f['reason'] as string) : '',
+          }),
+        )
+    : [];
+  return {
+    dryRun: data['dryRun'] !== false,
+    fileCount: num(data['fileCount']),
+    totalBytes: num(data['totalBytes']),
+    deletedCount: num(data['deletedCount']),
+    freedBytes: num(data['freedBytes']),
+    failures: Array.isArray(data['failures']) ? (data['failures'] as unknown[]).map(String) : [],
+    files,
+    truncated: data['truncated'] === true,
+  };
+}
+
+export interface PruneGroup {
+  reason: string;
+  count: number;
+  bytes: number;
+  files: PruneFileItem[];
+}
+
+/** The listed files grouped by why they go, biggest group first; files in a group biggest first. */
+export function pruneGroups(files: readonly PruneFileItem[]): PruneGroup[] {
+  const byReason = new Map<string, PruneGroup>();
+  for (const f of files) {
+    const reason = f.reason || 'Old file';
+    const g = byReason.get(reason) ?? { reason, count: 0, bytes: 0, files: [] };
+    g.count++;
+    g.bytes += f.bytes;
+    g.files.push(f);
+    byReason.set(reason, g);
+  }
+  const groups = [...byReason.values()];
+  for (const g of groups) g.files.sort((a, b) => b.bytes - a.bytes || a.path.localeCompare(b.path));
+  return groups.sort((a, b) => b.bytes - a.bytes || a.reason.localeCompare(b.reason));
+}
+
+/** The file name and the folder it is in, for a long Windows/Wine path. */
+export function pruneFileLabel(path: string): { name: string; folder: string } {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const name = parts.pop() ?? path;
+  return { name, folder: parts.slice(-2).join('/') };
+}
+
+function files(n: number): string {
+  return n === 1 ? '1 file' : `${n} files`;
+}
+
+/** What the dry run found, in one sentence. */
+export function pruneDryRunText(r: PruneFilesResult): string {
+  if (r.fileCount <= 0) return 'Nothing to clean up: no old files match the clean-up rules.';
+  return (
+    `${files(r.fileCount)} can be deleted, freeing ${formatBytes(r.totalBytes)}.` +
+    (r.truncated ? ` Only the first ${r.files.length} are listed below.` : '')
+  );
+}
+
+/** What the real clean-up did, in one sentence. */
+export function pruneOutcomeText(r: PruneFilesResult): string {
+  const failed = r.failures.length;
+  const done =
+    r.deletedCount > 0
+      ? `Deleted ${files(r.deletedCount)}, freed ${formatBytes(r.freedBytes)}.`
+      : 'No file was deleted.';
+  return failed > 0 ? `${done} ${files(failed)} could not be deleted (in use or no permission).` : done;
+}
+
+/** The confirm button of the review step. */
+export function pruneConfirmLabel(r: PruneFilesResult | null): string {
+  return r && r.fileCount > 0 ? `Delete ${files(r.fileCount)} (${formatBytes(r.totalBytes)})` : 'Delete files';
+}
+
+/** Fixed copy of the clean-up dialog. */
+export const PRUNE_COPY = {
+  title: 'Clean up old files',
+  intro:
+    "The host supervisor lists old files on this terminal's computer first: terminal journals and EA logs older than 14 days, and the files of EA instances that have been silent for 30 days or more. Nothing is deleted until you confirm the list.",
+  safe: 'Never deleted: sign-in credentials, settings, chart templates, and reports or orders still waiting to be sent (outbox, retry queue, recovery, dead letters). The newest file of every kind is always kept.',
+} as const;
