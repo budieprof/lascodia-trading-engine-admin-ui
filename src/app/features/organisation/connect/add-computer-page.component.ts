@@ -33,11 +33,13 @@ import {
   installCommand,
   installRunningText,
   isAllDone,
-  MAC_INSTALLER_STEPS,
-  MAC_INSTALLER_WHY_ASKED,
-  macInstallerAvailable,
+  installerAvailable,
+  installerFileName,
+  installerPlatform,
+  installerSteps,
+  installerWhyAsked,
   macInstallerErrorText,
-  macInstallerFileName,
+  shellName,
   nextDaemonPollMs,
   openShellSteps,
   osAvailability,
@@ -333,7 +335,7 @@ import type { EnrollmentProgress } from './terminal-wizard.types';
           <section class="card">
             <header class="card-head">
               <h3>
-                <span class="num">2</span>{{ pkgOffered() ? 'Install it on the Mac' : 'Paste this line on the ' + osName() }}
+                <span class="num">2</span>{{ pkgOffered() ? 'Install it on the ' + osName() : 'Paste this line on the ' + osName() }}
               </h3>
             </header>
             <div class="card-body">
@@ -350,7 +352,7 @@ import type { EnrollmentProgress } from './terminal-wizard.types';
                 @if (pkgOffered()) {
                   <h4>Easiest: download the installer and double-click it</h4>
                   <ol class="how">
-                    @for (s of installerSteps; track $index) {
+                    @for (s of installerSteps(); track $index) {
                       <li>{{ s }}</li>
                     }
                   </ol>
@@ -364,8 +366,8 @@ import type { EnrollmentProgress } from './terminal-wizard.types';
                       {{ downloadingPkg() ? 'Downloading…' : 'Download the installer' }}
                     </button>
                   </div>
-                  <p class="small muted">{{ whyAsked }}</p>
-                  <h4>Or paste this line in Terminal</h4>
+                  <p class="small muted">{{ whyAsked() }}</p>
+                  <h4>Or paste this line in {{ shellName() }}</h4>
                 }
                 <div class="command">
                   <pre aria-label="Install line">{{ cmd }}</pre>
@@ -572,10 +574,12 @@ export class AddComputerPageComponent {
     return c ? installCommand(this.setup.value(), this.os(), c.token) : null;
   });
   readonly shellSteps = computed(() => openShellSteps(this.os()));
-  readonly pkgOffered = computed(() => macInstallerAvailable(this.setup.value(), this.os()));
+  /** A double-click installer is published for the chosen OS (the Mac .pkg or the Windows .exe). */
+  readonly pkgOffered = computed(() => installerAvailable(this.setup.value(), this.os()));
   readonly downloadingPkg = signal(false);
-  protected readonly installerSteps = MAC_INSTALLER_STEPS;
-  protected readonly whyAsked = MAC_INSTALLER_WHY_ASKED;
+  protected readonly installerSteps = computed(() => installerSteps(this.os()));
+  protected readonly whyAsked = computed(() => installerWhyAsked(this.os()));
+  protected readonly shellName = computed(() => shellName(this.os()));
 
   /** Re-evaluated every 30 s so the expiry line counts down. */
   private readonly now = signal(Date.now());
@@ -663,7 +667,8 @@ export class AddComputerPageComponent {
   downloadInstaller(token: string): void {
     if (!token || this.downloadingPkg()) return;
     this.downloadingPkg.set(true);
-    this.api.downloadMacInstaller().subscribe({
+    const os = this.os();
+    this.api.downloadInstaller(installerPlatform(os)).subscribe({
       next: async (file) => {
         try {
           const verdict = await sha256Matches(await file.blob.arrayBuffer(), file.sha256);
@@ -671,7 +676,7 @@ export class AddComputerPageComponent {
             this.notify.error('The downloaded installer does not match the published file, so it was not saved. Try again.');
             return;
           }
-          saveBlob(file.blob, macInstallerFileName(this.setup.value(), token));
+          saveBlob(file.blob, installerFileName(this.setup.value(), os, token));
           this.notify.success('Installer downloaded. Open it from your Downloads folder.');
         } finally {
           this.downloadingPkg.set(false);

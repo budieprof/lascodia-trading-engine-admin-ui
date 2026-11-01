@@ -20,6 +20,12 @@ import {
   macInstallerAvailable as pkgAvailable,
   macInstallerErrorText,
   macInstallerFileName,
+  installerAvailable,
+  installerFileName,
+  installerPlatform,
+  installerSteps,
+  installerWhyAsked,
+  shellName,
 } from './add-computer.logic';
 import type {
   DaemonEaProgress,
@@ -255,5 +261,36 @@ describe('double-click macOS installer', () => {
     expect(macInstallerErrorText({ status: 403 })).toContain('permission');
     expect(macInstallerErrorText({ status: 0 })).toContain('could not be reached');
     expect(macInstallerErrorText(new Error('x'))).toContain('install line');
+  });
+});
+
+describe('double-click Windows installer', () => {
+  const exe = { platform: 'windows-exe', label: 'Windows installer (double-click)', available: true, version: '1.0.0', sizeBytes: 1, publishedAtUtc: null };
+  const base = { macCommandTemplate: '', windowsCommandTemplate: '', platforms: [] } as unknown as Parameters<typeof installerAvailable>[0];
+
+  it('is offered only for Windows and only once published; the Mac one only for a Mac', () => {
+    expect(installerAvailable({ ...base!, windowsInstaller: exe }, 'windows')).toBe(true);
+    expect(installerAvailable({ ...base!, windowsInstaller: exe }, 'macos')).toBe(false);
+    expect(installerAvailable({ ...base!, windowsInstaller: { ...exe, available: false } }, 'windows')).toBe(false);
+    expect(installerAvailable(base, 'windows')).toBe(false);
+    expect(installerAvailable(null, 'windows')).toBe(false);
+    expect(installerAvailable({ ...base!, macInstaller: { ...exe, platform: 'macos-pkg' } }, 'macos')).toBe(true);
+  });
+
+  it('is saved as an .exe with the install code in its name', () => {
+    const t = 'lsc_enr_abcd1234_' + 'X'.repeat(40);
+    expect(installerFileName(null, 'windows', t)).toBe(`Lascodia Setup ${t}.exe`);
+    expect(installerFileName(null, 'macos', t)).toBe(`Lascodia Setup ${t}.pkg`);
+    expect(installerFileName({ ...base!, windowsInstallerFileNameTemplate: 'Setup.exe' }, 'windows', t)).toBe(`Lascodia Setup ${t}.exe`);
+  });
+
+  it('asks for the right platform and explains SmartScreen in plain words', () => {
+    expect(installerPlatform('windows')).toBe('windows-exe');
+    expect(installerPlatform('macos')).toBe('macos-pkg');
+    expect(installerSteps('windows').join(' ')).toContain('Run anyway');
+    expect(installerSteps('macos').join(' ')).toContain('Open Anyway');
+    expect(installerWhyAsked('windows')).toContain('code-signing');
+    expect(shellName('windows')).toBe('PowerShell');
+    expect(shellName('macos')).toBe('Terminal');
   });
 });
