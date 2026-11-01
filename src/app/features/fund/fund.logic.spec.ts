@@ -5,6 +5,16 @@ import { describe, expect, it } from 'vitest';
 import { blobError, fundQuery, toDownloadedFile } from './fund-api.service';
 import {
   bestExTiles,
+  dayLabel,
+  heatColor,
+  lossPct,
+  matchPreset,
+  periodLabel,
+  periodPresets,
+  signedPct,
+  splitAccount,
+  splitBroker,
+  tone,
   enumWords,
   shareOfMax,
   liveScopeAccounts,
@@ -222,5 +232,50 @@ describe('cash-flow sources', () => {
       'admin-user:5',
     );
     expect(ledgerSource({ recordedBy: 'admin-user:5' })).toBe('admin-user:5');
+  });
+});
+
+describe('fund presentation helpers', () => {
+  it('names a period by the days it covers', () => {
+    expect(periodLabel('2026-08-04T00:00:00Z', '2026-11-02T00:00:00Z')).toBe('4 Aug – 1 Nov 2026');
+    expect(periodLabel('2025-12-01', '2026-01-02')).toBe('1 Dec 2025 – 1 Jan 2026');
+    expect(dayLabel('2026-09-22T00:00:00Z', false)).toBe('22 Sep');
+  });
+
+  it('offers presets and recognises them', () => {
+    const now = new Date(Date.UTC(2026, 10, 1, 9));
+    const p = periodPresets(now);
+    expect(p.map((x) => x.key)).toEqual(['1m', '3m', 'ytd', '1y']);
+    expect(p[2]).toMatchObject({ from: '2026-01-01', to: '2026-11-02' });
+    expect(matchPreset(p[1].from, p[1].to, now)).toBe('3m');
+    expect(matchPreset('2026-05-01', '2026-11-02', now)).toBeNull();
+    for (const x of p) expect('problem' in periodQuery(x.from, x.to)).toBe(false);
+  });
+
+  it('signs losses and returns', () => {
+    expect(lossPct(0.1506)).toBe('−15.06 %');
+    expect(lossPct(0)).toBe('0.00 %');
+    expect(signedPct(0.029, 1)).toBe('+2.9 %');
+    expect(signedPct(-0.114, 1)).toBe('−11.4 %');
+    expect(signedPct(null)).toBe('—');
+    expect(tone(-1)).toBe('neg');
+  });
+
+  it('shades monthly cells by size and sign', () => {
+    expect(heatColor(null, 1)).toBeNull();
+    expect(heatColor(0.1, 0.1)).toBe('rgba(52, 199, 89, 0.55)');
+    expect(heatColor(-0.02, 0.1)).toBe('rgba(255, 59, 48, 0.19)');
+  });
+
+  it('splits account and broker labels', () => {
+    expect(splitAccount('134646967 (Olabode Olaleye Exness Pro)')).toEqual({
+      login: '134646967',
+      name: 'Olabode Olaleye Exness Pro',
+    });
+    expect(splitAccount('All fills')).toEqual({ login: 'All fills', name: '' });
+    expect(splitBroker('Exness Technologies Ltd / Exness-MT5Trial9')).toEqual({
+      broker: 'Exness Technologies Ltd',
+      server: 'Exness-MT5Trial9',
+    });
   });
 });

@@ -7,28 +7,38 @@ import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { errorText } from '@features/iam/iam.logic';
 import { saveBlob } from '@features/scripting/shared/download';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 
 import { FundApiService } from '../fund-api.service';
+import { performanceChart } from '../fund-charts';
 import {
   MONTHS,
-  day,
+  dayLabel,
   defaultPeriod,
   flowSource,
   flowSourceChip,
   flowWhen,
+  heatColor,
   isUpgradeNotice,
   ledgerSource,
   liveScopeAccounts,
+  lossPct,
+  matchPreset,
   minuteUtc,
   money,
   monthlyGrid,
   num,
   pct,
+  periodLabel,
+  periodPresets,
   periodQuery,
   signedAmount,
+  signedPct,
   sparkline,
+  tone,
+  type PresetKey,
 } from '../fund.logic';
 import type {
   CashFlow,
@@ -54,44 +64,45 @@ interface GlanceRow {
   selector: 'app-fund-performance-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent],
-  styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss'],
-  styles: [
-    `
-      tr.pick {
-        cursor: pointer;
-      }
-      tr.pick:hover td,
-      tr.picked td {
-        background: var(--bg-tertiary);
-      }
-      .spark {
-        width: 120px;
-        height: 28px;
-        display: block;
-      }
-      .spark polyline {
-        fill: none;
-        stroke: var(--accent, #2563eb);
-        stroke-width: 1.5;
-      }
-    `,
-  ],
+  imports: [FormsModule, PageHeaderComponent, ConfirmDialogComponent, ChartCardComponent],
+  styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss', './performance-page.scss'],
   template: `
     <div class="page">
       <app-page-header
-        title="Performance"
+        title="Performance statements"
         subtitle="Time-weighted return, drawdown and risk-adjusted figures from the engine's own equity records."
-      />
+      >
+        @if (!upgrade()) {
+          <button
+            type="button"
+            class="btn btn-secondary"
+            [disabled]="!statement() || busy()"
+            (click)="download('pdf')"
+            title="Download this statement as a PDF"
+          >
+            ⤓ PDF
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            [disabled]="!statement() || busy()"
+            (click)="download('csv')"
+            title="Download the daily series as CSV"
+          >
+            ⤓ CSV
+          </button>
+        }
+      </app-page-header>
 
       @if (upgrade()) {
         <section class="card upgrade" role="status">
           <span class="chip warn">Not in your plan</span> {{ upgrade() }}
         </section>
       } @else {
+        <!-- ── What to report on ─────────────────────────── -->
         <section class="card">
-          <div class="filters">
-            <label class="field">
+          <div class="query">
+            <label class="field grow">
               <span class="label">Account or portfolio</span>
               <select
                 class="select"
@@ -99,19 +110,44 @@ interface GlanceRow {
                 [ngModel]="subject()"
                 (ngModelChange)="subject.set($event)"
               >
-                @for (a of scope().accounts; track a.id) {
-                  <option [ngValue]="'a:' + a.id">
-                    {{ a.accountId }} · {{ a.broker }} · {{ a.accountType }}
-                  </option>
+                @if (scope().accounts.length) {
+                  <optgroup label="Accounts">
+                    @for (a of scope().accounts; track a.id) {
+                      <option [ngValue]="'a:' + a.id">
+                        {{ a.accountId }} — {{ a.accountName }} · {{ a.broker }} ·
+                        {{ a.accountType }}
+                      </option>
+                    }
+                  </optgroup>
                 }
-                @for (g of scope().groups; track g.id) {
-                  <option [ngValue]="'g:' + g.id">
-                    Portfolio: {{ g.name }} ({{ g.accounts }})
-                  </option>
+                @if (scope().groups.length) {
+                  <optgroup label="Portfolios">
+                    @for (g of scope().groups; track g.id) {
+                      <option [ngValue]="'g:' + g.id">
+                        {{ g.name }} ({{ g.accounts }} accounts)
+                      </option>
+                    }
+                  </optgroup>
                 }
               </select>
             </label>
-            <label class="field">
+            <div class="field">
+              <span class="label">Period</span>
+              <div class="seg" role="group" aria-label="Quick periods">
+                @for (p of presets; track p.key) {
+                  <button
+                    type="button"
+                    [class.on]="preset() === p.key"
+                    [attr.aria-pressed]="preset() === p.key"
+                    (click)="applyPreset(p.key)"
+                  >
+                    {{ p.label }}
+                  </button>
+                }
+                <button type="button" [class.on]="preset() === null" disabled>Custom</button>
+              </div>
+            </div>
+            <label class="field date">
               <span class="label">From (UTC)</span>
               <input
                 class="input"
@@ -121,8 +157,8 @@ interface GlanceRow {
                 (ngModelChange)="from.set($event)"
               />
             </label>
-            <label class="field">
-              <span class="label">To (UTC, exclusive)</span>
+            <label class="field date">
+              <span class="label">To (not included)</span>
               <input
                 class="input"
                 type="date"
@@ -131,59 +167,50 @@ interface GlanceRow {
                 (ngModelChange)="to.set($event)"
               />
             </label>
-            <label class="field">
-              <span class="label">Risk-free rate (% a year)</span>
-              <input
-                class="input"
-                type="number"
-                step="0.1"
-                name="rf"
-                [ngModel]="riskFree()"
-                (ngModelChange)="riskFree.set(+$event || 0)"
-              />
+            <label class="field rf" title="Used for Sharpe and Sortino">
+              <span class="label">Risk-free %/yr</span>
+              <div class="suffix">
+                <input
+                  class="input"
+                  type="number"
+                  step="0.1"
+                  name="rf"
+                  [ngModel]="riskFree()"
+                  (ngModelChange)="riskFree.set(+$event || 0)"
+                />
+                <span>%</span>
+              </div>
             </label>
             <button
               type="button"
               class="btn btn-primary"
               [disabled]="loading() || !subject()"
-              (click)="load()"
+              (click)="run()"
             >
               {{ loading() ? 'Loading…' : 'Show' }}
             </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              [disabled]="!statement() || busy()"
-              (click)="download('pdf')"
-            >
-              PDF
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary"
-              [disabled]="!statement() || busy()"
-              (click)="download('csv')"
-            >
-              CSV
-            </button>
           </div>
           @if (error()) {
-            <p class="pad" role="alert">
-              <span class="chip bad">Could not load</span> {{ error() }}
-            </p>
+            <p class="alert" role="alert"><strong>Could not load.</strong> {{ error() }}</p>
           }
           @if (scopeLoaded() && scope().accounts.length === 0 && scope().groups.length === 0) {
-            <p class="pad muted">You have no accounts to report on.</p>
+            <p class="empty">
+              <strong>No accounts to report on</strong>
+              Statements appear here for the trading accounts and portfolios you have been given
+              access to.
+            </p>
           }
         </section>
 
+        <!-- ── Live accounts at a glance ─────────────────── -->
         @if (glance().length) {
           <section class="card">
             <div class="card-head">
-              <strong>Live accounts at a glance</strong>
-              <span class="muted small"
+              <h3>Live accounts</h3>
+              <span class="count">{{ glance().length }}</span>
+              <span class="hint"
                 >{{ glancePeriod() }} · time-weighted, deposits and withdrawals taken out · click a
-                row for its statement</span
+                row to open its statement</span
               >
             </div>
             <div class="table-wrap">
@@ -194,10 +221,10 @@ interface GlanceRow {
                     <th class="num">Equity now</th>
                     <th class="num">Return</th>
                     <th class="num">Max drawdown</th>
-                    <th class="num">In drawdown now</th>
+                    <th class="num">Below peak now</th>
                     <th class="num">Sharpe</th>
                     <th class="num">Worst day</th>
-                    <th>Growth of 1</th>
+                    <th>Trend</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -208,27 +235,30 @@ interface GlanceRow {
                       (click)="pick(g.account.id)"
                     >
                       <td>
-                        {{ g.account.accountId }} · {{ g.account.accountName }}
-                        <div class="small muted">
-                          {{ g.account.broker }} · {{ g.account.accountType }}
-                        </div>
+                        <span class="strong mono">{{ g.account.accountId }}</span>
+                        {{ g.account.accountName }}
+                        <span class="sub"
+                          >{{ g.account.broker }} · {{ g.account.accountType }}</span
+                        >
                       </td>
                       @if (g.statement; as st) {
-                        <td class="num">{{ money(st.endEquity) }} {{ st.currency }}</td>
-                        <td
-                          class="num"
-                          [class.pos]="(st.timeWeightedReturn ?? 0) > 0"
-                          [class.neg]="(st.timeWeightedReturn ?? 0) < 0"
-                        >
-                          {{ pct(st.timeWeightedReturn) }}
+                        <td class="num">
+                          {{ money(st.endEquity) }}
+                          <span class="sub">{{ st.currency }}</span>
                         </td>
-                        <td class="num neg">{{ pct(st.maxDrawdown) }}</td>
-                        <td class="num">{{ pct(st.currentDrawdown) }}</td>
-                        <td class="num">{{ num(st.sharpe) }}</td>
-                        <td class="num">{{ pct(st.worstDay) }}</td>
+                        <td class="num strong" [class]="tone(st.timeWeightedReturn)">
+                          {{ signedPct(st.timeWeightedReturn) }}
+                        </td>
+                        <td class="num neg">{{ lossPct(st.maxDrawdown) }}</td>
+                        <td class="num" [class.muted]="st.currentDrawdown === 0">
+                          {{ lossPct(st.currentDrawdown) }}
+                        </td>
+                        <td class="num" [class]="tone(st.sharpe)">{{ num(st.sharpe) }}</td>
+                        <td class="num">{{ signedPct(st.worstDay) }}</td>
                         <td>
                           <svg
                             class="spark"
+                            [class.up]="(st.timeWeightedReturn ?? 0) >= 0"
                             viewBox="0 0 120 28"
                             preserveAspectRatio="none"
                             aria-hidden="true"
@@ -245,106 +275,116 @@ interface GlanceRow {
               </table>
             </div>
             @if (otherAccounts() > 0) {
-              <p class="pad small muted">
-                {{ otherAccounts() }} more account(s) in your scope are inactive (no recent equity
-                record) — pick one in the list above to see its history.
+              <p class="foot">
+                {{ otherAccounts() }} more account{{ otherAccounts() === 1 ? '' : 's' }} in your
+                scope {{ otherAccounts() === 1 ? 'is' : 'are' }} inactive (no recent equity record)
+                — pick one in the list above to see its history.
               </p>
             }
           </section>
         }
 
+        @if (!statement() && loading()) {
+          <section class="card"><p class="empty">Building the statement…</p></section>
+        }
+
         @if (statement(); as s) {
-          <section class="card">
-            <div class="card-head">
-              <strong>{{ s.scope }}</strong> <span class="muted small">· {{ s.currency }}</span>
-            </div>
-            <div class="tiles">
-              <div class="tile">
-                <div class="tile-label">Time-weighted return</div>
-                <div
-                  class="tile-value"
-                  [class.pos]="(s.timeWeightedReturn ?? 0) > 0"
-                  [class.neg]="(s.timeWeightedReturn ?? 0) < 0"
+          <!-- ── Headline ───────────────────────────────── -->
+          <section class="card hero" [class.stale]="loading()">
+            <div class="hero-main">
+              <div>
+                <h2>{{ s.scope }}</h2>
+                <span class="sub"
+                  >{{ statementPeriod() }} · {{ s.returnDays }} trading days ·
+                  {{ s.currency }}</span
                 >
-                  {{ pct(s.timeWeightedReturn) }}
+              </div>
+              <div class="hero-figure">
+                <span class="k-label">Time-weighted return</span>
+                <span class="big" [class]="tone(s.timeWeightedReturn)">{{
+                  signedPct(s.timeWeightedReturn)
+                }}</span>
+                <span class="sub">
+                  @if (s.annualisedReturn === null) {
+                    Not annualised — under a year of history
+                  } @else {
+                    {{ signedPct(s.annualisedReturn) }} annualised
+                  }
+                </span>
+              </div>
+              <dl class="facts">
+                <div>
+                  <dt>Equity</dt>
+                  <dd>{{ money(s.startEquity) }} → {{ money(s.endEquity) }}</dd>
                 </div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Annualised</div>
-                <div class="tile-value">
-                  {{ s.annualisedReturn === null ? 'n/a (< 1 year)' : pct(s.annualisedReturn) }}
+                <div>
+                  <dt>Net deposits / withdrawals</dt>
+                  <dd>{{ money(s.netFlows) }}</dd>
                 </div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Max drawdown</div>
-                <div class="tile-value neg">{{ pct(s.maxDrawdown) }}</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Volatility (ann.)</div>
-                <div class="tile-value">{{ pct(s.annualisedVolatility) }}</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Sharpe</div>
-                <div class="tile-value">{{ num(s.sharpe) }}</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Sortino</div>
-                <div class="tile-value">{{ num(s.sortino) }}</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Start → end equity</div>
-                <div class="tile-value small">
-                  {{ money(s.startEquity) }} → {{ money(s.endEquity) }}
-                </div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Net external flows</div>
-                <div class="tile-value">{{ money(s.netFlows) }}</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Positive days</div>
-                <div class="tile-value">{{ pct(s.positiveDayShare, 0) }} of {{ s.returnDays }}</div>
-              </div>
+              </dl>
             </div>
-            <div class="pad">
-              <div class="small muted">Time-weighted index</div>
-              <svg
-                class="chart"
-                viewBox="0 0 600 120"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="Time-weighted index"
-              >
-                <polyline [attr.points]="indexLine()" />
-              </svg>
-              <div class="small muted">
-                Drawdown (peak
-                {{ day(s.maxDrawdownPeakUtc) === '—' ? 'start' : day(s.maxDrawdownPeakUtc) }},
-                trough {{ day(s.maxDrawdownTroughUtc) }}, recovered
-                {{
-                  s.maxDrawdownTroughUtc
-                    ? s.maxDrawdownRecoveredUtc
-                      ? day(s.maxDrawdownRecoveredUtc)
-                      : 'not yet'
-                    : '—'
-                }})
+            <div class="kpis">
+              <div class="kpi neg">
+                <div class="k-label">Max drawdown</div>
+                <div class="k-value neg">{{ lossPct(s.maxDrawdown) }}</div>
+                <div class="k-hint">{{ drawdownStory() }}</div>
               </div>
-              <svg
-                class="chart dd"
-                viewBox="0 0 600 120"
-                preserveAspectRatio="none"
-                role="img"
-                aria-label="Drawdown"
-              >
-                <polyline [attr.points]="drawdownLine()" />
-              </svg>
+              <div class="kpi" [class.warn]="s.currentDrawdown > 0">
+                <div class="k-label">Below peak now</div>
+                <div class="k-value">{{ lossPct(s.currentDrawdown) }}</div>
+                <div class="k-hint">
+                  {{ s.currentDrawdown > 0 ? 'still recovering' : 'at a new high' }}
+                </div>
+              </div>
+              <div class="kpi">
+                <div class="k-label">Volatility</div>
+                <div class="k-value">{{ pct(s.annualisedVolatility) }}</div>
+                <div class="k-hint">annualised, from daily returns</div>
+              </div>
+              <div class="kpi" [class]="tone(s.sharpe)">
+                <div class="k-label">Sharpe</div>
+                <div class="k-value">{{ num(s.sharpe) }}</div>
+                <div class="k-hint">risk-free {{ s.riskFreeRatePct }} % a year</div>
+              </div>
+              <div class="kpi" [class]="tone(s.sortino)">
+                <div class="k-label">Sortino</div>
+                <div class="k-value">{{ num(s.sortino) }}</div>
+                <div class="k-hint">counts only downside moves</div>
+              </div>
+              <div class="kpi">
+                <div class="k-label">Positive days</div>
+                <div class="k-value">{{ pct(s.positiveDayShare, 0) }}</div>
+                <div class="k-hint">{{ positiveDays() }} of {{ s.returnDays }} days up</div>
+              </div>
+              <div class="kpi pos">
+                <div class="k-label">Best day</div>
+                <div class="k-value">{{ signedPct(s.bestDay) }}</div>
+              </div>
+              <div class="kpi neg">
+                <div class="k-label">Worst day</div>
+                <div class="k-value">{{ signedPct(s.worstDay) }}</div>
+              </div>
             </div>
           </section>
 
+          <app-chart-card
+            title="Growth and drawdown"
+            subtitle="Cumulative time-weighted return (top) and the fall from the running peak (bottom). Orange dots mark days with a deposit or withdrawal — not performance."
+            height="340px"
+            [options]="chartOptions()"
+            [emptyMessage]="
+              s.days.length < 2 ? 'Not enough days in the period to draw a chart.' : null
+            "
+          />
+
+          <!-- ── Monthly returns ────────────────────────── -->
           <section class="card">
-            <div class="card-head"><strong>Monthly returns</strong></div>
+            <div class="card-head">
+              <h3>Monthly returns</h3>
+              <span class="hint">chain-linked within each calendar month (UTC)</span>
+            </div>
             <div class="table-wrap">
-              <table class="grid">
+              <table class="grid heat">
                 <thead>
                   <tr>
                     <th>Year</th>
@@ -357,19 +397,19 @@ interface GlanceRow {
                 <tbody>
                   @for (row of grid(); track row.year) {
                     <tr>
-                      <td>{{ row.year }}</td>
+                      <td class="strong">{{ row.year }}</td>
                       @for (v of row.months; track $index) {
-                        <td class="num" [class.pos]="(v ?? 0) > 0" [class.neg]="(v ?? 0) < 0">
-                          {{ v === null ? '' : pct(v, 1) }}
+                        <td class="num cell" [style.background]="heat(v)">
+                          {{ v === null ? '·' : signedPct(v, 1) }}
                         </td>
                       }
-                      <td class="num">
-                        <strong>{{ pct(row.total, 1) }}</strong>
+                      <td class="num strong total" [class]="tone(row.total)">
+                        {{ signedPct(row.total, 1) }}
                       </td>
                     </tr>
                   } @empty {
                     <tr>
-                      <td colspan="14" class="muted">No returns in the period.</td>
+                      <td colspan="14" class="empty">No returns in the period.</td>
                     </tr>
                   }
                 </tbody>
@@ -377,84 +417,84 @@ interface GlanceRow {
             </div>
           </section>
 
+          <!-- ── Cash flows ─────────────────────────────── -->
           <section class="card">
             <div class="card-head">
-              <strong>External cash flows</strong>
-              <span class="muted small">taken out of the return</span>
-            </div>
-            <div class="table-wrap">
-              <table class="grid">
-                <thead>
-                  <tr>
-                    <th>When (UTC)</th>
-                    <th>Account</th>
-                    <th class="num">Amount</th>
-                    <th>Source</th>
-                    <th>Note</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (f of s.flows; track $index) {
-                    <tr>
-                      <td>{{ flowWhen(f) }}</td>
-                      <td>#{{ f.tradingAccountId }}</td>
-                      <td class="num">{{ money(f.amount) }}</td>
-                      <td>
-                        @let chip = sourceChip(flowSource(f));
-                        <span
-                          class="chip"
-                          [class.ok]="chip.tone === 'ok'"
-                          [class.warn]="chip.tone === 'warn'"
-                          [title]="chip.title"
-                          >{{ chip.label }}</span
-                        >
-                      </td>
-                      <td class="small">{{ f.note }}</td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td colspan="5" class="muted">None in the period.</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          @if (accountId(); as accountId) {
-            <section class="card">
-              <div class="card-head">
-                <strong>Deposits, withdrawals and balance changes</strong>
-                <span class="muted small"
-                  >reported by the EA from the broker, or entered by hand</span
+              <h3>Cash flows</h3>
+              <div class="seg" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  [class.on]="tab() === 'period'"
+                  (click)="flowTab.set('period')"
                 >
-              </div>
-              @if (canRecord()) {
-                <div class="filters">
-                  <label class="field"
-                    ><span class="label">When (UTC)</span>
-                    <input
-                      class="input"
-                      type="datetime-local"
-                      name="flowAt"
-                      [ngModel]="flowAt()"
-                      (ngModelChange)="flowAt.set($event)"
-                  /></label>
-                  <label class="field"
-                    ><span class="label">Kind</span>
-                    <select
-                      class="select"
-                      name="flowKind"
-                      [ngModel]="flowKind()"
-                      (ngModelChange)="flowKind.set($event)"
-                    >
-                      @for (k of kinds; track k) {
-                        <option [ngValue]="k">{{ k }}</option>
-                      }
-                    </select></label
+                  In this statement <span class="n">{{ s.flows.length }}</span>
+                </button>
+                @if (accountId() !== null) {
+                  <button
+                    type="button"
+                    role="tab"
+                    [class.on]="tab() === 'ledger'"
+                    (click)="flowTab.set('ledger')"
                   >
-                  <label class="field"
-                    ><span class="label">Amount ({{ s.currency }})</span>
+                    Account ledger <span class="n">{{ flows().length }}</span>
+                  </button>
+                }
+              </div>
+              <span class="spacer"></span>
+              @if (accountId() !== null && canRecord()) {
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  [class.btn-secondary]="!recording()"
+                  [class.btn-ghost]="recording()"
+                  (click)="toggleRecording()"
+                >
+                  {{ recording() ? 'Close' : '+ Record a flow' }}
+                </button>
+              }
+            </div>
+            <p class="foot top">
+              @if (tab() === 'period') {
+                Deposits and withdrawals inside the period. They are taken out of the return, so
+                adding or removing money never counts as performance.
+              } @else {
+                Every balance change on this account — reported by the EA from the broker, or
+                entered by hand.
+              }
+            </p>
+
+            @if (recording() && accountId() !== null && canRecord()) {
+              <div class="record">
+                <label class="field">
+                  <span class="label">When (UTC)</span>
+                  <input
+                    class="input"
+                    type="datetime-local"
+                    name="flowAt"
+                    [ngModel]="flowAt()"
+                    (ngModelChange)="flowAt.set($event)"
+                  />
+                </label>
+                <div class="field">
+                  <span class="label">Kind</span>
+                  <div class="seg" role="radiogroup" aria-label="Kind">
+                    @for (k of kinds; track k) {
+                      <button
+                        type="button"
+                        role="radio"
+                        [class.on]="flowKind() === k"
+                        [attr.aria-checked]="flowKind() === k"
+                        (click)="flowKind.set(k)"
+                      >
+                        {{ k }}
+                      </button>
+                    }
+                  </div>
+                </div>
+                <label class="field amount">
+                  <span class="label">Amount</span>
+                  <div class="suffix">
                     <input
                       class="input"
                       type="number"
@@ -462,48 +502,106 @@ interface GlanceRow {
                       name="flowAmount"
                       [ngModel]="flowAmount()"
                       (ngModelChange)="flowAmount.set(+$event || 0)"
-                  /></label>
-                  <label class="field"
-                    ><span class="label">Note</span>
-                    <input
-                      class="input"
-                      name="flowNote"
-                      [ngModel]="flowNote()"
-                      (ngModelChange)="flowNote.set($event)"
-                  /></label>
-                  <button
-                    type="button"
-                    class="btn btn-secondary"
-                    [disabled]="busy() || !flowAt() || !flowAmount()"
-                    (click)="confirmFlow.set(true)"
-                  >
-                    Record
-                  </button>
-                </div>
-              }
-              <div class="table-wrap">
+                    />
+                    <span>{{ s.currency }}</span>
+                  </div>
+                </label>
+                <label class="field grow">
+                  <span class="label">Note</span>
+                  <input
+                    class="input"
+                    name="flowNote"
+                    placeholder="Optional — e.g. wire ref"
+                    [ngModel]="flowNote()"
+                    (ngModelChange)="flowNote.set($event)"
+                  />
+                </label>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  [disabled]="busy() || !flowAt() || !flowAmount()"
+                  (click)="confirmFlow.set(true)"
+                >
+                  Record…
+                </button>
+                <p class="foot full">
+                  Withdrawals and fees are stored as negative amounts and deposits as positive; an
+                  adjustment keeps the sign you type.
+                </p>
+              </div>
+            }
+
+            <div class="table-wrap">
+              @if (tab() === 'period') {
                 <table class="grid">
                   <thead>
                     <tr>
-                      <th>When</th>
+                      <th>When (UTC)</th>
+                      <th>Account</th>
+                      <th class="num">Amount</th>
+                      <th>Source</th>
+                      <th>Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (f of s.flows; track $index) {
+                      <tr>
+                        <td class="nowrap">{{ flowWhen(f) }}</td>
+                        <td class="mono">#{{ f.tradingAccountId }}</td>
+                        <td class="num strong" [class]="tone(f.amount)">
+                          {{ money(f.amount) }}
+                        </td>
+                        <td>
+                          @let chip = sourceChip(flowSource(f));
+                          <span
+                            class="pill"
+                            [class.ok]="chip.tone === 'ok'"
+                            [class.warn]="chip.tone === 'warn'"
+                            [title]="chip.title"
+                            >{{ chip.label }}</span
+                          >
+                        </td>
+                        <td class="small">{{ f.note }}</td>
+                      </tr>
+                    } @empty {
+                      <tr>
+                        <td colspan="5" class="empty">
+                          <strong>No deposits or withdrawals in this period</strong>
+                          @if (accountId() !== null && flows().length) {
+                            Earlier ones are on the account ledger.
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              } @else {
+                <table class="grid">
+                  <thead>
+                    <tr>
+                      <th>When (UTC)</th>
                       <th>Kind</th>
                       <th class="num">Amount</th>
                       <th>Note</th>
                       <th>Source</th>
-                      <th></th>
+                      <th><span class="sr-only">Actions</span></th>
                     </tr>
                   </thead>
                   <tbody>
                     @for (f of flows(); track f.id) {
                       <tr>
-                        <td>{{ minuteUtc(f.occurredAtUtc) }}</td>
-                        <td>{{ f.kind }}</td>
-                        <td class="num">{{ money(f.amount) }}</td>
+                        <td class="nowrap">{{ minuteUtc(f.occurredAtUtc) }}</td>
+                        <td>
+                          <span class="pill" [class]="kindTone(f.kind)">{{ f.kind }}</span>
+                        </td>
+                        <td class="num strong" [class]="tone(f.amount)">
+                          {{ money(f.amount) }}
+                        </td>
                         <td class="small">{{ f.note }}</td>
                         <td class="small">
                           @if (f.brokerDealTicket) {
                             <span
-                              class="chip ok"
+                              class="pill ok"
                               title="The broker's own balance deal, reported by the EA"
                               >broker</span
                             >
@@ -514,7 +612,7 @@ interface GlanceRow {
                           @if (canRecord()) {
                             <button
                               type="button"
-                              class="btn btn-sm btn-secondary"
+                              class="btn btn-sm btn-ghost-danger"
                               [disabled]="busy()"
                               (click)="removing.set(f)"
                             >
@@ -525,31 +623,45 @@ interface GlanceRow {
                       </tr>
                     } @empty {
                       <tr>
-                        <td colspan="6" class="muted">
-                          Nothing recorded yet. The EA reports the broker's deposits, withdrawals
-                          and balance resets; until it has, equity changes on days without positions
-                          are inferred as flows.
+                        <td colspan="6" class="empty">
+                          <strong>Nothing recorded yet</strong>
+                          The EA reports the broker's deposits, withdrawals and balance resets;
+                          until it has, equity changes on days without positions are inferred as
+                          flows.
                         </td>
                       </tr>
                     }
                   </tbody>
                 </table>
-              </div>
-            </section>
-          }
+              }
+            </div>
+          </section>
 
+          <!-- ── Notes and methodology ──────────────────── -->
           <section class="card">
-            <div class="card-head"><strong>Data notes and methodology</strong></div>
-            <ul class="pad notes small">
+            <div class="card-head">
+              <h3>About these figures</h3>
+              <span class="hint">generated {{ minuteUtc(s.generatedAtUtc) }} UTC</span>
+            </div>
+            <div class="notes">
               @for (n of s.dataNotes; track $index) {
-                <li>
-                  <strong>{{ n }}</strong>
-                </li>
+                <p class="callout">{{ n }}</p>
+              } @empty {
+                <p class="small muted">No data caveats for this statement.</p>
               }
-              @for (m of s.methodology; track $index) {
-                <li>{{ m }}</li>
-              }
-            </ul>
+            </div>
+            @if (s.methodology.length) {
+              <details class="method">
+                <summary>
+                  How these figures are calculated ({{ s.methodology.length }} notes)
+                </summary>
+                <ol>
+                  @for (m of s.methodology; track $index) {
+                    <li>{{ m }}</li>
+                  }
+                </ol>
+              </details>
+            }
           </section>
         }
       }
@@ -584,14 +696,17 @@ export class PerformancePageComponent {
   protected readonly pct = pct;
   protected readonly num = num;
   protected readonly money = money;
-  protected readonly day = day;
   protected readonly minuteUtc = minuteUtc;
   protected readonly flowWhen = flowWhen;
   protected readonly flowSource = flowSource;
   protected readonly sourceChip = flowSourceChip;
   protected readonly ledgerSource = ledgerSource;
+  protected readonly signedPct = signedPct;
+  protected readonly lossPct = lossPct;
+  protected readonly tone = tone;
   protected readonly months = MONTHS;
   protected readonly kinds: CashFlowKind[] = ['Deposit', 'Withdrawal', 'Fee', 'Adjustment'];
+  protected readonly presets = periodPresets(new Date());
 
   readonly scope = signal<FundScope>({ accounts: [], groups: [], bestExecution: false });
   readonly scopeLoaded = signal(false);
@@ -612,13 +727,17 @@ export class PerformancePageComponent {
   readonly flowNote = signal('');
   readonly confirmFlow = signal(false);
   readonly removing = signal<CashFlow | null>(null);
+  readonly recording = signal(false);
+  readonly flowTab = signal<'period' | 'ledger'>('period');
 
   readonly glance = signal<GlanceRow[]>([]);
   readonly glancePeriod = signal('');
+  private liveAccounts: FundScopeAccount[] = [];
   readonly otherAccounts = computed(() =>
     Math.max(0, this.scope().accounts.length - this.glance().length),
   );
 
+  readonly preset = computed(() => matchPreset(this.from(), this.to(), new Date()));
   readonly accountId = computed(() => {
     const s = this.subject();
     return s?.startsWith('a:') ? Number(s.slice(2)) : null;
@@ -627,17 +746,38 @@ export class PerformancePageComponent {
     const s = this.subject();
     return s?.startsWith('g:') ? Number(s.slice(2)) : null;
   });
+  /** A portfolio has no single ledger, so it always shows the statement's flows. */
+  readonly tab = computed(() => (this.accountId() === null ? 'period' : this.flowTab()));
   readonly canRecord = computed(() => this.auth.hasPermission(Permission.AccountsManage));
   readonly grid = computed(() => {
     const s = this.statement();
     return s ? monthlyGrid(s.months, s.years) : [];
   });
-  readonly indexLine = computed(() =>
-    sparkline(this.statement()?.days.map((d) => d.index) ?? [], 600, 120),
+  private readonly heatMax = computed(() =>
+    Math.max(0, ...(this.statement()?.months ?? []).map((m) => Math.abs(m.return))),
   );
-  readonly drawdownLine = computed(() =>
-    sparkline(this.statement()?.days.map((d) => -d.drawdown) ?? [], 600, 120),
-  );
+  readonly chartOptions = computed(() => {
+    const s = this.statement();
+    return s ? performanceChart(s.days, s.currency) : {};
+  });
+  readonly statementPeriod = computed(() => {
+    const s = this.statement();
+    return s ? periodLabel(s.fromUtc, s.toUtc) : '';
+  });
+  readonly positiveDays = computed(() => {
+    const s = this.statement();
+    return s && s.positiveDayShare !== null ? Math.round(s.positiveDayShare * s.returnDays) : 0;
+  });
+  /** "Peak 24 Aug, trough 22 Sep · not recovered". */
+  readonly drawdownStory = computed(() => {
+    const s = this.statement();
+    if (!s || !s.maxDrawdownTroughUtc) return 'no fall from a high in the period';
+    const peak = s.maxDrawdownPeakUtc ? dayLabel(s.maxDrawdownPeakUtc, false) : 'start';
+    const rec = s.maxDrawdownRecoveredUtc
+      ? `recovered ${dayLabel(s.maxDrawdownRecoveredUtc, false)}`
+      : 'not recovered yet';
+    return `peak ${peak} → trough ${dayLabel(s.maxDrawdownTroughUtc, false)} · ${rec}`;
+  });
   readonly flowMessage = computed(
     () =>
       `${this.flowKind()} of ${money(signedAmount(this.flowKind(), this.flowAmount()))} on ${this.flowAt().replace('T', ' ')} UTC. ` +
@@ -652,6 +792,7 @@ export class PerformancePageComponent {
         this.scopeLoaded.set(true);
         this.fund.activeAccountIds().subscribe((ids) => {
           const live = liveScopeAccounts(s.accounts, ids);
+          this.liveAccounts = live;
           const first = live[0] ?? s.accounts[0];
           this.subject.set(first ? `a:${first.id}` : s.groups[0] ? `g:${s.groups[0].id}` : null);
           if (this.subject()) this.load();
@@ -665,7 +806,7 @@ export class PerformancePageComponent {
   private loadGlance(accounts: FundScopeAccount[]): void {
     const period = periodQuery(this.from(), this.to());
     if ('problem' in period || !accounts.length) return;
-    this.glancePeriod.set(`${period.from.slice(0, 10)} → ${period.to.slice(0, 10)}`);
+    this.glancePeriod.set(periodLabel(period.from, period.to));
     this.glance.set(accounts.map((account) => ({ account, statement: null, error: null })));
     forkJoin(
       accounts.map((account) =>
@@ -681,9 +822,42 @@ export class PerformancePageComponent {
     ).subscribe((rows) => this.glance.set(rows));
   }
 
+  /** Show: the chosen statement, and the live-account table for the same period. */
+  run(): void {
+    this.load();
+    this.loadGlance(this.liveAccounts);
+  }
+
+  applyPreset(key: PresetKey): void {
+    const p = this.presets.find((x) => x.key === key);
+    if (!p) return;
+    this.from.set(p.from);
+    this.to.set(p.to);
+    if (this.subject()) this.run();
+  }
+
   pick(accountId: number): void {
     this.subject.set(`a:${accountId}`);
     this.load();
+  }
+
+  toggleRecording(): void {
+    this.recording.update((r) => !r);
+    if (this.recording()) this.flowTab.set('ledger');
+  }
+
+  heat(v: number | null): string | null {
+    return heatColor(v, this.heatMax());
+  }
+
+  kindTone(kind: string): string {
+    return kind === 'Deposit'
+      ? 'ok'
+      : kind === 'Withdrawal'
+        ? 'bad'
+        : kind === 'Fee'
+          ? 'warn'
+          : 'info';
   }
 
   spark(st: PerformanceStatement): string {

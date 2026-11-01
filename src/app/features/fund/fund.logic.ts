@@ -268,3 +268,94 @@ export function enumWords(key: string): string {
   const spaced = key.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
+
+// ── Presentation helpers (fund pages redesign) ──────────────────────────────
+
+const MONTH_SHORT = MONTHS;
+
+/** "4 Aug" or "4 Aug 2026" for an ISO day / instant (UTC). */
+export function dayLabel(iso: string | null | undefined, withYear = true): string {
+  if (!iso) return '—';
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return '—';
+  return `${d} ${MONTH_SHORT[m - 1]}${withYear ? ` ${y}` : ''}`;
+}
+
+/**
+ * A report period in words, with the exclusive end turned into the last day it covers:
+ * from 2026-08-04, to 2026-11-02 (exclusive) → "4 Aug – 1 Nov 2026".
+ */
+export function periodLabel(fromIso: string, toIso: string): string {
+  const f = Date.parse(`${fromIso.slice(0, 10)}T00:00:00Z`);
+  const t = Date.parse(`${toIso.slice(0, 10)}T00:00:00Z`) - 86_400_000;
+  if (!Number.isFinite(f) || !Number.isFinite(t) || t < f) return '—';
+  const last = new Date(t).toISOString().slice(0, 10);
+  const sameYear = fromIso.slice(0, 4) === last.slice(0, 4);
+  return `${dayLabel(fromIso, !sameYear)} – ${dayLabel(last)}`;
+}
+
+export type PresetKey = '1m' | '3m' | 'ytd' | '1y';
+
+/** The quick periods offered above every fund report (UTC days; `to` is tomorrow, exclusive). */
+export function periodPresets(
+  now: Date,
+): { key: PresetKey; label: string; from: string; to: string }[] {
+  const days = (n: number) => defaultPeriod(now, n);
+  const to = days(1).to;
+  return [
+    { key: '1m', label: '1M', ...days(30) },
+    { key: '3m', label: '3M', ...days(90) },
+    { key: 'ytd', label: 'YTD', from: `${now.getUTCFullYear()}-01-01`, to },
+    { key: '1y', label: '1Y', ...days(365) },
+  ];
+}
+
+/** Which preset a period matches, or null for a custom one. */
+export function matchPreset(from: string, to: string, now: Date): PresetKey | null {
+  return periodPresets(now).find((p) => p.from === from && p.to === to)?.key ?? null;
+}
+
+/** A drawdown (stored as a positive fraction) shown as the loss it is: 0.1506 → "−15.06 %". */
+export function lossPct(fraction: number | null | undefined, digits = 2): string {
+  if (fraction === null || fraction === undefined || !Number.isFinite(fraction)) return '—';
+  if (fraction === 0) return pct(0, digits);
+  return `−${(Math.abs(fraction) * 100).toFixed(digits)} %`;
+}
+
+/** A return with its sign: 0.029 → "+2.90 %", −0.11 → "−11.00 %". */
+export function signedPct(fraction: number | null | undefined, digits = 2): string {
+  if (fraction === null || fraction === undefined || !Number.isFinite(fraction)) return '—';
+  const v = (fraction * 100).toFixed(digits);
+  if (Number(v) === 0) return `${(0).toFixed(digits)} %`;
+  return fraction > 0 ? `+${v} %` : `−${v.replace('-', '')} %`;
+}
+
+/** "pos" / "neg" / "" for colouring a signed value. */
+export function tone(v: number | null | undefined): 'pos' | 'neg' | '' {
+  return v === null || v === undefined || !Number.isFinite(v) || v === 0
+    ? ''
+    : v > 0
+      ? 'pos'
+      : 'neg';
+}
+
+/** Background of a monthly-returns cell: green or red, stronger with the size of the move. */
+export function heatColor(v: number | null, maxAbs: number): string | null {
+  if (v === null || !Number.isFinite(v) || v === 0 || maxAbs <= 0) return null;
+  const a = 0.1 + 0.45 * Math.min(1, Math.abs(v) / maxAbs);
+  return v > 0 ? `rgba(52, 199, 89, ${a.toFixed(2)})` : `rgba(255, 59, 48, ${a.toFixed(2)})`;
+}
+
+/** "134646967 (Olabode Olaleye Exness Pro)" → login + name. */
+export function splitAccount(label: string): { login: string; name: string } {
+  const m = /^(\S+)\s*\((.*)\)\s*$/.exec(label.trim());
+  return m ? { login: m[1], name: m[2] } : { login: label, name: '' };
+}
+
+/** "Exness Technologies Ltd / Exness-MT5Trial9" → broker + server. */
+export function splitBroker(label: string): { broker: string; server: string } {
+  const i = label.indexOf(' / ');
+  return i < 0
+    ? { broker: label, server: '' }
+    : { broker: label.slice(0, i), server: label.slice(i + 3) };
+}

@@ -9,14 +9,19 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 
 import { FundApiService } from '../fund-api.service';
 import {
-  day,
+  dayLabel,
   defaultPeriod,
   enumWords,
   isSha256,
   isUpgradeNotice,
+  matchPreset,
+  minuteUtc,
+  periodLabel,
+  periodPresets,
   periodQuery,
   shareOfMax,
   shortHash,
+  type PresetKey,
 } from '../fund.logic';
 import type {
   ComplianceExportPreview,
@@ -26,6 +31,22 @@ import type {
   ComplianceVerification,
   DownloadedFile,
 } from '../fund.types';
+
+/** What each section of an export holds, in the words the page shows. */
+const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> = {
+  audit: {
+    title: 'Audit log',
+    text: "The organisation's audit events, oldest first — sign-ins, access changes, configuration, trading controls, approvals — each with its chain hash (the audit log is hash-chained).",
+  },
+  orders: {
+    title: 'Orders',
+    text: "Orders created in the period (deleted ones included and marked): requested and filled price, latency, the position each opened and that position's lifecycle events.",
+  },
+  approvals: {
+    title: 'Approvals',
+    text: 'Two-person and four-eyes requests made in the period, with every approval recorded.',
+  },
+};
 
 /**
  * Compliance exports (fund module): the organisation's audit log, order lifecycle and approvals for a
@@ -38,69 +59,7 @@ import type {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, PageHeaderComponent],
-  styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss'],
-  styles: [
-    `
-      .split {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
-        padding: 0 1rem 1rem;
-      }
-      @media (max-width: 1100px) {
-        .split {
-          grid-template-columns: minmax(0, 1fr);
-        }
-      }
-      .bars li {
-        display: grid;
-        grid-template-columns: minmax(0, 9rem) minmax(0, 1fr) 3.5rem;
-        gap: 0.5rem;
-        align-items: center;
-        font-size: var(--text-xs);
-        margin: 0.2rem 0;
-      }
-      .bars {
-        list-style: none;
-        margin: 0.4rem 0 0;
-        padding: 0;
-      }
-      .bar {
-        height: 6px;
-        border-radius: 3px;
-        background: var(--accent, #2563eb);
-        min-width: 2px;
-      }
-      .days {
-        display: flex;
-        align-items: flex-end;
-        gap: 2px;
-        height: 70px;
-        padding: 0 1rem;
-        margin-bottom: 1rem;
-      }
-      .days span {
-        flex: 1;
-        background: var(--accent, #2563eb);
-        opacity: 0.75;
-        border-radius: 2px 2px 0 0;
-        min-height: 1px;
-      }
-      .sections dt {
-        font-weight: 600;
-        font-size: var(--text-sm);
-      }
-      .sections dd {
-        margin: 0 0 0.6rem;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .sections {
-        margin: 0;
-        padding: 1rem;
-      }
-    `,
-  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss', './compliance-page.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -113,217 +72,297 @@ import type {
           <span class="chip warn">Not in your plan</span> {{ upgrade() }}
         </section>
       } @else {
-        <section class="card">
-          <div class="filters">
-            <label class="field"
-              ><span class="label">From (UTC)</span>
-              <input
-                class="input"
-                type="date"
-                name="from"
-                [ngModel]="from()"
-                (ngModelChange)="setFrom($event)"
-            /></label>
-            <label class="field"
-              ><span class="label">To (UTC, exclusive)</span>
-              <input
-                class="input"
-                type="date"
-                name="to"
-                [ngModel]="to()"
-                (ngModelChange)="setTo($event)"
-            /></label>
-            @for (s of allSections; track s) {
-              <label class="check"
-                ><input
-                  type="checkbox"
-                  [name]="'s-' + s"
-                  [ngModel]="sections().includes(s)"
-                  (ngModelChange)="toggle(s)"
-                />
-                {{ s }}</label
-              >
-            }
-            <label class="field"
-              ><span class="label">Format</span>
-              <select
-                class="select"
-                name="format"
-                [ngModel]="format()"
-                (ngModelChange)="format.set($event)"
-              >
-                <option [ngValue]="'json'">JSON (one document)</option>
-                <option [ngValue]="'csv'">CSV (zip)</option>
-              </select></label
-            >
-            <button
-              type="button"
-              class="btn btn-primary"
-              [disabled]="busy() || sections().length === 0"
-              (click)="download()"
-            >
-              {{ busy() ? 'Preparing…' : 'Download' }}
-            </button>
-          </div>
-          @if (error()) {
-            <p class="pad" role="alert"><span class="chip bad">Not exported</span> {{ error() }}</p>
-          }
-          @if (last(); as f) {
-            <div class="pad small">
-              <div>
-                <strong>{{ f.fileName }}</strong>
-              </div>
-              <div>
-                SHA-256: <span class="mono">{{ f.sha256 }}</span>
-              </div>
-              @if (f.signature) {
-                <div>
-                  Signature: <span class="mono">{{ f.signature }}</span> (key {{ f.signingKeyId }})
-                </div>
-              } @else {
-                <div class="muted">
-                  Unsigned: the engine has no signing key configured. The hash is still registered.
-                </div>
-              }
-            </div>
-          }
-        </section>
-
-        @if (preview(); as p) {
+        <div class="build">
+          <!-- ── New export ─────────────────────────── -->
           <section class="card">
             <div class="card-head">
-              <strong>What an export of this period holds</strong>
-              <span class="muted small"
-                >{{ day(p.fromUtc) }} → {{ day(p.toUtc) }} (exclusive) · counted now, nothing is
-                built or registered</span
-              >
+              <h3>New export</h3>
+              <span class="hint">counted live — nothing is built until you download</span>
             </div>
-            <div class="tiles">
-              <div class="tile">
-                <div class="tile-label">Audit events</div>
-                <div class="tile-value">{{ p.rowCounts['audit'] ?? 0 }}</div>
-                <div class="tile-label">sign-ins, access, settings, controls</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Orders</div>
-                <div class="tile-value">{{ p.rowCounts['orders'] ?? 0 }}</div>
-                <div class="tile-label">
-                  {{ p.paperOrders }} paper · with fills and position events
+            <div class="query">
+              <div class="field full">
+                <span class="label">Period</span>
+                <div class="seg" role="group" aria-label="Quick periods">
+                  @for (p of presets; track p.key) {
+                    <button
+                      type="button"
+                      [class.on]="preset() === p.key"
+                      [attr.aria-pressed]="preset() === p.key"
+                      (click)="applyPreset(p.key)"
+                    >
+                      {{ p.label }}
+                    </button>
+                  }
+                  <button type="button" [class.on]="preset() === null" disabled>Custom</button>
                 </div>
               </div>
-              <div class="tile">
-                <div class="tile-label">Approval requests</div>
-                <div class="tile-value">{{ p.rowCounts['approvals'] ?? 0 }}</div>
-                <div class="tile-label">two-person / four-eyes, with every approval</div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Signing</div>
-                <div class="tile-value" [class.pos]="p.signingConfigured">
-                  {{ p.signingConfigured ? 'On' : 'Off' }}
-                </div>
-                <div class="tile-label">
-                  {{
-                    p.signingConfigured
-                      ? 'HMAC-SHA256, key ' + p.signingKeyId
-                      : 'hash only — no Compliance:Export:SigningKey on the engine host'
-                  }}
-                </div>
-              </div>
-              <div class="tile">
-                <div class="tile-label">Exports registered</div>
-                <div class="tile-value">{{ p.exportsTotal }}</div>
-                <div class="tile-label">
-                  {{ p.lastExportAtUtc ? 'last ' + day(p.lastExportAtUtc) : 'none downloaded yet' }}
+              <label class="field date">
+                <span class="label">From (UTC)</span>
+                <input
+                  class="input"
+                  type="date"
+                  name="from"
+                  [ngModel]="from()"
+                  (ngModelChange)="setFrom($event)"
+                />
+              </label>
+              <label class="field date">
+                <span class="label">To (not included)</span>
+                <input
+                  class="input"
+                  type="date"
+                  name="to"
+                  [ngModel]="to()"
+                  (ngModelChange)="setTo($event)"
+                />
+              </label>
+            </div>
+
+            <div class="picks" role="group" aria-label="Sections to include">
+              @for (s of allSections; track s) {
+                <label class="pick" [class.on]="sections().includes(s)" [class.big]="isTooLarge(s)">
+                  <input
+                    type="checkbox"
+                    [name]="'s-' + s"
+                    [ngModel]="sections().includes(s)"
+                    (ngModelChange)="toggle(s)"
+                  />
+                  <span class="pick-head">
+                    <span class="box" aria-hidden="true">✓</span>
+                    <strong>{{ info[s].title }}</strong>
+                    @if (preview(); as p) {
+                      <span class="rows"
+                        >{{ (p.rowCounts[s] ?? 0).toLocaleString('en-US') }} rows</span
+                      >
+                    }
+                  </span>
+                  <span class="pick-text">{{ info[s].text }}</span>
+                  @if (isTooLarge(s)) {
+                    <span class="pill warn">Too large for one file — shorten the period</span>
+                  }
+                </label>
+              }
+            </div>
+
+            <div class="query">
+              <div class="field">
+                <span class="label">Format</span>
+                <div class="seg" role="radiogroup" aria-label="Format">
+                  <button
+                    type="button"
+                    role="radio"
+                    [class.on]="format() === 'json'"
+                    [attr.aria-checked]="format() === 'json'"
+                    (click)="format.set('json')"
+                  >
+                    JSON · one document
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    [class.on]="format() === 'csv'"
+                    [attr.aria-checked]="format() === 'csv'"
+                    (click)="format.set('csv')"
+                  >
+                    CSV · zip of files
+                  </button>
                 </div>
               </div>
             </div>
-            @if (p.tooLarge.length) {
-              <p class="pad" role="alert">
-                <span class="chip warn">Too large</span> {{ p.tooLarge.join(', ') }} has more than
-                {{ p.maxRowsPerSection.toLocaleString('en-US') }} rows in this period — a download
-                would be refused; export a shorter period.
-              </p>
-            }
-            @if (p.days.length > 1) {
-              <div class="pad small muted">Audit events and orders per day</div>
-              <div class="days" aria-hidden="true">
-                @for (d of p.days; track d.dayUtc; let i = $index) {
+
+            <div class="go">
+              <div class="go-text">
+                <strong>{{ summaryLine() }}</strong>
+                @if (preview(); as p) {
                   <span
-                    [style.height.%]="dayHeights()[i]"
-                    [title]="day(d.dayUtc) + ': ' + d.audit + ' audit, ' + d.orders + ' orders'"
-                  ></span>
+                    class="dot"
+                    [class.ok]="p.signingConfigured"
+                    [class.warn]="!p.signingConfigured"
+                  >
+                    {{
+                      p.signingConfigured
+                        ? 'Signed with HMAC-SHA256 · key ' + p.signingKeyId
+                        : 'Hash only — no signing key on the engine host'
+                    }}
+                  </span>
+                }
+              </div>
+              <button
+                type="button"
+                class="btn btn-primary"
+                [disabled]="busy() || sections().length === 0"
+                (click)="download()"
+              >
+                {{ busy() ? 'Preparing…' : '⤓ Download' }}
+              </button>
+            </div>
+            @if (error()) {
+              <p class="alert" role="alert"><strong>Not exported.</strong> {{ error() }}</p>
+            }
+            @if (last(); as f) {
+              <div class="receipt" role="status">
+                <div class="receipt-head">
+                  <span class="tick" aria-hidden="true">✓</span>
+                  <div>
+                    <strong>{{ f.fileName }}</strong>
+                    <span class="sub"
+                      >Downloaded and registered — anyone holding a copy can check it below.</span
+                    >
+                  </div>
+                </div>
+                <div class="hash">
+                  <span class="label">SHA-256</span>
+                  <span class="mono">{{ f.sha256 }}</span>
+                </div>
+                @if (f.signature) {
+                  <div class="hash">
+                    <span class="label">Signature (key {{ f.signingKeyId }})</span>
+                    <span class="mono">{{ f.signature }}</span>
+                  </div>
+                } @else {
+                  <p class="sub">
+                    Unsigned: the engine has no signing key configured. The hash is still
+                    registered.
+                  </p>
                 }
               </div>
             }
-            <div class="split">
-              <div>
-                <strong class="small">Audit events by kind</strong>
-                <ul class="bars">
-                  @for (c of p.auditByCategory; track c.key; let i = $index) {
-                    <li>
-                      <span>{{ words(c.key) }}</span
-                      ><span class="bar" [style.width.%]="auditWidths()[i]"></span
-                      ><span class="num">{{ c.count }}</span>
-                    </li>
-                  } @empty {
-                    <li class="muted">None in the period.</li>
-                  }
-                </ul>
-              </div>
-              <div>
-                <strong class="small">Orders by status</strong>
-                <ul class="bars">
-                  @for (c of p.ordersByStatus; track c.key; let i = $index) {
-                    <li>
-                      <span>{{ words(c.key) }}</span
-                      ><span class="bar" [style.width.%]="orderWidths()[i]"></span
-                      ><span class="num">{{ c.count }}</span>
-                    </li>
-                  } @empty {
-                    <li class="muted">None in the period.</li>
-                  }
-                </ul>
-              </div>
-              <div>
-                <strong class="small">Approval requests by outcome</strong>
-                <ul class="bars">
-                  @for (c of p.approvalsByStatus; track c.key; let i = $index) {
-                    <li>
-                      <span>{{ words(c.key) }}</span
-                      ><span class="bar" [style.width.%]="approvalWidths()[i]"></span
-                      ><span class="num">{{ c.count }}</span>
-                    </li>
-                  } @empty {
-                    <li class="muted">
-                      None in the period (set up a policy under Organisation → Approval policies).
-                    </li>
-                  }
-                </ul>
-              </div>
-            </div>
           </section>
-        } @else if (previewMissing()) {
-          <section class="card">
-            <p class="pad small muted">
-              The period's row counts appear here once the engine serves
-              <code>GET fund/compliance-exports/preview</code>.
-            </p>
-          </section>
-        }
 
+          <!-- ── What the period holds ─────────────── -->
+          <section class="card">
+            <div class="card-head">
+              <h3>This period</h3>
+              @if (preview(); as p) {
+                <span class="hint">{{ periodText(p) }}</span>
+              }
+            </div>
+            @if (preview(); as p) {
+              <div class="kpis pad-all">
+                <div class="kpi">
+                  <div class="k-label">Audit events</div>
+                  <div class="k-value">
+                    {{ (p.rowCounts['audit'] ?? 0).toLocaleString('en-US') }}
+                  </div>
+                  <div class="k-hint">sign-ins, access, settings, controls</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-label">Orders</div>
+                  <div class="k-value">
+                    {{ (p.rowCounts['orders'] ?? 0).toLocaleString('en-US') }}
+                  </div>
+                  <div class="k-hint">{{ p.paperOrders }} paper · with fills and positions</div>
+                </div>
+                <div class="kpi">
+                  <div class="k-label">Approval requests</div>
+                  <div class="k-value">{{ p.rowCounts['approvals'] ?? 0 }}</div>
+                  <div class="k-hint">two-person / four-eyes</div>
+                </div>
+              </div>
+              @if (p.days.length > 1) {
+                <div class="days-wrap">
+                  <div class="mini-head">Audit events and orders per day</div>
+                  <div class="days" aria-hidden="true">
+                    @for (d of p.days; track d.dayUtc; let i = $index) {
+                      <span
+                        [style.height.%]="dayHeights()[i]"
+                        [title]="
+                          dayLabel(d.dayUtc) + ': ' + d.audit + ' audit, ' + d.orders + ' orders'
+                        "
+                      ></span>
+                    }
+                  </div>
+                  <div class="days-axis">
+                    <span>{{ dayLabel(p.days[0].dayUtc, false) }}</span>
+                    <span>{{ dayLabel(p.days[p.days.length - 1].dayUtc, false) }}</span>
+                  </div>
+                </div>
+              }
+              <div class="split">
+                <div>
+                  <div class="mini-head">Audit events by kind</div>
+                  <ul class="bars">
+                    @for (c of p.auditByCategory; track c.key; let i = $index) {
+                      <li>
+                        <span>{{ words(c.key) }}</span
+                        ><span class="track"
+                          ><span class="bar" [style.width.%]="auditWidths()[i]"></span></span
+                        ><span class="num">{{ c.count }}</span>
+                      </li>
+                    } @empty {
+                      <li class="none">None in the period.</li>
+                    }
+                  </ul>
+                </div>
+                <div>
+                  <div class="mini-head">Orders by status</div>
+                  <ul class="bars">
+                    @for (c of p.ordersByStatus; track c.key; let i = $index) {
+                      <li>
+                        <span>{{ words(c.key) }}</span
+                        ><span class="track"
+                          ><span class="bar" [style.width.%]="orderWidths()[i]"></span></span
+                        ><span class="num">{{ c.count }}</span>
+                      </li>
+                    } @empty {
+                      <li class="none">None in the period.</li>
+                    }
+                  </ul>
+                </div>
+                <div>
+                  <div class="mini-head">Approval requests by outcome</div>
+                  <ul class="bars">
+                    @for (c of p.approvalsByStatus; track c.key; let i = $index) {
+                      <li>
+                        <span>{{ words(c.key) }}</span
+                        ><span class="track"
+                          ><span class="bar" [style.width.%]="approvalWidths()[i]"></span></span
+                        ><span class="num">{{ c.count }}</span>
+                      </li>
+                    } @empty {
+                      <li class="none">
+                        None in the period (set up a policy under Organisation → Approval policies).
+                      </li>
+                    }
+                  </ul>
+                </div>
+              </div>
+            } @else if (previewMissing()) {
+              <p class="empty">
+                The period's row counts appear here once the engine serves
+                <code>GET fund/compliance-exports/preview</code>.
+              </p>
+            } @else {
+              <p class="empty">Counting the period…</p>
+            }
+          </section>
+        </div>
+
+        <!-- ── Check a copy ──────────────────────────── -->
         <section class="card">
           <div class="card-head">
-            <strong>Check a copy</strong>
-            <span class="muted small">paste the file's SHA-256 (shasum -a 256 &lt;file&gt;)</span>
+            <h3>Check a copy</h3>
+            <span class="hint">was this file issued by the engine, unchanged?</span>
           </div>
-          <div class="filters">
-            <input
-              class="input search"
-              name="sha"
-              aria-label="SHA-256"
-              [ngModel]="sha()"
-              (ngModelChange)="sha.set($event)"
-            />
+          <div class="check-row">
+            <div class="field grow">
+              <span class="label">The file's SHA-256</span>
+              <input
+                class="input mono"
+                name="sha"
+                aria-label="SHA-256"
+                placeholder="64 characters — on a Mac or Linux: shasum -a 256 &lt;file&gt;"
+                spellcheck="false"
+                autocomplete="off"
+                [attr.aria-invalid]="shaProblem() ? 'true' : null"
+                [ngModel]="sha()"
+                (ngModelChange)="sha.set($event)"
+                (keydown.enter)="validSha() && verify()"
+              />
+              <span class="field-hint" [class.bad]="shaProblem()">
+                {{ shaProblem() || shaLength() + ' / 64 characters' }}
+              </span>
+            </div>
             <button
               type="button"
               class="btn btn-secondary"
@@ -334,12 +373,13 @@ import type {
             </button>
           </div>
           @if (verification(); as v) {
-            <p class="pad">
-              <span
-                class="chip"
-                [class.ok]="v.issued && v.signatureValid !== false"
-                [class.bad]="!v.issued || v.signatureValid === false"
-              >
+            <div
+              class="verdict"
+              [class.ok]="v.issued && v.signatureValid !== false"
+              [class.bad]="!v.issued || v.signatureValid === false"
+              role="status"
+            >
+              <strong>
                 {{
                   v.issued
                     ? v.signatureValid === false
@@ -347,18 +387,30 @@ import type {
                       : 'Issued by the engine'
                     : 'Not issued'
                 }}
-              </span>
+              </strong>
               {{ v.message }}
-            </p>
+            </div>
           }
+          <p class="foot">
+            The SHA-256 of the exact file is returned with the download and kept in the register;
+            with a signing key the register also holds an HMAC-SHA256 signature of it. Times are
+            UTC; the period is from (inclusive) to (exclusive). Evidence for your own records — not
+            a regulator's template.
+          </p>
         </section>
 
+        <!-- ── Register ──────────────────────────────── -->
         <section class="card">
           <div class="card-head">
-            <strong>Register</strong>
+            <h3>Register</h3>
+            <span class="count">{{ register.value().length }}</span>
+            @if (preview()?.lastExportAtUtc; as lastAt) {
+              <span class="hint">last export {{ minuteUtc(lastAt) }} UTC</span>
+            }
+            <span class="spacer"></span>
             <button
               type="button"
-              class="btn btn-sm btn-secondary"
+              class="btn btn-sm btn-ghost"
               (click)="register.reload()"
               [disabled]="register.loading()"
             >
@@ -366,13 +418,13 @@ import type {
             </button>
           </div>
           @if (register.error(); as err) {
-            <p class="pad" role="alert">{{ err }}</p>
+            <p class="alert" role="alert">{{ err }}</p>
           }
           <div class="table-wrap">
             <table class="grid">
               <thead>
                 <tr>
-                  <th>When</th>
+                  <th>When (UTC)</th>
                   <th>Period</th>
                   <th>Sections</th>
                   <th>Format</th>
@@ -385,55 +437,44 @@ import type {
               <tbody>
                 @for (r of register.value(); track r.id) {
                   <tr>
-                    <td class="small">{{ r.createdAtUtc.slice(0, 16).replace('T', ' ') }}</td>
-                    <td class="small">{{ r.fromUtc.slice(0, 10) }} → {{ r.toUtc.slice(0, 10) }}</td>
-                    <td>{{ r.sections.join(', ') }}</td>
-                    <td>{{ r.format }}</td>
+                    <td class="nowrap">
+                      {{ r.createdAtUtc.slice(0, 10) }}
+                      <span class="sub">{{ r.createdAtUtc.slice(11, 16) }}</span>
+                    </td>
+                    <td class="nowrap">{{ periodText(r) }}</td>
+                    <td>
+                      <span class="tags">
+                        @for (s of r.sections; track s) {
+                          <span class="pill">{{ sectionTitle(s) }}</span>
+                        }
+                      </span>
+                    </td>
+                    <td>
+                      <span class="pill info">{{ r.format.toUpperCase() }}</span>
+                    </td>
                     <td class="small">{{ rows(r) }}</td>
                     <td class="mono" [title]="r.sha256">{{ shortHash(r.sha256) }}</td>
-                    <td>{{ r.signature ? 'yes (' + r.signingKeyId + ')' : 'no' }}</td>
+                    <td>
+                      @if (r.signature) {
+                        <span class="dot ok">key {{ r.signingKeyId }}</span>
+                      } @else {
+                        <span class="dot">hash only</span>
+                      }
+                    </td>
                     <td class="small">{{ r.createdBy }}</td>
                   </tr>
                 } @empty {
                   <tr>
-                    <td colspan="8" class="muted">
-                      No export downloaded yet. Each download is registered here with its period,
-                      row counts, SHA-256 and signature, so anyone holding a copy can check it with
-                      “Check a copy” above.
+                    <td colspan="8" class="empty">
+                      <strong>No export downloaded yet</strong>
+                      Each download is registered here with its period, row counts, SHA-256 and
+                      signature, so anyone holding a copy can check it with “Check a copy” above.
                     </td>
                   </tr>
                 }
               </tbody>
             </table>
           </div>
-        </section>
-
-        <section class="card">
-          <div class="card-head"><strong>What a compliance export contains</strong></div>
-          <dl class="sections">
-            <dt>audit</dt>
-            <dd>
-              The organisation's audit events in the period, oldest first — sign-ins, access
-              changes, configuration, trading controls, approvals — each with its chain hash (the
-              engine's audit log is hash-chained).
-            </dd>
-            <dt>orders</dt>
-            <dd>
-              Orders created in the period (deleted ones included and marked): requested and filled
-              price, latency, the position each opened and that position's lifecycle events.
-            </dd>
-            <dt>approvals</dt>
-            <dd>
-              Two-person and four-eyes requests made in the period, with every approval recorded.
-            </dd>
-            <dt>Integrity</dt>
-            <dd>
-              The SHA-256 of the exact file is returned with the download and kept in the register;
-              with a signing key the register also holds an HMAC-SHA256 signature of it. Times are
-              UTC; the period is from (inclusive) to (exclusive). Evidence for your own records —
-              not a regulator's template.
-            </dd>
-          </dl>
         </section>
       }
     </div>
@@ -443,6 +484,10 @@ export class CompliancePageComponent {
   private readonly fund = inject(FundApiService);
 
   protected readonly shortHash = shortHash;
+  protected readonly minuteUtc = minuteUtc;
+  protected readonly dayLabel = dayLabel;
+  protected readonly info = SECTION_INFO;
+  protected readonly presets = periodPresets(new Date());
   protected readonly allSections: ComplianceSection[] = ['audit', 'orders', 'approvals'];
 
   readonly from = signal(defaultPeriod(new Date(), 30).from);
@@ -463,8 +508,8 @@ export class CompliancePageComponent {
 
   readonly preview = signal<ComplianceExportPreview | null>(null);
   readonly previewMissing = signal(false);
-  protected readonly day = day;
   protected readonly words = enumWords;
+  readonly preset = computed(() => matchPreset(this.from(), this.to(), new Date()));
   readonly dayHeights = computed(() =>
     shareOfMax((this.preview()?.days ?? []).map((d) => d.audit + d.orders)),
   );
@@ -477,6 +522,23 @@ export class CompliancePageComponent {
   readonly approvalWidths = computed(() =>
     shareOfMax((this.preview()?.approvalsByStatus ?? []).map((c) => c.count)),
   );
+  /** "3 sections · 306 rows · JSON" — what the Download button will produce. */
+  readonly summaryLine = computed(() => {
+    const n = this.sections().length;
+    if (n === 0) return 'Pick at least one section';
+    const p = this.preview();
+    const rows = p ? this.sections().reduce((sum, s) => sum + (p.rowCounts[s] ?? 0), 0) : null;
+    const fmt = this.format() === 'json' ? 'JSON' : 'CSV zip';
+    return `${n} section${n === 1 ? '' : 's'}${rows === null ? '' : ` · ${rows.toLocaleString('en-US')} rows`} · ${fmt}`;
+  });
+  readonly shaLength = computed(() => this.sha().trim().length);
+  readonly shaProblem = computed(() => {
+    const s = this.sha().trim();
+    if (!s) return '';
+    if (/[^0-9a-fA-F]/.test(s)) return 'Only 0–9 and a–f — paste just the hash.';
+    if (s.length !== 64) return `${s.length} / 64 characters`;
+    return '';
+  });
 
   constructor() {
     this.register.reload();
@@ -491,6 +553,26 @@ export class CompliancePageComponent {
   setTo(v: string): void {
     this.to.set(v);
     this.loadPreview();
+  }
+
+  applyPreset(key: PresetKey): void {
+    const p = this.presets.find((x) => x.key === key);
+    if (!p) return;
+    this.from.set(p.from);
+    this.to.set(p.to);
+    this.loadPreview();
+  }
+
+  periodText(p: { fromUtc: string; toUtc: string }): string {
+    return periodLabel(p.fromUtc, p.toUtc);
+  }
+
+  sectionTitle(s: string): string {
+    return SECTION_INFO[s as ComplianceSection]?.title ?? s;
+  }
+
+  isTooLarge(s: ComplianceSection): boolean {
+    return this.preview()?.tooLarge.includes(s) ?? false;
   }
 
   /** The period's counts (refreshed when the period changes; nothing is built or registered). */
