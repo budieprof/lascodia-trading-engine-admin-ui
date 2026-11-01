@@ -953,3 +953,35 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+// Asset-class pills above the movers table and symbol matrix.
+.board-classes {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  margin: 0 0 var(--space-3);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+
+  button {
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    padding: 5px 12px;
+    border-radius: var(--radius-full);
+    cursor: pointer;
+  }
+  button.on {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+  }
+  .n {
+    margin-left: 4px;
+    color: var(--text-tertiary);
+  }
+}

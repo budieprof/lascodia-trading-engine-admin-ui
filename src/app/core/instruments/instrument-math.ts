@@ -90,6 +90,90 @@ const CRYPTOS = new Set([
   'BTCGBP',
 ]);
 
+/** Coin codes, longest first (same list as the engine's BrokerCfdClassifier). */
+const COIN_CODES = [
+  'MATIC',
+  'SUSHI',
+  'DOGE',
+  'SHIB',
+  'LINK',
+  'AVAX',
+  'ATOM',
+  'AAVE',
+  'NEAR',
+  'ALGO',
+  'SAND',
+  'MANA',
+  'IOTA',
+  'DASH',
+  'COMP',
+  'PEPE',
+  'BONK',
+  'BTC',
+  'ETH',
+  'LTC',
+  'XRP',
+  'BCH',
+  'ADA',
+  'DOT',
+  'SOL',
+  'UNI',
+  'XLM',
+  'FIL',
+  'TRX',
+  'ETC',
+  'BNB',
+  'XTZ',
+  'EOS',
+  'AXS',
+  'APE',
+  'ICP',
+  'POL',
+  'XMR',
+  'ZEC',
+  'NEO',
+  'MKR',
+  'SNX',
+  'YFI',
+  'CRV',
+  'GRT',
+  'LDO',
+  'ARB',
+  'SUI',
+  'TON',
+  'WIF',
+];
+const COIN_QUOTES = new Set([
+  'USD',
+  'USDT',
+  'USDC',
+  'EUR',
+  'GBP',
+  'JPY',
+  'AUD',
+  'CAD',
+  'CHF',
+  'KRW',
+  'THB',
+  'ZAR',
+  'CNH',
+  'XAU',
+  'XAG',
+  'BTC',
+  'ETH',
+]);
+
+/**
+ * A broker coin pair without a dash — Exness `SOLUSD`, `ETHBTC`, `BTCJPY`. Six letters, so the old "anything else is
+ * FX" rule read them as currency pairs: wrong pips, and their weekend bars hidden as if the market were shut.
+ */
+export function isCoinPair(symbol: string): boolean {
+  const s = symbol.trim().toUpperCase().replace('/', '');
+  return COIN_CODES.some(
+    (c) => s.length > c.length && s.startsWith(c) && COIN_QUOTES.has(s.slice(c.length)),
+  );
+}
+
 /**
  * A symbol's asset class from its name alone — the engine's `ClassifyAssetFromSymbol` lists, plus the program's
  * canonical forms (`BTC-USDT`, `BTC-USDT-PERP` crypto; `ES1!` continuous futures). Anything else is FX, as the engine
@@ -99,7 +183,8 @@ export function classifySymbol(symbol: string): InstrumentAssetClass {
   const s = symbol.trim().toUpperCase();
   if (INDICES.has(s)) return 'Index';
   if (COMMODITIES.has(s)) return 'Commodity';
-  if (CRYPTOS.has(s) || /^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$/.test(s)) return 'Crypto';
+  if (CRYPTOS.has(s) || isCoinPair(s) || /^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$/.test(s))
+    return 'Crypto';
   if (/^[A-Z0-9]{1,4}\d!$/.test(s)) return 'Future';
   return 'Fx';
 }

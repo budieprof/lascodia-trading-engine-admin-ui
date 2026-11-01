@@ -9,9 +9,9 @@ import {
   OnDestroy,
   untracked,
 } from '@angular/core';
+import { resolveInstrument } from '@core/instruments/instrument-math';
 import {
   Subject,
-  forkJoin,
   from,
   timer,
   takeUntil,
@@ -23,6 +23,7 @@ import {
   switchMap,
   finalize,
   mergeMap,
+  toArray,
 } from 'rxjs';
 import { DatePipe } from '@angular/common';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
@@ -77,6 +78,9 @@ interface PriceEntry extends LivePriceDto {
   // exclude these entries.
   fromCandle: boolean;
 }
+
+/** Asset-class filter of the movers table and symbol matrix. */
+type BoardClass = 'all' | 'fx' | 'crypto' | 'stocks' | 'indices' | 'commodities';
 
 @Component({
   selector: 'app-market-data-page',
@@ -170,7 +174,7 @@ interface PriceEntry extends LivePriceDto {
                ("1d 2h", "10 / 16") fits on one line instead of in tall narrow tiles. -->
           <div class="overview-kpis">
             <app-metric-card
-              label="Watched pairs"
+              label="Watched symbols"
               [value]="livePrices().length"
               format="number"
               dotColor="#0071E3"
@@ -181,7 +185,7 @@ interface PriceEntry extends LivePriceDto {
               [value]="medianSpread()"
               format="number"
               dotColor="#FF9500"
-              [caption]="medianSpread() === null ? 'no live spreads yet' : 'pips · live quotes'"
+              [caption]="medianSpread() === null ? 'no live spreads yet' : 'pips · live FX quotes'"
             />
             <app-metric-card
               label="Up / Down today"
@@ -194,14 +198,14 @@ interface PriceEntry extends LivePriceDto {
               [value]="tightestSpread()"
               format="number"
               dotColor="#34C759"
-              [caption]="tightestSpread() === null ? 'no live spreads yet' : 'pips'"
+              [caption]="tightestSpread() === null ? 'no live spreads yet' : 'pips · FX'"
             />
             <app-metric-card
               label="Widest spread"
               [value]="widestSpread()"
               format="number"
               dotColor="#FF3B30"
-              [caption]="widestSpread() === null ? 'no live spreads yet' : 'pips'"
+              [caption]="widestSpread() === null ? 'no live spreads yet' : 'pips · FX'"
             />
             <!-- Local tile: the shared card only takes a number, and
                  "93,551" seconds is unreadable — this renders "1d 2h". Styled
@@ -314,6 +318,23 @@ interface PriceEntry extends LivePriceDto {
             </div>
           }
         </div>
+
+        <!-- Asset-class filter for the movers table and the symbol matrix: the board carries FX,
+             crypto, stock, index and commodity CFDs from the EAs, too many to scan as one list. -->
+        @if (boardClasses().length > 2) {
+          <div class="board-classes" role="group" aria-label="Asset class">
+            @for (c of boardClasses(); track c.key) {
+              <button
+                type="button"
+                [class.on]="boardClass() === c.key"
+                [attr.aria-pressed]="boardClass() === c.key"
+                (click)="boardClass.set(c.key)"
+              >
+                {{ c.label }} <span class="n">{{ c.count }}</span>
+              </button>
+            }
+          </div>
+        }
 
         <!-- Top movers + recent ticks side-by-side under the ribbon. Always
              rendered; empty states explain why the table is bare. -->
@@ -435,7 +456,7 @@ interface PriceEntry extends LivePriceDto {
                   <th class="num">Spread</th>
                   <th class="num">Day high</th>
                   <th class="num">Day low</th>
-                  <th class="num">Day range (pips)</th>
+                  <th class="num">Day range</th>
                   <th class="num">Day Δ %</th>
                   <th>Trend</th>
                 </tr>
@@ -486,6 +507,9 @@ interface PriceEntry extends LivePriceDto {
                     <td class="num mono">
                       @if (row.rangePips !== null) {
                         {{ row.rangePips.toFixed(1) }}
+                        <span class="muted">{{
+                          boardClassOf(row.symbol) === 'fx' ? 'pips' : 'pts'
+                        }}</span>
                       } @else {
                         <span class="muted">—</span>
                       }
@@ -1939,6 +1963,8 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
    */
   private readonly dayQuotes = signal<Record<string, WatchQuote>>({});
   private readonly watchlistService = inject(WatchlistService);
+  /** One live-price poll at a time — a slow batch must not stack a second over it. */
+  private priceLoadInFlight = false;
 
   /** Insert a slash between the base and quote currencies (`EURUSD` → `EUR/USD`). */
   private formatPairSymbol(symbol: string): string {
@@ -2151,10 +2177,61 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
   /// so the computed re-runs on every poll.
   private spreadsForKpis = computed(() => {
     this.livePrices(); // re-run trigger
-    const live = this.liveOnly();
+    // FX only: a stock's or a coin's spread in its own points is not an FX pip, and one of them
+    // read "widest spread 1,000 pips" on the board once the EA streamed broker CFDs.
+    const live = this.liveOnly().filter((p) => this.boardClassOf(p.symbol) === 'fx');
     if (live.length > 0) return live.map((p) => p.spread);
-    return Object.values(this.lastLiveSpread);
+    return Object.entries(this.lastLiveSpread)
+      .filter(([sym]) => this.boardClassOf(sym) === 'fx')
+      .map(([, v]) => v);
   });
+
+  /** The movers table and symbol matrix show one asset class at a time (or all). */
+  readonly boardClass = signal<BoardClass>('all');
+
+  /** A board symbol's asset class ("BTC/USD" or "BTCUSD"): the engine's pair class, else the name. */
+  boardClassOf(symbol: string | null | undefined): BoardClass {
+    const key = (symbol ?? '').replace('/', '').toUpperCase();
+    const ac = this.pairMeta()[key]?.assetClass ?? resolveInstrument(key).assetClass;
+    switch ((ac ?? '').toLowerCase()) {
+      case 'crypto':
+        return 'crypto';
+      case 'equity':
+      case 'etf':
+        return 'stocks';
+      case 'index':
+        return 'indices';
+      case 'commodity':
+        return 'commodities';
+      default:
+        return 'fx';
+    }
+  }
+
+  /** The filter pills with how many board symbols each holds; classes with none are left out. */
+  readonly boardClasses = computed(() => {
+    const counts = new Map<BoardClass, number>();
+    for (const sym of this.displaySymbols()) {
+      const c = this.boardClassOf(sym);
+      counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const order: { key: BoardClass; label: string }[] = [
+      { key: 'fx', label: 'FX' },
+      { key: 'crypto', label: 'Crypto' },
+      { key: 'stocks', label: 'Stocks' },
+      { key: 'indices', label: 'Indices' },
+      { key: 'commodities', label: 'Commodities' },
+    ];
+    return [
+      { key: 'all' as BoardClass, label: 'All', count: this.displaySymbols().length },
+      ...order.filter((o) => counts.has(o.key)).map((o) => ({ ...o, count: counts.get(o.key)! })),
+    ];
+  });
+
+  private inBoardClass(symbol: string | null | undefined): boolean {
+    const c = this.boardClass();
+    return c === 'all' || this.boardClassOf(symbol) === c;
+  }
 
   // Median, not mean, so a single exotic pair (e.g. USD/NGN at ~22,000 pips)
   // can't drag the headline spread into the thousands. The median tracks the
@@ -2216,6 +2293,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // Only pairs that have moved on the day: six rows of "+0.00%" is not a movers table.
     return this.livePrices()
       .filter((p): p is PriceEntry & { changePct: number } => !!p.changePct)
+      .filter((p) => this.inBoardClass(p.symbol))
       .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
       .slice(0, 6);
   });
@@ -2253,22 +2331,24 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     { symbol: string; live: PriceEntry | null; spark: number[]; rangePips: number | null }[]
   >(() => {
     const live = this.livePrices();
-    return this.displaySymbols().map((sym, i) => {
-      const apiSym = this.watchedSymbols()[i];
-      // Candle closes only — no tick-buffer fallback, for the same reason as the
-      // watch ribbon: a quiet pair's tick slice draws a flat line that reads as
-      // real, unmoving history.
-      const sparkHist = this.sparkSeries[apiSym] ?? [];
-      const liveEntry = live.find((p) => p.symbol === sym) ?? null;
-      const dayRange = liveEntry ? this.rangeInPips(liveEntry) : null;
-      const rangePips = dayRange === null ? null : +dayRange.toFixed(1);
-      return {
-        symbol: sym,
-        live: liveEntry,
-        spark: sparkHist.slice(-30),
-        rangePips,
-      };
-    });
+    return this.displaySymbols()
+      .map((sym, i) => {
+        const apiSym = this.watchedSymbols()[i];
+        // Candle closes only — no tick-buffer fallback, for the same reason as the
+        // watch ribbon: a quiet pair's tick slice draws a flat line that reads as
+        // real, unmoving history.
+        const sparkHist = this.sparkSeries[apiSym] ?? [];
+        const liveEntry = live.find((p) => p.symbol === sym) ?? null;
+        const dayRange = liveEntry ? this.rangeInPips(liveEntry) : null;
+        const rangePips = dayRange === null ? null : +dayRange.toFixed(1);
+        return {
+          symbol: sym,
+          live: liveEntry,
+          spark: sparkHist.slice(-30),
+          rangePips,
+        };
+      })
+      .filter((row) => this.inBoardClass(row.symbol));
   });
 
   // Auto-ticking clock signal so the sessions track + UTC label refresh
@@ -3309,8 +3389,11 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         map((candles) => ({ sym, candles })),
       );
 
-    forkJoin(targets.map(seedOne))
+    // At most six symbols at a time: ~120 parallel candle reads exhausted the browser's sockets.
+    from(targets)
       .pipe(
+        mergeMap(seedOne, 6),
+        toArray(),
         finalize(() => (this.sparkSeedInFlight = false)),
         takeUntil(this.destroy$),
       )
@@ -3355,49 +3438,58 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
     // against the NEW list and stamped USD/JPY's 156.2 quote onto the
     // AUD/USD row — which is where the "−1,555,274.9 pip" activity-feed
     // entries came from.
-    const requests = this.watchedSymbols().map((symbol) => {
-      const displaySymbol = this.formatPairSymbol(symbol);
-      return this.marketDataService.getLivePrice(symbol).pipe(
-        catchError(() => of(null as any)),
-        switchMap((res: any) => {
-          const live = res?.data;
-          if (live?.bid > 0 && live?.ask > 0) {
-            // Normalise to the slashed display format so downstream
-            // lookups (watch ribbon / symbol matrix) match displaySymbols.
-            // The engine returns the API symbol ("EURUSD") which would
-            // otherwise miss the displaySymbols-keyed `find` calls.
-            return of({
-              symbol,
-              displaySymbol,
-              data: { ...(live as LivePriceDto), symbol: displaySymbol },
-              fromCandle: false,
-            });
-          }
-          return this.marketDataService.getLatestCandle(symbol, 'M5').pipe(
-            catchError(() => of(null as any)),
-            map((cRes: any) => {
-              const candle = cRes?.data;
-              if (!candle?.close) return null;
+    // ONE batched read per poll (`market-data/watchlist-quotes`, ≤400 symbols): live bid/ask from the
+    // tick cache, else the last close (flagged fromCandle). It used to be one live-price request per
+    // symbol every 3 s, plus a candle request for each miss — fine for 26 FX pairs, but with the EA
+    // streaming ~120 broker symbols it was ~40 requests a second and the browser ran out of sockets
+    // (ERR_INSUFFICIENT_RESOURCES), starving the chart's own candle load.
+    const symbols = this.watchedSymbols();
+    if (symbols.length === 0 || this.priceLoadInFlight) return;
+    this.priceLoadInFlight = true;
+    from(this.watchlistService.quotes(symbols))
+      .pipe(
+        catchError(() => of([] as WatchQuote[])),
+        map((quotes) => {
+          const bySymbol = new Map(quotes.map((q) => [q.symbol.toUpperCase(), q]));
+          return symbols.map((symbol) => {
+            const displaySymbol = this.formatPairSymbol(symbol);
+            const q = bySymbol.get(symbol.toUpperCase());
+            if (!q) return null;
+            const at = q.asOfUtc ?? new Date().toISOString();
+            if ((q.bid ?? 0) > 0 && (q.ask ?? 0) > 0) {
               return {
                 symbol,
                 displaySymbol,
                 data: {
                   symbol: displaySymbol,
-                  bid: candle.close,
-                  ask: candle.close,
+                  bid: q.bid!,
+                  ask: q.ask!,
+                  spread: q.ask! - q.bid!,
+                  timestamp: at,
+                } as LivePriceDto,
+                fromCandle: false,
+              };
+            }
+            if ((q.last ?? 0) > 0) {
+              return {
+                symbol,
+                displaySymbol,
+                data: {
+                  symbol: displaySymbol,
+                  bid: q.last!,
+                  ask: q.last!,
                   spread: 0,
-                  timestamp: candle.timestamp,
+                  timestamp: at,
                 } as LivePriceDto,
                 fromCandle: true,
               };
-            }),
-          );
+            }
+            return null;
+          });
         }),
-      );
-    });
-
-    forkJoin(requests)
-      .pipe(takeUntil(this.destroy$))
+        finalize(() => (this.priceLoadInFlight = false)),
+        takeUntil(this.destroy$),
+      )
       .subscribe((results) => {
         const current = this.livePrices();
         const newPrices: PriceEntry[] = results

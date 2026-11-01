@@ -78,6 +78,12 @@ describe('instrument math — other asset classes', () => {
   });
   it('symbol-only classifier: engine lists + canonical crypto/continuous forms; unknown → FX', () => {
     expect(classifySymbol('BTC-USDT-PERP')).toBe('Crypto');
+    // Broker coin pairs without a dash (Exness): crypto, not six-letter FX.
+    expect(classifySymbol('SOLUSD')).toBe('Crypto');
+    expect(classifySymbol('ETHBTC')).toBe('Crypto');
+    expect(classifySymbol('BTCJPY')).toBe('Crypto');
+    expect(classifySymbol('EURUSD')).toBe('Fx');
+    expect(classifySymbol('USDJPY')).toBe('Fx');
     expect(classifySymbol('ES1!')).toBe('Future');
     expect(classifySymbol('US500')).toBe('Index');
     expect(classifySymbol('XAUUSD')).toBe('Commodity');

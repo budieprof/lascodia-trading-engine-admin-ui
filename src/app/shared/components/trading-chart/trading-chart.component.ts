@@ -13,6 +13,7 @@ import {
   OnDestroy,
   HostListener,
 } from '@angular/core';
+import { resolveInstrument } from '@core/instruments/instrument-math';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -2352,7 +2353,10 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     return 'none';
   });
 
-  pricePrecision = computed(() => (this.selectedSymbol().includes('JPY') ? 3 : 5));
+  /** Quote decimals from the instrument catalogue — 5 / 3 (JPY) for FX as before, 2 for BTCUSD or a stock CFD. */
+  pricePrecision = computed(
+    () => resolveInstrument(this.selectedSymbol().replace(/\//g, '')).priceDecimals,
+  );
 
   latestCandle = computed(() => {
     const c = this.candles();
@@ -3708,10 +3712,11 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         // inside that window are either filler (engine-generated when no
         // ticks arrived) or stale-feed echoes; either way they shouldn't
         // appear on the chart because they distort indicators and visually
-        // imply price activity that didn't happen. Crypto pairs (24/7) skip
-        // the filter — see `LooksLikeForexSymbol` in the engine for the same
-        // 6-alpha-char heuristic used by the worker-side weekend guards.
-        if (this.looksLikeForexSymbol(this.selectedSymbol())) {
+        // imply price activity that didn't happen. Only FX is filtered — the
+        // instrument catalogue's asset class decides, not the symbol's length:
+        // the old "6 letters = forex" test hid every weekend bar of a broker
+        // coin pair (BTCUSD, SOLUSD), which trade 24/7.
+        if (this.isForexInstrument(this.selectedSymbol())) {
           data = data.filter((c) => !this.isForexWeekendClosed(new Date(c.timestamp)));
         }
 
@@ -3742,11 +3747,9 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     return false;
   }
 
-  /** Heuristic: 6 alpha chars after stripping the `/` separator (EURUSD,
-   *  GBPUSD, USDJPY, …). Crypto symbols (BTCUSDT, 7+ chars) skip the filter. */
-  private looksLikeForexSymbol(symbol: string): boolean {
-    const stripped = symbol.replace(/\//g, '');
-    return /^[A-Za-z]{6}$/.test(stripped);
+  /** FX by the instrument catalogue (its name-based fallback recognises coin pairs too). */
+  private isForexInstrument(symbol: string): boolean {
+    return resolveInstrument(symbol.replace(/\//g, '')).assetClass === 'Fx';
   }
 
   private startLivePricePolling() {
