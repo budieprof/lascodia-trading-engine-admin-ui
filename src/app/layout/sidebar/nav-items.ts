@@ -54,7 +54,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Market Data', route: '/market-data', icon: navIcon.ChartCandlestick },
       // A person's exchange subscriber declarations (multi-asset WS8 8.2).
       { label: 'Data declarations', route: '/market-data/declarations', icon: navIcon.ScrollText },
-      { label: 'Instrument Candles', route: '/market-data/instrument-candles', icon: navIcon.Layers },
+      {
+        label: 'Instrument Candles',
+        route: '/market-data/instrument-candles',
+        icon: navIcon.Layers,
+      },
       { label: 'Watchlist', route: '/watchlist', icon: navIcon.Eye },
     ],
   },
@@ -68,7 +72,11 @@ export const NAV_GROUPS: NavGroup[] = [
       // Multi-asset WS7 7.7 / 7.10: venue connections and exchange reference data.
       { label: 'Connections', route: '/connections', icon: navIcon.Plug },
       { label: 'Fee Schedules', route: '/reference/fee-schedules', icon: navIcon.Ticket },
-      { label: 'Margin Requirements', route: '/reference/margin-requirements', icon: navIcon.Scale },
+      {
+        label: 'Margin Requirements',
+        route: '/reference/margin-requirements',
+        icon: navIcon.Scale,
+      },
       { label: 'Brokers', route: '/brokers', icon: navIcon.Handshake },
       { label: 'Risk Profiles', route: '/risk-profiles', icon: navIcon.ShieldCheck },
       { label: 'Spread-Reactive', route: '/spread-reactive', icon: navIcon.Activity },
@@ -215,6 +223,15 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'Best execution', route: '/fund/best-execution', icon: navIcon.BadgeCheck },
       { label: 'Compliance exports', route: '/fund/compliance', icon: navIcon.FileArchive },
+      { label: 'Regulatory reports', route: '/fund/regulatory', icon: navIcon.FileArchive },
+    ],
+  },
+  {
+    // Trade surveillance (gaps program): market-abuse pattern alerts for review — observe only.
+    label: 'Surveillance',
+    items: [
+      { label: 'Surveillance alerts', route: '/surveillance', icon: navIcon.ScanEye },
+      { label: 'Surveillance settings', route: '/surveillance/settings', icon: navIcon.Settings },
     ],
   },
   {

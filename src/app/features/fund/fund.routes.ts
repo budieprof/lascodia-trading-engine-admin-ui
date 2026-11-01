@@ -6,7 +6,7 @@ import { canAccessPath } from '@core/auth/can-access.guard';
 import type { AccessPath } from '@core/auth/route-access';
 
 /** The fund pages in sidebar order; `/fund` opens the first one the person may see. */
-const PAGES: AccessPath[] = ['fund/performance', 'fund/best-execution', 'fund/compliance'];
+const PAGES: AccessPath[] = ['fund/performance', 'fund/best-execution', 'fund/compliance', 'fund/regulatory'];
 
 /** The fund module (enterprise program): performance statements, best-execution evidence, compliance exports. */
 export const FUND_ROUTES: Routes = [
@@ -38,5 +38,12 @@ export const FUND_ROUTES: Routes = [
     data: { breadcrumb: 'Compliance exports' },
     loadComponent: () =>
       import('./pages/compliance-page.component').then((m) => m.CompliancePageComponent),
+  },
+  {
+    path: 'regulatory',
+    canActivate: [canAccessPath('fund/regulatory')],
+    data: { breadcrumb: 'Regulatory reports' },
+    loadComponent: () =>
+      import('./pages/regulatory-page.component').then((m) => m.RegulatoryPageComponent),
   },
 ];

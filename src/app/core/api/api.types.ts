@@ -449,7 +449,9 @@ export type AlertType =
   | 'ScriptAlert'
   | 'ScriptPositionsOrphaned'
   | 'ChartAlert'
-  | 'ScriptParityDrift';
+  | 'ScriptParityDrift'
+  // Gaps program surveillance: one row per organisation and detector, raised/resolved by SurveillanceWorker.
+  | 'SurveillanceAlert';
 
 export type AlertSeverity = 'Info' | 'Medium' | 'High' | 'Critical';
 

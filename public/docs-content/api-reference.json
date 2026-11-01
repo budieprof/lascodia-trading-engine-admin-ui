@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1043,
+  "endpointCount": 1086,
   "groups": [
     {
       "name": "Admin auth",
@@ -395,6 +395,23 @@
           "response": "ResponseData<List<EAAuditTimelineItem>>"
         },
         {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/autoheal",
+          "summary": "Switch auto-heal on / off for the instance and its terminal (`{enabled}`).",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "EAAutoHealBody",
+          "response": "ResponseData<EAAutoHealDto>"
+        },
+        {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/breakeven-exit",
           "summary": "Read the per-EA rule-based breakeven-exit configuration. Two mechanics: <i>salvage exit</i> (close at breakeven after MAE crossed + price returns near entry) and <i>trail to BE</i> (move SL to entry after MFE crossed). Both off by default. Storage is account-scoped; route key is per-instance to match the EA detail page's mental model.",
@@ -479,6 +496,56 @@
           "response": "ResponseData<AdminCommandQueueResult>"
         },
         {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/commands",
+          "summary": "The instance's commands, newest first, with derived status (Pending / Delivered / Succeeded / Failed / Expired).",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "page",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "pageSize",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<EACommandHistoryItem>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/commands/{commandId}",
+          "summary": "One command — polled after sending one until its status is final.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "commandId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<EACommandHistoryItem>"
+        },
+        {
           "method": "POST",
           "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/config",
           "summary": "Hot-reload the EA's safety config (10 knobs; omitted = keep current).",
@@ -494,6 +561,23 @@
           ],
           "body": "UpdateInstanceConfigCommand",
           "response": "ResponseData<string>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/deploy",
+          "summary": "Put an EA release on the terminal (`{releaseId?, restartAfter}`; blank = latest), then restart its EAs on it.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "DeployEaToTerminalCommand",
+          "response": "ResponseData<EATerminalJobResult>"
         },
         {
           "method": "GET",
@@ -543,6 +627,101 @@
             }
           ],
           "body": "FlattenInstanceCommand",
+          "response": "ResponseData<AdminCommandQueueResult>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/force-recovery",
+          "summary": "C3 ForceRecovery: clear the EA's failed-recovery flag and let it return to RUNNING (never clears COMPLIANCE).",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "ForceRecoveryCommand",
+          "response": "ResponseData<AdminCommandQueueResult>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/heal-events",
+          "summary": "The auto-heal ladder's steps for this instance, newest first.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            },
+            {
+              "name": "page",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "pageSize",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<EAHealEventDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/health",
+          "summary": "The health verdict (Healthy / Degraded / Down / Stopped) with plain-language problems and their one-click fixes.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<EAHealthDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/host-logs",
+          "summary": "Fetch a log tail from the host (`{kind: ea|journal|supervisor, lines ≤ 2000}`). Returns `{jobId}`.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "RequestHostLogsCommand",
+          "response": "ResponseData<EATerminalJobResult>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/inputs",
+          "summary": "C3 SetInputs: change restart-required inputs (`{inputs:{name:value}, reason}`); the EA restarts on them.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "SetEAInputsCommand",
           "response": "ResponseData<AdminCommandQueueResult>"
         },
         {
@@ -646,6 +825,23 @@
           ],
           "body": "UpdateEAPendingSignalRevalCommand",
           "response": "ResponseData<int>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/prune-files",
+          "summary": "Clean up old files on the host (`{dryRun = true, dryRunJobId?, reason?}`). A dry run lists what would be deleted (job `resultData.files`); the real run needs the id of a succeeded dry run of the same terminal from the last 30 minutes. Returns `{jobId}`.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "PruneEaFilesCommand",
+          "response": "ResponseData<EATerminalJobResult>"
         },
         {
           "method": "POST",
@@ -798,6 +994,73 @@
           ],
           "body": "UpdateEASpreadPadCommand",
           "response": "ResponseData<int>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/terminal",
+          "summary": "The instance's terminal: host, install, desired state, auto-heal, C4 runtime, its beacon, how it was linked.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<EATerminalDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/terminal/restart",
+          "summary": "Restart the terminal (wrapper + terminal) through the host supervisor. Returns `{jobId}`.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "EATerminalReasonBody",
+          "response": "ResponseData<EATerminalJobResult>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/terminal/start",
+          "summary": "Start the terminal (desired state Running) through the host supervisor. Returns `{jobId}`.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "EATerminalReasonBody",
+          "response": "ResponseData<EATerminalJobResult>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/ea/{instanceId}/terminal/stop",
+          "summary": "Stop the terminal and keep it stopped (desired state Stopped: no watchdog, no auto-heal). Returns `{jobId}`.",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "instanceId",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "EATerminalReasonBody",
+          "response": "ResponseData<EATerminalJobResult>"
         }
       ]
     },
@@ -1247,12 +1510,45 @@
         {
           "method": "POST",
           "path": "/api/v1/lascodia-trading-engine/admin/terminals/daemons/heartbeat",
-          "summary": "Daemon heartbeat — refresh LastSeenAt + reconcile sessions. Same caller rule as register.",
+          "summary": "Daemon heartbeat — refresh LastSeenAt, reconcile sessions, store each install's C4 runtime. Same caller rule as register. The answer carries every known install's desired state (`data.installs[]`) for the supervisor to obey.",
           "access": "permission",
           "permission": "access.eaingest",
           "parameters": [],
           "body": "DaemonHeartbeatCommand",
-          "response": "ResponseData<string>"
+          "response": "ResponseData<DaemonHeartbeatResponse>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/terminals/daemons/jobs",
+          "summary": "Self-heal job channel (C4), daemon side: long-poll for this daemon's pending jobs (`waitSec` ≤ 25). Claims what it returns atomically; answers an empty list when nothing arrived in time. Daemon tokens only.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "waitSec",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<List<DaemonJobItem>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/terminals/daemons/jobs/{jobId}/result",
+          "summary": "Self-heal job channel (C4): the daemon reports a job's outcome (`{status: Succeeded|Failed, message, data}`).",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "jobId",
+              "in": "path",
+              "required": true,
+              "type": "guid"
+            }
+          ],
+          "body": "ReportDaemonJobResultCommand",
+          "response": "ResponseData<TerminalJobDto>"
         },
         {
           "method": "GET",
@@ -1457,6 +1753,22 @@
             }
           ],
           "response": "ResponseData<RotateApiKeyResponse>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/admin/terminals/jobs/{jobId}",
+          "summary": "Self-heal job channel (C4), operator side: one job with its status and result (the console polls it).",
+          "access": "permission",
+          "permission": "access.operator",
+          "parameters": [
+            {
+              "name": "jobId",
+              "in": "path",
+              "required": true,
+              "type": "guid"
+            }
+          ],
+          "response": "ResponseData<TerminalJobDto>"
         },
         {
           "method": "POST",
@@ -5996,6 +6308,128 @@
         },
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/regulatory/reference-data",
+          "summary": "The organisation's regulatory reference data (its LEI, venue, decision makers, clients) and what is missing.",
+          "access": "permission",
+          "permission": "compliance.regulatory.generate",
+          "parameters": [],
+          "response": "ResponseData<RegulatoryReferenceDataDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/fund/regulatory/reference-data/accounts/{tradingAccountId}",
+          "summary": "Sets one trading account's client identification, counterparty LEI and venue code.",
+          "access": "permission",
+          "permission": "compliance.regulatory.generate",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdateRegulatoryAccountReferenceCommand",
+          "response": "ResponseData<RegulatoryReferenceDataDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/fund/regulatory/reference-data/firm",
+          "summary": "Sets the organisation's own reference data (an LEI must pass its ISO 17442 checksum).",
+          "access": "permission",
+          "permission": "compliance.regulatory.generate",
+          "parameters": [],
+          "body": "UpdateRegulatoryFirmReferenceCommand",
+          "response": "ResponseData<RegulatoryReferenceDataDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/regulatory/reports/download",
+          "summary": "Downloads a regulatory report as a signed zip (report.csv [+ report.xml], validation.json/.csv, manifest.json), kept in the compliance export register. Headers as the compliance export. The engine never submits it anywhere.",
+          "access": "permission",
+          "permission": "compliance.regulatory.generate",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "format",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "includeDemo",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "tradingCapacity",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/fund/regulatory/reports/preview",
+          "summary": "Builds a regulatory report (`kind` mifir-rts22 | emir-refit | rts28-venues) for a period and returns its validation (records, missing / invalid fields, a sample) — no file is built or registered.",
+          "access": "permission",
+          "permission": "compliance.regulatory.generate",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime"
+            },
+            {
+              "name": "includeDemo",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "tradingCapacity",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<RegulatoryReportPreviewDto>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/fund/scope",
           "summary": "The accounts and account groups the caller may report on.",
           "access": "permission",
@@ -10532,6 +10966,73 @@
       ]
     },
     {
+      "name": "Onboarding supervisor",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/supervisor/bundle",
+          "summary": "The newest bundle for `platform`, for the installer: header `X-Enrollment-Token` must carry a pending `Daemon` enrollment token (it is not used up). Headers `X-Bundle-Version`, `X-Bundle-Sha256`. 401 invalid/expired/used/revoked token, 403 an EA-terminal token, 404 no bundle published for the platform (plain message), 429 more than 10 downloads per token per hour.",
+          "access": "anonymous",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "platform",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "X-Enrollment-Token",
+              "in": "header",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/supervisor/install.ps1",
+          "summary": "The Windows installer (`text/plain`, public, no secrets) with the engine's public address filled in.",
+          "access": "anonymous",
+          "rateLimit": "auth",
+          "parameters": []
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/supervisor/install.sh",
+          "summary": "The macOS installer (`text/plain`, public, no secrets) with the engine's public address filled in.",
+          "access": "anonymous",
+          "rateLimit": "auth",
+          "parameters": []
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/supervisor/installer",
+          "summary": "A double-click installer for a signed-in person who may connect computers (`accounts.connect`): `platform=macos-pkg` (the default; `.pkg`) or `platform=windows-exe` (`.exe`), the newest release of it. The same file for everyone, with no secret in it: the console saves it as `Lascodia Setup <install code>.pkg|.exe` and the installer reads the code from its own name. Headers `X-Content-SHA256`, `X-Bundle-Version`. 404 when none is published; 400 for another platform; 403 for the showcase organisation. Audited.",
+          "access": "permission",
+          "permission": "accounts.connect",
+          "rateLimit": "auth",
+          "parameters": [
+            {
+              "name": "platform",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/onboarding/supervisor/setup",
+          "summary": "What the console's \"Add a computer\" wizard shows: the engine address, the two command lines (with `{token}` where the Daemon enrollment token goes), the WebRequest allow-list address, and which platforms have a bundle.",
+          "access": "permission",
+          "permission": "accounts.read",
+          "parameters": [],
+          "response": "ResponseData<SupervisorSetupDto>"
+        }
+      ]
+    },
+    {
       "name": "Operator role",
       "endpoints": [
         {
@@ -11390,6 +11891,21 @@
               "type": "string"
             }
           ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/ea/releases/{releaseId}/binary",
+          "summary": "Self-heal program (C4 DeployEaBinary): the bytes of one build by id, for a host supervisor's daemon token (or a super admin). Headers `X-Content-SHA256` and `X-Lascodia-EA-Version`; audited.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "releaseId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ]
         }
       ]
     },
@@ -11703,6 +12219,64 @@
           ],
           "body": "RejectTenantSignupCommand",
           "response": "ResponseData<TenantSignupDto>"
+        }
+      ]
+    },
+    {
+      "name": "Platform supervisor releases",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/supervisor/releases",
+          "summary": "Every kept bundle (no bytes), optionally of one `platform`, newest first.",
+          "access": "permission",
+          "permission": "platform.ea.releases.manage",
+          "parameters": [
+            {
+              "name": "platform",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/supervisor/releases",
+          "summary": "Publishes a bundle: `multipart/form-data` with `file` (the .tar.gz / .zip, ≤ 300 MB), `version` (dotted, e.g. 0.4.0), `platform` (`macos-arm64` | `macos-x86_64` | `windows-x64` | `macos-pkg` | `windows-exe`, the double-click macOS installer from the supervisor repo's `make publish-installer`), optional `sha256` (checked against the engine's own hash) and `notes`. The same platform + version + bytes again = 200 with `created:false`; other bytes = 409. Keeps the newest 5 per platform. Audited.",
+          "access": "permission",
+          "permission": "platform.ea.releases.manage",
+          "parameters": []
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/supervisor/releases/latest",
+          "summary": "The newest bundle for `platform` (metadata) — for an enrolled supervisor (daemon token) or a super admin.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "platform",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/supervisor/releases/{releaseId}/binary",
+          "summary": "One bundle's bytes by id (self-update): daemon token or super admin. Headers `X-Bundle-Version`, `X-Bundle-Sha256`, `X-Bundle-Platform`. Audited.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "releaseId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ]
         }
       ]
     },
@@ -12903,6 +13477,14 @@
       "name": "Public billing",
       "endpoints": [
         {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/billing/paystack/webhook",
+          "summary": "Paystack event delivery, authenticated by `x-paystack-signature` (HMAC-SHA512 of the raw body under the Paystack secret key). 200 = applied or nothing to do; 400 = signature refused; 500 = could not be applied now (Paystack retries); 503 = Paystack not configured.",
+          "access": "anonymous",
+          "rateLimit": "ea",
+          "parameters": []
+        },
+        {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/billing/plans/public",
           "summary": "The plans for sale: the free default plan first, then each plan with a Stripe price (amount, currency, interval from Stripe).",
@@ -13697,7 +14279,7 @@
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/scripting/libraries",
-          "summary": "List the Pine library versions the operator can import: the built-in lascodia/std/1, every Shared version and their own Private ones. Optional filters: publisher (exact) and name (substring).",
+          "summary": "List the Pine library versions the operator can import: the built-in lascodia/* libraries, every Shared version and their own Private ones. Optional filters: publisher (exact) and name (substring).",
           "access": "permission",
           "permission": "access.viewer",
           "parameters": [
@@ -13760,7 +14342,7 @@
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/scripting/libraries/{id}",
-          "summary": "One Pine library version with its source and exports (0 = the built-in lascodia/std/1).",
+          "summary": "One Pine library version with its source and exports (0 and below = the built-in lascodia/* libraries).",
           "access": "permission",
           "permission": "access.viewer",
           "parameters": [
@@ -15868,6 +16450,182 @@
       ]
     },
     {
+      "name": "Surveillance",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/alerts",
+          "summary": "The organisation's surveillance alerts, newest first (filters: status, detector, minimum severity, symbol, account, period, mine).",
+          "access": "permission",
+          "permission": "surveillance.view",
+          "parameters": [
+            {
+              "name": "status",
+              "in": "query",
+              "required": false,
+              "type": "SurveillanceAlertStatus?"
+            },
+            {
+              "name": "detector",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "minSeverity",
+              "in": "query",
+              "required": false,
+              "type": "SurveillanceSeverity?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "mine",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "page",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "pageSize",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<SurveillanceAlertPageDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/alerts/{id}",
+          "summary": "One alert with its evidence (orders, fills, positions, quotes, metrics, thresholds, timeline) and review history.",
+          "access": "permission",
+          "permission": "surveillance.view",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<SurveillanceAlertDetailDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/alerts/{id}/assign",
+          "summary": "Assigns an alert to a member of the organisation (no id: to the caller; `unassign`: to nobody).",
+          "access": "permission",
+          "permission": "surveillance.review",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "AssignSurveillanceAlertCommand",
+          "response": "ResponseData<SurveillanceAlertDetailDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/alerts/{id}/notes",
+          "summary": "Adds a reviewer's note to an alert's timeline.",
+          "access": "permission",
+          "permission": "surveillance.review",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "AddSurveillanceAlertNoteCommand",
+          "response": "ResponseData<SurveillanceAlertDetailDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/alerts/{id}/transition",
+          "summary": "Moves an alert through its review: Open → UnderReview → Closed (resolution + note), or back to Open.",
+          "access": "permission",
+          "permission": "surveillance.review",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "TransitionSurveillanceAlertCommand",
+          "response": "ResponseData<SurveillanceAlertDetailDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/detectors",
+          "summary": "The detectors with the thresholds and severities they run with (engine settings `Surveillance:*`, read-only here).",
+          "access": "permission",
+          "permission": "surveillance.view",
+          "parameters": [],
+          "response": "ResponseData<SurveillanceConfigurationDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/operations",
+          "summary": "The surveillance scan's last run / result / next run and, for platform staff, the audit anchor publisher and its targets (file, S3 Object Lock bucket, webhook — secrets shown as set/unset only).",
+          "access": "permission",
+          "permission": "surveillance.view",
+          "parameters": [],
+          "response": "ResponseData<SurveillanceOperationsDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/surveillance/operations/{job}/run-now",
+          "summary": "Asks the surveillance scan (`scan`) or the audit anchor publisher (`anchors`) to run within ~30 s.",
+          "access": "permission",
+          "permission": "platform.engine.manage",
+          "parameters": [
+            {
+              "name": "job",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<OperationsJobStatusDto>"
+        }
+      ]
+    },
+    {
       "name": "Synthetic analyser audit",
       "endpoints": [
         {
@@ -16058,6 +16816,16 @@
               "type": "string"
             }
           ]
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/paystack/confirm",
+          "summary": "Back from Paystack's payment page: `{reference}` → `{state, message}` (`active`, `processing`, `not_paid`, `failed`). Applies the payment at once (verified at Paystack); only the organisation's own references.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "parameters": [],
+          "body": "ConfirmPaystackCheckoutCommand",
+          "response": "ResponseData<PaystackConfirmDto>"
         },
         {
           "method": "POST",
@@ -16884,6 +17652,23 @@
             }
           ],
           "response": "ResponseData<string>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/trading-account/{id}/broker-cash-flows",
+          "summary": "The EA reports the broker's balance deals (deposits, withdrawals, demo balance resets, credits, charges, corrections, bonuses) so performance takes them out of the return. Idempotent per deal ticket.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "ReportBrokerCashFlowsCommand",
+          "response": "ResponseData<ReportBrokerCashFlowsResult>"
         },
         {
           "method": "PUT",
