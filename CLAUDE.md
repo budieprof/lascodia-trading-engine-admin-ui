@@ -86,14 +86,21 @@ These are not preferences; violating them breaks something real.
 - **A green build proves nothing about whether a page renders.** Drive it in a browser
   (see **Verifying in a browser**).
 
-### Deliberately not done
+### Content-Security-Policy and HSTS
 
-CSP is **not** copied from `docker/nginx.conf` into the Caddy config. That container has never
-served this app in production, so the policy is unproven, and one missed directive fails closed on
-a single page — silently, and only for whoever opens it. Needs a report-only pass first.
+The CSP is ENFORCED at the edge (installed Caddyfile, verified on every sidebar route 2026-09-19). Since the gaps program
+security review (2026-11-01) the production build emits **no inline script** (`angular.json` production
+`optimization.styles.inlineCritical: false` — the critical-CSS inliner's one-line `<script>` that flipped
+`media="print"` stylesheets was the only one), so `script-src` can drop `'unsafe-inline'`: the engine repo's
+`deploy/caddy/Caddyfile.security.diff` does that and raises HSTS to one year + includeSubDomains. Order matters: publish
+this release FIRST, then apply the Caddy diff — a bundle with the inline script under the new policy keeps its
+stylesheets on `media="print"` (an unstyled console). Residue: `style-src 'unsafe-inline'` (Angular component styles).
+Never add an inline `<script>` or `on*=` handler to `src/index.html`. `docker/security-headers.conf` carries the same
+policy for the container image and is included in every nginx location (nginx drops inherited `add_header`s in a block
+that sets its own).
 
-The `Dockerfile` + `docker/nginx.conf` path still works and is kept current, but it is not how
-this deployment runs.
+The `Dockerfile` + `docker/nginx.conf` path (nginx-unprivileged, uid 101, **port 8080**) still works and is kept
+current, but it is not how this deployment runs.
 
 ## Development
 
