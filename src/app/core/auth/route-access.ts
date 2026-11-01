@@ -114,6 +114,8 @@ export const ROUTE_ACCESS = {
   'dealing/clients': rule(P.DealingRead),
   sentiment: rule(P.MarketdataRead),
   performance: rule(P.StrategiesRead),
+  // Gaps program (risk vertical): GET risk/portfolio/overview; writes inside need risk.manage / config keys.
+  risk: rule(P.RiskRead),
   'drawdown-recovery': rule(P.RiskManage), // A4.1: GET drawdown-recovery/latest, /by-account
   martingale: rule(P.AccessOperator),
   'drift-report': rule(P.MlRead),

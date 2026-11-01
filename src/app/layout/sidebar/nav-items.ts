@@ -70,6 +70,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'Fee Schedules', route: '/reference/fee-schedules', icon: navIcon.Ticket },
       { label: 'Margin Requirements', route: '/reference/margin-requirements', icon: navIcon.Scale },
       { label: 'Brokers', route: '/brokers', icon: navIcon.Handshake },
+      { label: 'Portfolio Risk', route: '/risk', icon: navIcon.Gauge },
       { label: 'Risk Profiles', route: '/risk-profiles', icon: navIcon.ShieldCheck },
       { label: 'Spread-Reactive', route: '/spread-reactive', icon: navIcon.Activity },
       { label: 'Currency Pairs', route: '/currency-pairs', icon: navIcon.Coins },
