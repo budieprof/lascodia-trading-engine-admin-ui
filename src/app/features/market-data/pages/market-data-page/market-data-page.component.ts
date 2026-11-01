@@ -166,53 +166,61 @@ interface PriceEntry extends LivePriceDto {
             </div>
           </div>
 
+          <!-- Six tiles in two even rows of three beside the sessions card, so every figure
+               ("1d 2h", "10 / 16") fits on one line instead of in tall narrow tiles. -->
           <div class="overview-kpis">
             <app-metric-card
               label="Watched pairs"
               [value]="livePrices().length"
               format="number"
               dotColor="#0071E3"
+              caption="on the live board"
             />
             <app-metric-card
               label="Median spread"
               [value]="medianSpread()"
               format="number"
               dotColor="#FF9500"
+              [caption]="medianSpread() === null ? 'no live spreads yet' : 'pips · live quotes'"
             />
-            <app-metric-card
-              label="Tightest"
-              [value]="tightestSpread()"
-              format="number"
-              dotColor="#34C759"
-            />
-            <app-metric-card
-              label="Widest"
-              [value]="widestSpread()"
-              format="number"
-              dotColor="#FF3B30"
-            />
-            <!-- The label promised two numbers and the card showed one (the up count). -->
             <app-metric-card
               label="Up / Down today"
               [displayValue]="upDownLabel()"
               [dotColor]="upPairsCount() >= downPairsCount() ? '#34C759' : '#FF3B30'"
+              caption="pairs vs the prior close"
+            />
+            <app-metric-card
+              label="Tightest spread"
+              [value]="tightestSpread()"
+              format="number"
+              dotColor="#34C759"
+              [caption]="tightestSpread() === null ? 'no live spreads yet' : 'pips'"
+            />
+            <app-metric-card
+              label="Widest spread"
+              [value]="widestSpread()"
+              format="number"
+              dotColor="#FF3B30"
+              [caption]="widestSpread() === null ? 'no live spreads yet' : 'pips'"
             />
             <!-- Local tile: the shared card only takes a number, and
-                 "93,551" seconds is unreadable — this renders "1d 2h". -->
-            <div class="kpi-tile">
-              <div class="kpi-tile-head">
-                <span
-                  class="dot"
-                  [style.background]="
-                    feedAgeSec() !== null && feedAgeSec()! > 60 ? '#FF3B30' : '#34C759'
-                  "
-                ></span>
-                <span class="kpi-tile-label">Feed age</span>
+                 "93,551" seconds is unreadable — this renders "1d 2h". Styled
+                 like app-metric-card (tone stripe, uppercase label, caption). -->
+            <div
+              class="kpi-tile"
+              [style.--tone]="feedAgeSec() !== null && feedAgeSec()! > 60 ? '#FF3B30' : '#34C759'"
+            >
+              <span class="kpi-tile-label">Feed age</span>
+              <div class="kpi-tile-body">
+                <div class="kpi-tile-value">{{ formatAge(feedAgeSec()) }}</div>
+                <div class="kpi-tile-sub">
+                  @if (lastLiveTickLabel(); as t) {
+                    last tick {{ t }} UTC
+                  } @else {
+                    no tick yet
+                  }
+                </div>
               </div>
-              <div class="kpi-tile-value">{{ formatAge(feedAgeSec()) }}</div>
-              @if (lastLiveTickLabel(); as t) {
-                <div class="kpi-tile-sub">last tick {{ t }} UTC</div>
-              }
             </div>
           </div>
         </div>

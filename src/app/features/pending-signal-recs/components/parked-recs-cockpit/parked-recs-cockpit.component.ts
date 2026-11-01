@@ -88,38 +88,61 @@ interface AuditEntry {
 
     <!-- Analysis KPI strip — funnel breakdown across all states (symbol-scoped). -->
     <div class="kpi-grid" [class.loading]="metricsLoading() && mTotal() === 0">
-      <app-metric-card label="Total recs" [value]="mTotal()" format="number" dotColor="#0071E3" />
+      <app-metric-card
+        label="Total recs"
+        [value]="mTotal()"
+        format="number"
+        dotColor="#0071E3"
+        caption="every state"
+      />
       <app-metric-card
         label="Active (parked / reval)"
         [value]="mActive()"
         format="number"
         [dotColor]="(mActive() ?? 0) > 0 ? '#FF9500' : '#34C759'"
+        caption="waiting for the entry price"
       />
       <app-metric-card
         label="Approved → signal"
         [value]="mApproved()"
         format="number"
         dotColor="#34C759"
+        caption="promoted to a trade signal"
       />
-      <app-metric-card label="Rejected" [value]="mRejected()" format="number" dotColor="#FF3B30" />
-      <app-metric-card label="Expired" [value]="mExpired()" format="number" dotColor="#8E8E93" />
+      <app-metric-card
+        label="Rejected"
+        [value]="mRejected()"
+        format="number"
+        dotColor="#FF3B30"
+        caption="failed re-validation"
+      />
+      <app-metric-card
+        label="Expired"
+        [value]="mExpired()"
+        format="number"
+        dotColor="#FF9500"
+        caption="park window ran out"
+      />
       <app-metric-card
         label="Conversion rate"
         [value]="mConversionPct()"
         format="percent"
         dotColor="#34C759"
+        caption="approved ÷ finished recs"
       />
       <app-metric-card
         [label]="sampleIsPartial() ? 'Avg confidence (newest)' : 'Avg confidence'"
         [value]="mAvgConfidence()"
         format="percent"
         dotColor="#0071E3"
+        caption="at generation"
       />
       <app-metric-card
         [label]="sampleIsPartial() ? 'Sibling-validated (newest)' : 'Sibling-validated'"
         [value]="mSiblingValidated()"
         format="number"
         dotColor="#AF52DE"
+        caption="re-check skips the LLM"
       />
     </div>
     @if (sampleIsPartial()) {
@@ -129,44 +152,44 @@ interface AuditEntry {
       </p>
     }
 
+    <!-- Toolbar: state toggle-chips (multi-select; the checkbox inside each chip is the real
+         control) · symbol · sibling toggle · actions. -->
     <section class="filters">
-      <div class="filter-group">
-        <label class="filter-label">State</label>
-        <div class="state-chips">
-          @for (s of allStates; track s) {
-            <label class="chip" [class.on]="selectedStates().has(s)">
-              <input
-                type="checkbox"
-                [checked]="selectedStates().has(s)"
-                (change)="toggleState(s, $any($event.target).checked)"
-              />
-              <span>{{ s }}</span>
-            </label>
-          }
-        </div>
+      <span class="filter-label">State</span>
+      <div class="state-chips" role="group" aria-label="State">
+        @for (s of allStates; track s) {
+          <label class="chip" [class.on]="selectedStates().has(s)">
+            <input
+              type="checkbox"
+              [checked]="selectedStates().has(s)"
+              (change)="toggleState(s, $any($event.target).checked)"
+            />
+            <span>{{ s }}</span>
+          </label>
+        }
       </div>
-      <div class="filter-group symbol-group">
-        <label class="filter-label">Symbol</label>
+      <label class="symbol-box">
+        <span class="sr-only">Symbol</span>
         <input
           type="text"
-          placeholder="e.g. EURUSD"
+          placeholder="Symbol"
           [value]="symbolFilter()"
           (input)="symbolFilter.set($any($event.target).value)"
           (keydown.enter)="applyFilters()"
           class="symbol-input"
         />
-      </div>
-      <div class="filter-group toggles">
-        <label class="inline-check">
-          <input
-            type="checkbox"
-            [checked]="siblingValidatedOnly()"
-            (change)="siblingValidatedOnly.set($any($event.target).checked)"
-          />
-          <span>Sibling-validated only</span>
-        </label>
+      </label>
+      <label class="toggle" [class.on]="siblingValidatedOnly()">
+        <input
+          type="checkbox"
+          [checked]="siblingValidatedOnly()"
+          (change)="siblingValidatedOnly.set($any($event.target).checked)"
+        />
+        <span>Sibling-validated only</span>
+      </label>
+      <div class="actions">
         <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="loading()">
-          {{ loading() ? 'Refreshing…' : 'Refresh' }}
+          {{ loading() ? 'Refreshing…' : '↻ Refresh' }}
         </button>
         <a
           class="btn btn-secondary"
@@ -200,18 +223,15 @@ interface AuditEntry {
               <th>Symbol</th>
               <th>Dir</th>
               <th class="num">Entry</th>
-              <th class="num">SL</th>
-              <th class="num">TP</th>
-              <th class="num">ATR</th>
-              <th class="num">Conf</th>
+              <th class="num" title="Stop loss / take profit">SL / TP</th>
+              <th class="num" title="ATR at generation">ATR</th>
+              <th class="num" title="Confidence at generation">Conf</th>
               <th>State</th>
-              <th>Validation</th>
-              <th>Parked</th>
-              <th>Park exp.</th>
-              <th>Last reval</th>
-              <th class="num">Attempts</th>
-              <th>Terminal</th>
-              <th>Resulting signal</th>
+              <th title="Sibling pre-validated, or re-validated by the LLM at touch">Validation</th>
+              <th title="When the rec was parked, and when the park expires">Parked · expires</th>
+              <th title="Last re-validation attempt, and how many attempts so far">Last reval</th>
+              <th>Terminal reason</th>
+              <th class="num" title="Resulting trade signal">Signal</th>
               <th></th>
             </tr>
           </thead>
@@ -249,11 +269,13 @@ interface AuditEntry {
                   {{ r.direction }}
                 </td>
                 <td class="num">{{ r.recommendedEntryPrice | number: '1.0-5' }}</td>
-                <td class="num">
-                  {{ r.stopLoss === null ? '—' : (r.stopLoss | number: '1.0-5') }}
-                </td>
-                <td class="num">
-                  {{ r.takeProfit === null ? '—' : (r.takeProfit | number: '1.0-5') }}
+                <td class="num two">
+                  <span class="loss-t">{{
+                    r.stopLoss === null ? '—' : (r.stopLoss | number: '1.0-5')
+                  }}</span>
+                  <span class="profit-t">{{
+                    r.takeProfit === null ? '—' : (r.takeProfit | number: '1.0-5')
+                  }}</span>
                 </td>
                 <td class="num">{{ r.atrAtGeneration | number: '1.0-5' }}</td>
                 <!-- Same unit as the "Avg confidence" tile (percent), so a
@@ -285,16 +307,20 @@ interface AuditEntry {
                     >
                   }
                 </td>
-                <td class="ts">{{ r.createdAt | date: 'MMM d HH:mm' }}</td>
-                <td class="ts">{{ r.parkExpiresAt | date: 'MMM d HH:mm' }}</td>
-                <td class="ts">
-                  {{
+                <td class="ts two">
+                  <span>{{ r.createdAt | date: 'MMM d HH:mm' }}</span>
+                  <span class="sub">→ {{ r.parkExpiresAt | date: 'MMM d HH:mm' }}</span>
+                </td>
+                <td class="ts two" [title]="r.revalAttempts + ' re-validation attempt(s)'">
+                  <span>{{
                     r.lastRevalAttemptAt === null
                       ? '—'
                       : (r.lastRevalAttemptAt | date: 'MMM d HH:mm')
-                  }}
+                  }}</span>
+                  <span class="sub"
+                    >{{ r.revalAttempts }} attempt{{ r.revalAttempts === 1 ? '' : 's' }}</span
+                  >
                 </td>
-                <td class="num">{{ r.revalAttempts }}</td>
                 <td class="terminal" [title]="r.terminalReason ?? ''">
                   {{ r.terminalReason ?? '—' }}
                 </td>
@@ -326,7 +352,7 @@ interface AuditEntry {
               </tr>
               @if (isExpanded(r.id)) {
                 <tr class="detail-row">
-                  <td colspan="18">
+                  <td colspan="15">
                     <div class="audit-panel">
                       <!-- Lifecycle / context summary -->
                       <dl class="kv-grid">
@@ -541,571 +567,7 @@ interface AuditEntry {
       (actionConfirmed)="onChartCancelConfirmed()"
     />
   `,
-  styles: [
-    `
-      .auto-note {
-        margin: 0 0 0.5rem;
-        font-size: 0.8125rem;
-        color: var(--text-secondary);
-      }
-      :host {
-        display: block;
-      }
-      /* Global conversion switch bar */
-      .conv-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-4, 16px);
-        padding: 10px 14px;
-        margin-bottom: var(--space-3, 12px);
-        border: 1px solid var(--border);
-        border-left: 3px solid #34c759;
-        border-radius: var(--radius-md, 8px);
-        background: var(--bg-secondary);
-      }
-      .conv-bar.conv-off {
-        border-left-color: #ff9500;
-        background: rgba(255, 149, 0, 0.06);
-      }
-      .conv-text {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-      }
-      .conv-title {
-        font-weight: var(--font-semibold, 600);
-        font-size: var(--text-sm, 13px);
-        color: var(--text-primary);
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-      }
-      .conv-scope {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        padding: 1px 6px;
-        border-radius: var(--radius-full, 999px);
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .conv-desc {
-        font-size: var(--text-xs, 12px);
-        color: var(--text-secondary);
-      }
-      .conv-switch {
-        flex: none;
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        font-size: var(--text-sm, 13px);
-        color: var(--text-primary);
-        cursor: pointer;
-        user-select: none;
-      }
-      .conv-switch-label {
-        font-size: var(--text-xs, 12px);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      /* Native checkbox restyled as a pill switch so the control reads as
-         On/Off at a glance instead of "checkbox + adjective". */
-      .conv-switch input {
-        appearance: none;
-        width: 34px;
-        height: 20px;
-        margin: 0;
-        border-radius: var(--radius-full, 999px);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        position: relative;
-        cursor: pointer;
-        transition: background 120ms ease;
-      }
-      .conv-switch input::after {
-        content: '';
-        position: absolute;
-        top: 2px;
-        left: 2px;
-        width: 14px;
-        height: 14px;
-        border-radius: 50%;
-        background: var(--bg-primary);
-        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-        transition: transform 120ms ease;
-      }
-      .conv-switch input:checked {
-        background: var(--profit);
-        border-color: var(--profit);
-      }
-      .conv-switch input:checked::after {
-        transform: translateX(14px);
-      }
-      .conv-switch input:disabled {
-        cursor: not-allowed;
-      }
-      .conv-state {
-        min-width: 2.2em;
-        font-weight: var(--font-semibold, 600);
-        color: var(--text-secondary);
-      }
-      .conv-state.on {
-        color: var(--profit);
-      }
-      .conv-switch.busy {
-        opacity: 0.6;
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-      .small {
-        font-size: var(--text-xs, 12px);
-      }
-      .bad {
-        color: #d70015;
-      }
-
-      /* Analysis KPI strip — fixed columns (like the Signals tab) so the 8
-         cards stretch to fill the page width evenly instead of leaving a
-         ragged trailing gap. Collapses to 4 then 2 columns as width shrinks. */
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(8, minmax(0, 1fr));
-        gap: var(--space-3, 12px);
-        margin-bottom: var(--space-4, 16px);
-      }
-      @media (max-width: 1500px) {
-        .kpi-grid {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .kpi-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .kpi-grid.loading {
-        opacity: 0.55;
-      }
-      .sample-note {
-        margin: 0;
-      }
-
-      /* Pagination bar */
-      .pager-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-4, 16px);
-        flex-wrap: wrap;
-        padding: 10px 4px 2px;
-        margin-top: 6px;
-        border-top: 1px solid var(--border);
-        font-size: var(--text-xs, 12px);
-        color: var(--text-secondary);
-      }
-      .pager-info strong {
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-      .pager-size {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .pager-size select {
-        height: 26px;
-        padding: 0 6px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm, 6px);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-xs, 12px);
-      }
-      .pager-nav {
-        display: flex;
-        align-items: center;
-        gap: 4px;
-      }
-      .pager-page {
-        min-width: 96px;
-        text-align: center;
-        font-variant-numeric: tabular-nums;
-      }
-      .pager-btn {
-        min-width: 28px;
-        height: 26px;
-        padding: 0 8px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm, 6px);
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-size: 14px;
-        line-height: 1;
-      }
-      .pager-btn:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .pager-btn:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
-      }
-      .link {
-        color: var(--accent);
-        text-decoration: none;
-      }
-      .link:hover {
-        text-decoration: underline;
-      }
-      /* Filter bar — matches the soft secondary surface used by other
-         operator-config cards (e.g. trading-window panel) so it reads as
-         part of the page in both themes. */
-      .filters {
-        display: flex;
-        gap: var(--space-4);
-        align-items: flex-end;
-        flex-wrap: wrap;
-        margin-bottom: var(--space-3);
-        padding: var(--space-3);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-      }
-      .filter-group {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .filter-group.toggles {
-        flex-direction: row;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .filter-label {
-        font-size: var(--text-xs, 12px);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .state-chips {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 10px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        font-size: var(--text-xs, 12px);
-        color: var(--text-secondary);
-        user-select: none;
-      }
-      .chip input {
-        accent-color: var(--accent);
-      }
-      .chip.on {
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--accent);
-        border-color: rgba(0, 113, 227, 0.25);
-      }
-      .inline-check {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--text-sm, 13px);
-        color: var(--text-primary);
-        cursor: pointer;
-      }
-      .symbol-group .symbol-input {
-        width: 12rem;
-        padding: 6px 10px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        color: var(--text-primary);
-        border-radius: var(--radius-sm);
-        font-size: var(--text-sm, 13px);
-      }
-      .table-wrap {
-        overflow-x: auto;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-      }
-      /* The empty / error line used to sit flush against the box's left border
-         at body size; inset and centred like the other empty states. */
-      .table-wrap > p {
-        margin: 0;
-        padding: var(--space-6) var(--space-5);
-        text-align: center;
-        font-size: var(--text-sm);
-      }
-      table.grid {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-sm, 13px);
-      }
-      table.grid th,
-      table.grid td {
-        padding: 8px 10px;
-        border-bottom: 1px solid var(--border);
-        text-align: left;
-        white-space: nowrap;
-      }
-      table.grid th {
-        font-weight: var(--font-semibold, 600);
-        font-size: var(--text-xs, 12px);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        background: var(--bg-secondary);
-        position: sticky;
-        top: 0;
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .ts {
-        font-variant-numeric: tabular-nums;
-      }
-      tr.dim {
-        opacity: 0.55;
-      }
-      .dir-buy {
-        color: #248a3d;
-        font-weight: var(--font-semibold, 600);
-      }
-      .dir-sell {
-        color: #d70015;
-        font-weight: var(--font-semibold, 600);
-      }
-      .state {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold, 600);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .state-parked {
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--accent);
-      }
-      .state-revalidating {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-      .state-approved {
-        background: rgba(52, 199, 89, 0.16);
-        color: #248a3d;
-      }
-      .state-rejected,
-      .state-expired,
-      .state-canceled {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .validation .badge {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold, 600);
-        letter-spacing: 0.04em;
-      }
-      .badge.sibling {
-        background: rgba(52, 199, 89, 0.16);
-        color: #248a3d;
-      }
-      .badge.llm {
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .terminal {
-        max-width: 14rem;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .btn {
-        padding: 6px 14px;
-        font-size: var(--text-xs, 12px);
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-family: inherit;
-        font-weight: var(--font-semibold, 600);
-        cursor: pointer;
-      }
-      .btn[disabled] {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-      .btn-secondary:hover:not([disabled]) {
-        background: var(--bg-tertiary);
-      }
-      .btn-mini {
-        padding: 3px 8px;
-        font-size: 11px;
-      }
-      .btn-danger {
-        border-color: rgba(255, 59, 48, 0.4);
-        color: #d70015;
-      }
-      .btn-danger:hover:not([disabled]) {
-        background: rgba(255, 59, 48, 0.08);
-      }
-      code {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 0.92em;
-      }
-      /* expand affordance + audit drilldown */
-      th.expand-col,
-      td.expand-cell {
-        width: 28px;
-        padding: 0;
-        text-align: center;
-      }
-      .expand-btn {
-        background: transparent;
-        border: none;
-        color: var(--text-tertiary);
-        padding: 4px 6px;
-        cursor: pointer;
-        font-size: var(--text-sm, 13px);
-        line-height: 1;
-        border-radius: var(--radius-sm);
-      }
-      .expand-btn:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .expand-btn .chev {
-        display: inline-block;
-        transition: transform 0.12s ease;
-      }
-      .expand-btn.on .chev {
-        transform: rotate(90deg);
-        color: var(--accent);
-      }
-      tr.expanded {
-        background: var(--bg-tertiary);
-      }
-      tr.detail-row td {
-        padding: 0;
-        background: var(--bg-tertiary);
-        border-bottom: 1px solid var(--border);
-      }
-      .audit-panel {
-        padding: 12px 16px 14px 44px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-      }
-      .kv-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 6px 24px;
-        margin: 0;
-        padding: 0;
-      }
-      .kv-grid > div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .kv-grid dt {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      .kv-grid dd {
-        margin: 0;
-        font-size: var(--text-sm, 13px);
-        color: var(--text-primary);
-      }
-      .audit-header {
-        font-size: var(--text-xs, 12px);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold, 600);
-      }
-      table.audit-grid {
-        width: auto;
-        max-width: 100%;
-        border-collapse: collapse;
-        font-size: var(--text-xs, 12px);
-      }
-      table.audit-grid th,
-      table.audit-grid td {
-        padding: 5px 10px;
-        border-bottom: 1px solid var(--border);
-        text-align: left;
-        white-space: nowrap;
-        color: var(--text-primary);
-      }
-      table.audit-grid th {
-        background: transparent;
-        color: var(--text-tertiary);
-        font-size: 10.5px;
-        position: static;
-      }
-      table.audit-grid .reason {
-        max-width: 36rem;
-        white-space: normal;
-      }
-      .decision-pill {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold, 600);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-      }
-      .decision-approved,
-      .decision-approvedbysiblingrec {
-        background: rgba(52, 199, 89, 0.16);
-        color: #248a3d;
-      }
-      .decision-rejected {
-        background: rgba(255, 59, 48, 0.12);
-        color: #d70015;
-      }
-      .decision-retryparked {
-        background: rgba(255, 149, 0, 0.14);
-        color: #c93400;
-      }
-
-      /* Row click affordance for the chart modal. */
-      tr.row-clickable[role='button'] {
-        cursor: pointer;
-      }
-      tr.row-clickable[role='button']:hover > td {
-        background: var(--bg-tertiary);
-      }
-    `,
-  ],
+  styleUrl: './parked-recs-cockpit.component.scss',
 })
 export class ParkedRecsCockpitComponent implements OnInit, OnDestroy {
   private readonly svc = inject(PendingSignalRecsService);

@@ -50,12 +50,15 @@ const EMPTY: LiveExposureDto = {
         <div class="panel-title">
           <h3>Live signal book</h3>
           <span
-            class="muted small"
+            class="title-meta"
             title="Walk status, not queue status: 'in play' = entry triggered and neither SL nor TP hit yet; 'armed' = waiting for the entry to trigger. Independent of the Pending / Approved counts below."
           >
-            {{ book().openCount }} in play · {{ book().pendingCount }} armed
+            <span class="count-chip" [class.live]="book().openCount > 0"
+              >{{ book().openCount }} in play</span
+            >
+            <span class="count-chip">{{ book().pendingCount }} armed</span>
             @if (book().asOfUtc) {
-              · updated {{ book().asOfUtc | relativeTime }}
+              <span class="muted small">updated {{ book().asOfUtc | relativeTime }}</span>
             }
           </span>
         </div>
@@ -71,93 +74,95 @@ const EMPTY: LiveExposureDto = {
 
       <ui-progress-bar [active]="resource.loading()" />
 
-      @if (loading()) {
-        <app-card-skeleton [lines]="4" />
-      } @else if (failed()) {
-        <app-error-state
-          title="Could not load the signal book"
-          message="The exposure walk failed — the book is unknown, not flat."
-          (retry)="resource.refresh()"
-        />
-      } @else if (currencies().length === 0) {
-        <app-empty-state
-          title="Book is flat"
-          description="No in-play or armed signals — no net currency exposure right now."
-        />
-      } @else {
-        <p class="hint muted small">
-          Net exposure per currency across not-yet-resolved signals. Correlated same-direction legs
-          are ONE concentrated bet — a bar flagged CROWDED is where a fresh same-side signal adds
-          risk rather than a new idea.
-        </p>
-        <ul class="ccy-list">
-          @for (c of currencies(); track c.currency) {
-            <li class="ccy-row" [class.crowded]="abs(c.net) >= crowded()">
-              <span class="ccy">{{ c.currency }}</span>
-              <span
-                class="net"
-                [class.long]="c.net > 0"
-                [class.short]="c.net < 0"
-                [class.flat]="c.net === 0"
-              >
-                {{ c.net > 0 ? '+' : '' }}{{ c.net }}
-              </span>
-              <span class="bar-track" aria-hidden="true">
+      <div class="panel-body">
+        @if (loading()) {
+          <app-card-skeleton [lines]="4" />
+        } @else if (failed()) {
+          <app-error-state
+            title="Could not load the signal book"
+            message="The exposure walk failed — the book is unknown, not flat."
+            (retry)="resource.refresh()"
+          />
+        } @else if (currencies().length === 0) {
+          <app-empty-state
+            title="Book is flat"
+            description="No in-play or armed signals — no net currency exposure right now."
+          />
+        } @else {
+          <p class="hint muted small">
+            Net exposure per currency across not-yet-resolved signals. Correlated same-direction
+            legs are ONE concentrated bet — a bar flagged CROWDED is where a fresh same-side signal
+            adds risk rather than a new idea.
+          </p>
+          <ul class="ccy-list">
+            @for (c of currencies(); track c.currency) {
+              <li class="ccy-row" [class.crowded]="abs(c.net) >= crowded()">
+                <span class="ccy">{{ c.currency }}</span>
                 <span
-                  class="bar"
+                  class="net"
                   [class.long]="c.net > 0"
                   [class.short]="c.net < 0"
-                  [style.width.%]="barWidth(c.net)"
-                ></span>
-              </span>
-              <span class="legs muted small">
-                {{ c.longCount }} long / {{ c.shortCount }} short
-              </span>
-              @if (abs(c.net) >= crowded()) {
-                <span class="badge-crowded">CROWDED</span>
-              }
-            </li>
-          }
-        </ul>
-
-        @if (book().signals.length > 0) {
-          <details class="signals">
-            <summary class="muted small">{{ book().signals.length }} in-play signal(s)</summary>
-            <table class="sig-table">
-              <thead>
-                <tr>
-                  <th>Signal</th>
-                  <th>Symbol</th>
-                  <th>Dir</th>
-                  <th>Status</th>
-                  <th class="num">Conf</th>
-                  <th class="num">Walk pips</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of book().signals; track s.signalId) {
-                  <tr>
-                    <td>
-                      <a [routerLink]="['/trade-signals', s.signalId]">#{{ s.signalId }}</a>
-                    </td>
-                    <td>{{ s.symbol }}</td>
-                    <td [class.buy]="s.direction === 'Buy'" [class.sell]="s.direction === 'Sell'">
-                      {{ s.direction }}
-                    </td>
-                    <td>
-                      <span class="pill" [class.open]="s.status === 'Open'">{{ s.status }}</span>
-                    </td>
-                    <td class="num">{{ s.confidence | number: '1.2-2' }}</td>
-                    <td class="num" [class.pos]="s.walkPipPnL > 0" [class.neg]="s.walkPipPnL < 0">
-                      {{ s.walkPipPnL > 0 ? '+' : '' }}{{ s.walkPipPnL | number: '1.1-1' }}
-                    </td>
-                  </tr>
+                  [class.flat]="c.net === 0"
+                >
+                  {{ c.net > 0 ? '+' : '' }}{{ c.net }}
+                </span>
+                <span class="bar-track" aria-hidden="true">
+                  <span
+                    class="bar"
+                    [class.long]="c.net > 0"
+                    [class.short]="c.net < 0"
+                    [style.width.%]="barWidth(c.net)"
+                  ></span>
+                </span>
+                <span class="legs muted small">
+                  {{ c.longCount }} long / {{ c.shortCount }} short
+                </span>
+                @if (abs(c.net) >= crowded()) {
+                  <span class="badge-crowded">CROWDED</span>
                 }
-              </tbody>
-            </table>
-          </details>
+              </li>
+            }
+          </ul>
+
+          @if (book().signals.length > 0) {
+            <details class="signals">
+              <summary class="muted small">{{ book().signals.length }} in-play signal(s)</summary>
+              <table class="sig-table">
+                <thead>
+                  <tr>
+                    <th>Signal</th>
+                    <th>Symbol</th>
+                    <th>Dir</th>
+                    <th>Status</th>
+                    <th class="num">Conf</th>
+                    <th class="num">Walk pips</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (s of book().signals; track s.signalId) {
+                    <tr>
+                      <td>
+                        <a [routerLink]="['/trade-signals', s.signalId]">#{{ s.signalId }}</a>
+                      </td>
+                      <td>{{ s.symbol }}</td>
+                      <td [class.buy]="s.direction === 'Buy'" [class.sell]="s.direction === 'Sell'">
+                        {{ s.direction }}
+                      </td>
+                      <td>
+                        <span class="pill" [class.open]="s.status === 'Open'">{{ s.status }}</span>
+                      </td>
+                      <td class="num">{{ s.confidence | number: '1.2-2' }}</td>
+                      <td class="num" [class.pos]="s.walkPipPnL > 0" [class.neg]="s.walkPipPnL < 0">
+                        {{ s.walkPipPnL > 0 ? '+' : '' }}{{ s.walkPipPnL | number: '1.1-1' }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </details>
+          }
         }
-      }
+      </div>
     </section>
   `,
   styles: [
@@ -166,25 +171,50 @@ const EMPTY: LiveExposureDto = {
          \`var(--border-color, …)\` names do not exist in _tokens.scss, so the
          white fallbacks won and the card rendered white-on-white in the
          dark theme. */
+      /* Board chrome (drift-report family): head strip over a padded body. */
       .panel {
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-4);
         background: var(--bg-secondary);
         color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
       }
       .panel-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: var(--space-3);
-        margin-bottom: var(--space-1);
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .panel-body {
+        padding: var(--space-3) var(--space-4) var(--space-4);
       }
       .panel-title {
         display: flex;
-        align-items: baseline;
+        align-items: center;
+        gap: var(--space-2) var(--space-3);
+        flex-wrap: wrap;
+      }
+      .title-meta {
+        display: inline-flex;
+        align-items: center;
         gap: var(--space-2);
         flex-wrap: wrap;
+      }
+      .count-chip {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+      }
+      .count-chip.live {
+        color: var(--profit);
+        background: rgba(52, 199, 89, 0.14);
       }
       .panel-title h3 {
         margin: 0;
@@ -199,7 +229,7 @@ const EMPTY: LiveExposureDto = {
         font-size: var(--text-xs);
       }
       .hint {
-        margin: var(--space-1) 0 var(--space-3);
+        margin: 0 0 var(--space-3);
         color: var(--text-secondary);
       }
       .ccy-list {
@@ -292,15 +322,15 @@ const EMPTY: LiveExposureDto = {
       .sig-table th,
       .sig-table td {
         text-align: left;
-        padding: var(--space-1) var(--space-2);
+        padding: 7px var(--space-2);
         border-bottom: 1px solid var(--border);
       }
       .sig-table th {
         color: var(--text-tertiary);
-        font-weight: var(--font-medium);
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        font-size: 10px;
+        letter-spacing: 0.05em;
+        font-size: 10.5px;
       }
       .sig-table .num {
         text-align: right;

@@ -7,6 +7,7 @@ import { ApiService } from '@core/api/api.service';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
@@ -41,8 +42,135 @@ interface DeclarationDraft {
   selector: 'app-md-declarations-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent],
+  imports: [FormsModule, RouterLink, PageHeaderComponent, MetricCardComponent],
   styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
+  // Family look (boards, uppercase headers, ghost row buttons, status dots) layered on iam-page.
+  styles: [
+    `
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      @media (max-width: 900px) {
+        .kpis {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .card {
+        box-shadow: var(--shadow-sm);
+      }
+      .card-head h3 {
+        font-size: var(--text-base);
+      }
+      .card-head .count {
+        font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
+        font-variant-numeric: tabular-nums;
+      }
+      .card-head .hint {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .head-link {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .head-link:hover {
+        text-decoration: underline;
+      }
+      table.grid th {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        background: var(--bg-primary);
+        padding-top: 9px;
+        padding-bottom: 9px;
+      }
+      table.grid td {
+        padding-top: 10px;
+        padding-bottom: 10px;
+      }
+      table.grid tbody tr:hover td {
+        background: var(--bg-primary);
+      }
+      table.grid .sub {
+        color: var(--text-tertiary);
+        margin-top: 2px;
+      }
+      table.grid .strong {
+        font-weight: var(--font-semibold);
+      }
+      table.grid .chip {
+        margin-left: 6px;
+      }
+      table.grid code {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .dot {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: var(--font-medium);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .dot::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.5;
+      }
+      .dot.ok {
+        color: var(--profit, #1f9d55);
+      }
+      .dot.ok::before {
+        background: var(--profit, #34c759);
+        opacity: 1;
+        box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18);
+      }
+      .btn-ghost {
+        background: transparent;
+        border-color: transparent;
+        color: var(--accent);
+      }
+      .btn-ghost:hover:not(:disabled) {
+        background: rgba(0, 113, 227, 0.08);
+      }
+      .btn-ghost-danger {
+        background: transparent;
+        border-color: transparent;
+        color: var(--loss);
+      }
+      .btn-ghost-danger:hover:not(:disabled) {
+        background: rgba(255, 59, 48, 0.08);
+      }
+      .q-list {
+        list-style: decimal;
+        font-size: var(--text-sm);
+        color: var(--text-primary);
+        line-height: 1.45;
+      }
+      .q-list li::marker {
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+      }
+      .foot-note {
+        margin: 0;
+        line-height: 1.45;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -77,35 +205,48 @@ interface DeclarationDraft {
           } @else if (!m.required) {
             <p class="note">Declarations are not checked at the moment; you can still sign them.</p>
           }
-          <div class="tiles" aria-label="Summary">
-            <div class="tile">
-              <span class="t-label">Exchanges</span>
-              <span class="t-value">{{ m.families.length }}</span>
-              <span class="t-hint">with a professional / non-professional rule</span>
-            </div>
-            <div class="tile" [attr.data-tone]="neededOpen(m) ? 'warn' : null">
-              <span class="t-label">Needed now</span>
-              <span class="t-value">{{ neededOpen(m) }}</span>
-              <span class="t-hint">licences you hold without a current declaration</span>
-            </div>
-            <div class="tile">
-              <span class="t-label">Feeds you can read</span>
-              <span class="t-value">{{ myFeeds().length || '—' }}</span>
-              <span class="t-hint">{{ exchangeFeedCount() }} of them exchange or venue feeds</span>
-            </div>
-            <div class="tile" [attr.data-tone]="liveFeedCount() ? 'ok' : null">
-              <span class="t-label">With a live source</span>
-              <span class="t-value">{{ myFeeds().length ? liveFeedCount() : '—' }}</span>
-              <span class="t-hint">feeds an enabled source delivers now</span>
-            </div>
-            <div class="tile">
-              <span class="t-label">Declared</span>
-              <span class="t-value">{{ declaredCount(m) }}</span>
-              <span class="t-hint">renewed every {{ m.validityDays }} days</span>
-            </div>
+          <div class="kpis" aria-label="Summary">
+            <app-metric-card
+              label="Exchanges"
+              [value]="m.families.length"
+              dotColor="#0071E3"
+              caption="pro / non-pro rule"
+            />
+            <app-metric-card
+              label="Needed now"
+              [value]="neededOpen(m)"
+              [dotColor]="neededOpen(m) ? '#FF9500' : '#34C759'"
+              caption="need a declaration"
+            />
+            <app-metric-card
+              label="Feeds you can read"
+              [value]="myFeeds().length"
+              [displayValue]="myFeeds().length ? null : '—'"
+              dotColor="#5856D6"
+              [caption]="exchangeFeedCount() + ' exchange / venue'"
+            />
+            <app-metric-card
+              label="With a live source"
+              [value]="liveFeedCount()"
+              [displayValue]="myFeeds().length ? null : '—'"
+              [dotColor]="liveFeedCount() ? '#34C759' : '#8E8E93'"
+              caption="source delivers now"
+            />
+            <app-metric-card
+              label="Declared"
+              [value]="declaredCount(m)"
+              dotColor="#8E8E93"
+              [caption]="'renew every ' + m.validityDays + ' d'"
+            />
           </div>
           <section class="card">
-            <header class="card-head"><h3>Exchanges</h3></header>
+            <header class="card-head">
+              <h3>Exchanges</h3>
+              <span class="count">{{ m.families.length }}</span>
+              <span class="hint"
+                >Declare once per exchange; renewed every {{ m.validityDays }} days</span
+              >
+            </header>
             <div class="table-wrap">
               <table class="grid">
                 <thead>
@@ -113,14 +254,14 @@ interface DeclarationDraft {
                     <th>Exchange</th>
                     <th>Your declaration</th>
                     <th>Valid until</th>
-                    <th></th>
+                    <th><span class="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (f of m.families; track f.id) {
                     <tr>
                       <td>
-                        {{ f.name }}
+                        <span class="strong">{{ f.name }}</span>
                         @if (f.needed && !f.declaration?.current) {
                           <span class="chip warn">Needed for your licences</span>
                         }
@@ -164,13 +305,13 @@ interface DeclarationDraft {
                         }
                       </td>
                       <td class="actions">
-                        <button type="button" class="btn btn-secondary btn-sm" (click)="open(f)">
+                        <button type="button" class="btn btn-ghost btn-sm" (click)="open(f)">
                           {{ f.declaration ? 'Re-declare' : 'Declare' }}
                         </button>
                         @if (f.declaration; as d) {
                           <button
                             type="button"
-                            class="btn btn-ghost btn-sm"
+                            class="btn btn-ghost-danger btn-sm"
                             (click)="withdraw(d.id, f.name)"
                             [disabled]="busy()"
                           >
@@ -189,9 +330,11 @@ interface DeclarationDraft {
             <section class="card" aria-label="Your feed access">
               <header class="card-head">
                 <h3>Your organisation's feed access</h3>
-                <span class="chip">{{ myFeeds().length }} feeds</span>
-                <span class="spacer"></span>
-                <a class="small" routerLink="/market-data/instrument-candles">Instrument candles</a>
+                <span class="count">{{ myFeeds().length }} feeds</span>
+                <!-- Kept beside the title, not at the far right where the floating Ask button sits. -->
+                <a class="head-link" routerLink="/market-data/instrument-candles"
+                  >Instrument candles →</a
+                >
               </header>
               <div class="table-wrap">
                 <table class="grid">
@@ -207,13 +350,27 @@ interface DeclarationDraft {
                   <tbody>
                     @for (f of myFeeds(); track f.feedId) {
                       <tr>
-                        <td><code>{{ f.feedId }}</code><span class="sub">{{ f.name }}</span></td>
-                        <td class="small">{{ access(f) }}@if (f.validTo) {<span class="sub">until {{ f.validTo.slice(0, 10) }}</span>}</td>
+                        <td>
+                          <code>{{ f.feedId }}</code
+                          ><span class="sub">{{ f.name }}</span>
+                        </td>
+                        <td class="small">
+                          {{ access(f) }}
+                          @if (f.validTo) {
+                            <span class="sub">until {{ f.validTo.slice(0, 10) }}</span>
+                          }
+                        </td>
                         <td class="small">{{ holding(f.source) }}</td>
                         <td class="small">
-                          <span class="chip" [class.ok]="(live().get(f.feedId) ?? 0) > 0">{{ live().get(f.feedId) ?? 0 }}</span>
+                          <span class="dot" [class.ok]="(live().get(f.feedId) ?? 0) > 0">{{
+                            live().get(f.feedId) ?? 0
+                          }}</span>
                         </td>
-                        <td class="small">{{ f.declarationRequired ? 'Needed for real-time viewing' : 'Not needed' }}</td>
+                        <td class="small" [class.muted]="!f.declarationRequired">
+                          {{
+                            f.declarationRequired ? 'Needed for real-time viewing' : 'Not needed'
+                          }}
+                        </td>
                       </tr>
                     }
                   </tbody>
@@ -226,17 +383,18 @@ interface DeclarationDraft {
             <section class="card" aria-label="What you will be asked">
               <header class="card-head">
                 <h3>What you will be asked</h3>
-                <span class="chip">questionnaire v{{ m.questionnaireVersion }}</span>
+                <span class="count">questionnaire v{{ m.questionnaireVersion }}</span>
               </header>
               <div class="card-body">
-                <ol class="small q-list">
+                <ol class="q-list">
                   @for (q of m.questions; track q.key) {
                     <li>{{ q.text }}</li>
                   }
                 </ol>
                 <p class="note">
-                  Any answer that points to professional use makes you a professional subscriber for that exchange (its
-                  fees are higher). You sign with your typed name; staff may review and reclassify it.
+                  Any answer that points to professional use makes you a professional subscriber for
+                  that exchange (its fees are higher). You sign with your typed name; staff may
+                  review and reclassify it.
                 </p>
               </div>
             </section>
@@ -328,7 +486,7 @@ interface DeclarationDraft {
               </div>
             </section>
           }
-          <p class="muted small">
+          <p class="muted small foot-note">
             Signing records your name, the date and your answers. Staff may review it and reclassify
             it; you will see their note here. Crypto exchanges, FX venues and delayed data need no
             declaration.
@@ -375,8 +533,12 @@ export class MarketDataDeclarationsPageComponent {
     ),
   );
   readonly live = computed(() => liveSourcesPerFeed(this.sourcesRes.value()));
-  readonly exchangeFeedCount = computed(() => this.myFeeds().filter((f) => !!f.exchangeFamily).length);
-  readonly liveFeedCount = computed(() => this.myFeeds().filter((f) => (this.live().get(f.feedId) ?? 0) > 0).length);
+  readonly exchangeFeedCount = computed(
+    () => this.myFeeds().filter((f) => !!f.exchangeFamily).length,
+  );
+  readonly liveFeedCount = computed(
+    () => this.myFeeds().filter((f) => (this.live().get(f.feedId) ?? 0) > 0).length,
+  );
 
   familyFeeds(family: string): string {
     return feedsOfFamily(this.myFeeds(), family)
@@ -389,7 +551,9 @@ export class MarketDataDeclarationsPageComponent {
   }
 
   declaredCount(m: MyDeclarations): number {
-    return m.families.filter((f) => f.declaration?.status === 'Accepted' || f.declaration?.status === 'Submitted').length;
+    return m.families.filter(
+      (f) => f.declaration?.status === 'Accepted' || f.declaration?.status === 'Submitted',
+    ).length;
   }
 
   readonly me = iamResource(

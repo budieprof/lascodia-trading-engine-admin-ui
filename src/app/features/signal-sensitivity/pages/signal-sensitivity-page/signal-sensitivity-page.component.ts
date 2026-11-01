@@ -253,7 +253,7 @@ const WINDOW_OPTIONS = [
             </div>
           </div>
           @if (dataSource() === 'signals') {
-            <div class="field field--wide" role="group" aria-labelledby="ss-sources-label">
+            <div class="field field--span4" role="group" aria-labelledby="ss-sources-label">
               <span id="ss-sources-label">Sources</span>
               <div class="source-chips">
                 @for (s of sourcesAvail; track s) {
@@ -269,7 +269,7 @@ const WINDOW_OPTIONS = [
               </div>
             </div>
           } @else {
-            <div class="field field--wide" role="group" aria-labelledby="ss-recstates-label">
+            <div class="field field--span4" role="group" aria-labelledby="ss-recstates-label">
               <span id="ss-recstates-label"
                 >Rec states <em class="hint-inline">(empty = all)</em></span
               >
@@ -287,6 +287,20 @@ const WINDOW_OPTIONS = [
               </div>
             </div>
           }
+          <!-- Cohort filter, so it sits with the scope controls (the form is one 6-column grid). -->
+          <label class="field">
+            <span>Min confidence</span>
+            <input
+              type="number"
+              step="0.05"
+              min="0"
+              max="100"
+              [(ngModel)]="minConfidence"
+              name="minConfidence"
+              placeholder="0.70 or 70"
+              title="Confidence floor for the cohort. Accepts 0–1 (fraction) or 1–100 (percent): 70 = 0.70."
+            />
+          </label>
         </div>
         <div class="filter-row">
           <label class="field">
@@ -318,19 +332,6 @@ const WINDOW_OPTIONS = [
               [(ngModel)]="sweepInput"
               name="sweepInput"
               placeholder="0.5, 0.75, 1.0, 1.25, 1.5"
-            />
-          </label>
-          <label class="field">
-            <span>Min confidence</span>
-            <input
-              type="number"
-              step="0.05"
-              min="0"
-              max="100"
-              [(ngModel)]="minConfidence"
-              name="minConfidence"
-              placeholder="0.70 or 70"
-              title="Confidence floor for the cohort. Accepts 0–1 (fraction) or 1–100 (percent): 70 = 0.70."
             />
           </label>
           <label class="field">
@@ -903,7 +904,7 @@ const WINDOW_OPTIONS = [
             }
             <p class="heatmap-hint">
               Bars bucketed by signal <code>GeneratedAt</code> (UTC day). Left axis = net P&amp;L $;
-              right axis = count of <em>HitTP</em> wins (blue) and <em>HitSL</em> losses (red).
+              right axis = count of <em>HitTP</em> wins (blue) and <em>HitSL</em> losses (orange).
             </p>
           </section>
         </div>
@@ -1489,34 +1490,48 @@ const WINDOW_OPTIONS = [
       }
     </div>
   `,
+  styleUrl: './signal-sensitivity-page.modals.scss',
   styles: [
     `
       .page {
-        padding: 1rem;
+        padding: var(--space-2) 0;
         display: flex;
         flex-direction: column;
-        gap: 1rem;
+        gap: var(--space-4);
       }
+      /* The form is ONE 6-column grid (rows are display: contents) so every control
+         lines up: scope · cohort · what-if knobs · sizing + Analyse. */
       .filter-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 1.25rem;
-        display: flex;
-        flex-direction: column;
-        gap: 1rem;
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-4);
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: var(--space-3) var(--space-4);
+        align-items: end;
       }
       .filter-row {
-        display: flex;
-        gap: 1.25rem;
-        flex-wrap: wrap;
-        align-items: flex-end;
+        display: contents;
       }
       .field {
-        display: inline-flex;
+        display: flex;
         flex-direction: column;
-        gap: 6px;
-        font-size: 0.85rem;
+        gap: var(--space-1);
+        font-size: var(--text-sm);
+        min-width: 0;
+      }
+      .field--span4 {
+        grid-column: span 4;
+      }
+      @media (max-width: 1100px) {
+        .filter-card {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .field--span4 {
+          grid-column: 1 / -1;
+        }
       }
       .field--off {
         opacity: 0.55;
@@ -1525,26 +1540,32 @@ const WINDOW_OPTIONS = [
         cursor: not-allowed;
       }
       .field > span {
-        font-size: 0.75rem;
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        opacity: 0.7;
-        font-weight: 600;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        font-weight: var(--font-semibold);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .flip-row {
-        display: inline-flex;
+        display: flex;
         align-items: center;
         gap: 8px;
+        height: 32px;
         text-transform: none;
         letter-spacing: normal;
-        opacity: 1;
         font-weight: 400;
+        color: var(--text-secondary);
       }
-      .flip-row input[type='number'] {
-        width: 90px;
+      .field .flip-row input[type='number'] {
+        flex: 1;
+        width: auto;
+        min-width: 0;
       }
       .field--wide {
-        flex: 1 1 280px;
+        grid-column: span 2;
       }
       .field .muted {
         opacity: 0.55;
@@ -1573,13 +1594,17 @@ const WINDOW_OPTIONS = [
          floating mid-pill and the label pushed to the far edge. */
       .field input:not([type='checkbox']),
       .field select {
-        padding: 0.45rem 0.6rem;
+        height: 32px;
+        box-sizing: border-box;
+        width: 100%;
+        min-width: 0;
+        padding: 0 10px;
         background: var(--bg-primary);
         color: var(--text-primary);
         border: 1px solid var(--border);
-        border-radius: 4px;
-        min-width: 100px;
-        font-size: 0.9rem;
+        border-radius: var(--radius-sm);
+        font-size: var(--text-sm);
+        font-family: inherit;
       }
       .field input[type='checkbox'] {
         margin: 0;
@@ -1597,25 +1622,33 @@ const WINDOW_OPTIONS = [
       }
       .source-chips {
         display: flex;
-        gap: 0.4rem;
+        gap: 6px;
         flex-wrap: wrap;
+        min-height: 32px;
+        align-items: center;
       }
+      /* Segmented pill (venue-page family). */
       .source-toggle {
         display: inline-flex;
+        align-self: flex-start;
         gap: 2px;
+        height: 32px;
+        box-sizing: border-box;
         background: var(--bg-tertiary);
         padding: 3px;
-        border-radius: var(--radius-sm, 6px);
+        border-radius: var(--radius-full);
       }
       .ds-btn {
-        padding: 5px 12px;
+        padding: 0 12px;
         background: transparent;
         border: none;
         color: var(--text-secondary);
-        font-size: var(--text-sm, 13px);
+        font-family: inherit;
+        font-size: var(--text-xs);
         font-weight: var(--font-medium, 500);
         cursor: pointer;
-        border-radius: 4px;
+        border-radius: var(--radius-full);
+        white-space: nowrap;
       }
       .ds-btn:hover {
         color: var(--text-primary);
@@ -1630,21 +1663,31 @@ const WINDOW_OPTIONS = [
         font-style: normal;
         font-size: 0.85em;
       }
+      /* Toggle chips (venue-page family); lit while checked. */
       .chip-checkbox {
         display: inline-flex;
         align-items: center;
-        gap: 0.35rem;
-        padding: 0.35rem 0.7rem;
+        gap: 6px;
+        height: 32px;
+        box-sizing: border-box;
+        padding: 0 12px;
         border: 1px solid var(--border);
-        border-radius: 9999px;
-        font-size: 0.8rem;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
         cursor: pointer;
         background: var(--bg-primary);
-        color: var(--text-primary);
+        color: var(--text-secondary);
         user-select: none;
+        white-space: nowrap;
       }
       .chip-checkbox:hover {
-        background: var(--bg-tertiary);
+        color: var(--text-primary);
+      }
+      .chip-checkbox:has(input:checked) {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.08);
       }
       .symbol-multiselect {
         display: flex;
@@ -1684,14 +1727,22 @@ const WINDOW_OPTIONS = [
         opacity: 1;
         background: rgba(0, 113, 227, 0.25);
       }
+      /* Primary action in the grid's last column, on the inputs' baseline. */
       .run-btn {
+        grid-column: -2 / -1;
+        height: 32px;
         background: var(--accent);
         color: #fff;
         border: none;
-        padding: 0.5rem 1.25rem;
-        border-radius: 4px;
+        padding: 0 var(--space-4);
+        border-radius: var(--radius-full);
         cursor: pointer;
-        font-weight: 600;
+        font-family: inherit;
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+      }
+      .run-btn:hover:not(:disabled) {
+        background: var(--accent-hover, var(--accent));
       }
       .run-btn:disabled {
         opacity: 0.5;
@@ -1711,19 +1762,30 @@ const WINDOW_OPTIONS = [
         border-radius: 3px;
       }
       .window-meta {
-        font-size: 0.85rem;
-        opacity: 0.7;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
       }
 
+      /* Six tiles = one even row (auto-fit left OUTCOME MIX orphaned on a second row);
+         three-by-two where the row is narrow or shares its width with the equity card. */
       .kpi-grid {
         display: grid;
-        gap: 1rem;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: var(--space-3);
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+      }
+      @media (max-width: 1200px) {
+        .kpi-grid {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+      }
+      .optimal-and-equity-grid:has(.equity-card) .kpi-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .kpi-grid--optimal {
-        padding: 0.75rem;
-        border: 1px dashed var(--accent);
-        border-radius: 8px;
+        padding: var(--space-3);
+        border: 1px dashed rgba(0, 113, 227, 0.5);
+        border-radius: var(--radius-md);
         background: rgba(0, 113, 227, 0.04);
       }
       .optimal-banner {
@@ -1734,7 +1796,7 @@ const WINDOW_OPTIONS = [
         padding: 0 0.25rem;
       }
       .optimal-banner-title {
-        font-size: 0.9rem;
+        font-size: var(--text-xs);
         font-weight: 700;
         color: var(--accent);
         text-transform: uppercase;
@@ -1747,33 +1809,60 @@ const WINDOW_OPTIONS = [
       .kpi--optimal {
         background: var(--bg-primary);
       }
+      /* Same chrome as the shared app-metric-card tile. */
       .kpi {
+        position: relative;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 2px);
         display: flex;
         flex-direction: column;
-        gap: 0.25rem;
+        gap: 2px;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .kpi::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--text-tertiary);
+        opacity: 0.3;
+      }
+      .kpi:has(.kpi-value.profit)::before {
+        background: var(--profit);
+        opacity: 0.9;
+      }
+      .kpi:has(.kpi-value.loss)::before {
+        background: var(--loss);
+        opacity: 0.9;
       }
       .kpi-label {
-        font-size: 0.75rem;
-        opacity: 0.7;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
+        margin-bottom: var(--space-1);
       }
       .kpi-value {
-        font-size: 1.6rem;
-        font-weight: 600;
+        font-size: clamp(var(--text-lg), 1.5vw, 24px);
+        font-weight: var(--font-semibold);
+        letter-spacing: -0.01em;
+        line-height: 1.2;
         font-variant-numeric: tabular-nums;
+        overflow-wrap: anywhere;
       }
       .kpi-sub {
-        font-size: 0.75rem;
-        opacity: 0.7;
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
       }
       /* .profit / .loss colours defined below (theme-aware). */
 
-      .sweep-card,
       .signals-card,
       .equity-card,
       .breakdown-card,
@@ -1781,12 +1870,78 @@ const WINDOW_OPTIONS = [
       .analytics-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-radius: 8px;
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         padding: 0.75rem 1rem;
+      }
+      /* Board chrome (drift-report family) for the result cards: title strip over a
+         full-bleed table / padded chart. The equity card keeps its padded layout. */
+      .breakdown-card,
+      .analytics-card,
+      .heatmap-card,
+      .daily-breakdown-card,
+      .signals-card {
+        padding: 0;
+        overflow: hidden;
+      }
+      .breakdown-card > header,
+      .analytics-card > header,
+      .heatmap-card > header,
+      .daily-breakdown-card > header,
+      .signals-card > h2 {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .heatmap-chart,
+      .daily-chart {
+        margin: var(--space-2) var(--space-3) 0;
+        width: auto;
+      }
+      .heatmap-hint,
+      .metric-hint {
+        margin: 0;
+        padding: var(--space-2) var(--space-4) var(--space-3);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .analytics-card > .metric-grid {
+        padding: var(--space-3) var(--space-4) 0;
+        margin: 0;
+      }
+      .breakdown-table th,
+      .dist-table th,
+      .signal-table th {
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+      }
+      .breakdown-table th:first-child,
+      .breakdown-table td:first-child,
+      .dist-table th:first-child,
+      .dist-table td:first-child,
+      .signal-table th:first-child,
+      .signal-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .breakdown-table th:last-child,
+      .breakdown-table td:last-child,
+      .dist-table th:last-child,
+      .dist-table td:last-child,
+      .signal-table th:last-child,
+      .signal-table td:last-child {
+        padding-right: var(--space-4);
+      }
+      .breakdown-table tbody tr:hover td,
+      .dist-table tbody tr:hover td {
+        background: var(--bg-primary);
       }
       .analytics-grid {
         display: grid;
-        grid-template-columns: 1.2fr 1fr 1fr;
+        grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr) minmax(0, 1fr);
         gap: 1rem;
       }
       @media (max-width: 1100px) {
@@ -1796,47 +1951,42 @@ const WINDOW_OPTIONS = [
       }
       .analytics-header h2 {
         margin: 0;
-        font-size: 0.95rem;
+        font-size: var(--text-base);
         font-weight: 600;
       }
       .analytics-header small {
-        opacity: 0.6;
-        font-size: 0.75rem;
+        color: var(--text-tertiary);
+        font-size: var(--text-xs);
         display: block;
         margin-top: 2px;
       }
       .dist-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.82rem;
-        margin-top: 0.5rem;
+        font-size: var(--text-sm);
       }
       .dist-table th,
       .dist-table td {
         text-align: left;
-        padding: 0.3rem 0.5rem;
+        padding: 7px var(--space-2);
         border-bottom: 1px solid var(--border);
+      }
+      .dist-table tbody tr:last-child td {
+        border-bottom: none;
       }
       .dist-table th.num,
       .dist-table td.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
-      .dist-table th {
-        font-weight: 600;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        opacity: 0.65;
-      }
       .bar-cell {
         width: 35%;
         min-width: 80px;
       }
       .dist-bar {
-        height: 0.65rem;
+        height: 8px;
         background: var(--accent);
-        border-radius: 2px;
+        border-radius: 4px;
         opacity: 0.6;
       }
       .dist-bar--loss {
@@ -1857,38 +2007,34 @@ const WINDOW_OPTIONS = [
         gap: 2px;
       }
       .metric-label {
-        font-size: 0.7rem;
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        opacity: 0.7;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
         font-weight: 600;
       }
       .metric-value {
-        font-size: 1.05rem;
+        font-size: var(--text-lg);
         font-weight: 600;
         font-variant-numeric: tabular-nums;
-      }
-      .metric-hint {
-        font-size: 0.7rem;
-        opacity: 0.6;
-        margin: 0.75rem 0 0;
       }
       .heatmap-header {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: center;
         gap: 1rem;
         flex-wrap: wrap;
         margin-bottom: 0.5rem;
       }
       .heatmap-header h2 {
         margin: 0;
-        font-size: 1rem;
+        font-size: var(--text-base);
         font-weight: 600;
       }
       .heatmap-header h2 small {
         font-weight: 400;
-        opacity: 0.6;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
       }
       .heatmap-controls {
         display: flex;
@@ -1900,19 +2046,21 @@ const WINDOW_OPTIONS = [
         gap: 2px;
       }
       .heatmap-control span {
-        font-size: 0.7rem;
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        opacity: 0.7;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
         font-weight: 600;
       }
       .heatmap-control select {
+        height: 32px;
         background: var(--bg-primary);
         color: var(--text-primary);
         border: 1px solid var(--border);
-        border-radius: 4px;
-        padding: 0.3rem 0.5rem;
-        font-size: 0.85rem;
+        border-radius: var(--radius-sm);
+        padding: 0 10px;
+        font-size: var(--text-sm);
+        font-family: inherit;
       }
       .heatmap-chart {
         width: 100%;
@@ -1921,8 +2069,8 @@ const WINDOW_OPTIONS = [
       /* ── Sweep + daily-breakdown 2-up grid ───────────────────────── */
       .sweep-and-daily-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
+        gap: var(--space-4);
       }
       .sweep-and-daily-grid > * {
         min-width: 0;
@@ -1930,8 +2078,8 @@ const WINDOW_OPTIONS = [
       /* ── Optimal-scenario + Equity-curve 2-up grid ───────────────── */
       .optimal-and-equity-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
-        gap: 0.75rem;
+        grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
+        gap: var(--space-4);
       }
       .optimal-and-equity-grid > * {
         min-width: 0;
@@ -1939,8 +2087,8 @@ const WINDOW_OPTIONS = [
       .daily-breakdown-card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
       }
       .daily-chart {
         width: 100%;
@@ -1953,17 +2101,18 @@ const WINDOW_OPTIONS = [
         color: var(--text-tertiary, #888);
         font-size: 0.85rem;
       }
-      .heatmap-hint {
-        font-size: 0.78rem;
-        opacity: 0.65;
-        margin: 0.5rem 0 0;
-      }
       /* minmax(0, …): a wide breakdown table scrolls inside its card instead of pushing the
          third card past the page edge. */
       .breakdown-grid {
         display: grid;
-        grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
-        gap: 1rem;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: var(--space-4);
+        align-items: start;
+      }
+      /* By symbol gets the full row (nine columns, any number of pairs); direction and
+         source share the row below — three-up clipped their Unrealized / PF columns. */
+      .breakdown-grid > :first-child {
+        grid-column: 1 / -1;
       }
       .breakdown-grid > * {
         min-width: 0;
@@ -1975,37 +2124,32 @@ const WINDOW_OPTIONS = [
         }
       }
       .breakdown-header h2 {
-        margin: 0 0 0.5rem;
-        font-size: 0.95rem;
+        margin: 0;
+        font-size: var(--text-base);
         font-weight: 600;
       }
       .breakdown-header h2 small {
         font-weight: 400;
-        opacity: 0.6;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
         margin-left: 0.35rem;
       }
       .breakdown-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.82rem;
+        font-size: var(--text-sm);
       }
       .breakdown-table th,
       .breakdown-table td {
         text-align: left;
-        padding: 0.3rem 0.55rem;
+        padding: 8px var(--space-2);
         border-bottom: 1px solid var(--border);
+        white-space: nowrap;
       }
       .breakdown-table th.num,
       .breakdown-table td.num {
         text-align: right;
         font-variant-numeric: tabular-nums;
-      }
-      .breakdown-table th {
-        font-weight: 600;
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        opacity: 0.65;
       }
       .breakdown-table td.key {
         font-weight: 600;
@@ -2083,52 +2227,17 @@ const WINDOW_OPTIONS = [
         vector-effect: non-scaling-stroke;
         opacity: 0.5;
       }
-      .sweep-card h2,
       .signals-card h2 {
         margin: 0 0 0.5rem 0;
-        font-size: 1rem;
+        font-size: var(--text-base);
         font-weight: 600;
       }
-      .sweep-card small,
       .signals-card small {
         font-weight: 400;
-        opacity: 0.7;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
         margin-left: 0.5rem;
       }
-      .sweep-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.85rem;
-      }
-      .sweep-table th,
-      .sweep-table td {
-        padding: 0.35rem 0.5rem;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-      }
-      .sweep-table th.num,
-      .sweep-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .sweep-table tr.row--active td {
-        background: rgba(0, 113, 227, 0.1);
-        font-weight: 600;
-      }
-      .curve {
-        width: 200px;
-      }
-      .curve-bar {
-        height: 12px;
-        border-radius: 6px;
-      }
-      .curve-bar--profit {
-        background: rgba(79, 209, 197, 0.6);
-      }
-      .curve-bar--loss {
-        background: rgba(255, 122, 122, 0.6);
-      }
-
       .table-scroll {
         overflow-x: auto;
         max-height: 60vh;
@@ -2136,11 +2245,11 @@ const WINDOW_OPTIONS = [
       .signal-table {
         width: 100%;
         border-collapse: collapse;
-        font-size: 0.85rem;
+        font-size: var(--text-sm);
       }
       .signal-table th,
       .signal-table td {
-        padding: 0.3rem 0.5rem;
+        padding: 7px var(--space-2);
         text-align: left;
         border-bottom: 1px solid var(--border);
         white-space: nowrap;
@@ -2252,219 +2361,6 @@ const WINDOW_OPTIONS = [
       }
       .signal-table tr.signal-row:hover td {
         background: var(--bg-tertiary);
-      }
-
-      .modal-scrim {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.55);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        padding: 2rem;
-      }
-      .modal-card {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: 12px;
-        width: min(1100px, 100%);
-        max-height: 90vh;
-        display: flex;
-        flex-direction: column;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
-      }
-      .modal-header {
-        padding: 1rem 1.25rem;
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
-        gap: 1rem;
-      }
-      .modal-header h2 {
-        margin: 0;
-        font-size: 1.05rem;
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-      }
-      .modal-sub {
-        margin: 0.25rem 0 0;
-        font-size: 0.85rem;
-        opacity: 0.7;
-      }
-      .modal-header-right {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-      }
-      .tf-toolbar {
-        display: inline-flex;
-        gap: 2px;
-        background: var(--bg-tertiary);
-        border-radius: 6px;
-        padding: 2px;
-      }
-      .tf-btn {
-        background: transparent;
-        border: none;
-        color: var(--text-secondary);
-        font-size: 0.78rem;
-        font-weight: 600;
-        padding: 0.3rem 0.55rem;
-        border-radius: 4px;
-        cursor: pointer;
-        transition:
-          background 0.12s,
-          color 0.12s;
-      }
-      .tf-btn:hover {
-        color: var(--text-primary);
-      }
-      .tf-btn--active {
-        background: var(--accent);
-        color: #ffffff;
-      }
-      .tf-btn--active:hover {
-        color: #ffffff;
-      }
-      .modal-close {
-        background: transparent;
-        border: none;
-        color: inherit;
-        font-size: 1.5rem;
-        cursor: pointer;
-        line-height: 1;
-        padding: 0.25rem 0.5rem;
-        border-radius: 4px;
-      }
-      .modal-close:hover {
-        background: var(--bg-tertiary);
-      }
-      .modal-body {
-        flex: 1;
-        padding: 1rem 1.25rem;
-        display: flex;
-        flex-direction: column;
-        gap: 0.75rem;
-        min-height: 480px;
-      }
-      .chart-instance {
-        flex: 1;
-        min-height: 420px;
-      }
-      .chart-legend {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-        font-size: 0.8rem;
-        opacity: 0.85;
-        padding-top: 0.5rem;
-        border-top: 1px solid var(--border);
-      }
-      .legend-item {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-      }
-      .dot {
-        display: inline-block;
-        width: 14px;
-        height: 3px;
-        border-radius: 1px;
-      }
-      .dot--entry {
-        background: #6e6e73;
-      }
-      .dot--tp {
-        background: #1f8a3d;
-      }
-      .dot--sl {
-        background: #c4290a;
-      }
-      .dot--tp-scenario {
-        background: #1f8a3d;
-        opacity: 0.55;
-      }
-      .dot--sl-scenario {
-        background: #c4290a;
-        opacity: 0.55;
-      }
-      .dot--exit {
-        background: var(--accent);
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-      }
-
-      /* ── Per-symbol auto-config dialog ────────────────────────────────── */
-      .autoconfig-card {
-        width: min(880px, 100%);
-      }
-      .autoconfig-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.85rem;
-      }
-      .autoconfig-table th,
-      .autoconfig-table td {
-        padding: 0.4rem 0.6rem;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-      }
-      .autoconfig-table th.num,
-      .autoconfig-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .autoconfig-table th {
-        font-weight: 600;
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        opacity: 0.7;
-      }
-      .autoconfig-table td.key {
-        font-weight: 600;
-      }
-      .autoconfig-table .check-col {
-        width: 32px;
-        text-align: center;
-        padding-right: 0;
-      }
-      .autoconfig-table tr.row--excluded td {
-        opacity: 0.45;
-      }
-      .autoconfig-footer {
-        display: flex;
-        justify-content: flex-end;
-        gap: 0.5rem;
-        padding: 0.75rem 1.25rem;
-        border-top: 1px solid var(--border);
-      }
-      .btn-secondary {
-        background: transparent;
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-        padding: 0.5rem 1rem;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-      }
-      .btn-secondary:hover {
-        background: var(--bg-tertiary);
-      }
-      .autoconfig-message {
-        margin: 0.75rem 0 0;
-        padding: 0.5rem 0.75rem;
-        background: var(--bg-tertiary);
-        border-radius: 4px;
-        font-size: 0.85rem;
-      }
-      .autoconfig-message.error {
-        background: rgba(196, 41, 10, 0.15);
-        color: #c4290a;
       }
     `,
   ],
@@ -2839,13 +2735,16 @@ export class SignalSensitivityPageComponent implements OnInit {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
       },
+      // Legend below the plot: top-right it sat on the right axis' "W / L" name.
       legend: {
         data: ['Net P&L', 'Wins', 'Losses'],
-        top: 6,
-        right: 10,
-        textStyle: { fontSize: 10 },
+        bottom: 0,
+        left: 'center',
+        itemWidth: 12,
+        itemHeight: 8,
+        textStyle: { fontSize: 11 },
       },
-      grid: { left: 60, right: 60, top: 36, bottom: 32 },
+      grid: { left: 56, right: 44, top: 34, bottom: 56 },
       xAxis: {
         type: 'category',
         data: days.map((d) => d.date),
@@ -2860,7 +2759,10 @@ export class SignalSensitivityPageComponent implements OnInit {
           type: 'value',
           name: 'P&L $',
           position: 'left',
+          nameTextStyle: { fontSize: 10 },
+          splitLine: { lineStyle: { type: 'dashed', opacity: 0.5 } },
           axisLabel: {
+            fontSize: 10,
             formatter: (v: number) =>
               v >= 1000 || v <= -1000 ? `${(v / 1000).toFixed(1)}k` : v.toString(),
           },
@@ -2870,6 +2772,8 @@ export class SignalSensitivityPageComponent implements OnInit {
           name: 'W / L',
           position: 'right',
           minInterval: 1,
+          nameTextStyle: { fontSize: 10 },
+          axisLabel: { fontSize: 10 },
           splitLine: { show: false },
         },
       ],
@@ -2878,6 +2782,9 @@ export class SignalSensitivityPageComponent implements OnInit {
           name: 'Net P&L',
           type: 'bar',
           yAxisIndex: 0,
+          barMaxWidth: 22,
+          barGap: '15%',
+          itemStyle: { color: '#34c759', borderRadius: [2, 2, 0, 0] },
           data: days.map((d) => ({
             value: Math.round(d.pnl * 100) / 100,
             itemStyle: { color: d.pnl >= 0 ? '#34c759' : '#ff3b30' },
@@ -2887,15 +2794,18 @@ export class SignalSensitivityPageComponent implements OnInit {
           name: 'Wins',
           type: 'bar',
           yAxisIndex: 1,
+          barMaxWidth: 14,
           data: days.map((d) => d.wins),
-          itemStyle: { color: '#4a8cff' },
+          itemStyle: { color: '#4a8cff', opacity: 0.85, borderRadius: [2, 2, 0, 0] },
         },
         {
           name: 'Losses',
           type: 'bar',
           yAxisIndex: 1,
+          barMaxWidth: 14,
           data: days.map((d) => d.losses),
-          itemStyle: { color: '#c4290a' },
+          // Orange, not red: the red net-P&L bars beside them read as the same series.
+          itemStyle: { color: '#ff9500', opacity: 0.85, borderRadius: [2, 2, 0, 0] },
         },
       ],
     };
@@ -3001,7 +2911,9 @@ export class SignalSensitivityPageComponent implements OnInit {
           `;
         },
       },
-      grid: { left: 60, right: 30, top: 30, bottom: 60, containLabel: true },
+      // Bottom room for the SL axis name AND the colour scale under it — at 60 the
+      // scale's end labels sat on the axis labels and hid the "SL ×" name.
+      grid: { left: 60, right: 30, top: 24, bottom: 92, containLabel: true },
       xAxis: {
         type: 'category',
         name: 'SL ×',
@@ -3024,7 +2936,10 @@ export class SignalSensitivityPageComponent implements OnInit {
         calculable: true,
         orient: 'horizontal',
         left: 'center',
-        bottom: 8,
+        bottom: 0,
+        itemHeight: 160,
+        itemWidth: 10,
+        textStyle: { fontSize: 10 },
         // Diverging red-white-green palette (matches profit/loss conventions).
         inRange: { color: ['#c4290a', '#f1eee5', '#1f8a3d'] },
       },

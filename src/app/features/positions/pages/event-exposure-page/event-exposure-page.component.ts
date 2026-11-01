@@ -54,18 +54,22 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         <a routerLink="/positions" class="btn btn-secondary">← Positions</a>
       </app-page-header>
 
-      <div class="filter-row">
-        <label>
-          Look ahead
-          <select [(ngModel)]="lookaheadHours">
-            <option [ngValue]="4">4 hours</option>
-            <option [ngValue]="8">8 hours</option>
-            <option [ngValue]="24">24 hours</option>
-            <option [ngValue]="72">3 days</option>
-            <option [ngValue]="168">7 days</option>
-          </select>
-        </label>
-        <label class="check">
+      <!-- Filter toolbar — venue-page family: segmented look-ahead pills and a
+           toggle chip for medium-impact releases. -->
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="Look ahead">
+          @for (o of lookaheadOptions; track o.hours) {
+            <button
+              type="button"
+              [class.on]="lookaheadHours() === o.hours"
+              [attr.aria-pressed]="lookaheadHours() === o.hours"
+              (click)="lookaheadHours.set(o.hours)"
+            >
+              {{ o.label }}
+            </button>
+          }
+        </div>
+        <label class="toggle" [class.on]="includeMedium()">
           <input type="checkbox" [(ngModel)]="includeMedium" />
           Include medium impact
         </label>
@@ -84,27 +88,53 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         />
       } @else if (data(); as d) {
         <div class="kpi-strip">
-          <app-metric-card label="Open positions" [value]="d.openPositionCount" />
+          <app-metric-card
+            label="Open positions"
+            [value]="d.openPositionCount"
+            [dotColor]="d.openPositionCount > 0 ? '#0071E3' : '#8E8E93'"
+            caption="In the selected scope"
+          />
+          <app-metric-card
+            label="Releases ahead"
+            [value]="d.events.length"
+            [dotColor]="d.events.length > 0 ? '#FF9500' : '#8E8E93'"
+            caption="With positions across them"
+          />
           <app-metric-card
             label="Exposed to a release"
             [value]="d.exposedPositionCount"
-            [dotColor]="d.exposedPositionCount > 0 ? 'var(--warn)' : undefined"
+            [dotColor]="d.exposedPositionCount > 0 ? '#FF9500' : '#8E8E93'"
+            caption="Positions spanning one"
           />
-          <app-metric-card label="Exposed lots" [value]="d.exposedLots" />
+          <app-metric-card
+            label="Exposed lots"
+            [value]="d.exposedLots"
+            [dotColor]="d.exposedLots > 0 ? '#FF9500' : '#8E8E93'"
+            caption="Volume across releases"
+          />
           <app-metric-card
             label="Unrealised on exposed"
             [value]="d.exposedUnrealizedPnL"
             format="currency"
             [colorByValue]="true"
+            caption="Open P&L at risk"
           />
           <app-metric-card
             label="Without a stop"
             [value]="unprotectedTotal()"
-            [dotColor]="unprotectedTotal() > 0 ? 'var(--danger)' : undefined"
+            [dotColor]="unprotectedTotal() > 0 ? '#FF3B30' : '#8E8E93'"
+            caption="Summed per release"
           />
         </div>
 
-        <p class="basis">{{ d.basis }}</p>
+        <!-- The engine's caveat, verbatim (see the class comment) — a quiet note, not a wall of text. -->
+        <aside class="basis" aria-label="How to read this page">
+          <span class="basis-icon" aria-hidden="true">i</span>
+          <div>
+            <span class="basis-title">How to read this</span>
+            <p>{{ d.basis }}</p>
+          </div>
+        </aside>
 
         @if (d.events.length === 0) {
           <app-empty-state
@@ -216,39 +246,133 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       .btn-secondary:hover {
         background: var(--bg-tertiary);
       }
-      .filter-row {
+      /* Filter toolbar — venue-page family. */
+      .toolbar {
         display: flex;
-        gap: 1rem;
         align-items: center;
         flex-wrap: wrap;
-        margin-bottom: 1rem;
+        gap: var(--space-2) var(--space-3);
+        margin-bottom: var(--space-4);
+        padding: var(--space-3) var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
       }
-      .filter-row label {
-        display: flex;
-        gap: 0.4rem;
+      .seg {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+      }
+      .seg button {
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        padding: 4px 12px;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .seg button:hover {
+        color: var(--text-primary);
+      }
+      .seg button.on {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
+      }
+      .toggle {
+        display: inline-flex;
         align-items: center;
-        font-size: 0.875rem;
+        gap: 6px;
+        height: 32px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        cursor: pointer;
+        user-select: none;
       }
-      .filter-row .stamp {
+      .toggle input {
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .toggle.on {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.08);
+      }
+      .stamp {
         margin-left: auto;
-        font-size: 0.8125rem;
-        opacity: 0.65;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
       }
-      /* Standard stat-tile grid: five numbers were rendering as five stacked
-         full-width cards (~650px) because this rule was missing. */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-        gap: var(--space-2);
-        align-items: start;
+        grid-template-columns: repeat(6, 1fr);
+        gap: var(--space-3);
         margin-bottom: var(--space-3);
       }
+      @media (max-width: 1100px) {
+        .kpi-strip {
+          grid-template-columns: repeat(3, 1fr);
+        }
+      }
+      @media (max-width: 640px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+      /* The engine's statistical caveat — a quiet note card. */
       .basis {
-        font-size: 0.8125rem;
-        line-height: 1.5;
-        opacity: 0.75;
-        margin: 0.75rem 0 1.5rem;
-        max-width: 90ch;
+        display: flex;
+        gap: var(--space-3);
+        align-items: flex-start;
+        margin: 0 0 var(--space-5);
+        padding: var(--space-3) var(--space-4);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-md);
+        color: var(--text-secondary);
+      }
+      .basis-icon {
+        flex: none;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        font-style: italic;
+        font-family: Georgia, serif;
+        color: var(--text-secondary);
+        border: 1px solid var(--text-tertiary);
+        margin-top: 1px;
+      }
+      .basis-title {
+        display: block;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+        margin-bottom: 2px;
+      }
+      .basis p {
+        margin: 0;
+        font-size: var(--text-xs);
+        line-height: 1.55;
+        max-width: 110ch;
       }
       .data-table-card {
         margin-bottom: 1.25rem;
@@ -318,6 +442,14 @@ export class EventExposurePageComponent {
   private readonly positions = inject(PositionsService);
 
   protected readonly lookaheadHours = signal(24);
+  /** Same choices the old select offered. */
+  protected readonly lookaheadOptions = [
+    { hours: 4, label: '4h' },
+    { hours: 8, label: '8h' },
+    { hours: 24, label: '24h' },
+    { hours: 72, label: '3d' },
+    { hours: 168, label: '7d' },
+  ];
   protected readonly includeMedium = signal(false);
 
   protected readonly resource = createPolledResource<EventExposureDto | null>(

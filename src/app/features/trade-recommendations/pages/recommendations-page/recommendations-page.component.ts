@@ -96,32 +96,32 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
       <!-- KPI strip: the whole filter, not just this page -->
       @if (summary(); as s) {
         <section class="kpis" aria-label="Summary for the current filter">
-          <div class="kpi">
+          <div class="kpi" style="--tone: var(--accent)">
             <span class="kpi-label">Cards</span>
             <span class="kpi-value mono">{{ s.total | number }}</span>
             <span class="kpi-sub muted">{{ spanLabel() }}</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" style="--tone: var(--profit)">
             <span class="kpi-label">Filed</span>
             <span class="kpi-value mono">{{ s.byStatus['Filed'] ?? 0 | number }}</span>
             <span class="kpi-sub muted">{{ share(s.byStatus['Filed'], s.total) }}</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" style="--tone: var(--loss)">
             <span class="kpi-label">Refused</span>
             <span class="kpi-value mono">{{ s.byStatus['Rejected'] ?? 0 | number }}</span>
             <span class="kpi-sub muted">{{ share(s.byStatus['Rejected'], s.total) }}</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" style="--tone: #5856d6">
             <span class="kpi-label">Watching</span>
             <span class="kpi-value mono">{{ s.watched | number }}</span>
             <span class="kpi-sub muted">active monitors</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" style="--tone: var(--accent)">
             <span class="kpi-label">Became signals</span>
             <span class="kpi-value mono">{{ s.withSignal | number }}</span>
             <span class="kpi-sub muted">{{ s.withPosition }} reached a position</span>
           </div>
-          <div class="kpi">
+          <div class="kpi" style="--tone: var(--warning)">
             <span class="kpi-label">Positions won / lost</span>
             <span class="kpi-value mono">
               <span class="profit">{{ s.wins }}</span> / <span class="loss">{{ s.losses }}</span>
@@ -138,6 +138,9 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
           </div>
           <div
             class="kpi"
+            [style.--tone]="
+              s.realizedPnL > 0 ? 'var(--profit)' : s.realizedPnL < 0 ? 'var(--loss)' : null
+            "
             title="Summed across every account the cards traded on, demo and real alike"
           >
             <span class="kpi-label">Realized P&amp;L · all accounts</span>
@@ -164,9 +167,9 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
         </section>
       }
 
-      <!-- Filters -->
-      <section class="filters panel" aria-label="Filters">
-        <div class="filter-row">
+      <!-- Filters: one toolbar (search · window · signal · sort · page size), then the facets -->
+      <section class="filters" aria-label="Filters">
+        <div class="toolbar">
           <label class="search">
             <span class="sr-only">Search</span>
             <input
@@ -179,7 +182,7 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
           <div class="seg" role="group" aria-label="Written within">
             @for (r of rangeKeys; track r) {
               <button type="button" [class.on]="range() === r" (click)="set(range, r)">
-                {{ r === 'all' ? 'All' : r }}
+                {{ r === 'all' ? 'All time' : r }}
               </button>
             }
           </div>
@@ -201,66 +204,68 @@ const REFRESH_ON: readonly RealtimeEventName[] = [
             }
           </select>
           @if (hasFilters()) {
-            <button type="button" class="btn btn--sm" (click)="clearFilters()">
-              Clear filters
-            </button>
+            <button type="button" class="clear" (click)="clearFilters()">Clear filters</button>
           }
         </div>
 
-        <div class="facet">
+        <div class="facets">
           <span class="facet-label">Status</span>
-          @for (st of statusOptions; track st) {
-            <button
-              type="button"
-              class="chip"
-              [class.on]="statuses().includes(st)"
-              (click)="toggle(statuses, st)"
-            >
-              {{ st }} <span class="n">{{ summary()?.byStatus?.[st] ?? 0 }}</span>
-            </button>
-          }
-        </div>
-        <div class="facet">
-          <span class="facet-label">Source</span>
-          @for (src of sourceOptions(); track src) {
-            <button
-              type="button"
-              class="chip"
-              [class.on]="sources().includes(src)"
-              (click)="toggle(sources, src)"
-            >
-              {{ sourceLabels[src] ?? src }}
-              <span class="n">{{ summary()?.bySource?.[src] ?? 0 }}</span>
-            </button>
-          }
-        </div>
-        <div class="facet">
-          <span class="facet-label">Direction</span>
-          @for (d of ['Buy', 'Sell']; track d) {
-            <button
-              type="button"
-              class="chip"
-              [class.on]="directions().includes(d)"
-              [class.chip--buy]="d === 'Buy'"
-              [class.chip--sell]="d === 'Sell'"
-              (click)="toggle(directions, d)"
-            >
-              {{ d === 'Buy' ? '↑' : '↓' }} {{ d }}
-              <span class="n">{{ summary()?.byDirection?.[d] ?? 0 }}</span>
-            </button>
-          }
-          @if (symbolOptions().length > 0) {
-            <span class="facet-label facet-label--gap">Symbol</span>
-            @for (sym of symbolOptions(); track sym) {
+          <div class="facet">
+            @for (st of statusOptions; track st) {
               <button
                 type="button"
-                class="chip mono"
-                [class.on]="symbols().includes(sym)"
-                (click)="toggle(symbols, sym)"
+                class="chip"
+                [class.on]="statuses().includes(st)"
+                (click)="toggle(statuses, st)"
               >
-                {{ sym }} <span class="n">{{ summary()?.bySymbol?.[sym] ?? 0 }}</span>
+                {{ st }} <span class="n">{{ summary()?.byStatus?.[st] ?? 0 }}</span>
               </button>
             }
+          </div>
+          <span class="facet-label">Source</span>
+          <div class="facet">
+            @for (src of sourceOptions(); track src) {
+              <button
+                type="button"
+                class="chip"
+                [class.on]="sources().includes(src)"
+                (click)="toggle(sources, src)"
+              >
+                {{ sourceLabels[src] ?? src }}
+                <span class="n">{{ summary()?.bySource?.[src] ?? 0 }}</span>
+              </button>
+            }
+          </div>
+          <span class="facet-label">Direction</span>
+          <div class="facet">
+            @for (d of ['Buy', 'Sell']; track d) {
+              <button
+                type="button"
+                class="chip"
+                [class.on]="directions().includes(d)"
+                [class.chip--buy]="d === 'Buy'"
+                [class.chip--sell]="d === 'Sell'"
+                (click)="toggle(directions, d)"
+              >
+                {{ d === 'Buy' ? '↑' : '↓' }} {{ d }}
+                <span class="n">{{ summary()?.byDirection?.[d] ?? 0 }}</span>
+              </button>
+            }
+          </div>
+          @if (symbolOptions().length > 0) {
+            <span class="facet-label">Symbol</span>
+            <div class="facet">
+              @for (sym of symbolOptions(); track sym) {
+                <button
+                  type="button"
+                  class="chip mono"
+                  [class.on]="symbols().includes(sym)"
+                  (click)="toggle(symbols, sym)"
+                >
+                  {{ sym }} <span class="n">{{ summary()?.bySymbol?.[sym] ?? 0 }}</span>
+                </button>
+              }
+            </div>
           }
         </div>
       </section>

@@ -9,17 +9,26 @@
   font-family: 'SF Mono', 'Fira Code', monospace;
 }
 
+// Quiet empty state: centred in whatever room the cell has, one secondary line + a faint hint.
 .empty-state {
-  padding: var(--space-6) var(--space-4);
+  flex: 1 1 auto;
+  padding: var(--space-4) var(--space-3);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-1);
+  justify-content: center;
+  gap: 2px;
   text-align: center;
 }
+.empty-state .muted {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
 .empty-hint {
-  font-size: 10.5px;
+  font-size: var(--text-xs);
+  line-height: 1.4;
   color: var(--text-tertiary);
+  max-width: 34ch;
 }
 
 /* ── Market Insights ─────────────────────────────────────────── */
@@ -28,18 +37,20 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 .insights-head {
   display: flex;
   align-items: baseline;
-  gap: var(--space-3);
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--border);
 }
 .insights-head h3 {
   margin: 0;
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: var(--font-semibold);
 }
 .insights-grid {
@@ -68,11 +79,11 @@
   gap: var(--space-2);
 }
 .insight-title {
-  font-size: var(--text-xs);
+  font-size: 10.5px;
   font-weight: var(--font-semibold);
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.05em;
 }
 .insight-status {
   font-size: 10.5px;

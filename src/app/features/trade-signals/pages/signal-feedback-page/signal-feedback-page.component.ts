@@ -191,48 +191,58 @@ interface AnomalyFlag {
             label="Events"
             [value]="filteredRows().length"
             format="number"
-            dotColor="#0071E3"
+            [caption]="'last ' + windowHours() + 'h, after filters'"
+            [dotColor]="filteredRows().length > 0 ? '#0071E3' : '#8E8E93'"
           />
           <app-metric-card
             label="Rejected"
             [value]="rejectedCount()"
             format="number"
-            [dotColor]="rejectedCount() > 0 ? '#FF3B30' : '#34C759'"
+            caption="declined by EA or strategy"
+            [dotColor]="rejectedCount() > 0 ? '#FF3B30' : '#8E8E93'"
           />
           <app-metric-card
             label="Expired"
             [value]="expiredCount()"
             format="number"
-            [dotColor]="expiredCount() > 0 ? '#FF9500' : '#34C759'"
+            caption="TTL ran out unexecuted"
+            [dotColor]="expiredCount() > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
             label="EA-sourced"
             [value]="eaCount()"
             format="number"
+            caption="exits reported by an EA"
             [dotColor]="eaCount() > 0 ? '#34C759' : '#8E8E93'"
           />
           <app-metric-card
             label="Strategies"
             [value]="distinctStrategies()"
             format="number"
+            caption="distinct strategies"
             dotColor="#AF52DE"
           />
           <app-metric-card
             label="Symbols"
             [value]="distinctSymbols()"
             format="number"
+            caption="distinct symbols"
             dotColor="#AF52DE"
           />
           <app-metric-card
             label="Reasons"
             [value]="reasonBuckets().length"
             format="number"
+            caption="distinct exit reasons"
             dotColor="#0071E3"
           />
-          <div class="tile tile--text">
-            <span class="tile-label">Last exit</span>
-            <span class="tile-value">{{ lastExitLabel() }}</span>
-          </div>
+          <!-- A label ("3 min ago" / "—"), not a number: same tile, literal value. -->
+          <app-metric-card
+            label="Last exit"
+            [displayValue]="lastExitLabel()"
+            caption="most recent in the window"
+            dotColor="#8E8E93"
+          />
         </div>
 
         @if (filteredRows().length === 0) {
@@ -516,103 +526,85 @@ interface AnomalyFlag {
         gap: var(--space-4);
       }
 
-      /* ── Filter bar — matches market-data trading-sessions toolbar ── */
+      /* ── Filter bar — the family toolbar (venue / drift-report pages) ── */
       .filter-bar {
         display: flex;
         align-items: flex-end;
-        gap: var(--space-3);
+        gap: var(--space-3) var(--space-4);
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         padding: var(--space-3) var(--space-4);
       }
       .fb-field {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: var(--space-1);
       }
       .fb-label {
-        font-size: 10px;
+        font-size: 10.5px;
         font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
       }
       .filter-input,
       .filter-select {
         height: 32px;
-        padding: 0 var(--space-3);
+        padding: 0 10px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
         color: var(--text-primary);
         font-size: var(--text-sm);
-        min-width: 160px;
+        min-width: 150px;
+        box-sizing: border-box;
       }
+      .filter-input:focus,
+      .filter-select:focus {
+        outline: none;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+      }
+      /* Window presets as a segmented pill group. */
       .window-presets {
-        display: flex;
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
         height: 32px;
+        box-sizing: border-box;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
       }
       .preset {
         padding: 0 12px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
         cursor: pointer;
         font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
       .preset:hover {
-        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .preset.active {
-        background: var(--accent);
-        color: white;
-        border-color: var(--accent);
-      }
-      .preset:first-child {
-        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-      }
-      .preset:last-child {
-        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      }
-      .preset + .preset {
-        border-left: none;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
       }
 
       /* ── KPI strip ── */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
-        align-items: start;
-      }
-      /* Text-valued tile matching app-metric-card's chrome, for values that
-         are labels ("3 min ago" / "—") rather than numbers. */
-      .tile--text {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        min-height: 100%;
-      }
-      .tile-label {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        line-height: 1.3;
-        min-height: 2.6em;
-      }
-      .tile-value {
-        font-size: var(--text-2xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        line-height: 1.2;
-        font-variant-numeric: tabular-nums;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: var(--space-3);
       }
       @media (max-width: 720px) {
         .kpi-strip {
@@ -625,18 +617,19 @@ interface AnomalyFlag {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         overflow: hidden;
       }
       .insights-head {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
       }
       .insights-head h3 {
         margin: 0;
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .insights-head .muted {
@@ -808,23 +801,29 @@ interface AnomalyFlag {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         overflow: hidden;
       }
       .board-head {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
       }
       .board-head h3 {
         margin: 0;
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .board-head .muted {
-        color: var(--text-tertiary);
         font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
       }
       .board-table {
         width: 100%;
@@ -832,22 +831,30 @@ interface AnomalyFlag {
       }
       .board-table th,
       .board-table td {
-        padding: 6px var(--space-3);
+        padding: 9px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         vertical-align: middle;
+      }
+      .board-table th:first-child,
+      .board-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .board-table th:last-child,
+      .board-table td:last-child {
+        padding-right: var(--space-4);
       }
       .board-table tbody tr:last-child td {
         border-bottom: none;
       }
       .board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
         font-size: 10.5px;
         font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         position: sticky;
         top: 0;
         z-index: 1;

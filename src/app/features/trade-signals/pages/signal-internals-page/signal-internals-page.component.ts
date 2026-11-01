@@ -264,8 +264,23 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
                         <span class="muted"> {{ a.drawdownPct | number: '1.1-1' }}%</span>
                       }
                     </td>
-                    <td class="mono">
-                      {{ a.polledSymbols.length ? a.polledSymbols.join(', ') : '—' }}
+                    <!-- A full roster of 20+ symbols made each row five lines tall: the
+                         first few as tags, the rest counted, the full list on hover. -->
+                    <td class="syms-cell">
+                      @if (a.polledSymbols.length === 0) {
+                        <span class="muted">—</span>
+                      } @else {
+                        <span class="sym-tags" [title]="a.polledSymbols.join(', ')">
+                          @for (sym of symbolsHead(a.polledSymbols); track sym) {
+                            <span class="sym-tag">{{ sym }}</span>
+                          }
+                          @if (a.polledSymbols.length > symbolTagLimit) {
+                            <span class="sym-more"
+                              >+{{ a.polledSymbols.length - symbolTagLimit }} more</span
+                            >
+                          }
+                        </span>
+                      }
                     </td>
                     <!--
                   Live instances in full; dead ones folded away.
@@ -461,11 +476,37 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         color: var(--text-primary);
         margin: 0 0 var(--space-2);
       }
+      /* Board chrome (drift-report family): the title is a head strip, the body is padded. */
       .card {
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
-        padding: var(--space-4);
+        box-shadow: var(--shadow-sm);
+        overflow: hidden;
+      }
+      .card > h2 {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+      }
+      .card > .section-note {
+        margin: 0;
+        padding: var(--space-3) var(--space-4);
+        border-bottom: 1px solid var(--border);
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+      }
+      .card > table th:first-child,
+      .card > table td:first-child,
+      .card .table-scroll th:first-child,
+      .card .table-scroll td:first-child {
+        padding-left: var(--space-4);
+      }
+      .card > table th:last-child,
+      .card > table td:last-child,
+      .card .table-scroll th:last-child,
+      .card .table-scroll td:last-child {
+        padding-right: var(--space-4);
       }
       .section-note {
         margin: 0 0 var(--space-3);
@@ -473,9 +514,9 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         color: var(--text-secondary);
       }
       .btn {
-        height: 32px;
+        height: 36px;
         padding: 0 var(--space-4);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-full);
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
         font-family: inherit;
@@ -495,10 +536,11 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       }
       .controls {
         display: flex;
-        gap: var(--space-4);
+        gap: var(--space-3) var(--space-4);
         align-items: flex-end;
         flex-wrap: wrap;
         padding: var(--space-3) var(--space-4);
+        box-shadow: var(--shadow-sm);
       }
       .field {
         display: flex;
@@ -506,11 +548,11 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         gap: var(--space-1);
       }
       .field-label {
-        font-size: var(--text-xs);
+        font-size: 10.5px;
         font-weight: var(--font-semibold);
-        color: var(--text-secondary);
+        color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
       }
       .input {
         height: 32px;
@@ -526,6 +568,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       .input:focus {
         outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
       }
       .as-of {
         margin-left: auto;
@@ -534,15 +577,20 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         color: var(--text-tertiary);
       }
 
+      /* Loud on purpose: a blanket account gate is the commonest silent cause of "no signals". */
       .blockers {
         border: 1px solid rgba(255, 59, 48, 0.4);
-        border-left: 3px solid var(--loss);
+        border-left: 4px solid var(--loss);
         border-radius: var(--radius-md);
         padding: var(--space-4);
-        background: var(--bg-secondary);
+        background:
+          linear-gradient(rgba(255, 59, 48, 0.05), rgba(255, 59, 48, 0.05)), var(--bg-secondary);
+        box-shadow: var(--shadow-sm);
       }
       .blockers h2 {
         color: var(--loss);
+        font-size: var(--text-lg);
+        margin-bottom: var(--space-3);
       }
       .blocker {
         padding: var(--space-3) 0;
@@ -569,8 +617,8 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       .blocker-badge {
         background: var(--loss);
         color: #fff;
-        border-radius: var(--radius-sm);
-        padding: 2px 8px;
+        border-radius: var(--radius-full);
+        padding: 2px 10px;
         font-size: 11px;
         font-weight: var(--font-semibold);
       }
@@ -587,31 +635,63 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         margin-top: var(--space-3);
         width: auto;
         min-width: 480px;
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        border-collapse: separate;
+        border-spacing: 0;
+        overflow: hidden;
+      }
+      .halted th:first-child,
+      .halted td:first-child {
+        padding-left: var(--space-3);
+      }
+      .halted th:last-child,
+      .halted td:last-child {
+        padding-right: var(--space-3);
       }
 
       .stages {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-2);
-        align-items: start;
+        gap: var(--space-3);
+        align-items: stretch;
+        padding: var(--space-4);
       }
+      /* Stage cards share the KPI tile's chrome: tone stripe on the left edge. */
       .stage {
+        position: relative;
         border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
+        border-radius: var(--radius-md);
+        padding: var(--space-3) var(--space-3) var(--space-3) calc(var(--space-3) + 3px);
         display: flex;
         flex-direction: column;
-        gap: 2px;
+        gap: 4px;
         background: var(--bg-primary);
+        overflow: hidden;
+      }
+      .stage::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--text-tertiary);
+        opacity: 0.3;
       }
       .stage.has-drop {
         border-color: rgba(255, 59, 48, 0.4);
       }
+      .stage.has-drop::before {
+        background: var(--loss);
+        opacity: 0.9;
+      }
       .stage-label {
-        font-size: 11px;
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
         font-weight: var(--font-semibold);
       }
       .stage-entered {
@@ -627,6 +707,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       }
       .stage-why {
         font-size: 11px;
+        line-height: 1.45;
         color: var(--text-tertiary);
       }
 
@@ -642,17 +723,22 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       th,
       td {
         text-align: left;
-        padding: var(--space-2);
+        padding: 9px var(--space-3);
         border-bottom: 1px solid var(--border);
         vertical-align: top;
       }
       th {
-        font-size: 11px;
+        font-size: 10.5px;
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         color: var(--text-tertiary);
         font-weight: var(--font-semibold);
         white-space: nowrap;
+        background: var(--bg-primary);
+        vertical-align: middle;
+      }
+      tbody tr:hover td {
+        background: var(--bg-primary);
       }
       tbody tr:last-child td {
         border-bottom: none;
@@ -666,8 +752,40 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         font-family: 'SF Mono', 'Fira Code', monospace;
         font-size: var(--text-xs);
       }
-      .row-blocked {
-        background: rgba(255, 59, 48, 0.06);
+      .row-blocked td {
+        background: rgba(255, 59, 48, 0.05);
+      }
+      .row-blocked td:first-child {
+        box-shadow: inset 3px 0 0 rgba(255, 59, 48, 0.55);
+      }
+      tbody tr.row-blocked:hover td {
+        background: rgba(255, 59, 48, 0.08);
+      }
+
+      /* Polled symbols: a few tags + "+N more" (full list in the tooltip). */
+      .sym-tags {
+        display: flex;
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 4px;
+      }
+      .sym-tag {
+        font-family: 'SF Mono', 'Fira Code', monospace;
+        font-size: 11px;
+        padding: 0 6px;
+        line-height: 18px;
+        border-radius: 4px;
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .sym-more {
+        font-size: 11px;
+        line-height: 18px;
+        font-weight: var(--font-semibold);
+        color: var(--accent);
+        white-space: nowrap;
+        cursor: help;
       }
 
       .mode {
@@ -724,8 +842,14 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       .signal {
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
-        margin-bottom: var(--space-2);
+        margin: var(--space-2) var(--space-4);
         background: var(--bg-primary);
+      }
+      .signal:first-of-type {
+        margin-top: var(--space-3);
+      }
+      .signal:last-of-type {
+        margin-bottom: var(--space-3);
       }
       .signal.live {
         border-left: 3px solid var(--profit);
@@ -845,7 +969,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       .rule-list {
         list-style: none;
         margin: 0;
-        padding: 0;
+        padding: var(--space-3) var(--space-4) 0;
         display: flex;
         flex-direction: column;
         gap: var(--space-2);
@@ -853,7 +977,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
       .rule-list li {
         display: flex;
         gap: var(--space-3);
-        align-items: flex-start;
+        align-items: center;
         font-size: var(--text-sm);
         color: var(--text-primary);
         padding: var(--space-2) var(--space-3);
@@ -875,7 +999,8 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
         justify-content: center;
       }
       .rule-note {
-        margin: var(--space-3) 0 0;
+        margin: 0;
+        padding: var(--space-3) var(--space-4) var(--space-4);
         font-size: var(--text-xs);
         color: var(--text-secondary);
       }
@@ -893,6 +1018,13 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
   ],
 })
 export class SignalInternalsPageComponent {
+  /** Symbols shown as tags in an Account readiness row before "+N more". */
+  readonly symbolTagLimit = 4;
+
+  symbolsHead(symbols: readonly string[]): readonly string[] {
+    return symbols.slice(0, this.symbolTagLimit);
+  }
+
   private readonly service = inject(SignalInternalsService);
 
   readonly loading = signal(true);

@@ -90,31 +90,31 @@ import {
         </nav>
       }
 
-      <!-- Summary strip — 8 dense tiles (recent window) -->
+      <!-- Summary strip — 8 dense tiles in two even rows of four. The top row
+           reads the open book; the bottom row the closed window. -->
       <div class="metrics-strip">
         <app-metric-card
           label="Unrealized P&L"
           [value]="totalUnrealizedPnL()"
           format="currency"
           [colorByValue]="true"
-        />
-        <app-metric-card
-          label="Today realized"
-          [value]="realizedToday()"
-          format="currency"
-          [colorByValue]="true"
+          [caption]="
+            'Across ' + openPositionCount() + ' open ' + plural(openPositionCount(), 'position')
+          "
         />
         <app-metric-card
           label="Open positions"
           [value]="openPositionCount()"
           format="number"
-          dotColor="#0071E3"
+          [dotColor]="openPositionCount() > 0 ? '#0071E3' : '#8E8E93'"
+          [caption]="openSymbolCount() + ' ' + plural(openSymbolCount(), 'symbol')"
         />
         <app-metric-card
           label="Total lots"
           [value]="totalLots()"
           format="number"
-          dotColor="#5AC8FA"
+          [dotColor]="totalLots() > 0 ? '#5AC8FA' : '#8E8E93'"
+          caption="Open volume, every position"
         />
         <!-- A share of lots, not a lot count: the tile said "(lots)" over a percentage. -->
         <app-metric-card
@@ -122,6 +122,21 @@ import {
           [value]="longShortRatioPct()"
           format="percent"
           dotColor="#34C759"
+          [caption]="
+            openPositionCount() > 0
+              ? lotsLabel(longShort().longLots) +
+                ' long · ' +
+                lotsLabel(longShort().shortLots) +
+                ' short'
+              : 'Nothing open'
+          "
+        />
+        <app-metric-card
+          label="Today realized"
+          [value]="realizedToday()"
+          format="currency"
+          [colorByValue]="true"
+          caption="Closed since local midnight"
         />
         <!-- These three read the closed window (latest 500 closed in scope), like
              the Closed tab's "Closed (window)" — not all history. -->
@@ -130,18 +145,21 @@ import {
           [value]="winRatePct()"
           format="percent"
           dotColor="#34C759"
+          [caption]="closedKnownCount() + ' closed trades with known P&L'"
         />
         <app-metric-card
           label="Profit factor (window)"
           [value]="profitFactor()"
           format="number"
           dotColor="#AF52DE"
+          caption="Gross win ÷ gross loss"
         />
         <app-metric-card
           label="Avg hold (h, window)"
           [value]="avgHoldHours()"
           format="number"
           dotColor="#FF9500"
+          caption="Open → close, per closed trade"
         />
       </div>
 
@@ -158,12 +176,36 @@ import {
                   [options]="exposureBySymbolChart()"
                   [height]="exposureChartHeight()"
                 />
-                <app-chart-card
-                  title="Long vs Short"
-                  subtitle="By open lots and unrealized P&L"
-                  [options]="longShortChart()"
-                  height="140px"
-                />
+                <!-- Lots and dollars on one axis hid the lots bar entirely, so the
+                     split is a strip (share of lots) plus one column per side. -->
+                <section class="ls-panel" aria-label="Long vs Short">
+                  <header class="ls-head">
+                    <h3>Long vs Short</h3>
+                    <p>Share of open lots, and unrealized P&L by side</p>
+                  </header>
+                  <div class="ls-strip" role="img" [attr.aria-label]="longShortAria()">
+                    <span class="long" [style.width.%]="longShort().longPct"></span>
+                    <span class="short" [style.width.%]="100 - longShort().longPct"></span>
+                  </div>
+                  <div class="ls-sides">
+                    @for (side of longShortSides(); track side.key) {
+                      <div class="ls-side" [class]="side.key">
+                        <span class="ls-tag"><i></i>{{ side.label }}</span>
+                        <span class="ls-lots">{{ lotsLabel(side.lots) }} <small>lots</small></span>
+                        <span class="ls-meta">
+                          {{ side.count }} {{ plural(side.count, 'position') }} ·
+                          {{ side.pct.toFixed(0) }}% of lots
+                        </span>
+                        <span
+                          class="ls-pnl"
+                          [class.profit]="side.pnl > 0"
+                          [class.loss]="side.pnl < 0"
+                          >{{ signedUsd(side.pnl) }} <small>unrealized</small></span
+                        >
+                      </div>
+                    }
+                  </div>
+                </section>
               </div>
             }
             <app-data-table
@@ -604,7 +646,6 @@ import {
       /* Tile rows wrap via auto-fit instead of forcing eight (or nine) fixed
          columns past the viewport; align-items:start stops short tiles from
          stretching to the tallest one. */
-      .metrics-strip,
       .closed-stats,
       .analytics-kpis {
         display: grid;
@@ -613,8 +654,117 @@ import {
         margin-bottom: var(--space-3);
         align-items: start;
       }
+      /* Header strip: two even rows of four, never 6 + 2. */
       .metrics-strip {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-3);
         margin-bottom: var(--space-4);
+      }
+      @media (max-width: 720px) {
+        .metrics-strip {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      /* Long vs Short panel — drift-report severity-mix look. */
+      .ls-panel {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+        padding: var(--card-padding);
+      }
+      .ls-head h3 {
+        margin: 0;
+        font-size: var(--text-base);
+        font-weight: var(--font-semibold);
+      }
+      .ls-head p {
+        margin: 2px 0 var(--space-4);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .ls-strip {
+        display: flex;
+        height: 10px;
+        border-radius: var(--radius-full);
+        overflow: hidden;
+        background: var(--bg-tertiary);
+        gap: 2px;
+      }
+      .ls-strip span {
+        min-width: 0;
+      }
+      .ls-strip .long {
+        background: #34c759;
+      }
+      .ls-strip .short {
+        background: #ff3b30;
+      }
+      .ls-sides {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: var(--space-3);
+        margin-top: var(--space-4);
+      }
+      .ls-side {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: var(--space-3);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        border: 1px solid var(--border);
+      }
+      .ls-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+      }
+      .ls-tag i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+      }
+      .ls-side.long .ls-tag i {
+        background: #34c759;
+      }
+      .ls-side.short .ls-tag i {
+        background: #ff3b30;
+      }
+      .ls-lots {
+        font-size: var(--text-lg);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-primary);
+      }
+      .ls-side small {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--text-tertiary);
+      }
+      .ls-meta {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .ls-pnl {
+        margin-top: var(--space-1);
+        font-size: var(--text-sm);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+      }
+      .ls-pnl.profit {
+        color: var(--profit);
+      }
+      .ls-pnl.loss {
+        color: var(--loss);
       }
 
       .open-insights {
@@ -734,9 +884,9 @@ import {
       .account-pills {
         display: flex;
         flex-wrap: wrap;
-        gap: var(--space-2);
-        margin: var(--space-3) 0;
-        padding: 4px;
+        gap: 2px;
+        margin: 0 0 var(--space-4);
+        padding: 3px;
         background: var(--bg-tertiary);
         border-radius: var(--radius-full);
         width: fit-content;
@@ -745,12 +895,12 @@ import {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        height: 30px;
-        padding: 0 14px;
+        height: 28px;
+        padding: 0 12px;
         border: none;
         background: transparent;
         color: var(--text-secondary);
-        font-size: var(--text-sm);
+        font-size: var(--text-xs);
         font-weight: var(--font-medium);
         border-radius: var(--radius-full);
         cursor: pointer;
@@ -763,9 +913,9 @@ import {
         color: var(--text-primary);
       }
       .acct-pill.active {
-        background: var(--bg-secondary);
-        color: var(--accent);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
       }
       .acct-count {
         font-size: 10.5px;
@@ -1095,117 +1245,136 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
   });
 
   // ── Column definitions ────────────────────────────────────────────
+  //
+  // Fourteen columns at the shared 88px minimum wrapped headers ("CURREN / T")
+  // and cut "Opened" off at 1440px. Paired values now share a two-line cell —
+  // current price under entry, P&L % under the dollar figure, distance under
+  // SL / TP — so the minimums fit the content column. Each combined column
+  // keeps its primary field (server sort unchanged); renderers style inline
+  // because AG Grid renders them outside this component's style scope.
   readonly openColumnDefs: ColDef<PositionDto>[] = [
-    { field: 'symbol', headerName: 'Symbol', width: 90 },
+    {
+      field: 'symbol',
+      headerName: 'Symbol',
+      width: 96,
+      minWidth: 96,
+      cellStyle: { fontWeight: '600' },
+    },
     {
       field: 'direction',
       headerName: 'Dir',
       width: 80,
+      minWidth: 80,
       cellRenderer: DirectionCellComponent,
     },
     {
       field: 'averageEntryPrice',
       headerName: 'Entry',
-      width: 100,
-      cellClass: 'mono',
-      valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
-    },
-    {
-      field: 'currentPrice',
-      headerName: 'Current',
-      width: 100,
-      cellClass: 'mono',
-      valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
+      headerTooltip: 'Average entry price, with the current price underneath',
+      width: 108,
+      minWidth: 108,
+      type: 'rightAligned',
+      cellRenderer: (p: any) => {
+        const d = p.data as PositionDto | undefined;
+        if (!d) return '';
+        const entry = d.averageEntryPrice != null ? Number(d.averageEntryPrice).toFixed(5) : '—';
+        const now = d.currentPrice != null ? `now ${Number(d.currentPrice).toFixed(5)}` : 'now —';
+        return posStack(entry, now);
+      },
     },
     {
       field: 'openLots',
       headerName: 'Lots',
-      width: 70,
-      cellClass: 'mono',
+      width: 72,
+      minWidth: 72,
+      type: 'rightAligned',
+      cellStyle: POS_NUM_CELL,
       valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(2) : '—'),
     },
     {
       field: 'unrealizedPnL',
       headerName: 'Unrealized',
-      width: 110,
+      headerTooltip: 'Unrealized P&L, with P&L % underneath',
+      width: 108,
+      minWidth: 108,
+      type: 'rightAligned',
       cellRenderer: (params: any) => {
         if (params.value == null) return '-';
-        const color = params.value >= 0 ? '#34C759' : '#FF3B30';
-        const sign = params.value >= 0 ? '+' : '';
-        return `<span style="color:${color};font-weight:600;font-family:'SF Mono',monospace;font-size:12px">${sign}${Number(params.value).toFixed(2)}</span>`;
-      },
-    },
-    {
-      headerName: 'P&L %',
-      colId: 'pnlPct',
-      width: 80,
-      cellClass: 'mono',
-      valueGetter: (p: any) => pnlPct(p.data as PositionDto),
-      cellRenderer: (params: any) => {
-        const v = params.value as number | null;
-        if (v === null) return '<span style="color:#8E8E93">—</span>';
-        const color = v >= 0 ? '#34C759' : '#FF3B30';
+        const v = Number(params.value);
+        const color = v >= 0 ? '#248A3D' : '#D70015';
         const sign = v >= 0 ? '+' : '';
-        return `<span style="color:${color};font-weight:600;font-family:'SF Mono',monospace;font-size:12px">${sign}${v.toFixed(2)}%</span>`;
+        const pct = pnlPct(params.data as PositionDto);
+        const pctTxt = pct === null ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+        return posStack(
+          `<span style="color:${color};font-weight:600">${sign}${v.toFixed(2)}</span>`,
+          pctTxt,
+        );
       },
     },
     {
       headerName: 'R',
+      headerTooltip: 'Open P&L in multiples of the initial risk',
       colId: 'rMultiple',
-      width: 70,
-      cellClass: 'mono',
+      width: 72,
+      minWidth: 72,
+      type: 'rightAligned',
+      cellStyle: POS_NUM_CELL,
       valueGetter: (p: any) => rMultiple(p.data as PositionDto),
       cellRenderer: (params: any) => {
         const v = params.value as number | null;
         if (v === null) return '<span style="color:#8E8E93">—</span>';
-        const color = v >= 0 ? '#34C759' : '#FF3B30';
+        const color = v >= 0 ? '#248A3D' : '#D70015';
         const sign = v >= 0 ? '+' : '';
-        return `<span style="color:${color};font-weight:600;font-family:'SF Mono',monospace;font-size:12px">${sign}${v.toFixed(2)}R</span>`;
+        return `<span style="color:${color};font-weight:600;font-variant-numeric:tabular-nums">${sign}${v.toFixed(2)}R</span>`;
       },
     },
     {
       field: 'stopLoss',
       headerName: 'SL',
-      width: 95,
-      cellClass: 'mono',
-      valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
-    },
-    {
-      headerName: 'To SL',
-      colId: 'pipsToSl',
-      width: 75,
-      cellClass: 'mono',
-      valueGetter: (p: any) => pipsToSl(p.data as PositionDto),
-      valueFormatter: (p: any) => (p.value !== null ? `${(p.value as number).toFixed(1)}p` : '—'),
+      headerTooltip: 'Stop loss, with the distance to it underneath',
+      width: 104,
+      minWidth: 104,
+      type: 'rightAligned',
+      cellRenderer: (p: any) => {
+        const d = p.data as PositionDto | undefined;
+        if (!d) return '';
+        const sl = d.stopLoss != null ? Number(d.stopLoss).toFixed(5) : '—';
+        const dist = pipsToSl(d);
+        return posStack(sl, dist !== null ? `${dist.toFixed(1)}p away` : '—');
+      },
     },
     {
       field: 'takeProfit',
       headerName: 'TP',
-      width: 95,
-      cellClass: 'mono',
-      valueFormatter: (p: any) => (p.value != null ? Number(p.value).toFixed(5) : '—'),
-    },
-    {
-      headerName: 'To TP',
-      colId: 'pipsToTp',
-      width: 75,
-      cellClass: 'mono',
-      valueGetter: (p: any) => pipsToTp(p.data as PositionDto),
-      valueFormatter: (p: any) => (p.value !== null ? `${(p.value as number).toFixed(1)}p` : '—'),
+      headerTooltip: 'Take profit, with the distance to it underneath',
+      width: 104,
+      minWidth: 104,
+      type: 'rightAligned',
+      cellRenderer: (p: any) => {
+        const d = p.data as PositionDto | undefined;
+        if (!d) return '';
+        const tp = d.takeProfit != null ? Number(d.takeProfit).toFixed(5) : '—';
+        const dist = pipsToTp(d);
+        return posStack(tp, dist !== null ? `${dist.toFixed(1)}p away` : '—');
+      },
     },
     {
       field: 'openedAt',
       headerName: 'Opened',
-      width: 110,
+      width: 104,
+      minWidth: 104,
+      cellStyle: { color: 'var(--text-secondary)' },
       valueFormatter: (p: any) => this.relativeTimePipe.transform(p.value),
     },
     // No Status column here: every row on the Open tab is "Open", and the
     // 15-column grid was truncating eight headers to make room for it.
     {
-      headerName: 'Actions',
+      headerName: '',
       colId: 'actions',
-      width: 110,
+      width: 92,
+      minWidth: 92,
       sortable: false,
+      cellStyle: { justifyContent: 'flex-end' },
       cellRenderer: (params: any) => {
         const pos = params.data as PositionDto | undefined;
         if (!pos || pos.status !== 'Open') return '';
@@ -2193,52 +2362,83 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
     return `${Math.min(360, Math.max(120, 40 + symbols * 22))}px`;
   });
 
-  readonly longShortChart = computed<EChartsOption>(() => {
-    const open = this.openPositions();
-    if (open.length === 0) return this.emptyChartOption('No open positions');
+  /** Long / short split of the open book: lots, unrealized P&L, counts. */
+  readonly longShort = computed(() => {
     let longLots = 0,
       shortLots = 0,
       longPnl = 0,
-      shortPnl = 0;
-    for (const p of open) {
+      shortPnl = 0,
+      longCount = 0,
+      shortCount = 0;
+    for (const p of this.openPositions()) {
       if (p.direction === 'Long') {
         longLots += p.openLots;
         longPnl += p.unrealizedPnL;
+        longCount++;
       } else {
         shortLots += p.openLots;
         shortPnl += p.unrealizedPnL;
+        shortCount++;
       }
     }
-    return {
-      tooltip: { trigger: 'axis' },
-      legend: { bottom: 0, textStyle: { fontSize: 10 } },
-      grid: { top: 4, right: 16, bottom: 28, left: 70 },
-      xAxis: { type: 'value', axisLabel: { fontSize: 9, color: '#8E8E93' } },
-      yAxis: {
-        type: 'category',
-        data: ['Lots', 'Unrealized $'],
-        axisLabel: { fontSize: 10, color: '#8E8E93' },
-      },
-      series: [
-        {
-          name: 'Long',
-          type: 'bar',
-          stack: 'group',
-          itemStyle: { color: '#34C759' },
-          data: [+longLots.toFixed(2), +longPnl.toFixed(2)],
-          barMaxWidth: 18,
-        },
-        {
-          name: 'Short',
-          type: 'bar',
-          stack: 'group',
-          itemStyle: { color: '#FF3B30' },
-          data: [+shortLots.toFixed(2), +shortPnl.toFixed(2)],
-          barMaxWidth: 18,
-        },
-      ],
-    };
+    const total = longLots + shortLots;
+    const longPct = total > 0 ? (longLots / total) * 100 : 50;
+    return { longLots, shortLots, longPnl, shortPnl, longCount, shortCount, longPct };
   });
+
+  readonly longShortSides = computed(() => {
+    const ls = this.longShort();
+    const total = ls.longLots + ls.shortLots;
+    return [
+      {
+        key: 'long',
+        label: 'Long',
+        lots: ls.longLots,
+        pnl: ls.longPnl,
+        count: ls.longCount,
+        pct: total > 0 ? (ls.longLots / total) * 100 : 0,
+      },
+      {
+        key: 'short',
+        label: 'Short',
+        lots: ls.shortLots,
+        pnl: ls.shortPnl,
+        count: ls.shortCount,
+        pct: total > 0 ? (ls.shortLots / total) * 100 : 0,
+      },
+    ];
+  });
+
+  readonly longShortAria = computed(() => {
+    const ls = this.longShort();
+    return `Long ${this.lotsLabel(ls.longLots)} lots, short ${this.lotsLabel(ls.shortLots)} lots`;
+  });
+
+  readonly openSymbolCount = computed(
+    () =>
+      new Set(
+        this.openPositions()
+          .map((p) => p.symbol)
+          .filter(Boolean),
+      ).size,
+  );
+
+  readonly closedKnownCount = computed(() => this.closedPositions().filter(pnlKnown).length);
+
+  plural(n: number, word: string): string {
+    return n === 1 ? word : `${word}s`;
+  }
+
+  lotsLabel(v: number): string {
+    return v.toFixed(2);
+  }
+
+  signedUsd(v: number): string {
+    const abs = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(
+      Math.abs(v),
+    );
+    return v > 0 ? `+${abs}` : v < 0 ? `−${abs}` : abs;
+  }
 
   // ── Data fetchers ────────────────────────────────────────────────
   //
@@ -2723,6 +2923,18 @@ function sortClosedWindow(
  * positions and realizedPnL for closed. Null when entry × lots is zero
  * (data corruption / missing fields).
  */
+/** The theme makes .ag-cell a flex row, so text-align alone never moves a number right. */
+const POS_NUM_CELL = { fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' };
+
+/** Right-aligned two-line grid cell; both arguments are HTML built from numbers. */
+function posStack(top: string, bottom: string): string {
+  return (
+    `<div style="display:flex;flex-direction:column;justify-content:center;align-items:flex-end;` +
+    `height:100%;width:100%;min-width:0;line-height:1.3;font-variant-numeric:tabular-nums;white-space:nowrap">` +
+    `<span>${top}</span><span style="font-size:11px;color:var(--text-tertiary)">${bottom}</span></div>`
+  );
+}
+
 function pnlPct(p: PositionDto | null | undefined): number | null {
   if (!p || p.currentPrice === null || p.averageEntryPrice === 0) return null;
   // Return on notional, direction-aware. Mathematically equals

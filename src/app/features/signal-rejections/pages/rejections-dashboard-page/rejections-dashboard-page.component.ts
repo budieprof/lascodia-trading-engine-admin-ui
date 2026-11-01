@@ -172,48 +172,56 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
             label="Local"
             [value]="localCount()"
             format="number"
-            [dotColor]="localCount() > 0 ? '#FF9500' : '#34C759'"
+            caption="EA-side safety gates"
+            [dotColor]="localCount() > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
             label="Engine"
             [value]="engineCount()"
             format="number"
-            [dotColor]="engineCount() > 0 ? '#0071E3' : '#34C759'"
+            caption="engine-side checks"
+            [dotColor]="engineCount() > 0 ? '#0071E3' : '#8E8E93'"
           />
           <app-metric-card
             label="Broker"
             [value]="brokerCount()"
             format="number"
-            [dotColor]="brokerCount() > 0 ? '#FF3B30' : '#34C759'"
+            caption="broker retcodes"
+            [dotColor]="brokerCount() > 0 ? '#FF3B30' : '#8E8E93'"
           />
           <app-metric-card
             label="Last hour"
             [value]="lastHourCount()"
             format="number"
-            dotColor="#AF52DE"
+            caption="events in the past 60 min"
+            [dotColor]="lastHourCount() > 0 ? '#AF52DE' : '#8E8E93'"
           />
           <app-metric-card
             label="Accounts"
             [value]="distinctAccounts()"
             format="number"
+            caption="distinct accounts hit"
             dotColor="#5856D6"
           />
           <app-metric-card
             label="Symbols"
             [value]="distinctSymbols()"
             format="number"
+            caption="distinct symbols"
             dotColor="#5856D6"
           />
           <app-metric-card
             label="Distinct reasons"
             [value]="distinctSubStages()"
             format="number"
+            caption="sub-stages that fired"
             dotColor="#8E8E93"
           />
           <app-metric-card
             label="Events shown"
             [value]="filteredRows().length"
             format="number"
+            [caption]="'of ' + rows().length + ' in the window'"
             dotColor="#0071E3"
           />
         </div>
@@ -422,78 +430,90 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
         gap: var(--space-4);
       }
 
-      /* ── Filter bar — matches sibling feed pages ─────────────────────── */
+      /* ── Filter bar — the family toolbar (venue / drift-report pages) ─── */
       .filter-bar {
         display: flex;
         align-items: flex-end;
-        gap: var(--space-3);
+        gap: var(--space-3) var(--space-4);
         flex-wrap: wrap;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         padding: var(--space-3) var(--space-4);
       }
       .fb-field {
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: var(--space-1);
       }
       .fb-label {
-        font-size: 10px;
+        font-size: 10.5px;
         font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
       }
       .filter-input,
       .filter-select {
-        height: 28px;
-        padding: 0 var(--space-2);
+        height: 32px;
+        padding: 0 10px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);
         background: var(--bg-primary);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         color: var(--text-primary);
-        min-width: 130px;
+        min-width: 150px;
+        box-sizing: border-box;
       }
       .filter-input:focus,
       .filter-select:focus {
         outline: none;
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
       }
+      /* Window presets as a segmented pill group. */
       .window-presets {
         display: inline-flex;
-        gap: 0;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
+        gap: 2px;
+        padding: 3px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        height: 32px;
+        box-sizing: border-box;
       }
       .preset {
-        background: var(--bg-primary);
+        background: transparent;
         color: var(--text-secondary);
         border: none;
-        padding: 4px 10px;
+        padding: 0 12px;
+        font: inherit;
         font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        border-radius: var(--radius-full);
         cursor: pointer;
-        border-right: 1px solid var(--border);
-      }
-      .preset:last-child {
-        border-right: none;
+        white-space: nowrap;
       }
       .preset:hover {
-        background: var(--bg-tertiary);
+        color: var(--text-primary);
       }
       .preset.active {
-        background: var(--accent);
-        color: var(--accent-contrast, #fff);
-        font-weight: var(--font-semibold);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
       }
 
       /* ── KPI strip ───────────────────────────────────────────────────── */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        /* Eight tiles: two even rows of four (auto-fit left one orphan at 1440px). */
+        grid-template-columns: repeat(4, minmax(0, 1fr));
         gap: var(--space-3);
+      }
+      @media (max-width: 760px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
       }
 
       /* ── Board-pattern tables (sibling of feed-page board-tables) ────── */
@@ -501,23 +521,29 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         overflow: hidden;
       }
       .board-head {
         display: flex;
-        align-items: baseline;
+        align-items: center;
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
         border-bottom: 1px solid var(--border);
       }
       .board-head h3 {
         margin: 0;
-        font-size: var(--text-sm);
+        font-size: var(--text-base);
         font-weight: var(--font-semibold);
       }
       .board-head .muted {
-        color: var(--text-tertiary);
         font-size: var(--text-xs);
+        font-weight: var(--font-semibold);
+        font-variant-numeric: tabular-nums;
+        color: var(--text-secondary);
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
+        padding: 1px 8px;
       }
       .board-table {
         width: 100%;
@@ -525,22 +551,30 @@ const WINDOW_PRESETS = [1, 6, 24, 168] as const;
       }
       .board-table th,
       .board-table td {
-        padding: 6px var(--space-3);
+        padding: 9px var(--space-3);
         text-align: left;
         border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
+        font-size: var(--text-sm);
         vertical-align: middle;
+      }
+      .board-table th:first-child,
+      .board-table td:first-child {
+        padding-left: var(--space-4);
+      }
+      .board-table th:last-child,
+      .board-table td:last-child {
+        padding-right: var(--space-4);
       }
       .board-table tbody tr:last-child td {
         border-bottom: none;
       }
       .board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
+        background: var(--bg-primary);
+        color: var(--text-tertiary);
         font-size: 10.5px;
         font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
+        letter-spacing: 0.05em;
         position: sticky;
         top: 0;
         z-index: 1;

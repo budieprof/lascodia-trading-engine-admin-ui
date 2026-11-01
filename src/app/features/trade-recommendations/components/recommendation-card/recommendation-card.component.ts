@@ -36,7 +36,7 @@ import {
         <div class="head-main">
           <span class="id mono">#{{ c.id }}</span>
           <span class="sym">{{ c.symbol }}</span>
-          <span class="tf muted">{{ c.timeframe }}</span>
+          <span class="tf">{{ c.timeframe }}</span>
           <span
             class="pill"
             [class.pill--buy]="c.direction === 'Buy'"
@@ -45,10 +45,10 @@ import {
             {{ c.direction === 'Buy' ? '↑' : '↓' }} {{ c.direction }}{{ orderTypeSuffix() }}
           </span>
         </div>
-        <span class="pill" [class]="'pill pill--' + statusTone()">{{ c.status }}</span>
+        <span [class]="'status status--' + statusTone()">{{ c.status }}</span>
       </header>
 
-      <div class="meta muted">
+      <div class="meta">
         <span>{{ sourceLabel() }}</span>
         @if (c.analysisModel) {
           <span>· {{ c.analysisModel }}</span>
@@ -68,14 +68,14 @@ import {
           <span class="lbl">Stop</span>
           <span class="val mono loss">{{ price(c.stopLoss) }}</span>
           @if (riskPips() !== null) {
-            <span class="sub mono muted">{{ riskPips() }}p</span>
+            <span class="sub mono">{{ riskPips() }}p</span>
           }
         </div>
         <div class="lvl">
           <span class="lbl">Target</span>
           <span class="val mono profit">{{ price(c.takeProfit) }}</span>
           @if (rewardPips() !== null) {
-            <span class="sub mono muted">{{ rewardPips() }}p</span>
+            <span class="sub mono">{{ rewardPips() }}p</span>
           }
         </div>
         <div class="lvl">
@@ -118,21 +118,21 @@ import {
       <footer class="foot">
         <span class="pill" [class]="'pill pill--' + outcome().tone">{{ outcome().label }}</span>
         @if (c.watchingMonitorId) {
-          <span class="pill pill--info" title="An active monitor will file this card"
+          <span class="tag tag--info" title="An active monitor will file this card"
             >👁 #{{ c.watchingMonitorId }}</span
           >
         } @else if (c.monitorCount > 0) {
-          <span class="pill" title="Monitors armed for this card"
+          <span class="tag" title="Monitors armed for this card"
             >👁 {{ c.monitorCount }} · {{ c.latestMonitorStatus }}</span
           >
         }
         @if (c.ocoGroupId) {
-          <span class="pill pill--warn" [attr.title]="'One-cancels-other group ' + c.ocoGroupId"
+          <span class="tag tag--oco" [attr.title]="'One-cancels-other group ' + c.ocoGroupId"
             >OCO</span
           >
         }
         @if (c.tradeSignalId) {
-          <span class="pill"
+          <span class="tag"
             >⚡ #{{ c.tradeSignalId }}{{ c.signalStatus ? ' · ' + c.signalStatus : '' }}</span
           >
         }
@@ -154,7 +154,7 @@ import {
           </span>
         }
         @if (!compact() && c.siblingCount > 0) {
-          <span class="sibs muted">+{{ c.siblingCount }} from same analysis</span>
+          <span class="sibs">+{{ c.siblingCount }} from same analysis</span>
         }
       </footer>
     </a>
@@ -171,11 +171,12 @@ import {
         gap: 10px;
         height: 100%;
         box-sizing: border-box;
-        padding: 14px 16px;
+        padding: 14px 16px 12px;
         border: 1px solid var(--border);
         border-left: 3px solid var(--border);
         border-radius: var(--radius-md);
         background: var(--bg-secondary);
+        box-shadow: var(--shadow-sm);
         color: inherit;
         text-decoration: none;
         transition:
@@ -212,37 +213,91 @@ import {
         min-width: 0;
       }
       .id {
-        font-size: 12px;
-        color: var(--text-secondary);
+        font-size: 11.5px;
+        color: var(--text-tertiary);
       }
       .sym {
         font-weight: var(--font-semibold);
         font-size: var(--text-base);
       }
       .tf {
-        font-size: 12px;
+        font-size: 11.5px;
+        color: var(--text-tertiary);
+      }
+      .head .pill {
+        font-size: 10.5px;
+        padding: 1px 7px;
+      }
+      /* Status: a calm dot + label, not a second filled chip next to the direction pill. */
+      .status {
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11.5px;
+        font-weight: var(--font-medium);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .status::before {
+        content: '';
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.6;
+      }
+      .status--good {
+        color: var(--profit);
+      }
+      .status--good::before {
+        background: var(--profit);
+        opacity: 1;
+      }
+      .status--bad::before {
+        background: var(--loss);
+        opacity: 1;
+      }
+      .status--warn {
+        color: #b25000;
+      }
+      .status--warn::before {
+        background: var(--warning);
+        opacity: 1;
+      }
+      .status--info {
+        color: var(--accent);
+      }
+      .status--info::before {
+        background: var(--accent);
+        opacity: 1;
       }
       .meta {
-        font-size: 12px;
+        font-size: 11.5px;
+        color: var(--text-tertiary);
         display: flex;
         flex-wrap: wrap;
         gap: 4px;
+        margin-top: -4px;
       }
       .levels {
         display: grid;
         grid-template-columns: repeat(5, minmax(0, 1fr));
         gap: 6px;
+        padding-top: 2px;
       }
       .lvl {
         display: flex;
         flex-direction: column;
+        gap: 1px;
         min-width: 0;
       }
       .lbl {
-        font-size: 10.5px;
+        font-size: 10px;
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
       }
       .val {
         font-size: 13px;
@@ -251,39 +306,44 @@ import {
         text-overflow: ellipsis;
       }
       .sub {
-        font-size: 11px;
+        font-size: 10.5px;
+        color: var(--text-tertiary);
       }
       .rr-bar {
         display: flex;
-        height: 4px;
+        height: 3px;
         border-radius: 2px;
         overflow: hidden;
         gap: 2px;
       }
       .rr-risk {
         background: var(--loss);
-        opacity: 0.7;
+        opacity: 0.55;
         flex-basis: 0;
       }
       .rr-reward {
         background: var(--profit);
-        opacity: 0.7;
+        opacity: 0.55;
         flex-basis: 0;
       }
       .rationale {
         margin: 0;
         font-size: 13px;
-        line-height: 1.45;
+        line-height: 1.5;
         color: var(--text-primary);
         display: -webkit-box;
         -webkit-line-clamp: 3;
         -webkit-box-orient: vertical;
         overflow: hidden;
       }
+      /* Why the card is in its status: readable, secondary text; a refusal is marked by a thin red
+         rule and a tinted code tag rather than by painting the whole sentence red. */
       .reason {
         margin: 0;
+        padding-left: 8px;
+        border-left: 2px solid var(--border);
         font-size: 12px;
-        line-height: 1.4;
+        line-height: 1.45;
         color: var(--text-secondary);
         display: -webkit-box;
         -webkit-line-clamp: 2;
@@ -291,28 +351,67 @@ import {
         overflow: hidden;
       }
       .reason--bad {
-        color: var(--loss);
+        border-left-color: rgba(255, 59, 48, 0.45);
       }
       .code {
-        font-size: 11px;
-        padding: 1px 5px;
+        font-size: 10.5px;
+        padding: 0 5px;
         border-radius: 4px;
         background: var(--bg-tertiary);
+        color: var(--text-secondary);
         margin-right: 4px;
+      }
+      .reason--bad .code {
+        background: rgba(255, 59, 48, 0.08);
+        color: var(--loss);
       }
       .foot {
         margin-top: auto;
+        padding-top: 8px;
+        border-top: 1px solid var(--border);
         display: flex;
         align-items: center;
         flex-wrap: wrap;
         gap: 6px;
+      }
+      .foot .pill {
+        font-size: 11px;
+        font-weight: var(--font-medium);
+        padding: 1px 8px;
+        line-height: 18px;
+      }
+      /* Secondary tags (monitor, OCO, signal): one quiet outlined style, same height as the pill. */
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: var(--font-medium);
+        line-height: 18px;
+        padding: 0 7px;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .tag--info {
+        border-color: rgba(0, 113, 227, 0.35);
+        color: var(--accent);
+      }
+      .tag--oco {
+        font-size: 10px;
+        font-weight: var(--font-semibold);
+        letter-spacing: 0.05em;
+        border-color: rgba(255, 149, 0, 0.45);
+        color: #b25000;
       }
       .pnl {
         font-size: 12.5px;
         font-weight: var(--font-semibold);
       }
       .sibs {
-        font-size: 11.5px;
+        font-size: 11px;
+        color: var(--text-tertiary);
         margin-left: auto;
       }
       @media (max-width: 520px) {

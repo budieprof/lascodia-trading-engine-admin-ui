@@ -87,160 +87,178 @@ interface OrdersViewState {
       <ui-tabs [tabs]="tabItems" [(activeTab)]="activeTab">
         @switch (activeTab()) {
           @case ('all') {
-            <!-- Summary Metrics — 8 dense tiles, recent-orders-scoped (last 500) -->
+            <!-- Summary Metrics — 8 dense tiles (two even rows of four), recent-orders-scoped
+                 (last 500). Zero counts stay neutral grey so colour only marks something to look at. -->
             <div class="metrics-strip">
               <app-metric-card
                 label="Orders (recent window)"
                 [value]="totalOrders()"
                 format="number"
                 dotColor="#0071E3"
+                caption="Newest orders sampled for these tiles"
               />
               <app-metric-card
                 label="Pending"
                 [value]="pendingOrders()"
                 format="number"
-                [dotColor]="pendingOrders() > 0 ? '#FF9500' : '#34C759'"
+                [dotColor]="pendingOrders() > 0 ? '#FF9500' : '#8E8E93'"
+                [caption]="pendingOrders() > 0 ? 'Waiting on the broker' : 'Nothing waiting'"
               />
               <app-metric-card
                 label="Fill Rate"
                 [value]="fillRate()"
                 format="percent"
                 dotColor="#5856D6"
+                [caption]="
+                  (filledOrders() | number) + ' of ' + (totalOrders() | number) + ' filled'
+                "
               />
               <app-metric-card
                 label="Today filled"
                 [value]="filledToday()"
                 format="number"
-                dotColor="#34C759"
+                [dotColor]="filledToday() > 0 ? '#34C759' : '#8E8E93'"
+                caption="Since local midnight"
               />
               <app-metric-card
                 label="Today rejected"
                 [value]="rejectedToday()"
                 format="number"
                 [dotColor]="rejectedToday() > 0 ? '#FF3B30' : '#8E8E93'"
+                caption="Since local midnight"
               />
               <app-metric-card
                 label="Today volume (lots)"
                 [value]="volumeToday()"
                 format="number"
-                dotColor="#0071E3"
+                [dotColor]="volumeToday() > 0 ? '#0071E3' : '#8E8E93'"
+                caption="Lots filled today"
               />
               <app-metric-card
                 label="Avg fill latency (min)"
                 [value]="avgFillLatencyMin()"
                 format="number"
                 dotColor="#AF52DE"
+                caption="Created → filled, recent window"
               />
               <app-metric-card
                 label="Symbols traded"
                 [value]="symbolsTraded()"
                 format="number"
-                dotColor="#5AC8FA"
+                [dotColor]="symbolsTraded() > 0 ? '#5AC8FA' : '#8E8E93'"
+                caption="Distinct symbols, recent window"
               />
             </div>
 
-            <!-- Filter chips — denser than the dropdowns, with live counts -->
-            <div class="filter-row">
-              <div class="chip-group" role="tablist" aria-label="Filter by status">
-                @for (s of statusChips; track s) {
-                  <button
-                    type="button"
-                    role="tab"
-                    class="chip"
-                    [attr.data-status]="s || null"
-                    [class.active]="filterStatus() === s"
-                    (click)="onFilterStatusChange(s)"
-                    [attr.aria-selected]="filterStatus() === s"
-                  >
-                    {{ s === '' ? 'All' : s }}
-                    @if (statusCount(s) !== null) {
-                      <span class="chip-count">{{ statusCount(s) | number }}</span>
-                    }
-                  </button>
-                }
-              </div>
-              <div class="chip-group" role="tablist" aria-label="Filter by side">
-                @for (d of sideChips; track d) {
-                  <button
-                    type="button"
-                    role="tab"
-                    class="chip"
-                    [class.active]="filterSide() === d"
-                    [class.buy]="d === 'Buy'"
-                    [class.sell]="d === 'Sell'"
-                    (click)="onFilterSideChange(d)"
-                    [attr.aria-selected]="filterSide() === d"
-                  >
-                    {{ d === '' ? 'All sides' : d }}
-                  </button>
-                }
-              </div>
-              <!--
-                The mode filter was never sent to the engine, so Live / Paper
-                highlighted and changed nothing. It is sent as filter.isPaper,
-                which OrderQueryFilter honours since 2026-10-19; the chip totals
-                above follow it (baseFilter).
-              -->
-              <div class="chip-group" role="tablist" aria-label="Filter by mode">
-                <button
-                  type="button"
-                  role="tab"
-                  class="chip"
-                  [class.active]="filterPaper() === null"
-                  [attr.aria-selected]="filterPaper() === null"
-                  (click)="onFilterPaperChange(null)"
-                >
-                  All modes
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  class="chip"
-                  [class.active]="filterPaper() === false"
-                  [attr.aria-selected]="filterPaper() === false"
-                  (click)="onFilterPaperChange(false)"
-                >
-                  Live
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  class="chip"
-                  [class.active]="filterPaper() === true"
-                  [attr.aria-selected]="filterPaper() === true"
-                  (click)="onFilterPaperChange(true)"
-                >
-                  Paper
-                </button>
-              </div>
-              @if (hasActiveFilters()) {
-                <button class="chip chip-clear" (click)="clearFilters()">Clear filters</button>
-              }
-              <!-- Saved views live with the filters they restore, at the end of
-                   the same row, instead of floating above the tab strip. -->
-              <div class="saved-views">
-                @for (v of pinnedSavedViews(); track v.id) {
-                  <button
-                    type="button"
-                    class="view-pill"
-                    (click)="applySavedView(v)"
-                    [attr.aria-label]="'Restore saved view ' + v.label"
-                  >
-                    <span class="view-label">{{ v.label }}</span>
-                    <span
-                      class="view-remove"
-                      role="button"
-                      tabindex="0"
-                      aria-label="Remove saved view"
-                      (click)="removeSavedView(v.id, $event)"
-                      (keydown.enter)="removeSavedView(v.id, $event)"
-                      >×</span
+            <!-- Filter toolbar — one card: status (with live engine totals) on the
+                 first row; side, mode and saved views on the second. -->
+            <div class="toolbar">
+              <div class="tb-row">
+                <div class="seg" role="tablist" aria-label="Filter by status">
+                  @for (s of statusChips; track s) {
+                    <button
+                      type="button"
+                      role="tab"
+                      class="chip"
+                      [attr.data-status]="s || null"
+                      [class.active]="filterStatus() === s"
+                      (click)="onFilterStatusChange(s)"
+                      [attr.aria-selected]="filterStatus() === s"
                     >
+                      {{ s === '' ? 'All' : s }}
+                      @if (statusCount(s) !== null) {
+                        <span class="chip-count">{{ statusCount(s) | number }}</span>
+                      }
+                    </button>
+                  }
+                </div>
+                @if (hasActiveFilters()) {
+                  <button type="button" class="chip-clear" (click)="clearFilters()">
+                    Clear filters
                   </button>
                 }
-                <button type="button" class="view-save" (click)="saveCurrentView()">
-                  + Save view
-                </button>
+              </div>
+              <div class="tb-row">
+                <div class="seg" role="tablist" aria-label="Filter by side">
+                  @for (d of sideChips; track d) {
+                    <button
+                      type="button"
+                      role="tab"
+                      class="chip"
+                      [class.active]="filterSide() === d"
+                      [class.buy]="d === 'Buy'"
+                      [class.sell]="d === 'Sell'"
+                      (click)="onFilterSideChange(d)"
+                      [attr.aria-selected]="filterSide() === d"
+                    >
+                      {{ d === '' ? 'All sides' : d }}
+                    </button>
+                  }
+                </div>
+                <!--
+                  The mode filter was never sent to the engine, so Live / Paper
+                  highlighted and changed nothing. It is sent as filter.isPaper,
+                  which OrderQueryFilter honours since 2026-10-19; the chip totals
+                  above follow it (baseFilter).
+                -->
+                <div class="seg" role="tablist" aria-label="Filter by mode">
+                  <button
+                    type="button"
+                    role="tab"
+                    class="chip"
+                    [class.active]="filterPaper() === null"
+                    [attr.aria-selected]="filterPaper() === null"
+                    (click)="onFilterPaperChange(null)"
+                  >
+                    All modes
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="chip"
+                    [class.active]="filterPaper() === false"
+                    [attr.aria-selected]="filterPaper() === false"
+                    (click)="onFilterPaperChange(false)"
+                  >
+                    Live
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    class="chip"
+                    [class.active]="filterPaper() === true"
+                    [attr.aria-selected]="filterPaper() === true"
+                    (click)="onFilterPaperChange(true)"
+                  >
+                    Paper
+                  </button>
+                </div>
+                <!-- Saved views live with the filters they restore, at the end of
+                     the same toolbar, instead of floating above the tab strip. -->
+                <div class="saved-views">
+                  @for (v of pinnedSavedViews(); track v.id) {
+                    <button
+                      type="button"
+                      class="view-pill"
+                      (click)="applySavedView(v)"
+                      [attr.aria-label]="'Restore saved view ' + v.label"
+                    >
+                      <span class="view-label">{{ v.label }}</span>
+                      <span
+                        class="view-remove"
+                        role="button"
+                        tabindex="0"
+                        aria-label="Remove saved view"
+                        (click)="removeSavedView(v.id, $event)"
+                        (keydown.enter)="removeSavedView(v.id, $event)"
+                        >×</span
+                      >
+                    </button>
+                  }
+                  <button type="button" class="view-save" (click)="saveCurrentView()">
+                    + Save view
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -705,19 +723,28 @@ interface OrdersViewState {
         }
       }
 
-      /* Filter chips — replaces the old filter-bar dropdowns */
-      .filter-row {
+      /* Filter toolbar — venue-page family: a quiet card, segmented pills. */
+      .toolbar {
         display: flex;
-        gap: var(--space-3);
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-4);
+        margin-bottom: var(--space-3);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
+      }
+      .tb-row {
+        display: flex;
         align-items: center;
         flex-wrap: wrap;
-        margin-bottom: var(--space-3);
+        gap: var(--space-2) var(--space-3);
       }
-      /* The eight status chips carry engine totals ("Cancelled 2,894"), so the
-         track is wider than an 820 px tablet's content column; it wraps inside
-         the column instead of pushing the page sideways. 17 px = half a
-         one-row track (28 + 2×3), so a single row still reads as a pill. */
-      .chip-group {
+      /* The eight status chips carry engine totals ("Cancelled 2,894"); on a
+         narrow column the track wraps inside the card instead of pushing the
+         page sideways. */
+      .seg {
         display: inline-flex;
         flex-wrap: wrap;
         max-width: 100%;
@@ -727,8 +754,8 @@ interface OrdersViewState {
         border-radius: 17px;
       }
       .chip {
-        height: 28px;
-        padding: 0 12px;
+        height: 26px;
+        padding: 0 11px;
         white-space: nowrap;
         border: none;
         background: transparent;
@@ -746,7 +773,7 @@ interface OrdersViewState {
         color: var(--text-primary);
       }
       .chip.active {
-        background: var(--bg-secondary);
+        background: var(--bg-primary);
         color: var(--text-primary);
         box-shadow: var(--shadow-sm);
       }
@@ -766,20 +793,24 @@ interface OrdersViewState {
         color: #d70015;
       }
       .chip-count {
-        background: var(--bg-tertiary);
         color: var(--text-tertiary);
-        padding: 1px 7px;
-        border-radius: var(--radius-full);
-        font-size: 10px;
+        font-size: 10.5px;
         font-variant-numeric: tabular-nums;
       }
       .chip.active .chip-count {
-        background: var(--bg-tertiary);
         color: var(--text-secondary);
       }
       .chip-clear {
+        height: 28px;
+        padding: 0 12px;
+        border: none;
+        border-radius: var(--radius-full);
         background: rgba(255, 59, 48, 0.08);
         color: #d70015;
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        cursor: pointer;
       }
       .chip-clear:hover {
         background: rgba(255, 59, 48, 0.15);
@@ -898,97 +929,6 @@ interface OrdersViewState {
         flex: 1;
         height: 36px;
         text-decoration: none;
-      }
-
-      /* Filter Bar */
-      .filter-bar {
-        display: flex;
-        align-items: flex-end;
-        gap: var(--space-4);
-        padding: var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        margin-bottom: var(--space-4);
-        flex-wrap: wrap;
-      }
-
-      .filter-group {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-
-      .filter-label {
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-
-      .filter-select {
-        height: 34px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        cursor: pointer;
-        min-width: 140px;
-      }
-      .filter-select:focus {
-        border-color: var(--accent);
-        outline: none;
-      }
-
-      .toggle-group {
-        display: flex;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-      }
-
-      .toggle-btn {
-        height: 32px;
-        padding: 0 var(--space-3);
-        border: none;
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-        border-right: 1px solid var(--border);
-      }
-      .toggle-btn:last-child {
-        border-right: none;
-      }
-      .toggle-btn.active {
-        background: var(--accent);
-        color: white;
-      }
-      .toggle-btn:hover:not(.active) {
-        background: var(--bg-tertiary);
-      }
-
-      .btn-clear-filters {
-        height: 34px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-        font-family: inherit;
-        cursor: pointer;
-        transition: all 0.15s ease;
-      }
-      .btn-clear-filters:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
       }
 
       .manual-note {
@@ -1332,33 +1272,64 @@ export class OrdersPageComponent {
   }
 
   // AG Grid columns
+  //
+  // Sixteen columns at the shared 88px minimum overflowed the card at 1440px
+  // (everything after "Filled Qty" was cut off and the Cancelling pill was
+  // clipped). Secondary values now ride in a second line of their primary
+  // cell — signal under ID, mode under symbol, filled qty / fill price under
+  // qty / price, TP under SL, time under date — so the minimums sum to well
+  // under the content column and sizeColumnsToFit never has to scroll. Each
+  // combined column keeps its primary `field`, so server-side sort is
+  // unchanged. Cell renderers return HTML that AG Grid renders outside this
+  // component's style scope, so they style inline and escape data text.
   columns: ColDef<OrderDto>[] = [
-    { headerName: 'ID', field: 'id', width: 70, sortable: true },
     {
-      headerName: 'Signal',
-      field: 'tradeSignalId',
+      headerName: 'ID',
+      headerTooltip: 'Order ID, with the trade signal it came from underneath',
+      field: 'id',
       width: 80,
-      cellClass: 'mono',
-      valueFormatter: (p) => (p.value != null ? `#${p.value}` : '—'),
+      minWidth: 80,
+      sortable: true,
+      cellRenderer: (p: { data?: OrderDto }) => {
+        const o = p.data;
+        if (!o) return '';
+        const sig = o.tradeSignalId != null ? `sig #${o.tradeSignalId}` : 'no signal';
+        return stackCell(`<span style="font-weight:600">${o.id}</span>`, esc(sig));
+      },
     },
-    { headerName: 'Symbol', field: 'symbol', width: 100 },
+    {
+      headerName: 'Symbol',
+      headerTooltip: 'Symbol, with Live / Paper underneath',
+      field: 'symbol',
+      width: 96,
+      minWidth: 96,
+      cellRenderer: (p: { data?: OrderDto }) => {
+        const o = p.data;
+        if (!o) return '';
+        const mode = o.isPaper ? `<span style="color:#0040DD">Paper</span>` : `<span>Live</span>`;
+        return stackCell(`<span style="font-weight:600">${esc(o.symbol ?? '—')}</span>`, mode);
+      },
+    },
     {
       headerName: 'Side',
       field: 'orderType',
-      width: 90,
+      width: 68,
+      minWidth: 68,
       cellRenderer: (params: { value: number | string }) => {
         const v = params.value;
         const isBuy = v === 0 || v === 'Buy';
         const label = isBuy ? 'BUY' : 'SELL';
         const color = isBuy ? '#248A3D' : '#D70015';
         const bg = isBuy ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.12)';
-        return `<span style="color:${color};background:${bg};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
+        return `<span style="color:${color};background:${bg};padding:0 8px;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:.03em;line-height:20px">${label}</span>`;
       },
     },
     {
       headerName: 'Type',
       field: 'executionType',
-      width: 100,
+      width: 76,
+      minWidth: 76,
+      cellStyle: { color: 'var(--text-secondary)' },
       cellRenderer: (params: { value: number | string }) => {
         const execMap: Record<number, string> = {
           0: 'Market',
@@ -1368,47 +1339,69 @@ export class OrdersPageComponent {
         };
         const v = params.value;
         const label = typeof v === 'number' ? (execMap[v] ?? String(v)) : v;
-        return `<span style="font-size:12px;font-weight:500">${label}</span>`;
+        return `<span style="font-size:12px;font-weight:500">${esc(String(label ?? '—'))}</span>`;
       },
     },
     {
       // "Quantity" wrapped mid-word ("QUANTI / TY") in a 100px uppercase header.
       headerName: 'Qty',
-      headerTooltip: 'Quantity (lots)',
+      headerTooltip: 'Quantity (lots), with the filled quantity underneath',
       field: 'quantity',
-      width: 90,
-      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(2) : '-'),
-    },
-    {
-      headerName: 'Price',
-      field: 'price',
-      width: 110,
-      // A market order carries no requested price — the engine stores 0, which
-      // printed as a price of 0.00000.
-      valueFormatter: (params) => {
-        if (params.value == null) return '-';
-        const v = Number(params.value);
-        const exec = params.data?.executionType as unknown;
-        if (v === 0 && (exec === 'Market' || exec === 0)) return 'Market';
-        return v.toFixed(5);
+      width: 80,
+      minWidth: 80,
+      type: 'rightAligned',
+      cellRenderer: (p: { data?: OrderDto }) => {
+        const o = p.data;
+        if (!o) return '';
+        const qty = o.quantity != null ? Number(o.quantity).toFixed(2) : '-';
+        const filled =
+          o.filledQuantity != null ? `filled ${Number(o.filledQuantity).toFixed(2)}` : '—';
+        return stackCell(qty, filled, true);
       },
     },
     {
-      headerName: 'SL',
-      field: 'stopLoss',
-      width: 100,
-      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
+      headerName: 'Price',
+      headerTooltip: 'Order price, with the fill price underneath',
+      field: 'price',
+      width: 112,
+      minWidth: 112,
+      type: 'rightAligned',
+      // A market order carries no requested price — the engine stores 0, which
+      // printed as a price of 0.00000.
+      cellRenderer: (p: { data?: OrderDto }) => {
+        const o = p.data;
+        if (!o) return '';
+        let price: string;
+        if (o.price == null) price = '-';
+        else {
+          const v = Number(o.price);
+          const exec = o.executionType as unknown;
+          price = v === 0 && (exec === 'Market' || exec === 0) ? 'Market' : v.toFixed(5);
+        }
+        const fill = o.filledPrice != null ? `fill ${Number(o.filledPrice).toFixed(5)}` : '—';
+        return stackCell(price, fill, true);
+      },
     },
     {
-      headerName: 'TP',
-      field: 'takeProfit',
-      width: 100,
-      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
+      headerName: 'SL / TP',
+      headerTooltip: 'Stop loss, with take profit underneath',
+      field: 'stopLoss',
+      width: 112,
+      minWidth: 112,
+      type: 'rightAligned',
+      cellRenderer: (p: { data?: OrderDto }) => {
+        const o = p.data;
+        if (!o) return '';
+        const sl = o.stopLoss != null ? Number(o.stopLoss).toFixed(5) : '-';
+        const tp = o.takeProfit != null ? `TP ${Number(o.takeProfit).toFixed(5)}` : 'TP -';
+        return stackCell(sl, tp, true);
+      },
     },
     {
       headerName: 'Status',
       field: 'status',
-      width: 120,
+      width: 112,
+      minWidth: 112,
       cellRenderer: (params: { value: number | string; data: OrderDto }) => {
         const statusNumMap: Record<number, string> = {
           0: 'Pending',
@@ -1419,53 +1412,56 @@ export class OrdersPageComponent {
           5: 'Rejected',
           6: 'Expired',
         };
-        const statusStyleMap: Record<string, { bg: string; color: string }> = {
-          Pending: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
-          Submitted: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          PartialFill: { bg: 'rgba(0,113,227,0.12)', color: '#0040DD' },
-          Filled: { bg: 'rgba(52,199,89,0.12)', color: '#248A3D' },
-          Cancelled: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
-          Rejected: { bg: 'rgba(255,59,48,0.12)', color: '#D70015' },
-          Expired: { bg: 'rgba(142,142,147,0.12)', color: '#636366' },
+        const statusColor: Record<string, string> = {
+          Pending: '#C93400',
+          Cancelling: '#C93400',
+          Submitted: '#0040DD',
+          PartialFill: '#0040DD',
+          Filled: '#248A3D',
+          Cancelled: '#636366',
+          Rejected: '#D70015',
+          Expired: '#636366',
         };
         const v = params.value;
-        const label = typeof v === 'number' ? (statusNumMap[v] ?? String(v)) : v;
-        const s = statusStyleMap[label] ?? statusStyleMap['Expired'];
+        const label = typeof v === 'number' ? (statusNumMap[v] ?? String(v)) : String(v ?? '—');
+        const c = statusColor[label] ?? '#636366';
         // Hover-tooltip the rejection reason on the pill so the operator can scan
         // a row of failures without opening each detail drawer.
         const reason =
           label === 'Rejected' && params.data.rejectionReason
             ? ` title="${escapeAttribute(params.data.rejectionReason)}"`
             : '';
-        return `<span${reason} style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${label}</span>`;
+        return (
+          `<span${reason} style="display:inline-flex;align-items:center;gap:6px;padding:0 9px;border-radius:999px;` +
+          `background:${c}1a;color:${c};font-size:11.5px;font-weight:600;line-height:20px;white-space:nowrap">` +
+          `<span style="width:6px;height:6px;border-radius:50%;background:${c}"></span>${esc(label)}</span>`
+        );
       },
     },
     {
-      headerName: 'Filled Price',
-      field: 'filledPrice',
-      width: 110,
-      valueFormatter: (params) => (params.value != null ? Number(params.value).toFixed(5) : '-'),
-    },
-    {
-      headerName: 'Filled Qty',
-      field: 'filledQuantity',
-      width: 100,
-      valueFormatter: (p) => (p.value != null ? Number(p.value).toFixed(2) : '—'),
-    },
-    {
-      headerName: 'Fill Latency',
+      headerName: 'Latency',
+      headerTooltip: 'Fill latency: created → filled',
       colId: 'fillLatency',
-      width: 110,
-      cellClass: 'mono',
+      width: 96,
+      minWidth: 96,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueGetter: (p) => fillLatencyMs(p.data as OrderDto),
       valueFormatter: (p) => formatLatencyMs(p.value as number | null),
     },
     {
-      headerName: 'Broker',
+      headerName: 'Broker ID',
+      headerTooltip: 'Broker order ID',
       field: 'brokerOrderId',
-      width: 130,
+      flex: 1,
+      width: 110,
+      minWidth: 96,
       tooltipField: 'brokerOrderId',
-      cellClass: 'mono',
+      cellStyle: {
+        fontFamily: "'SF Mono','Fira Code',monospace",
+        fontSize: '12px',
+        color: 'var(--text-secondary)',
+      },
       valueFormatter: (p) => {
         const v = p.value as string | null;
         if (!v) return '—';
@@ -1473,31 +1469,23 @@ export class OrdersPageComponent {
       },
     },
     {
-      headerName: 'Mode',
-      field: 'isPaper',
-      width: 80,
-      cellRenderer: (params: { value: boolean }) => {
-        const label = params.value ? 'Paper' : 'Live';
-        const bg = params.value ? 'rgba(0,113,227,0.12)' : 'rgba(52,199,89,0.12)';
-        const color = params.value ? '#0040DD' : '#248A3D';
-        return `<span style="background:${bg};color:${color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${label}</span>`;
-      },
-    },
-    {
       headerName: 'Created',
       field: 'createdAt',
-      width: 160,
-      valueFormatter: (params) => {
-        if (!params.value) return '-';
+      width: 96,
+      minWidth: 96,
+      cellRenderer: (p: { value: string | null }) => {
+        if (!p.value) return '-';
         try {
-          return new Date(params.value).toLocaleString('en-US', {
-            month: 'short',
-            day: 'numeric',
+          const d = new Date(p.value);
+          const day = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+          const time = d.toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit',
+            hour12: false,
           });
+          return stackCell(esc(day), esc(time));
         } catch {
-          return params.value;
+          return esc(String(p.value));
         }
       },
     },
@@ -2402,6 +2390,31 @@ function lastUtcDays(n: number): string[] {
     days.push(new Date(today - i * 86_400_000).toISOString().slice(0, 10));
   }
   return days;
+}
+
+/** Cell-renderer strings go straight into innerHTML; payload-derived text must be escaped. */
+function esc(s: string): string {
+  return s.replace(
+    /[&<>"']/g,
+    (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!,
+  );
+}
+
+/** The theme makes .ag-cell a flex row, so text-align alone never moves a number right. */
+const NUM_CELL = { fontVariantNumeric: 'tabular-nums', justifyContent: 'flex-end' };
+
+/**
+ * Two-line grid cell: primary value on top, quiet secondary value underneath.
+ * Both arguments are HTML — callers escape data-derived text.
+ */
+function stackCell(top: string, bottom: string, right = false): string {
+  return (
+    `<div style="display:flex;flex-direction:column;justify-content:center;` +
+    `align-items:${right ? 'flex-end' : 'flex-start'};height:100%;width:100%;min-width:0;` +
+    `line-height:1.3;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden">` +
+    `<span>${top}</span>` +
+    `<span style="font-size:11px;color:var(--text-tertiary)">${bottom}</span></div>`
+  );
 }
 
 function escapeAttribute(s: string): string {

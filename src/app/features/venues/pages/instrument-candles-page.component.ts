@@ -5,15 +5,32 @@ import { catchError, of } from 'rxjs';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { FeatureStateComponent } from '@shared/components/feedback/feature-state.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 
 import { VenuesApiService } from '../venues-api.service';
 import { lagText } from '../venues.logic';
-import { ADJUSTMENTS, candleChain, candleTiles, rollRows, utcDay } from '../instrument-candles.logic';
-import type { FuturesCatalogRoot, InstrumentCandleReadiness, InstrumentCandleState } from '../venues.types';
+import {
+  ADJUSTMENTS,
+  candleChain,
+  candleTiles,
+  rollRows,
+  utcDay,
+} from '../instrument-candles.logic';
+import type {
+  FuturesCatalogRoot,
+  InstrumentCandleReadiness,
+  InstrumentCandleState,
+} from '../venues.types';
 
-const EMPTY: InstrumentCandleState = { builderEnabled: false, continuousAdjustment: null, cursors: [], rolls: [], statusCounts: {} };
+const EMPTY: InstrumentCandleState = {
+  builderEnabled: false,
+  continuousAdjustment: null,
+  cursors: [],
+  rolls: [],
+  statusCounts: {},
+};
 const ROLL_ROWS_COLLAPSED = 12;
 const SOURCE_KIND: Record<string, string> = {
   CmeFutures: 'futures',
@@ -36,8 +53,79 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
   selector: 'app-instrument-candles-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent, FeatureStateComponent],
-  styleUrls: ['../../iam/shared/iam-page.scss', '../../market-data/md-summary.scss'],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    FeatureStateComponent,
+    MetricCardComponent,
+  ],
+  styleUrls: [
+    '../../iam/shared/iam-page.scss',
+    '../../market-data/md-summary.scss',
+    './venue-page.scss',
+  ],
+  styles: [
+    `
+      /* Five tiles sit in one row; six (with the readiness endpoint) in two even rows of three so
+         the longer captions stay whole. */
+      .kpis {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: var(--space-3);
+      }
+      .kpis.six {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      @media (max-width: 900px) {
+        .kpis,
+        .kpis.six {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+      .head-link {
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .dot.info {
+        color: var(--accent);
+      }
+      .dot.info::before {
+        background: var(--accent);
+        opacity: 1;
+      }
+      table.grid .sub {
+        color: var(--text-tertiary);
+        margin-top: 2px;
+      }
+      table.grid code {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      /* Per-source tags: outlined and quiet; green only when the source stored today. */
+      .chips .chip {
+        background: transparent;
+        border: 1px solid var(--border);
+        font-weight: var(--font-medium);
+      }
+      .chips .chip.ok {
+        border-color: rgba(52, 199, 89, 0.45);
+      }
+      .chips .chip.warn {
+        border-color: rgba(255, 149, 0, 0.45);
+      }
+      /* Quiet empty states inside the boards. */
+      .card > p.pad.muted {
+        font-size: var(--text-sm);
+        line-height: 1.5;
+      }
+      .card > .note {
+        margin: 0 var(--space-4) var(--space-3);
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
@@ -46,7 +134,12 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
       >
         <a class="btn btn-secondary" routerLink="/market-data/sources">Sources</a>
         <a class="btn btn-secondary" routerLink="/docs/multi-asset-setup">Guide</a>
-        <button type="button" class="btn btn-secondary" (click)="reload()" [disabled]="state.loading()">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          (click)="reload()"
+          [disabled]="state.loading()"
+        >
           {{ state.loading() ? 'Loading…' : 'Refresh' }}
         </button>
       </app-page-header>
@@ -65,13 +158,14 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
         [links]="links"
       />
 
-      <div class="tiles" aria-label="Summary">
+      <div class="kpis" [class.six]="tiles().length === 6" aria-label="Summary">
         @for (t of tiles(); track t.label) {
-          <div class="tile" [attr.data-tone]="t.tone ?? null">
-            <span class="t-label">{{ t.label }}</span>
-            <span class="t-value">{{ t.value }}</span>
-            <span class="t-hint">{{ t.hint }}</span>
-          </div>
+          <app-metric-card
+            [label]="t.label"
+            [displayValue]="t.value"
+            [dotColor]="toneColor(t.tone)"
+            [caption]="t.hint"
+          />
         }
       </div>
 
@@ -79,14 +173,25 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
         <header class="card-head">
           <h3>Symbols built</h3>
           @for (s of statuses(); track s.status) {
-            <span class="chip" [class.bad]="s.status === 'Blocked' || s.status === 'Stalled'" [class.ok]="s.status === 'Live'">
+            <span
+              class="dot"
+              [class.bad]="s.status === 'Blocked' || s.status === 'Stalled'"
+              [class.ok]="s.status === 'Live'"
+            >
               {{ s.status }} {{ s.count }}
             </span>
           }
           <span class="spacer"></span>
-          <label class="field">
+          <label class="search-box">
             <span class="sr-only">Symbol or root starts with</span>
-            <input class="input search" name="f-sym" placeholder="Filter: symbol or root starts with" [ngModel]="symbol()" (ngModelChange)="symbol.set($event)" (keydown.enter)="state.reload()" />
+            <input
+              class="input"
+              name="f-sym"
+              placeholder="Filter: symbol or root starts with"
+              [ngModel]="symbol()"
+              (ngModelChange)="symbol.set($event)"
+              (keydown.enter)="state.reload()"
+            />
           </label>
         </header>
         @if (state.value().cursors.length) {
@@ -99,23 +204,39 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                   <th>Status</th>
                   <th>Built span (UTC)</th>
                   <th title="Minutes between the newest built bar and now">Lag</th>
-                  <th title="Candle rows written · trade prints read (excluded: odd lots, outside session)">Bars · prints (excluded)</th>
+                  <th
+                    title="Candle rows written · trade prints read (excluded: odd lots, outside session)"
+                  >
+                    Bars · prints (excluded)
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 @for (c of state.value().cursors; track c.id) {
                   <tr>
-                    <td><code>{{ c.symbol }}</code></td>
-                    <td class="small">{{ kindLabel(c.kind) }}<span class="sub">{{ c.sourceId ?? c.root ?? '—' }}</span></td>
                     <td>
-                      <span class="chip" [class.ok]="c.status === 'Live'" [class.bad]="c.status === 'Blocked' || c.status === 'Stalled'">{{ c.status }}</span>
+                      <code>{{ c.symbol }}</code>
+                    </td>
+                    <td class="small">
+                      {{ kindLabel(c.kind)
+                      }}<span class="sub">{{ c.sourceId ?? c.root ?? '—' }}</span>
+                    </td>
+                    <td>
+                      <span
+                        class="dot"
+                        [class.ok]="c.status === 'Live'"
+                        [class.bad]="c.status === 'Blocked' || c.status === 'Stalled'"
+                        >{{ c.status }}</span
+                      >
                       @if (c.note) {
                         <span class="sub">{{ c.note }}</span>
                       }
                     </td>
                     <td class="small">{{ when(c.builtFromUtc) }} → {{ when(c.builtToUtc) }}</td>
                     <td class="small">{{ lag(c.lagMinutes) }}</td>
-                    <td class="small">{{ c.barsWritten }} · {{ c.tradesRead }} ({{ c.tradesExcluded }})</td>
+                    <td class="small">
+                      {{ c.barsWritten }} · {{ c.tradesRead }} ({{ c.tradesExcluded }})
+                    </td>
                   </tr>
                 }
               </tbody>
@@ -126,9 +247,11 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
             @if (symbol().trim()) {
               No built symbol starts with “{{ symbol().trim() }}”.
             } @else {
-              No symbol is built yet. The builder claims a symbol on the first cycle after a source has stored trades for it
+              No symbol is built yet. The builder claims a symbol on the first cycle after a source
+              has stored trades for it
               @if (readiness(); as r) {
-                — {{ readyCount() }} of the {{ r.candidateTotal }} instruments below have stored trades now.
+                — {{ readyCount() }} of the {{ r.candidateTotal }} instruments below have stored
+                trades now.
               } @else {
                 — the instruments below are the ones it would build.
               }
@@ -142,7 +265,7 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
           <header class="card-head">
             <h3>Instruments it would build</h3>
             @if (readiness(); as r) {
-              <span class="chip">{{ r.candidateTotal }} mapped or stored</span>
+              <span class="count">{{ r.candidateTotal }} mapped or stored</span>
             }
           </header>
           @if (readiness(); as r) {
@@ -159,9 +282,22 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                   <tbody>
                     @for (c of shownCandidates(); track c.symbol) {
                       <tr>
-                        <td><code>{{ c.symbol }}</code><span class="sub" title="The instrument-master row's exchange; candles come from the source chosen per symbol">{{ c.assetClass }} · master row {{ c.exchange }} · {{ c.tradingCalendarCode }}</span></td>
                         <td>
-                          <span class="chip" [class.ok]="c.stage === 'building'" [class.info]="c.stage === 'ready'">{{ stageLabel(c.stage) }}</span>
+                          <code>{{ c.symbol }}</code
+                          ><span
+                            class="sub"
+                            title="The instrument-master row's exchange; candles come from the source chosen per symbol"
+                            >{{ c.assetClass }} · master row {{ c.exchange }} ·
+                            {{ c.tradingCalendarCode }}</span
+                          >
+                        </td>
+                        <td>
+                          <span
+                            class="dot"
+                            [class.ok]="c.stage === 'building'"
+                            [class.info]="c.stage === 'ready'"
+                            >{{ stageLabel(c.stage) }}</span
+                          >
                           @if (c.cursorStatus) {
                             <span class="sub">{{ c.cursorStatus }}</span>
                           }
@@ -169,8 +305,20 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                         <td>
                           <div class="chips">
                             @for (s of c.sources; track s.sourceId) {
-                              <span class="chip" [class.ok]="s.storedTo === today()" [class.warn]="s.enabled && !s.storedTo" [title]="sourceTitle(s)">
-                                {{ s.sourceId }}{{ s.storedTo ? ' · ' + s.storedTo : s.enabled ? ' · mapped, its feed sends no trades' : ' · disabled' }}
+                              <span
+                                class="chip"
+                                [class.ok]="s.storedTo === today()"
+                                [class.warn]="s.enabled && !s.storedTo"
+                                [title]="sourceTitle(s)"
+                              >
+                                {{ s.sourceId
+                                }}{{
+                                  s.storedTo
+                                    ? ' · ' + s.storedTo
+                                    : s.enabled
+                                      ? ' · mapped, its feed sends no trades'
+                                      : ' · disabled'
+                                }}
                               </span>
                             }
                           </div>
@@ -181,20 +329,25 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                 </table>
               </div>
               @if (r.candidates.length > candidateLimit) {
-                <button type="button" class="toggle-more" (click)="allCandidates.set(!allCandidates())">
+                <button
+                  type="button"
+                  class="toggle-more"
+                  (click)="allCandidates.set(!allCandidates())"
+                >
                   {{ allCandidates() ? 'Show fewer' : 'Show all ' + r.candidates.length }}
                 </button>
               }
             } @else {
               <p class="pad muted">
-                No futures, crypto or stock data source maps or stores any of the {{ eligible() }} eligible instruments. Map
-                symbols on a source (Market data → Sources) and run its feed.
+                No futures, crypto or stock data source maps or stores any of the
+                {{ eligible() }} eligible instruments. Map symbols on a source (Market data →
+                Sources) and run its feed.
               </p>
             }
             <p class="note">
-              Eligible = an instrument-master future, crypto market, stock or ETF with no forex pair row. “Stored” = the
-              source has trade prints for it in the market-data store; “mapped only” = the source lists it but nothing is
-              stored yet.
+              Eligible = an instrument-master future, crypto market, stock or ETF with no forex pair
+              row. “Stored” = the source has trade prints for it in the market-data store; “mapped
+              only” = the source lists it but nothing is stored yet.
             </p>
           } @else {
             <p class="pad muted">{{ readinessNote() }}</p>
@@ -204,8 +357,8 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
         <section class="card" aria-label="Sources">
           <header class="card-head">
             <h3>Futures, crypto and stock sources</h3>
-            <span class="spacer"></span>
-            <a class="small" routerLink="/market-data/sources">Manage</a>
+            <!-- Beside the title, clear of the floating Ask button at the right edge. -->
+            <a class="head-link" routerLink="/market-data/sources">Manage →</a>
           </header>
           @if (readiness(); as r) {
             <div class="table-wrap">
@@ -214,15 +367,26 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                   <tr>
                     <th>Source</th>
                     <th>State</th>
-                    <th title="Symbols mapped that are eligible instruments · symbols with stored data">Mapped · stored</th>
+                    <th
+                      title="Symbols mapped that are eligible instruments · symbols with stored data"
+                    >
+                      Mapped · stored
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (s of shownSources(); track s.sourceId) {
                     <tr>
-                      <td><code>{{ s.sourceId }}</code><span class="sub">{{ s.displayName }}</span></td>
                       <td>
-                        <span class="chip" [class.ok]="s.lastStoredDay === today()" [class.warn]="s.enabled && s.lastStoredDay !== today()">
+                        <code>{{ s.sourceId }}</code
+                        ><span class="sub">{{ s.displayName }}</span>
+                      </td>
+                      <td>
+                        <span
+                          class="dot"
+                          [class.ok]="s.lastStoredDay === today()"
+                          [class.warn]="s.enabled && s.lastStoredDay !== today()"
+                        >
                           {{ sourceState(s) }}
                         </span>
                       </td>
@@ -240,7 +404,8 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
             @if (idleSources().length) {
               <p class="pad muted small">
                 @if (!allSources()) {
-                  {{ idleSources().length }} more registered but disabled (never used): {{ idleSummary() }}.
+                  {{ idleSources().length }} more registered but disabled (never used):
+                  {{ idleSummary() }}.
                 }
                 <button type="button" class="toggle-more" (click)="allSources.set(!allSources())">
                   {{ allSources() ? 'Hide disabled' : 'Show them' }}
@@ -256,9 +421,9 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
       <section class="card" aria-label="Roll calendar">
         <header class="card-head">
           <h3>Continuous futures roll calendar</h3>
-          <span class="chip">{{ rolls().length }} roots</span>
+          <span class="count">{{ rolls().length }} roots</span>
           @if (readiness()) {
-            <span class="chip ok">{{ masterRoots() }} in the instrument master</span>
+            <span class="hint">{{ masterRoots() }} in the instrument master</span>
           }
         </header>
         @if (rolls().length) {
@@ -268,7 +433,11 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                 <tr>
                   <th>Root · series</th>
                   <th>Exchange</th>
-                  <th title="The continuous series moves to the next contract on this date (the roll rule's business days before the last trade)">Next roll (UTC)</th>
+                  <th
+                    title="The continuous series moves to the next contract on this date (the roll rule's business days before the last trade)"
+                  >
+                    Next roll (UTC)
+                  </th>
                   <th>Then</th>
                   <th>Last rolled</th>
                   <th>Built by the builder</th>
@@ -277,8 +446,13 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
               <tbody>
                 @for (x of shownRolls(); track x.root) {
                   <tr>
-                    <td><code>{{ x.continuousSymbol }}</code><span class="sub">{{ x.root }} · {{ x.description }}</span></td>
-                    <td class="small">{{ x.exchange }}<span class="sub">{{ x.group }} · {{ x.rollRule }}</span></td>
+                    <td>
+                      <code>{{ x.continuousSymbol }}</code
+                      ><span class="sub">{{ x.root }} · {{ x.description }}</span>
+                    </td>
+                    <td class="small">
+                      {{ x.exchange }}<span class="sub">{{ x.group }} · {{ x.rollRule }}</span>
+                    </td>
                     <td class="small">
                       @if (x.next) {
                         <strong>{{ x.next.contract }}</strong> {{ x.next.rollUtc.slice(0, 10) }}
@@ -287,15 +461,33 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
                         —
                       }
                     </td>
-                    <td class="small">{{ x.following ? x.following.contract + ' ' + x.following.rollUtc.slice(0, 10) : '—' }}</td>
-                    <td class="small">{{ x.lastRolled ? x.lastRolled.contract + ' ' + x.lastRolled.rollUtc.slice(0, 10) : '—' }}</td>
+                    <td class="small">
+                      {{
+                        x.following
+                          ? x.following.contract + ' ' + x.following.rollUtc.slice(0, 10)
+                          : '—'
+                      }}
+                    </td>
+                    <td class="small">
+                      {{
+                        x.lastRolled
+                          ? x.lastRolled.contract + ' ' + x.lastRolled.rollUtc.slice(0, 10)
+                          : '—'
+                      }}
+                    </td>
                     <td class="small">
                       @if (x.inMaster) {
-                        <span class="chip" [class.ok]="x.continuousStatus === 'Live'">{{ x.continuousStatus ?? 'yes — waiting for contract candles' }}</span>
+                        <span class="dot" [class.ok]="x.continuousStatus === 'Live'">{{
+                          x.continuousStatus ?? 'yes — waiting for contract candles'
+                        }}</span>
                       } @else if (readiness()) {
                         <span class="muted">not in the instrument master</span>
                       } @else {
-                        <span class="muted" title="Which roots are in the instrument master comes with the engine update (instrument-candles/readiness)">not known yet</span>
+                        <span
+                          class="muted"
+                          title="Which roots are in the instrument master comes with the engine update (instrument-candles/readiness)"
+                          >not known yet</span
+                        >
                       }
                     </td>
                   </tr>
@@ -312,16 +504,17 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
           <p class="pad muted">The engine returned no futures roots.</p>
         }
         <p class="note">
-          Roots in the instrument master (FutureRoot rows) get continuous series from the builder once their contracts'
-          candles exist. The other roots are in the futures feed catalog only: their contracts stream when a futures source
-          runs, but no continuous series is stitched until the instrument reference sync adds them to the master.
+          Roots in the instrument master (FutureRoot rows) get continuous series from the builder
+          once their contracts' candles exist. The other roots are in the futures feed catalog only:
+          their contracts stream when a futures source runs, but no continuous series is stitched
+          until the instrument reference sync adds them to the master.
         </p>
       </section>
 
       <section class="card" aria-label="Rolls recorded">
         <header class="card-head">
           <h3>Rolls recorded</h3>
-          <span class="chip">{{ state.value().rolls.length }}</span>
+          <span class="count">{{ state.value().rolls.length }}</span>
         </header>
         @if (state.value().rolls.length) {
           <div class="table-wrap">
@@ -339,13 +532,17 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
               <tbody>
                 @for (r of state.value().rolls; track r.id) {
                   <tr>
-                    <td><code>{{ r.continuousSymbol }}</code></td>
+                    <td>
+                      <code>{{ r.continuousSymbol }}</code>
+                    </td>
                     <td class="small">{{ when(r.rollUtc) }}</td>
                     <td class="small">{{ r.fromContract }} → {{ r.toContract }}</td>
                     <td class="small">{{ r.fromPrice ?? '—' }} → {{ r.toPrice ?? '—' }}</td>
                     <td class="small">{{ r.gap }} · {{ r.ratio }}</td>
                     <td class="small">
-                      <span class="chip" [class.warn]="r.priceSource === 'unobserved'">{{ r.priceSource }}</span>
+                      <span class="dot" [class.warn]="r.priceSource === 'unobserved'">{{
+                        r.priceSource
+                      }}</span>
                       <span class="sub">{{ when(r.observedAtUtc) }}</span>
                     </td>
                   </tr>
@@ -355,10 +552,12 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
           </div>
         } @else {
           <p class="pad muted">
-            None yet. A roll is recorded when the builder stitches a continuous series across a contract change, with the
-            settlement (or last common one-minute close) of both contracts.
+            None yet. A roll is recorded when the builder stitches a continuous series across a
+            contract change, with the settlement (or last common one-minute close) of both
+            contracts.
             @if (nextMasterRoll(); as n) {
-              Next one due: <strong>{{ n.continuousSymbol }}</strong> {{ n.next!.contract }} on {{ n.next!.rollUtc.slice(0, 10) }}
+              Next one due: <strong>{{ n.continuousSymbol }}</strong> {{ n.next!.contract }} on
+              {{ n.next!.rollUtc.slice(0, 10) }}
               — recorded only if that contract's candles are being built by then.
             }
           </p>
@@ -374,11 +573,13 @@ const CANDIDATE_ROWS_COLLAPSED = 15;
           </div>
           <p class="note">
             Each root gets two series: <code>6E1!</code> adjusted with the method in use
-            (<code>MarketData:InstrumentCandles:Continuous:Adjustment</code>) and <code>6E1!U</code> always unadjusted.
-            Changing the method rebuilds the adjusted series from the start.
+            (<code>MarketData:InstrumentCandles:Continuous:Adjustment</code>) and
+            <code>6E1!U</code> always unadjusted. Changing the method rebuilds the adjusted series
+            from the start.
             @if (readiness(); as r) {
-              Continuous series are {{ r.continuousEnabled ? 'on' : 'off' }}; backfill reaches {{ r.backfillMaxDays }} days;
-              stock odd lots are {{ r.excludeEquityOddLots ? 'excluded' : 'included' }}.
+              Continuous series are {{ r.continuousEnabled ? 'on' : 'off' }}; backfill reaches
+              {{ r.backfillMaxDays }} days; stock odd lots are
+              {{ r.excludeEquityOddLots ? 'excluded' : 'included' }}.
             }
           </p>
         </div>
@@ -397,7 +598,11 @@ export class InstrumentCandlesPageComponent {
   protected readonly links = [
     { label: 'Market-data sources', route: '/market-data/sources' },
     { label: 'Candle coverage', route: '/market-data/coverage' },
-    { label: 'Builder settings', route: '/engine-config', query: { search: 'MarketData:InstrumentCandles' } },
+    {
+      label: 'Builder settings',
+      route: '/engine-config',
+      query: { search: 'MarketData:InstrumentCandles' },
+    },
     { label: 'Guide: switching on futures, crypto and stocks', route: '/docs/multi-asset-setup' },
   ];
 
@@ -424,43 +629,65 @@ export class InstrumentCandlesPageComponent {
   readonly readiness = computed(() => this.readinessRes.value());
   readonly today = computed(() => utcDay(this.now()));
   readonly statuses = computed(() =>
-    Object.entries(this.state.value().statusCounts ?? {}).map(([status, count]) => ({ status, count })),
+    Object.entries(this.state.value().statusCounts ?? {}).map(([status, count]) => ({
+      status,
+      count,
+    })),
   );
   readonly chain = computed(() => candleChain(this.state.value(), this.readiness(), this.now()));
   readonly rolls = computed(() => rollRows(this.readiness(), this.catalog.value(), this.now()));
-  readonly tiles = computed(() => candleTiles(this.state.value(), this.readiness(), this.rolls(), this.now()));
+  readonly tiles = computed(() =>
+    candleTiles(this.state.value(), this.readiness(), this.rolls(), this.now()),
+  );
   readonly masterRoots = computed(() => this.rolls().filter((r) => r.inMaster).length);
-  readonly shownRolls = computed(() => (this.allRolls() ? this.rolls() : this.rolls().slice(0, ROLL_ROWS_COLLAPSED)));
+  readonly shownRolls = computed(() =>
+    this.allRolls() ? this.rolls() : this.rolls().slice(0, ROLL_ROWS_COLLAPSED),
+  );
   readonly nextMasterRoll = computed(() => this.rolls().find((r) => r.inMaster && r.next) ?? null);
   readonly shownCandidates = computed(() => {
     const all = this.readiness()?.candidates ?? [];
     return this.allCandidates() ? all : all.slice(0, CANDIDATE_ROWS_COLLAPSED);
   });
-  readonly readyCount = computed(() => (this.readiness()?.candidates ?? []).filter((c) => c.stage !== 'mapped').length);
+  readonly readyCount = computed(
+    () => (this.readiness()?.candidates ?? []).filter((c) => c.stage !== 'mapped').length,
+  );
   readonly eligible = computed(() =>
-    Object.values(this.readiness()?.eligibleByClass ?? {}).reduce((a, b) => a + b, 0).toLocaleString('en-US'),
+    Object.values(this.readiness()?.eligibleByClass ?? {})
+      .reduce((a, b) => a + b, 0)
+      .toLocaleString('en-US'),
   );
   readonly sortedSources = computed(() =>
     [...(this.readiness()?.sources ?? [])].sort(
-      (a, b) => Number(b.enabled) - Number(a.enabled) || b.storedSymbols - a.storedSymbols || a.sourceId.localeCompare(b.sourceId),
+      (a, b) =>
+        Number(b.enabled) - Number(a.enabled) ||
+        b.storedSymbols - a.storedSymbols ||
+        a.sourceId.localeCompare(b.sourceId),
     ),
   );
   readonly allSources = signal(false);
   /** Disabled sources that never stored anything — one line unless asked for. */
-  readonly idleSources = computed(() => this.sortedSources().filter((s) => !s.enabled && s.storedSymbols === 0));
+  readonly idleSources = computed(() =>
+    this.sortedSources().filter((s) => !s.enabled && s.storedSymbols === 0),
+  );
   readonly shownSources = computed(() =>
-    this.allSources() ? this.sortedSources() : this.sortedSources().filter((s) => s.enabled || s.storedSymbols > 0),
+    this.allSources()
+      ? this.sortedSources()
+      : this.sortedSources().filter((s) => s.enabled || s.storedSymbols > 0),
   );
   readonly idleSummary = computed(() => {
     const by = new Map<string, string[]>();
     for (const s of this.idleSources()) {
       const k = SOURCE_KIND[s.kind] ?? s.kind;
-      by.set(k, [...(by.get(k) ?? []), s.sourceId + (s.mappedEligible ? ` (${s.mappedEligible} mapped)` : '')]);
+      by.set(k, [
+        ...(by.get(k) ?? []),
+        s.sourceId + (s.mappedEligible ? ` (${s.mappedEligible} mapped)` : ''),
+      ]);
     }
     return [...by.entries()].map(([k, ids]) => `${k}: ${ids.join(', ')}`).join(' · ');
   });
   readonly adjustment = computed(
-    () => this.readiness()?.continuousAdjustment ?? this.state.value().continuousAdjustment ?? 'Panama',
+    () =>
+      this.readiness()?.continuousAdjustment ?? this.state.value().continuousAdjustment ?? 'Panama',
   );
   readonly readinessNote = computed(() =>
     this.readinessRes.loading() && !this.readinessRes.loaded()
@@ -480,14 +707,37 @@ export class InstrumentCandlesPageComponent {
   }
 
   kindLabel(kind: string): string {
-    return kind === 'Continuous' ? 'Continuous (adjusted)' : kind === 'ContinuousUnadjusted' ? 'Continuous (raw)' : kind;
+    return kind === 'Continuous'
+      ? 'Continuous (adjusted)'
+      : kind === 'ContinuousUnadjusted'
+        ? 'Continuous (raw)'
+        : kind;
+  }
+
+  /** Tile tone → the metric-card stripe colour; untoned tiles keep the accent so the stripe still reads. */
+  toneColor(tone: string | null | undefined): string {
+    switch (tone) {
+      case 'ok':
+        return '#34C759';
+      case 'warn':
+        return '#FF9500';
+      case 'bad':
+        return '#FF3B30';
+      default:
+        return '#0071E3';
+    }
   }
 
   stageLabel(stage: string): string {
     return stage === 'building' ? 'Building' : stage === 'ready' ? 'Trades stored' : 'Mapped only';
   }
 
-  sourceTitle(s: { enabled: boolean; mapped: boolean; storedFrom: string | null; storedTo: string | null }): string {
+  sourceTitle(s: {
+    enabled: boolean;
+    mapped: boolean;
+    storedFrom: string | null;
+    storedTo: string | null;
+  }): string {
     return `${s.enabled ? 'enabled' : 'disabled'} · ${s.mapped ? 'in its symbol map' : 'not in its symbol map'} · ${
       s.storedFrom ? `stored ${s.storedFrom} → ${s.storedTo}` : 'nothing stored'
     }`;

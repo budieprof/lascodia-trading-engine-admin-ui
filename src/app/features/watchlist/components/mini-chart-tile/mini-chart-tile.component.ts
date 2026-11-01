@@ -152,59 +152,56 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
         </button>
       </header>
 
-      <div class="tile-prices">
-        @if (livePrice(); as p) {
-          <span class="px-row" [attr.data-side]="'bid'">
-            <span class="px-label">Bid</span>
-            <span class="px-value-wrap" [@priceFlash]="p.bid">
-              <span class="px-value mono px-bid" [attr.data-trend]="bidTrend()">{{
-                formatPrice(p.bid)
-              }}</span>
-              <span
-                class="px-trend"
-                [attr.data-trend]="bidTrend()"
-                [attr.aria-label]="
-                  bidTrend() === 'up' ? 'tick up' : bidTrend() === 'down' ? 'tick down' : ''
-                "
-                >{{ bidTrend() === 'up' ? '▲' : bidTrend() === 'down' ? '▼' : '·' }}</span
-              >
+      <!-- Candles and the live quote are separate endpoints: a drawn chart with
+           no quote means the price poll is what is missing. That case no longer
+           takes a line of its own — it folds into the footer's one feed
+           indicator, so a quiet wall reads calm instead of 26 grey/orange lines. -->
+      @if (livePrice() || (loading() && candles().length === 0)) {
+        <div class="tile-prices">
+          @if (livePrice(); as p) {
+            <span class="px-row" [attr.data-side]="'bid'">
+              <span class="px-label">Bid</span>
+              <span class="px-value-wrap" [@priceFlash]="p.bid">
+                <span class="px-value mono px-bid" [attr.data-trend]="bidTrend()">{{
+                  formatPrice(p.bid)
+                }}</span>
+                <span
+                  class="px-trend"
+                  [attr.data-trend]="bidTrend()"
+                  [attr.aria-label]="
+                    bidTrend() === 'up' ? 'tick up' : bidTrend() === 'down' ? 'tick down' : ''
+                  "
+                  >{{ bidTrend() === 'up' ? '▲' : bidTrend() === 'down' ? '▼' : '·' }}</span
+                >
+              </span>
             </span>
-          </span>
-          <span class="px-row" [attr.data-side]="'ask'">
-            <span class="px-label">Ask</span>
-            <span class="px-value-wrap" [@priceFlash]="p.ask">
-              <span class="px-value mono px-ask" [attr.data-trend]="askTrend()">{{
-                formatPrice(p.ask)
-              }}</span>
-              <span
-                class="px-trend"
-                [attr.data-trend]="askTrend()"
-                [attr.aria-label]="
-                  askTrend() === 'up' ? 'tick up' : askTrend() === 'down' ? 'tick down' : ''
-                "
-                >{{ askTrend() === 'up' ? '▲' : askTrend() === 'down' ? '▼' : '·' }}</span
-              >
+            <span class="px-row" [attr.data-side]="'ask'">
+              <span class="px-label">Ask</span>
+              <span class="px-value-wrap" [@priceFlash]="p.ask">
+                <span class="px-value mono px-ask" [attr.data-trend]="askTrend()">{{
+                  formatPrice(p.ask)
+                }}</span>
+                <span
+                  class="px-trend"
+                  [attr.data-trend]="askTrend()"
+                  [attr.aria-label]="
+                    askTrend() === 'up' ? 'tick up' : askTrend() === 'down' ? 'tick down' : ''
+                  "
+                  >{{ askTrend() === 'up' ? '▲' : askTrend() === 'down' ? '▼' : '·' }}</span
+                >
+              </span>
             </span>
-          </span>
-          <span class="px-row">
-            <span class="px-label">Spread</span>
-            <span class="px-value-wrap" [@priceFlash]="formatSpreadPips(p)">
-              <span class="px-value mono px-spread">{{ formatSpreadPips(p) }}p</span>
+            <span class="px-row">
+              <span class="px-label">Spread</span>
+              <span class="px-value-wrap" [@priceFlash]="formatSpreadPips(p)">
+                <span class="px-value mono px-spread">{{ formatSpreadPips(p) }}p</span>
+              </span>
             </span>
-          </span>
-        } @else if (loading() && candles().length === 0) {
-          <span class="px-row muted">Loading…</span>
-        } @else {
-          <!-- Candles and the live quote are separate endpoints: a drawn
-               chart with no quote means the price poll is what is missing. -->
-          <span
-            class="px-row muted"
-            title="No price has arrived from the stream yet: the market may be closed, or no EA is streaming this symbol"
-          >
-            No live quote
-          </span>
-        }
-      </div>
+          } @else if (loading() && candles().length === 0) {
+            <span class="px-row muted">Loading…</span>
+          }
+        </div>
+      }
 
       <div class="tile-chart">
         @if (candles().length > 0) {
@@ -229,20 +226,12 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
           <span class="muted small">
             {{ candles().length }} bar{{ candles().length === 1 ? '' : 's' }}
           </span>
-          @if (barAge(); as age) {
-            <span
-              class="small"
-              [class.muted]="!age.stale"
-              [class.stale]="age.stale"
-              [title]="
-                age.stale
-                  ? 'Last closed bar is older than three ' +
-                    timeframe() +
-                    ' bars — the feed for this symbol looks stale'
-                  : 'Age of the last closed bar'
-              "
-            >
-              · {{ age.label }}{{ age.stale ? ' · stale' : '' }}
+          <!-- One quiet feed indicator: the bar age, plus "no quote" when the
+               stream has not priced the symbol. The dot turns amber only when
+               the last closed bar is older than three bars. -->
+          @if (feedLabel() !== '') {
+            <span class="feed small" [class.warn]="barAge()?.stale === true" [title]="feedTitle()">
+              <i aria-hidden="true"></i>{{ feedLabel() }}
             </span>
           }
           @if (candleError()) {
@@ -526,9 +515,23 @@ const PRICE_FLASH_TRIGGER: AnimationTriggerMetadata = trigger('priceFlash', [
       .error-text {
         color: var(--loss, #c93631);
       }
-      .stale {
-        color: var(--warning, #c93400);
-        font-weight: var(--font-semibold);
+      .feed {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        color: var(--text-tertiary);
+        white-space: nowrap;
+      }
+      .feed i {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.5;
+      }
+      .feed.warn i {
+        background: var(--warning, #ff9500);
+        opacity: 1;
       }
 
       .tile-foot {
@@ -1052,6 +1055,33 @@ export class MiniChartTileComponent implements OnInit, OnDestroy {
    * lengths (min 15 min). "95d old" on an M30 tile used to render exactly
    * like "3m old" — the number was there, the judgement was not.
    */
+  /** Footer feed indicator text: "1d old", "No quote · 1d old", or "No quote". */
+  protected feedLabel(): string {
+    const age = this.barAge();
+    const parts: string[] = [];
+    if (!this.livePrice() && !(this.loading() && this.candles().length === 0))
+      parts.push('No quote');
+    if (age) parts.push(age.label);
+    return parts.join(' · ');
+  }
+
+  /** The full explanation behind the indicator, as a hover title. */
+  protected feedTitle(): string {
+    const age = this.barAge();
+    const lines: string[] = [];
+    if (!this.livePrice())
+      lines.push(
+        'No live quote: no price has arrived from the stream yet — the market may be closed, or no EA is streaming this symbol.',
+      );
+    if (age)
+      lines.push(
+        age.stale
+          ? `Last closed bar is older than three ${this.timeframe()} bars — the feed for this symbol looks stale.`
+          : 'Age of the last closed bar.',
+      );
+    return lines.join('\n');
+  }
+
   protected barAge(): { label: string; stale: boolean } | null {
     const xs = this.candles();
     if (xs.length === 0) return null;

@@ -92,8 +92,10 @@ const SHOW_ORDERS_STORAGE_KEY = 'tradingChart.watchlist.showOrders.v1';
 const OVERLAY_ACCOUNT_STORAGE_KEY = 'tradingChart.watchlist.overlayAccount.v1';
 const TF_OPTIONS: ReadonlyArray<string> = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1', 'W1'];
 const SIZE_OPTIONS: ReadonlyArray<{ value: TileSize; label: string; minPx: number }> = [
-  { value: 'sm', label: 'S', minPx: 320 },
-  { value: 'md', label: 'M', minPx: 420 },
+  // Min tile widths only set wall density (the tile's chart height per size
+  // lives in the tile). M packs three across a 1440 px screen, S four.
+  { value: 'sm', label: 'S', minPx: 250 },
+  { value: 'md', label: 'M', minPx: 340 },
   { value: 'lg', label: 'L', minPx: 560 },
   { value: 'xl', label: 'XL', minPx: 720 },
 ];
@@ -117,7 +119,7 @@ const UNDO_MS = 8_000;
         subtitle="Mini-charts for every symbol of a watchlist — the same lists as the chart's watchlist panel. Click a tile to open the full chart."
       >
         <label class="source-pick">
-          <span class="tf-label">Showing</span>
+          <span class="seg-label">Showing</span>
           <select
             class="acct-select source-select"
             (change)="setSource($any($event.target).value)"
@@ -147,138 +149,145 @@ const UNDO_MS = 8_000;
         </div>
       }
 
-      <!-- ── Toolbar: timeframe + size + add-symbol ──────────────── -->
+      <!-- ── Toolbar: venue-page family. Row 1 is how the wall draws
+           (timeframe, size, bars); row 2 what it overlays and adds. ── -->
       <section class="toolbar" aria-label="Watchlist controls">
-        <div class="tf-group" role="tablist" aria-label="Timeframe">
-          <span class="tf-label">Timeframe</span>
-          @for (tf of timeframeOptions; track tf) {
-            <button
-              type="button"
-              role="tab"
-              class="tf-btn"
-              [class.active]="globalTimeframe() === tf"
-              [attr.aria-selected]="globalTimeframe() === tf"
-              (click)="setGlobalTimeframe(tf)"
-            >
-              {{ tf }}
-            </button>
-          }
+        <div class="tb-row">
+          <div class="seg" role="tablist" aria-label="Timeframe">
+            <span class="seg-label">TF</span>
+            @for (tf of timeframeOptions; track tf) {
+              <button
+                type="button"
+                role="tab"
+                class="tf-btn"
+                [class.active]="globalTimeframe() === tf"
+                [attr.aria-selected]="globalTimeframe() === tf"
+                (click)="setGlobalTimeframe(tf)"
+              >
+                {{ tf }}
+              </button>
+            }
+          </div>
+          <div class="seg" role="tablist" aria-label="Tile size">
+            <span class="seg-label">Size</span>
+            @for (s of sizeOptions; track s.value) {
+              <button
+                type="button"
+                role="tab"
+                class="tf-btn"
+                [class.active]="tileSize() === s.value"
+                [attr.aria-selected]="tileSize() === s.value"
+                (click)="setTileSize(s.value)"
+                [title]="
+                  'Min tile width ' +
+                  s.minPx +
+                  ' px — ' +
+                  (s.value === 'sm'
+                    ? 'compact wall, many tiles'
+                    : s.value === 'md'
+                      ? 'comfortable default'
+                      : s.value === 'lg'
+                        ? 'large candles, ~3 columns'
+                        : 'extra-large candles, ~2 columns')
+                "
+              >
+                {{ s.label }}
+              </button>
+            }
+          </div>
+          <div class="seg" role="tablist" aria-label="Candles per tile">
+            <span class="seg-label">Bars</span>
+            @for (n of barCountOptions; track n) {
+              <button
+                type="button"
+                role="tab"
+                class="tf-btn"
+                [class.active]="barCount() === n"
+                [attr.aria-selected]="barCount() === n"
+                (click)="setBarCount(n)"
+                [title]="'Fetch and render ' + n + ' candles per tile'"
+              >
+                {{ n }}
+              </button>
+            }
+          </div>
+          <span class="grow"></span>
+          <span class="muted small grid-meta">
+            {{ entries().length }} tile{{ entries().length === 1 ? '' : 's' }}
+          </span>
         </div>
-        <div class="tf-group" role="tablist" aria-label="Tile size">
-          <span class="tf-label">Size</span>
-          @for (s of sizeOptions; track s.value) {
+        <div class="tb-row">
+          <div class="overlays" role="group" aria-label="Chart overlays">
+            <span class="seg-label">Overlays</span>
             <button
               type="button"
-              role="tab"
-              class="tf-btn"
-              [class.active]="tileSize() === s.value"
-              [attr.aria-selected]="tileSize() === s.value"
-              (click)="setTileSize(s.value)"
-              [title]="
-                'Min tile width ' +
-                s.minPx +
-                ' px — ' +
-                (s.value === 'sm'
-                  ? 'compact wall, many tiles'
-                  : s.value === 'md'
-                    ? 'comfortable default'
-                    : s.value === 'lg'
-                      ? 'large candles, ~3 columns'
-                      : 'extra-large candles, ~2 columns')
+              class="toggle"
+              [class.on]="showPositions()"
+              [attr.aria-pressed]="showPositions()"
+              (click)="togglePositions()"
+              title="Show open-position entry / SL / TP lines on each tile"
+            >
+              Positions
+            </button>
+            <button
+              type="button"
+              class="toggle"
+              [class.on]="showOrders()"
+              [attr.aria-pressed]="showOrders()"
+              (click)="toggleOrders()"
+              title="Show pending-order price / SL / TP lines on each tile"
+            >
+              Orders
+            </button>
+            <select
+              class="acct-select"
+              [value]="overlayAccountStr()"
+              (change)="setOverlayAccount($any($event.target).value)"
+              title="Which account's positions / orders to overlay"
+              aria-label="Overlay account scope"
+            >
+              <option value="all" [selected]="overlayAccount() === 'all'">All accounts</option>
+              @for (a of overlayAccounts(); track a.id) {
+                <option [value]="a.id" [selected]="overlayAccount() === a.id">
+                  {{ a.accountName || a.accountId || 'Account ' + a.id }}
+                </option>
+              }
+            </select>
+          </div>
+          <span class="grow"></span>
+          <div class="add-wrap">
+            <input
+              #addInput
+              type="text"
+              class="add-input"
+              [placeholder]="
+                sourceList()
+                  ? 'Add a symbol to ' + sourceList()!.name + ' (e.g. EURUSD)…'
+                  : 'Pick a watchlist above to add symbols'
               "
-            >
-              {{ s.label }}
-            </button>
-          }
-        </div>
-        <div class="tf-group" role="tablist" aria-label="Candles per tile">
-          <span class="tf-label">Bars</span>
-          @for (n of barCountOptions; track n) {
+              [disabled]="!sourceList()"
+              [ngModel]="addDraft()"
+              (ngModelChange)="addDraft.set($event)"
+              (keydown.enter)="addFromInput()"
+              list="watchlist-symbols"
+              aria-label="Add symbol to the watchlist"
+            />
+            <datalist id="watchlist-symbols">
+              @for (s of catalogueSymbols(); track s) {
+                <option [value]="s"></option>
+              }
+            </datalist>
             <button
               type="button"
-              role="tab"
-              class="tf-btn"
-              [class.active]="barCount() === n"
-              [attr.aria-selected]="barCount() === n"
-              (click)="setBarCount(n)"
-              [title]="'Fetch and render ' + n + ' candles per tile'"
+              class="add-btn"
+              [disabled]="!canAdd()"
+              (click)="addFromInput()"
+              title="Add this symbol to the watchlist (it shows on the chart's watchlist panel too)"
             >
-              {{ n }}
+              Add
             </button>
-          }
+          </div>
         </div>
-        <div class="tf-group" role="group" aria-label="Chart overlays">
-          <span class="tf-label">Overlays</span>
-          <button
-            type="button"
-            class="tf-btn"
-            [class.active]="showPositions()"
-            [attr.aria-pressed]="showPositions()"
-            (click)="togglePositions()"
-            title="Show open-position entry / SL / TP lines on each tile"
-          >
-            Positions
-          </button>
-          <button
-            type="button"
-            class="tf-btn"
-            [class.active]="showOrders()"
-            [attr.aria-pressed]="showOrders()"
-            (click)="toggleOrders()"
-            title="Show pending-order price / SL / TP lines on each tile"
-          >
-            Orders
-          </button>
-          <select
-            class="acct-select"
-            [value]="overlayAccountStr()"
-            (change)="setOverlayAccount($any($event.target).value)"
-            title="Which account's positions / orders to overlay"
-            aria-label="Overlay account scope"
-          >
-            <option value="all" [selected]="overlayAccount() === 'all'">All accounts</option>
-            @for (a of overlayAccounts(); track a.id) {
-              <option [value]="a.id" [selected]="overlayAccount() === a.id">
-                {{ a.accountName || a.accountId || 'Account ' + a.id }}
-              </option>
-            }
-          </select>
-        </div>
-        <div class="add-wrap">
-          <input
-            #addInput
-            type="text"
-            class="add-input"
-            [placeholder]="
-              sourceList()
-                ? 'Add a symbol to ' + sourceList()!.name + ' (e.g. EURUSD)…'
-                : 'Pick a watchlist above to add symbols'
-            "
-            [disabled]="!sourceList()"
-            [ngModel]="addDraft()"
-            (ngModelChange)="addDraft.set($event)"
-            (keydown.enter)="addFromInput()"
-            list="watchlist-symbols"
-            aria-label="Add symbol to the watchlist"
-          />
-          <datalist id="watchlist-symbols">
-            @for (s of catalogueSymbols(); track s) {
-              <option [value]="s"></option>
-            }
-          </datalist>
-          <button
-            type="button"
-            class="add-btn"
-            [disabled]="!canAdd()"
-            (click)="addFromInput()"
-            title="Add this symbol to the watchlist (it shows on the chart's watchlist panel too)"
-          >
-            Add
-          </button>
-        </div>
-        <span class="muted small grid-meta">
-          {{ entries().length }} tile{{ entries().length === 1 ? '' : 's' }}
-        </span>
       </section>
 
       @if (undo(); as u) {
@@ -396,81 +405,121 @@ const UNDO_MS = 8_000;
         color: var(--text-primary);
       }
 
-      /* ── Toolbar ─────────────────────────────────────────────── */
+      /* ── Toolbar — venue-page family: segmented pills, toggle chips ── */
       .toolbar {
         display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-3);
-        align-items: center;
-        padding: var(--space-2) var(--space-3);
+        flex-direction: column;
+        gap: var(--space-2);
+        padding: var(--space-3) var(--space-4);
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
       }
-      .tf-group {
+      .tb-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2) var(--space-3);
+      }
+      .grow {
+        flex: 1;
+      }
+      .seg {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
         flex-wrap: wrap;
+        gap: 2px;
+        padding: 3px;
+        background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
       }
-      .tf-label {
+      .seg-label {
+        padding: 0 6px 0 9px;
         font-size: 10px;
         font-weight: var(--font-semibold);
         color: var(--text-tertiary);
         text-transform: uppercase;
         letter-spacing: 0.05em;
-        margin-right: 4px;
       }
       .tf-btn {
         appearance: none;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
+        border: none;
+        background: transparent;
         color: var(--text-secondary);
-        font-family: inherit;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        font-variant-numeric: tabular-nums;
         padding: 4px 10px;
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-full);
         cursor: pointer;
       }
       .tf-btn:hover {
-        background: var(--bg-tertiary);
         color: var(--text-primary);
       }
       .tf-btn.active {
-        background: var(--accent, #0071e3);
-        border-color: var(--accent, #0071e3);
-        color: white;
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
       }
-
+      .overlays {
+        display: inline-flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .overlays .seg-label {
+        padding-left: 0;
+      }
+      .toggle {
+        appearance: none;
+        height: 30px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+      }
+      .toggle.on {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.08);
+      }
       .add-wrap {
         display: inline-flex;
-        gap: 4px;
+        gap: 6px;
         align-items: center;
-        flex: 1 1 280px;
+        flex: 0 1 380px;
         min-width: 260px;
       }
       .acct-select {
-        height: 28px;
-        margin-left: 4px;
-        padding: 0 6px;
+        height: 30px;
+        padding: 0 10px;
         border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-full);
         background: var(--bg-primary);
         color: var(--text-primary);
-        font-size: 12px;
-        max-width: 160px;
+        font: inherit;
+        font-size: var(--text-xs);
+        max-width: 180px;
         cursor: pointer;
       }
       .add-input {
         flex: 1;
+        min-width: 0;
         height: 30px;
-        padding: 0 10px;
+        padding: 0 12px;
         border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
+        border-radius: var(--radius-full);
         background: var(--bg-primary);
         color: var(--text-primary);
-        font-size: 12px;
+        font: inherit;
+        font-size: var(--text-xs);
         outline: none;
       }
       .add-input:focus {
@@ -479,12 +528,13 @@ const UNDO_MS = 8_000;
       .add-btn {
         appearance: none;
         height: 30px;
-        padding: 0 14px;
+        padding: 0 16px;
         background: var(--accent, #0071e3);
         color: white;
         border: none;
-        border-radius: var(--radius-sm);
-        font-size: 12px;
+        border-radius: var(--radius-full);
+        font: inherit;
+        font-size: var(--text-xs);
         font-weight: var(--font-semibold);
         cursor: pointer;
       }
@@ -494,7 +544,7 @@ const UNDO_MS = 8_000;
         cursor: not-allowed;
       }
       .grid-meta {
-        margin-left: auto;
+        font-variant-numeric: tabular-nums;
       }
 
       .load-banner {
@@ -514,9 +564,9 @@ const UNDO_MS = 8_000;
       .grid {
         display: grid;
         /* --tile-min-width is bound from the toolbar's size selector;
-           320 px fallback matches the old "compact" default for the
-           initial render frame before the binding settles. */
-        grid-template-columns: repeat(auto-fit, minmax(var(--tile-min-width, 320px), 1fr));
+           340 px fallback matches the "M" default for the initial render
+           frame before the binding settles. */
+        grid-template-columns: repeat(auto-fit, minmax(var(--tile-min-width, 340px), 1fr));
         gap: var(--space-3);
       }
 

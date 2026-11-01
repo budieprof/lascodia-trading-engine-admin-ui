@@ -110,52 +110,47 @@ interface AnomalyFlag {
         <app-refresh-button [refreshing]="resource.refreshing()" (refresh)="resource.refresh()" />
       </app-page-header>
 
-      <section class="filter-bar">
-        <div class="fb-field">
-          <label for="window" class="fb-label">Window</label>
-          <div class="window-presets">
-            @for (p of windowPresets; track p) {
-              <button
-                type="button"
-                class="preset"
-                [class.active]="windowHours() === p"
-                (click)="windowHours.set(p)"
-              >
-                {{ p < 24 ? p + 'h' : p / 24 + 'd' }}
-              </button>
-            }
-          </div>
+      <!-- Filter toolbar — venue-page family: segmented window pills, rounded
+           search boxes and selects on one line. -->
+      <section class="toolbar" aria-label="Filters">
+        <div class="seg" role="group" aria-label="Window">
+          @for (p of windowPresets; track p) {
+            <button
+              type="button"
+              [class.on]="windowHours() === p"
+              [attr.aria-pressed]="windowHours() === p"
+              (click)="windowHours.set(p)"
+            >
+              {{ p < 24 ? p + 'h' : p / 24 + 'd' }}
+            </button>
+          }
         </div>
-        <div class="fb-field">
-          <label for="symbol" class="fb-label">Symbol</label>
+        <div class="search-box">
+          <label for="symbol" class="sr-only">Symbol</label>
           <input
             id="symbol"
             class="filter-input"
             type="search"
-            placeholder="e.g. EURUSD"
+            placeholder="Symbol, e.g. EURUSD"
             [ngModel]="symbolFilter()"
             (ngModelChange)="symbolFilter.set($event)"
           />
         </div>
-        <div class="fb-field">
-          <label for="position" class="fb-label">Position #</label>
+        <div class="search-box narrow">
+          <label for="position" class="sr-only">Position #</label>
           <input
             id="position"
             class="filter-input"
             type="search"
-            placeholder="id"
+            placeholder="Position #"
             [ngModel]="positionFilter()"
             (ngModelChange)="positionFilter.set($event)"
           />
         </div>
-        <div class="fb-field">
-          <label for="source" class="fb-label">Source</label>
-          <select
-            id="source"
-            class="filter-select"
-            [ngModel]="sourceFilter()"
-            (ngModelChange)="sourceFilter.set($event)"
-          >
+        <span class="grow"></span>
+        <label class="pick">
+          <span>Source</span>
+          <select id="source" [ngModel]="sourceFilter()" (ngModelChange)="sourceFilter.set($event)">
             <option value="">all sources</option>
             <option value="EA">EA (delta)</option>
             <option value="EASnapshot">EASnapshot</option>
@@ -165,12 +160,11 @@ interface AnomalyFlag {
             <option value="Manual">Manual</option>
             <option value="ReceivePositionSnapshot">ReceivePositionSnapshot</option>
           </select>
-        </div>
-        <div class="fb-field">
-          <label for="eventType" class="fb-label">Type</label>
+        </label>
+        <label class="pick">
+          <span>Type</span>
           <select
             id="eventType"
-            class="filter-select"
             [ngModel]="eventTypeFilter()"
             (ngModelChange)="eventTypeFilter.set($event)"
           >
@@ -183,7 +177,7 @@ interface AnomalyFlag {
             <option value="Reconciled">Reconciled</option>
             <option value="StaleClose">StaleClose</option>
           </select>
-        </div>
+        </label>
       </section>
 
       @if (loading()) {
@@ -195,55 +189,66 @@ interface AnomalyFlag {
           (retry)="resource.refresh()"
         />
       } @else {
-        <!-- KPI strip — canonical metric-cards, always rendered. -->
+        <!-- KPI strip — canonical metric-cards, always rendered, two even rows of
+             four. Zero counts stay neutral grey; colour marks something to look at. -->
         <div class="kpi-strip">
           <app-metric-card
             label="Events"
             [value]="filteredRows().length"
             format="number"
-            dotColor="#0071E3"
+            [dotColor]="filteredRows().length > 0 ? '#0071E3' : '#8E8E93'"
+            [caption]="
+              'In the last ' + (windowHours() < 24 ? windowHours() + 'h' : windowHours() / 24 + 'd')
+            "
           />
           <app-metric-card
             label="Types"
             [value]="typeBuckets().length"
             format="number"
-            dotColor="#0071E3"
+            [dotColor]="typeBuckets().length > 0 ? '#0071E3' : '#8E8E93'"
+            caption="Distinct event types"
           />
           <app-metric-card
             label="Sources"
             [value]="sourceBuckets().length"
             format="number"
-            dotColor="#0071E3"
+            [dotColor]="sourceBuckets().length > 0 ? '#0071E3' : '#8E8E93'"
+            caption="Distinct writers"
           />
           <app-metric-card
             label="Positions"
             [value]="positionRollups().length"
             format="number"
-            dotColor="#0071E3"
+            [dotColor]="positionRollups().length > 0 ? '#0071E3' : '#8E8E93'"
+            caption="Positions touched"
           />
           <app-metric-card
             label="Symbols"
             [value]="distinctSymbols()"
             format="number"
-            dotColor="#0071E3"
+            [dotColor]="distinctSymbols() > 0 ? '#5AC8FA' : '#8E8E93'"
+            caption="Distinct symbols"
           />
           <app-metric-card
             label="Stale closes"
             [value]="staleCloseCount()"
             format="number"
-            [dotColor]="staleCloseCount() > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="staleCloseCount() > 0 ? '#FF3B30' : '#8E8E93'"
+            caption="StaleClose events in the window"
           />
           <app-metric-card
             label="Closing pending"
             [value]="closingPendingCount()"
             format="number"
-            [dotColor]="closingPendingCount() > 0 ? '#FF9500' : '#34C759'"
+            [dotColor]="closingPendingCount() > 0 ? '#FF9500' : '#8E8E93'"
+            caption="Close requested, not yet confirmed"
           />
           <app-metric-card
             label="Last event (min ago)"
             [value]="lastEventMinutes()"
             format="number"
-            dotColor="#AF52DE"
+            [dotColor]="lastEventMinutes() !== null ? '#AF52DE' : '#8E8E93'"
+            caption="Age of the newest event"
           />
         </div>
 
@@ -547,78 +552,129 @@ interface AnomalyFlag {
         gap: var(--space-4);
       }
 
-      /* ── Filter bar — matches the ml-models / market-data toolbar ── */
-      .filter-bar {
+      /* ── Filter toolbar — venue-page family ── */
+      .toolbar {
         display: flex;
-        align-items: flex-end;
-        gap: var(--space-3);
+        align-items: center;
         flex-wrap: wrap;
+        gap: var(--space-2) var(--space-3);
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
         padding: var(--space-3) var(--space-4);
       }
-      .fb-field {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
+      .toolbar .grow {
+        flex: 1;
       }
-      .fb-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .filter-input,
-      .filter-select {
-        height: 32px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        min-width: 160px;
-      }
-
-      .window-presets {
-        display: flex;
-        height: 32px;
-      }
-      .preset {
-        padding: 0 12px;
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        cursor: pointer;
-        font-variant-numeric: tabular-nums;
-      }
-      .preset:hover {
+      .seg {
+        display: inline-flex;
+        gap: 2px;
+        padding: 3px;
         background: var(--bg-tertiary);
+        border-radius: var(--radius-full);
       }
-      .preset.active {
-        background: var(--accent);
-        color: white;
+      .seg button {
+        border: none;
+        background: transparent;
+        color: var(--text-secondary);
+        font: inherit;
+        font-size: var(--text-xs);
+        font-weight: var(--font-medium);
+        font-variant-numeric: tabular-nums;
+        padding: 4px 12px;
+        border-radius: var(--radius-full);
+        cursor: pointer;
+      }
+      .seg button:hover {
+        color: var(--text-primary);
+      }
+      .seg button.on {
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        box-shadow: var(--shadow-sm);
+      }
+      .search-box {
+        position: relative;
+        width: 200px;
+        max-width: 100%;
+      }
+      .search-box.narrow {
+        width: 130px;
+      }
+      .search-box::before {
+        content: '⌕';
+        position: absolute;
+        left: 11px;
+        top: 50%;
+        transform: translateY(-52%);
+        color: var(--text-tertiary);
+        font-size: 15px;
+        pointer-events: none;
+      }
+      .filter-input {
+        width: 100%;
+        height: 32px;
+        padding: 0 var(--space-3) 0 30px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-sm);
+      }
+      .pick {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 32px;
+        padding: 0 4px 0 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+      }
+      .pick span {
+        font-weight: var(--font-medium);
+      }
+      .pick select {
+        border: none;
+        background: transparent;
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-sm);
+        height: 30px;
+        max-width: 180px;
+        cursor: pointer;
+      }
+      .pick select:focus {
+        outline: none;
+      }
+      .pick:focus-within,
+      .filter-input:focus {
         border-color: var(--accent);
+        outline: none;
       }
-      .preset:first-child {
-        border-radius: var(--radius-sm) 0 0 var(--radius-sm);
-      }
-      .preset:last-child {
-        border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-      }
-      .preset + .preset {
-        border-left: none;
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
       }
 
-      /* ── KPI strip — wraps via auto-fit; short tiles do not stretch ── */
+      /* ── KPI strip — two even rows of four ── */
       .kpi-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-        gap: var(--space-2);
-        align-items: start;
+        grid-template-columns: repeat(4, 1fr);
+        gap: var(--space-3);
+      }
+      @media (max-width: 720px) {
+        .kpi-strip {
+          grid-template-columns: repeat(2, 1fr);
+        }
       }
 
       /* ── Insights section — board-style wrapper + 1px-border grid trick ── */

@@ -1,0 +1,216 @@
+// Modal chrome for the Signal Sensitivity page: the per-signal chart modal and the
+// per-symbol auto-config dialog. Split from the page's inline styles so each
+// stylesheet stays inside the 16 kB component-style budget.
+
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+.modal-card {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  width: min(1100px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+.modal-header {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+.modal-header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.modal-sub {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+.modal-header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.tf-toolbar {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  padding: 2px;
+}
+.tf-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.3rem 0.55rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.tf-btn:hover {
+  color: var(--text-primary);
+}
+.tf-btn--active {
+  background: var(--accent);
+  color: #ffffff;
+}
+.tf-btn--active:hover {
+  color: #ffffff;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 1.5rem;
+  cursor: pointer;
+  line-height: 1;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+}
+.modal-close:hover {
+  background: var(--bg-tertiary);
+}
+.modal-body {
+  flex: 1;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-height: 480px;
+}
+.chart-instance {
+  flex: 1;
+  min-height: 420px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  font-size: 0.8rem;
+  opacity: 0.85;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.dot {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 1px;
+}
+.dot--entry {
+  background: #6e6e73;
+}
+.dot--tp {
+  background: #1f8a3d;
+}
+.dot--sl {
+  background: #c4290a;
+}
+.dot--tp-scenario {
+  background: #1f8a3d;
+  opacity: 0.55;
+}
+.dot--sl-scenario {
+  background: #c4290a;
+  opacity: 0.55;
+}
+.dot--exit {
+  background: var(--accent);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ── Per-symbol auto-config dialog ────────────────────────────────── */
+.autoconfig-card {
+  width: min(880px, 100%);
+}
+.autoconfig-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.autoconfig-table th,
+.autoconfig-table td {
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.autoconfig-table th.num,
+.autoconfig-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.autoconfig-table th {
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.7;
+}
+.autoconfig-table td.key {
+  font-weight: 600;
+}
+.autoconfig-table .check-col {
+  width: 32px;
+  text-align: center;
+  padding-right: 0;
+}
+.autoconfig-table tr.row--excluded td {
+  opacity: 0.45;
+}
+.autoconfig-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.75rem 1.25rem;
+  border-top: 1px solid var(--border);
+}
+.btn-secondary {
+  background: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.btn-secondary:hover {
+  background: var(--bg-tertiary);
+}
+.autoconfig-message {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  font-size: 0.85rem;
+}
+.autoconfig-message.error {
+  background: rgba(196, 41, 10, 0.15);
+  color: #c4290a;
+}

@@ -82,7 +82,12 @@ type DirectionChip = 'all' | TradeDirection;
         title="Trade Signals"
         subtitle="Review pending signals, monitor strategy output, and act on the queue"
       >
-        <button class="btn btn-primary" type="button" (click)="showCreateDialog.set(true)">
+        <!-- Header-size primary: the page's compact .btn rule (bulk bar) must not shrink it. -->
+        <button
+          class="btn btn-primary header-btn"
+          type="button"
+          (click)="showCreateDialog.set(true)"
+        >
           + Create signal
         </button>
       </app-page-header>
@@ -220,48 +225,58 @@ type DirectionChip = 'all' | TradeDirection;
           />
         </div>
       } @else {
-        <!-- KPI strip (6 dense tiles) -->
+        <!-- KPI strip (6 dense tiles). Zero counts take the neutral tone; a tone means
+             there is something there to look at. -->
         <div class="kpi-grid">
           <app-metric-card
             label="Pending now"
             [value]="pendingCount()"
             format="number"
-            [dotColor]="pendingCount() > 0 ? '#FF9500' : '#34C759'"
+            caption="awaiting approval"
+            [dotColor]="pendingCount() > 0 ? '#FF9500' : '#8E8E93'"
           />
           <app-metric-card
             label="Approved today"
             [value]="approvedToday()"
             format="number"
-            dotColor="#34C759"
+            caption="since local midnight"
+            [dotColor]="approvedToday() > 0 ? '#34C759' : '#8E8E93'"
           />
           <app-metric-card
             label="Rejected today"
             [value]="rejectedToday()"
             format="number"
-            dotColor="#FF3B30"
+            caption="since local midnight"
+            [dotColor]="rejectedToday() > 0 ? '#FF3B30' : '#8E8E93'"
           />
           <app-metric-card
             label="Expired today"
             [value]="expiredToday()"
             format="number"
-            dotColor="#8E8E93"
+            caption="TTL ran out unexecuted"
+            [dotColor]="expiredToday() > 0 ? '#FF9500' : '#8E8E93'"
           />
           <!-- No pending signal → no average ("0.00%" read as a measured zero). -->
           <app-metric-card
-            label="Avg confidence (pending)"
+            label="Avg confidence"
             [value]="avgPendingConfidence() === null ? null : avgPendingConfidence()! * 100"
             format="percent"
-            dotColor="#0071E3"
+            [caption]="
+              avgPendingConfidence() === null ? 'no pending signals' : 'across pending signals'
+            "
+            [dotColor]="avgPendingConfidence() === null ? '#8E8E93' : '#0071E3'"
           />
           <app-metric-card
-            label="ML disagreements (24h)"
+            label="ML disagreements"
             [value]="mlDisagreementCount()"
             format="number"
+            caption="ML direction ≠ signal, 24h"
             [dotColor]="mlDisagreementCount() > 0 ? '#AF52DE' : '#8E8E93'"
           />
         </div>
 
-        <!-- Filter row -->
+        <!-- Filter toolbar — status + direction segments, search, ML toggle and the match
+             count on one card (the venue-page toolbar). -->
         <div class="filter-row">
           <div class="chip-group" role="tablist" aria-label="Filter by status">
             @for (s of statusChips; track s) {
@@ -299,16 +314,20 @@ type DirectionChip = 'all' | TradeDirection;
             }
           </div>
 
-          <input
-            type="search"
-            class="input search"
-            placeholder="Symbol or ID…"
-            [ngModel]="symbolFilter()"
-            (ngModelChange)="symbolFilter.set($event)"
-          />
+          <div class="search-box">
+            <input
+              type="search"
+              class="input search"
+              placeholder="Symbol or ID…"
+              aria-label="Filter by symbol or ID"
+              [ngModel]="symbolFilter()"
+              (ngModelChange)="symbolFilter.set($event)"
+            />
+          </div>
 
           <label
             class="toggle"
+            [class.on]="mlDisagreementOnly()"
             title="Counts the recent signals whose ML direction disagrees (the figure beside it). The engine's signal list cannot filter on ML agreement, so the table is unaffected."
           >
             <input
@@ -320,30 +339,39 @@ type DirectionChip = 'all' | TradeDirection;
           </label>
 
           <span
-            class="muted"
+            class="match-count"
             title="The KPIs above and this figure are computed over the most recent 500 signals; the chip counts are engine totals for the table, which pages through the full history."
           >
             {{ visibleSignals().length }} of the last {{ recentSignals().length }} signals match
           </span>
         </div>
 
-        <!-- Charts row -->
-        <div class="charts-row">
-          <app-chart-card
-            title="Signal Flow (24h)"
-            subtitle="Hourly count by terminal status"
-            [options]="hourlyVolumeChart()"
-            height="220px"
-            [loading]="metricsLoading()"
-          />
-          <app-chart-card
-            title="By Symbol"
-            subtitle="Last 24h, count by direction"
-            [options]="bySymbolChart()"
-            height="220px"
-            [loading]="metricsLoading()"
-          />
-        </div>
+        <!-- Charts row. With nothing generated in the last 24h both charts would be two
+             260px boxes carrying one sentence; collapse them into a single slim note. -->
+        @if (!metricsLoading() && signals24hCount() === 0) {
+          <div class="charts-empty" role="status">
+            <span class="charts-empty-dot"></span>
+            <span class="charts-empty-title">Signal flow &amp; by symbol (24h)</span>
+            <span class="charts-empty-text">No signals generated in the last 24h</span>
+          </div>
+        } @else {
+          <div class="charts-row">
+            <app-chart-card
+              title="Signal Flow (24h)"
+              subtitle="Hourly count by terminal status"
+              [options]="hourlyVolumeChart()"
+              height="220px"
+              [loading]="metricsLoading()"
+            />
+            <app-chart-card
+              title="By Symbol"
+              subtitle="Last 24h, count by direction"
+              [options]="bySymbolChart()"
+              height="220px"
+              [loading]="metricsLoading()"
+            />
+          </div>
+        }
 
         <!-- Comprehensive table -->
         <app-data-table
@@ -725,11 +753,17 @@ type DirectionChip = 'all' | TradeDirection;
         }
       }
 
+      /* One toolbar card (venue-page family): segments, search, toggle, count. */
       .filter-row {
         display: flex;
-        gap: var(--space-3);
+        gap: var(--space-2) var(--space-3);
         align-items: center;
         flex-wrap: wrap;
+        padding: var(--space-3) var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-sm);
       }
       /* The seven status chips carry engine totals ("Expired 5,430"), so the
          track is wider than an 820 px tablet's content column; it wraps inside
@@ -806,26 +840,94 @@ type DirectionChip = 'all' | TradeDirection;
         font-size: var(--text-sm);
         outline: none;
       }
+      .search-box {
+        position: relative;
+        flex: 0 1 220px;
+        min-width: 160px;
+      }
+      .search-box::before {
+        content: '⌕';
+        position: absolute;
+        left: 11px;
+        top: 50%;
+        transform: translateY(-52%);
+        color: var(--text-tertiary);
+        font-size: 15px;
+        pointer-events: none;
+      }
       .input.search {
-        flex: 1 1 200px;
-        max-width: 280px;
+        width: 100%;
+        box-sizing: border-box;
+        padding-left: 30px;
+        border-radius: var(--radius-full);
       }
       .input:focus {
         border-color: var(--accent);
+        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
       }
       .toggle {
         display: inline-flex;
         align-items: center;
         gap: 6px;
+        height: 32px;
+        padding: 0 12px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-full);
+        background: var(--bg-primary);
         font-size: var(--text-xs);
+        font-weight: var(--font-medium);
         color: var(--text-secondary);
         cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      .toggle input {
+        margin: 0;
+        accent-color: var(--accent);
+      }
+      .toggle.on {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: rgba(0, 113, 227, 0.08);
+      }
+      .match-count {
+        margin-left: auto;
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
       }
       .muted {
         color: var(--text-tertiary);
         font-size: var(--text-xs);
       }
 
+      /* Slim stand-in for the two chart cards when the last 24h is empty. */
+      .charts-empty {
+        display: flex;
+        align-items: center;
+        gap: var(--space-3);
+        padding: var(--space-3) var(--space-4);
+        background: var(--bg-secondary);
+        border: 1px dashed var(--border);
+        border-radius: var(--radius-md);
+        font-size: var(--text-sm);
+      }
+      .charts-empty-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--text-tertiary);
+        opacity: 0.6;
+        flex: none;
+      }
+      .charts-empty-title {
+        font-weight: var(--font-semibold);
+        color: var(--text-primary);
+      }
+      .charts-empty-text {
+        color: var(--text-tertiary);
+      }
       .charts-row {
         display: grid;
         grid-template-columns: 2fr 1fr;
@@ -850,6 +952,17 @@ type DirectionChip = 'all' | TradeDirection;
       .btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
+      }
+      /* Page-header action at the app's normal header-button size. */
+      .btn.header-btn {
+        height: 36px;
+        padding: 0 var(--space-4);
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
       }
       .btn-success {
         background: rgba(52, 199, 89, 0.15);
@@ -1158,6 +1271,13 @@ type DirectionChip = 'all' | TradeDirection;
         font-weight: 600;
       }
 
+      /* Tighter horizontal cell padding so the fitted columns keep their headers on one line. */
+      :host ::ng-deep .ag-theme-alpine .ag-header-cell,
+      :host ::ng-deep .ag-theme-alpine .ag-cell {
+        padding-left: 10px;
+        padding-right: 10px;
+      }
+
       /* The whole row opens the signal detail (chart) modal — advertise it. */
       :host ::ng-deep .ag-theme-alpine .ag-center-cols-container .ag-row {
         cursor: pointer;
@@ -1308,6 +1428,12 @@ export class SignalsPageComponent {
     const pending = this.recentSignals().filter((s) => s.status === 'Pending');
     if (pending.length === 0) return null;
     return pending.reduce((sum, s) => sum + s.confidence, 0) / pending.length;
+  });
+
+  /** Signals generated in the last 24h — zero collapses the two chart cards into one note. */
+  readonly signals24hCount = computed(() => {
+    const cutoff = Date.now() - 24 * 3600_000;
+    return this.recentSignals().filter((s) => new Date(s.generatedAt).getTime() >= cutoff).length;
   });
 
   readonly mlDisagreementCount = computed(() => {
@@ -1613,108 +1739,141 @@ export class SignalsPageComponent {
   }
 
   // ── Table ────────────────────────────────────────────────────────────
+  // Fitted to a 1440px content column: the shared table's 88px default minimum
+  // put 16 columns past the card edge, so every column states its own width and
+  // related figures share a two-line cell (source + strategy under the symbol,
+  // ML direction over its score, SL over TP, generated over expires). Cell
+  // renderers return HTML outside this component's style scope — inline styles
+  // only, and data-derived text is escaped. The theme makes .ag-cell a flex row,
+  // so numbers are right-aligned with justify-content, not text-align.
   readonly columns: ColDef<TradeSignalDto>[] = [
-    { headerName: 'ID', field: 'id', width: 70, sortable: true },
-    { headerName: 'Symbol', field: 'symbol', width: 100 },
     {
-      headerName: 'Src',
-      field: 'isManual',
-      width: 70,
-      cellRenderer: (p: { value: boolean | null | undefined }) => {
-        if (p.value) {
-          return `<span title="Hand-authored via the admin UI" style="color:#8A2BE2;background:rgba(138,43,226,0.12);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600">Manual</span>`;
-        }
-        return `<span title="Generated by a strategy worker" style="color:#8E8E93;font-size:11px">Auto</span>`;
+      headerName: 'ID',
+      field: 'id',
+      width: 64,
+      minWidth: 64,
+      sortable: true,
+      cellStyle: { color: 'var(--text-tertiary)', fontVariantNumeric: 'tabular-nums' },
+    },
+    {
+      headerName: 'Symbol',
+      headerTooltip: 'Symbol · source (Auto = strategy worker, Manual = admin UI) · strategy',
+      field: 'symbol',
+      flex: 1,
+      minWidth: 112,
+      cellRenderer: (p: { data?: TradeSignalDto }) => {
+        const d = p.data;
+        if (!d) return '';
+        const src = d.isManual
+          ? `<span title="Hand-authored via the admin UI" style="color:#8A2BE2;background:rgba(138,43,226,0.12);padding:0 6px;border-radius:999px;font-size:10px;font-weight:600;line-height:15px">Manual</span>`
+          : `<span title="Generated by a strategy worker">Auto</span>`;
+        const strat = d.strategyId != null ? ` · #${d.strategyId}` : '';
+        return (
+          `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;min-width:0;line-height:1.3">` +
+          `<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(d.symbol ?? '—')}</span>` +
+          `<span style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text-tertiary);white-space:nowrap">${src}${strat}</span></div>`
+        );
       },
     },
     {
       headerName: 'Dir',
       field: 'direction',
-      width: 70,
+      width: 74,
+      minWidth: 74,
       cellRenderer: (p: { value: string }) => {
         const isBuy = p.value === 'Buy';
         const color = isBuy ? '#248A3D' : '#D70015';
         const bg = isBuy ? 'rgba(52,199,89,0.12)' : 'rgba(255,59,48,0.12)';
-        return `<span style="color:${color};background:${bg};padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600">${isBuy ? '↑' : '↓'} ${p.value}</span>`;
+        return `<span style="color:${color};background:${bg};padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">${isBuy ? '↑' : '↓'} ${escapeHtml(p.value ?? '')}</span>`;
       },
     },
     {
-      headerName: 'Strat',
-      field: 'strategyId',
-      width: 70,
-      valueFormatter: (p) => (p.value != null ? `#${p.value}` : '—'),
-    },
-    {
       headerName: 'Conf',
+      headerTooltip: 'Signal confidence',
       field: 'confidence',
-      width: 80,
+      width: 70,
+      minWidth: 70,
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
     },
     {
-      headerName: 'ML dir',
+      headerName: 'ML',
+      headerTooltip:
+        'ML predicted direction (≠ when it disagrees with the signal) over the ML score',
       field: 'mlPredictedDirection',
-      width: 90,
-      cellRenderer: (p: { value: string | null; data: TradeSignalDto }) => {
-        if (!p.value) return `<span style="color:#8E8E93;font-size:11px">—</span>`;
+      width: 78,
+      minWidth: 78,
+      cellRenderer: (p: { value: string | null; data?: TradeSignalDto }) => {
+        if (!p.value || !p.data) return `<span style="color:#8E8E93;font-size:11px">—</span>`;
         const disagrees = p.value !== p.data.direction;
         const color = disagrees ? '#8A2BE2' : p.value === 'Buy' ? '#248A3D' : '#D70015';
         const arrow = p.value === 'Buy' ? '↑' : '↓';
         const tag = disagrees
-          ? `<span style="color:#8A2BE2;font-size:9px;font-weight:600;margin-left:4px">≠</span>`
+          ? `<span title="ML disagrees with the signal direction" style="color:#8A2BE2;font-size:10px;font-weight:700;margin-left:4px">≠</span>`
           : '';
-        return `<span style="color:${color};font-size:11px;font-weight:600">${arrow} ${p.value}${tag}</span>`;
+        const score = p.data.mlConfidenceScore;
+        const scoreText = score != null ? `${(score * 100).toFixed(1)}%` : '—';
+        return (
+          `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;line-height:1.3">` +
+          `<span style="color:${color};font-size:11.5px;font-weight:600;white-space:nowrap">${arrow} ${escapeHtml(p.value)}${tag}</span>` +
+          `<span title="ML score" style="font-size:11px;color:var(--text-tertiary);font-variant-numeric:tabular-nums">${scoreText}</span></div>`
+        );
       },
-    },
-    {
-      headerName: 'ML score',
-      field: 'mlConfidenceScore',
-      width: 90,
-      valueFormatter: (p) => (p.value != null ? `${(p.value * 100).toFixed(1)}%` : '—'),
     },
     {
       headerName: 'Entry',
       field: 'entryPrice',
-      width: 96,
-      cellClass: 'mono',
+      width: 108,
+      minWidth: 108,
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) => this.formatPrice(p.value, p.data),
     },
     {
-      headerName: 'SL',
+      headerName: 'SL / TP',
+      headerTooltip: 'Stop loss (top) and take profit (bottom)',
       field: 'stopLoss',
-      width: 96,
-      cellClass: 'mono',
-      valueFormatter: (p) => this.formatPrice(p.value, p.data),
-    },
-    {
-      headerName: 'TP',
-      field: 'takeProfit',
-      width: 96,
-      cellClass: 'mono',
-      valueFormatter: (p) => this.formatPrice(p.value, p.data),
+      width: 126,
+      minWidth: 126,
+      cellRenderer: (p: { data?: TradeSignalDto }) => {
+        const d = p.data;
+        if (!d) return '';
+        const line = (tag: string, color: string, v: number | null | undefined) =>
+          `<span style="display:flex;justify-content:flex-end;gap:6px;white-space:nowrap"><span style="font-size:9.5px;font-weight:700;letter-spacing:.04em;color:${color}">${tag}</span><span style="font-variant-numeric:tabular-nums">${escapeHtml(this.formatPrice(v ?? null, d))}</span></span>`;
+        return (
+          `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;width:100%;line-height:1.3;font-size:12px">` +
+          line('SL', '#D70015', d.stopLoss) +
+          line('TP', '#248A3D', d.takeProfit) +
+          `</div>`
+        );
+      },
     },
     {
       headerName: 'R:R',
       colId: 'rr',
-      width: 96,
-      cellClass: 'mono',
+      width: 78,
+      minWidth: 78,
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueGetter: (p) => this.formatRR(p.data as TradeSignalDto),
       cellRenderer: (p: { value: string; data: TradeSignalDto }) => {
         if (!this.hasImpossibleStop(p.data)) return escapeHtml(p.value ?? '—');
         const risk = Math.abs(p.data.entryPrice - (p.data.stopLoss ?? p.data.entryPrice));
-        return `<span title="Stop is ${escapeHtml(this.formatPrice(risk, p.data))} from entry — ${IMPOSSIBLE_STOP_HINT}" style="color:#D70015;background:rgba(255,59,48,0.12);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600">⚠ ${escapeHtml(p.value)}</span>`;
+        return `<span title="Stop is ${escapeHtml(this.formatPrice(risk, p.data))} from entry — ${IMPOSSIBLE_STOP_HINT}" style="color:#D70015;background:rgba(255,59,48,0.12);padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">⚠ ${escapeHtml(p.value)}</span>`;
       },
     },
     {
       headerName: 'Lots',
+      headerTooltip: 'Suggested lot size',
       field: 'suggestedLotSize',
-      width: 70,
-      cellClass: 'mono',
+      width: 64,
+      minWidth: 64,
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) => (p.value != null ? Number(p.value).toFixed(2) : '—'),
     },
     {
       headerName: 'Status',
       field: 'status',
-      width: 110,
+      width: 100,
+      minWidth: 100,
       cellRenderer: (p: { value: string; data: TradeSignalDto }) => {
         const map: Record<string, { bg: string; color: string }> = {
           Pending: { bg: 'rgba(255,149,0,0.12)', color: '#C93400' },
@@ -1729,33 +1888,43 @@ export class SignalsPageComponent {
           p.data.rejectionReason && p.value === 'Rejected'
             ? ` title="${escapeHtml(p.data.rejectionReason)}"`
             : '';
-        return `<span${reason} style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600">${p.value}</span>`;
+        return `<span${reason} style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap">${escapeHtml(p.value ?? '')}</span>`;
       },
     },
     {
-      headerName: 'Accounts',
+      headerName: 'Accts',
       headerTooltip: 'Distinct accounts that created an order from this signal',
       field: 'accountsPickedUpCount',
-      width: 90,
+      width: 70,
+      minWidth: 70,
       sortable: true,
+      cellStyle: { justifyContent: 'flex-end' },
       cellRenderer: (p: { value: number | null | undefined }) => {
         const n = p.value ?? 0;
         const color = n > 0 ? '#248A3D' : '#8E8E93';
         const bg = n > 0 ? 'rgba(52,199,89,0.12)' : 'rgba(142,142,147,0.12)';
-        return `<span title="Distinct accounts that created an order from this signal" style="color:${color};background:${bg};padding:2px 10px;border-radius:999px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">${n}</span>`;
+        return `<span title="Distinct accounts that created an order from this signal" style="color:${color};background:${bg};padding:2px 9px;border-radius:999px;font-size:11px;font-weight:600;font-variant-numeric:tabular-nums">${n}</span>`;
       },
     },
     {
       headerName: 'Generated',
+      headerTooltip: 'Generated (top) · expires (bottom)',
       field: 'generatedAt',
-      width: 120,
-      valueFormatter: (p) => this.relativeTimePipe.transform(p.value),
-    },
-    {
-      headerName: 'Expires',
-      field: 'expiresAt',
-      width: 120,
-      valueFormatter: (p) => this.relativeTimePipe.transform(p.value),
+      width: 124,
+      minWidth: 124,
+      cellRenderer: (p: { data?: TradeSignalDto }) => {
+        const d = p.data;
+        if (!d) return '';
+        // "about 1 month ago" → "1 month ago": the qualifier cost the column its last word.
+        const short = (v: string) => v.replace(/^about /, '');
+        const gen = short(this.relativeTimePipe.transform(d.generatedAt));
+        const exp = short(this.relativeTimePipe.transform(d.expiresAt));
+        return (
+          `<div style="display:flex;flex-direction:column;justify-content:center;height:100%;line-height:1.3;white-space:nowrap;min-width:0">` +
+          `<span style="font-size:12px;overflow:hidden;text-overflow:ellipsis">${escapeHtml(gen)}</span>` +
+          `<span style="font-size:11px;color:var(--text-tertiary);overflow:hidden;text-overflow:ellipsis">exp ${escapeHtml(exp)}</span></div>`
+        );
+      },
     },
   ];
 
