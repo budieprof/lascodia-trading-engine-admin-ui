@@ -11,10 +11,12 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { catchError, of } from 'rxjs';
 
+import { AuthService } from '@core/auth/auth.service';
 import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { SecurityPosturePanelComponent } from '../../security/posture/security-posture-panel.component';
 import { IamApiService } from '../iam-api.service';
 import {
   errorText,
@@ -49,6 +51,7 @@ import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.componen
     MfaHintComponent,
     StatTilesComponent,
     AuditTrailComponent,
+    SecurityPosturePanelComponent,
   ],
   styleUrl: '../shared/iam-page.scss',
   styles: [
@@ -281,6 +284,12 @@ import { StatTilesComponent, type StatTile } from '../shared/stat-tiles.componen
         </aside>
       </div>
 
+      @if (showPlatformPosture()) {
+        <!-- Platform staff only (gaps program security): rate limits, headers, endpoint audit, RLS, findings. -->
+        <h2 class="section-title">Platform security</h2>
+        <app-security-posture-panel />
+      }
+
       <app-confirm-dialog
         [open]="confirming()"
         title="Change the sign-in policy?"
@@ -298,6 +307,11 @@ export class SecurityPolicyPageComponent {
   private readonly notify = inject(NotificationService);
 
   protected readonly P = Permission;
+  private readonly auth = inject(AuthService);
+  /** The platform's posture (gaps program security) for staff holding the security-evidence key. */
+  readonly showPlatformPosture = computed(() =>
+    this.auth.hasPermission(Permission.PlatformSecurityEvidence),
+  );
 
   readonly policy = iamResource<SecurityPolicy | null>(
     () => this.iam.securityPolicy(),

@@ -28,19 +28,25 @@ RUN if [ -n "$BUILD_SHA" ] || [ -n "$BUILD_TIME" ]; then \
 RUN npm run build -- --configuration production
 
 # ─── Stage 2: runtime ────────────────────────────────────────────
-FROM nginx:1.27-alpine
+# Unprivileged nginx (uid 101, listens on 8080): nothing in the container runs as root (gaps program security,
+# Trivy DS-0002 / triage T-2 closed). PORT CHANGE: the staging image now serves :8080, not :80 — map it with
+# `docker run -p 80:8080 …` (or point the staging proxy at :8080).
+FROM nginxinc/nginx-unprivileged:1.28-alpine
 WORKDIR /usr/share/nginx/html
 
-# Clear nginx defaults and drop in our SPA-friendly config.
-RUN rm -rf ./*
+# The base image's default site listens on 8080 already; ours replaces it.
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
-COPY --from=build /app/dist/lascodia-admin/browser/ ./
+COPY docker/security-headers.conf /etc/nginx/snippets/security-headers.conf
+COPY --from=build --chown=101:101 /app/dist/lascodia-admin/browser/ ./
+# A bundle without its shell is not a release.
+RUN test -f /usr/share/nginx/html/index.html
 
 # Allow runtime override of API base URL. The entrypoint writes /usr/share/nginx/html/config.json
-# from the API_BASE_URL env var (falls back to the bundled public/config.json).
-COPY docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# from the API_BASE_URL env var (falls back to the bundled public/config.json) — the html directory is owned by
+# uid 101 above, so it can, without root.
+COPY --chmod=0755 docker/entrypoint.sh /entrypoint.sh
 
-EXPOSE 80
+USER 101
+EXPOSE 8080
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]
