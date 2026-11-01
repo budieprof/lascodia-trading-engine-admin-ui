@@ -1,3 +1,6 @@
+import { ticketAlgoFields } from '@features/execution/execution.logic';
+import type { ExecutionAlgorithm } from '@features/execution/execution.types';
+
 import type { LiveQuote } from '../overlays/trade-layer';
 import { roundPrice, type TradeLine } from './trade-lines';
 import type {
@@ -23,6 +26,14 @@ export interface TicketState {
   stop: number | null;
   target: number | null;
   mode: TicketMode;
+  /** Gaps program (execution): how a LIVE ticket is executed (Direct = one order, as always). */
+  algorithm?: ExecutionAlgorithm;
+  /** The algorithm's window in minutes (null = the platform default). */
+  algoMinutes?: number | null;
+  /** TWAP / VWAP slices (null = the platform default). */
+  algoSlices?: number | null;
+  /** Iceberg: lots shown at a time. */
+  algoDisplayLots?: number | null;
 }
 
 /** A ticket opened from somewhere else (a position tool's "Stage…", DR-I9). */
@@ -70,6 +81,13 @@ export function ticketRequest(state: TicketState, symbol: string): ManualTradeRe
     stopLoss: state.stop,
     takeProfit: state.target,
     mode: state.mode,
+    ...ticketAlgoFields(
+      state.mode,
+      state.algorithm ?? 'Direct',
+      state.algoMinutes ?? null,
+      state.algoSlices ?? null,
+      state.algoDisplayLots ?? null,
+    ),
   };
 }
 

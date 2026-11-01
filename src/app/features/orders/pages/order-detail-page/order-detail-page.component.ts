@@ -328,6 +328,17 @@ import { OrderSignalContextComponent } from '../../components/order-signal-conte
                       }
                     </span>
                   </div>
+                  @if ($any(order())?.algoOrderId; as parentId) {
+                    <!-- Gaps program (execution): a child of an execution algorithm. -->
+                    <div class="detail-item">
+                      <span class="detail-label">Algorithmic parent</span>
+                      <span class="detail-value">
+                        <a class="link" [routerLink]="['/execution/algo-orders', parentId]"
+                          >#{{ parentId }} · slice {{ $any(order())?.algoSliceIndex }}</a
+                        >
+                      </span>
+                    </div>
+                  }
                   <div class="detail-item">
                     <span class="detail-label">Created At</span>
                     <span class="detail-value">{{

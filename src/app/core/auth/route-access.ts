@@ -226,6 +226,11 @@ export const ROUTE_ACCESS = {
   // ── Trade surveillance (gaps program; observe only) ──
   surveillance: rule(P.SurveillanceView), // GET surveillance/alerts
   'surveillance/settings': rule(P.SurveillanceView), // GET surveillance/detectors (changes: platform.engine.manage via PUT config)
+  // ── Execution algorithms + block allocation (gaps program, execution) ──
+  execution: rule(P.OrdersRead, P.AccountsRead),
+  'execution/algo-orders': rule(P.OrdersRead), // GET execution/algo-orders (cancel: orders.cancel)
+  'execution/settings': rule(P.OrdersRead), // GET execution/algo/settings (changes: platform.engine.manage via PUT config)
+  'execution/allocation-groups': rule(P.AccountsRead), // GET execution/allocation-groups, execution/blocks (changes: accounts.manage)
   onboarding: rule(P.TenantUsageRead), // GET tenant/onboarding
   // The documentation portal (enterprise onboarding): static guides + the API reference; no engine read.
   docs: rule(),
