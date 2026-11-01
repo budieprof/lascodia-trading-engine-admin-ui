@@ -16,7 +16,11 @@ import {
 } from './surveillance.logic';
 import type { JobStatus, SurveillanceDetector, SurveillanceKey } from './surveillance.types';
 
-const key = (k: string, dataType: SurveillanceKey['dataType'], value: string | null = null): SurveillanceKey => ({
+const key = (
+  k: string,
+  dataType: SurveillanceKey['dataType'],
+  value: string | null = null,
+): SurveillanceKey => ({
   key: k,
   value,
   default: '1',
@@ -52,8 +56,12 @@ describe('surveillance review rules', () => {
     expect(transitionProblem('Open', 'UnderReview', null, '')).toBeNull();
     expect(transitionProblem('UnderReview', 'Open', null, '')).toBeNull();
     expect(transitionProblem('Open', 'Closed', 'FalsePositive', 'explained by news')).toBeNull();
-    expect(transitionProblem('UnderReview', 'Closed', null, 'explained by news')).toMatch(/resolution/);
-    expect(transitionProblem('UnderReview', 'Closed', 'Actioned', 'short')).toMatch(/10 characters/);
+    expect(transitionProblem('UnderReview', 'Closed', null, 'explained by news')).toMatch(
+      /resolution/,
+    );
+    expect(transitionProblem('UnderReview', 'Closed', 'Actioned', 'short')).toMatch(
+      /10 characters/,
+    );
     expect(transitionProblem('Closed', 'Open', null, '')).toMatch(/stays closed/);
     expect(transitionProblem('Open', 'Open', null, '')).toMatch(/already/);
   });
@@ -65,7 +73,9 @@ describe('surveillance settings controls', () => {
     expect(controlKind(key('Surveillance:WashTrade:Severity', 'String'))).toBe('severity');
     expect(controlKind(key('Surveillance:Alerts:NotifyMinSeverity', 'String'))).toBe('severity');
     expect(controlKind(key('Surveillance:WashTrade:WindowSeconds', 'Int'))).toBe('int');
-    expect(controlKind(key('Surveillance:WashTrade:PriceTolerancePips', 'Decimal'))).toBe('decimal');
+    expect(controlKind(key('Surveillance:WashTrade:PriceTolerancePips', 'Decimal'))).toBe(
+      'decimal',
+    );
   });
 
   it('refuses values outside the bounds before the engine is asked', () => {
@@ -75,10 +85,18 @@ describe('surveillance settings controls', () => {
     expect(valueProblem(w, '0', detectors)).toMatch(/Between 1 and 3600/);
     expect(valueProblem(w, '2.5', detectors)).toMatch(/whole/);
     expect(valueProblem(w, 'abc', detectors)).toMatch(/number/);
-    expect(valueProblem(key('Surveillance:Enabled', 'Bool'), 'yes', detectors)).toMatch(/true or false/);
-    expect(valueProblem(key('Surveillance:WashTrade:Severity', 'String'), 'High', detectors)).toBeNull();
-    expect(valueProblem(key('Surveillance:WashTrade:Severity', 'String'), 'Loud', detectors)).not.toBeNull();
-    expect(valueProblem(key('Surveillance:PollIntervalSeconds', 'Int'), '30', detectors)).toMatch(/60/);
+    expect(valueProblem(key('Surveillance:Enabled', 'Bool'), 'yes', detectors)).toMatch(
+      /true or false/,
+    );
+    expect(
+      valueProblem(key('Surveillance:WashTrade:Severity', 'String'), 'High', detectors),
+    ).toBeNull();
+    expect(
+      valueProblem(key('Surveillance:WashTrade:Severity', 'String'), 'Loud', detectors),
+    ).not.toBeNull();
+    expect(valueProblem(key('Surveillance:PollIntervalSeconds', 'Int'), '30', detectors)).toMatch(
+      /60/,
+    );
   });
 
   it('groups keys by detector with the switch and severity first', () => {
@@ -140,7 +158,6 @@ describe('small formatting', () => {
     );
   });
 });
-
 
 describe('LEI check', () => {
   it('accepts valid LEIs and refuses mistyped ones', () => {

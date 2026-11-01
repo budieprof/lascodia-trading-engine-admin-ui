@@ -56,7 +56,9 @@ import type {
         <header class="d-head">
           <div>
             <div class="pills">
-              <span class="pill" [class]="'pill ' + tone(d.alert.severity)">{{ d.alert.severity }}</span>
+              <span class="pill" [class]="'pill ' + tone(d.alert.severity)">{{
+                d.alert.severity
+              }}</span>
               <span class="pill">{{ d.alert.detectorName }}</span>
               <span class="pill info">{{ label(d.alert.status) }}</span>
               @if (d.alert.resolution) {
@@ -65,7 +67,8 @@ import type {
             </div>
             <h3 id="surv-drawer-title">{{ d.alert.title }}</h3>
             <p class="sub">
-              #{{ d.alert.id }} · detected {{ d.alert.detectedAtUtc.slice(0, 16).replace('T', ' ') }} UTC
+              #{{ d.alert.id }} · detected
+              {{ d.alert.detectedAtUtc.slice(0, 16).replace('T', ' ') }} UTC
               @if (d.alert.account) {
                 · {{ d.alert.account }}
               }
@@ -142,7 +145,9 @@ import type {
               </table>
             </div>
             @if (d.evidence.ordersOmitted) {
-              <p class="muted small">{{ d.evidence.ordersOmitted }} more order(s) not stored in the evidence.</p>
+              <p class="muted small">
+                {{ d.evidence.ordersOmitted }} more order(s) not stored in the evidence.
+              </p>
             }
           </section>
         }
@@ -216,17 +221,32 @@ import type {
             @if (d.alert.status !== 'Closed') {
               <div class="actions">
                 @if (!d.alert.assignedTo) {
-                  <button type="button" class="btn btn-sm btn-secondary" [disabled]="busy()" (click)="takeIt()">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    [disabled]="busy()"
+                    (click)="takeIt()"
+                  >
                     Take it
                   </button>
                 }
                 @if (d.nextStatuses.includes('UnderReview')) {
-                  <button type="button" class="btn btn-sm btn-secondary" [disabled]="busy()" (click)="move('UnderReview')">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    [disabled]="busy()"
+                    (click)="move('UnderReview')"
+                  >
                     Start review
                   </button>
                 }
                 @if (d.nextStatuses.includes('Open')) {
-                  <button type="button" class="btn btn-sm btn-ghost" [disabled]="busy()" (click)="move('Open')">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    [disabled]="busy()"
+                    (click)="move('Open')"
+                  >
                     Back to the queue
                   </button>
                 }
@@ -249,11 +269,29 @@ import type {
               </div>
             }
             <label class="field">
-              <span class="label">Note {{ d.alert.status !== 'Closed' ? '(why — needed to close, at least ' + minNote + ' characters)' : '' }}</span>
-              <textarea class="input" rows="3" name="note" [ngModel]="note()" (ngModelChange)="note.set($event)"></textarea>
+              <span class="label"
+                >Note
+                {{
+                  d.alert.status !== 'Closed'
+                    ? '(why — needed to close, at least ' + minNote + ' characters)'
+                    : ''
+                }}</span
+              >
+              <textarea
+                class="input"
+                rows="3"
+                name="note"
+                [ngModel]="note()"
+                (ngModelChange)="note.set($event)"
+              ></textarea>
             </label>
             <div class="actions">
-              <button type="button" class="btn btn-sm btn-secondary" [disabled]="busy() || !note().trim()" (click)="addNote()">
+              <button
+                type="button"
+                class="btn btn-sm btn-secondary"
+                [disabled]="busy() || !note().trim()"
+                (click)="addNote()"
+              >
                 Add note
               </button>
               @if (d.alert.status !== 'Closed') {
@@ -272,7 +310,9 @@ import type {
               <p class="muted small">{{ closeProblem() }}</p>
             }
           } @else {
-            <p class="muted small">Reviewing alerts needs the <code>surveillance.review</code> permission.</p>
+            <p class="muted small">
+              Reviewing alerts needs the <code>surveillance.review</code> permission.
+            </p>
           }
           @if (error()) {
             <p class="alert" role="alert">{{ error() }}</p>
@@ -297,10 +337,14 @@ import type {
         <p class="notice">{{ d.notice }}</p>
       } @else if (loadError()) {
         <p class="alert" role="alert">{{ loadError() }}</p>
-        <button type="button" class="btn btn-sm btn-ghost" data-autofocus (click)="closed.emit()">Close</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-autofocus (click)="closed.emit()">
+          Close
+        </button>
       } @else {
         <p class="muted">Loading the alert…</p>
-        <button type="button" class="btn btn-sm btn-ghost" data-autofocus (click)="closed.emit()">Close</button>
+        <button type="button" class="btn btn-sm btn-ghost" data-autofocus (click)="closed.emit()">
+          Close
+        </button>
       }
     </aside>
   `,
@@ -329,14 +373,20 @@ export class SurveillanceAlertDrawerComponent implements OnInit {
   readonly canReview = computed(() => this.auth.hasPermission(Permission.SurveillanceReview));
 
   readonly metrics = computed(() =>
-    Object.entries(this.detail()?.evidence.metrics ?? {}).map(([k, v]) => [k, metricText(v)] as const),
+    Object.entries(this.detail()?.evidence.metrics ?? {}).map(
+      ([k, v]) => [k, metricText(v)] as const,
+    ),
   );
   readonly thresholds = computed(() =>
-    Object.entries(this.detail()?.evidence.thresholds ?? {}).map(([k, v]) => [k, metricText(v)] as const),
+    Object.entries(this.detail()?.evidence.thresholds ?? {}).map(
+      ([k, v]) => [k, metricText(v)] as const,
+    ),
   );
   readonly closeProblem = computed(() => {
     const d = this.detail();
-    return d ? transitionProblem(d.alert.status, 'Closed', this.resolutionPick(), this.note()) : null;
+    return d
+      ? transitionProblem(d.alert.status, 'Closed', this.resolutionPick(), this.note())
+      : null;
   });
 
   ngOnInit(): void {
@@ -354,7 +404,11 @@ export class SurveillanceAlertDrawerComponent implements OnInit {
     return iso ? iso.slice(0, 19).replace('T', ' ') : '—';
   }
 
-  eventTitle(kind: string, to: SurveillanceStatus | null, r: SurveillanceResolution | null): string {
+  eventTitle(
+    kind: string,
+    to: SurveillanceStatus | null,
+    r: SurveillanceResolution | null,
+  ): string {
     if (kind === 'StatusChanged' && to)
       return `→ ${statusLabel(to)}${r ? ' (' + resolutionLabel(r) + ')' : ''}`;
     return kind === 'Notified' ? 'Notified' : kind === 'Updated' ? 'Seen again' : kind;

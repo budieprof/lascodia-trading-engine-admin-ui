@@ -143,7 +143,10 @@ export function detectorKeys(keys: SurveillanceKey[], detector: string): Surveil
 }
 
 /** The keys that are not a detector's (cadence, lookback, notification). */
-export function globalKeys(keys: SurveillanceKey[], detectors: SurveillanceDetector[]): SurveillanceKey[] {
+export function globalKeys(
+  keys: SurveillanceKey[],
+  detectors: SurveillanceDetector[],
+): SurveillanceKey[] {
   return keys.filter((k) => !detectors.some((d) => k.key.startsWith(`Surveillance:${d.key}:`)));
 }
 
@@ -157,7 +160,8 @@ export function keyLabel(key: string): string {
 /** A metric value for the evidence table. */
 export function metricText(v: unknown): string {
   if (v === null || v === undefined) return '—';
-  if (typeof v === 'number') return Number.isInteger(v) ? String(v) : v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  if (typeof v === 'number')
+    return Number.isInteger(v) ? String(v) : v.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
   if (typeof v === 'object') return JSON.stringify(v);
   return String(v);
@@ -167,7 +171,8 @@ export function metricText(v: unknown): string {
 export function leiProblem(raw: string | null | undefined): string | null {
   const lei = (raw ?? '').trim().toUpperCase();
   if (!lei) return null;
-  if (!/^[A-Z0-9]{18}[0-9]{2}$/.test(lei)) return '20 letters and digits ending in two check digits.';
+  if (!/^[A-Z0-9]{18}[0-9]{2}$/.test(lei))
+    return '20 letters and digits ending in two check digits.';
   let rem = 0;
   for (const c of lei) {
     const v = c >= '0' && c <= '9' ? c.charCodeAt(0) - 48 : c.charCodeAt(0) - 55;

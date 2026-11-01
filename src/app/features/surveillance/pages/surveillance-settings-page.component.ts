@@ -20,7 +20,11 @@ import {
   relative,
   valueProblem,
 } from '../surveillance.logic';
-import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations } from '../surveillance.types';
+import type {
+  SurveillanceConfiguration,
+  SurveillanceKey,
+  SurveillanceOperations,
+} from '../surveillance.types';
 
 /**
  * Surveillance settings and operations (gaps program; console operability): typed controls for every
@@ -33,7 +37,13 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
   selector: 'app-surveillance-settings-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, NgTemplateOutlet, PageHeaderComponent, JobStatusComponent, ConfirmDialogComponent],
+  imports: [
+    FormsModule,
+    NgTemplateOutlet,
+    PageHeaderComponent,
+    JobStatusComponent,
+    ConfirmDialogComponent,
+  ],
   styleUrls: ['../../iam/shared/iam-page.scss', './surveillance-page.scss'],
   template: `
     <div class="page">
@@ -133,7 +143,13 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
                 </label>
               }
               @case ('severity') {
-                <select class="input" [name]="k.key" [disabled]="!config.value()?.canEdit" [ngModel]="draft(k)" (ngModelChange)="setDraft(k, $event)">
+                <select
+                  class="input"
+                  [name]="k.key"
+                  [disabled]="!config.value()?.canEdit"
+                  [ngModel]="draft(k)"
+                  (ngModelChange)="setDraft(k, $event)"
+                >
                   @for (s of severities; track s) {
                     <option [value]="s">{{ s }}</option>
                   }
@@ -152,15 +168,22 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
               }
             }
             @if (dirty(k)) {
-              <button type="button" class="btn btn-sm btn-primary" [disabled]="!!problem(k) || busy()" (click)="ask(k)">Save</button>
+              <button
+                type="button"
+                class="btn btn-sm btn-primary"
+                [disabled]="!!problem(k) || busy()"
+                (click)="ask(k)"
+              >
+                Save
+              </button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="reset(k)">Undo</button>
             }
           </div>
           <div class="k-meta">
-            default {{ k.default }}
-            · {{ k.value === null ? 'no row — default applies' : 'set' }}
+            default {{ k.default }} · {{ k.value === null ? 'no row — default applies' : 'set' }}
             @if (k.lastChangedAtUtc) {
-              · changed {{ ago(k.lastChangedAtUtc) }}{{ k.lastChangedBy ? ' by ' + k.lastChangedBy : '' }}
+              · changed {{ ago(k.lastChangedAtUtc)
+              }}{{ k.lastChangedBy ? ' by ' + k.lastChangedBy : '' }}
             }
             @if (problem(k); as p) {
               <span class="bad">· {{ p }}</span>
@@ -174,9 +197,17 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
           <div class="card-head">
             <h3>Audit anchor targets</h3>
             <span class="pill" [class.on]="a.configured && !a.problems.length">
-              {{ !a.configured ? 'Not configured' : a.problems.length ? 'Configuration problem' : 'Publishing' }}
+              {{
+                !a.configured
+                  ? 'Not configured'
+                  : a.problems.length
+                    ? 'Configuration problem'
+                    : 'Publishing'
+              }}
             </span>
-            <span class="hint">every {{ a.intervalHours }} h · MAC key {{ a.macKeySet ? 'set' : 'unset' }}</span>
+            <span class="hint"
+              >every {{ a.intervalHours }} h · MAC key {{ a.macKeySet ? 'set' : 'unset' }}</span
+            >
           </div>
           @for (p of a.problems; track p) {
             <p class="alert" role="alert">{{ p }}</p>
@@ -186,19 +217,24 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
               @if (det.lastAnchor; as la) {
                 <div>
                   <span class="label">Last anchor</span>
-                  row {{ la.eventId }} · {{ la.publishedAtUtc.slice(0, 19).replace('T', ' ') }} UTC ·
-                  <span class="mono">{{ la.hash.slice(0, 16) }}…</span> · {{ la.signed ? 'signed' : 'unsigned' }}
+                  row {{ la.eventId }} · {{ la.publishedAtUtc.slice(0, 19).replace('T', ' ') }} UTC
+                  · <span class="mono">{{ la.hash.slice(0, 16) }}…</span> ·
+                  {{ la.signed ? 'signed' : 'unsigned' }}
                 </div>
               }
               <div>
                 <span class="label">Previous head check</span>
-                <span [class.bad]="det.previousHeadCheck === 'MISMATCH'">{{ det.previousHeadCheck ?? '—' }}</span>
+                <span [class.bad]="det.previousHeadCheck === 'MISMATCH'">{{
+                  det.previousHeadCheck ?? '—'
+                }}</span>
               </div>
               @if (det.targets?.length) {
                 <div>
                   <span class="label">Targets</span>
                   @for (t of det.targets; track t.target) {
-                    <span class="pill" [class.on]="t.ok" [class.bad]="!t.ok">{{ t.target }} {{ t.ok ? '✓' : '✗' }}</span>
+                    <span class="pill" [class.on]="t.ok" [class.bad]="!t.ok"
+                      >{{ t.target }} {{ t.ok ? '✓' : '✗' }}</span
+                    >
                   }
                 </div>
               }
@@ -206,15 +242,42 @@ import type { SurveillanceConfiguration, SurveillanceKey, SurveillanceOperations
           }
           <table class="kv">
             <tbody>
-              <tr><th>Append-only file</th><td>{{ a.filePath ?? 'not set' }}</td></tr>
-              <tr><th>Webhook</th><td>{{ a.webhookHost ?? 'not set' }}</td></tr>
+              <tr>
+                <th>Append-only file</th>
+                <td>{{ a.filePath ?? 'not set' }}</td>
+              </tr>
+              <tr>
+                <th>Webhook</th>
+                <td>{{ a.webhookHost ?? 'not set' }}</td>
+              </tr>
               @if (a.s3; as s) {
-                <tr><th>S3 Object Lock bucket</th><td>{{ s.bucket }} · {{ s.region }} · {{ s.endpoint }}{{ s.pathStyle ? ' (path style)' : '' }}</td></tr>
-                <tr><th>Prefix</th><td class="mono">{{ s.prefix }}</td></tr>
-                <tr><th>Retention</th><td>{{ s.lockMode }} for {{ s.retentionDays }} days</td></tr>
-                <tr><th>Access key</th><td class="mono">{{ s.accessKeyId }} · secret {{ s.secretAccessKeySet ? 'set' : 'UNSET' }}{{ s.sessionTokenSet ? ' · session token set' : '' }}</td></tr>
+                <tr>
+                  <th>S3 Object Lock bucket</th>
+                  <td>
+                    {{ s.bucket }} · {{ s.region }} · {{ s.endpoint
+                    }}{{ s.pathStyle ? ' (path style)' : '' }}
+                  </td>
+                </tr>
+                <tr>
+                  <th>Prefix</th>
+                  <td class="mono">{{ s.prefix }}</td>
+                </tr>
+                <tr>
+                  <th>Retention</th>
+                  <td>{{ s.lockMode }} for {{ s.retentionDays }} days</td>
+                </tr>
+                <tr>
+                  <th>Access key</th>
+                  <td class="mono">
+                    {{ s.accessKeyId }} · secret {{ s.secretAccessKeySet ? 'set' : 'UNSET'
+                    }}{{ s.sessionTokenSet ? ' · session token set' : '' }}
+                  </td>
+                </tr>
               } @else {
-                <tr><th>S3 Object Lock bucket</th><td>not set (no WORM copy)</td></tr>
+                <tr>
+                  <th>S3 Object Lock bucket</th>
+                  <td>not set (no WORM copy)</td>
+                </tr>
               }
             </tbody>
           </table>
@@ -249,8 +312,16 @@ export class SurveillanceSettingsPageComponent {
   protected readonly kind = controlKind;
   protected readonly name = keyLabel;
 
-  readonly config = iamResource<SurveillanceConfiguration | null>(() => this.api.configuration(), null, 'Could not load the settings.');
-  readonly ops = iamResource<SurveillanceOperations | null>(() => this.api.operations(), null, 'Could not load the job status.');
+  readonly config = iamResource<SurveillanceConfiguration | null>(
+    () => this.api.configuration(),
+    null,
+    'Could not load the settings.',
+  );
+  readonly ops = iamResource<SurveillanceOperations | null>(
+    () => this.api.operations(),
+    null,
+    'Could not load the job status.',
+  );
   readonly drafts = signal<Record<string, string>>({});
   readonly pending = signal<SurveillanceKey | null>(null);
   readonly busy = signal(false);
@@ -318,18 +389,29 @@ export class SurveillanceSettingsPageComponent {
     this.saveError.set(null);
     this.saved.set(null);
     this.configs
-      .upsert({ key: k.key, value: this.draft(k).trim(), dataType: k.dataType, description: k.description, isHotReloadable: true })
+      .upsert({
+        key: k.key,
+        value: this.draft(k).trim(),
+        dataType: k.dataType,
+        description: k.description,
+        isHotReloadable: true,
+      })
       .subscribe({
         next: (res) => {
           this.busy.set(false);
           this.pending.set(null);
           if (!res.status) {
             // A two-person policy parks the change: that is not a failure.
-            if (res.responseCode === '-202-approval') this.saved.set(`${k.key}: sent for approval.`);
+            if (res.responseCode === '-202-approval')
+              this.saved.set(`${k.key}: sent for approval.`);
             else this.saveError.set(res.message || 'The change was refused.');
             return;
           }
-          this.saved.set(isQueuedForCoolingOff(res) ? `${k.key}: queued for the cooling-off period.` : `${k.key} saved.`);
+          this.saved.set(
+            isQueuedForCoolingOff(res)
+              ? `${k.key}: queued for the cooling-off period.`
+              : `${k.key} saved.`,
+          );
           this.reset(k);
           this.config.reload();
         },
@@ -337,7 +419,8 @@ export class SurveillanceSettingsPageComponent {
           this.busy.set(false);
           this.pending.set(null);
           const text = errorText(e, 'The change was not saved.');
-          if (/-202-approval/.test(JSON.stringify(e ?? {}))) this.saved.set(`${k.key}: sent for approval.`);
+          if (/-202-approval/.test(JSON.stringify(e ?? {})))
+            this.saved.set(`${k.key}: sent for approval.`);
           else this.saveError.set(text);
         },
       });

@@ -149,6 +149,16 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'compliance.regulatory.generate',
+    category: 'Surveillance and regulatory reporting',
+    description:
+      "Keep the organisation's regulatory reference data (its LEI, venue code, decision makers, clients' identifiers) and generate signed regulatory report files — MiFIR RTS 22-shaped transaction reports, EMIR Refit-shaped trade reports, an RTS 28-style top-five venue summary — with a validation report. The engine never submits them to a regulator or ARM.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'dealing.ingest',
     category: 'Dealing desk',
     description:
@@ -892,6 +902,26 @@ export const PERMISSION_CATALOG = [
     deprecated: false,
   },
   {
+    key: 'surveillance.review',
+    category: 'Surveillance and regulatory reporting',
+    description:
+      "Review the organisation's trade-surveillance alerts: take or assign them, move them under review, close them as false positive / escalated / actioned with a note, and add notes. Every step is in the audit log.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
+    key: 'surveillance.view',
+    category: 'Surveillance and regulatory reporting',
+    description:
+      "See the organisation's trade-surveillance alerts (wash trades, self-matches, layering, order-to-trade ratio, marking the close, off-market prices, concentration, after-loss doubling, unusual P&L) with their evidence and review history, and the detectors' thresholds. Surveillance observes only.",
+    scopeable: false,
+    stepUp: false,
+    twoPerson: false,
+    deprecated: false,
+  },
+  {
     key: 'tenant.billing.manage',
     category: 'Organisations',
     description:
@@ -999,6 +1029,7 @@ export const Permission = {
   ApprovalsPolicyManage: 'approvals.policy.manage',
   AuditRead: 'audit.read',
   ComplianceExport: 'compliance.export',
+  ComplianceRegulatoryGenerate: 'compliance.regulatory.generate',
   DealingIngest: 'dealing.ingest',
   DealingManage: 'dealing.manage',
   DealingRead: 'dealing.read',
@@ -1076,6 +1107,8 @@ export const Permission = {
   StrategiesEdit: 'strategies.edit',
   StrategiesLifecycle: 'strategies.lifecycle',
   StrategiesRead: 'strategies.read',
+  SurveillanceReview: 'surveillance.review',
+  SurveillanceView: 'surveillance.view',
   TenantBillingManage: 'tenant.billing.manage',
   TenantBillingRead: 'tenant.billing.read',
   TenantBrandingManage: 'tenant.branding.manage',

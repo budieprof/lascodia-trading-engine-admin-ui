@@ -1,4 +1,12 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 
 import { errorText } from '@features/iam/iam.logic';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -57,7 +65,12 @@ import type { JobStatus } from '../surveillance.types';
   template: `
     <strong><span class="dot" [class]="'dot ' + health()"></span>{{ title() }}</strong>
     @if (status(); as s) {
-      <span>last run {{ when(s.lastFinishedAtUtc) }} · {{ s.lastOutcome ?? 'never' }}{{ s.lastDurationMs !== null ? ' in ' + (s.lastDurationMs / 1000).toFixed(1) + ' s' : '' }}</span>
+      <span
+        >last run {{ when(s.lastFinishedAtUtc) }} · {{ s.lastOutcome ?? 'never'
+        }}{{
+          s.lastDurationMs !== null ? ' in ' + (s.lastDurationMs / 1000).toFixed(1) + ' s' : ''
+        }}</span
+      >
       <span class="muted">next {{ when(s.nextRunAtUtc) }}</span>
       @if (s.consecutiveFailures > 1) {
         <span class="err">{{ s.consecutiveFailures }} failures in a row</span>
@@ -66,13 +79,21 @@ import type { JobStatus } from '../surveillance.types';
         <span class="muted msg">{{ s.lastMessage }}</span>
       }
       @if (s.runRequestedAtUtc) {
-        <span class="muted">run requested {{ when(s.runRequestedAtUtc) }}{{ s.runRequestedBy ? ' by ' + s.runRequestedBy : '' }}</span>
+        <span class="muted"
+          >run requested {{ when(s.runRequestedAtUtc)
+          }}{{ s.runRequestedBy ? ' by ' + s.runRequestedBy : '' }}</span
+        >
       }
     } @else {
       <span class="muted">No run recorded yet.</span>
     }
     @if (canRun()) {
-      <button type="button" class="btn btn-sm btn-secondary" [disabled]="busy() || !!status()?.runRequestedAtUtc" (click)="confirming.set(true)">
+      <button
+        type="button"
+        class="btn btn-sm btn-secondary"
+        [disabled]="busy() || !!status()?.runRequestedAtUtc"
+        (click)="confirming.set(true)"
+      >
         {{ runLabel() }}
       </button>
     }

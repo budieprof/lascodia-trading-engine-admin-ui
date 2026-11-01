@@ -212,7 +212,12 @@ export const ROUTE_ACCESS = {
   'organisation/approval-policies': rule(P.IamApprovalsDecide, P.ApprovalsPolicyManage),
 
   // ── Fund module (enterprise program, fund-module; plan feature fundModule) ──
-  fund: rule(P.FundReportsRead, P.FundBestexRead, P.ComplianceExport, P.ComplianceRegulatoryGenerate),
+  fund: rule(
+    P.FundReportsRead,
+    P.FundBestexRead,
+    P.ComplianceExport,
+    P.ComplianceRegulatoryGenerate,
+  ),
   'fund/performance': rule(P.FundReportsRead), // GET fund/scope, fund/performance
   'fund/best-execution': rule(P.FundBestexRead), // GET fund/best-execution
   'fund/compliance': rule(P.ComplianceExport), // GET fund/compliance-exports

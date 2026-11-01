@@ -252,19 +252,29 @@ export class FundApiService {
   // ── Regulatory report files (gaps program; never submitted anywhere) ──
   regulatoryReference(): Observable<RegulatoryReferenceData> {
     return settled(
-      this.api.get<ResponseData<RegulatoryReferenceData>>('/fund/regulatory/reference-data', SILENT),
+      this.api.get<ResponseData<RegulatoryReferenceData>>(
+        '/fund/regulatory/reference-data',
+        SILENT,
+      ),
     );
   }
 
   updateRegulatoryFirm(body: RegulatoryFirm): Observable<RegulatoryReferenceData> {
     return settled(
-      this.api.put<ResponseData<RegulatoryReferenceData>>('/fund/regulatory/reference-data/firm', body, SILENT),
+      this.api.put<ResponseData<RegulatoryReferenceData>>(
+        '/fund/regulatory/reference-data/firm',
+        body,
+        SILENT,
+      ),
     );
   }
 
   updateRegulatoryAccount(
     tradingAccountId: number,
-    body: Pick<RegulatoryAccount, 'clientIdType' | 'clientIdentifier' | 'clientCountry' | 'counterpartyLei' | 'venueMic'>,
+    body: Pick<
+      RegulatoryAccount,
+      'clientIdType' | 'clientIdentifier' | 'clientCountry' | 'counterpartyLei' | 'venueMic'
+    >,
   ): Observable<RegulatoryReferenceData> {
     return settled(
       this.api.put<ResponseData<RegulatoryReferenceData>>(

@@ -9,7 +9,13 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { SurveillanceAlertDrawerComponent } from '../components/alert-drawer.component';
 import { JobStatusComponent } from '../components/job-status.component';
 import { SurveillanceApiService } from '../surveillance-api.service';
-import { SEVERITIES, STATUSES, resolutionLabel, severityTone, statusLabel } from '../surveillance.logic';
+import {
+  SEVERITIES,
+  STATUSES,
+  resolutionLabel,
+  severityTone,
+  statusLabel,
+} from '../surveillance.logic';
 import type {
   SurveillanceAlertPage,
   SurveillanceConfiguration,
@@ -38,7 +44,14 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
   selector: 'app-surveillance-alerts-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent, FeatureStateComponent, SurveillanceAlertDrawerComponent, JobStatusComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    PageHeaderComponent,
+    FeatureStateComponent,
+    SurveillanceAlertDrawerComponent,
+    JobStatusComponent,
+  ],
   styleUrls: ['../../iam/shared/iam-page.scss', './surveillance-page.scss'],
   template: `
     <div class="page">
@@ -91,7 +104,12 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
         <div class="filters">
           <label class="field">
             <span class="label">Detector</span>
-            <select class="input" name="detector" [ngModel]="detector()" (ngModelChange)="detector.set($event); reload()">
+            <select
+              class="input"
+              name="detector"
+              [ngModel]="detector()"
+              (ngModelChange)="detector.set($event); reload()"
+            >
               <option [ngValue]="null">All detectors</option>
               @for (d of config.value()?.detectors ?? []; track d.key) {
                 <option [ngValue]="d.key">
@@ -102,7 +120,12 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
           </label>
           <label class="field">
             <span class="label">At least</span>
-            <select class="input" name="severity" [ngModel]="minSeverity()" (ngModelChange)="minSeverity.set($event); reload()">
+            <select
+              class="input"
+              name="severity"
+              [ngModel]="minSeverity()"
+              (ngModelChange)="minSeverity.set($event); reload()"
+            >
               <option [ngValue]="null">Any severity</option>
               @for (s of severities; track s) {
                 <option [ngValue]="s">{{ s }}</option>
@@ -111,14 +134,33 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
           </label>
           <label class="field">
             <span class="label">Symbol</span>
-            <input class="input" name="symbol" placeholder="e.g. EURUSD" [ngModel]="symbol()" (ngModelChange)="symbol.set($event)" (keydown.enter)="reload()" />
+            <input
+              class="input"
+              name="symbol"
+              placeholder="e.g. EURUSD"
+              [ngModel]="symbol()"
+              (ngModelChange)="symbol.set($event)"
+              (keydown.enter)="reload()"
+            />
           </label>
           <label class="check">
-            <input type="checkbox" name="mine" [ngModel]="mine()" (ngModelChange)="mine.set($event); reload()" />
+            <input
+              type="checkbox"
+              name="mine"
+              [ngModel]="mine()"
+              (ngModelChange)="mine.set($event); reload()"
+            />
             Assigned to me
           </label>
           <span class="spacer"></span>
-          <button type="button" class="btn btn-sm btn-ghost" [disabled]="page.loading()" (click)="reload()">Refresh</button>
+          <button
+            type="button"
+            class="btn btn-sm btn-ghost"
+            [disabled]="page.loading()"
+            (click)="reload()"
+          >
+            Refresh
+          </button>
         </div>
 
         @if (page.error(); as err) {
@@ -142,7 +184,9 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
               @for (a of page.value().items; track a.id) {
                 <tr class="row" tabindex="0" (click)="open(a.id)" (keydown.enter)="open(a.id)">
                   <td class="nowrap">{{ a.detectedAtUtc.slice(0, 16).replace('T', ' ') }}</td>
-                  <td><span class="pill" [class]="'pill ' + tone(a.severity)">{{ a.severity }}</span></td>
+                  <td>
+                    <span class="pill" [class]="'pill ' + tone(a.severity)">{{ a.severity }}</span>
+                  </td>
                   <td>{{ a.detectorName }}</td>
                   <td class="title">{{ a.title }}</td>
                   <td>{{ a.account ?? '—' }}</td>
@@ -177,16 +221,34 @@ const EMPTY_PAGE: SurveillanceAlertPage = {
         </div>
         @if (page.value().total > page.value().pageSize) {
           <div class="pager">
-            <button type="button" class="btn btn-sm btn-ghost" [disabled]="pageNo() <= 1" (click)="go(pageNo() - 1)">Previous</button>
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              [disabled]="pageNo() <= 1"
+              (click)="go(pageNo() - 1)"
+            >
+              Previous
+            </button>
             <span>Page {{ pageNo() }} of {{ pages() }} · {{ page.value().total }} alerts</span>
-            <button type="button" class="btn btn-sm btn-ghost" [disabled]="pageNo() >= pages()" (click)="go(pageNo() + 1)">Next</button>
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost"
+              [disabled]="pageNo() >= pages()"
+              (click)="go(pageNo() + 1)"
+            >
+              Next
+            </button>
           </div>
         }
         <p class="foot">{{ page.value().notice }}</p>
       </section>
 
       @if (selected(); as id) {
-        <app-surveillance-alert-drawer [alertId]="id" (closed)="selected.set(null)" (changed)="reload()" />
+        <app-surveillance-alert-drawer
+          [alertId]="id"
+          (closed)="selected.set(null)"
+          (changed)="reload()"
+        />
       }
     </div>
   `,
@@ -227,12 +289,25 @@ export class SurveillanceAlertsPageComponent {
     null,
     'Could not load the detectors.',
   );
-  readonly ops = iamResource<SurveillanceOperations | null>(() => this.api.operations(), null, 'Could not load the scan status.');
+  readonly ops = iamResource<SurveillanceOperations | null>(
+    () => this.api.operations(),
+    null,
+    'Could not load the scan status.',
+  );
 
   readonly filtered = computed(
-    () => !!(this.status() || this.detector() || this.minSeverity() || this.symbol().trim() || this.mine()),
+    () =>
+      !!(
+        this.status() ||
+        this.detector() ||
+        this.minSeverity() ||
+        this.symbol().trim() ||
+        this.mine()
+      ),
   );
-  readonly pages = computed(() => Math.max(1, Math.ceil(this.page.value().total / this.page.value().pageSize)));
+  readonly pages = computed(() =>
+    Math.max(1, Math.ceil(this.page.value().total / this.page.value().pageSize)),
+  );
 
   constructor() {
     this.page.reload();

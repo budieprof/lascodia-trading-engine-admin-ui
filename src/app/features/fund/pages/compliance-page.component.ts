@@ -346,7 +346,10 @@ const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> =
           <section class="card">
             <div class="card-head">
               <h3>Regulatory report files</h3>
-              <span class="hint">MiFIR RTS 22 / EMIR Refit-shaped files and a venue summary — signed, registered below, never submitted</span>
+              <span class="hint"
+                >MiFIR RTS 22 / EMIR Refit-shaped files and a venue summary — signed, registered
+                below, never submitted</span
+              >
               <span class="spacer"></span>
               <a routerLink="/fund/regulatory" class="btn btn-sm btn-secondary">Open</a>
             </div>
@@ -498,7 +501,9 @@ const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> =
 export class CompliancePageComponent {
   private readonly fund = inject(FundApiService);
   private readonly auth = inject(AuthService);
-  readonly canRegulatory = computed(() => this.auth.hasPermission(Permission.ComplianceRegulatoryGenerate));
+  readonly canRegulatory = computed(() =>
+    this.auth.hasPermission(Permission.ComplianceRegulatoryGenerate),
+  );
 
   protected readonly shortHash = shortHash;
   protected readonly minuteUtc = minuteUtc;
