@@ -16,7 +16,8 @@ export type InstrumentAssetClass =
   | 'Commodity'
   | 'Etf';
 
-export type QuantityUnit = 'Lots' | 'Contracts' | 'Shares' | 'Coins';
+/** `Units` = base-currency units, as direct FX venues (OANDA, cTrader, FIX) size orders (gaps/routing). */
+export type QuantityUnit = 'Lots' | 'Contracts' | 'Shares' | 'Coins' | 'Units';
 
 /** The unit a price distance is shown in: pips only for FX. */
 export type DisplayDistance = 'Pips' | 'Ticks' | 'Points' | 'Cents' | 'Bps';

@@ -191,6 +191,7 @@ const QTY_UNIT: Record<QuantityUnit, [string, string]> = {
   Contracts: ['contract', 'contracts'],
   Shares: ['share', 'shares'],
   Coins: ['coin', 'coins'],
+  Units: ['unit', 'units'],
 };
 
 /** `0.10 lots`, `2 contracts`, `100 shares`, `0.5 BTC`. */

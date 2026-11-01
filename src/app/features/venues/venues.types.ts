@@ -1,3 +1,4 @@
+import type { ConfigDataType } from '@core/api/api.types';
 /**
  * Wire shapes of the engine's venue / exchange-traded console APIs (multi-asset WS7 7.5–7.10, engine branch
  * `ma/console-api`, plus exec-gateway's `execution/*`). Enums of exec-gateway's DTOs may arrive as names or numbers
@@ -540,4 +541,93 @@ export interface CryptoFundamentals {
   liquidationCount24h: number;
   ageMs: number | null;
   notes: string[];
+}
+
+// ── FX routing beyond MT5 (gaps/routing; engine GET execution/fx/routing) ────────────────────────────
+
+export interface FxConfigKey {
+  key: string;
+  /** Stored value; null when no row exists (the default applies). */
+  value: string | null;
+  default: string;
+  dataType: ConfigDataType;
+  description: string;
+  /** "route" (FX routing keys) or "prerequisite" (switches a route also needs). */
+  group: 'route' | 'prerequisite' | string;
+  lastChangedAtUtc: string | null;
+  lastChangedBy: string | null;
+}
+
+export interface FxSessionStatus {
+  executionAccountId: number;
+  connected: boolean;
+  lastConnectedUtc: string | null;
+  lastRequestUtc: string | null;
+  lastErrorUtc: string | null;
+  lastError: string | null;
+  requests: number;
+  errors: number;
+}
+
+export interface FxVenueKind {
+  kind: string;
+  registered: boolean;
+  enabled: boolean;
+  environment: string;
+  endpoint: string;
+  gatewayTokenSet: boolean | null;
+  accounts: number;
+  activeAccounts: number;
+  capabilities: ExecutionAdapter['capabilities'] | null;
+  sessions: FxSessionStatus[];
+  credentialFields: string[];
+}
+
+export interface FxGatewaySession {
+  sessionKey: string;
+  profile: string;
+  environment: string;
+  state: string;
+  nextSenderSeqNum: number;
+  nextTargetSeqNum: number;
+  loggedOnAtUtc: string | null;
+  lastMessageAtUtc: string | null;
+  logons: number;
+  gapFillsReceived: number;
+  resendRequestsSent: number;
+  lastError: string | null;
+  openOrders: number;
+  fills: number;
+  unverified: string[];
+}
+
+export interface FxGatewayStatus {
+  /** ok / not-configured / unreachable. */
+  state: string;
+  url: string | null;
+  error: string | null;
+  sessions: FxGatewaySession[];
+}
+
+export interface FxGateDecision {
+  id: number;
+  tradeSignalId: number;
+  /** Refused (Enforce) or WouldRefuse (Observe). */
+  outcome: string;
+  reason: string;
+  gate: string | null;
+  mode: string | null;
+  executionAccountId: number | null;
+  symbol: string | null;
+  createdAtUtc: string;
+}
+
+export interface FxRoutingStatus {
+  keys: FxConfigKey[];
+  venues: FxVenueKind[];
+  mappings: { venue: string; activeMappings: number }[];
+  gateway: FxGatewayStatus;
+  decisions: FxGateDecision[];
+  canManage: boolean;
+  operatorSteps: string[];
 }

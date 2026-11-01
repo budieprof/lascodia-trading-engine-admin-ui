@@ -10,6 +10,13 @@ export const CONNECTIONS_ROUTES: Routes = [
       import('./pages/connections-page.component').then((m) => m.ConnectionsPageComponent),
   },
   {
+    path: 'fx-routing',
+    canActivate: [canAccessPath('connections/fx-routing')],
+    data: { breadcrumb: 'FX routing' },
+    loadComponent: () =>
+      import('./pages/fx-routing-page.component').then((m) => m.FxRoutingPageComponent),
+  },
+  {
     path: 'drift',
     canActivate: [canAccessPath('connections/drift')],
     data: { breadcrumb: 'Reconciliation drift' },
