@@ -9,6 +9,7 @@ import { IamApiService } from '@features/iam/iam-api.service';
 import type { TenantDto } from '@features/iam/iam.types';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
+import { ago } from '@features/iam/shared/admin-context.logic';
 import { MarketDataEntitlementsApiService } from '../md-entitlements-api.service';
 import { MarketDataSourcesApiService } from '../../sources/md-sources-api.service';
 import { feedHoldings, groupByFamily } from '../md-feeds.logic';
@@ -41,7 +42,7 @@ import type {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, RouterLink, PageHeaderComponent],
-  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
+  styleUrls: ['../../../iam/shared/iam-page.scss', './md-licensing-pages.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -73,95 +74,167 @@ import type {
         </p>
       }
 
-      <div class="tiles" aria-label="Summary">
-        <div class="tile">
-          <span class="t-label">Feeds in the catalog</span>
-          <span class="t-value">{{ catalog.value()?.feeds?.length ?? '—' }}</span>
-          <span class="t-hint">{{ exchangeFeeds() }} exchange-licensed · {{ catalog.value()?.defaultFeeds?.length ?? 0 }} default</span>
+      <div class="kpis" aria-label="Summary">
+        <div class="kpi info">
+          <span class="k-label">Feeds in the catalog</span>
+          <span class="k-value">{{ catalog.value()?.feeds?.length ?? '—' }}</span>
+          <span class="k-hint"
+            >{{ exchangeFeeds() }} exchange-licensed ·
+            {{ catalog.value()?.defaultFeeds?.length ?? 0 }} default</span
+          >
         </div>
-        <div class="tile" [attr.data-tone]="liveGrants() ? 'ok' : null">
-          <span class="t-label">Live grants</span>
-          <span class="t-value">{{ liveGrants() }}</span>
-          <span class="t-hint">{{ grantedOrgs() }} organisation{{ grantedOrgs() === 1 ? '' : 's' }} hold a grant</span>
+        <div class="kpi" [class.ok]="liveGrants() > 0">
+          <span class="k-label">Live grants</span>
+          <span class="k-value">{{ liveGrants() }}</span>
+          <span class="k-hint"
+            >{{ grantedOrgs() }} organisation{{ grantedOrgs() === 1 ? '' : 's' }} hold a grant</span
+          >
         </div>
-        <div class="tile">
-          <span class="t-label">Organisations</span>
-          <span class="t-value">{{ tenants().length || '—' }}</span>
-          <span class="t-hint">read the default feeds without a grant</span>
+        <div class="kpi">
+          <span class="k-label">Organisations</span>
+          <span class="k-value">{{ tenants().length || '—' }}</span>
+          <span class="k-hint">read the default feeds without a grant</span>
         </div>
-        <div class="tile">
-          <span class="t-label">Feeds with a live source</span>
-          <span class="t-value">{{ enabledIds() ? feedsWithSource() : '—' }}</span>
-          <span class="t-hint">a grant only delivers data when a source behind the feed is enabled</span>
+        <div class="kpi" [class.ok]="feedsWithSource() > 0">
+          <span class="k-label">Feeds with a live source</span>
+          <span class="k-value"
+            >{{ enabledIds() ? feedsWithSource() : '—' }}
+            @if (enabledIds() && catalog.value()) {
+              <span class="k-of">/ {{ catalog.value()?.feeds?.length }}</span>
+            }
+          </span>
+          <span
+            class="k-hint"
+            title="a grant only delivers data when a source behind the feed is enabled"
+            >a grant only delivers data when a source behind the feed is enabled</span
+          >
         </div>
-        <div class="tile">
-          <span class="t-label">Need a declaration</span>
-          <span class="t-value">{{ declarationFeeds() }}</span>
-          <span class="t-hint">feeds whose real-time display needs a subscriber declaration</span>
+        <div class="kpi" [class.warn]="declarationFeeds() > 0">
+          <span class="k-label">Need a declaration</span>
+          <span class="k-value">{{ declarationFeeds() }}</span>
+          <span class="k-hint">feeds whose real-time display needs a subscriber declaration</span>
         </div>
       </div>
 
       <section class="card" aria-label="Who holds each feed">
         <header class="card-head">
           <h3>Feed catalog — who holds what</h3>
+          <span class="count">{{ holdings().length }}</span>
+          <span class="hint">grouped by licensor</span>
           <span class="spacer"></span>
-          <a class="small" routerLink="/market-data/sources">Sources</a>
-          <a class="small" routerLink="/market-data/usage">Usage</a>
+          <span class="links">
+            <a routerLink="/market-data/sources">Sources →</a>
+            <a routerLink="/market-data/usage">Usage →</a>
+          </span>
         </header>
-        <div class="table-wrap">
-          <table class="grid">
-            <thead>
-              <tr>
-                <th>Feed</th>
-                <th>Data</th>
-                <th title="Registry sources behind the feed that are enabled / all">Sources live</th>
-                <th>Licence terms</th>
-                <th>Who reads it</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (g of families(); track g.family) {
-                <tr class="selected">
-                  <td colspan="5" class="small"><strong>{{ g.name }}</strong></td>
+        @if (families().length === 0) {
+          <div class="empty">
+            @if (catalog.error(); as err) {
+              <strong>Could not load the feed catalog</strong>
+              <p>{{ err }}</p>
+            } @else {
+              <strong>{{
+                catalog.loading() ? 'Loading the feed catalog…' : 'No feeds in the catalog'
+              }}</strong>
+              <p>
+                Each feed the engine can serve — broker ticks and depth, CME, FX venues — appears
+                here with who may read it.
+              </p>
+            }
+          </div>
+        } @else {
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Feed</th>
+                  <th>Data</th>
+                  <th title="Registry sources behind the feed that are enabled / all">
+                    Sources live
+                  </th>
+                  <th>Licence terms</th>
+                  <th>Who reads it</th>
                 </tr>
-                @for (h of g.rows; track h.feed.feedId) {
-                  <tr>
-                    <td><code>{{ h.feed.feedId }}</code><span class="sub">{{ h.feed.name }}</span></td>
-                    <td class="small">{{ h.feed.level ?? (h.feed.exchangeFeed ? '—' : 'Quotes / depth') }}</td>
-                    <td class="small">
-                      @if (h.enabledSources === null) {
-                        {{ h.feed.sources.length }} registered
-                      } @else {
-                        <span class="chip" [class.ok]="h.enabledSources > 0">{{ h.enabledSources }} / {{ h.feed.sources.length }}</span>
-                      }
-                    </td>
-                    <td class="small">
-                      {{ h.feed.isDefault ? 'Included for everyone' : h.feed.exchangeFeed ? 'Exchange licence' : 'Grant' }}
-                      @if (h.feed.requiresDeclaration) {
-                        <span class="sub">real-time display needs a declaration</span>
-                      }
-                      @if (h.feed.hasDelayedData) {
-                        <span class="sub">delayed licence available ({{ h.feed.delayMinutes }} min)</span>
-                      }
-                    </td>
-                    <td class="small">
-                      {{ h.holders }}
-                      @if (h.grantees.length) {
-                        <span class="sub">{{ h.grantees.join(', ') }}</span>
-                      }
+              </thead>
+              <tbody>
+                @for (g of families(); track g.family) {
+                  <tr class="group">
+                    <td colspan="5">
+                      {{ g.name }}<span class="n">{{ g.rows.length }}</span>
                     </td>
                   </tr>
+                  @for (h of g.rows; track h.feed.feedId) {
+                    <tr>
+                      <td>
+                        <span class="ident">{{ h.feed.feedId }}</span>
+                        <span class="feed-name">{{ h.feed.name }}</span>
+                      </td>
+                      <td class="small">
+                        {{ h.feed.level ?? (h.feed.exchangeFeed ? '—' : 'Quotes / depth') }}
+                      </td>
+                      <td>
+                        @if (h.enabledSources === null) {
+                          <span class="small muted">{{ h.feed.sources.length }} registered</span>
+                        } @else {
+                          <span
+                            class="meter"
+                            [class.ok]="h.enabledSources > 0"
+                            [title]="
+                              h.enabledSources + ' of ' + h.feed.sources.length + ' sources enabled'
+                            "
+                          >
+                            <span class="track"
+                              ><i
+                                [style.width.%]="share(h.enabledSources, h.feed.sources.length)"
+                              ></i
+                            ></span>
+                            {{ h.enabledSources }} / {{ h.feed.sources.length }}
+                          </span>
+                        }
+                      </td>
+                      <td>
+                        <span
+                          class="chip"
+                          [class.ok]="h.feed.isDefault"
+                          [class.info]="!h.feed.isDefault && h.feed.exchangeFeed"
+                        >
+                          {{
+                            h.feed.isDefault
+                              ? 'Included for everyone'
+                              : h.feed.exchangeFeed
+                                ? 'Exchange licence'
+                                : 'Grant'
+                          }}
+                        </span>
+                        @if (h.feed.requiresDeclaration) {
+                          <span class="sub">real-time display needs a declaration</span>
+                        }
+                        @if (h.feed.hasDelayedData) {
+                          <span class="sub"
+                            >delayed licence available ({{ h.feed.delayMinutes }} min)</span
+                          >
+                        }
+                      </td>
+                      <td class="small">
+                        {{ h.holders }}
+                        @if (h.grantees.length) {
+                          <span class="sub">{{ h.grantees.join(', ') }}</span>
+                        }
+                      </td>
+                    </tr>
+                  }
                 }
-              }
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        }
       </section>
 
       @if (editing(); as e) {
-        <section class="card">
+        <section class="card form-card">
           <header class="card-head">
             <h3>{{ e.id === null ? 'Grant a feed' : 'Change ' + e.label }}</h3>
+            <span class="hint">recorded in the organisation's audit log</span>
           </header>
           <form class="card-body" (ngSubmit)="save()">
             @if (e.id === null) {
@@ -304,7 +377,7 @@ import type {
       }
 
       @if (revoking(); as r) {
-        <section class="card" aria-label="Revoke licence">
+        <section class="card danger-card" aria-label="Revoke licence">
           <header class="card-head">
             <h3>Revoke {{ r.feedId }} for {{ r.tenantName || r.tenantSlug }}?</h3>
           </header>
@@ -347,15 +420,22 @@ import type {
       <section class="card" aria-label="Grants">
         <header class="card-head">
           <h3>Grants</h3>
-          <input
-            class="input search"
-            type="search"
-            aria-label="Search organisations and feeds"
-            placeholder="Search organisation or feed"
-            [ngModel]="search()"
-            (ngModelChange)="search.set($event)"
-          />
-          <label class="check">
+          <span class="count">{{ visible().length }}</span>
+          <span class="hint">{{ liveGrants() }} live</span>
+          <span class="spacer"></span>
+        </header>
+        <div class="toolbar">
+          <span class="search-box">
+            <input
+              class="input"
+              type="search"
+              aria-label="Search organisations and feeds"
+              placeholder="Search organisation or feed"
+              [ngModel]="search()"
+              (ngModelChange)="search.set($event)"
+            />
+          </span>
+          <label class="toggle" [class.on]="includeRevoked()">
             <input
               type="checkbox"
               [ngModel]="includeRevoked()"
@@ -363,20 +443,25 @@ import type {
             />
             Show revoked
           </label>
-          <span class="spacer"></span>
-        </header>
+        </div>
         @if (rows.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (rows.loaded() && visible().length === 0) {
-          <p class="pad muted">
+          <div class="empty">
             @if (search()) {
-              No grants match “{{ search() }}”.
+              <strong>No grants match “{{ search() }}”.</strong>
+              <p>Search looks at the organisation name, slug and id, and the feed id and name.</p>
             } @else {
-              No grants yet — so every organisation reads only its default feeds and House reads every feed (see the
-              catalog above). A grant lets one organisation read an exchange or venue feed, for people (display) and/or
-              machines (non-display), from a date and until a date, inside its plan: use <strong>Grant a feed</strong>.
+              <strong>No grants yet</strong>
+              <p>
+                No grants yet — so every organisation reads only its default feeds and House reads
+                every feed (see the catalog above). A grant lets one organisation read an exchange
+                or venue feed, for people (display) and/or machines (non-display), from a date and
+                until a date, inside its plan: use
+                <b>Grant a feed</b>.
+              </p>
             }
-          </p>
+          </div>
         } @else if (visible().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -394,47 +479,45 @@ import type {
               </thead>
               <tbody>
                 @for (r of visible(); track r.id) {
-                  <tr>
+                  <tr [class.is-past]="r.status === 'Revoked' || r.status === 'Expired'">
                     <td>
-                      {{ r.tenantName || 'Organisation ' + r.tenantId }}
+                      <strong>{{ r.tenantName || 'Organisation ' + r.tenantId }}</strong>
                       <span class="sub"
                         ><code>{{ r.tenantSlug }}</code></span
                       >
                     </td>
                     <td>
-                      <code>{{ r.feedId }}</code>
-                      <span class="sub">{{ r.feedName }}</span>
+                      <span class="ident">{{ r.feedId }}</span>
+                      <span class="feed-name">{{ r.feedName }}</span>
                     </td>
                     <td class="small">{{ usages(r) }}</td>
-                    <td class="small">{{ validity(r) }}</td>
+                    <td class="small nowrap">{{ validity(r) }}</td>
                     <td>
-                      <span [class]="'chip ' + tone(r.status)">{{ r.status }}</span>
+                      <span [class]="'dot ' + tone(r.status)">{{ r.status }}</span>
                       @if (r.outsidePlan && r.status !== 'Revoked') {
-                        <span
-                          class="chip warn"
-                          title="The organisation's plan does not include this feed: it is not served until it does."
-                        >
-                          Outside plan
+                        <span class="flags">
+                          <span
+                            class="chip warn"
+                            title="The organisation's plan does not include this feed: it is not served until it does."
+                          >
+                            Outside plan
+                          </span>
                         </span>
                       }
                     </td>
                     <td class="small">{{ r.reason || '—' }}</td>
-                    <td class="small">
-                      {{ at(r.createdAtUtc) }}
+                    <td class="small nowrap">
+                      <span [title]="at(r.createdAtUtc)">{{ ago(r.createdAtUtc) }}</span>
                       <span class="sub">{{ r.grantedBy || '' }}</span>
                     </td>
                     <td class="actions">
                       @if (r.status !== 'Revoked') {
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-secondary"
-                          (click)="startEdit(r)"
-                        >
+                        <button type="button" class="btn btn-sm btn-ghost" (click)="startEdit(r)">
                           Change
                         </button>
                         <button
                           type="button"
-                          class="btn btn-sm btn-danger"
+                          class="btn btn-sm btn-ghost-danger"
                           (click)="startRevoke(r)"
                         >
                           Revoke
@@ -460,6 +543,12 @@ export class MarketDataEntitlementsPageComponent {
   protected readonly validity = validityText;
   protected readonly tone = statusTone;
   protected readonly at = when;
+  protected readonly ago = ago;
+
+  /** Width (0-100) of a mini meter: part of whole, 0 when there is no whole. */
+  protected share(part: number, whole: number): number {
+    return whole > 0 ? Math.min(100, (part / whole) * 100) : 0;
+  }
 
   readonly includeRevoked = signal(false);
   readonly search = signal('');
@@ -479,20 +568,29 @@ export class MarketDataEntitlementsPageComponent {
   private readonly sourcesApi = inject(MarketDataSourcesApiService);
   /** Ids of the enabled registry sources; null when the registry could not be read. */
   readonly enabledIds = signal<ReadonlySet<string> | null>(null);
-  readonly holdings = computed(() => feedHoldings(this.catalog.value(), this.rows.value(), this.enabledIds()));
+  readonly holdings = computed(() =>
+    feedHoldings(this.catalog.value(), this.rows.value(), this.enabledIds()),
+  );
   readonly families = computed(() => groupByFamily(this.holdings()));
-  readonly exchangeFeeds = computed(() => (this.catalog.value()?.feeds ?? []).filter((f) => f.exchangeFeed).length);
+  readonly exchangeFeeds = computed(
+    () => (this.catalog.value()?.feeds ?? []).filter((f) => f.exchangeFeed).length,
+  );
   readonly declarationFeeds = computed(
     () => (this.catalog.value()?.feeds ?? []).filter((f) => f.requiresDeclaration).length,
   );
-  readonly feedsWithSource = computed(() => this.holdings().filter((h) => (h.enabledSources ?? 0) > 0).length);
+  readonly feedsWithSource = computed(
+    () => this.holdings().filter((h) => (h.enabledSources ?? 0) > 0).length,
+  );
   readonly liveGrants = computed(
     () => this.rows.value().filter((r) => r.status === 'Active' || r.status === 'Scheduled').length,
   );
   readonly grantedOrgs = computed(
     () =>
       new Set(
-        this.rows.value().filter((r) => r.status === 'Active' || r.status === 'Scheduled').map((r) => r.tenantId),
+        this.rows
+          .value()
+          .filter((r) => r.status === 'Active' || r.status === 'Scheduled')
+          .map((r) => r.tenantId),
       ).size,
   );
 
@@ -524,7 +622,11 @@ export class MarketDataEntitlementsPageComponent {
     this.sourcesApi
       .list()
       .pipe(catchError(() => of(null)))
-      .subscribe((rows) => this.enabledIds.set(rows ? new Set(rows.filter((r) => r.enabled).map((r) => r.sourceId)) : null));
+      .subscribe((rows) =>
+        this.enabledIds.set(
+          rows ? new Set(rows.filter((r) => r.enabled).map((r) => r.sourceId)) : null,
+        ),
+      );
     this.iam
       .tenants()
       .pipe(catchError(() => of([] as TenantDto[])))

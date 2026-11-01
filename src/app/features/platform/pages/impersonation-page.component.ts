@@ -25,7 +25,7 @@ import { ago, plural } from '@features/iam/shared/admin-context.logic';
 import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
-import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import type { StatTile } from '@features/iam/shared/stat-tiles.component';
 import {
   FeatureStateComponent,
   type FeatureRequirement,
@@ -46,52 +46,10 @@ import {
     PageHeaderComponent,
     ConfirmDialogComponent,
     MfaHintComponent,
-    StatTilesComponent,
     FeatureStateComponent,
     AuditTrailComponent,
   ],
-  styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [
-    `
-      .split {
-        display: grid;
-        grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .split {
-          grid-template-columns: 1fr;
-        }
-      }
-      .main-col,
-      .side {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        min-width: 0;
-      }
-
-      .cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 860px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
-      }
-      .rules {
-        list-style: disc;
-        margin: 0;
-        padding-left: var(--space-5);
-        display: grid;
-        gap: var(--space-2);
-      }
-    `,
-  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './fleet-access-page.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -99,7 +57,29 @@ import {
         subtitle="See the console as another user, read-only. Recorded in their organisation's audit log."
       />
 
-      <app-stat-tiles [tiles]="tiles()" label="Impersonation summary" />
+      <ul class="kpis" aria-label="Impersonation summary">
+        @for (t of tiles(); track t.label) {
+          <li
+            class="kpi"
+            [class.tone-good]="t.tone === 'good'"
+            [class.tone-warn]="t.tone === 'warn'"
+            [class.tone-bad]="t.tone === 'bad'"
+            [attr.title]="t.title ?? null"
+          >
+            <span class="kpi-label">{{ t.label }}</span>
+            @if (t.route) {
+              <a class="kpi-value" [routerLink]="t.route" [queryParams]="t.query ?? undefined">{{
+                t.value
+              }}</a>
+            } @else {
+              <span class="kpi-value">{{ t.value }}</span>
+            }
+            @if (t.caption) {
+              <span class="kpi-hint" [title]="t.caption">{{ t.caption }}</span>
+            }
+          </li>
+        }
+      </ul>
 
       <app-feature-state
         title="View as another person"
@@ -118,14 +98,20 @@ import {
         ]"
       />
 
-      <div class="split">
+      <div class="split wide-side">
         <div class="main-col">
           <section class="card">
             <header class="card-head">
               <h3>Choose the person</h3>
+              @if (tenantId() !== null && !membersError()) {
+                <span class="count">{{ shown().length }}</span>
+              }
               <span class="spacer"></span>
+              <span class="hint">Active members only · you cannot view yourself</span>
+            </header>
+            <div class="toolbar">
               <select
-                class="select search"
+                class="select"
                 name="tenant"
                 aria-label="Organisation"
                 [ngModel]="tenantId()"
@@ -136,21 +122,26 @@ import {
                   <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
                 }
               </select>
-              <input
-                class="input search"
-                type="search"
-                placeholder="Filter people"
-                aria-label="Filter people"
-                [ngModel]="filter()"
-                (ngModelChange)="filter.set($event)"
-              />
-            </header>
+              <label class="search-box">
+                <input
+                  class="input"
+                  type="search"
+                  placeholder="Filter people"
+                  aria-label="Filter people"
+                  [ngModel]="filter()"
+                  (ngModelChange)="filter.set($event)"
+                />
+              </label>
+            </div>
             @if (tenantId() === null) {
-              <p class="pad muted">Choose an organisation to list its members.</p>
+              <p class="empty">
+                <strong>Choose an organisation to list its members.</strong>
+                Its active members appear here, each with a “View as” button.
+              </p>
             } @else if (membersError(); as e) {
               <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ e }}</p>
             } @else if (shown().length === 0) {
-              <p class="pad small muted">
+              <p class="empty">
                 {{
                   members().length
                     ? 'No one else is an active member here — you cannot view yourself, and suspended or invited people have no console to see.'
@@ -158,38 +149,46 @@ import {
                 }}
               </p>
             } @else {
-              <table class="grid">
-                <thead>
-                  <tr>
-                    <th>Person</th>
-                    <th>Membership</th>
-                    <th><span class="sr-only">View</span></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (m of shown(); track m.userId) {
+              <div class="table-wrap">
+                <table class="grid">
+                  <thead>
                     <tr>
-                      <td>
-                        {{ label(m) }}<span class="sub">{{ m.email || '' }}</span>
-                      </td>
-                      <td class="small">
-                        {{ m.status }}
-                        <span class="sub">{{ memberSince(m) }}</span>
-                      </td>
-                      <td class="actions">
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-primary"
-                          [disabled]="busy()"
-                          (click)="target.set(m)"
-                        >
-                          View as
-                        </button>
-                      </td>
+                      <th>Person</th>
+                      <th>Membership</th>
+                      <th><span class="sr-only">View</span></th>
                     </tr>
-                  }
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    @for (m of shown(); track m.userId) {
+                      <tr>
+                        <td>
+                          <div class="person">
+                            <span class="avatar" aria-hidden="true">{{ initials(m) }}</span>
+                            <div>
+                              <span class="strong">{{ label(m) }}</span
+                              ><span class="sub">{{ m.email || '' }}</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td class="small">
+                          <span class="dot" [class.ok]="m.status === 'Active'">{{ m.status }}</span>
+                          <span class="sub">{{ memberSince(m) }}</span>
+                        </td>
+                        <td class="actions">
+                          <button
+                            type="button"
+                            class="btn btn-sm btn-primary"
+                            [disabled]="busy()"
+                            (click)="target.set(m)"
+                          >
+                            View as
+                          </button>
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
             }
           </section>
         </div>
@@ -197,7 +196,7 @@ import {
           <section class="card">
             <header class="card-head"><h3>The rules</h3></header>
             <div class="card-body small">
-              <ul class="rules">
+              <ul class="help">
                 <li>
                   Read-only: every change is refused while you view, unless an approved elevation
                   for that organisation is active (<a routerLink="/platform/elevations"
@@ -381,6 +380,14 @@ export class ImpersonationPageComponent {
     return d?.stepUp
       ? 'a fresh second-factor sign-in is asked for at the start'
       : 'no extra sign-in step';
+  }
+
+  initials(m: IamMember): string {
+    const words = memberLabel(m)
+      .trim()
+      .split(/[\s@._-]+/)
+      .filter(Boolean);
+    return (words.length > 1 ? words[0][0] + words[1][0] : (words[0] ?? '?').slice(0, 2)) || '?';
   }
 
   label(m: IamMember): string {

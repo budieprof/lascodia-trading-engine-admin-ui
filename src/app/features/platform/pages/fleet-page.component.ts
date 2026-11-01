@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { when } from '@features/iam/iam.logic';
+import { ago } from '@features/iam/shared/admin-context.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { PlansApiService } from '../plans-api.service';
 import {
@@ -13,6 +14,13 @@ import {
   type FleetFilter,
 } from '../plans.logic';
 import type { FleetHealth } from '../plans.types';
+
+/** `ShuttingDown` → "Shutting down", `PendingApproval` → "Pending approval". */
+function humanise(value: string | null | undefined): string {
+  if (!value) return '—';
+  const spaced = value.replace(/([a-z])([A-Z])/g, '$1 $2');
+  return spaced.charAt(0) + spaced.slice(1).toLowerCase();
+}
 
 /** The look-back choices for disconnected terminals. */
 const WINDOWS = [
@@ -32,7 +40,7 @@ const WINDOWS = [
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, PageHeaderComponent],
-  styleUrl: '../../iam/shared/iam-page.scss',
+  styleUrls: ['../../iam/shared/iam-page.scss', './fleet-access-page.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -67,121 +75,219 @@ const WINDOWS = [
 
       @if (fleet.value(); as f) {
         @if (f.globalKillSwitchEngaged) {
-          <p class="note warn" role="status">
+          <p class="banner" role="status">
+            <span class="dot bad">Kill switch</span>
             The platform kill switch is engaged: no organisation is trading.
           </p>
         }
 
+        @let k = kpis();
+        <ul class="kpis" aria-label="Fleet health summary">
+          <li class="kpi" [class.tone-warn]="k.attention > 0">
+            <span class="kpi-label">Organisations</span>
+            <span class="kpi-value">{{ k.orgs }}</span>
+            <span class="kpi-hint">{{
+              k.attention > 0 ? k.attention + ' need attention' : 'none need attention'
+            }}</span>
+          </li>
+          <li class="kpi tone-info">
+            <span class="kpi-label">Terminals</span>
+            <span class="kpi-value">{{ k.terminals }}</span>
+            <span class="kpi-hint" [title]="windowLabel()">{{
+              k.legacy > 0 ? k.legacy + ' on the legacy API key' : 'no legacy API keys'
+            }}</span>
+          </li>
+          <li class="kpi" [class.tone-good]="k.terminals > 0 && k.healthy === k.terminals">
+            <span class="kpi-label">Healthy</span>
+            <span class="kpi-value">{{ k.healthy }}</span>
+            <span class="kpi-hint">{{ pct(k.healthy, k.terminals) }} of terminals</span>
+          </li>
+          <li class="kpi" [class.tone-warn]="k.stale > 0">
+            <span class="kpi-label">Stale</span>
+            <span class="kpi-value">{{ k.stale }}</span>
+            <span class="kpi-hint">no heartbeat for over {{ f.heartbeatTimeoutSeconds }} s</span>
+          </li>
+          <li class="kpi" [class.tone-bad]="k.disconnected > 0">
+            <span class="kpi-label">Disconnected</span>
+            <span class="kpi-value">{{ k.disconnected }}</span>
+            <span class="kpi-hint">seen in the {{ windowLabel().toLowerCase() }}</span>
+          </li>
+          <li class="kpi" [class.tone-bad]="k.killSwitches > 0 || f.globalKillSwitchEngaged">
+            <span class="kpi-label">Kill switches</span>
+            <span class="kpi-value">{{ k.killSwitches }}</span>
+            <span class="kpi-hint">{{
+              f.globalKillSwitchEngaged
+                ? 'platform switch engaged too'
+                : k.killSwitches > 0
+                  ? 'engaged in organisations'
+                  : 'none engaged'
+            }}</span>
+          </li>
+        </ul>
+
         <section class="card">
           <header class="card-head">
             <h3>Organisations</h3>
+            <span class="count">{{ organisations().length }}</span>
             <span class="spacer"></span>
-            <span class="muted small"
+            <span class="hint" [title]="when(f.generatedAtUtc)"
               >Stale = connected but no heartbeat for over {{ f.heartbeatTimeoutSeconds }} s · as of
-              {{ when(f.generatedAtUtc) }}</span
+              {{ rel(f.generatedAtUtc) }} · choose a name to show only its terminals</span
             >
           </header>
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Organisation</th>
-                  <th>Terminals</th>
-                  <th>Healthy</th>
-                  <th>Stale</th>
-                  <th>Disconnected</th>
-                  <th>Kill switches engaged</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (o of organisations(); track o.tenantId) {
-                  <tr [class.selected]="tenantFilter() === o.tenantId">
-                    <td>
-                      <button
-                        type="button"
-                        class="btn btn-sm btn-secondary"
-                        (click)="toggleTenant(o.tenantId)"
-                      >
-                        {{ o.name }}
-                      </button>
-                      @if (o.needsAttention) {
-                        <span class="chip warn">Needs attention</span>
-                      }
-                      @if (o.status !== 'Active') {
-                        <span class="chip bad">{{ o.status }}</span>
-                      }
-                      <span class="sub"
-                        ><code>{{ o.slug }}</code> · {{ o.kind }}</span
-                      >
-                    </td>
-                    <td class="small">{{ o.instances }}</td>
-                    <td class="small">{{ o.healthy }}</td>
-                    <td class="small">
-                      @if (o.stale > 0) {
-                        <span class="chip warn">{{ o.stale }}</span>
-                      } @else {
-                        0
-                      }
-                    </td>
-                    <td class="small">{{ o.disconnected }}</td>
-                    <td class="small">
-                      @for (k of o.killSwitches; track $index) {
-                        <span class="sub"
-                          ><span class="chip bad">{{
-                            k.scope === 'Account'
-                              ? 'Account #' + k.tradingAccountId
-                              : 'Organisation'
-                          }}</span>
-                          {{ k.reason }} — {{ k.changedBy ?? 'unknown' }},
-                          {{ when(k.changedAtUtc) }}</span
-                        >
-                      } @empty {
-                        <span class="muted">None</span>
-                      }
-                    </td>
+          @if (organisations().length === 0) {
+            <p class="empty">
+              <strong>No organisations reported</strong>
+              Each organisation with an EA terminal (or an engaged kill switch) appears here.
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Organisation</th>
+                    <th>Health mix</th>
+                    <th class="num">Terminals</th>
+                    <th class="num">Healthy</th>
+                    <th class="num">Stale</th>
+                    <th class="num">Disconnected</th>
+                    <th>Kill switches engaged</th>
                   </tr>
-                }
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  @for (o of organisations(); track o.tenantId) {
+                    <tr [class.selected]="tenantFilter() === o.tenantId">
+                      <td>
+                        <button
+                          type="button"
+                          class="org-btn"
+                          [attr.aria-pressed]="tenantFilter() === o.tenantId"
+                          [title]="orgTitle(o.tenantId, o.name)"
+                          (click)="toggleTenant(o.tenantId)"
+                        >
+                          {{ o.name }}
+                        </button>
+                        <span class="inline-chips">
+                          @if (o.needsAttention) {
+                            <span class="chip warn">Needs attention</span>
+                          }
+                          @if (o.status !== 'Active') {
+                            <span class="chip bad">{{ human(o.status) }}</span>
+                          }
+                        </span>
+                        <span class="sub"
+                          ><code>{{ o.slug }}</code> · {{ human(o.kind) }}</span
+                        >
+                      </td>
+                      <td>
+                        <span
+                          class="mix"
+                          role="img"
+                          [attr.aria-label]="
+                            o.healthy +
+                            ' healthy, ' +
+                            o.stale +
+                            ' stale, ' +
+                            o.disconnected +
+                            ' disconnected'
+                          "
+                          [title]="
+                            o.healthy +
+                            ' healthy · ' +
+                            o.stale +
+                            ' stale · ' +
+                            o.disconnected +
+                            ' disconnected'
+                          "
+                        >
+                          <i class="m-ok" [style.width.%]="share(o.healthy, o.instances)"></i>
+                          <i class="m-warn" [style.width.%]="share(o.stale, o.instances)"></i>
+                          <i class="m-bad" [style.width.%]="share(o.disconnected, o.instances)"></i>
+                        </span>
+                      </td>
+                      <td class="num strong">{{ o.instances }}</td>
+                      <td class="num">{{ o.healthy }}</td>
+                      <td class="num">
+                        @if (o.stale > 0) {
+                          <span class="chip warn">{{ o.stale }}</span>
+                        } @else {
+                          <span class="dim">0</span>
+                        }
+                      </td>
+                      <td class="num" [class.dim]="o.disconnected === 0">{{ o.disconnected }}</td>
+                      <td class="small">
+                        @for (ks of o.killSwitches; track $index) {
+                          <span class="sub"
+                            ><span class="chip bad">{{
+                              ks.scope === 'Account'
+                                ? 'Account #' + ks.tradingAccountId
+                                : 'Organisation'
+                            }}</span>
+                            {{ ks.reason }} — {{ ks.changedBy ?? 'unknown' }},
+                            <span [title]="when(ks.changedAtUtc)">{{
+                              rel(ks.changedAtUtc)
+                            }}</span></span
+                          >
+                        } @empty {
+                          <span class="dim">None</span>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
         </section>
 
         <section class="card">
           <header class="card-head">
             <h3>Terminals</h3>
-            <select
-              class="select"
-              aria-label="Show"
-              [ngModel]="filter()"
-              (ngModelChange)="filter.set($event)"
-            >
-              <option value="all">All</option>
-              <option value="attention">Stale or not RUNNING</option>
-              <option value="stale">Stale</option>
-              <option value="disconnected">Disconnected</option>
-            </select>
-            <input
-              class="input search"
-              type="search"
-              placeholder="Instance, organisation, login, version"
-              aria-label="Search terminals"
-              [ngModel]="search()"
-              (ngModelChange)="search.set($event)"
-            />
-            @if (tenantFilter() !== null) {
-              <button
-                type="button"
-                class="btn btn-sm btn-secondary"
-                (click)="tenantFilter.set(null)"
-              >
-                All organisations
-              </button>
-            }
+            <span class="count">{{ rows().length }} of {{ f.instances.length }}</span>
             <span class="spacer"></span>
-            <span class="muted small">{{ rows().length }} of {{ f.instances.length }}</span>
+            <span class="hint">Stale first, then by organisation</span>
           </header>
+          <div class="toolbar">
+            <div class="seg" role="group" aria-label="Show">
+              @for (o of filterOptions; track o.value) {
+                <button
+                  type="button"
+                  [class.on]="filter() === o.value"
+                  [attr.aria-pressed]="filter() === o.value"
+                  (click)="filter.set(o.value)"
+                >
+                  {{ o.label }}<span class="n">{{ filterCount(o.value) }}</span>
+                </button>
+              }
+            </div>
+            <label class="search-box">
+              <input
+                class="input"
+                type="search"
+                placeholder="Instance, organisation, login, version"
+                aria-label="Search terminals"
+                [ngModel]="search()"
+                (ngModelChange)="search.set($event)"
+              />
+            </label>
+            @if (tenantFilter() !== null) {
+              <span class="scope-pill">
+                {{ tenantName() }}
+                <button type="button" class="btn btn-sm btn-ghost" (click)="tenantFilter.set(null)">
+                  All organisations
+                </button>
+              </span>
+            }
+          </div>
           @if (rows().length === 0) {
-            <p class="pad muted">No terminals match.</p>
+            <p class="empty">
+              <strong>No terminals match</strong>
+              {{
+                f.instances.length === 0
+                  ? 'No EA terminal has connected in the ' + windowLabel().toLowerCase() + '.'
+                  : 'Try another filter, clear the search, or show all organisations.'
+              }}
+            </p>
           } @else {
             <div class="table-wrap">
               <table class="grid">
@@ -193,51 +299,68 @@ const WINDOWS = [
                     <th>Health</th>
                     <th>EA state</th>
                     <th>Version</th>
-                    <th>Last heartbeat</th>
+                    <th class="num">Last heartbeat</th>
                     <th>Signs in with</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (i of rows(); track i.id) {
-                    <tr>
+                    <tr
+                      [class.is-past]="i.health === 'Disconnected' || i.health === 'ShuttingDown'"
+                    >
                       <td class="small">
                         <code>{{ i.tenantSlug }}</code>
                       </td>
-                      <td class="small">
-                        <code>{{ i.instanceId }}</code>
+                      <td>
+                        <span class="ident" [title]="i.instanceId">{{ i.instanceId }}</span>
                       </td>
                       <td class="small">
-                        {{ i.accountLogin ?? '#' + i.tradingAccountId }}
+                        <span class="mono">{{ i.accountLogin ?? '#' + i.tradingAccountId }}</span>
                         @if (i.brokerServer) {
                           <span class="sub">{{ i.brokerServer }}</span>
                         }
                       </td>
                       <td>
                         <span
-                          class="chip"
+                          class="dot"
                           [class.ok]="i.health === 'Healthy'"
                           [class.warn]="i.health === 'Stale'"
                           [class.bad]="i.health === 'Disconnected'"
-                          >{{ i.health }}</span
+                          >{{ human(i.health) }}</span
                         >
                       </td>
                       <td class="small">
-                        {{ i.stateMachine ?? '—' }}
+                        @if (i.stateMachine) {
+                          <span
+                            class="chip"
+                            [class.ok]="i.stateMachine === 'RUNNING'"
+                            [class.warn]="i.stateMachine !== 'RUNNING'"
+                            >{{ i.stateMachine }}</span
+                          >
+                        } @else {
+                          <span class="dim">—</span>
+                        }
                         @if (i.eaKillSwitchActive) {
                           <span class="chip bad">EA kill switch</span>
                         }
                       </td>
-                      <td class="small">{{ i.eaVersion || '—' }}</td>
                       <td class="small">
+                        <span class="mono">{{ i.eaVersion || '—' }}</span>
+                      </td>
+                      <td class="num small" [title]="when(i.lastHeartbeatUtc)">
                         {{ age(i.heartbeatAgeSeconds) }} ago
-                        <span class="sub">{{ when(i.lastHeartbeatUtc) }}</span>
+                        <span class="when-sub">{{ when(i.lastHeartbeatUtc) }}</span>
                       </td>
                       <td class="small">
-                        <span class="chip" [class.warn]="i.credentialOrigin === 'LegacyApiKey'">{{
-                          credential(i.credentialOrigin)
-                        }}</span>
+                        <span
+                          class="chip wrap"
+                          [class.warn]="i.credentialOrigin === 'LegacyApiKey'"
+                          >{{ credential(i.credentialOrigin) }}</span
+                        >
                         @if (i.credentialLastUsedUtc) {
-                          <span class="sub">used {{ when(i.credentialLastUsedUtc) }}</span>
+                          <span class="sub" [title]="when(i.credentialLastUsedUtc)"
+                            >used {{ rel(i.credentialLastUsedUtc) }}</span
+                          >
                         }
                       </td>
                     </tr>
@@ -248,7 +371,7 @@ const WINDOWS = [
           }
         </section>
       } @else if (!fleet.error()) {
-        <section class="card"><p class="pad muted">Loading…</p></section>
+        <section class="card"><p class="empty">Loading fleet health…</p></section>
       }
     </div>
   `,
@@ -260,6 +383,14 @@ export class FleetPageComponent {
   protected readonly when = when;
   protected readonly age = ageText;
   protected readonly credential = credentialLabel;
+  protected readonly rel = ago;
+  protected readonly human = humanise;
+  protected readonly filterOptions: readonly { value: FleetFilter; label: string }[] = [
+    { value: 'all', label: 'All' },
+    { value: 'attention', label: 'Stale or not RUNNING' },
+    { value: 'stale', label: 'Stale' },
+    { value: 'disconnected', label: 'Disconnected' },
+  ];
 
   readonly sinceHours = signal<number>(168);
   readonly filter = signal<FleetFilter>('all');
@@ -282,8 +413,59 @@ export class FleetPageComponent {
     ),
   );
 
+  /** The summary strip, from the same response the tables show. */
+  readonly kpis = computed(() => {
+    const f = this.fleet.value();
+    const orgs = f?.organisations ?? [];
+    const inst = f?.instances ?? [];
+    return {
+      orgs: orgs.length,
+      attention: orgs.filter((o) => o.needsAttention).length,
+      terminals: inst.length,
+      healthy: inst.filter((i) => i.health === 'Healthy').length,
+      stale: inst.filter((i) => i.health === 'Stale').length,
+      disconnected: inst.filter((i) => i.health === 'Disconnected' || i.health === 'ShuttingDown')
+        .length,
+      legacy: inst.filter((i) => i.credentialOrigin === 'LegacyApiKey').length,
+      killSwitches: orgs.reduce((n, o) => n + o.killSwitches.length, 0),
+    };
+  });
+
+  readonly tenantName = computed(() => {
+    const id = this.tenantFilter();
+    return this.fleet.value()?.organisations.find((o) => o.tenantId === id)?.name ?? `#${id}`;
+  });
+
   constructor() {
     this.fleet.reload();
+  }
+
+  windowLabel(): string {
+    return WINDOWS.find((w) => w.hours === this.sinceHours())?.label ?? 'Chosen window';
+  }
+
+  /** How many terminals each filter pill would show, given the organisation and search. */
+  filterCount(filter: FleetFilter): number {
+    return fleetRows(
+      this.fleet.value()?.instances ?? [],
+      filter,
+      this.tenantFilter(),
+      this.search(),
+    ).length;
+  }
+
+  orgTitle(tenantId: number, name: string): string {
+    return this.tenantFilter() === tenantId
+      ? "Show every organisation's terminals"
+      : `Show only ${name}'s terminals`;
+  }
+
+  share(part: number, whole: number): number {
+    return whole > 0 ? (part / whole) * 100 : 0;
+  }
+
+  pct(part: number, whole: number): string {
+    return whole > 0 ? `${Math.round((part / whole) * 100)}%` : '—';
   }
 
   toggleTenant(tenantId: number): void {

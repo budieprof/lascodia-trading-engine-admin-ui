@@ -1,0 +1,263 @@
+// The platform Closed organisations page: only what it adds on top of iam-page.scss + venue-page.scss.
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  h3 {
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  p {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-head .titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  p {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+}
+
+.who {
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+table.grid tr.selected td {
+  background: rgba(0, 113, 227, 0.06);
+}
+table.grid tr.selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+// Grace-period meter.
+.grace {
+  min-width: 150px;
+}
+.grace-date {
+  display: block;
+  white-space: nowrap;
+}
+.meter {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--bg-tertiary);
+  overflow: hidden;
+  margin-top: 5px;
+  max-width: 160px;
+
+  i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--warning);
+  }
+}
+.bar-cell {
+  width: 30%;
+  min-width: 100px;
+
+  .meter {
+    margin-top: 0;
+    max-width: none;
+  }
+  .meter i {
+    background: var(--accent);
+    opacity: 0.7;
+  }
+}
+
+// Detail card.
+.detail {
+  border-color: var(--accent);
+}
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-2) var(--space-5);
+  margin: 0;
+  font-size: var(--text-sm);
+
+  dt {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+    padding-top: 2px;
+  }
+  dd {
+    margin: 0;
+    color: var(--text-primary);
+    line-height: 1.45;
+  }
+}
+.section-label {
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+.plan {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-3);
+}
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+
+  .spacer {
+    flex: 1;
+  }
+}
+.plan-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  max-height: 420px;
+  overflow-y: auto;
+}
+.people {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+}
+.actions-row .grow-left {
+  margin-right: auto;
+}
+.own {
+  border-top: 1px solid var(--border);
+}
+
+// Usage tiles.
+.usage-grid {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4) 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--space-2);
+
+  li {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .k {
+    font-size: var(--text-xs);
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .v {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
+  }
+}
+
+// Numbered steps with round markers.
+ol.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+
+  li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 34px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    min-height: 22px;
+  }
+  li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: var(--font-semibold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.empty a {
+  color: var(--accent);
+}
+.empty p {
+  margin: 0 auto;
+  max-width: 620px;
+  line-height: 1.5;
+}
+.empty .empty-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}
+p.empty {
+  margin: 0;
+}

@@ -51,52 +51,13 @@ import type { PlanDto } from '../plans.types';
     StatTilesComponent,
     AuditTrailComponent,
   ],
-  styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [
-    `
-      .cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 860px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
-      }
-      .links {
-        margin: 0;
-        padding-left: var(--space-5);
-        list-style: disc;
-        display: grid;
-        gap: var(--space-2);
-      }
-    `,
-  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './org-plans-page.scss'],
   template: `
     <div class="page">
-      <app-page-header title="Organisations" subtitle="Every organisation on the platform.">
-        <input
-          class="input search"
-          type="search"
-          placeholder="Search slug or name"
-          aria-label="Search organisations"
-          [ngModel]="search()"
-          (ngModelChange)="search.set($event)"
-          (keyup.enter)="tenants.reload()"
-        />
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="tenants.reload()"
-          [disabled]="tenants.loading()"
-        >
-          {{ tenants.loading() ? 'Loading…' : 'Search' }}
-        </button>
-        @if (canReadUsage) {
-          <app-usage-export />
-        }
+      <app-page-header
+        title="Organisations"
+        subtitle="Every organisation on the platform — its status, plan, people and first Owner."
+      >
         <button type="button" class="btn btn-primary" (click)="creating.set(!creating())">
           New organisation
         </button>
@@ -186,10 +147,61 @@ import type { PlanDto } from '../plans.types';
       }
 
       <section class="card">
+        <div class="toolbar">
+          <div class="search-box">
+            <input
+              class="input"
+              type="search"
+              placeholder="Search slug or name — Enter"
+              aria-label="Search organisations"
+              [ngModel]="search()"
+              (ngModelChange)="search.set($event)"
+              (keyup.enter)="tenants.reload()"
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm btn-secondary"
+            (click)="tenants.reload()"
+            [disabled]="tenants.loading()"
+          >
+            {{ tenants.loading() ? 'Loading…' : 'Search' }}
+          </button>
+          <div class="seg" role="group" aria-label="Show organisations by status">
+            @for (f of statusFilters; track f.key) {
+              <button
+                type="button"
+                [class.on]="statusFilter() === f.key"
+                [attr.aria-pressed]="statusFilter() === f.key"
+                (click)="statusFilter.set(f.key)"
+              >
+                {{ f.label }}<span class="n">{{ statusCount(f.key) }}</span>
+              </button>
+            }
+          </div>
+          <span class="grow"></span>
+          @if (canReadUsage) {
+            <app-usage-export />
+          }
+        </div>
         @if (tenants.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         } @else if (tenants.loaded() && tenants.value().length === 0) {
-          <p class="pad muted">No organisations match.</p>
+          <p class="empty">
+            <strong>No organisations match.</strong>
+            {{
+              search().trim()
+                ? 'Nothing has a slug or name like "' +
+                  search().trim() +
+                  '". Clear the search to see them all.'
+                : 'Organisations appear here once staff create one or a sign-up is approved.'
+            }}
+          </p>
+        } @else if (tenants.value().length > 0 && shown().length === 0) {
+          <p class="empty">
+            <strong>No {{ statusFilter().toLowerCase() }} organisations.</strong>
+            Pick <em>All</em> to see the other {{ tenants.value().length }}.
+          </p>
         } @else if (tenants.value().length > 0) {
           <div class="table-wrap">
             <table class="grid">
@@ -199,19 +211,19 @@ import type { PlanDto } from '../plans.types';
                   <th>Kind</th>
                   <th>Status</th>
                   <th>Plan</th>
-                  <th>Members</th>
+                  <th class="num">Members</th>
                   <th>Created</th>
                   <th><span class="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
-                @for (t of tenants.value(); track t.id) {
+                @for (t of shown(); track t.id) {
                   @let action = statusAction(t);
                   <tr [class.selected]="openMembersFor() === t.id">
                     <td>
-                      {{ t.name }}
+                      <span class="name">{{ t.name }}</span>
                       <span class="sub"
-                        ><code>{{ t.slug }}</code> · #{{ t.id }}</span
+                        ><span class="ident">{{ t.slug }}</span> · #{{ t.id }}</span
                       >
                     </td>
                     <td>
@@ -219,9 +231,10 @@ import type { PlanDto } from '../plans.types';
                     </td>
                     <td>
                       <span
-                        class="chip"
+                        class="dot"
                         [class.ok]="t.status === 'Active'"
-                        [class.bad]="t.status !== 'Active'"
+                        [class.warn]="t.status === 'Suspended'"
+                        [class.bad]="t.status !== 'Active' && t.status !== 'Suspended'"
                         >{{ t.status }}</span
                       >
                       @if (t.statusReason) {
@@ -230,13 +243,21 @@ import type { PlanDto } from '../plans.types';
                     </td>
                     <td class="small">
                       {{ t.planName ?? 'Default plan' }}
+                      @if (!t.planName) {
+                        <span class="sub dim">not assigned</span>
+                      }
                     </td>
-                    <td class="small">{{ t.activeMembers ?? '—' }}</td>
-                    <td class="small">{{ when(t.createdAtUtc) }}</td>
+                    <td class="num">{{ t.activeMembers ?? '—' }}</td>
+                    <td class="small nowrap" [attr.title]="when(t.createdAtUtc)">
+                      {{ ago(t.createdAtUtc) }}
+                      <span class="when-sub">{{ when(t.createdAtUtc) }}</span>
+                    </td>
                     <td class="actions">
                       <button
                         type="button"
-                        class="btn btn-sm btn-secondary"
+                        class="btn btn-sm btn-ghost"
+                        [class.on]="openMembersFor() === t.id"
+                        [attr.aria-expanded]="openMembersFor() === t.id"
                         (click)="toggleMembers(t)"
                       >
                         Members
@@ -244,7 +265,9 @@ import type { PlanDto } from '../plans.types';
                       @if (canReadUsage || canManagePlans) {
                         <button
                           type="button"
-                          class="btn btn-sm btn-secondary"
+                          class="btn btn-sm btn-ghost"
+                          [class.on]="openPlanFor() === t.id"
+                          [attr.aria-expanded]="openPlanFor() === t.id"
                           (click)="togglePlan(t)"
                         >
                           Plan &amp; usage
@@ -253,7 +276,8 @@ import type { PlanDto } from '../plans.types';
                       @if (canInviteOwner(t)) {
                         <button
                           type="button"
-                          class="btn btn-sm btn-secondary"
+                          class="btn btn-sm btn-ghost"
+                          [class.on]="ownerInviteFor()?.id === t.id"
                           (click)="startOwnerInvite(t)"
                         >
                           Invite first Owner
@@ -262,7 +286,7 @@ import type { PlanDto } from '../plans.types';
                       @if (action === 'suspend') {
                         <button
                           type="button"
-                          class="btn btn-sm btn-danger"
+                          class="btn btn-sm btn-ghost-danger"
                           (click)="openStatus(t, 'suspend')"
                         >
                           Suspend
@@ -279,22 +303,27 @@ import type { PlanDto } from '../plans.types';
                     </td>
                   </tr>
                   @if (openMembersFor() === t.id) {
-                    <tr class="selected">
+                    <tr class="selected detail">
                       <td colspan="7">
+                        <p class="section-label">Members of {{ t.name }}</p>
                         @if (membersError(); as e) {
                           <span class="chip bad">Could not load</span> {{ e }}
                         } @else if (members().length === 0) {
                           <span class="muted small">No members.</span>
                         } @else {
-                          @for (m of members(); track m.userId) {
-                            <span class="sub">{{ label(m) }} — {{ m.status }}</span>
-                          }
+                          <div class="chips">
+                            @for (m of members(); track m.userId) {
+                              <span class="chip" [class.ok]="m.status === 'Active'"
+                                >{{ label(m) }} — {{ m.status }}</span
+                              >
+                            }
+                          </div>
                         }
                       </td>
                     </tr>
                   }
                   @if (ownerInviteFor()?.id === t.id) {
-                    <tr class="selected">
+                    <tr class="selected detail">
                       <td colspan="7">
                         @if (ownerInvite(); as r) {
                           @if (r.acceptUrl) {
@@ -358,7 +387,7 @@ import type { PlanDto } from '../plans.types';
                     </tr>
                   }
                   @if (openPlanFor() === t.id) {
-                    <tr class="selected">
+                    <tr class="selected detail">
                       <td colspan="7">
                         <app-tenant-plan-panel
                           [tenant]="t"
@@ -380,12 +409,20 @@ import type { PlanDto } from '../plans.types';
         <section class="card">
           <header class="card-head">
             <h3>Plans in use</h3>
+            @if (canManagePlans && plans.loaded()) {
+              <span class="count">{{ plans.value().length }}</span>
+            }
             <span class="spacer"></span>
-            <a class="small" routerLink="/platform/plans">Plans</a>
+            <a class="small" routerLink="/platform/plans">Manage plans →</a>
           </header>
           @if (!canManagePlans) {
             <p class="pad small muted">
               Seeing the plans needs <code>platform.plans.manage</code>.
+            </p>
+          } @else if (plans.loaded() && plans.value().length === 0) {
+            <p class="empty">
+              <strong>No plans yet.</strong>
+              Each plan you create on the Plans page is listed here with the organisations on it.
             </p>
           } @else {
             <div class="table-wrap">
@@ -394,19 +431,29 @@ import type { PlanDto } from '../plans.types';
                   <tr>
                     <th>Plan</th>
                     <th>Organisations on it</th>
+                    <th class="num">Share</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (p of plans.value(); track p.id) {
+                    @let n = onPlanCount(p.id, p.isDefault);
                     <tr>
                       <td>
-                        {{ p.name }}
+                        <span class="name">{{ p.name }}</span>
                         @if (p.isDefault) {
                           <span class="chip info">default</span>
                         }
                         <span class="sub">{{ p.description || '' }}</span>
                       </td>
-                      <td class="small">{{ onPlan(p.id, p.isDefault) }}</td>
+                      <td class="small" [class.dim]="n === 0">{{ onPlan(p.id, p.isDefault) }}</td>
+                      <td class="num">
+                        <span class="share">
+                          <span class="bar" aria-hidden="true"
+                            ><span [style.width.%]="sharePct(n)"></span
+                          ></span>
+                          {{ n }}
+                        </span>
+                      </td>
                     </tr>
                   }
                 </tbody>
@@ -573,6 +620,37 @@ export class OrganisationsPageComponent {
       },
     ];
   });
+
+  /** Client-side status filter over the loaded list (the search still goes to the engine). */
+  protected readonly statusFilters = [
+    { key: 'All', label: 'All' },
+    { key: 'Active', label: 'Active' },
+    { key: 'Suspended', label: 'Suspended' },
+    { key: 'Closed', label: 'Closed' },
+  ] as const;
+  readonly statusFilter = signal<'All' | 'Active' | 'Suspended' | 'Closed'>('All');
+  readonly shown = computed(() => {
+    const f = this.statusFilter();
+    const all = this.tenants.value();
+    return f === 'All' ? all : all.filter((t) => t.status === f);
+  });
+  protected readonly ago = ago;
+
+  statusCount(key: string): number {
+    const all = this.tenants.value();
+    return key === 'All' ? all.length : all.filter((t) => t.status === key).length;
+  }
+
+  onPlanCount(planId: number, isDefault: boolean): number {
+    return this.tenants
+      .value()
+      .filter((t) => t.planId === planId || (isDefault && t.planId == null)).length;
+  }
+
+  sharePct(n: number): number {
+    const total = this.tenants.value().length;
+    return total > 0 ? Math.round((n / total) * 100) : 0;
+  }
 
   onPlan(planId: number, isDefault: boolean): string {
     const names = this.tenants

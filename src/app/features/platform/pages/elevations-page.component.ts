@@ -21,7 +21,7 @@ import { MfaHintComponent } from '@features/iam/shared/mfa-hint.component';
 import { elevationActions, elevationErrors } from '../platform.logic';
 import { ago, countBy, plural } from '@features/iam/shared/admin-context.logic';
 import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
-import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import type { StatTile } from '@features/iam/shared/stat-tiles.component';
 
 type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
 
@@ -40,37 +40,9 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
     PageHeaderComponent,
     ConfirmDialogComponent,
     MfaHintComponent,
-    StatTilesComponent,
     AuditTrailComponent,
   ],
-  styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [
-    `
-      .split {
-        display: grid;
-        grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr);
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .split {
-          grid-template-columns: 1fr;
-        }
-      }
-      .side {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .help {
-        margin: 0;
-        padding-left: var(--space-5);
-        list-style: disc;
-        display: grid;
-        gap: var(--space-2);
-      }
-    `,
-  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './fleet-access-page.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -87,11 +59,144 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
         </button>
       </app-page-header>
 
-      <app-stat-tiles [tiles]="tiles()" label="Elevated access summary" />
+      <ul class="kpis" aria-label="Elevated access summary">
+        @for (t of tiles(); track t.label) {
+          <li
+            class="kpi"
+            [class.tone-good]="t.tone === 'good'"
+            [class.tone-warn]="t.tone === 'warn'"
+            [class.tone-bad]="t.tone === 'bad'"
+            [attr.title]="t.title ?? null"
+          >
+            <span class="kpi-label">{{ t.label }}</span>
+            <span class="kpi-value">{{ t.value }}</span>
+            @if (t.caption) {
+              <span class="kpi-hint" [title]="t.caption">{{ t.caption }}</span>
+            }
+          </li>
+        }
+      </ul>
+
+      <section class="card">
+        <header class="card-head">
+          <h3>Requests</h3>
+          @if (elevations.loaded()) {
+            <span class="count">{{ elevations.value().length }}</span>
+          }
+          <span class="spacer"></span>
+          <span class="hint"
+            >Approve, open or end from here · newest decisions are in the history</span
+          >
+        </header>
+        @if (elevations.error(); as err) {
+          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+        } @else if (elevations.loaded() && elevations.value().length === 0) {
+          <p class="empty">
+            <strong>No elevated access has been requested</strong>
+            Platform staff ask for it here when they must act inside a customer organisation (at
+            most 240 minutes, only the permissions ticked); another staff member approves, and it
+            ends by itself. Viewing as someone, read-only, needs none — see Impersonation.
+          </p>
+        } @else if (elevations.value().length > 0) {
+          <div class="table-wrap">
+            <table class="grid">
+              <thead>
+                <tr>
+                  <th>Who</th>
+                  <th>Organisation</th>
+                  <th>Why · permissions</th>
+                  <th>Window</th>
+                  <th>Status</th>
+                  <th><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (e of elevations.value(); track e.id) {
+                  @let can = actions(e);
+                  <tr [class.is-past]="isPast(e)">
+                    <td>
+                      <span class="strong">{{ e.staffName || '#' + e.staffUserId }}</span>
+                      @if (e.requestedAtUtc) {
+                        <span class="when-sub" [title]="when(e.requestedAtUtc)"
+                          >asked {{ rel(e.requestedAtUtc) }}</span
+                        >
+                      }
+                    </td>
+                    <td>{{ e.tenantName || '#' + e.tenantId }}</td>
+                    <td>
+                      {{ e.reason }}
+                      <span class="tags" [attr.aria-label]="e.permissions.join(', ')">
+                        @for (p of e.permissions; track p) {
+                          <span class="tag">{{ p }}</span>
+                        }
+                      </span>
+                    </td>
+                    <td class="small nowrap">
+                      @if (e.startsAtUtc) {
+                        <span [title]="when(e.startsAtUtc) + ' – ' + when(e.endsAtUtc)"
+                          >{{ when(e.startsAtUtc) }} – {{ when(e.endsAtUtc) }}</span
+                        >
+                        @if (e.status === 'Active' && e.endsAtUtc) {
+                          <span class="when-sub">ends {{ rel(e.endsAtUtc) }}</span>
+                        }
+                      } @else {
+                        {{ e.minutes ?? '—' }} minutes, from approval
+                      }
+                    </td>
+                    <td>
+                      <span
+                        class="dot"
+                        [class.warn]="e.status === 'Pending'"
+                        [class.ok]="e.status === 'Active'"
+                        [class.bad]="e.status === 'Rejected'"
+                        >{{ e.status }}</span
+                      >
+                      @if (e.approvedBy) {
+                        <span class="sub">approved by {{ e.approvedBy }}</span>
+                      }
+                    </td>
+                    <td class="actions">
+                      @if (can.open) {
+                        <button type="button" class="btn btn-sm btn-primary" (click)="open(e)">
+                          Open organisation
+                        </button>
+                      }
+                      @if (can.approve) {
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-secondary"
+                          (click)="pending.set({ kind: 'approve', elevation: e })"
+                        >
+                          Approve
+                        </button>
+                      }
+                      @if (can.end) {
+                        <button
+                          type="button"
+                          class="btn btn-sm btn-danger"
+                          (click)="pending.set({ kind: 'end', elevation: e })"
+                        >
+                          End
+                        </button>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="empty">Loading requests…</p>
+        }
+      </section>
 
       <div class="split">
         <section class="card">
-          <header class="card-head"><h3>Request access</h3></header>
+          <header class="card-head">
+            <h3>Request access</h3>
+            <span class="spacer"></span>
+            <span class="hint">Another staff member must approve it</span>
+          </header>
           <form class="card-body" (ngSubmit)="request()">
             <div class="form-grid">
               <label class="field">
@@ -170,7 +275,11 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
                 }
               </ul>
             }
-            <div class="actions-row">
+            <div class="form-foot">
+              <span class="small muted"
+                >{{ chosen().size }} permission{{ chosen().size === 1 ? '' : 's' }} for
+                {{ minutes() || 0 }} min · recorded in that organisation's audit log</span
+              >
               <button type="submit" class="btn btn-primary" [disabled]="busy()">
                 {{ busy() ? 'Sending…' : 'Request access' }}
               </button>
@@ -213,90 +322,6 @@ type Pending = { kind: 'approve' | 'end'; elevation: AccessElevation };
         </aside>
       </div>
 
-      <section class="card">
-        <header class="card-head"><h3>Requests</h3></header>
-        @if (elevations.error(); as err) {
-          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-        } @else if (elevations.loaded() && elevations.value().length === 0) {
-          <p class="pad small muted">
-            No elevated access has been requested. Platform staff ask for it here when they must act
-            inside a customer organisation (at most 240 minutes, only the permissions ticked);
-            another staff member approves, and it ends by itself. Viewing as someone, read-only,
-            needs none — see Impersonation.
-          </p>
-        } @else if (elevations.value().length > 0) {
-          <div class="table-wrap">
-            <table class="grid">
-              <thead>
-                <tr>
-                  <th>Who</th>
-                  <th>Organisation</th>
-                  <th>Why</th>
-                  <th>Window</th>
-                  <th>Status</th>
-                  <th><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (e of elevations.value(); track e.id) {
-                  @let can = actions(e);
-                  <tr>
-                    <td>{{ e.staffName || '#' + e.staffUserId }}</td>
-                    <td>{{ e.tenantName || '#' + e.tenantId }}</td>
-                    <td>
-                      {{ e.reason }}<span class="sub">{{ e.permissions.join(', ') }}</span>
-                    </td>
-                    <td class="small">
-                      @if (e.startsAtUtc) {
-                        {{ when(e.startsAtUtc) }} – {{ when(e.endsAtUtc) }}
-                      } @else {
-                        {{ e.minutes ?? '—' }} minutes, from approval
-                      }
-                    </td>
-                    <td>
-                      <span
-                        class="chip"
-                        [class.warn]="e.status === 'Pending'"
-                        [class.ok]="e.status === 'Active'"
-                        >{{ e.status }}</span
-                      >
-                      @if (e.approvedBy) {
-                        <span class="sub">approved by {{ e.approvedBy }}</span>
-                      }
-                    </td>
-                    <td class="actions">
-                      @if (can.open) {
-                        <button type="button" class="btn btn-sm btn-primary" (click)="open(e)">
-                          Open organisation
-                        </button>
-                      }
-                      @if (can.approve) {
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-secondary"
-                          (click)="pending.set({ kind: 'approve', elevation: e })"
-                        >
-                          Approve
-                        </button>
-                      }
-                      @if (can.end) {
-                        <button
-                          type="button"
-                          class="btn btn-sm btn-danger"
-                          (click)="pending.set({ kind: 'end', elevation: e })"
-                        >
-                          End
-                        </button>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        }
-      </section>
-
       <app-confirm-dialog
         [open]="pending() !== null"
         [title]="pending()?.kind === 'approve' ? 'Approve this access?' : 'End this access?'"
@@ -321,6 +346,7 @@ export class ElevationsPageComponent {
 
   protected readonly P = Permission;
   protected readonly when = when;
+  protected readonly rel = ago;
   protected readonly maxMinutes = MAX_ELEVATION_MINUTES;
 
   readonly elevations = iamResource(
@@ -409,6 +435,11 @@ export class ElevationsPageComponent {
   constructor() {
     this.elevations.reload();
     this.tenants.reload();
+  }
+
+  /** Finished requests read quieter than pending and active ones. */
+  isPast(e: AccessElevation): boolean {
+    return e.status === 'Ended' || e.status === 'Expired' || e.status === 'Rejected';
   }
 
   actions(e: AccessElevation) {

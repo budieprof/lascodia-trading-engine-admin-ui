@@ -32,21 +32,10 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, RouterLink, PageHeaderComponent, StatTilesComponent, AuditTrailComponent],
-  styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [
-    `
-      .cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 860px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
-      }
-    `,
+  styleUrls: [
+    '../../iam/shared/iam-page.scss',
+    '../../venues/pages/venue-page.scss',
+    './security-evidence-page.scss',
   ],
   template: `
     <div class="page">
@@ -59,21 +48,37 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
 
       <div class="cols">
         <section class="card">
-          <header class="card-head"><h3>Download</h3></header>
+          <header class="card-head">
+            <div class="titles">
+              <h3>Download</h3>
+              <p>One zip for the period, with a manifest of SHA-256s</p>
+            </div>
+          </header>
           <div class="card-body">
             <p class="note">
               This archive is engineering evidence for your own assessment and your auditor. It is
               not a certification or an attestation of compliance with SOC 2, ISO 27001 or any other
               standard.
             </p>
-            <p class="small">
-              It contains: quarterly access reviews with their sign-offs (one CSV per review) and
-              the monthly counts; the audit log's hash-chain check and the external anchor check;
-              backup/restore drill reports; release notes; CI security-scan summaries; and a
-              manifest with every file's SHA-256. Sources the engine host is not configured for are
-              listed as "not configured". Each download is recorded in the audit log.
-            </p>
-            <div class="row">
+            <div class="contents">
+              <span class="section-label">It contains</span>
+              <ul class="checklist">
+                <li>
+                  Quarterly access reviews with their sign-offs (one CSV per review) and the monthly
+                  counts
+                </li>
+                <li>The audit log's hash-chain check and the external anchor check</li>
+                <li>Backup/restore drill reports</li>
+                <li>Release notes</li>
+                <li>CI security-scan summaries</li>
+                <li>A manifest with every file's SHA-256</li>
+              </ul>
+              <p class="small muted">
+                Sources the engine host is not configured for are listed as "not configured". Each
+                download is recorded in the audit log.
+              </p>
+            </div>
+            <div class="period">
               <label class="field">
                 <span class="label">From</span>
                 <input
@@ -82,8 +87,10 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
                   name="from"
                   [ngModel]="from()"
                   (ngModelChange)="from.set($event)"
+                  [attr.aria-invalid]="problem() !== null"
                 />
               </label>
+              <span class="arrow" aria-hidden="true">→</span>
               <label class="field">
                 <span class="label">To</span>
                 <input
@@ -92,10 +99,15 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
                   name="to"
                   [ngModel]="to()"
                   (ngModelChange)="to.set($event)"
+                  [attr.aria-invalid]="problem() !== null"
                 />
               </label>
+              <span class="days">{{ periodDays() }}</span>
             </div>
             <div class="actions-row">
+              @if (problem(); as p) {
+                <span class="small problem">{{ p }}</span>
+              }
               <button
                 type="button"
                 class="btn btn-primary"
@@ -105,25 +117,34 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
               >
                 {{ busy() ? 'Preparing…' : 'Download evidence bundle' }}
               </button>
-              @if (problem(); as p) {
-                <span class="small muted">{{ p }}</span>
-              }
             </div>
             @if (last(); as l) {
-              <p class="small">
-                {{ l.fileName }} · SHA-256 <code>{{ l.sha256 ?? 'not sent' }}</code>
-                @if (l.signature) {
-                  · signed (key {{ l.signingKeyId }})
-                } @else {
-                  · unsigned (no signing key configured on the engine)
-                }
-              </p>
+              <div class="result" role="status">
+                <div class="result-head">
+                  <span class="dot ok">Downloaded</span>
+                  <span class="file">{{ l.fileName }}</span>
+                  <span class="spacer"></span>
+                  @if (l.signature) {
+                    <span class="dot ok">signed (key {{ l.signingKeyId }})</span>
+                  } @else {
+                    <span class="dot warn">unsigned (no signing key configured on the engine)</span>
+                  }
+                </div>
+                <span class="small muted"
+                  >SHA-256 <code>{{ l.sha256 ?? 'not sent' }}</code></span
+                >
+              </div>
             }
           </div>
         </section>
 
         <section class="card">
-          <header class="card-head"><h3>What the bundle holds today</h3></header>
+          <header class="card-head">
+            <div class="titles">
+              <h3>What the bundle holds today</h3>
+              <p>Each source as it stands right now</p>
+            </div>
+          </header>
           <div class="table-wrap">
             <table class="grid">
               <thead>
@@ -135,70 +156,85 @@ import type { AccessReviewCampaign, ReleaseNote } from '../security.types';
               <tbody>
                 <tr>
                   <td>
-                    Quarterly access reviews
+                    <span class="src">Quarterly access reviews</span>
                     <span class="sub"
                       >snapshots of people, grants, credentials and tokens + sign-offs</span
                     >
                   </td>
-                  <td class="small">
+                  <td class="small state">
                     @if (latestReview(); as r) {
-                      {{ plural(campaigns.value().length, 'review') }} · latest {{ r.period }}
                       <span
-                        class="chip"
+                        class="dot"
                         [class.ok]="!!r.signedOffAtUtc"
                         [class.warn]="!r.signedOffAtUtc"
                         >{{ r.signedOffAtUtc ? 'signed off' : 'not signed off' }}</span
                       >
-                      <a routerLink="/iam/access-review">Open</a>
+                      <span class="sub"
+                        >{{ plural(campaigns.value().length, 'review') }} · latest {{ r.period }} ·
+                        <a routerLink="/iam/access-review">Open</a></span
+                      >
                     } @else {
-                      {{ campaigns.loaded() ? 'None yet — one opens each quarter.' : 'Loading…' }}
+                      <span class="dot">{{
+                        campaigns.loaded() ? 'None yet — one opens each quarter.' : 'Loading…'
+                      }}</span>
                     }
                   </td>
                 </tr>
                 <tr>
                   <td>
-                    Audit log hash chain
+                    <span class="src">Audit log hash chain</span>
                     <span class="sub"
                       >recomputed over the newest events now, as the bundle does</span
                     >
                   </td>
-                  <td class="small">
+                  <td class="small state">
                     @if (chain(); as c) {
-                      <span class="chip" [class.ok]="c.intact" [class.bad]="!c.intact">{{
+                      <span class="dot" [class.ok]="c.intact" [class.bad]="!c.intact">{{
                         c.intact ? 'intact' : 'broken link'
                       }}</span>
-                      {{ c.rowsChecked }} events checked{{
-                        c.pendingUnsealed ? ' · ' + c.pendingUnsealed + ' awaiting sealing' : ''
-                      }}
+                      <span class="sub"
+                        >{{ c.rowsChecked.toLocaleString() }} events checked{{
+                          c.pendingUnsealed ? ' · ' + c.pendingUnsealed + ' awaiting sealing' : ''
+                        }}</span
+                      >
                     } @else if (!canVerify()) {
-                      Checking needs <code>audit.read</code>.
+                      <span class="dot">Checking needs <code>audit.read</code>.</span>
                     } @else {
-                      {{ chainError() ?? 'Checking…' }}
+                      <span class="dot" [class.bad]="!!chainError()">{{
+                        chainError() ?? 'Checking…'
+                      }}</span>
                     }
                   </td>
                 </tr>
                 <tr>
                   <td>
-                    Release notes
+                    <span class="src">Release notes</span>
                     <span class="sub">written notes of each release in the period</span>
                   </td>
-                  <td class="small">
-                    {{ notes.loaded() ? plural(notes.value().length, 'note') : 'Loading…' }}
+                  <td class="small state">
+                    <span class="dot" [class.ok]="notes.value().length > 0">{{
+                      notes.loaded() ? plural(notes.value().length, 'note') : 'Loading…'
+                    }}</span>
                     @if (notes.loaded() && notes.value().length === 0) {
-                      — none published; <a routerLink="/releases">see Releases</a>
+                      <span class="sub"
+                        >none published; <a routerLink="/releases">see Releases</a></span
+                      >
                     }
                   </td>
                 </tr>
                 <tr>
                   <td>
-                    External anchor check, drill reports, CI scan summaries
+                    <span class="src">External anchor check, drill reports, CI scan summaries</span>
                     <span class="sub">files on the engine host</span>
                   </td>
-                  <td class="small muted">
-                    Read from the host's configured folders (<code>Audit:Anchors:FilePath</code>,
-                    <code>Security:Evidence:DrillResultsDirectory</code>,
-                    <code>Security:Evidence:ScanSummaryDirectory</code>); a folder that is not set
-                    is listed in the bundle as "not configured".
+                  <td class="small muted state">
+                    Read from the host's configured folders:
+                    <span class="keys">
+                      <code>Audit:Anchors:FilePath</code>
+                      <code>Security:Evidence:DrillResultsDirectory</code>
+                      <code>Security:Evidence:ScanSummaryDirectory</code>
+                    </span>
+                    a folder that is not set is listed in the bundle as "not configured".
                   </td>
                 </tr>
               </tbody>
@@ -267,11 +303,20 @@ export class SecurityEvidencePageComponent {
       },
       {
         label: 'Period chosen',
-        value: `${Math.max(0, Math.round((Date.parse(this.to()) - Date.parse(this.from())) / 86_400_000) + 1)} days`,
-        caption: `${this.from()} to ${this.to()}`,
+        value: this.periodDays(),
+        caption: `${this.from() || '—'} to ${this.to() || '—'}`,
+        tone: this.problem() !== null ? 'warn' : null,
       },
     ];
   });
+
+  /** Length of the chosen period ("365 days"); '—' while a date is missing or unreadable. */
+  periodDays(): string {
+    const ms = Date.parse(this.to()) - Date.parse(this.from());
+    if (!Number.isFinite(ms)) return '—';
+    const n = Math.max(0, Math.round(ms / 86_400_000) + 1);
+    return `${n.toLocaleString()} day${n === 1 ? '' : 's'}`;
+  }
 
   constructor() {
     this.campaigns.reload();

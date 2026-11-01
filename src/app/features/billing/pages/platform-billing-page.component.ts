@@ -8,7 +8,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { AuditTrailComponent } from '@features/iam/shared/audit-trail.component';
-import { StatTilesComponent, type StatTile } from '@features/iam/shared/stat-tiles.component';
+import { type StatTile } from '@features/iam/shared/stat-tiles.component';
 import { IamApiService } from '@features/iam/iam-api.service';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
@@ -58,31 +58,9 @@ type Pending =
     ConfirmDialogComponent,
     InvoiceDetailComponent,
     UsageMonthViewComponent,
-    StatTilesComponent,
     AuditTrailComponent,
   ],
-  styleUrl: '../../iam/shared/iam-page.scss',
-  styles: [
-    `
-      .tabs {
-        display: flex;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .tabs .btn[aria-selected='true'] {
-        font-weight: 600;
-        border-color: var(--accent, currentColor);
-      }
-      .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      .wide {
-        grid-column: 1 / -1;
-      }
-    `,
-  ],
+  styleUrls: ['../../iam/shared/iam-page.scss', './platform-billing-page.component.scss'],
   template: `
     <div class="page">
       <app-page-header
@@ -90,31 +68,49 @@ type Pending =
         subtitle="Invoices from metered usage × plan price books. No tax is computed; no real payment provider is integrated."
       />
 
-      <app-stat-tiles [tiles]="tiles()" label="Billing summary" />
-
-      <div class="tabs" role="tablist" aria-label="Billing sections">
-        @for (t of tabs; track t.id) {
-          <button
-            type="button"
-            role="tab"
-            class="btn btn-secondary"
-            [attr.aria-selected]="tab() === t.id"
-            (click)="tab.set(t.id)"
-          >
-            {{ t.label }}
-          </button>
+      <ul class="kpis" aria-label="Billing summary">
+        @for (t of tiles(); track t.label) {
+          <li class="kpi" [attr.data-tone]="t.tone ?? null" [attr.title]="t.caption ?? null">
+            <span class="kpi-label">{{ t.label }}</span>
+            <span class="kpi-value">{{ t.value }}</span>
+            @if (t.caption) {
+              <span class="kpi-hint">{{ t.caption }}</span>
+            }
+          </li>
         }
+      </ul>
+
+      <div class="bar">
+        <div class="seg" role="tablist" aria-label="Billing sections">
+          @for (t of tabs; track t.id) {
+            <button
+              type="button"
+              role="tab"
+              [class.on]="tab() === t.id"
+              [attr.aria-selected]="tab() === t.id"
+              (click)="tab.set(t.id)"
+            >
+              {{ t.label }}
+              @if (tabCount(t.id); as n) {
+                <span class="n">{{ n }}</span>
+              }
+            </button>
+          }
+        </div>
       </div>
 
       @if (provider.value(); as p) {
-        <p class="note" [class.warn]="!p.active" role="status">
-          Payment provider: <code>{{ p.configured }}</code>
-          @if (p.isTestDouble) {
-            — the local test double (nothing leaves the engine, no money moves).
-          } @else if (!p.active) {
-            — invoices are exported and collected outside the engine.
-          }
-          <span class="muted small">{{ p.notice }}</span>
+        <p class="provider" [class.warn]="!p.active" role="status">
+          <span class="dot" [class.ok]="p.active" [class.warn]="!p.active">Payment provider</span>
+          <code>{{ p.configured }}</code>
+          <span class="provider-text">
+            @if (p.isTestDouble) {
+              — the local test double (nothing leaves the engine, no money moves).
+            } @else if (!p.active) {
+              — invoices are exported and collected outside the engine.
+            }
+            <span class="muted">{{ p.notice }}</span>
+          </span>
         </p>
       }
 
@@ -123,35 +119,51 @@ type Pending =
         <section class="card">
           <header class="card-head">
             <h3>Invoices</h3>
+            @if (invoices.loaded()) {
+              <span class="count">{{ invoices.value().length }}</span>
+            }
+            <span class="hint">{{ monthLabel(month()) }}</span>
             <span class="spacer"></span>
-            <select
-              class="select"
-              aria-label="Month"
-              [ngModel]="month()"
-              (ngModelChange)="month.set($event); invoices.reload()"
-            >
-              @for (m of months; track m) {
-                <option [ngValue]="m">{{ monthLabel(m) }}</option>
+            @if (invoices.value().length) {
+              <span class="total-line"
+                >Total of live invoices: <b>{{ totals() }}</b></span
+              >
+            }
+          </header>
+          <div class="toolbar">
+            <label class="inline-field">
+              <span class="label">Month</span>
+              <select
+                class="select"
+                aria-label="Month"
+                [ngModel]="month()"
+                (ngModelChange)="month.set($event); invoices.reload()"
+              >
+                @for (m of months; track m) {
+                  <option [ngValue]="m">{{ monthLabel(m) }}</option>
+                }
+              </select>
+            </label>
+            <div class="seg" role="group" aria-label="Status">
+              @for (s of statusFilters; track s.value) {
+                <button
+                  type="button"
+                  [class.on]="status() === s.value"
+                  [attr.aria-pressed]="status() === s.value"
+                  (click)="status.set(s.value); invoices.reload()"
+                >
+                  {{ s.label }}
+                </button>
               }
-            </select>
-            <select
-              class="select"
-              aria-label="Status"
-              [ngModel]="status()"
-              (ngModelChange)="status.set($event); invoices.reload()"
-            >
-              <option [ngValue]="''">Any status</option>
-              <option ngValue="Draft">Draft</option>
-              <option ngValue="Finalised">Finalised</option>
-              <option ngValue="Void">Void</option>
-            </select>
+            </div>
+            <span class="grow"></span>
             <button
               type="button"
-              class="btn btn-secondary btn-sm"
+              class="btn btn-ghost btn-sm"
               (click)="invoices.reload()"
               [disabled]="invoices.loading()"
             >
-              {{ invoices.loading() ? 'Loading…' : 'Refresh' }}
+              {{ invoices.loading() ? 'Loading…' : '↻ Refresh' }}
             </button>
             @if (canManage()) {
               <button
@@ -162,22 +174,28 @@ type Pending =
                 Draft invoices for {{ monthLabel(month()) }}
               </button>
             }
-          </header>
+          </div>
           @if (invoices.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          } @else if (invoices.value().length === 0) {
-            <p class="pad muted">
-              {{
-                invoices.loaded()
-                  ? 'No invoices for this month. Draft them once the month is over.' +
-                    (billableCount() === 0
-                      ? ' Today only House (never invoiced) exists, so a draft run would skip every organisation; it also needs a published price book for each organisation plan.'
-                      : '')
-                  : 'Loading…'
-              }}
+            <p class="pad alert" role="alert">
+              <span class="dot bad">Could not load</span> {{ err }}
             </p>
+          } @else if (invoices.value().length === 0) {
+            <div class="empty">
+              @if (invoices.loaded()) {
+                <p>
+                  {{
+                    'No invoices for this month. Draft them once the month is over.' +
+                      (billableCount() === 0
+                        ? ' Today only House (never invoiced) exists, so a draft run would skip every organisation; it also needs a published price book for each organisation plan.'
+                        : '')
+                  }}
+                </p>
+              } @else {
+                <p>Loading…</p>
+              }
+            </div>
             @if (invoices.loaded() && ownUsage.value(); as own) {
-              <div class="card-body">
+              <div class="card-body own-usage">
                 <p class="small muted">
                   Meanwhile, what metering has recorded for your own organisation this month (a
                   member read — nothing is added to an audit log):
@@ -186,7 +204,6 @@ type Pending =
               </div>
             }
           } @else {
-            <p class="pad small muted">Total of live invoices: {{ totals() }}</p>
             <div class="table-wrap">
               <table class="grid">
                 <thead>
@@ -197,36 +214,45 @@ type Pending =
                     <th>Status</th>
                     <th>Payment</th>
                     <th>Notes</th>
-                    <th></th>
+                    <th><span class="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (i of invoices.value(); track i.id) {
                     @let a = actions(i);
-                    <tr [class.selected]="selected()?.id === i.id">
+                    <tr
+                      [class.selected]="selected()?.id === i.id"
+                      [class.is-void]="i.status === 'Void'"
+                    >
                       <td>
-                        {{ i.tenantName }}
-                        <span class="sub"
-                          ><code>{{ i.tenantSlug }}</code></span
-                        >
+                        <span class="strong">{{ i.tenantName }}</span>
+                        <span class="sub mono">{{ i.tenantSlug }}</span>
                       </td>
                       <td>
-                        <code>{{ i.number ?? '—' }}</code>
+                        @if (i.number) {
+                          <span class="ident">{{ i.number }}</span>
+                        } @else {
+                          <span class="dim">— not numbered</span>
+                        }
                       </td>
-                      <td class="num">{{ money(i.total, i.currency) }}</td>
+                      <td class="num strong">{{ money(i.total, i.currency) }}</td>
                       <td>
-                        <span class="chip" [class]="statusTone(i.status)">{{ i.status }}</span>
+                        <span class="dot" [class]="statusTone(i.status)">{{ i.status }}</span>
                       </td>
                       <td>
-                        <span class="chip" [class]="paymentTone(i.paymentStatus)">{{
+                        <span class="dot" [class]="paymentTone(i.paymentStatus)">{{
                           paymentLabel(i.paymentStatus)
                         }}</span>
                       </td>
                       <td class="small">
-                        {{ i.warnings.length ? i.warnings.length + ' to review' : '—' }}
+                        @if (i.warnings.length) {
+                          <span class="chip warn">{{ i.warnings.length + ' to review' }}</span>
+                        } @else {
+                          <span class="dim">—</span>
+                        }
                       </td>
-                      <td class="actions-row">
-                        <button type="button" class="btn btn-sm btn-secondary" (click)="open(i)">
+                      <td class="actions">
+                        <button type="button" class="btn btn-sm btn-ghost" (click)="open(i)">
                           Review
                         </button>
                         @if (canManage()) {
@@ -242,7 +268,7 @@ type Pending =
                           @if (a.collect) {
                             <button
                               type="button"
-                              class="btn btn-sm btn-secondary"
+                              class="btn btn-sm btn-ghost"
                               (click)="pending.set({ kind: 'collect', invoice: i })"
                             >
                               Collect
@@ -251,7 +277,7 @@ type Pending =
                           @if (a.refresh) {
                             <button
                               type="button"
-                              class="btn btn-sm btn-secondary"
+                              class="btn btn-sm btn-ghost"
                               (click)="refreshPayment(i)"
                             >
                               Payment status
@@ -260,7 +286,7 @@ type Pending =
                           @if (a.void) {
                             <button
                               type="button"
-                              class="btn btn-sm btn-danger"
+                              class="btn btn-sm btn-ghost-danger"
                               (click)="startVoid(i)"
                             >
                               Void
@@ -275,15 +301,20 @@ type Pending =
             </div>
           }
           @if (lastRun(); as run) {
-            <div class="pad small">
-              <strong>Last draft run ({{ monthLabel(run.month) }}):</strong>
-              {{ run.drafted.length }} drafted, {{ run.skipped.length }} skipped.
+            <div class="run">
+              <div class="run-head">
+                <strong>Last draft run ({{ monthLabel(run.month) }}):</strong>
+                <span class="dot ok">{{ run.drafted.length }} drafted</span>
+                <span class="dot" [class.warn]="run.skipped.length > 0"
+                  >{{ run.skipped.length }} skipped</span
+                >
+              </div>
               @if (run.skipped.length) {
-                <ul>
+                <ul class="run-list">
                   @for (s of run.skipped; track s.tenantId) {
                     <li>
-                      <code>{{ s.tenantSlug }}</code
-                      >: {{ s.reason }}
+                      <span class="ident">{{ s.tenantSlug }}</span>
+                      <span class="muted">{{ s.reason }}</span>
                     </li>
                   }
                 </ul>
@@ -306,11 +337,14 @@ type Pending =
         <section class="card">
           <header class="card-head">
             <h3>Price books</h3>
-            <span class="spacer"></span>
-            <span class="muted small"
+            @if (books.loaded()) {
+              <span class="count">{{ books.value().length }}</span>
+            }
+            <span class="hint"
               >Monthly prices, charged per UTC day. Published versions are frozen; a change is a new
               version.</span
             >
+            <span class="spacer"></span>
             @if (canManage()) {
               <button type="button" class="btn btn-primary btn-sm" (click)="newBook(null)">
                 New price book
@@ -318,15 +352,20 @@ type Pending =
             }
           </header>
           @if (books.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
-          } @else if (books.value().length === 0) {
-            <p class="pad small muted">
-              {{
-                books.loaded()
-                  ? 'No price books yet: nothing can be invoiced until a plan has a published one. Each plan below needs its own.'
-                  : 'Loading…'
-              }}
+            <p class="pad alert" role="alert">
+              <span class="dot bad">Could not load</span> {{ err }}
             </p>
+          } @else if (books.value().length === 0) {
+            <div class="empty">
+              @if (books.loaded()) {
+                <p>
+                  No price books yet: nothing can be invoiced until a plan has a published one. Each
+                  plan below needs its own.
+                </p>
+              } @else {
+                <p>Loading…</p>
+              }
+            </div>
             @if (plans.value().length) {
               <div class="table-wrap">
                 <table class="grid">
@@ -342,15 +381,16 @@ type Pending =
                     @for (p of planRows(); track p.id) {
                       <tr>
                         <td>
-                          {{ p.name }}<span class="sub">{{ p.description || '' }}</span>
+                          <span class="strong">{{ p.name }}</span
+                          ><span class="sub">{{ p.description || '' }}</span>
                         </td>
-                        <td class="small"><span class="chip warn">none</span></td>
-                        <td class="small">{{ p.orgs }}</td>
+                        <td><span class="dot warn">none</span></td>
+                        <td class="small" [class.dim]="p.orgs === 'none'">{{ p.orgs }}</td>
                         <td class="actions">
                           @if (canManage()) {
                             <button
                               type="button"
-                              class="btn btn-sm btn-secondary"
+                              class="btn btn-sm btn-ghost"
                               (click)="newBookForPlan(p.id)"
                             >
                               Draft one
@@ -376,49 +416,62 @@ type Pending =
                     <th class="num">Per user (incl.)</th>
                     <th>Modules</th>
                     <th>Feeds / LLM</th>
-                    <th></th>
+                    <th><span class="sr-only">Actions</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (b of books.value(); track b.id) {
-                    <tr>
+                    <tr [class.is-past]="b.status === 'Published' && !b.inForce">
                       <td>
-                        {{ b.planName }}
-                        <span class="sub"
-                          ><code>{{ b.planSlug }}</code></span
-                        >
+                        <span class="strong">{{ b.planName }}</span>
+                        <span class="sub mono">{{ b.planSlug }}</span>
                       </td>
-                      <td>
-                        v{{ b.version }}
+                      <td class="nowrap">
+                        <span class="ver">v{{ b.version }}</span>
                         <span
-                          class="chip"
+                          class="dot"
                           [class.ok]="b.inForce"
                           [class.warn]="b.status === 'Draft'"
                           >{{ b.inForce ? 'In force' : b.status }}</span
                         >
                       </td>
-                      <td class="small">{{ b.effectiveFromUtc.slice(0, 10) }}</td>
+                      <td class="nowrap" [attr.title]="b.effectiveFromUtc">
+                        {{ b.effectiveFromUtc.slice(0, 10) }}
+                        <span class="when-sub">{{ relDay(b.effectiveFromUtc) }}</span>
+                      </td>
                       <td class="num">{{ money(b.platformFeeMonthly, b.currency) }}</td>
                       <td class="num">
-                        {{ money(b.perTerminalMonthly, b.currency) }} ({{ b.includedTerminals }})
+                        {{ money(b.perTerminalMonthly, b.currency) }}
+                        <span class="incl" title="Included in the platform fee"
+                          >{{ b.includedTerminals }} incl.</span
+                        >
                       </td>
                       <td class="num">
-                        {{ money(b.perUserMonthly, b.currency) }} ({{ b.includedUsers }})
+                        {{ money(b.perUserMonthly, b.currency) }}
+                        <span class="incl" title="Included in the platform fee"
+                          >{{ b.includedUsers }} incl.</span
+                        >
                       </td>
                       <td class="small">
-                        Prop {{ b.propModuleMonthly }} · Broker {{ b.brokerModuleMonthly }} · Fund
-                        {{ b.fundModuleMonthly }}
+                        <span class="kv"><i>Prop</i> {{ b.propModuleMonthly }}</span>
+                        <span class="kv"><i>Broker</i> {{ b.brokerModuleMonthly }}</span>
+                        <span class="kv"><i>Fund</i> {{ b.fundModuleMonthly }}</span>
                       </td>
                       <td class="small">
-                        {{ b.feedPrices.length }} feed(s) · LLM
-                        {{ b.llmMarginPct === null ? 'not billed' : '+' + b.llmMarginPct + ' %' }}
+                        <span class="kv"><i>Feeds</i> {{ b.feedPrices.length }}</span>
+                        <span class="kv"
+                          ><i>LLM</i>
+                          {{
+                            b.llmMarginPct === null ? 'not billed' : '+' + b.llmMarginPct + ' %'
+                          }}</span
+                        >
                       </td>
-                      <td class="actions-row">
+                      <td class="actions">
                         @if (canManage()) {
                           @if (b.status === 'Draft') {
                             <button
                               type="button"
-                              class="btn btn-sm btn-secondary"
+                              class="btn btn-sm btn-ghost"
                               (click)="editBook(b)"
                             >
                               Edit
@@ -432,17 +485,13 @@ type Pending =
                             </button>
                             <button
                               type="button"
-                              class="btn btn-sm btn-danger"
+                              class="btn btn-sm btn-ghost-danger"
                               (click)="pending.set({ kind: 'delete', book: b })"
                             >
                               Delete
                             </button>
                           } @else {
-                            <button
-                              type="button"
-                              class="btn btn-sm btn-secondary"
-                              (click)="newBook(b)"
-                            >
+                            <button type="button" class="btn btn-sm btn-ghost" (click)="newBook(b)">
                               New version
                             </button>
                           }
@@ -457,100 +506,114 @@ type Pending =
         </section>
 
         @if (form(); as f) {
-          <section class="card">
+          <section class="card editor">
             <header class="card-head">
               <h3>{{ editingId() === null ? 'New price book (draft)' : 'Edit draft' }}</h3>
+              <span class="hint">Saved as a draft — nothing applies until it is published.</span>
             </header>
-            <div class="form-grid pad">
-              <label class="field">
-                <span class="label">Plan</span>
-                <select
-                  class="select"
-                  [ngModel]="f.planId"
-                  (ngModelChange)="patch({ planId: $event })"
-                  [disabled]="editingId() !== null"
-                >
-                  <option [ngValue]="null">Choose…</option>
-                  @for (p of plans.value(); track p.id) {
-                    <option [ngValue]="p.id">{{ p.name }} ({{ p.slug }})</option>
-                  }
-                </select>
-              </label>
-              <label class="field">
-                <span class="label">Currency</span>
-                <input
-                  class="input"
-                  maxlength="3"
-                  [ngModel]="f.currency"
-                  (ngModelChange)="patch({ currency: $event })"
-                />
-              </label>
-              <label class="field">
-                <span class="label">Prices apply from (UTC day)</span>
-                <input
-                  class="input"
-                  type="date"
-                  [ngModel]="f.effectiveFrom"
-                  (ngModelChange)="patch({ effectiveFrom: $event })"
-                />
-              </label>
-              @for (n of numberFields; track n.key) {
+            <div class="form-section">
+              <h4 class="section-label">Plan and period</h4>
+              <div class="form-grid">
                 <label class="field">
-                  <span class="label">{{ n.label }}</span>
+                  <span class="label">Plan</span>
+                  <select
+                    class="select"
+                    [ngModel]="f.planId"
+                    (ngModelChange)="patch({ planId: $event })"
+                    [disabled]="editingId() !== null"
+                  >
+                    <option [ngValue]="null">Choose…</option>
+                    @for (p of plans.value(); track p.id) {
+                      <option [ngValue]="p.id">{{ p.name }} ({{ p.slug }})</option>
+                    }
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">Currency</span>
                   <input
                     class="input"
-                    inputmode="decimal"
-                    [ngModel]="f[n.key]"
-                    (ngModelChange)="patchField(n.key, $event)"
+                    maxlength="3"
+                    [ngModel]="f.currency"
+                    (ngModelChange)="patch({ currency: $event })"
                   />
                 </label>
-              }
-              <label class="field">
-                <span class="label">LLM margin % (blank = LLM not invoiced)</span>
-                <input
-                  class="input"
-                  inputmode="decimal"
-                  [ngModel]="f.llmMarginPct"
-                  (ngModelChange)="patch({ llmMarginPct: $event })"
-                />
-              </label>
-              <label class="field wide">
-                <span class="label"
-                  >Feed prices — one per line: feed id, monthly pass-through cost, per display user,
-                  margin %</span
-                >
-                <textarea
-                  class="textarea"
-                  rows="4"
-                  placeholder="cme-l2, 120, 15, 20"
-                  [ngModel]="f.feedPrices"
-                  (ngModelChange)="patch({ feedPrices: $event })"
-                ></textarea>
-              </label>
-              <label class="field wide">
-                <span class="label"
-                  >Exchange fees per subscriber — one per exchange: family, professional,
-                  non-professional, non-display (per organisation), margin %. Charged per person who
-                  read the exchange's real-time data in the month; people without a declaration
-                  count as professional.</span
-                >
-                <textarea
-                  class="textarea"
-                  rows="3"
-                  placeholder="cme-group, 105, 3, 0, 0"
-                  [ngModel]="f.exchangeFees ?? ''"
-                  (ngModelChange)="patch({ exchangeFees: $event })"
-                ></textarea>
-              </label>
-              <label class="field wide">
-                <span class="label">Notes</span>
-                <textarea
-                  class="textarea"
-                  rows="2"
-                  [ngModel]="f.notes"
-                  (ngModelChange)="patch({ notes: $event })"
-                ></textarea>
-              </label>
+                <label class="field">
+                  <span class="label">Prices apply from (UTC day)</span>
+                  <input
+                    class="input"
+                    type="date"
+                    [ngModel]="f.effectiveFrom"
+                    (ngModelChange)="patch({ effectiveFrom: $event })"
+                  />
+                </label>
+              </div>
+            </div>
+            <div class="form-section">
+              <h4 class="section-label">Monthly prices</h4>
+              <div class="form-grid">
+                @for (n of numberFields; track n.key) {
+                  <label class="field">
+                    <span class="label">{{ n.label }}</span>
+                    <input
+                      class="input num-input"
+                      inputmode="decimal"
+                      [ngModel]="f[n.key]"
+                      (ngModelChange)="patchField(n.key, $event)"
+                    />
+                  </label>
+                }
+                <label class="field">
+                  <span class="label">LLM margin % (blank = LLM not invoiced)</span>
+                  <input
+                    class="input num-input"
+                    inputmode="decimal"
+                    [ngModel]="f.llmMarginPct"
+                    (ngModelChange)="patch({ llmMarginPct: $event })"
+                  />
+                </label>
+              </div>
+            </div>
+            <div class="form-section">
+              <h4 class="section-label">Pass-through fees and notes</h4>
+              <div class="form-grid">
+                <label class="field wide">
+                  <span class="label"
+                    >Feed prices — one per line: feed id, monthly pass-through cost, per display
+                    user, margin %</span
+                  >
+                  <textarea
+                    class="textarea"
+                    rows="4"
+                    placeholder="cme-l2, 120, 15, 20"
+                    [ngModel]="f.feedPrices"
+                    (ngModelChange)="patch({ feedPrices: $event })"
+                  ></textarea>
+                </label>
+                <label class="field wide">
+                  <span class="label"
+                    >Exchange fees per subscriber — one per exchange: family, professional,
+                    non-professional, non-display (per organisation), margin %. Charged per person
+                    who read the exchange's real-time data in the month; people without a
+                    declaration count as professional.</span
+                  >
+                  <textarea
+                    class="textarea"
+                    rows="3"
+                    placeholder="cme-group, 105, 3, 0, 0"
+                    [ngModel]="f.exchangeFees ?? ''"
+                    (ngModelChange)="patch({ exchangeFees: $event })"
+                  ></textarea>
+                </label>
+                <label class="field wide">
+                  <span class="label">Notes</span>
+                  <textarea
+                    class="textarea"
+                    rows="2"
+                    [ngModel]="f.notes"
+                    (ngModelChange)="patch({ notes: $event })"
+                  ></textarea>
+                </label>
+              </div>
             </div>
             @if (formErrors().length) {
               <ul class="errors pad">
@@ -559,7 +622,7 @@ type Pending =
                 }
               </ul>
             }
-            <div class="actions-row pad">
+            <div class="actions-row editor-foot">
               <button
                 type="button"
                 class="btn btn-secondary"
@@ -586,52 +649,64 @@ type Pending =
         <section class="card">
           <header class="card-head">
             <h3>An organisation's metered usage</h3>
-            <span class="spacer"></span>
+            <span class="hint">Each view is recorded in that organisation's audit log.</span>
+          </header>
+          <div class="toolbar">
             @if (tenants.value().length) {
+              <label class="inline-field">
+                <span class="label">Organisation</span>
+                <select
+                  class="select org-select"
+                  aria-label="Organisation"
+                  [ngModel]="usageTenant()"
+                  (ngModelChange)="usageTenant.set($event)"
+                >
+                  <option [ngValue]="null">Choose an organisation…</option>
+                  @for (t of tenants.value(); track t.id) {
+                    <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
+                  }
+                </select>
+              </label>
+            } @else {
+              <label class="inline-field">
+                <span class="label">Organisation</span>
+                <input
+                  class="input org-select"
+                  type="number"
+                  min="1"
+                  placeholder="Organisation id"
+                  aria-label="Organisation id"
+                  [ngModel]="usageTenant()"
+                  (ngModelChange)="usageTenant.set($event ? +$event : null)"
+                />
+              </label>
+            }
+            <label class="inline-field">
+              <span class="label">Month</span>
               <select
                 class="select"
-                aria-label="Organisation"
-                [ngModel]="usageTenant()"
-                (ngModelChange)="usageTenant.set($event)"
+                aria-label="Month"
+                [ngModel]="usageMonth()"
+                (ngModelChange)="usageMonth.set($event)"
               >
-                <option [ngValue]="null">Choose an organisation…</option>
-                @for (t of tenants.value(); track t.id) {
-                  <option [ngValue]="t.id">{{ t.name }} ({{ t.slug }})</option>
+                @for (m of months; track m) {
+                  <option [ngValue]="m">{{ monthLabel(m) }}</option>
                 }
               </select>
-            } @else {
-              <input
-                class="input"
-                type="number"
-                min="1"
-                placeholder="Organisation id"
-                aria-label="Organisation id"
-                [ngModel]="usageTenant()"
-                (ngModelChange)="usageTenant.set($event ? +$event : null)"
-              />
-            }
-            <select
-              class="select"
-              aria-label="Month"
-              [ngModel]="usageMonth()"
-              (ngModelChange)="usageMonth.set($event)"
-            >
-              @for (m of months; track m) {
-                <option [ngValue]="m">{{ monthLabel(m) }}</option>
-              }
-            </select>
+            </label>
             <button
               type="button"
-              class="btn btn-secondary btn-sm"
+              class="btn btn-primary btn-sm"
               (click)="loadUsage()"
               [disabled]="usageTenant() === null || usage.loading()"
             >
               {{ usage.loading() ? 'Loading…' : 'Show' }}
             </button>
-          </header>
-          <p class="pad small muted">Each view is recorded in that organisation's audit log.</p>
+          </div>
           @if (usage.error(); as err) {
-            <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+            <p class="pad alert" role="alert">
+              <span class="dot bad">Could not load</span> {{ err }}
+            </p>
           }
         </section>
         @if (usage.value(); as u) {
@@ -642,6 +717,16 @@ type Pending =
             (read as a member — not a staff view, so nothing is added to an audit log).
           </p>
           <app-billing-usage-month [usage]="own" />
+        } @else {
+          <div class="card">
+            <div class="empty">
+              <strong class="empty-title">No organisation chosen</strong>
+              <p>
+                Choose an organisation and a month, then Show — its metered days, terminals, users,
+                feeds and an invoice estimate appear here.
+              </p>
+            </div>
+          </div>
         }
       }
 
@@ -702,6 +787,12 @@ export class PlatformBillingPageComponent {
     { id: 'invoices', label: 'Invoices' },
     { id: 'price-books', label: 'Price books' },
     { id: 'usage', label: 'Usage' },
+  ];
+  protected readonly statusFilters: { value: string; label: string }[] = [
+    { value: '', label: 'Any status' },
+    { value: 'Draft', label: 'Draft' },
+    { value: 'Finalised', label: 'Finalised' },
+    { value: 'Void', label: 'Void' },
   ];
   protected readonly months = recentMonths(13);
   protected readonly monthLabel = monthLabel;
@@ -895,6 +986,24 @@ export class PlatformBillingPageComponent {
       },
     ];
   });
+
+  /** The count shown on a section pill (null hides it: not loaded, or nothing to count). */
+  tabCount(id: Tab): number | null {
+    if (id === 'invoices') return this.invoices.loaded() ? this.invoices.value().length : null;
+    if (id === 'price-books') return this.books.loaded() ? this.books.value().length : null;
+    return null;
+  }
+
+  /** "in 3 days" / "12 days ago" / "today" for a UTC day, relative to now. */
+  relDay(utc: string): string {
+    const t = new Date(utc).getTime();
+    if (Number.isNaN(t)) return '';
+    const days = Math.round((t - Date.now()) / 86_400_000);
+    if (days === 0) return 'today';
+    const n = Math.abs(days);
+    const unit = n === 1 ? 'day' : 'days';
+    return days > 0 ? `in ${n} ${unit}` : `${n} ${unit} ago`;
+  }
 
   constructor() {
     this.ownUsage.reload();

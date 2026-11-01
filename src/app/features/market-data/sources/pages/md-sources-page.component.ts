@@ -5,7 +5,9 @@ import { RouterLink } from '@angular/router';
 
 import { NotificationService } from '@core/notifications/notification.service';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
+import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { errorText, reportable, when } from '@features/iam/iam.logic';
+import { ago } from '@features/iam/shared/admin-context.logic';
 import { iamResource } from '@features/iam/shared/iam-resource';
 import { MarketDataSourcesApiService } from '../md-sources-api.service';
 import {
@@ -38,6 +40,15 @@ interface EditState {
   reason: string;
 }
 
+/** KPI stripe colours (the metric-card `dotColor`), shared with the rest of the platform pages. */
+const TONE = {
+  accent: '#0071E3',
+  ok: '#34C759',
+  warn: '#FF9500',
+  muted: '#8E8E93',
+  violet: '#5856D6',
+} as const;
+
 /**
  * Market-data sources (engine C7, platform staff, `platform.data.manage`): every source in the
  * registry — MT5 broker servers (the engine's own; read-only here), CME vendor paths and FX venues —
@@ -50,16 +61,11 @@ interface EditState {
   selector: 'app-md-sources-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, RouterLink, PageHeaderComponent],
-  styleUrls: ['../../../iam/shared/iam-page.scss', '../../md-summary.scss'],
-  styles: [
-    `
-      textarea.input {
-        min-height: 72px;
-        font-family: var(--font-mono, monospace);
-        font-size: var(--text-xs);
-      }
-    `,
+  imports: [FormsModule, RouterLink, PageHeaderComponent, MetricCardComponent],
+  styleUrls: [
+    '../../../iam/shared/iam-page.scss',
+    '../../md-summary.scss',
+    './md-sources-page.scss',
   ],
   template: `
     <div class="page">
@@ -67,10 +73,7 @@ interface EditState {
         title="Market-data sources"
         subtitle="Every source the engine stores: MT5 broker servers, CME vendor paths and FX venues — who may write each one, and its feed."
       >
-        <a class="btn btn-secondary" routerLink="/market-data/entitlements">Entitlements</a>
-        <button type="button" class="btn btn-secondary" (click)="startVenue()">
-          Register a venue
-        </button>
+        <a class="btn btn-ghost" routerLink="/market-data/entitlements">Entitlements</a>
         <button
           type="button"
           class="btn btn-secondary"
@@ -79,11 +82,75 @@ interface EditState {
         >
           {{ sources.loading() ? 'Loading…' : 'Refresh' }}
         </button>
+        <button type="button" class="btn btn-primary" (click)="startVenue()">
+          Register a venue
+        </button>
       </app-page-header>
 
+      @if (sources.error(); as err) {
+        <section class="card">
+          <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+        </section>
+      }
+
+      <div class="kpis" aria-label="Summary">
+        <app-metric-card
+          label="Sources registered"
+          [value]="sources.value().length"
+          [dotColor]="tone.accent"
+          [caption]="kindTabs().length - 1 + ' kinds · ' + kindSummary()"
+        />
+        @if (coverage.value()) {
+          <app-metric-card
+            label="Receiving today"
+            [value]="counts().receiving"
+            [dotColor]="counts().receiving ? tone.ok : tone.muted"
+            caption="stored data today (UTC)"
+          />
+          <app-metric-card
+            label="Enabled, nothing arriving"
+            [value]="counts().waiting"
+            [dotColor]="counts().waiting ? tone.warn : tone.ok"
+            caption="nothing stored today"
+          />
+        } @else {
+          <app-metric-card
+            label="Receiving today"
+            displayValue="—"
+            caption="needs the engine update (store coverage)"
+          />
+          <app-metric-card
+            label="Enabled"
+            [value]="counts().enabled"
+            [dotColor]="tone.ok"
+            caption="MT5 servers stream from the EAs; others from their writers"
+          />
+        }
+        <app-metric-card
+          label="Disabled"
+          [value]="counts().stored + counts().disabled"
+          [dotColor]="tone.muted"
+          [caption]="
+            coverage.value()
+              ? counts().stored + ' kept history · ' + counts().disabled + ' never stored'
+              : 'registered, not enabled'
+          "
+        />
+        <app-metric-card
+          label="Symbols stored"
+          [value]="coverage.value() ? storedSymbols() : null"
+          [displayValue]="coverage.value() ? null : '—'"
+          [dotColor]="tone.violet"
+          caption="source × symbol pairs"
+        />
+      </div>
+
       @if (venue(); as v) {
-        <section class="card" aria-label="Register an FX venue">
-          <header class="card-head"><h3>Register an FX venue</h3></header>
+        <section class="card form-card" aria-label="Register an FX venue">
+          <header class="card-head">
+            <h3>Register an FX venue</h3>
+            <span class="hint">created disabled — nothing is stored until you enable it</span>
+          </header>
           <form class="card-body" (ngSubmit)="createVenue()">
             <p class="note">
               The source is created DISABLED as <code>venue-{{ v.venueId || '…' }}</code> with feed
@@ -136,12 +203,7 @@ interface EditState {
               <p class="note warn">{{ p }}</p>
             }
             <div class="actions-row">
-              <button
-                type="button"
-                class="btn btn-secondary"
-                data-autofocus
-                (click)="venue.set(null)"
-              >
+              <button type="button" class="btn btn-ghost" data-autofocus (click)="venue.set(null)">
                 Cancel
               </button>
               <button
@@ -157,9 +219,13 @@ interface EditState {
       }
 
       @if (editing(); as e) {
-        <section class="card" aria-label="Edit source">
+        <section class="card form-card" aria-label="Edit source">
           <header class="card-head">
-            <h3>{{ e.row.sourceId }}</h3>
+            <h3>
+              Edit <span class="ident">{{ e.row.sourceId }}</span>
+            </h3>
+            <span class="tag">{{ kind(e.row.kind) }}</span>
+            <span class="hint">feed {{ e.row.feedId }}</span>
           </header>
           <form class="card-body" (ngSubmit)="save()">
             @if (e.enabled && !e.row.enabled) {
@@ -169,7 +235,7 @@ interface EditState {
                 >. Check the licence first.
               </p>
             }
-            <label class="check">
+            <label class="toggle" [class.on]="e.enabled">
               <input
                 type="checkbox"
                 name="enabled"
@@ -237,7 +303,7 @@ interface EditState {
             <div class="actions-row">
               <button
                 type="button"
-                class="btn btn-secondary"
+                class="btn btn-ghost"
                 data-autofocus
                 (click)="editing.set(null)"
               >
@@ -255,61 +321,67 @@ interface EditState {
         </section>
       }
 
-      @if (sources.error(); as err) {
-        <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
+      @if (sources.value().length) {
+        <section class="card" aria-label="Filter sources">
+          <div class="toolbar">
+            <div class="seg" role="group" aria-label="Kind">
+              @for (k of kindTabs(); track k.key) {
+                <button
+                  type="button"
+                  [class.on]="kindFilter() === k.key"
+                  [attr.aria-pressed]="kindFilter() === k.key"
+                  (click)="kindFilter.set(k.key)"
+                >
+                  {{ k.label }}<span class="n">{{ k.n }}</span>
+                </button>
+              }
+            </div>
+            <div class="search-box">
+              <input
+                class="input"
+                type="search"
+                aria-label="Search sources"
+                placeholder="Search sources"
+                title="Matches source, feed, kind, writer or mapped symbol"
+                [ngModel]="query()"
+                (ngModelChange)="query.set($event)"
+              />
+            </div>
+            <label class="toggle" [class.on]="showDisabled()">
+              <input
+                type="checkbox"
+                [ngModel]="showDisabled()"
+                (ngModelChange)="showDisabled.set($event)"
+              />
+              Show disabled
+            </label>
+            @if (filtering() || kindFilter() !== 'all') {
+              <span class="shown">{{ shownCount() }} of {{ sources.value().length }} shown</span>
+            }
+          </div>
+        </section>
       }
-
-      <div class="tiles" aria-label="Summary">
-        <div class="tile">
-          <span class="t-label">Sources registered</span>
-          <span class="t-value">{{ sources.value().length }}</span>
-          <span class="t-hint">{{ kindSummary() }}</span>
-        </div>
-        <div class="tile" [attr.data-tone]="counts().receiving ? 'ok' : null">
-          <span class="t-label">Receiving today</span>
-          <span class="t-value">{{ coverage.value() ? counts().receiving : '—' }}</span>
-          <span class="t-hint">{{ coverage.value() ? 'stored data today (UTC)' : 'needs the engine update (store coverage)' }}</span>
-        </div>
-        @if (coverage.value()) {
-          <div class="tile" [attr.data-tone]="counts().waiting ? 'warn' : null">
-            <span class="t-label">Enabled, nothing arriving</span>
-            <span class="t-value">{{ counts().waiting }}</span>
-            <span class="t-hint">enabled sources the store got nothing from today</span>
-          </div>
-        } @else {
-          <div class="tile">
-            <span class="t-label">Enabled</span>
-            <span class="t-value">{{ counts().enabled }}</span>
-            <span class="t-hint">MT5 servers stream from the EAs; others from their writers</span>
-          </div>
-        }
-        <div class="tile">
-          <span class="t-label">Disabled</span>
-          <span class="t-value">{{ counts().stored + counts().disabled }}</span>
-          <span class="t-hint">{{ coverage.value() ? counts().stored + ' with history kept · ' + counts().disabled + ' never stored' : 'registered, not enabled' }}</span>
-        </div>
-        <div class="tile">
-          <span class="t-label">Symbols stored</span>
-          <span class="t-value">{{ coverage.value() ? storedSymbols() : '—' }}</span>
-          <span class="t-hint">source × symbol pairs in the market-data store</span>
-        </div>
-      </div>
 
       @for (g of groups(); track g.group) {
         <section class="card" [attr.aria-label]="g.title">
           <header class="card-head">
+            <span class="tone" [class]="groupTone(g.group)"></span>
             <h3>{{ g.title }}</h3>
-            <span class="chip" [class.ok]="g.group === 'receiving' || g.group === 'enabled'" [class.warn]="g.group === 'waiting'">{{ g.rows.length }}</span>
-            <span class="muted small">{{ g.hint }}</span>
-            @if (g.group === 'disabled' || g.group === 'off') {
+            <span class="count" [class]="groupTone(g.group)">{{ g.rows.length }}</span>
+            <span class="hint">{{ g.hint }}</span>
+            @if (isOffGroup(g.group)) {
               <span class="spacer"></span>
-              <button type="button" class="btn btn-sm btn-secondary" (click)="showDisabled.set(!showDisabled())">
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost"
+                (click)="showDisabled.set(!showDisabled())"
+              >
                 {{ showDisabled() ? 'Hide' : 'Show' }}
               </button>
             }
           </header>
-          @if ((g.group === 'disabled' || g.group === 'off') && !showDisabled()) {
-            <p class="pad muted small">{{ disabledSummary() }}</p>
+          @if (isOffGroup(g.group) && !showDisabled() && !filtering()) {
+            <p class="collapsed">{{ disabledSummary() }}</p>
           } @else {
             <div class="table-wrap">
               <table class="grid">
@@ -327,10 +399,15 @@ interface EditState {
                 </thead>
                 <tbody>
                   @for (s of g.rows; track s.sourceId) {
-                    <tr>
+                    <tr
+                      [class.is-editing]="editing()?.row?.sourceId === s.sourceId"
+                      [class.is-off]="!s.enabled"
+                    >
                       <td>
-                        <code>{{ s.sourceId }}</code>
-                        <span class="sub">{{ s.displayName }}</span>
+                        <span class="ident">{{ s.sourceId }}</span>
+                        <span class="sub" [title]="'Updated ' + at(s.updatedAtUtc)">{{
+                          s.displayName
+                        }}</span>
                       </td>
                       <td class="small">
                         {{ kind(s.kind) }}
@@ -340,10 +417,12 @@ interface EditState {
                         >
                       </td>
                       <td>
-                        <code>{{ s.feedId }}</code>
+                        <span class="tag">{{ s.feedId }}</span>
                       </td>
                       <td>
-                        <span class="chip" [class]="ready(s).tone">{{ ready(s).text }}</span>
+                        <span class="dot nowrap" [class]="dotTone(ready(s).tone)">{{
+                          ready(s).text
+                        }}</span>
                       </td>
                       <td class="small">
                         @if (s.kind === 'Mt5Broker') {
@@ -351,19 +430,23 @@ interface EditState {
                         } @else if (s.writerInstanceIds.length) {
                           <div class="chips">
                             @for (w of s.writerInstanceIds; track w) {
-                              <code>{{ w }}</code>
+                              <span class="tag">{{ w }}</span>
                             }
                           </div>
                         } @else {
                           <span class="muted">none</span>
                         }
                       </td>
-                      <td class="small">{{ symbolCount(s) }}</td>
+                      <td class="small syms">{{ symbolCount(s) }}</td>
                       <td class="small">
                         @if (coverage.value()) {
-                          {{ stored(covFor(s.sourceId), today()) }}
+                          <span class="dot" [class.ok]="covFor(s.sourceId)?.lastDay === today()">{{
+                            stored(covFor(s.sourceId), today())
+                          }}</span>
                           @if (covFor(s.sourceId); as c) {
-                            <span class="sub">{{ c.symbolsOnLastDay }} on the last day · {{ topSymbols(c) }}</span>
+                            <span class="sub"
+                              >{{ c.symbolsOnLastDay }} on the last day · {{ topSymbols(c) }}</span
+                            >
                           }
                         } @else {
                           <span class="muted">—</span>
@@ -371,7 +454,9 @@ interface EditState {
                       </td>
                       <td class="actions">
                         @if (editable(s)) {
-                          <button type="button" class="btn btn-sm btn-secondary" (click)="startEdit(s)">Edit</button>
+                          <button type="button" class="btn btn-sm btn-ghost" (click)="startEdit(s)">
+                            Edit
+                          </button>
                         }
                       </td>
                     </tr>
@@ -383,22 +468,40 @@ interface EditState {
         </section>
       }
       @if (sources.loaded() && !sources.error() && !sources.value().length) {
-        <p class="pad muted">No market-data source is registered yet.</p>
+        <section class="card">
+          <div class="empty">
+            <strong>No market-data source is registered yet.</strong>
+            MT5 broker servers appear here the first time a trusted EA streams from them; register
+            an FX venue above to add an external one.
+          </div>
+        </section>
+      } @else if (sources.value().length && !groups().length) {
+        <section class="card">
+          <div class="empty">
+            <strong>No source matches.</strong>
+            Clear the search or pick another kind.
+          </div>
+        </section>
       }
 
       <section class="card" aria-label="How sources work">
-        <div class="card-body">
-          <p class="note">
-            MT5 broker sources are created by the engine the first time a trusted EA streams from a new broker server;
-            which EAs are trusted is the market-data source trust setting, not this page. External sources (CME, crypto,
-            stocks, FX venues) are written only by the machine ids listed as their writers — a sidecar feed process
-            (compose profiles <code>crypto</code>, <code>venues</code>, <code>equities</code>) signs in as that id.
-            Enabling a source starts storing what its writers send; who may READ it is the entitlements page.
+        <header class="card-head"><h3>How sources work</h3></header>
+        <div class="card-body how-body">
+          <p class="how">
+            MT5 broker sources are created by the engine the first time a trusted EA streams from a
+            new broker server; which EAs are trusted is the market-data source trust setting, not
+            this page. External sources (CME, crypto, stocks, FX venues) are written only by the
+            machine ids listed as their writers — a sidecar feed process (compose profiles
+            <code>crypto</code>, <code>venues</code>, <code>equities</code>) signs in as that id.
+            Enabling a source starts storing what its writers send; who may READ it is the
+            entitlements page.
           </p>
           <nav class="links-row" aria-label="Related">
             <a routerLink="/market-data/entitlements">Entitlements (who may read each feed)</a>
             <a routerLink="/market-data/usage">Usage this month</a>
-            <a routerLink="/market-data/instrument-candles">Instrument candles (built from these trades)</a>
+            <a routerLink="/market-data/instrument-candles"
+              >Instrument candles (built from these trades)</a
+            >
             <a routerLink="/docs/platform-guide">Guide: data sources</a>
           </nav>
         </div>
@@ -414,6 +517,7 @@ export class MarketDataSourcesPageComponent {
   protected readonly kind = kindLabel;
   protected readonly ready = readiness;
   protected readonly editable = isEditable;
+  protected readonly tone = TONE;
 
   readonly sources = iamResource<MarketDataSourceAdmin[]>(
     () => this.api.list(),
@@ -426,6 +530,10 @@ export class MarketDataSourcesPageComponent {
     null,
   );
   readonly showDisabled = signal(false);
+  /** View filters (presentation only): source kind tab + free-text search. */
+  readonly kindFilter = signal<string>('all');
+  readonly query = signal('');
+  readonly filtering = computed(() => this.query().trim().length > 0);
   protected readonly stored = storedText;
   readonly today = computed(
     () => this.coverage.value()?.todayUtc ?? new Date().toISOString().slice(0, 10),
@@ -437,21 +545,50 @@ export class MarketDataSourcesPageComponent {
     const today = this.today();
     const by = new Map<string, MarketDataSourceAdmin[]>();
     for (const s of this.sources.value()) {
-      const g = sourceGroup(s, this.covById().get(s.sourceId), today, this.coverage.value() !== null);
+      const g = sourceGroup(
+        s,
+        this.covById().get(s.sourceId),
+        today,
+        this.coverage.value() !== null,
+      );
       by.set(g, [...(by.get(g) ?? []), s]);
     }
     return by;
   });
+  readonly kindTabs = computed(() => {
+    const n = new Map<string, number>();
+    for (const s of this.sources.value()) n.set(s.kind, (n.get(s.kind) ?? 0) + 1);
+    return [
+      { key: 'all', label: 'All', n: this.sources.value().length },
+      ...[...n.entries()].map(([k, c]) => ({ key: k as string, label: kindLabel(k), n: c })),
+    ];
+  });
+  private matches(s: MarketDataSourceAdmin): boolean {
+    if (this.kindFilter() !== 'all' && s.kind !== this.kindFilter()) return false;
+    const q = this.query().trim().toLowerCase();
+    if (!q) return true;
+    return [
+      s.sourceId,
+      s.displayName,
+      s.feedId,
+      kindLabel(s.kind),
+      ...s.writerInstanceIds,
+      ...Object.keys(s.symbolMap ?? {}),
+    ].some((x) => (x ?? '').toLowerCase().includes(q));
+  }
   readonly groups = computed(() =>
-    SOURCE_GROUPS.map((g) => ({ ...g, rows: this.grouped().get(g.group) ?? [] })).filter(
-      (g) => g.rows.length > 0,
-    ),
+    SOURCE_GROUPS.map((g) => ({
+      ...g,
+      rows: (this.grouped().get(g.group) ?? []).filter((s) => this.matches(s)),
+    })).filter((g) => g.rows.length > 0),
   );
+  readonly shownCount = computed(() => this.groups().reduce((a, g) => a + g.rows.length, 0));
   readonly counts = computed(() => ({
     receiving: this.grouped().get('receiving')?.length ?? 0,
     waiting: this.grouped().get('waiting')?.length ?? 0,
     stored: this.grouped().get('stored')?.length ?? 0,
-    disabled: (this.grouped().get('disabled')?.length ?? 0) + (this.grouped().get('off')?.length ?? 0),
+    disabled:
+      (this.grouped().get('disabled')?.length ?? 0) + (this.grouped().get('off')?.length ?? 0),
     enabled: this.sources.value().filter((x) => x.enabled).length,
   }));
   readonly storedSymbols = computed(() =>
@@ -459,13 +596,18 @@ export class MarketDataSourcesPageComponent {
   );
   readonly kindSummary = computed(() => {
     const n = new Map<string, number>();
-    for (const s of this.sources.value()) n.set(kindLabel(s.kind), (n.get(kindLabel(s.kind)) ?? 0) + 1);
+    for (const s of this.sources.value())
+      n.set(kindLabel(s.kind), (n.get(kindLabel(s.kind)) ?? 0) + 1);
     return [...n.entries()].map(([k, v]) => `${v} ${k}`).join(' · ') || 'none';
   });
   readonly disabledSummary = computed(() => {
-    const rows = [...(this.grouped().get('disabled') ?? []), ...(this.grouped().get('off') ?? [])];
+    const rows = [
+      ...(this.grouped().get('disabled') ?? []),
+      ...(this.grouped().get('off') ?? []),
+    ].filter((s) => this.matches(s));
     const n = new Map<string, string[]>();
-    for (const s of rows) n.set(kindLabel(s.kind), [...(n.get(kindLabel(s.kind)) ?? []), s.sourceId]);
+    for (const s of rows)
+      n.set(kindLabel(s.kind), [...(n.get(kindLabel(s.kind)) ?? []), s.sourceId]);
     return (
       [...n.entries()].map(([k, ids]) => `${k}: ${ids.join(', ')}`).join(' · ') +
       (this.coverage.value()
@@ -515,20 +657,41 @@ export class MarketDataSourcesPageComponent {
     this.coverage.reload();
   }
 
+  /** "3 days ago (exact local time)" for a title attribute. */
+  protected at(utc: string | null | undefined): string {
+    return utc ? `${ago(utc)} (${when(utc)})` : '—';
+  }
+
+  /** The 'disabled' / 'off' groups collapse to a one-line summary until shown. */
+  isOffGroup(group: string): boolean {
+    return group === 'disabled' || group === 'off';
+  }
+
+  /** Header dot/count tone of a source group. */
+  groupTone(group: string): string {
+    return group === 'receiving' || group === 'enabled' ? 'ok' : group === 'waiting' ? 'warn' : '';
+  }
+
+  /** readiness() tone → status-dot class ('info' is the neutral grey dot). */
+  dotTone(tone: string): string {
+    return tone === 'ok' || tone === 'warn' ? tone : '';
+  }
+
   covFor(sourceId: string): StoreCoverageSource | null {
     return this.covById().get(sourceId) ?? null;
   }
 
   topSymbols(c: StoreCoverageSource): string {
     const names = c.symbols.slice(0, 5).map((x) => x.symbol);
-    return names.join(', ') + (c.symbolCount > names.length ? ` +${c.symbolCount - names.length}` : '');
+    return (
+      names.join(', ') + (c.symbolCount > names.length ? ` +${c.symbolCount - names.length}` : '')
+    );
   }
 
   symbolCount(s: MarketDataSourceAdmin): string {
     const n = Object.keys(s.symbolMap ?? {}).length;
     return n === 0 ? '—' : n <= 4 ? Object.keys(s.symbolMap).join(', ') : `${n} symbols`;
   }
-
   startEdit(s: MarketDataSourceAdmin): void {
     this.venue.set(null);
     this.editing.set({

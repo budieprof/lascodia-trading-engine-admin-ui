@@ -32,6 +32,28 @@ import { PlanUsagePanelComponent } from './plan-usage-panel.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, ConfirmDialogComponent, PlanUsagePanelComponent],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      :host {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-2);
+      }
+      .move {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
+      }
+      .move-head {
+        margin: 0;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+      }
+    `,
+  ],
   template: `
     @if (canReadUsage()) {
       @if (usage.error(); as err) {
@@ -44,7 +66,8 @@ import { PlanUsagePanelComponent } from './plan-usage-panel.component';
     }
 
     @if (plans(); as all) {
-      <form class="card-body" (ngSubmit)="openConfirm()">
+      <form class="card-body move" (ngSubmit)="openConfirm()">
+        <p class="move-head">Plan for {{ tenant().name }}</p>
         @if (isHouse()) {
           <p class="note">House is always on its own unlimited plan.</p>
         } @else {

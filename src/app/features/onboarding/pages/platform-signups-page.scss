@@ -1,0 +1,180 @@
+// The platform Sign-ups page: only what it adds on top of iam-page.scss + venue-page.scss.
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.dialog {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-5);
+  width: min(520px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+
+  h3 {
+    margin: 0;
+    font-size: var(--text-base);
+  }
+  p {
+    margin: 0;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+  }
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-head .titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.card-head .titles p {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+// Numbered steps with round markers.
+ol.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+
+  li {
+    counter-increment: step;
+    position: relative;
+    padding-left: 34px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    min-height: 22px;
+  }
+  li::before {
+    content: counter(step);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: var(--font-semibold);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-variant-numeric: tabular-nums;
+  }
+  strong {
+    color: var(--text-primary);
+  }
+}
+
+.facts-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+
+  li {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-2) var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .k {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-tertiary);
+  }
+  .v {
+    font-size: var(--text-base);
+    font-weight: var(--font-semibold);
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+.line {
+  margin: 0;
+  line-height: 1.6;
+  color: var(--text-secondary);
+
+  .dot {
+    margin-right: var(--space-2);
+    vertical-align: baseline;
+  }
+  strong {
+    color: var(--text-primary);
+  }
+}
+
+.dot.info {
+  color: var(--accent);
+}
+.dot.info::before {
+  background: var(--accent);
+  opacity: 1;
+}
+
+.who {
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+}
+.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+.decision-note {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  font-style: italic;
+  max-width: 320px;
+}
+td.actions .btn + .btn {
+  margin-left: var(--space-1);
+}
+.empty a {
+  color: var(--accent);
+}
+.empty p {
+  margin: 0 auto;
+  max-width: 620px;
+  line-height: 1.5;
+}
+.empty .empty-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-1);
+}

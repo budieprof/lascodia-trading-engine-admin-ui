@@ -19,6 +19,22 @@ import { blobErrorText, exportMonths, monthLabel } from '../plans.logic';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      :host {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .select {
+        width: auto;
+        height: 32px;
+        padding: 0 10px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+      }
+    `,
+  ],
   template: `
     <select
       class="select"
@@ -30,7 +46,13 @@ import { blobErrorText, exportMonths, monthLabel } from '../plans.logic';
         <option [value]="m">{{ label(m) }}</option>
       }
     </select>
-    <button type="button" class="btn btn-secondary" (click)="download()" [disabled]="busy()">
+    <button
+      type="button"
+      class="btn btn-sm btn-secondary"
+      title="One row per organisation: plan, monthly peaks, research hours, LLM spend"
+      (click)="download()"
+      [disabled]="busy()"
+    >
       {{ busy() ? 'Exporting…' : 'Usage export (CSV)' }}
     </button>
   `,

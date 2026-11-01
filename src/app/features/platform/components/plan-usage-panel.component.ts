@@ -31,7 +31,7 @@ import type { TenantUsage, UsageItem } from '../plans.types';
         background: var(--profit, #1f9d55);
       }
       .meter.warn > span {
-        background: #ff9500;
+        background: var(--warning);
       }
       .meter.bad > span {
         background: var(--loss);
@@ -41,9 +41,41 @@ import type { TenantUsage, UsageItem } from '../plans.types';
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
         gap: var(--space-3);
       }
+      .fact {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+      }
       .fact .label {
         display: block;
+        flex-basis: 100%;
         margin-bottom: 2px;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+      }
+      .fact .note {
+        flex-basis: 100%;
+      }
+      table.grid th {
+        font-size: 10.5px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
+      }
+      table.grid .num {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .table-wrap {
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        background: var(--bg-secondary);
       }
     `,
   ],
@@ -76,16 +108,16 @@ import type { TenantUsage, UsageItem } from '../plans.types';
           <thead>
             <tr>
               <th>What</th>
-              <th>In use</th>
+              <th class="num">In use</th>
               <th><span class="sr-only">Share of the limit</span></th>
-              <th>Room left</th>
+              <th class="num">Room left</th>
             </tr>
           </thead>
           <tbody>
             @for (item of u.items; track item.key) {
               <tr>
                 <td>{{ item.label }}</td>
-                <td class="small">{{ text(item) }}</td>
+                <td class="small num">{{ text(item) }}</td>
                 <td>
                   @if (percent(item); as p) {
                     <div
@@ -115,7 +147,7 @@ import type { TenantUsage, UsageItem } from '../plans.types';
                     </div>
                   }
                 </td>
-                <td class="small">
+                <td class="small num">
                   @if (item.overLimit) {
                     <span class="chip bad"
                       >Over the limit by {{ item.used - (item.limit ?? 0) }}</span

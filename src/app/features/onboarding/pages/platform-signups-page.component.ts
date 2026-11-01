@@ -51,47 +51,10 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
     FeatureStateComponent,
     AuditTrailComponent,
   ],
-  styleUrls: ['../../iam/shared/iam-page.scss'],
-  styles: [
-    `
-      .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-      }
-      .dialog {
-        background: var(--bg-primary);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        padding: var(--space-5);
-        width: min(520px, calc(100vw - 32px));
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 860px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
-      }
-      ol.steps {
-        list-style: decimal;
-        margin: 0;
-        padding-left: var(--space-5);
-        display: grid;
-        gap: var(--space-2);
-      }
-    `,
+  styleUrls: [
+    '../../iam/shared/iam-page.scss',
+    '../../venues/pages/venue-page.scss',
+    './platform-signups-page.scss',
   ],
   template: `
     <div class="page">
@@ -133,43 +96,57 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
       <section class="card">
         <header class="card-head">
           <h3>Requests</h3>
+          @if (signups.loaded()) {
+            <span class="count">{{ signups.value().length }}</span>
+          }
           <span class="spacer"></span>
-          <label class="small">
-            Show
-            <select
-              class="select"
-              name="filter"
-              [ngModel]="filter()"
-              (ngModelChange)="filter.set($event); signups.reload()"
-            >
-              <option value="">All</option>
-              <option value="Pending">Waiting</option>
-              <option value="Approved">Approved</option>
-              <option value="Provisioned">Created</option>
-              <option value="Rejected">Turned down</option>
-            </select>
-          </label>
+          <span class="hint">Newest first · every decision is audited</span>
         </header>
+        <div class="toolbar">
+          <div class="seg" role="group" aria-label="Show requests">
+            @for (f of filters; track f.value) {
+              <button
+                type="button"
+                [class.on]="filter() === f.value"
+                [attr.aria-pressed]="filter() === f.value"
+                (click)="filter.set(f.value); signups.reload()"
+              >
+                {{ f.label }}
+              </button>
+            }
+          </div>
+          <span class="grow"></span>
+          @if (signups.loading()) {
+            <span class="hint small muted">Loading…</span>
+          }
+        </div>
         @if (signups.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         }
         @if (signups.loaded() && signups.value().length === 0 && !signups.error()) {
-          <p class="pad small muted">
+          <div class="empty">
             @if (filter()) {
-              No request with this status.
+              <p class="empty-title">No request with this status.</p>
+              <p>Pick “All” to see every request, whatever happened to it.</p>
             } @else if (status.value()?.available) {
-              Nobody has asked yet. A request appears here as soon as someone fills in the public
-              "Create an organisation" form.
+              <p class="empty-title">Nobody has asked yet.</p>
+              <p>
+                A request appears here as soon as someone fills in the public "Create an
+                organisation" form.
+              </p>
             } @else {
-              No one has asked to create an organisation: the public form is not offered while
-              sign-up cannot run (see the checklist above), so organisations are created by staff on
-              <a routerLink="/platform/organisations">Organisations</a>.
+              <p class="empty-title">No one has asked to create an organisation.</p>
+              <p>
+                The public form is not offered while sign-up cannot run (see the checklist above),
+                so organisations are created by staff on
+                <a routerLink="/platform/organisations">Organisations</a>.
+              </p>
             }
-          </p>
+          </div>
         }
         @if (signups.value().length) {
           <div class="table-wrap">
-            <table>
+            <table class="grid">
               <thead>
                 <tr>
                   <th scope="col">Organisation</th>
@@ -181,31 +158,31 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
               </thead>
               <tbody>
                 @for (s of signups.value(); track s.id) {
-                  <tr>
+                  <tr [class.is-past]="!decide(s).reject">
                     <td>
-                      {{ s.organisationName }}
-                      <div class="sub">
-                        {{ s.organisationSlug }}
+                      <span class="who">{{ s.organisationName }}</span>
+                      <span class="sub">
+                        <span class="mono">{{ s.organisationSlug }}</span>
                         @if (s.tenantId) {
                           · #{{ s.tenantId }}
                         }
-                      </div>
+                      </span>
                     </td>
                     <td>
                       {{ s.displayName }}
-                      <div class="sub">{{ s.email }}</div>
+                      <span class="sub">{{ s.email }}</span>
+                    </td>
+                    <td class="nowrap" [title]="s.requestedAtUtc | date: 'medium'">
+                      {{ ago(s.requestedAtUtc) }}
+                      <span class="when-sub">from {{ s.requestIp || 'unknown address' }}</span>
                     </td>
                     <td>
-                      {{ s.requestedAtUtc | date: 'medium' }}
-                      <div class="sub">from {{ s.requestIp || 'unknown' }}</div>
-                    </td>
-                    <td>
-                      <span [class]="'chip ' + tone(s)">{{ label(s) }}</span>
+                      <span [class]="'dot ' + tone(s)">{{ label(s) }}</span>
                       @if (s.decisionNote) {
-                        <div class="sub">{{ s.decisionNote }}</div>
+                        <span class="decision-note">“{{ s.decisionNote }}”</span>
                       }
                     </td>
-                    <td>
+                    <td class="actions">
                       @if (decide(s).approve) {
                         <button
                           type="button"
@@ -219,7 +196,7 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
                       @if (decide(s).reject) {
                         <button
                           type="button"
-                          class="btn btn-danger btn-sm"
+                          class="btn btn-ghost-danger btn-sm"
                           [disabled]="busy()"
                           (click)="open(s, 'reject')"
                         >
@@ -237,7 +214,12 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
 
       <div class="cols">
         <section class="card">
-          <header class="card-head"><h3>How a sign-up becomes an organisation</h3></header>
+          <header class="card-head">
+            <div class="titles">
+              <h3>How a sign-up becomes an organisation</h3>
+              <p>Four steps, from the public form to a working organisation</p>
+            </div>
+          </header>
           <div class="card-body small">
             <ol class="steps">
               <li>
@@ -281,29 +263,57 @@ import type { SignupStatus, TenantSignup } from '../onboarding.types';
         </section>
 
         <section class="card">
-          <header class="card-head"><h3>Plans and payment for new organisations</h3></header>
+          <header class="card-head">
+            <div class="titles">
+              <h3>Plans and payment for new organisations</h3>
+              <p>What a new organisation gets, and how it can upgrade</p>
+            </div>
+            <span class="spacer"></span>
+            @if (defaultPlan()) {
+              <a class="btn btn-ghost btn-sm" routerLink="/platform/plans">Change plans</a>
+            }
+          </header>
           <div class="card-body small">
             @if (defaultPlan(); as p) {
-              <p>
-                New organisations start on <strong>{{ p.name }}</strong
-                >: {{ limit(p.maxTradingAccounts, 'trading account') }},
-                {{ limit(p.maxActiveEaInstances, 'terminal') }},
-                {{ limit(p.maxMembers, 'member') }},
-                {{ limit(p.maxStrategies, 'strategy', 'strategies') }}.
-                <a routerLink="/platform/plans">Change plans</a>
+              <p class="line">
+                New organisations start on <strong>{{ p.name }}</strong>
               </p>
+              <ul class="facts-list" aria-label="Default plan limits">
+                <li>
+                  <span class="k">Trading accounts</span>
+                  <span class="v">{{ limitValue(p.maxTradingAccounts) }}</span>
+                </li>
+                <li>
+                  <span class="k">Terminals</span>
+                  <span class="v">{{ limitValue(p.maxActiveEaInstances) }}</span>
+                </li>
+                <li>
+                  <span class="k">Members</span>
+                  <span class="v">{{ limitValue(p.maxMembers) }}</span>
+                </li>
+                <li>
+                  <span class="k">Strategies</span>
+                  <span class="v">{{ limitValue(p.maxStrategies) }}</span>
+                </li>
+              </ul>
             } @else if (!canReadPlans()) {
               <p class="muted">Seeing the plans needs <code>platform.plans.manage</code>.</p>
             }
             @if (billing.value(); as b) {
-              <p>
+              <p class="line">
                 @if (b.selfServeEnabled) {
-                  <span class="chip ok">card billing on</span> An Owner can upgrade with a card (the
-                  payment provider's payment page) from their organisation's billing page.
+                  <span class="dot ok">Card billing on</span>
+                  <span
+                    >An Owner can upgrade with a card (the payment provider's payment page) from
+                    their organisation's billing page.</span
+                  >
                 } @else {
-                  <span class="chip">card billing off</span> Upgrading is by contacting the platform
-                  operator: self-serve card billing (<code>Billing:SelfServe:Enabled</code> +
-                  payment provider keys on the engine host) is not set up.
+                  <span class="dot">Card billing off</span>
+                  <span
+                    >Upgrading is by contacting the platform operator: self-serve card billing
+                    (<code>Billing:SelfServe:Enabled</code> + payment provider keys on the engine
+                    host) is not set up.</span
+                  >
                 }
               </p>
             }
@@ -392,6 +402,15 @@ export class PlatformSignupsPageComponent {
   protected readonly label = signupStatusLabel;
   protected readonly tone = signupTone;
   protected readonly decide = canDecide;
+  protected readonly ago = ago;
+  /** The status filter as segmented pills; values are the engine's filter keys. */
+  protected readonly filters: readonly { value: string; label: string }[] = [
+    { value: '', label: 'All' },
+    { value: 'Pending', label: 'Waiting' },
+    { value: 'Approved', label: 'Approved' },
+    { value: 'Provisioned', label: 'Created' },
+    { value: 'Rejected', label: 'Turned down' },
+  ];
 
   readonly filter = signal('');
   readonly signups = iamResource<TenantSignup[]>(
@@ -496,6 +515,11 @@ export class PlatformSignupsPageComponent {
 
   limit(n: number | null, one: string, many?: string): string {
     return n == null ? `unlimited ${many ?? one + 's'}` : plural(n, one, many);
+  }
+
+  /** A plan limit as a tile figure: the number, or "Unlimited". */
+  limitValue(n: number | null): string {
+    return n == null ? 'Unlimited' : n.toLocaleString();
   }
 
   open(signup: TenantSignup, action: 'approve' | 'reject'): void {

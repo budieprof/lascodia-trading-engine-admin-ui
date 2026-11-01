@@ -1,0 +1,165 @@
+// The platform Security evidence page: only what it adds on top of iam-page.scss + venue-page.scss.
+
+.cols {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+  gap: var(--space-3);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-head .titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+
+  p {
+    margin: 0;
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+  }
+}
+.section-label {
+  font-size: 10.5px;
+  font-weight: var(--font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+
+.contents {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+
+  p {
+    margin: 0;
+  }
+}
+.checklist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+
+  li {
+    position: relative;
+    padding-left: 22px;
+    line-height: 1.4;
+  }
+  li::before {
+    content: '✓';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 16px;
+    text-align: center;
+    color: var(--profit, #1f9d55);
+    font-weight: var(--font-semibold);
+  }
+}
+
+// Period picker: From → To · N days on one line.
+.period {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+
+  .field {
+    flex: 1 1 150px;
+  }
+  .arrow {
+    color: var(--text-tertiary);
+    padding-bottom: 8px;
+  }
+  .days {
+    padding: 0 10px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--radius-full);
+    background: var(--bg-tertiary);
+    font-size: var(--text-xs);
+    font-weight: var(--font-semibold);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+}
+.problem {
+  color: #b25000;
+  margin-right: auto;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--profit);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+}
+.result-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
+
+  .spacer {
+    flex: 1;
+  }
+  .file {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 12px;
+    font-weight: var(--font-semibold);
+    overflow-wrap: anywhere;
+  }
+}
+
+table.grid {
+  .src {
+    font-weight: var(--font-medium);
+    color: var(--text-primary);
+  }
+  th:first-child {
+    width: 44%;
+  }
+  td.state {
+    line-height: 1.45;
+  }
+  td.state .keys {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    margin: 4px 0;
+  }
+  td.state .keys code {
+    word-break: normal;
+    white-space: nowrap;
+  }
+  td.state .sub {
+    margin-top: 3px;
+  }
+  td.state .dot {
+    white-space: normal;
+  }
+  a {
+    color: var(--accent);
+  }
+}

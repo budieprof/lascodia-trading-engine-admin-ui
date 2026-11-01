@@ -25,7 +25,7 @@ import {
   planSummary,
   purgeConfirmationOk,
 } from '../lifecycle.logic';
-import type { TenantClosure, TenantClosureState } from '../lifecycle.types';
+import type { PurgeStep, TenantClosure, TenantClosureState } from '../lifecycle.types';
 import { PlansApiService } from '@features/platform/plans-api.service';
 import type { TenantUsage } from '@features/platform/plans.types';
 
@@ -52,59 +52,10 @@ type Dialog = 'reopen' | 'purge' | null;
     StatTilesComponent,
     AuditTrailComponent,
   ],
-  styleUrls: ['../../../iam/shared/iam-page.scss'],
-  styles: [
-    `
-      .overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-      }
-      .dialog {
-        background: var(--bg-primary);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        padding: var(--space-5);
-        width: min(560px, calc(100vw - 32px));
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      tr.selected td {
-        background: var(--bg-secondary);
-      }
-      .facts {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: var(--space-1) var(--space-4);
-        margin: 0;
-      }
-      .facts dt {
-        color: var(--text-secondary);
-      }
-      .cols {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 860px) {
-        .cols {
-          grid-template-columns: 1fr;
-        }
-      }
-      ol.steps {
-        list-style: decimal;
-        margin: 0;
-        padding-left: var(--space-5);
-        display: grid;
-        gap: var(--space-2);
-      }
-    `,
+  styleUrls: [
+    '../../../iam/shared/iam-page.scss',
+    '../../../venues/pages/venue-page.scss',
+    './platform-closures-page.scss',
   ],
   template: `
     <div class="page">
@@ -125,20 +76,30 @@ type Dialog = 'reopen' | 'purge' | null;
       <app-stat-tiles [tiles]="tiles()" label="Closures summary" />
 
       <section class="card">
-        <header class="card-head"><h3>Closed organisations</h3></header>
+        <header class="card-head">
+          <h3>Closed organisations</h3>
+          @if (closures.loaded()) {
+            <span class="count">{{ closures.value().length }}</span>
+          }
+          <span class="spacer"></span>
+          <span class="hint">Pick one to see what closing did and to plan its deletion</span>
+        </header>
         @if (closures.error(); as err) {
           <p class="pad" role="alert"><span class="chip bad">Could not load</span> {{ err }}</p>
         }
         @if (closures.loaded() && closures.value().length === 0 && !closures.error()) {
-          <p class="pad small muted">
-            No organisation has been closed. A closure appears here the moment an organisation's
-            Owner closes it from <a routerLink="/organisation/close">Close organisation</a>; it then
-            waits out its {{ graceDays() ?? 30 }}-day grace period before its data can be deleted.
-          </p>
+          <div class="empty">
+            <p class="empty-title">No organisation has been closed.</p>
+            <p>
+              A closure appears here the moment an organisation's Owner closes it from
+              <a routerLink="/organisation/close">Close organisation</a>; it then waits out its
+              {{ graceDays() ?? 30 }}-day grace period before its data can be deleted.
+            </p>
+          </div>
         }
         @if (closures.value().length) {
           <div class="table-wrap">
-            <table>
+            <table class="grid">
               <thead>
                 <tr>
                   <th scope="col">Organisation</th>
@@ -152,24 +113,34 @@ type Dialog = 'reopen' | 'purge' | null;
                 @for (c of closures.value(); track c.id) {
                   <tr [class.selected]="selected()?.tenantId === c.tenantId">
                     <td>
-                      {{ c.name || 'Organisation #' + c.tenantId }}
-                      <div class="sub">{{ c.slug }} · {{ c.reason }}</div>
+                      <span class="who">{{ c.name || 'Organisation #' + c.tenantId }}</span>
+                      <span class="sub"
+                        ><span class="mono">{{ c.slug }}</span>
+                        @if (c.reason) {
+                          · {{ c.reason }}
+                        }
+                      </span>
+                    </td>
+                    <td class="nowrap" [title]="c.closedAtUtc | date: 'medium'">
+                      {{ ago(c.closedAtUtc) }}
+                      <span class="when-sub">by {{ c.requestedBy }}</span>
                     </td>
                     <td>
-                      {{ c.closedAtUtc | date: 'medium' }}
-                      <div class="sub">by {{ c.requestedBy }}</div>
+                      <span [class]="'dot ' + tone(c.status)">{{ statusLabel(c.status) }}</span>
                     </td>
-                    <td>
-                      <span [class]="'chip ' + tone(c.status)">{{ statusLabel(c.status) }}</span>
-                    </td>
-                    <td>
-                      {{ c.graceEndsAtUtc | date: 'mediumDate' }}
+                    <td class="grace" [title]="c.graceEndsAtUtc | date: 'medium'">
+                      <span class="grace-date">{{ c.graceEndsAtUtc | date: 'mediumDate' }}</span>
+                      <span class="meter" aria-hidden="true"
+                        ><i [style.width.%]="graceShare(c)"></i
+                      ></span>
                       @if (daysLeft(c.graceEndsAtUtc) > 0) {
-                        <div class="sub">{{ daysLeft(c.graceEndsAtUtc) }} day(s) left</div>
+                        <span class="when-sub">{{ daysLeft(c.graceEndsAtUtc) }} day(s) left</span>
+                      } @else {
+                        <span class="when-sub">grace period over</span>
                       }
                     </td>
-                    <td>
-                      <button type="button" class="btn btn-secondary btn-sm" (click)="select(c)">
+                    <td class="actions">
+                      <button type="button" class="btn btn-ghost btn-sm" (click)="select(c)">
                         Details
                       </button>
                     </td>
@@ -181,153 +152,15 @@ type Dialog = 'reopen' | 'purge' | null;
         }
       </section>
 
-      <div class="cols">
-        <section class="card">
-          <header class="card-head">
-            <h3>Every organisation</h3>
-            <span class="spacer"></span>
-            <a class="small" routerLink="/platform/organisations">Organisations</a>
-          </header>
-          @if (tenants.value().length === 0) {
-            <p class="pad small muted">
-              {{
-                canSeeTenants()
-                  ? 'Loading…'
-                  : 'Listing organisations needs platform.tenants.manage.'
-              }}
-            </p>
-          } @else {
-            <div class="table-wrap">
-              <table class="grid">
-                <thead>
-                  <tr>
-                    <th>Organisation</th>
-                    <th>State</th>
-                    <th>Can it be closed?</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (t of tenants.value(); track t.id) {
-                    <tr>
-                      <td>
-                        {{ t.name
-                        }}<span class="sub"
-                          >{{ t.slug }} · {{ t.kind }} · {{ t.activeMembers ?? 0 }} active
-                          members</span
-                        >
-                      </td>
-                      <td>
-                        <span
-                          class="chip"
-                          [class.ok]="t.status === 'Active'"
-                          [class.warn]="t.status === 'Suspended'"
-                          [class.bad]="t.status === 'Closed'"
-                          >{{ t.status }}</span
-                        >
-                      </td>
-                      <td class="small">{{ closable(t) }}</td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          }
-          @if (own.value(); as o) {
-            @if (o.blockers.length) {
-              <div class="card-body">
-                <p class="small">
-                  <strong>{{ o.name }}</strong> (the organisation you act in) today:
-                </p>
-                <ul class="errors">
-                  @for (b of o.blockers; track b) {
-                    <li>{{ b }}</li>
-                  }
-                </ul>
-                <p class="small muted">
-                  {{ o.members }} members · {{ o.owners }} Owner(s) ·
-                  {{ o.activeMachineCredentials }} terminal credentials · {{ o.openPositions }} open
-                  positions · {{ o.workingOrders }} working orders
-                </p>
-              </div>
-            }
-          }
-        </section>
-
-        <section class="card">
-          <header class="card-head"><h3>What closing does, step by step</h3></header>
-          <div class="card-body small">
-            <ol class="steps">
-              <li>
-                An Owner closes the organisation (step-up sign-in; a second Owner approves when
-                there is more than one). It is refused for House and while positions or working
-                orders are open.
-              </li>
-              <li>
-                At once: the organisation kill switch is engaged, terminal credentials, enrollment
-                tokens, API tokens and invitations are revoked, sessions end and its
-                identity-provider organisation is disabled.
-              </li>
-              <li>
-                For {{ graceDays() ?? 30 }} days (<code>Tenancy:Closure:GraceDays</code>) platform
-                staff can reopen it here — the kill switch stays engaged until someone releases it.
-              </li>
-              <li>
-                After that, staff review a dry-run deletion plan (every table and row count, who is
-                removed, what is kept) and confirm with the organisation's handle. The engine
-                deletes its data; audit events, the closure record and platform rows are kept.
-              </li>
-            </ol>
-          </div>
-        </section>
-      </div>
-
-      @if (usage.value(); as u) {
-        <section class="card">
-          <header class="card-head">
-            <h3>What a deletion covers — {{ u.tenantName }} today</h3>
-          </header>
-          <div class="table-wrap">
-            <table class="grid">
-              <tbody>
-                @for (i of u.items; track i.key) {
-                  <tr>
-                    <td>{{ i.label }}</td>
-                    <td>
-                      <strong>{{ i.used }}</strong>
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-          <p class="pad small muted">
-            A deletion removes every row the organisation owns — these counts plus its orders,
-            positions, signals, settings, alerts and conversations — in dependency order, and keeps
-            its audit events, the closure record and platform rows.
-            {{
-              u.kind === 'House'
-                ? 'House itself is never deleted; these are its figures for scale.'
-                : ''
-            }}
-          </p>
-        </section>
-      }
-
-      <app-audit-trail
-        heading="Closure activity"
-        [actions]="['tenant.closure.', 'platform.tenant.']"
-        empty="No organisation has been closed, reopened, suspended or deleted yet. Each closure, refusal, reopening, deletion plan and deletion is recorded here."
-      />
-
       @if (selected(); as c) {
-        <section class="card">
+        <section class="card detail" aria-label="Closure details">
           <header class="card-head">
-            <h3>
-              {{ c.name || 'Organisation #' + c.tenantId }}
-              <span class="muted small">{{ c.slug }}</span>
-            </h3>
+            <div class="titles">
+              <h3>{{ c.name || 'Organisation #' + c.tenantId }}</h3>
+              <p class="mono">{{ c.slug }}</p>
+            </div>
             <span class="spacer"></span>
-            <span [class]="'chip ' + tone(c.status)">{{ statusLabel(c.status) }}</span>
+            <span [class]="'dot ' + tone(c.status)">{{ statusLabel(c.status) }}</span>
           </header>
           <div class="card-body">
             <dl class="facts">
@@ -372,54 +205,82 @@ type Dialog = 'reopen' | 'purge' | null;
             </dl>
 
             @if (c.plan; as plan) {
-              <h4>Deletion plan (dry run, {{ plan.generatedAtUtc | date: 'medium' }})</h4>
-              <p [class.errors]="!plan.canRun">{{ summary(plan) }}</p>
-              @if (plan.blockers.length) {
-                <ul class="errors" role="alert">
-                  @for (b of plan.blockers; track b.table + b.column) {
-                    <li>
-                      {{ b.table }}.{{ b.column }} → {{ b.referencesTable }} ({{ b.rows }}):
-                      {{ b.why }}
-                    </li>
-                  }
-                </ul>
-              }
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th scope="col">Order</th>
-                      <th scope="col">Table</th>
-                      <th scope="col">Kind</th>
-                      <th scope="col">Rows</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    @for (s of plan.steps; track s.table; let i = $index) {
-                      <tr>
-                        <td>{{ i + 1 }}</td>
-                        <td>{{ s.table }}</td>
-                        <td>{{ s.ownership }}</td>
-                        <td>{{ s.rows.toLocaleString() }}</td>
-                      </tr>
+              <div class="plan">
+                <div class="plan-head">
+                  <span class="section-label">Deletion plan</span>
+                  <span class="small muted"
+                    >dry run, {{ plan.generatedAtUtc | date: 'medium' }}</span
+                  >
+                  <span class="spacer"></span>
+                  <span class="dot" [class.ok]="plan.canRun" [class.bad]="!plan.canRun">{{
+                    plan.canRun ? 'Can run' : 'Blocked'
+                  }}</span>
+                </div>
+                <p class="note" [class.warn]="!plan.canRun">{{ summary(plan) }}</p>
+                @if (plan.blockers.length) {
+                  <ul class="errors" role="alert">
+                    @for (b of plan.blockers; track b.table + b.column) {
+                      <li>
+                        <span class="mono">{{ b.table }}.{{ b.column }}</span> →
+                        <span class="mono">{{ b.referencesTable }}</span> ({{ b.rows }}):
+                        {{ b.why }}
+                      </li>
                     }
-                  </tbody>
-                </table>
+                  </ul>
+                }
+                <div class="table-wrap plan-table">
+                  <table class="grid">
+                    <thead>
+                      <tr>
+                        <th scope="col" class="num">Order</th>
+                        <th scope="col">Table</th>
+                        <th scope="col">Kind</th>
+                        <th scope="col" class="num">Rows</th>
+                        <th scope="col"><span class="sr-only">Share of rows</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      @for (s of plan.steps; track s.table; let i = $index) {
+                        <tr>
+                          <td class="num dim">{{ i + 1 }}</td>
+                          <td class="mono">{{ s.table }}</td>
+                          <td class="small">{{ humanise(s.ownership) }}</td>
+                          <td class="num strong">{{ s.rows.toLocaleString() }}</td>
+                          <td class="bar-cell">
+                            <span class="meter"
+                              ><i [style.width.%]="rowShare(s.rows, plan.steps)"></i
+                            ></span>
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
+                @if (plan.people.length) {
+                  <div class="people">
+                    <span class="section-label">People</span>
+                    @for (p of plan.people; track p.adminUserId) {
+                      <span class="chip" [class.bad]="p.action === 'remove'"
+                        >{{ p.username }} ({{ p.action }})</span
+                      >
+                    }
+                  </div>
+                }
+                @for (n of plan.notes; track n) {
+                  <p class="note">{{ n }}</p>
+                }
               </div>
-              @if (plan.people.length) {
-                <p class="small">
-                  People:
-                  @for (p of plan.people; track p.adminUserId; let last = $last) {
-                    {{ p.username }} ({{ p.action }}){{ last ? '' : ', ' }}
-                  }
-                </p>
-              }
-              @for (n of plan.notes; track n) {
-                <p class="note">{{ n }}</p>
-              }
             }
 
             <div class="actions-row">
+              @if (!c.canSchedulePurge && c.status === 'Closed') {
+                <span class="small muted grow-left">
+                  The deletion can be confirmed once the grace period is over ({{
+                    daysLeft(c.graceEndsAtUtc)
+                  }}
+                  day(s) left).
+                </span>
+              }
               @if (c.canReopen && can(P.PlatformTenantsManage)) {
                 <button
                   type="button"
@@ -454,17 +315,154 @@ type Dialog = 'reopen' | 'purge' | null;
                 <app-mfa-hint [permission]="P.PlatformTenantsPurge" />
               }
             </div>
-            @if (!c.canSchedulePurge && c.status === 'Closed') {
-              <p class="note">
-                The deletion can be confirmed once the grace period is over ({{
-                  daysLeft(c.graceEndsAtUtc)
-                }}
-                day(s) left).
-              </p>
-            }
           </div>
         </section>
       }
+
+      <div class="cols">
+        <section class="card">
+          <header class="card-head">
+            <div class="titles">
+              <h3>Every organisation</h3>
+              <p>Whether each one could be closed today</p>
+            </div>
+            <span class="spacer"></span>
+            <a class="btn btn-ghost btn-sm" routerLink="/platform/organisations">Organisations</a>
+          </header>
+          @if (tenants.value().length === 0) {
+            <p class="empty">
+              {{
+                canSeeTenants()
+                  ? 'Loading…'
+                  : 'Listing organisations needs platform.tenants.manage.'
+              }}
+            </p>
+          } @else {
+            <div class="table-wrap">
+              <table class="grid">
+                <thead>
+                  <tr>
+                    <th>Organisation</th>
+                    <th>State</th>
+                    <th>Can it be closed?</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (t of tenants.value(); track t.id) {
+                    <tr>
+                      <td>
+                        <span class="who">{{ t.name }}</span
+                        ><span class="sub"
+                          ><span class="mono">{{ t.slug }}</span> · {{ t.kind }} ·
+                          {{ t.activeMembers ?? 0 }} active members</span
+                        >
+                      </td>
+                      <td>
+                        <span
+                          class="dot"
+                          [class.ok]="t.status === 'Active'"
+                          [class.warn]="t.status === 'Suspended'"
+                          [class.bad]="t.status === 'Closed'"
+                          >{{ t.status }}</span
+                        >
+                      </td>
+                      <td class="small" [class.dim]="t.kind === 'House' || t.status === 'Closed'">
+                        {{ closable(t) }}
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
+          @if (own.value(); as o) {
+            @if (o.blockers.length) {
+              <div class="card-body own">
+                <p class="small">
+                  <strong>{{ o.name }}</strong> (the organisation you act in) today:
+                </p>
+                <ul class="errors">
+                  @for (b of o.blockers; track b) {
+                    <li>{{ b }}</li>
+                  }
+                </ul>
+                <p class="small muted">
+                  {{ o.members }} members · {{ o.owners }} Owner(s) ·
+                  {{ o.activeMachineCredentials }} terminal credentials · {{ o.openPositions }} open
+                  positions · {{ o.workingOrders }} working orders
+                </p>
+              </div>
+            }
+          }
+        </section>
+
+        <section class="card">
+          <header class="card-head">
+            <div class="titles">
+              <h3>What closing does, step by step</h3>
+              <p>From the Owner's request to the deletion of its data</p>
+            </div>
+          </header>
+          <div class="card-body small">
+            <ol class="steps">
+              <li>
+                An Owner closes the organisation (step-up sign-in; a second Owner approves when
+                there is more than one). It is refused for House and while positions or working
+                orders are open.
+              </li>
+              <li>
+                At once: the organisation kill switch is engaged, terminal credentials, enrollment
+                tokens, API tokens and invitations are revoked, sessions end and its
+                identity-provider organisation is disabled.
+              </li>
+              <li>
+                For {{ graceDays() ?? 30 }} days (<code>Tenancy:Closure:GraceDays</code>) platform
+                staff can reopen it here — the kill switch stays engaged until someone releases it.
+              </li>
+              <li>
+                After that, staff review a dry-run deletion plan (every table and row count, who is
+                removed, what is kept) and confirm with the organisation's handle. The engine
+                deletes its data; audit events, the closure record and platform rows are kept.
+              </li>
+            </ol>
+          </div>
+        </section>
+      </div>
+
+      @if (usage.value(); as u) {
+        <section class="card">
+          <header class="card-head">
+            <div class="titles">
+              <h3>What a deletion covers — {{ u.tenantName }} today</h3>
+              <p>For scale: what one organisation holds right now</p>
+            </div>
+          </header>
+          <ul class="usage-grid">
+            @for (i of u.items; track i.key) {
+              <li>
+                <span class="k">{{ i.label }}</span>
+                <span class="v">{{ i.used.toLocaleString() }}</span>
+              </li>
+            }
+          </ul>
+          <p class="pad small muted foot">
+            A deletion removes every row the organisation owns — these counts plus its orders,
+            positions, signals, settings, alerts and conversations — in dependency order, and keeps
+            its audit events, the closure record and platform rows.
+            {{
+              u.kind === 'House'
+                ? 'House itself is never deleted; these are its figures for scale.'
+                : ''
+            }}
+          </p>
+        </section>
+      }
+
+      <app-audit-trail
+        heading="Closure activity"
+        [actions]="['tenant.closure.', 'platform.tenant.']"
+        empty="No organisation has been closed, reopened, suspended or deleted yet. Each closure, refusal, reopening, deletion plan and deletion is recorded here."
+      />
 
       @if (dialog(); as d) {
         @let c = selected()!;
@@ -569,6 +567,32 @@ export class PlatformClosuresPageComponent {
   protected readonly tone = closureTone;
   protected readonly summary = planSummary;
   protected readonly daysLeft = (iso: string) => daysUntil(iso);
+  protected readonly ago = ago;
+
+  /** How much of the grace period has passed, 0–100 (the row's meter). */
+  graceShare(c: TenantClosure): number {
+    const start = Date.parse(c.closedAtUtc);
+    const end = Date.parse(c.graceEndsAtUtc);
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return 100;
+    return Math.min(100, Math.max(0, ((Date.now() - start) / (end - start)) * 100));
+  }
+
+  /** A plan step's rows as a share of the largest step, 0–100. */
+  rowShare(rows: number, steps: readonly PurgeStep[]): number {
+    const max = steps.reduce((m, s) => Math.max(m, s.rows), 0);
+    return max > 0 ? Math.max(2, (rows / max) * 100) : 0;
+  }
+
+  /** "TenantOwned" → "Tenant owned"; '—' when the engine sent none. */
+  humanise(code: string | null): string {
+    if (!code) return '—';
+    const words = code
+      .replace(/[_-]+/g, ' ')
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .trim()
+      .toLowerCase();
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
 
   readonly closures = iamResource<TenantClosure[]>(
     () => this.api.closures(),
