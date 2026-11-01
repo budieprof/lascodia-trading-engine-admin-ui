@@ -131,6 +131,30 @@ const TIMEFRAME_MINUTES: Record<string, number> = {
 };
 
 /**
+ * The candle window for a selection at `tfMin` minutes per bar.
+ *  • Closed trade → frame entry → exit (75 bars before, 25 after).
+ *  • Open / pending → 75 bars before entry up to now, so the newest candle is the current bar.
+ *
+ * The engine returns candles newest-first and the chart asks for one 500-row page, so a long-open
+ * trade already gets the most recent 500 bars (entry clamps to the left edge). The window is NOT
+ * capped by wall-clock time: "480 bars before now" assumed the market never closes, so over a
+ * weekend it started after Friday's last bar and the chart came back empty for every open trade.
+ */
+export function candleWindow(
+  s: Pick<TradeChartSelection, 'referenceTime' | 'exitTime'>,
+  tfMin: number,
+  nowMs: number,
+): { from: Date; to: Date } {
+  const refMs = new Date(s.referenceTime).getTime();
+  const from = new Date(refMs - 75 * tfMin * 60_000);
+  if (s.exitTime) {
+    const exitMs = new Date(s.exitTime).getTime();
+    return { from, to: new Date(exitMs + 25 * tfMin * 60_000) };
+  }
+  return { from, to: new Date(nowMs) };
+}
+
+/**
  * The timeframe to open a selection on: the requested one (M5 by default), stepped up until a
  * closed trade's entry → exit plus the chart's 100 bars of margin fits one 500-candle page.
  */
@@ -736,29 +760,7 @@ export class EATradeChartModalComponent implements OnChanges, OnDestroy, AfterVi
 
     const tf = this.selectedTimeframe();
     const tfMin = this.timeframeMinutes(tf);
-    const ref = new Date(s.referenceTime);
-    const refMs = ref.getTime();
-
-    // Window selection:
-    //  • Closed trades  → frame entry → exit (75-bar pre / 25-bar post margins).
-    //  • Open / pending → the window MUST end at "now" so the latest candle is
-    //    the current bar and the live NOW line aligns with it. Start 75 bars
-    //    before entry, but cap the span at ~480 bars (under the 500-row limit)
-    //    so a long-open trade shows the most recent bars (entry clamps to the
-    //    left edge) rather than a stale window around the entry.
-    const preMin = 75 * tfMin;
-    const now = Date.now();
-    let from: Date;
-    let to: Date;
-    if (s.exitTime) {
-      const exitMs = new Date(s.exitTime).getTime();
-      from = new Date(refMs - preMin * 60_000);
-      to = new Date(exitMs + 25 * tfMin * 60_000);
-    } else {
-      to = new Date(now);
-      const maxSpanMin = 480 * tfMin;
-      from = new Date(Math.max(refMs - preMin * 60_000, now - maxSpanMin * 60_000));
-    }
+    const { from, to } = candleWindow(s, tfMin, Date.now());
 
     this.marketData
       .listCandles({
