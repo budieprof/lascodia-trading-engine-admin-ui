@@ -16,6 +16,11 @@ import {
   openShellSteps,
   osAvailability,
 } from './add-computer.logic';
+import {
+  macInstallerAvailable as pkgAvailable,
+  macInstallerErrorText,
+  macInstallerFileName,
+} from './add-computer.logic';
 import type {
   DaemonEaProgress,
   DaemonInstallProgress,
@@ -222,5 +227,33 @@ describe('add a computer — following it connect', () => {
     expect(nextDaemonPollMs(progress('token-expired'), 0)).toBeNull();
     expect(isDaemonSettled('credential-revoked')).toBe(true);
     expect(isDaemonSettled('offline')).toBe(false);
+  });
+});
+
+describe('double-click macOS installer', () => {
+  const pkg = { platform: 'macos-pkg', label: 'macOS installer (double-click)', available: true, version: '1.0.0', sizeBytes: 1, publishedAtUtc: null };
+  const base = { macCommandTemplate: '', windowsCommandTemplate: '', platforms: [] } as unknown as Parameters<typeof pkgAvailable>[0];
+
+  it('is offered only for a Mac and only once published', () => {
+    expect(pkgAvailable({ ...base!, macInstaller: pkg }, 'macos')).toBe(true);
+    expect(pkgAvailable({ ...base!, macInstaller: pkg }, 'windows')).toBe(false);
+    expect(pkgAvailable({ ...base!, macInstaller: { ...pkg, available: false } }, 'macos')).toBe(false);
+    expect(pkgAvailable(base, 'macos')).toBe(false);
+    expect(pkgAvailable(null, 'macos')).toBe(false);
+  });
+
+  it('is saved with the install code in its name (the package reads it back)', () => {
+    const t = 'lsc_enr_abcd1234_' + 'X'.repeat(40);
+    expect(macInstallerFileName(null, t)).toBe(`Lascodia Setup ${t}.pkg`);
+    expect(macInstallerFileName({ ...base!, macInstallerFileNameTemplate: 'Setup-{token}.pkg' }, t)).toBe(`Setup-${t}.pkg`);
+    // a template without the code would make an installer that cannot find it
+    expect(macInstallerFileName({ ...base!, macInstallerFileNameTemplate: 'Setup.pkg' }, t)).toBe(`Lascodia Setup ${t}.pkg`);
+  });
+
+  it('explains a failed download in plain words', () => {
+    expect(macInstallerErrorText({ status: 404 })).toContain('not been published');
+    expect(macInstallerErrorText({ status: 403 })).toContain('permission');
+    expect(macInstallerErrorText({ status: 0 })).toContain('could not be reached');
+    expect(macInstallerErrorText(new Error('x'))).toContain('install line');
   });
 });

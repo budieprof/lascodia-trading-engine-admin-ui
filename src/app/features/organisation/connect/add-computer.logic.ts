@@ -60,6 +60,49 @@ export function osAvailability(setup: SupervisorSetup | null, os: ComputerOs): {
   return { available: true, note: null };
 }
 
+/** The engine's default name for the downloaded installer (`{token}` = the install code). */
+export const MAC_INSTALLER_FILE_NAME = 'Lascodia Setup {token}.pkg';
+
+/** Is the double-click installer offered: a Mac, and a published `macos-pkg`? */
+export function macInstallerAvailable(setup: SupervisorSetup | null, os: ComputerOs): boolean {
+  return os === 'macos' && !!setup?.macInstaller?.available;
+}
+
+/**
+ * The name the installer is saved under. The package reads the install code back from its own
+ * name, so the code must be in it (the code has no spaces, slashes or quotes).
+ */
+export function macInstallerFileName(setup: SupervisorSetup | null, token: string): string {
+  const template = setup?.macInstallerFileNameTemplate || MAC_INSTALLER_FILE_NAME;
+  return (template.includes('{token}') ? template : MAC_INSTALLER_FILE_NAME).replace('{token}', token);
+}
+
+/**
+ * What to do with the downloaded installer. It is not signed with an Apple Developer ID, so macOS
+ * stops the first open; the steps say exactly how to let it through, for macOS 15+ and earlier.
+ */
+export const MAC_INSTALLER_STEPS: readonly string[] = [
+  'Do this on the Mac that runs MetaTrader 5. If you are reading this page on another computer, open it on that Mac, or use the install line below instead.',
+  'Click "Download the installer". Then open the file "Lascodia Setup … .pkg" from your Downloads folder.',
+  'macOS says it cannot check the file for malicious software. Click Done. Then open System Settings → Privacy & Security, scroll down to Security, click Open Anyway, and enter your Mac password. On macOS 14 or earlier, Control-click the file and choose Open instead.',
+  'In the installer, click Continue, then Install, and enter your Mac password. It takes about a minute. Keep this page open: it shows the Mac connecting.',
+];
+
+/** Why macOS asks — one sentence, shown under the steps. */
+export const MAC_INSTALLER_WHY_ASKED =
+  'macOS asks because the installer is not signed with an Apple developer certificate. The installer still checks that the supervisor it downloads is the genuine file, and it runs the same steps as the install line.';
+
+/** What a failed installer download means for the person (the body is a Blob, so the status decides). */
+export function macInstallerErrorText(err: unknown): string {
+  const status = (err as { status?: unknown } | null)?.status;
+  if (status === 403)
+    return 'You may not download the installer here: it needs the permission to connect accounts, and the demonstration organisation cannot connect computers.';
+  if (status === 404) return 'The installer has not been published yet. Use the install line below instead.';
+  if (status === 429) return 'Too many downloads in a short time. Wait a minute and try again.';
+  if (status === 0) return 'The engine could not be reached. Check your connection and try again.';
+  return 'The installer could not be downloaded. Try again, or use the install line below.';
+}
+
 /** How to open the window the line is pasted into. */
 export function openShellSteps(os: ComputerOs): string[] {
   return os === 'macos'
