@@ -49,6 +49,15 @@ describe('ticket model (SP-I4)', () => {
 
   it('defaults to paper', () => expect(DEFAULT_TICKET.mode).toBe('Paper'));
 
+  it('asks a live ticket for its execution algorithm only when one is chosen (gaps program)', () => {
+    expect(ticketRequest(state({ mode: 'Live', algorithm: 'Direct' }), 'EURUSD')).not.toHaveProperty('executionAlgorithm');
+    expect(ticketRequest(state({ mode: 'Paper', algorithm: 'TWAP', algoMinutes: 15 }), 'EURUSD')).not.toHaveProperty('executionAlgorithm');
+    const twap = ticketRequest(state({ mode: 'Live', algorithm: 'TWAP', algoMinutes: 15, algoSlices: 5 }), 'EURUSD')!;
+    expect(twap.executionAlgorithm).toBe('TWAP');
+    expect(twap.algoDurationSeconds).toBe(900);
+    expect(twap.algoSlices).toBe(5);
+  });
+
   it('places default brackets 1.5 ATR away with a 2R target, on the right sides', () => {
     expect(defaultBrackets('Buy', 1.1, 0.002, 5)).toEqual({ stop: 1.097, target: 1.106 });
     expect(defaultBrackets('Sell', 1.1, 0.002, 5)).toEqual({ stop: 1.103, target: 1.094 });

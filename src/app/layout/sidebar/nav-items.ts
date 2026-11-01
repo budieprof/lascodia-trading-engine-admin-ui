@@ -229,6 +229,15 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    // Execution algorithms + block allocation (gaps program, execution).
+    label: 'Execution',
+    items: [
+      { label: 'Algorithmic orders', route: '/execution/algo-orders', icon: navIcon.Timer },
+      { label: 'Allocation groups', route: '/execution/allocation-groups', icon: navIcon.Group },
+      { label: 'Execution settings', route: '/execution/settings', icon: navIcon.Settings },
+    ],
+  },
+  {
     // Trade surveillance (gaps program): market-abuse pattern alerts for review — observe only.
     label: 'Surveillance',
     items: [

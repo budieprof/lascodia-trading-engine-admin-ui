@@ -679,6 +679,14 @@ export const routes: Routes = [
           import('@features/organisation/organisation.routes').then((m) => m.ORGANISATION_ROUTES),
       },
       {
+        // Execution algorithms + block allocation (gaps program): algorithmic orders, settings, allocation groups.
+        path: 'execution',
+        canActivate: [canAccessPath('execution')],
+        data: { breadcrumb: 'Execution' },
+        loadChildren: () =>
+          import('@features/execution/execution.routes').then((m) => m.EXECUTION_ROUTES),
+      },
+      {
         // Trade surveillance (gaps program): alerts for review (observe only), detector settings, job status.
         path: 'surveillance',
         canActivate: [canAccessPath('surveillance')],

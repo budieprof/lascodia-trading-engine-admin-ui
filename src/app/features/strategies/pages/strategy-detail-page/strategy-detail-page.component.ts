@@ -67,6 +67,7 @@ import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-p
 import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
 import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
+import { StrategyExecutionCardComponent } from '@features/execution/components/strategy-execution-card.component';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
 import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
@@ -93,6 +94,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
   selector: 'app-strategy-detail-page',
   standalone: true,
   imports: [
+    StrategyExecutionCardComponent,
     PageHeaderComponent,
     PresenceBadgeComponent,
     DataTableComponent,
@@ -697,6 +699,13 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
           <!-- Capacity Profile Tab — AUM-vs-Sharpe sweep with sizing guidance. -->
           @if (activeTab() === 'capacity') {
             <app-strategy-capacity-card [strategyId]="strategyId" />
+            <!-- Gaps program (execution): how this strategy's orders are executed. -->
+            <app-strategy-execution-card
+              [strategyId]="strategyId"
+              [current]="$any(strategy())?.executionAlgorithm"
+              [currentParamsJson]="$any(strategy())?.executionAlgoParamsJson"
+              [isScript]="isScript()"
+            />
             @if (strategy()) {
               <app-strategy-tab-context
                 [strategy]="strategy()!"

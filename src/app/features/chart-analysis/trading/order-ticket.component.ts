@@ -17,6 +17,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
+import { ALGORITHMS, ALGORITHM_HELP } from '@features/execution/execution.logic';
+import type { ExecutionAlgorithm } from '@features/execution/execution.types';
 
 import type { LiveQuote } from '../overlays/trade-layer';
 import { ManualTradingService } from './manual-trading.service';
@@ -210,6 +212,56 @@ const PREVIEW_REFRESH_MS = 10_000;
         >
       </div>
 
+      @if (state().mode === 'Live') {
+        <!-- Gaps program (execution): how the live ticket is executed. Direct = one order (as always); an
+             algorithm sends child orders, each through the account risk check and the EA's gates. -->
+        <div class="ticket-row" role="group" aria-label="Execution">
+          <span>Execution</span>
+          <select
+            data-testid="ticket-algo"
+            [value]="state().algorithm ?? 'Direct'"
+            (change)="setAlgorithm($any($event.target).value)"
+          >
+            @for (a of algorithms; track a) {
+              <option [value]="a">{{ a }}</option>
+            }
+          </select>
+        </div>
+        @if ((state().algorithm ?? 'Direct') !== 'Direct') {
+          <div class="ticket-row" role="group" aria-label="Algorithm parameters">
+            <span>Window (min)</span>
+            <input
+              type="number"
+              min="1"
+              data-testid="ticket-algo-minutes"
+              [value]="state().algoMinutes ?? ''"
+              (change)="setAlgoNumber('algoMinutes', $any($event.target).value)"
+            />
+            @if (state().algorithm === 'TWAP' || state().algorithm === 'VWAP') {
+              <span>Slices</span>
+              <input
+                type="number"
+                min="2"
+                max="50"
+                [value]="state().algoSlices ?? ''"
+                (change)="setAlgoNumber('algoSlices', $any($event.target).value)"
+              />
+            }
+            @if (state().algorithm === 'Iceberg') {
+              <span>Show (lots)</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                [value]="state().algoDisplayLots ?? ''"
+                (change)="setAlgoNumber('algoDisplayLots', $any($event.target).value)"
+              />
+            }
+          </div>
+          <p class="ticket-note" data-testid="ticket-algo-help">{{ algoHelp() }}</p>
+        }
+      }
+
       @if (preview(); as p) {
         <dl class="ticket-facts" data-testid="ticket-facts">
           <dt>Size</dt>
@@ -288,6 +340,9 @@ const PREVIEW_REFRESH_MS = 10_000;
             Live {{ c.direction }} {{ c.lots }} lots {{ symbol() }} on {{ c.accountType }} account
             {{ c.account }}. {{ c.accountType === 'Real' ? 'Real money.' : '' }} The engine checks
             it again, then Tier 1 and the account risk check.
+            @if ((state().algorithm ?? 'Direct') !== 'Direct') {
+              Executed through {{ state().algorithm }}: child orders, each checked again before the EA sends it.
+            }
           </p>
           <button type="button" (click)="confirmLive.set(null)">Back</button>
           <button
@@ -651,6 +706,23 @@ export class OrderTicketComponent {
 
   setMode(mode: TicketMode): void {
     this.state.update((s) => ({ ...s, mode }));
+  }
+
+  /** Gaps program (execution): the live ticket's execution algorithm. */
+  protected readonly algorithms = ALGORITHMS;
+  readonly algoHelp = computed(
+    () =>
+      ALGORITHM_HELP[this.state().algorithm ?? 'Direct'] +
+      ' The whole size passes the account risk check first; every child does again. Needs execution algorithms switched on.',
+  );
+
+  setAlgorithm(algorithm: ExecutionAlgorithm): void {
+    this.state.update((s) => ({ ...s, algorithm }));
+  }
+
+  setAlgoNumber(field: 'algoMinutes' | 'algoSlices' | 'algoDisplayLots', raw: string): void {
+    const v = Number(raw);
+    this.state.update((s) => ({ ...s, [field]: raw === '' || !Number.isFinite(v) || v <= 0 ? null : v }));
   }
 
   setPrice(field: 'entry' | 'stop' | 'target', raw: string): void {
