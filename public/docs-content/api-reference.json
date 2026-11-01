@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1086,
+  "endpointCount": 1113,
   "groups": [
     {
       "name": "Admin auth",
@@ -1532,6 +1532,23 @@
             }
           ],
           "response": "ResponseData<List<DaemonJobItem>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/admin/terminals/daemons/jobs/{jobId}/progress",
+          "summary": "Job channel progress (gaps program, zero-downtime): a long host job (deploy, backup, restore drill) streams its output lines while it runs; the console shows them live. Daemon tokens only; the job must be claimed by this daemon.",
+          "access": "permission",
+          "permission": "access.eaingest",
+          "parameters": [
+            {
+              "name": "jobId",
+              "in": "path",
+              "required": true,
+              "type": "guid"
+            }
+          ],
+          "body": "ReportDaemonJobProgressCommand",
+          "response": "ResponseData<bool>"
         },
         {
           "method": "POST",
@@ -11074,6 +11091,50 @@
       ]
     },
     {
+      "name": "Ops platform",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/ops/platform",
+          "summary": "Leader + colours, migrations, the host's last status report (backups, swap history), alerting, deploy policy, recent host jobs, the page's settings.",
+          "access": "permission",
+          "permission": "platform.infrastructure.manage",
+          "parameters": [],
+          "response": "ResponseData<PlatformOpsDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/ops/platform/alerts/test",
+          "summary": "Send a test alert through Alertmanager to every configured receiver.",
+          "access": "permission",
+          "permission": "platform.infrastructure.manage",
+          "parameters": [],
+          "body": "SendPlatformTestAlertCommand",
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/ops/platform/deploy",
+          "summary": "Blue/green deploy (or rollback, or dry run) of the money-path api, run by the host supervisor. Off unless Ops:ConsoleDeploy:Enabled; typed confirmation; refused in the high-risk window unless overridden; four-eyes (platform.deploy) when a policy exists.",
+          "access": "permission",
+          "permission": "platform.deploy",
+          "parameters": [],
+          "body": "QueuePlatformDeployCommand",
+          "response": "ResponseData<PlatformJobQueuedDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/ops/platform/host-jobs",
+          "summary": "Ask the host supervisor to report status, back up now, or run the restore drill. Follow it with GET admin/terminals/jobs/{jobId}.",
+          "access": "permission",
+          "permission": "platform.infrastructure.manage",
+          "parameters": [],
+          "body": "QueuePlatformHostJobCommand",
+          "response": "ResponseData<PlatformJobQueuedDto>"
+        }
+      ]
+    },
+    {
       "name": "Order",
       "endpoints": [
         {
@@ -12631,6 +12692,331 @@
             }
           ],
           "response": "ResponseData<PortfolioCoverageDto>"
+        }
+      ]
+    },
+    {
+      "name": "Portfolio risk",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/exposure",
+          "summary": "Open positions + working orders + live signals netted per currency leg (one account in its currency, or the organisation's book in USD when `tradingAccountId` is omitted).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "includeSignals",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<NettedExposureDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/jobs",
+          "summary": "Status of the risk workers (last run, result, next run, errors) and what their run-now does.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "response": "ResponseData<List<RiskJobDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/accounts/{tradingAccountId}/margin-forecast",
+          "summary": "The account's margin / stop-out forecast, computed now (per-symbol moves, σ distances, days to stop-out).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<MarginForecastDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/history",
+          "summary": "Paged snapshot history (filter: tradingAccountId, fromUtc, toUtc; nested in `filter`).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "body": "GetPagedPortfolioRiskSnapshotsQuery",
+          "response": "ResponseData<PagedData<PortfolioRiskSnapshotDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/overview",
+          "summary": "The risk dashboard: the organisation's book and every active account's latest snapshot.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "response": "ResponseData<PortfolioRiskOverviewDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/series",
+          "summary": "A VaR history chart series, downsampled to `maxPoints` (each bucket keeps its highest VaR95).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            },
+            {
+              "name": "fromUtc",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "toUtc",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "maxPoints",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<PortfolioRiskSeriesDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/snapshot",
+          "summary": "The latest stored snapshot of one account (omit `tradingAccountId` for the organisation's book).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long?"
+            }
+          ],
+          "response": "ResponseData<PortfolioRiskSnapshotDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/snapshot-now",
+          "summary": "Run-now of the portfolio risk worker's history: store a snapshot of every active account (or one) now.",
+          "access": "permission",
+          "permission": "risk.manage",
+          "parameters": [],
+          "body": "RunPortfolioSnapshotNowCommand",
+          "response": "ResponseData<int>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/portfolio/what-if",
+          "summary": "What a proposed trade would do to VaR (marginal VaR), the worst stress scenario and the stop-out distance, and what the Tier-2 stress step would do with it. READ-ONLY: nothing is placed or stored.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "body": "WhatIfTradeRequest",
+          "response": "ResponseData<WhatIfTradeResultDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/settings",
+          "summary": "Every risk setting with its current value (organisation / platform / default), default, limits and last change — the dashboard's typed controls. Writes go through the existing audited paths: `PUT config` (`platform.engine.manage`) for the engine-wide value, `PUT config/overrides` (`engine.config`) for an organisation's tighter value of a layered key.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "response": "ResponseData<List<RiskSettingDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/decisions",
+          "summary": "The stress step's recorded verdicts (Observe: would-reject / would-shrink), paged (filter nested in `filter`).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "body": "GetPagedStressDecisionsQuery",
+          "response": "ResponseData<PagedData<StressDecisionDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/decisions/summary",
+          "summary": "Counts of the stress step's verdicts over the last `days` (1-90) per outcome.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "days",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<Dictionary<string, int>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/latest",
+          "summary": "The latest result of every scenario for one account (last 35 days), worst first.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "tradingAccountId",
+              "in": "query",
+              "required": false,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<List<StressTestResultDto>>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/library/{id}/active",
+          "summary": "Platform staff: switch a PLATFORM library scenario on or off for every organisation.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "isActive",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/results",
+          "summary": "Paged stress results (filter: tradingAccountId, scenarioId, fromUtc, toUtc, onlyBreaches; nested in `filter`).",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [],
+          "body": "GetPagedStressResultsQuery",
+          "response": "ResponseData<PagedData<StressTestResultDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/results/{id}",
+          "summary": "One stress result with its per-position impacts.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<StressTestResultDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/run",
+          "summary": "Runs one scenario (or every active non-reverse scenario when `scenarioId` is omitted) against an account now; stores the results and alerts on a margin call / stop-out / drawdown breach.",
+          "access": "permission",
+          "permission": "risk.manage",
+          "parameters": [],
+          "body": "RunStressTestsNowCommand",
+          "response": "ResponseData<List<StressTestResultDto>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/scenarios",
+          "summary": "The stress library: the platform's seeded scenarios and the organisation's own.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "includeInactive",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            }
+          ],
+          "response": "ResponseData<List<StressScenarioDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/scenarios",
+          "summary": "Creates a stress scenario owned by the acting organisation.",
+          "access": "permission",
+          "permission": "risk.manage",
+          "parameters": [],
+          "body": "CreateStressScenarioCommand",
+          "response": "ResponseData<long>"
+        },
+        {
+          "method": "DELETE",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/scenarios/{id}",
+          "summary": "Deletes one of the organisation's own scenarios (soft delete; its past results stay).",
+          "access": "permission",
+          "permission": "risk.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<bool>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/scenarios/{id}",
+          "summary": "One stress scenario.",
+          "access": "permission",
+          "permission": "risk.read",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<StressScenarioDto>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/risk/stress/scenarios/{id}",
+          "summary": "Updates one of the organisation's own scenarios (platform scenarios are read-only here).",
+          "access": "permission",
+          "permission": "risk.manage",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "UpdateStressScenarioCommand",
+          "response": "ResponseData<bool>"
         }
       ]
     },
