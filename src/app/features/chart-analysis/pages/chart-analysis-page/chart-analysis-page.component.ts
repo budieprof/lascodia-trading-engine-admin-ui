@@ -2456,6 +2456,15 @@ export class ChartAnalysisPageComponent {
     }));
   });
 
+  /** The search row's second column: the master's description, or "AUD/CAD" where it only repeats an FX symbol. */
+  symbolDescription(symbol: string, description: string | null | undefined): string {
+    const d = (description ?? '').trim();
+    if (d && d.toUpperCase() !== symbol.toUpperCase()) return d;
+    return /^[A-Z]{6}$/i.test(symbol)
+      ? `${symbol.slice(0, 3)}/${symbol.slice(3)}`.toUpperCase()
+      : d;
+  }
+
   readonly filteredSymbols = computed(() => {
     const cls = this.symbolClass();
     const rows = cls ? this.searchable().filter((i) => i.assetClass === cls) : this.searchable();
