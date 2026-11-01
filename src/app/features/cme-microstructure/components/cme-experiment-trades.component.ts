@@ -43,13 +43,22 @@ import type {
             Both are shown so they reconcile.
           </p>
         </div>
-        <button type="button" class="btn" (click)="load()" [disabled]="loading() || !runId()">
-          {{ loading() ? 'Loading…' : data() ? 'Refresh' : 'Load trades' }}
-        </button>
+        <!-- The page projects its run picker here, so the choice sits beside the action it
+             feeds instead of floating above the section title. -->
+        <div class="head-actions">
+          <ng-content select="[runPicker]" />
+          <button type="button" class="btn" (click)="load()" [disabled]="loading() || !runId()">
+            {{ loading() ? 'Loading…' : data() ? 'Refresh' : 'Load trades' }}
+          </button>
+        </div>
       </header>
 
       @if (!runId()) {
-        <p class="muted small">Run the experiment, or pick a run from the history below.</p>
+        <p class="muted small">Run the experiment, or pick a recorded run from Verdict history.</p>
+      } @else if (!data() && !loading() && !error()) {
+        <p class="muted small">
+          Trades load on demand — pick a run and press <strong>Load trades</strong>.
+        </p>
       }
 
       @if (error(); as e) {
@@ -246,7 +255,7 @@ import type {
               </table>
             </div>
             @if (visibleTrades().length < d.trades.length) {
-              <button type="button" class="btn" (click)="showAll.set(true)">
+              <button type="button" class="btn more" (click)="showAll.set(true)">
                 Show all {{ d.trades.length | number }} loaded rows
               </button>
             }
@@ -357,24 +366,41 @@ import type {
         gap: 1rem;
         flex-wrap: wrap;
       }
+      .trades-head > div:first-child {
+        flex: 1 1 32rem;
+        min-width: 0;
+      }
+      .head-actions {
+        display: flex;
+        align-items: flex-end;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
       h3 {
-        margin: 0 0 0.15rem;
-        font-size: 1rem;
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: var(--font-bold);
+        color: var(--text-primary);
       }
       p {
         margin: 0;
       }
       .muted {
-        opacity: 0.7;
+        color: var(--text-tertiary);
+      }
+      .trades-head .muted {
+        color: var(--text-secondary);
+        max-width: 90ch;
       }
       .small {
-        font-size: 0.8125rem;
+        font-size: 12px;
+        line-height: 1.5;
       }
       .err {
-        color: #d7263d;
+        color: var(--tone-red);
       }
       .neg {
-        color: #d7263d;
+        color: var(--tone-red);
       }
 
       .arms {
@@ -482,19 +508,26 @@ import type {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
+      /* Same button as the page's secondary actions, so the section reads as one page. */
       .btn {
-        padding: 0.35rem 0.75rem;
-        border-radius: 7px;
-        border: 1px solid var(--axis);
-        background: transparent;
-        color: inherit;
+        height: 30px;
+        padding: 0 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: var(--font-semibold);
         cursor: pointer;
-        font: inherit;
-        margin-top: 0.5rem;
+        white-space: nowrap;
       }
       .btn[disabled] {
         opacity: 0.55;
-        cursor: default;
+        cursor: not-allowed;
+      }
+      .btn.more {
+        margin-top: 0.5rem;
       }
 
       .row-clickable {

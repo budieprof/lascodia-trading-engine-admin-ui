@@ -206,7 +206,12 @@ import { spreadBumpDisplay } from './spread-bump-display';
   `,
   styles: [
     `
+      :host {
+        display: block;
+      }
       .panel {
+        height: 100%;
+        box-sizing: border-box;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);

@@ -8,18 +8,27 @@ import {
   OnDestroy,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Subject, timer, takeUntil, catchError, of } from 'rxjs';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { SystemLogsService } from '@core/services/system-logs.service';
 import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
+import {
+  categoryTail,
+  firstLine,
+  isMultiline,
+  isSameLocalDay,
+  levelLabel,
+  utcStamp,
+} from './log-format';
 
 @Component({
   selector: 'app-system-logs-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, PageHeaderComponent, ErrorStateComponent],
+  imports: [DatePipe, DecimalPipe, FormsModule, PageHeaderComponent, ErrorStateComponent],
+  styleUrl: './system-logs-page.component.scss',
   template: `
     <div class="page">
       <app-page-header
@@ -28,57 +37,55 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
       />
 
       <!--
-        Filter bar — every input updates a signal that drives the next
-        fetch. Auto-refresh fires on a 5s timer when enabled (default on).
-        Buffer-stats badge shows what % of capacity is in use so the
-        operator knows when entries are getting evicted.
+        Filter bar — every input updates a field that drives the next fetch (debounced 300 ms).
+        Auto-refresh fires on a 5s timer when Live is on (default on).
       -->
-      <section class="filter-bar">
-        <div class="filter-group">
-          <label class="filter-label">Min level</label>
-          <select class="filter-input" [(ngModel)]="minLevel" (ngModelChange)="onFilterChange()">
+      <section class="toolbar" aria-label="Log filters">
+        <label class="fld">
+          <span class="fld-l">Min level</span>
+          <select class="fld-c" [(ngModel)]="minLevel" (ngModelChange)="onFilterChange()">
             <option value="">All</option>
             @for (l of levels; track l) {
-              <option [value]="l">{{ l }}</option>
+              <option [value]="l">{{ levelLabel(l) }} and above</option>
             }
           </select>
-        </div>
-        <div class="filter-group flex-grow">
-          <label class="filter-label">Category</label>
+        </label>
+        <label class="fld cat">
+          <span class="fld-l">Category</span>
           <input
             type="text"
-            class="filter-input"
+            class="fld-c"
             placeholder="e.g. Worker, MLPrediction"
             [(ngModel)]="category"
             (ngModelChange)="onFilterChange()"
           />
-        </div>
-        <div class="filter-group flex-grow">
-          <label class="filter-label">Search</label>
+        </label>
+        <label class="fld grow">
+          <span class="fld-l">Search</span>
           <input
             type="text"
-            class="filter-input"
+            class="fld-c"
             placeholder="Match on message or exception text"
             [(ngModel)]="search"
             (ngModelChange)="onFilterChange()"
           />
-        </div>
-        <div class="filter-group">
-          <label class="filter-label">Limit</label>
+        </label>
+        <label class="fld">
+          <span class="fld-l">Limit</span>
           <input
             type="number"
-            class="filter-input narrow"
+            class="fld-c narrow"
             min="10"
             max="5000"
             [(ngModel)]="limit"
             (ngModelChange)="onFilterChange()"
           />
-        </div>
-        <div class="filter-actions">
+        </label>
+        <div class="actions">
           <button
             type="button"
-            class="btn btn-ghost"
-            [class.active]="autoRefresh()"
+            class="btn live"
+            [class.on]="autoRefresh()"
             (click)="toggleAutoRefresh()"
             [attr.aria-pressed]="autoRefresh()"
             title="Auto-refresh every 5s"
@@ -86,41 +93,49 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
             <span class="auto-dot" [class.on]="autoRefresh()"></span>
             Live
           </button>
-          <button type="button" class="btn btn-primary" (click)="fetchNow()" [disabled]="loading()">
+          <button type="button" class="btn primary" (click)="fetchNow()" [disabled]="loading()">
             {{ loading() ? 'Loading…' : 'Refresh' }}
           </button>
         </div>
       </section>
 
       <section class="meta-row">
-        <div class="meta-item">
-          Buffer
-          <strong>{{ pageData()?.bufferSize ?? 0 }}</strong>
-          /
-          <span class="muted">{{ pageData()?.bufferCapacity ?? 0 }}</span>
-        </div>
-        <div class="meta-item">
-          <strong>{{ pageData()?.entries?.length ?? 0 }}</strong> entries loaded
-          <span class="muted">(limit {{ limit }} · scroll the table)</span>
-        </div>
-        @if ((pageData()?.droppedCount ?? 0) > 0) {
-          <div class="meta-item warn">
-            <span class="muted"
-              >{{ pageData()!.droppedCount }} entries evicted since startup (FIFO)</span
-            >
-          </div>
-        }
+        <span class="meta-item">
+          @if (autoRefresh()) {
+            <span class="state on">Live · every 5 s</span>
+          } @else {
+            <span class="state">Paused</span>
+          }
+        </span>
         @if (lastFetchedAt()) {
-          <div class="meta-item right">
+          <span class="meta-item" title="Your browser's local time">
             Last fetched
             <strong>{{ lastFetchedAt() | date: 'HH:mm:ss' }}</strong>
-          </div>
+          </span>
         }
+        <span class="meta-item">
+          <strong>{{ pageData()?.entries?.length ?? 0 }}</strong> entries loaded
+          <span class="muted">(limit {{ limit }} · scroll the table)</span>
+        </span>
         @if (errorMessage()) {
-          <div class="meta-item error">
+          <span class="meta-item error">
             <strong>{{ errorMessage() }}</strong>
-          </div>
+          </span>
         }
+        <span class="meta-item right">
+          Buffer
+          <strong>{{ pageData()?.bufferSize ?? 0 | number }}</strong>
+          /
+          <span class="muted">{{ pageData()?.bufferCapacity ?? 0 | number }}</span>
+          @if ((pageData()?.droppedCount ?? 0) > 0) {
+            <span
+              class="muted"
+              title="The buffer is a fixed-size ring: once full, the oldest entry is dropped for each new one"
+            >
+              · {{ pageData()!.droppedCount | number }} entries evicted since startup (FIFO)
+            </span>
+          }
+        </span>
       </section>
 
       <section class="logs-table-wrap">
@@ -135,7 +150,7 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
                 (retry)="fetchNow()"
               />
             } @else {
-              <span class="muted">No log entries match the current filters.</span>
+              <strong>No log entries match the current filters.</strong>
               <span class="empty-hint">
                 Either the buffer is genuinely empty (engine just started) or the filters are too
                 restrictive — try clearing the search field.
@@ -144,17 +159,25 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
           </div>
         } @else {
           <table class="logs-table">
+            <colgroup>
+              <col class="w-time" />
+              <col class="w-level" />
+              <col class="w-cat" />
+              <col />
+            </colgroup>
             <thead>
               <tr>
                 <th
                   class="col-time"
                   title="Your browser's local time; hover a time for the UTC stamp"
                 >
-                  Time
+                  Time <span class="th-hint">local</span>
                 </th>
                 <th class="col-level">Level</th>
-                <th class="col-cat">Category</th>
-                <th>Message</th>
+                <th class="col-cat" title="Logger class; hover a cell for the full namespace">
+                  Category
+                </th>
+                <th>Message <span class="th-hint">click a row for the full entry</span></th>
               </tr>
             </thead>
             <tbody>
@@ -164,30 +187,45 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
                 @let e = r.entry;
                 <tr
                   class="log-row"
+                  [attr.data-lvl]="e.level.toLowerCase()"
                   [class.has-exception]="!!e.exception"
                   [class.expanded]="expandedKey() === r.key"
-                  [class]="'lvl-' + e.level.toLowerCase()"
+                  [attr.aria-expanded]="expandedKey() === r.key"
                   (click)="toggleRow(r.key)"
                 >
-                  <td class="col-time mono" [title]="e.timestamp">
+                  <td class="col-time mono" [title]="utcStamp(e.timestamp)">
+                    @if (!isToday(e.timestamp)) {
+                      <span class="day">{{ e.timestamp | date: 'd MMM' }}</span>
+                    }
                     {{ e.timestamp | date: 'HH:mm:ss.SSS' }}
                   </td>
                   <td class="col-level">
-                    <span class="level-chip" [class]="'lvl-chip-' + e.level.toLowerCase()">
-                      {{ e.level }}
+                    <span class="lvl" [attr.data-lvl]="e.level.toLowerCase()" [title]="e.level">
+                      {{ levelLabel(e.level) }}
                     </span>
                   </td>
-                  <td class="col-cat mono" [title]="e.category">{{ shortCategory(e.category) }}</td>
+                  <td class="col-cat mono" [title]="e.category">{{ categoryTail(e.category) }}</td>
                   <td class="col-msg">
-                    <span class="msg-text">{{ e.message }}</span>
-                    @if (e.exception) {
-                      <span class="exc-pill">EXC</span>
-                    }
+                    <div class="msg-line">
+                      <span class="msg-text" [title]="e.message">{{ firstLine(e.message) }}</span>
+                      @if (isMultiline(e.message)) {
+                        <span class="more" title="The message continues — click to expand">…</span>
+                      }
+                      @if (e.exception) {
+                        <span
+                          class="exc-pill"
+                          title="This entry carries an exception — click to read it"
+                        >
+                          exception
+                        </span>
+                      }
+                    </div>
                   </td>
                 </tr>
                 @if (expandedKey() === r.key) {
                   <tr class="exp-row">
                     <td colspan="4">
+                      <pre class="exp-msg">{{ e.message }}</pre>
                       <dl class="exp-dl">
                         <div>
                           <dt>Full category</dt>
@@ -199,7 +237,12 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
                         </div>
                         <div>
                           <dt>Timestamp</dt>
-                          <dd class="mono">{{ e.timestamp }}</dd>
+                          <dd class="mono">
+                            {{ utcStamp(e.timestamp) }}
+                            <span class="muted"
+                              >· {{ e.timestamp | date: 'yyyy-MM-dd HH:mm:ss.SSS' }} local</span
+                            >
+                          </dd>
                         </div>
                       </dl>
                       @if (e.exception) {
@@ -218,319 +261,6 @@ import { EngineLogEntryDto, EngineLogPageDto } from '@core/api/api.types';
       </section>
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-
-      .filter-bar {
-        display: flex;
-        align-items: flex-end;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-3);
-      }
-      .filter-group {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        min-width: 120px;
-      }
-      .filter-group.flex-grow {
-        flex: 1;
-      }
-      .filter-label {
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
-      }
-      .filter-input {
-        height: 30px;
-        padding: 0 8px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: 12px;
-        font-family: inherit;
-      }
-      .filter-input.narrow {
-        width: 80px;
-      }
-      .filter-actions {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-      }
-      .btn {
-        height: 30px;
-        padding: 0 12px;
-        border-radius: var(--radius-sm);
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-        font-family: inherit;
-        border: 1px solid var(--border);
-        background: transparent;
-        color: var(--text-secondary);
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .btn-primary:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-      }
-      .btn-ghost {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .btn-ghost.active {
-        color: var(--accent);
-        border-color: var(--accent);
-        background: rgba(0, 113, 227, 0.06);
-      }
-      .auto-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background: var(--text-tertiary);
-        transition: background 0.2s ease;
-      }
-      .auto-dot.on {
-        background: #34c759;
-        box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.18);
-      }
-
-      .meta-row {
-        display: flex;
-        gap: var(--space-4);
-        align-items: center;
-        font-size: 11.5px;
-        color: var(--text-secondary);
-      }
-      .meta-item.right {
-        margin-left: auto;
-      }
-      .meta-item.error {
-        color: var(--tone-red);
-      }
-      .meta-item.warn {
-        color: var(--tone-amber);
-      }
-      .meta-item strong {
-        color: var(--text-primary);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-
-      .logs-table-wrap {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: auto;
-        max-height: calc(100vh - 320px);
-      }
-      .logs-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 11.5px;
-      }
-      .logs-table thead th {
-        position: sticky;
-        top: 0;
-        background: var(--bg-secondary);
-        text-align: left;
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
-        padding: 8px;
-        border-bottom: 1px solid var(--border);
-      }
-      .logs-table td {
-        padding: 6px 8px;
-        vertical-align: top;
-        border-bottom: 1px solid rgba(142, 142, 147, 0.1);
-      }
-      .col-time {
-        width: 95px;
-        white-space: nowrap;
-      }
-      .col-level {
-        width: 90px;
-      }
-      /* Fixed column, one line, ellipsis — the full namespace is on the
-         title and in the expanded row. break-all wrapped it mid-word. */
-      .col-cat {
-        width: 220px;
-        max-width: 220px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .col-msg {
-        word-break: break-word;
-      }
-
-      .log-row {
-        cursor: pointer;
-        transition: background 0.1s ease;
-      }
-      .log-row:hover {
-        background: rgba(0, 113, 227, 0.04);
-      }
-      .log-row.expanded {
-        background: rgba(0, 113, 227, 0.06);
-      }
-      .log-row.lvl-warning {
-        background: rgba(255, 149, 0, 0.04);
-      }
-      .log-row.lvl-error,
-      .log-row.lvl-critical {
-        background: rgba(255, 59, 48, 0.06);
-      }
-
-      .level-chip {
-        display: inline-flex;
-        align-items: center;
-        height: 18px;
-        padding: 0 6px;
-        border-radius: 999px;
-        font-size: 9.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        background: rgba(142, 142, 147, 0.18);
-        color: var(--text-secondary);
-      }
-      .lvl-chip-debug {
-        background: rgba(142, 142, 147, 0.16);
-      }
-      /* Theme tones — #b91c1c / #b45309 were dark-on-dark in the dark theme. */
-      .lvl-chip-information {
-        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
-        color: var(--tone-blue);
-      }
-      .lvl-chip-warning {
-        background: color-mix(in srgb, var(--tone-amber) 18%, transparent);
-        color: var(--tone-amber);
-      }
-      .lvl-chip-error {
-        background: color-mix(in srgb, var(--tone-red) 18%, transparent);
-        color: var(--tone-red);
-      }
-      .lvl-chip-critical {
-        background: #b91c1c;
-        color: #fff;
-      }
-      .lvl-chip-trace {
-        background: rgba(142, 142, 147, 0.14);
-        color: var(--text-tertiary);
-      }
-
-      .exc-pill {
-        display: inline-block;
-        margin-left: 6px;
-        padding: 1px 5px;
-        font-size: 9px;
-        font-weight: var(--font-semibold);
-        background: color-mix(in srgb, var(--tone-red) 18%, transparent);
-        color: var(--tone-red);
-        border-radius: 3px;
-        vertical-align: middle;
-      }
-
-      .exp-row td {
-        background: rgba(0, 113, 227, 0.04);
-        padding: 12px 16px;
-        border-bottom: 1px solid var(--border);
-      }
-      .exp-dl {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 12px;
-        margin: 0 0 10px;
-      }
-      .exp-dl > div {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .exp-dl dt {
-        font-size: 9.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
-      }
-      .exp-dl dd {
-        margin: 0;
-        font-size: 11px;
-        color: var(--text-primary);
-      }
-      .exp-section-title {
-        font-size: 10px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-        font-weight: var(--font-semibold);
-        margin-bottom: 4px;
-      }
-      .exp-pre {
-        margin: 0;
-        padding: 8px 12px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 11px;
-        color: var(--tone-red);
-        white-space: pre-wrap;
-        word-break: break-word;
-        max-height: 300px;
-        overflow: auto;
-      }
-
-      .empty-state {
-        padding: 30px 20px;
-        text-align: center;
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .empty-state .muted {
-        color: var(--text-tertiary);
-        font-size: 13px;
-      }
-      .empty-state .empty-hint {
-        font-size: 11px;
-        color: var(--text-tertiary);
-        opacity: 0.85;
-      }
-
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-variant-numeric: tabular-nums;
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-    `,
-  ],
 })
 export class SystemLogsPageComponent implements OnInit, OnDestroy {
   private logsService = inject(SystemLogsService);
@@ -640,11 +370,13 @@ export class SystemLogsPageComponent implements OnInit, OnDestroy {
     });
   });
 
-  /** Last two namespace segments; the cell's title carries the full name. */
-  shortCategory(category: string): string {
-    if (!category) return '';
-    const parts = category.split('.');
-    if (parts.length <= 2) return category;
-    return parts.slice(-2).join('.');
+  // Pure formatters (log-format.ts), exposed to the template.
+  protected readonly levelLabel = levelLabel;
+  protected readonly categoryTail = categoryTail;
+  protected readonly firstLine = firstLine;
+  protected readonly isMultiline = isMultiline;
+  protected readonly utcStamp = utcStamp;
+  protected isToday(iso: string): boolean {
+    return isSameLocalDay(iso);
   }
 }

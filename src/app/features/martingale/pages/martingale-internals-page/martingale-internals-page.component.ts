@@ -13,6 +13,17 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 
+import {
+  chainMatchesQuery,
+  chainStatusTone,
+  nextRungVerdict,
+  type NextRungLike,
+  type Tone,
+} from '../../martingale-display';
+
+/** One format for every timestamp on the page; all of them are UTC and the page says so. */
+const TS = 'yyyy-MM-dd HH:mm';
+
 /**
  * Full visibility into the recovery-ladder module.
  *
@@ -38,11 +49,21 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
     CardSkeletonComponent,
     EmptyStateComponent,
   ],
+  styleUrl: './martingale-internals-page.scss',
   template: `
     <app-page-header
       title="Martingale Internals"
       subtitle="Every chain, the closes that moved it, and what it would stake next."
-    />
+    >
+      @if (view(); as v) {
+        <span class="asof" title="When the engine built this snapshot. Times on this page are UTC.">
+          Generated {{ v.generatedAtUtc | date: 'yyyy-MM-dd HH:mm:ss' : 'UTC' }} UTC
+        </span>
+      }
+      <button type="button" class="btn-ghost" (click)="reload()" [disabled]="loading()">
+        {{ loading() ? 'Loading…' : 'Refresh' }}
+      </button>
+    </app-page-header>
 
     @if (loading()) {
       <app-card-skeleton />
@@ -75,79 +96,168 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
       </section>
 
       <!--
+        The answer an operator comes for, before any totals: which chains are live right now and
+        whether each one can take its next rung. One line per open chain with a jump to its ledger
+        further down — the ledger is the "why", this is the "what".
+      -->
+      <section class="now card">
+        <div class="now-head">
+          <h2>Open right now</h2>
+          <span class="dim">
+            {{ openNow().length }} open chain{{ openNow().length === 1 ? '' : 's' }} in view
+          </span>
+        </div>
+        @if (openNow().length === 0) {
+          <p class="now-empty">
+            <b>No open chains.</b>
+            <span class="dim"
+              >Nothing is mid-recovery — every laddered symbol is at base size.</span
+            >
+          </p>
+        } @else {
+          @for (c of openNow(); track c.id) {
+            <div class="now-row">
+              <span class="now-title">
+                <b>{{ c.symbol }}</b> · {{ c.accountName }}
+                <span class="dim">#{{ c.tradingAccountId }} · chain #{{ c.id }}</span>
+              </span>
+              <span class="now-fig num" [class.neg]="c.depth >= c.maxDepth">
+                <span class="k">Depth</span> {{ c.depth }}/{{ c.maxDepth }}
+              </span>
+              <span class="now-fig num">
+                <span class="k">Balance</span>
+                @if (c.deficitAmount > 0) {
+                  <span class="neg">{{ c.deficitAmount | number: '1.2-2' }} owed</span>
+                } @else if (c.deficitAmount < 0) {
+                  <span class="pos">{{ -c.deficitAmount | number: '1.2-2' }} banked</span>
+                } @else {
+                  <span class="dim">level</span>
+                }
+              </span>
+              <span class="now-flags">
+                @if (c.nextRung; as r) {
+                  <span [class]="'pill ' + verdict(r).tone">
+                    Next rung: {{ verdict(r).label }}
+                  </span>
+                }
+                @if (c.depthDivergesFromLedger) {
+                  <span class="pill bad">depth mismatch</span>
+                }
+                @if (c.isStale && c.waitingOnOpenPosition) {
+                  <span class="pill">waiting on open position</span>
+                } @else if (c.isStale) {
+                  <span class="pill warn">stale</span>
+                }
+                @if (c.rungSkipCount > 0) {
+                  <span class="pill bad">rung skipped ×{{ c.rungSkipCount }}</span>
+                }
+              </span>
+              <button type="button" class="btn-link" (click)="jumpTo(c.id)">Ledger ↓</button>
+            </div>
+          }
+        }
+      </section>
+
+      <!--
         The scoreboard. Two money figures carry the page — has laddering paid, and how much is
         still at risk — so they are set large; the chain counts are bookkeeping and sit smaller.
         Debt and banked surplus are kept apart deliberately. Money is in each account's own
         currency: the overview spans accounts, so no single unit is honest.
       -->
       <section class="totals">
-        <div class="stat primary">
-          <span class="stat-label">Lifetime realised P&amp;L</span>
-          <span
-            class="stat-value"
+        <div
+          class="kpi primary"
+          [class.pos]="v.totals.lifetimeRealisedPnl > 0"
+          [class.neg]="v.totals.lifetimeRealisedPnl < 0"
+        >
+          <div class="k-label">Lifetime realised P&amp;L</div>
+          <div
+            class="k-value"
             [class.pos]="v.totals.lifetimeRealisedPnl > 0"
             [class.neg]="v.totals.lifetimeRealisedPnl < 0"
           >
             {{ v.totals.lifetimeRealisedPnl | number: '1.2-2' }}
-          </span>
-          <span class="stat-note">account currency · every close attributed to a chain</span>
+          </div>
+          <div class="k-hint">account currency · every close attributed to a chain</div>
         </div>
-        <div class="stat primary">
-          <span class="stat-label">Outstanding debt</span>
-          <span class="stat-value" [class.neg]="v.totals.outstandingDeficit > 0">
+        <div class="kpi primary" [class.neg]="v.totals.outstandingDeficit > 0">
+          <div class="k-label">Outstanding debt</div>
+          <div class="k-value" [class.neg]="v.totals.outstandingDeficit > 0">
             {{ v.totals.outstandingDeficit | number: '1.2-2' }}
-          </span>
-          <span class="stat-note">account currency · still to win back</span>
+          </div>
+          <div class="k-hint">account currency · still to win back</div>
         </div>
-        <div class="stat">
-          <span class="stat-label">Banked surplus</span>
-          <span class="stat-value" [class.pos]="v.totals.bankedSurplus > 0">
+        <div class="kpi" [class.pos]="v.totals.bankedSurplus > 0">
+          <div class="k-label">Banked surplus</div>
+          <div class="k-value" [class.pos]="v.totals.bankedSurplus > 0">
             {{ v.totals.bankedSurplus | number: '1.2-2' }}
-          </span>
-          <span class="stat-note">progress toward targets</span>
+          </div>
+          <div class="k-hint">progress toward targets</div>
         </div>
-        <div class="stat">
-          <span class="stat-label">Open chains</span>
-          <span class="stat-value">{{ v.totals.openChains }}</span>
+        <div class="kpi" [class.warn]="v.totals.openChains > 0">
+          <div class="k-label">Open chains</div>
+          <div class="k-value">{{ v.totals.openChains }}</div>
         </div>
-        <div class="stat">
-          <span class="stat-label">Recovered</span>
-          <span class="stat-value">{{ v.totals.recoveredChains }}</span>
+        <div class="kpi" [class.pos]="v.totals.recoveredChains > 0">
+          <div class="k-label">Recovered</div>
+          <div class="k-value">{{ v.totals.recoveredChains }}</div>
         </div>
-        <div class="stat">
-          <span class="stat-label">Abandoned</span>
-          <span class="stat-value">{{ v.totals.abandonedChains }}</span>
-          <span class="stat-note">
-            {{ v.totals.abandonedDeficit | number: '1.2-2' }} written off
-            @if (mismatchWriteOff(); as m) {
-              <br />
-              <span
-                class="warn"
-                title="These chains carry a stored depth the ledger does not support (legacy replay ledgers). Their write-off is a bookkeeping artefact of the inflated depth as much as a trading loss."
-              >
-                {{ m.amount | number: '1.2-2' }} of that from {{ m.count }} depth-mismatch chain{{
-                  m.count === 1 ? '' : 's'
-                }}
-                in view
-              </span>
-            }
-          </span>
+        <div class="kpi" [class.neg]="v.totals.abandonedChains > 0">
+          <div class="k-label">Abandoned</div>
+          <div class="k-value">{{ v.totals.abandonedChains }}</div>
+          <div class="k-hint">{{ v.totals.abandonedDeficit | number: '1.2-2' }} written off</div>
         </div>
       </section>
+      @if (mismatchWriteOff(); as m) {
+        <p
+          class="callout warn totals-note"
+          title="These chains carry a stored depth the ledger does not support (legacy replay ledgers). Their write-off is a bookkeeping artefact of the inflated depth as much as a trading loss."
+        >
+          Of the {{ v.totals.abandonedDeficit | number: '1.2-2' }} written off,
+          <b>{{ m.amount | number: '1.2-2' }}</b> comes from {{ m.count }} depth-mismatch chain{{
+            m.count === 1 ? '' : 's'
+          }}
+          in view — chains whose stored depth the ledger does not support, so that share is a
+          bookkeeping artefact as much as a trading loss.
+        </p>
+      }
 
       <!--
         Sweeper health. It is the repair path: when a close event is lost, this is what notices.
         Its cadence bounds how long a broken chain stays broken, so it belongs on this page rather
         than buried in config.
       -->
-      <section class="sweeper" [class.sweeper-off]="!v.sweeper.enabled">
-        <h2>Repair sweeper</h2>
+      <section class="sweeper card" [class.sweeper-off]="!v.sweeper.enabled">
+        <div class="sweeper-head">
+          <h2>Repair sweeper</h2>
+          @if (!v.sweeper.enabled) {
+            <span class="dot bad">disabled</span>
+          } @else if (v.sweeper.chainsStaleIdle > 0) {
+            <span class="dot warn">{{ v.sweeper.chainsStaleIdle }} in queue</span>
+          } @else {
+            <span class="dot ok">healthy</span>
+          }
+        </div>
         @if (!v.sweeper.enabled) {
-          <p class="warn">
+          <p class="callout bad">
             <b>Disabled.</b> A chain whose close event is lost will stay Open holding a deficit that
             nothing will clear — and with serialisation on, that blocks its symbol.
           </p>
         } @else {
+          @if (v.sweeper.chainsStaleIdle > 0) {
+            <p class="callout warn">
+              {{ v.sweeper.chainsStaleIdle }} chain(s) stale with nothing live on the symbol — in
+              the sweeper's queue. A count that never drains means the repair path itself is stuck.
+            </p>
+          } @else if (v.sweeper.chainsWaitingOnOpenPosition > 0) {
+            <p class="ok-line">
+              No chain needs repair. {{ v.sweeper.chainsWaitingOnOpenPosition }} chain(s) show as
+              stale only because their rung is still open at the broker — they are waiting on that
+              position, not on the sweeper.
+            </p>
+          } @else {
+            <p class="ok-line">No stale chains. Nothing waiting on repair.</p>
+          }
           <p class="sweeper-line">
             Runs every <b>{{ v.sweeper.intervalSeconds }}s</b>. Treats a chain as stuck after
             <b>{{ v.sweeper.staleAfterMinutes }} min</b> without an advance, looks back
@@ -155,173 +265,101 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
             opened a chain, and waits <b>{{ v.sweeper.openSettleSeconds }}s</b> for the broker's
             realised P&amp;L to settle before opening from one.
           </p>
-          @if (v.sweeper.chainsStaleIdle > 0) {
-            <p class="warn">
-              {{ v.sweeper.chainsStaleIdle }} chain(s) stale with nothing live on the symbol — in
-              the sweeper's queue. A count that never drains means the repair path itself is stuck.
-            </p>
-          } @else if (v.sweeper.chainsWaitingOnOpenPosition > 0) {
-            <p class="ok">
-              No chain needs repair. {{ v.sweeper.chainsWaitingOnOpenPosition }} chain(s) show as
-              stale only because their rung is still open at the broker — they are waiting on that
-              position, not on the sweeper.
-            </p>
-          } @else {
-            <p class="ok">No stale chains. Nothing waiting on repair.</p>
-          }
-        }
-      </section>
-
-      <!-- Laddered pairs, including ones with no chain yet. -->
-      <section class="symbols">
-        <h2>Laddered symbols</h2>
-        @if (v.ladderedSymbols.length === 0) {
-          <app-empty-state
-            title="No symbols opted in"
-            description="A ladder is switched on per account and symbol. Nothing is laddered yet."
-          />
-        } @else {
-          <div class="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Account</th>
-                  <th>Symbol</th>
-                  <th>State</th>
-                  <th class="num">Max depth</th>
-                  <th class="num">Target R</th>
-                  <th class="num">Stake cap</th>
-                  <th class="num">Age cap</th>
-                  <th class="num" title="Model estimate at the profile's assumed ~0.5R geometry">
-                    Worst case (model)
-                  </th>
-                  <th
-                    class="num"
-                    title="Next rung's stake at the open chain's actual entry geometry"
-                  >
-                    Next rung (live)
-                  </th>
-                  <th>Live now</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (s of v.ladderedSymbols; track s.tradingAccountId + s.symbol) {
-                  <tr [class.inactive]="!s.effectivelyActive">
-                    <td>
-                      {{ s.accountName }} <span class="dim">#{{ s.tradingAccountId }}</span>
-                    </td>
-                    <td class="mono">{{ s.symbol }}</td>
-                    <td>
-                      @if (s.effectivelyActive) {
-                        <span class="pill pill-on">active</span>
-                      } @else if (!s.enabled) {
-                        <span class="pill">symbol off</span>
-                      } @else if (!s.profileEnabled) {
-                        <span class="pill pill-warn">profile off</span>
-                      } @else {
-                        <span class="pill">mode off</span>
-                      }
-                    </td>
-                    <td class="num">{{ s.effectiveMaxDepth }}</td>
-                    <td class="num">{{ s.effectiveTargetProfitR | number: '1.2-2' }}</td>
-                    <td class="num">{{ s.effectiveMaxStakePctEquity | number: '1.0-2' }}%</td>
-                    <td class="num">{{ s.effectiveMaxChainAgeHours }}h</td>
-                    <td class="num" [class.neg]="s.worstCaseDrawdownPct > 50">
-                      {{ s.worstCaseDrawdownPct | number: '1.1-1' }}%
-                    </td>
-                    <td class="num">
-                      @if (liveRungFor(s); as r) {
-                        <span
-                          [class.neg]="r.stakePctEquity > s.effectiveMaxStakePctEquity"
-                          [title]="
-                            'Depth ' +
-                            r.depth +
-                            (r.geometryR !== null
-                              ? ' at ' + (r.geometryR | number: '1.2-2') + 'R'
-                              : '') +
-                            ' — next-rung estimate for the open chain'
-                          "
-                        >
-                          {{ r.stakePctEquity | number: '1.1-1' }}%
-                        </span>
-                      } @else {
-                        <span class="dim">—</span>
-                      }
-                    </td>
-                    <td>
-                      @if (s.openPositions || s.ordersInFlight) {
-                        <span class="dim">
-                          {{ s.openPositions }} pos · {{ s.ordersInFlight }} ord
-                        </span>
-                      } @else {
-                        <span class="dim">—</span>
-                      }
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-          <p class="foot">
-            <b>Worst case (model)</b> is the cumulative loss if every rung to the depth cap loses,
-            estimated at the profile's assumed geometry (~0.5R, stake roughly tripling per rung).
-            <b>Next rung (live)</b> is what the open chain would actually risk next, at the real
-            entry geometry of its last close — a thin-geometry chain can need more on a single rung
-            than the whole model series, which is why both are shown.
-          </p>
         }
       </section>
 
       <!-- Chains, each expandable into its ledger. -->
-      <section class="chains">
+      <section class="chains card">
         <div class="chains-head">
           <h2>Chains</h2>
-          <div class="filters">
-            @for (f of statusFilters; track f) {
-              <button
-                type="button"
-                class="filter"
-                [class.filter-on]="status() === f"
-                (click)="setStatus(f)"
-              >
-                {{ f || 'All' }}
-              </button>
-            }
+          <div class="chains-tools">
+            <input
+              type="search"
+              class="search"
+              placeholder="Find symbol, account or chain #"
+              aria-label="Filter the chains shown"
+              [ngModel]="query()"
+              (ngModelChange)="query.set($event)"
+            />
+            <div class="seg" role="group" aria-label="Chain status">
+              @for (f of statusFilters; track f) {
+                <button type="button" [class.on]="status() === f" (click)="setStatus(f)">
+                  {{ f || 'All' }}
+                </button>
+              }
+            </div>
           </div>
         </div>
+        <p class="chains-sub dim">
+          Newest {{ v.chains.length }} chain{{ v.chains.length === 1 ? '' : 's' }}
+          @if (query().trim()) {
+            · {{ visibleChains().length }} match "{{ query().trim() }}"
+          }
+          · open chains are expanded · times UTC
+        </p>
 
         @if (v.chains.length === 0) {
           <app-empty-state
             title="No chains"
             description="A chain opens on the first losing close of a laddered symbol."
           />
+        } @else if (visibleChains().length === 0) {
+          <div class="empty">
+            <strong>No chain matches "{{ query().trim() }}".</strong>
+            Search runs over the {{ v.chains.length }} chains loaded — try a symbol, an account
+            name, or a chain number.
+          </div>
         } @else {
           <!--
-            Fixed columns: status · title · depth · owed · net · flags · toggle. A flex row
+            Fixed columns: status · title · when · depth · owed · net · flags · toggle. A flex row
             wrapped differently for every chain, so the eye had to re-find "owed" on each line.
           -->
-          <div class="chain-cols dim" aria-hidden="true">
+          <div class="chain-cols" aria-hidden="true">
             <span>Status</span>
             <span>Chain</span>
+            <span>Closed / last move</span>
             <span class="num">Depth</span>
             <span class="num">Balance</span>
             <span class="num">Net P&amp;L</span>
             <span>Flags</span>
             <span></span>
           </div>
-          @for (c of v.chains; track c.id) {
+          @for (c of visibleChains(); track c.id) {
             <article
               class="chain"
+              [id]="'chain-' + c.id"
               [attr.data-status]="c.status"
               [attr.data-reset]="isOperatorReset(c) ? 'true' : null"
             >
-              <header class="chain-head" (click)="toggle(c.id)">
+              <header
+                class="chain-head"
+                role="button"
+                tabindex="0"
+                [attr.aria-expanded]="expanded().has(c.id)"
+                (click)="toggle(c.id)"
+                (keydown.enter)="toggle(c.id)"
+                (keydown.space)="$event.preventDefault(); toggle(c.id)"
+              >
                 <span class="chain-status" [title]="c.closureReason ?? ''">
-                  {{ statusLabel(c) }}
+                  <span [class]="'pill ' + statusTone(c)">{{ statusLabel(c) }}</span>
                 </span>
-                <span class="chain-title">
+                <span
+                  class="chain-title"
+                  [title]="
+                    c.symbol +
+                    ' · ' +
+                    c.accountName +
+                    ' #' +
+                    c.tradingAccountId +
+                    ' · chain #' +
+                    c.id
+                  "
+                >
                   <b>{{ c.symbol }}</b> · {{ c.accountName }}
-                  <span class="dim">#{{ c.tradingAccountId }}</span>
+                  <span class="dim">#{{ c.tradingAccountId }} · chain #{{ c.id }}</span>
+                </span>
+                <span class="chain-when dim">
+                  {{ c.closedAtUtc ?? c.lastAdvancedAtUtc | date: ts : 'UTC' }}
                 </span>
 
                 <span class="chain-depth num" [class.neg]="c.depth >= c.maxDepth">
@@ -355,7 +393,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
                 <span class="chain-flags">
                   @if (c.depthDivergesFromLedger) {
-                    <span class="pill pill-bad">depth mismatch</span>
+                    <span class="pill bad">depth mismatch</span>
                   }
                   @if (c.isStale && c.waitingOnOpenPosition) {
                     <span
@@ -366,18 +404,20 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     </span>
                   } @else if (c.isStale) {
                     <span
-                      class="pill pill-warn"
+                      class="pill warn"
                       title="No advance inside the sweeper's stale window and nothing live on the symbol."
                     >
                       stale
                     </span>
                   }
                   @if (c.status === 'Open' && c.rungSkipCount > 0) {
-                    <span class="pill pill-bad">rung skipped ×{{ c.rungSkipCount }}</span>
+                    <span class="pill bad">rung skipped ×{{ c.rungSkipCount }}</span>
                   }
                 </span>
 
-                <span class="chain-toggle">{{ expanded().has(c.id) ? '−' : '+' }}</span>
+                <span class="chain-toggle" aria-hidden="true">{{
+                  expanded().has(c.id) ? '−' : '+'
+                }}</span>
               </header>
 
               @if (expanded().has(c.id)) {
@@ -385,12 +425,18 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                   <dl class="chain-meta">
                     <div>
                       <dt>Opened</dt>
-                      <dd>{{ c.openedAtUtc | date: 'short' : 'UTC' }}</dd>
+                      <dd>{{ c.openedAtUtc | date: ts : 'UTC' }} UTC</dd>
                     </div>
                     <div>
                       <dt>Last advance</dt>
-                      <dd>{{ c.lastAdvancedAtUtc | date: 'short' : 'UTC' }}</dd>
+                      <dd>{{ c.lastAdvancedAtUtc | date: ts : 'UTC' }} UTC</dd>
                     </div>
+                    @if (c.closedAtUtc) {
+                      <div>
+                        <dt>Closed</dt>
+                        <dd>{{ c.closedAtUtc | date: ts : 'UTC' }} UTC</dd>
+                      </div>
+                    }
                     <div>
                       <dt>Age</dt>
                       <dd>{{ c.ageHours | number: '1.1-1' }}h / {{ c.maxChainAgeHours }}h cap</dd>
@@ -421,7 +467,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       its cap is abandoned rather than staked. An inflated depth writes off a chain
                       that still had headroom — possibly one that is winning.
                     -->
-                    <div class="divergence">
+                    <div class="box bad">
                       <h3>Stored depth disagrees with the ledger</h3>
                       <p>
                         This chain records <b>depth {{ c.depth }}</b
@@ -444,11 +490,11 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                       chain looks identical to one that is laddering, while it actually keeps
                       advancing on base-sized trades and the deficit compounds.
                     -->
-                    <div class="skiptrace">
+                    <div class="box bad">
                       <h3>
                         Rung skipped at sizing time
                         <span class="dim"
-                          >— last {{ c.lastRungSkippedAtUtc | date: 'short' : 'UTC' }} UTC,
+                          >— last {{ c.lastRungSkippedAtUtc | date: ts : 'UTC' }} UTC,
                           {{ c.rungSkipCount }} episode{{ c.rungSkipCount === 1 ? '' : 's' }}</span
                         >
                       </h3>
@@ -463,12 +509,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
 
                   @if (c.nextRung; as r) {
                     <div
-                      class="rung"
-                      [class.rung-blocked]="!!r.blockedBy"
-                      [class.rung-abandon]="r.wouldAbandon"
-                      [class.rung-skip]="r.rungWillBeSkipped"
+                      class="box rung"
+                      [class.warn]="!!r.blockedBy || r.rungWillBeSkipped"
+                      [class.bad]="r.wouldAbandon"
                     >
-                      <h3>Next rung — depth {{ r.depth }}</h3>
+                      <h3>
+                        Next rung — depth {{ r.depth }}
+                        <span [class]="'pill ' + verdict(r).tone">{{ verdict(r).label }}</span>
+                      </h3>
                       <p>
                         Must make <b>{{ r.amountToRecover | number: '1.2-2' }}</b> ({{
                           r.stakeMultiple | number: '1.1-2'
@@ -490,24 +538,24 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         }
                       </p>
                       @if (r.wouldAbandon) {
-                        <p class="warn">
+                        <p class="warn-line">
                           <b>Would not stake.</b> {{ r.bindingConstraint }} The deficit is taken as
                           a realised loss rather than escalated further.
                         </p>
                       } @else if (r.blockedBy) {
-                        <p class="warn">
+                        <p class="warn-line">
                           <b>Blocked:</b> {{ r.blockedBy }} on this symbol. Serialisation holds a
                           laddered symbol to one live thing at a time — a second would give the
                           chain two deficits it cannot tell apart.
                         </p>
                       } @else if (r.rungWillBeSkipped) {
-                        <p class="warn">
+                        <p class="warn-line">
                           <b>Will not fit.</b> {{ r.bindingConstraint }} Unlike a cap breach this
                           does NOT abandon the chain — it quietly under-ladders instead, which is
                           why it is surfaced here.
                         </p>
                       } @else {
-                        <p class="ok">Clear to stake on the next signal for this symbol.</p>
+                        <p class="ok-line">Clear to stake on the next signal for this symbol.</p>
                       }
                     </div>
                   }
@@ -516,7 +564,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                     Ledger
                     @if (c.ledgerSource === 'replay') {
                       <span
-                        class="pill pill-warn"
+                        class="pill warn"
                         title="This chain predates the advance ledger, so its closes are reconstructed from position history by account, symbol and time window. That attributes by coincidence and can include a neighbouring chain's close or miss one whose timestamp was revised."
                       >
                         reconstructed from position history
@@ -534,7 +582,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         <thead>
                           <tr>
                             <th>Position</th>
-                            <th>Applied</th>
+                            <th>Applied (UTC)</th>
                             <th>Dir</th>
                             <th class="num">Lots</th>
                             <th class="num">P&amp;L</th>
@@ -556,7 +604,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                 made chains read as opening after their own rungs closed).
                               -->
                               <td>
-                                {{ e.appliedAtUtc ?? e.closedAtUtc | date: 'short' : 'UTC' }}
+                                {{ e.appliedAtUtc ?? e.closedAtUtc | date: ts : 'UTC' }}
                                 @if (e.closedAtUtc) {
                                   <span
                                     class="sub"
@@ -567,7 +615,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                         : 'Broker close time'
                                     "
                                   >
-                                    closed {{ e.closedAtUtc | date: 'short' : 'UTC' }}
+                                    closed {{ e.closedAtUtc | date: ts : 'UTC' }}
                                     @if (e.closedAtImplausible) {
                                       ⚠
                                     }
@@ -632,19 +680,17 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                     <span class="pill">opened the chain — depth 0</span>
                                   }
                                   @case ('Recovered') {
-                                    <span class="pill pill-on">recovered — chain closed</span>
+                                    <span class="pill ok">recovered — chain closed</span>
                                   }
                                   @case ('Abandoned') {
-                                    <span class="pill pill-bad"
-                                      >abandoned — deficit written off</span
-                                    >
+                                    <span class="pill bad">abandoned — deficit written off</span>
                                   }
                                   @case ('Scratch') {
                                     <span class="pill">scratch — depth held</span>
                                   }
                                   @case ('Unfunded') {
                                     <span
-                                      class="pill pill-warn"
+                                      class="pill warn"
                                       title="Traded at base size while a rung was staked — the money counts, the depth does not."
                                     >
                                       unfunded — depth held
@@ -654,14 +700,14 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                                     @if (e.openedTheChain) {
                                       <span class="pill">opened the chain — depth 0</span>
                                     } @else if (e.burnedARung && e.outcome === 'Loss') {
-                                      <span class="pill pill-warn">lost — burned a rung</span>
+                                      <span class="pill warn">lost — burned a rung</span>
                                     } @else if (e.burnedARung || e.outcome === 'Win') {
                                       <!--
                                         A win that did not fully recover the chain still escalates:
                                         only a full recovery ends a ladder, so a partial win is a
                                         failed attempt that happened to close green.
                                       -->
-                                      <span class="pill pill-warn">paid down — burned a rung</span>
+                                      <span class="pill warn">paid down — burned a rung</span>
                                     } @else {
                                       <span class="pill">depth held</span>
                                     }
@@ -673,27 +719,30 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                         </tbody>
                       </table>
                     </div>
-                    <p class="foot">
-                      Depth is the escalation budget: the opening loss is depth 0 and each recovery
-                      rung that fails to clear the debt raises it by one. Only a
-                      <b>full recovery</b>
-                      of the deficit ends a ladder, so a win that merely paid some of it down burns
-                      a rung just as a loss does; a break-even or an unfunded close holds.
-                      @if (c.ledgerSource === 'advances') {
-                        Every row is what the service actually applied. Rows are in the order the
-                        ladder applied them, which is the order that made the chain — not the order
-                        the broker stamped on the closes. A row marked
-                        <b>restated</b> had its money corrected against the broker's settled P&amp;L
-                        after the fact; the balance shown is the reconciled one, and the figure the
-                        chain originally booked is beside it. Once every restatement is accounted
-                        for the last balance should match the header — if it still does not, the row
-                        and the chain have genuinely diverged.
-                      } @else {
-                        The running balance is replayed from the chain's opening loss; if its last
-                        row disagrees with the header, the reconstruction has attributed the wrong
-                        closes.
-                      }
-                    </p>
+                    <details class="method">
+                      <summary>How to read depth and the running balance</summary>
+                      <p class="foot">
+                        Depth is the escalation budget: the opening loss is depth 0 and each
+                        recovery rung that fails to clear the debt raises it by one. Only a
+                        <b>full recovery</b>
+                        of the deficit ends a ladder, so a win that merely paid some of it down
+                        burns a rung just as a loss does; a break-even or an unfunded close holds.
+                        @if (c.ledgerSource === 'advances') {
+                          Every row is what the service actually applied. Rows are in the order the
+                          ladder applied them, which is the order that made the chain — not the
+                          order the broker stamped on the closes. A row marked
+                          <b>restated</b> had its money corrected against the broker's settled
+                          P&amp;L after the fact; the balance shown is the reconciled one, and the
+                          figure the chain originally booked is beside it. Once every restatement is
+                          accounted for the last balance should match the header — if it still does
+                          not, the row and the chain have genuinely diverged.
+                        } @else {
+                          The running balance is replayed from the chain's opening loss; if its last
+                          row disagrees with the header, the reconstruction has attributed the wrong
+                          closes.
+                        }
+                      </p>
+                    </details>
                   }
 
                   @if (c.status === 'Open') {
@@ -737,7 +786,7 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
                           Cancel
                         </button>
                         @if (resetError(); as re) {
-                          <span class="warn">{{ re }}</span>
+                          <span class="warn-line">{{ re }}</span>
                         }
                       } @else {
                         <button type="button" class="btn-danger-outline" (click)="openReset(c.id)">
@@ -758,496 +807,131 @@ import { EmptyStateComponent } from '@shared/components/feedback/empty-state.com
         }
       </section>
 
-      <p class="generated">
-        Generated {{ v.generatedAtUtc | date: 'medium' : 'UTC' }} UTC ·
-        <button type="button" class="link" (click)="reload()">refresh</button>
-      </p>
+      <!-- Laddered pairs, including ones with no chain yet. -->
+      <section class="symbols card">
+        <h2>Laddered symbols</h2>
+        @if (v.ladderedSymbols.length === 0) {
+          <app-empty-state
+            title="No symbols opted in"
+            description="A ladder is switched on per account and symbol. Nothing is laddered yet."
+          />
+        } @else {
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Symbol</th>
+                  <th>State</th>
+                  <th class="num">Max depth</th>
+                  <th class="num">Target R</th>
+                  <th class="num">Stake cap</th>
+                  <th class="num">Age cap</th>
+                  <th class="num" title="Model estimate at the profile's assumed ~0.5R geometry">
+                    Worst case (model)
+                  </th>
+                  <th
+                    class="num"
+                    title="Next rung's stake at the open chain's actual entry geometry"
+                  >
+                    Next rung (live)
+                  </th>
+                  <th>Live now</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (s of v.ladderedSymbols; track s.tradingAccountId + s.symbol) {
+                  <tr [class.inactive]="!s.effectivelyActive">
+                    <td>
+                      {{ s.accountName }} <span class="dim">#{{ s.tradingAccountId }}</span>
+                    </td>
+                    <td class="mono">{{ s.symbol }}</td>
+                    <td>
+                      @if (s.effectivelyActive) {
+                        <span class="pill ok">active</span>
+                      } @else if (!s.enabled) {
+                        <span class="pill">symbol off</span>
+                      } @else if (!s.profileEnabled) {
+                        <span class="pill warn">profile off</span>
+                      } @else {
+                        <span class="pill">mode off</span>
+                      }
+                    </td>
+                    <td class="num">{{ s.effectiveMaxDepth }}</td>
+                    <td class="num">{{ s.effectiveTargetProfitR | number: '1.2-2' }}</td>
+                    <td class="num">{{ s.effectiveMaxStakePctEquity | number: '1.0-2' }}%</td>
+                    <td class="num">{{ s.effectiveMaxChainAgeHours }}h</td>
+                    <td class="num" [class.neg]="s.worstCaseDrawdownPct > 50">
+                      {{ s.worstCaseDrawdownPct | number: '1.1-1' }}%
+                    </td>
+                    <td class="num">
+                      @if (liveRungFor(s); as r) {
+                        <span
+                          [class.neg]="r.stakePctEquity > s.effectiveMaxStakePctEquity"
+                          [title]="
+                            'Depth ' +
+                            r.depth +
+                            (r.geometryR !== null
+                              ? ' at ' + (r.geometryR | number: '1.2-2') + 'R'
+                              : '') +
+                            ' — next-rung estimate for the open chain'
+                          "
+                        >
+                          {{ r.stakePctEquity | number: '1.1-1' }}%
+                        </span>
+                      } @else {
+                        <span class="dim">—</span>
+                      }
+                    </td>
+                    <td>
+                      @if (s.openPositions || s.ordersInFlight) {
+                        <span class="dim">
+                          {{ s.openPositions }} pos · {{ s.ordersInFlight }} ord
+                        </span>
+                      } @else {
+                        <span class="dim">—</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+          <p class="foot">
+            <b>Worst case (model)</b> is the cumulative loss if every rung to the depth cap loses,
+            estimated at the profile's assumed geometry (~0.5R, stake roughly tripling per rung).
+            <b>Next rung (live)</b> is what the open chain would actually risk next, at the real
+            entry geometry of its last close — a thin-geometry chain can need more on a single rung
+            than the whole model series, which is why both are shown.
+          </p>
+        }
+      </section>
     }
   `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-
-      /* Mode banner: colour-coded by consequence — Live is the only one that moves money. */
-      .mode {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        flex-wrap: wrap;
-        border: 1px solid var(--border);
-        border-left-width: 4px;
-        border-radius: 8px;
-        padding: 0.75rem 1rem;
-        margin-bottom: 1rem;
-        background: var(--bg-secondary);
-      }
-      .mode[data-mode='Live'] {
-        border-left-color: var(--loss);
-      }
-      .mode[data-mode='Shadow'] {
-        border-left-color: var(--warning);
-      }
-      .mode[data-mode='Off'] {
-        border-left-color: var(--border);
-      }
-      .mode-badge {
-        font-weight: 700;
-        text-transform: uppercase;
-        font-size: 0.75rem;
-        letter-spacing: 0.05em;
-      }
-      .mode-copy {
-        flex: 1 1 20rem;
-      }
-      .mode-link {
-        font-size: 0.875rem;
-      }
-
-      /* Two primary money tiles span two columns each and set their value
-         larger; the four count tiles share the remaining width at one weight. */
-      .totals {
-        display: grid;
-        grid-template-columns: repeat(8, minmax(0, 1fr));
-        gap: 0.75rem;
-        margin-bottom: 1rem;
-        align-items: stretch;
-      }
-      .stat {
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 0.7rem 0.85rem;
-        background: var(--bg-secondary);
-        min-width: 0;
-      }
-      .stat.primary {
-        grid-column: span 2;
-      }
-      .stat.primary .stat-value {
-        font-size: 1.75rem;
-      }
-      @media (max-width: 1100px) {
-        .totals {
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 640px) {
-        .totals {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .stat-label {
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
-      }
-      .stat-value {
-        font-size: 1.2rem;
-        font-weight: 600;
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .stat-note {
-        font-size: 0.72rem;
-        color: var(--text-secondary);
-        line-height: 1.35;
-      }
-
-      .sweeper,
-      .symbols,
-      .chains {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-        background: var(--bg-secondary);
-      }
-      .sweeper-off {
-        border-left: 4px solid var(--loss);
-      }
-      h2 {
-        margin: 0 0 0.6rem;
-        font-size: 1rem;
-      }
-      h3 {
-        margin: 1rem 0 0.4rem;
-        font-size: 0.9rem;
-      }
-      .sweeper-line {
-        margin: 0 0 0.4rem;
-      }
-
-      .chains-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-      }
-      .filters {
-        display: flex;
-        gap: 0.35rem;
-      }
-      .filter {
-        border: 1px solid var(--border);
-        background: transparent;
-        color: inherit;
-        border-radius: 999px;
-        padding: 0.2rem 0.7rem;
-        font-size: 0.8rem;
-        cursor: pointer;
-      }
-      .filter-on {
-        background: var(--bg-tertiary);
-        font-weight: 600;
-      }
-
-      .chain {
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        margin-top: 0.6rem;
-        overflow: hidden;
-      }
-      .chain[data-status='Open'] {
-        border-left: 4px solid var(--warning);
-      }
-      .chain[data-status='Recovered'] {
-        border-left: 4px solid var(--profit);
-      }
-      .chain[data-status='Abandoned'] {
-        border-left: 4px solid var(--loss);
-      }
-      /* An operator reset is a deliberate write-off, not a ladder that ran out of road. */
-      .chain[data-status='Abandoned'][data-reset='true'] {
-        border-left-color: var(--text-tertiary);
-      }
-      .chain-cols,
-      .chain-head {
-        display: grid;
-        /* 9.5rem: "Reset by operator" in caps is the longest status and was cut to "RESET BY OPERAT…". */
-        grid-template-columns: 9.5rem minmax(10rem, 1fr) 4rem 9rem 8rem minmax(8rem, 1.2fr) 1.2rem;
-        align-items: center;
-        gap: 0.75rem;
-        padding: 0.6rem 0.85rem;
-      }
-      .chain-cols {
-        margin-top: 0.75rem;
-        padding-top: 0;
-        padding-bottom: 0.2rem;
-        font-size: 0.68rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .chain-head {
-        cursor: pointer;
-      }
-      .chain-head > .num,
-      .chain-cols > .num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .chain-status {
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .chain-title {
-        min-width: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .chain-depth,
-      .chain-money,
-      .chain-pnl {
-        font-variant-numeric: tabular-nums;
-        font-size: 0.875rem;
-        white-space: nowrap;
-      }
-      .chain-flags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.3rem;
-        min-width: 0;
-      }
-      .chain-toggle {
-        font-size: 1.1rem;
-        width: 1rem;
-        text-align: center;
-      }
-      @media (max-width: 900px) {
-        .chain-cols {
-          display: none;
-        }
-        .chain-head {
-          grid-template-columns: 1fr 1fr;
-        }
-        .chain-head > .num {
-          text-align: left;
-        }
-      }
-      .chain-body {
-        padding: 0 0.85rem 0.85rem;
-        border-top: 1px solid var(--border);
-      }
-
-      .chain-meta {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-        gap: 0.5rem 1rem;
-        margin: 0.75rem 0 0;
-      }
-      .chain-meta > div.wide {
-        grid-column: 1 / -1;
-      }
-      .chain-meta dt {
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
-      }
-      .chain-meta dd {
-        margin: 0;
-        font-variant-numeric: tabular-nums;
-      }
-
-      .rung {
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        padding: 0.6rem 0.8rem;
-        margin-top: 0.9rem;
-        background: var(--bg-tertiary);
-      }
-      .rung h3 {
-        margin-top: 0;
-      }
-      .rung-blocked {
-        border-left: 3px solid var(--warning);
-      }
-      .rung-abandon {
-        border-left: 3px solid var(--loss);
-      }
-      .rung p {
-        margin: 0.25rem 0;
-      }
-
-      /* Wide tables scroll inside their own box — the page body never scrolls sideways. */
-      .table-scroll {
-        overflow-x: auto;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.875rem;
-      }
-      th,
-      td {
-        text-align: left;
-        padding: 0.4rem 0.6rem;
-        border-bottom: 1px solid var(--border);
-        white-space: nowrap;
-      }
-      /* Headers may wrap between words: at 1440px the ten laddered-symbol columns overflowed by
-         one ("Live now" was cut at the box edge) because two-word headers set the widths. */
-      th {
-        font-size: 0.72rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: var(--text-secondary);
-        font-weight: 600;
-        white-space: normal;
-        vertical-align: bottom;
-      }
-      td.num,
-      th.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      tr.inactive td {
-        opacity: 0.55;
-      }
-
-      .pill {
-        display: inline-block;
-        border: 1px solid var(--border);
-        border-radius: 999px;
-        padding: 0.05rem 0.5rem;
-        font-size: 0.72rem;
-        white-space: nowrap;
-      }
-      .pill-on {
-        border-color: var(--profit);
-      }
-      .pill-warn {
-        border-color: var(--warning);
-      }
-      .pill-bad {
-        border-color: var(--loss);
-        color: var(--loss);
-        font-weight: 600;
-      }
-
-      .divergence {
-        border: 1px solid var(--loss);
-        border-left-width: 3px;
-        border-radius: 6px;
-        padding: 0.6rem 0.8rem;
-        margin-top: 0.9rem;
-      }
-      .divergence h3 {
-        margin-top: 0;
-        color: var(--loss);
-      }
-      .divergence p {
-        margin: 0.25rem 0;
-      }
-
-      .pos {
-        color: var(--profit);
-      }
-      .neg {
-        color: var(--loss);
-      }
-      .dim {
-        color: var(--text-secondary);
-      }
-      .mono {
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-      }
-      .warn {
-        color: var(--warning);
-      }
-      .ok {
-        color: var(--profit);
-      }
-      .foot {
-        margin: 0.5rem 0 0;
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-      }
-
-      /* Secondary line inside a ledger cell: the broker close time under the apply time, and
-         the pre-reconciliation figure under a restated balance. Quiet by default — it is
-         provenance, not the number the reader came for — and loud only when it contradicts. */
-      .ledger .sub {
-        display: block;
-        font-size: 0.72rem;
-        line-height: 1.3;
-        color: var(--text-secondary);
-        font-weight: 400;
-      }
-      .ledger .sub.bad-time {
-        color: var(--warning);
-      }
-      .ledger .sub.restated {
-        font-style: italic;
-      }
-
-      /* Rung-skip trace: same visual weight as the depth-divergence callout — both mean the
-         module's paper state and its money state disagree. */
-      .skiptrace {
-        border: 1px solid var(--loss);
-        border-left-width: 4px;
-        border-radius: 6px;
-        padding: 0.6rem 0.8rem;
-        margin: 0.75rem 0;
-      }
-      .skiptrace h3 {
-        margin: 0 0 0.3rem;
-      }
-      .skiptrace p {
-        margin: 0 0 0.3rem;
-      }
-      .rung-skip {
-        border-left: 4px solid var(--warning);
-      }
-
-      .reset {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-        margin-top: 0.9rem;
-        padding-top: 0.75rem;
-        border-top: 1px dashed var(--border);
-        font-size: 0.85rem;
-      }
-      .reset-reason {
-        flex: 1 1 18rem;
-        padding: 0.35rem 0.5rem;
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        background: var(--bg-primary);
-        color: inherit;
-        font: inherit;
-      }
-      .btn-danger,
-      .btn-danger-outline,
-      .btn-plain {
-        border-radius: 6px;
-        padding: 0.35rem 0.7rem;
-        font: inherit;
-        font-size: 0.85rem;
-        cursor: pointer;
-      }
-      .btn-danger {
-        border: 1px solid var(--loss);
-        background: var(--loss);
-        color: #fff;
-      }
-      .btn-danger:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-danger-outline {
-        border: 1px solid var(--loss);
-        background: none;
-        color: var(--loss);
-      }
-      .btn-plain {
-        border: 1px solid var(--border);
-        background: none;
-        color: inherit;
-      }
-      .generated {
-        font-size: 0.8rem;
-        color: var(--text-secondary);
-      }
-      .link {
-        background: none;
-        border: none;
-        padding: 0;
-        color: inherit;
-        text-decoration: underline;
-        cursor: pointer;
-        font: inherit;
-      }
-    `,
-  ],
 })
 export class MartingaleInternalsPageComponent {
   private readonly service = inject(MartingaleService);
 
   readonly statusFilters = ['', 'Open', 'Recovered', 'Abandoned'] as const;
+  readonly ts = TS;
 
   readonly loading = signal(true);
   readonly error = signal<string | null>(null);
   readonly status = signal<string>('');
   readonly expanded = signal<ReadonlySet<number>>(new Set<number>());
+  /** Client-side search over the chains already loaded — never a new request. */
+  readonly query = signal('');
 
   private readonly data = signal<MartingaleOverviewDto | null>(null);
   readonly view = computed(() => this.data());
+
+  readonly visibleChains = computed(() => {
+    const q = this.query();
+    return (this.data()?.chains ?? []).filter((c) => chainMatchesQuery(c, q));
+  });
+
+  /** Open chains in view, for the "Open right now" headline. */
+  readonly openNow = computed(() => (this.data()?.chains ?? []).filter((c) => c.status === 'Open'));
 
   /**
    * Written-off money that belongs to chains whose stored depth the ledger does not support.
@@ -1284,6 +968,25 @@ export class MartingaleInternalsPageComponent {
 
   statusLabel(c: MartingaleChainViewDto): string {
     return this.isOperatorReset(c) ? 'Reset by operator' : c.status;
+  }
+
+  statusTone(c: MartingaleChainViewDto): Tone {
+    return chainStatusTone(c.status, this.isOperatorReset(c));
+  }
+
+  verdict(r: NextRungLike): { tone: Tone; label: string } {
+    return nextRungVerdict(r);
+  }
+
+  /** "Ledger ↓" in the headline: open the chain (if folded) and bring it into view. */
+  jumpTo(chainId: number): void {
+    if (!this.expanded().has(chainId)) this.toggle(chainId);
+    if (this.query() && !this.visibleChains().some((c) => c.id === chainId)) this.query.set('');
+    setTimeout(() =>
+      document
+        .getElementById('chain-' + chainId)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
   }
 
   constructor() {

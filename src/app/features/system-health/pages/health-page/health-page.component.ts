@@ -29,6 +29,8 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
+import { formatMs, humanizeEventType, idleReasonOf, type IdleReason } from './health-page.helpers';
+
 @Component({
   selector: 'app-health-page',
   standalone: true,
@@ -48,7 +50,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
     <div class="page">
       <app-page-header
         title="System Health"
-        subtitle="Live engine status and operational metrics"
+        subtitle="Is the engine up, are its background workers healthy, and is anything stuck in the dead-letter queue?"
       />
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab">
@@ -57,7 +59,8 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
             <app-card-skeleton [lines]="6" />
           } @else if (status()) {
             @if (status(); as s) {
-              <!-- Hero status banner -->
+              <!-- Hero: engine state first, then exactly what needs attention (each chip links to
+                   the page where it is dealt with). -->
               <div
                 class="health-hero"
                 [class.healthy]="s.isRunning"
@@ -67,15 +70,35 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <span class="health-icon" aria-hidden="true">{{ s.isRunning ? '✓' : '!' }}</span>
                 </div>
                 <div class="health-text">
-                  <span class="health-status">{{
-                    s.isRunning ? 'Engine Running' : 'Engine Stopped'
-                  }}</span>
-                  <span class="health-sub"
-                    >Last checked {{ s.checkedAt | date: 'MMM d, HH:mm:ss' }}</span
-                  >
-                  @if (modeLabel(); as mode) {
-                    <span class="mode-pill" [class.live]="!isPaperMode()">{{ mode }}</span>
-                  }
+                  <div class="health-title">
+                    <span class="health-status">{{
+                      s.isRunning ? 'Engine Running' : 'Engine Stopped'
+                    }}</span>
+                    @if (modeLabel(); as mode) {
+                      <span
+                        class="mode-pill"
+                        [class.live]="!isPaperMode()"
+                        [title]="
+                          isPaperMode()
+                            ? 'Orders are simulated, not sent to brokers'
+                            : 'Orders go to real broker accounts'
+                        "
+                        >{{ mode }}</span
+                      >
+                    }
+                  </div>
+                  <div class="attention" aria-label="What needs attention">
+                    @for (a of attention(); track a.text) {
+                      @if (a.link) {
+                        <a class="chip" [class]="a.tone" [routerLink]="a.link">{{ a.text }}</a>
+                      } @else {
+                        <span class="chip" [class]="a.tone">{{ a.text }}</span>
+                      }
+                    }
+                  </div>
+                  <span class="health-sub" title="Your local time · the page re-reads every 15 s">
+                    Last checked {{ s.checkedAt | date: 'MMM d, HH:mm:ss' }} · refreshes every 15 s
+                  </span>
                 </div>
                 <div class="hero-meta">
                   <span class="meta-pair">
@@ -114,104 +137,59 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 </div>
               </div>
 
-              <!-- 8-card KPI strip -->
+              <!-- KPI strip: a tone stripe only where the number says something is wrong (or,
+                   for healthy workers, right) — eight green stripes read as noise. -->
               <div class="hp-kpis">
                 <app-metric-card
                   label="Active strategies"
                   [value]="s.activeStrategies"
                   format="number"
-                  dotColor="#0071E3"
                 />
-                <app-metric-card
-                  label="Open positions"
-                  [value]="s.openPositions"
-                  format="number"
-                  dotColor="#34C759"
-                />
+                <app-metric-card label="Open positions" [value]="s.openPositions" format="number" />
                 <app-metric-card
                   label="Pending orders"
                   [value]="s.pendingOrders"
                   format="number"
-                  [dotColor]="s.pendingOrders > 0 ? '#FF9500' : '#34C759'"
+                  [dotColor]="s.pendingOrders > 0 ? 'var(--warning)' : ''"
+                  [caption]="s.pendingOrders > 0 ? 'Waiting to be filled or cancelled' : null"
                 />
                 <app-metric-card
                   label="Healthy workers"
                   [value]="workerCounts().Healthy"
                   format="number"
-                  dotColor="#34C759"
+                  dotColor="var(--profit)"
+                  [caption]="'of ' + workerSnapshots().length + ' workers'"
                 />
                 <app-metric-card
                   label="Degraded workers"
                   [value]="workerCounts().Degraded"
                   format="number"
-                  [dotColor]="workerCounts().Degraded > 0 ? '#FF9500' : '#34C759'"
+                  [dotColor]="workerCounts().Degraded > 0 ? 'var(--warning)' : ''"
                 />
                 <app-metric-card
                   label="Failed workers"
                   [value]="workerCounts().Failed"
                   format="number"
-                  [dotColor]="workerCounts().Failed > 0 ? '#FF3B30' : '#34C759'"
+                  [dotColor]="workerCounts().Failed > 0 ? 'var(--loss)' : ''"
                 />
                 <app-metric-card
                   label="Idle workers"
                   [value]="workerCounts().Idle"
                   format="number"
-                  dotColor="#0071E3"
+                  [caption]="workerCounts().Idle > 0 ? 'Running, no completed cycle yet' : null"
                 />
                 <app-metric-card
                   label="DLQ unresolved"
                   [value]="dlqTotal()"
                   format="number"
-                  [dotColor]="(dlqTotal() ?? 0) > 0 ? '#FF3B30' : '#34C759'"
+                  [dotColor]="(dlqTotal() ?? 0) > 0 ? 'var(--loss)' : ''"
+                  [caption]="(dlqTotal() ?? 0) > 0 ? 'Events never delivered to a consumer' : null"
                 />
               </div>
 
-              <!-- 2-col chart row: worker status donut + DLQ event types -->
-              <div class="hp-charts">
-                <app-chart-card
-                  title="Worker status distribution"
-                  subtitle="Healthy · Degraded · Failed · Idle"
-                  [options]="workerDonutOptions()"
-                  height="240px"
-                />
-                <!-- A donut with one or two slices says nothing a number can't;
-                     below three event types the breakdown renders as a list. -->
-                @if (dlqEventTypeRows().length >= 3) {
-                  <app-chart-card
-                    title="Unresolved DLQ by event type"
-                    subtitle="Event types in the last 25 unresolved rows"
-                    [options]="dlqEventTypeOptions()"
-                    height="240px"
-                  />
-                } @else {
-                  <section class="hp-board hp-board-list">
-                    <header class="hp-board-head">
-                      <h3>Unresolved DLQ by event type</h3>
-                      <span class="muted">Event types in the last 25 unresolved rows</span>
-                    </header>
-                    @if (dlqEventTypeRows().length === 0) {
-                      <p class="hp-board-empty good">No unresolved dead-letter events.</p>
-                    } @else {
-                      <ul class="hp-type-list">
-                        @for (row of dlqEventTypeRows(); track row.name) {
-                          <li>
-                            <span class="mono type-name" [title]="row.name">{{ row.name }}</span>
-                            <span class="type-bar">
-                              <span class="type-fill" [style.width.%]="row.share"></span>
-                            </span>
-                            <span class="mono type-count">
-                              {{ row.value }} · {{ row.share.toFixed(0) }}%
-                            </span>
-                          </li>
-                        }
-                      </ul>
-                    }
-                  </section>
-                }
-              </div>
-
-              <!-- Non-healthy workers. Idle is listed but not called an issue: an idle worker is
-                   running and simply has not completed a cycle yet (nothing to do, long cadence). -->
+              <!-- Non-healthy workers first: this is the list the operator came for. Idle is
+                   listed but not called an issue: an idle worker is running and simply has not
+                   completed a cycle yet (nothing to do, long cadence). -->
               @if (issuesList().length > 0) {
                 <section class="hp-board">
                   <header class="hp-board-head">
@@ -222,14 +200,15 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                       {{ problemCount() }} failed or degraded · {{ workerCounts().Idle }} idle (no
                       completed cycle yet)
                     </span>
+                    <a routerLink="/worker-health" class="head-link">Worker Health →</a>
                   </header>
                   <table class="hp-board-table">
                     <thead>
                       <tr>
                         <th>Status</th>
                         <th>Worker</th>
-                        <th>Message</th>
-                        <th>Last success</th>
+                        <th>Why</th>
+                        <th class="num">Last success</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -245,13 +224,40 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                               {{ w.status }}
                             </span>
                           </td>
-                          <td class="mono">{{ w.name }}</td>
-                          <td class="msg" [title]="w.lastErrorMessage ?? ''">
-                            {{ w.lastErrorMessage ?? idleReason(w.name) }}
-                          </td>
+                          <td class="mono nowrap">{{ w.name }}</td>
+                          @if (w.lastErrorMessage) {
+                            <td class="msg" [title]="w.lastErrorMessage">
+                              <span class="msg-error">{{ w.lastErrorMessage }}</span>
+                            </td>
+                          } @else {
+                            @let r = idleReasonFor(w.name);
+                            <td class="msg" [title]="idleReason(w.name)">
+                              @switch (r.kind) {
+                                @case ('off') {
+                                  <span class="strong">Switched off</span> —
+                                  <code>{{ r.key }}</code> = false{{
+                                    r.since ? ' since ' + r.since : ''
+                                  }}
+                                }
+                                @case ('on') {
+                                  Switched on; no completed cycle yet (nothing to do, or a long
+                                  interval)
+                                }
+                                @default {
+                                  <span class="muted">—</span>
+                                }
+                              }
+                            </td>
+                          }
                           <!-- capturedAt is when the snapshot was taken (always "just now"); the
                                worker's own last good cycle is what says how long it has been out. -->
-                          <td class="mono">
+                          <td
+                            class="num"
+                            [class.muted]="!w.lastSuccessAt"
+                            [title]="
+                              w.lastSuccessAt ? (w.lastSuccessAt | date: 'yyyy-MM-dd HH:mm:ss') : ''
+                            "
+                          >
                             {{ w.lastSuccessAt ? (w.lastSuccessAt | relativeTime) : 'never' }}
                           </td>
                         </tr>
@@ -261,7 +267,101 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 </section>
               }
 
+              <!-- Fleet + dead letters side by side. The fleet is a proportional bar, not a donut:
+                   at 94 of 98 healthy a donut is one green ring (the donut is on Infrastructure). -->
+              <div class="hp-charts">
+                <section class="hp-board">
+                  <header class="hp-board-head">
+                    <h3>Worker fleet</h3>
+                    <span class="muted">{{ workerSnapshots().length }} background workers</span>
+                  </header>
+                  @if (workerSnapshots().length === 0) {
+                    <p class="hp-board-empty">
+                      <strong>No worker snapshots yet</strong>
+                      {{
+                        workersResource.error()
+                          ? 'The /health/workers read failed; retrying every 15 s.'
+                          : 'Waiting for the first read.'
+                      }}
+                    </p>
+                  } @else {
+                    <div class="hp-board-body">
+                      <div class="fleet-bar" role="img" [attr.aria-label]="fleetAria()">
+                        @for (seg of fleetSegments(); track seg.key) {
+                          @if (seg.count > 0) {
+                            <span
+                              [class]="'seg-' + seg.key"
+                              [style.width.%]="seg.pct"
+                              [title]="seg.label + ': ' + seg.count"
+                            ></span>
+                          }
+                        }
+                      </div>
+                      <ul class="fleet-legend">
+                        @for (seg of fleetSegments(); track seg.key) {
+                          <li [class.zero]="seg.count === 0">
+                            <span class="sw" [class]="'sw seg-' + seg.key"></span>
+                            <span class="lbl">{{ seg.label }}</span>
+                            <span class="n">{{ seg.count }}</span>
+                            <span class="pct">{{ seg.pct.toFixed(0) }}%</span>
+                          </li>
+                        }
+                      </ul>
+                      <p class="fleet-note">
+                        Idle = running but no completed cycle yet; it lowers Healthy % without
+                        anything being wrong.
+                      </p>
+                    </div>
+                  }
+                </section>
+
+                <!-- A donut with one or two slices says nothing a number can't;
+                     below three event types the breakdown renders as a list. -->
+                @if (dlqEventTypeRows().length >= 3) {
+                  <app-chart-card
+                    title="Unresolved DLQ by event type"
+                    subtitle="Event types in the last 25 unresolved rows"
+                    [options]="dlqEventTypeOptions()"
+                    height="240px"
+                  />
+                } @else {
+                  <section class="hp-board">
+                    <header class="hp-board-head">
+                      <h3>Unresolved DLQ by event type</h3>
+                      <span class="muted">Event types in the last 25 unresolved rows</span>
+                      <a routerLink="/dead-letter" class="head-link">Dead-letter queue →</a>
+                    </header>
+                    @if (dlqEventTypeRows().length === 0) {
+                      <p class="hp-board-empty good">
+                        <strong>No unresolved dead-letter events.</strong>
+                        Every integration event has reached its consumers.
+                      </p>
+                    } @else {
+                      <div class="hp-board-body">
+                        <ul class="hp-type-list">
+                          @for (row of dlqEventTypeRows(); track row.name) {
+                            <li>
+                              <span [title]="row.name">
+                                <span class="ev-name">{{ row.label }}</span>
+                                <span class="ev-raw">{{ row.name }}</span>
+                              </span>
+                              <span class="type-bar">
+                                <span class="type-fill" [style.width.%]="row.share"></span>
+                              </span>
+                              <span class="type-count">
+                                {{ row.value }} · {{ row.share.toFixed(0) }}%
+                              </span>
+                            </li>
+                          }
+                        </ul>
+                      </div>
+                    }
+                  </section>
+                }
+              </div>
+
               <!-- Quick actions / drill-down links -->
+              <h4 class="hp-section-label">Go deeper</h4>
               <section class="hp-actions">
                 <a routerLink="/engine-overview" class="hp-action">
                   <span class="hp-action-label">Engine Overview</span>
@@ -283,6 +383,10 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <span class="hp-action-label">Audit trail</span>
                   <span class="hp-action-desc">Operator-facing change log</span>
                 </a>
+                <a routerLink="/system-health/worker-override-knobs" class="hp-action">
+                  <span class="hp-action-label">Worker override knobs</span>
+                  <span class="hp-action-desc">Config keys each worker reads</span>
+                </a>
               </section>
             }
           } @else {
@@ -296,63 +400,106 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         @if (activeTab() === 'infrastructure') {
           <!-- Per-category worker breakdown -->
           @if (workerSnapshots().length > 0) {
-            <!-- 8-card infra KPI strip — fleet-wide performance signals -->
+            <!-- 8-card infra KPI strip — fleet-wide performance signals. Durations are shown
+                 in a readable unit (393,015 ms → 6.6 min); the exact ms stays in the title. -->
             <div class="hp-kpis">
               <app-metric-card
                 label="Total workers"
                 [value]="workerSnapshots().length"
                 format="number"
-                dotColor="#0071E3"
               />
               <app-metric-card
                 label="Categories"
                 [value]="perCategoryBreakdown().length"
                 format="number"
-                dotColor="#5AC8FA"
+                caption="Grouped by the worker name's first word"
               />
               <!-- Median, not mean: one hourly 13-minute retention sweep dragged the mean P95 to
                    17 s while the typical worker cycles in under 100 ms. -->
               <app-metric-card
-                label="Median P95 (ms)"
+                label="Median P95 cycle"
                 [value]="infraStats().medianP95Cycle"
+                [displayValue]="formatMs(infraStats().medianP95Cycle)"
                 format="number"
-                [dotColor]="infraStats().medianP95Cycle > 1000 ? '#FF9500' : '#34C759'"
+                [dotColor]="infraStats().medianP95Cycle > 1000 ? 'var(--warning)' : ''"
+                [caption]="'Mean of all P95s: ' + formatMs(infraStats().avgP95Cycle)"
                 [attr.title]="'Mean of all P95s: ' + infraStats().avgP95Cycle + ' ms'"
               />
               <app-metric-card
-                label="Max P99 (ms)"
+                label="Max P99 cycle"
                 [value]="infraStats().maxP99Cycle"
+                [displayValue]="formatMs(infraStats().maxP99Cycle)"
                 format="number"
-                [dotColor]="infraStats().maxP99Cycle > 5000 ? '#FF3B30' : '#34C759'"
+                [dotColor]="infraStats().maxP99Cycle > 5000 ? 'var(--loss)' : ''"
+                [caption]="infraStats().maxP99Worker"
                 [attr.title]="
-                  infraStats().maxP99Worker ? 'Slowest: ' + infraStats().maxP99Worker : ''
+                  (infraStats().maxP99Worker
+                    ? 'Slowest: ' + infraStats().maxP99Worker + ' · '
+                    : '') +
+                  infraStats().maxP99Cycle.toLocaleString() +
+                  ' ms'
                 "
               />
               <app-metric-card
                 label="Errors / hour"
                 [value]="infraStats().totalErrorsLastHour"
                 format="number"
-                [dotColor]="infraStats().totalErrorsLastHour > 0 ? '#FF3B30' : '#34C759'"
+                [dotColor]="infraStats().totalErrorsLastHour > 0 ? 'var(--loss)' : ''"
               />
               <app-metric-card
                 label="Successes / hour"
                 [value]="infraStats().totalSuccessesLastHour"
                 format="number"
-                dotColor="#34C759"
+                caption="Completed worker cycles"
               />
               <app-metric-card
                 label="Total backlog"
                 [value]="infraStats().totalBacklog"
                 format="number"
-                [dotColor]="infraStats().totalBacklog > 100 ? '#FF9500' : '#34C759'"
+                [dotColor]="infraStats().totalBacklog > 100 ? 'var(--warning)' : ''"
+                caption="Items waiting across all workers"
                 [attr.title]="'Sum of the backlog depth every worker reports: items waiting, not items processed. On an engine older than 2026-10-19, SpreadProfileWorker also adds the ticks it processed (millions), which then dominate the total.'"
               />
               <app-metric-card
                 label="Retries / hour"
                 [value]="infraStats().totalRetriesLastHour"
                 format="number"
-                [dotColor]="infraStats().totalRetriesLastHour > 0 ? '#FF9500' : '#34C759'"
+                [dotColor]="infraStats().totalRetriesLastHour > 0 ? 'var(--warning)' : ''"
               />
+            </div>
+
+            <!-- Performance first (tail latency + error hot-spots), composition after. -->
+            <div class="hp-charts">
+              <app-chart-card
+                title="P95 cycle duration by category"
+                [subtitle]="
+                  'Average P95 per category, slowest ' +
+                  topCategoryLimit +
+                  ' shown · log scale · amber over 1 s — hover a bar for the value'
+                "
+                [options]="cycleDurationByCategoryOptions()"
+                height="300px"
+              />
+              @if (infraStats().totalErrorsLastHour > 0) {
+                <app-chart-card
+                  title="Errors per hour by category"
+                  subtitle="Hot-spots in the worker fleet"
+                  [options]="errorsByCategoryOptions()"
+                  height="300px"
+                />
+              } @else {
+                <section class="hp-board">
+                  <header class="hp-board-head">
+                    <h3>Errors per hour by category</h3>
+                    <span class="muted">Hot-spots in the worker fleet</span>
+                  </header>
+                  <p class="hp-board-empty good">
+                    <strong>No errors reported in the last hour</strong>
+                    {{ infraStats().totalSuccessesLastHour.toLocaleString() }} completed cycles
+                    across {{ workerSnapshots().length }} workers.
+                  </p>
+                </section>
+              }
             </div>
 
             <div class="hp-charts">
@@ -366,26 +513,6 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                 title="Workers by status"
                 subtitle="Status distribution across the fleet"
                 [options]="workerDonutOptions()"
-                height="300px"
-              />
-            </div>
-
-            <!-- Performance charts row — surfaces tail latency + error spikes -->
-            <div class="hp-charts">
-              <app-chart-card
-                title="P95 cycle duration by category"
-                [subtitle]="
-                  'Average P95 per category, slowest ' +
-                  topCategoryLimit +
-                  ' shown · log scale — hover a bar for the value'
-                "
-                [options]="cycleDurationByCategoryOptions()"
-                height="300px"
-              />
-              <app-chart-card
-                title="Errors per hour by category"
-                subtitle="Hot-spots in the worker fleet"
-                [options]="errorsByCategoryOptions()"
                 height="300px"
               />
             </div>
@@ -417,18 +544,28 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   <tbody>
                     @for (row of perCategoryBreakdown(); track row.category) {
                       <tr>
-                        <td class="mono">{{ row.category }}</td>
-                        <td class="num mono">{{ row.total }}</td>
-                        <td class="num mono good">{{ row.healthy }}</td>
-                        <td class="num mono" [class.warn]="row.degraded > 0">
+                        <td class="strong">{{ row.category }}</td>
+                        <td class="num">{{ row.total }}</td>
+                        <td class="num">{{ row.healthy }}</td>
+                        <td
+                          class="num"
+                          [class.warn]="row.degraded > 0"
+                          [class.zero]="row.degraded === 0"
+                        >
                           {{ row.degraded }}
                         </td>
-                        <td class="num mono" [class.bad]="row.failed > 0">{{ row.failed }}</td>
-                        <td class="num mono">{{ row.idle }}</td>
+                        <td
+                          class="num"
+                          [class.bad]="row.failed > 0"
+                          [class.zero]="row.failed === 0"
+                        >
+                          {{ row.failed }}
+                        </td>
+                        <td class="num" [class.zero]="row.idle === 0">{{ row.idle }}</td>
                         <!-- Coloured by failures, not by the share: idle workers lower the % without
                              anything being wrong (Feature read a red 33% for two idle workers). -->
                         <td
-                          class="num mono"
+                          class="num"
                           [class.good]="row.failed + row.degraded === 0 && row.idle === 0"
                           [class.warn]="row.degraded > 0 && row.failed === 0"
                           [class.bad]="row.failed > 0"
@@ -441,18 +578,18 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                   @if (perCategoryBreakdown().length > 0) {
                     <tfoot>
                       <tr class="total-row">
-                        <td class="mono">All categories</td>
-                        <td class="num mono">{{ workerSnapshots().length }}</td>
-                        <td class="num mono good">{{ workerCounts().Healthy }}</td>
-                        <td class="num mono" [class.warn]="workerCounts().Degraded > 0">
+                        <td>All categories</td>
+                        <td class="num">{{ workerSnapshots().length }}</td>
+                        <td class="num">{{ workerCounts().Healthy }}</td>
+                        <td class="num" [class.warn]="workerCounts().Degraded > 0">
                           {{ workerCounts().Degraded }}
                         </td>
-                        <td class="num mono" [class.bad]="workerCounts().Failed > 0">
+                        <td class="num" [class.bad]="workerCounts().Failed > 0">
                           {{ workerCounts().Failed }}
                         </td>
-                        <td class="num mono">{{ workerCounts().Idle }}</td>
+                        <td class="num">{{ workerCounts().Idle }}</td>
                         <td
-                          class="num mono"
+                          class="num"
                           [class.good]="problemCount() === 0"
                           [class.warn]="workerCounts().Degraded > 0 && workerCounts().Failed === 0"
                           [class.bad]="workerCounts().Failed > 0"
@@ -479,30 +616,36 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
                       All {{ deadLetters().length }} with their delivery attempts
                     }
                   </span>
+                  <a routerLink="/dead-letter" class="head-link">Dead-letter queue →</a>
                 </header>
                 <table class="hp-board-table">
                   <thead>
                     <tr>
                       <th>Event type</th>
                       <th class="num">Attempts</th>
-                      <th>Dead-lettered</th>
+                      <th class="num">Dead-lettered</th>
                     </tr>
                   </thead>
                   <tbody>
                     @for (d of deadLetters(); track d.id) {
                       <tr>
-                        <td class="mono">{{ d.eventType ?? 'unknown' }}</td>
+                        <td [title]="d.eventType ?? 'unknown'">
+                          <span class="ev-name">{{ eventLabel(d.eventType) }}</span>
+                          <span class="ev-raw">{{ d.eventType ?? 'unknown' }}</span>
+                        </td>
                         <td
-                          class="num mono"
+                          class="num"
                           [class.bad]="d.attemptCount >= 3"
                           [class.warn]="d.attemptCount === 2"
                         >
                           {{ d.attemptCount > 0 ? d.attemptCount : '—' }}
                         </td>
-                        <td class="mono">
+                        <td class="num">
                           @if (d.createdAt) {
                             {{ d.createdAt | relativeTime }}
-                            <span class="muted">· {{ d.createdAt | date: 'MMM d, HH:mm' }}</span>
+                            <span class="muted"
+                              >· {{ d.createdAt | date: 'yyyy-MM-dd HH:mm' }}</span
+                            >
                           } @else {
                             —
                           }
@@ -523,378 +666,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       </ui-tabs>
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-      }
-      .health-hero {
-        display: flex;
-        align-items: center;
-        gap: var(--space-5);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-6);
-        margin-bottom: var(--space-6);
-        box-shadow: var(--shadow-sm);
-      }
-      .health-circle {
-        width: 72px;
-        height: 72px;
-        border-radius: 50%;
-        display: grid;
-        place-items: center;
-        flex-shrink: 0;
-      }
-      .healthy .health-circle {
-        background: rgba(52, 199, 89, 0.15);
-      }
-      .unhealthy .health-circle {
-        background: rgba(255, 59, 48, 0.15);
-      }
-      .healthy .health-icon {
-        color: var(--profit);
-      }
-      .unhealthy .health-icon {
-        color: var(--loss);
-      }
-      .health-icon {
-        font-size: 32px;
-        font-weight: bold;
-      }
-      .health-text {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-      .health-status {
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .healthy .health-status {
-        color: var(--profit);
-      }
-      .unhealthy .health-status {
-        color: var(--loss);
-      }
-      .health-sub {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .mode-pill {
-        display: inline-block;
-        margin-top: var(--space-1);
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
-        color: var(--tone-blue);
-        width: fit-content;
-      }
-      .mode-pill.live {
-        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
-        color: var(--tone-amber);
-      }
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-4);
-        margin-bottom: var(--space-6);
-      }
-      @media (max-width: 768px) {
-        .metrics {
-          grid-template-columns: 1fr;
-        }
-      }
-      .note {
-        background: var(--bg-secondary);
-        border: 1px dashed var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4) var(--space-5);
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .note code {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-        padding: 1px 6px;
-        border-radius: 4px;
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-
-      /* Hero meta block — sits inside the existing hero card */
-      .hero-meta {
-        display: flex;
-        gap: var(--space-5);
-        margin-left: auto;
-        flex-wrap: wrap;
-      }
-      .meta-pair {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .meta-label {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .meta-value {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-      }
-      .meta-value.good {
-        color: var(--profit);
-      }
-      .meta-value.bad {
-        color: var(--loss);
-      }
-      .meta-value.warn {
-        color: var(--tone-amber);
-      }
-
-      /* KPI strip — 8 cards as 2 rows of 4. Eight across squeezed every label
-         onto two or three lines and made the columns unequal; minmax(0, 1fr)
-         keeps every column the same width regardless of value length. */
-      .hp-kpis {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-2);
-        margin-bottom: var(--space-3);
-      }
-      @media (max-width: 720px) {
-        .hp-kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* 2-col chart row */
-      .hp-charts {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-        align-items: start;
-      }
-      .hp-board-list {
-        margin-bottom: 0;
-        align-self: stretch;
-      }
-      .hp-board-empty {
-        margin: 0;
-        padding: var(--space-5) var(--space-4);
-        font-size: var(--text-sm);
-        color: var(--text-tertiary);
-      }
-      .hp-board-empty.good {
-        color: var(--profit);
-      }
-      .hp-type-list {
-        list-style: none;
-        margin: 0;
-        padding: var(--space-3) var(--space-4);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .hp-type-list li {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 160px auto;
-        align-items: center;
-        gap: var(--space-3);
-        font-size: var(--text-xs);
-      }
-      .hp-type-list .type-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--text-primary);
-      }
-      .hp-type-list .type-bar {
-        height: 6px;
-        background: rgba(142, 142, 147, 0.18);
-        border-radius: 3px;
-        overflow: hidden;
-      }
-      .hp-type-list .type-fill {
-        display: block;
-        height: 100%;
-        background: var(--loss);
-        border-radius: 3px;
-      }
-      .hp-type-list .type-count {
-        color: var(--text-secondary);
-        font-variant-numeric: tabular-nums;
-        white-space: nowrap;
-      }
-      @media (max-width: 1100px) {
-        .hp-charts {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Board card (active issues + per-category breakdown + DLQ events) */
-      .hp-board {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-        margin-bottom: var(--space-3);
-      }
-      .hp-board-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .hp-board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .hp-board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      /* Bounded scroll container so dense breakdowns don't push the page. */
-      .hp-board-scroll {
-        max-height: 360px;
-        overflow-y: auto;
-      }
-      .hp-board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .hp-board-table.sticky thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .hp-board-table tfoot .total-row td {
-        position: sticky;
-        bottom: 0;
-        z-index: 1;
-        background: var(--bg-tertiary);
-        font-weight: var(--font-semibold);
-        border-top: 1px solid var(--border);
-      }
-      .hp-board-table th,
-      .hp-board-table td {
-        padding: 8px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .hp-board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .hp-board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .hp-board-table th.num,
-      .hp-board-table td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      .hp-board-table .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .hp-board-table .muted {
-        color: var(--text-tertiary);
-      }
-      .hp-board-list .mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      .hp-board-table .good {
-        color: var(--profit);
-      }
-      .hp-board-table .warn {
-        color: var(--tone-amber);
-      }
-      .hp-board-table .bad {
-        color: var(--loss);
-      }
-      .hp-board-table .msg {
-        max-width: 480px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--text-secondary);
-      }
-      .hp-pill {
-        display: inline-flex;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        background: rgba(142, 142, 147, 0.14);
-        color: var(--tone-grey);
-      }
-      /* Theme tones — the light-theme hues (#0040dd on the dark board) were unreadable. */
-      .hp-pill.warn {
-        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
-        color: var(--tone-amber);
-      }
-      .hp-pill.bad {
-        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
-        color: var(--tone-red);
-      }
-      .hp-pill.info {
-        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
-        color: var(--tone-blue);
-      }
-
-      /* Quick actions row — links to drill-down pages */
-      .hp-actions {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: var(--space-2);
-      }
-      @media (max-width: 900px) {
-        .hp-actions {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-      .hp-action {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding: var(--space-3) var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        text-decoration: none;
-        color: var(--text-primary);
-        transition: all 0.15s ease;
-      }
-      .hp-action:hover {
-        border-color: var(--accent);
-        transform: translateY(-1px);
-      }
-      .hp-action-label {
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .hp-action-desc {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-    `,
-  ],
+  styleUrl: './health-page.component.scss',
 })
 export class HealthPageComponent {
   private readonly healthService = inject(HealthService);
@@ -1080,6 +852,72 @@ export class HealthPageComponent {
       .slice(0, 12);
   });
 
+  /** Structured version of {@link idleReason} for the table cell (key rendered as code). */
+  idleReasonFor(name: string): IdleReason {
+    return idleReasonOf(name, this.idleSwitches()[name]);
+  }
+
+  /** Plain label for an integration-event class name; the raw name is shown beside it. */
+  eventLabel(raw: string | null | undefined): string {
+    return humanizeEventType(raw);
+  }
+
+  /** Duration in a readable unit (393,015 ms → "6.6 min"). */
+  formatMs(ms: number): string {
+    return formatMs(ms);
+  }
+
+  /** One chip per thing that needs attention, worst first; a single "all clear" when none. */
+  readonly attention = computed(() => {
+    type Chip = { text: string; tone: 'ok' | 'warn' | 'bad'; link: string | null };
+    const out: Chip[] = [];
+    const s = this.status();
+    if (s && !s.isRunning) out.push({ text: 'Engine is not running', tone: 'bad', link: null });
+    const c = this.workerCounts();
+    const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+    if (c.Failed > 0)
+      out.push({
+        text: plural(c.Failed, 'failed worker', 'failed workers'),
+        tone: 'bad',
+        link: '/worker-health',
+      });
+    if (c.Degraded > 0)
+      out.push({
+        text: plural(c.Degraded, 'degraded worker', 'degraded workers'),
+        tone: 'warn',
+        link: '/worker-health',
+      });
+    const dlq = this.dlqTotal();
+    if (dlq !== null && dlq > 0)
+      out.push({
+        text: plural(dlq, 'unresolved dead letter', 'unresolved dead letters'),
+        tone: 'bad',
+        link: '/dead-letter',
+      });
+    if (this.workersResource.error() && this.workerSnapshots().length === 0)
+      out.push({ text: 'Worker snapshots could not be loaded', tone: 'warn', link: null });
+    if (out.length === 0) out.push({ text: 'Nothing needs attention', tone: 'ok', link: null });
+    return out;
+  });
+
+  /** Fleet status bar segments (same counts as the donut on Infrastructure). */
+  readonly fleetSegments = computed(() => {
+    const c = this.workerCounts();
+    const total = this.workerSnapshots().length;
+    const pct = (n: number) => (total > 0 ? (n / total) * 100 : 0);
+    return [
+      { key: 'healthy', label: 'Healthy', count: c.Healthy, pct: pct(c.Healthy) },
+      { key: 'degraded', label: 'Degraded', count: c.Degraded, pct: pct(c.Degraded) },
+      { key: 'failed', label: 'Failed', count: c.Failed, pct: pct(c.Failed) },
+      { key: 'idle', label: 'Idle', count: c.Idle, pct: pct(c.Idle) },
+    ];
+  });
+  readonly fleetAria = computed(() =>
+    this.fleetSegments()
+      .map((s) => `${s.label} ${s.count}`)
+      .join(', '),
+  );
+
   /** Plain reason for an idle worker without an error, from its switch row. */
   idleReason(name: string): string {
     const sw = this.idleSwitches()[name];
@@ -1133,7 +971,7 @@ export class HealthPageComponent {
     if (this.workerSnapshots().length === 0) return {};
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
+      legend: { bottom: 0, textStyle: { fontSize: 10, color: '#8E8E93' } },
       series: [
         {
           type: 'pie',
@@ -1180,8 +1018,8 @@ export class HealthPageComponent {
       xAxis: {
         type: 'value',
         minInterval: 1,
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        axisLabel: { fontSize: 10, color: '#8E8E93' },
+        splitLine: { lineStyle: { color: 'rgba(142,142,147,0.15)' } },
       },
       yAxis: {
         type: 'category',
@@ -1190,7 +1028,7 @@ export class HealthPageComponent {
         // count is that nothing has to be hidden.
         axisLabel: {
           fontSize: 11,
-          color: '#6E6E73',
+          color: '#8E8E93',
           interval: 0,
           width: 120,
           overflow: 'truncate',
@@ -1209,7 +1047,7 @@ export class HealthPageComponent {
             }))
             .reverse(),
           barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+          label: { show: true, position: 'right', fontSize: 10, color: '#8E8E93' },
         },
       ],
     };
@@ -1223,7 +1061,12 @@ export class HealthPageComponent {
     }
     const total = this.deadLetters().length;
     return Object.entries(counts)
-      .map(([name, value]) => ({ name, value, share: total > 0 ? (value / total) * 100 : 0 }))
+      .map(([name, value]) => ({
+        name,
+        label: humanizeEventType(name),
+        value,
+        share: total > 0 ? (value / total) * 100 : 0,
+      }))
       .sort((a, b) => b.value - a.value);
   });
 
@@ -1232,16 +1075,22 @@ export class HealthPageComponent {
     if (entries.length === 0) return {};
     const palette = ['#FF3B30', '#FF9500', '#AF52DE', '#FFCC00', '#5AC8FA', '#0071E3', '#8E8E93'];
     return {
-      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
-      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#6E6E73' } },
+      tooltip: {
+        trigger: 'item',
+        formatter: (p: any) => {
+          const raw = entries[p.dataIndex]?.name ?? '';
+          return `${p.name}: ${p.value} (${p.percent}%)<br/><span style="opacity:.7">${escapeHtml(raw)}</span>`;
+        },
+      },
+      legend: { bottom: 0, type: 'scroll', textStyle: { fontSize: 10, color: '#8E8E93' } },
       series: [
         {
           type: 'pie',
           radius: ['45%', '70%'],
           center: ['50%', '45%'],
           label: { show: false },
-          data: entries.map(({ name, value }, i) => ({
-            name,
+          data: entries.map(({ label, value }, i) => ({
+            name: label,
             value,
             itemStyle: { color: palette[i % palette.length] },
           })),
@@ -1326,24 +1175,24 @@ export class HealthPageComponent {
         logBase: 10,
         min: 1,
         name: 'ms',
-        nameTextStyle: { fontSize: 10, color: '#6E6E73' },
+        nameTextStyle: { fontSize: 10, color: '#8E8E93' },
         // Compact decades ("1k", "1M"): the full "1,000,000" labels ran into each other in the
         // narrow card ("1 10 10(10(10…").
         axisLabel: {
           fontSize: 10,
-          color: '#6E6E73',
+          color: '#8E8E93',
           hideOverlap: true,
           formatter: (v: number) =>
             v >= 1e6 ? `${v / 1e6}M` : v >= 1e3 ? `${v / 1e3}k` : String(v),
         },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        splitLine: { lineStyle: { color: 'rgba(142,142,147,0.15)' } },
       },
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.category).reverse(),
         axisLabel: {
           fontSize: 11,
-          color: '#6E6E73',
+          color: '#8E8E93',
           interval: 0,
           width: 120,
           overflow: 'truncate',
@@ -1407,15 +1256,15 @@ export class HealthPageComponent {
       xAxis: {
         type: 'value',
         minInterval: 1,
-        axisLabel: { fontSize: 10, color: '#6E6E73' },
-        splitLine: { lineStyle: { color: 'rgba(0,0,0,0.04)' } },
+        axisLabel: { fontSize: 10, color: '#8E8E93' },
+        splitLine: { lineStyle: { color: 'rgba(142,142,147,0.15)' } },
       },
       yAxis: {
         type: 'category',
         data: rows.map((r) => r.category).reverse(),
         axisLabel: {
           fontSize: 11,
-          color: '#6E6E73',
+          color: '#8E8E93',
           interval: 0,
           width: 120,
           overflow: 'truncate',
@@ -1434,7 +1283,7 @@ export class HealthPageComponent {
             }))
             .reverse(),
           barWidth: 12,
-          label: { show: true, position: 'right', fontSize: 10, color: '#6E6E73' },
+          label: { show: true, position: 'right', fontSize: 10, color: '#8E8E93' },
         },
       ],
     };
@@ -1447,4 +1296,8 @@ function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
+
+function escapeHtml(v: string): string {
+  return v.replace(/[&<>"']/g, (ch) => `&#${ch.charCodeAt(0)};`);
 }

@@ -26,30 +26,22 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
+import {
+  FAILURE_OUTCOMES,
+  OUTCOME_TONE_HEX,
+  OUTCOME_TONE_VAR,
+  POSITIVE_OUTCOMES,
+  REFUSAL_OUTCOMES,
+  escapeHtml,
+  outcomeTone,
+  type OutcomeTone,
+} from './audit-trail.util';
+
 type DateRange = 'all' | '24h' | '7d' | '30d';
+type QuickFilter = 'all' | '24h' | 'critical' | 'kill' | 'ml';
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-
-// Outcome buckets — maps the wide variety of strings the engine emits into
-// three operator-meaningful tiers so KPIs and charts stay legible.
-const POSITIVE_OUTCOMES = new Set([
-  'Approved',
-  'Executed',
-  'Active',
-  'Promoted',
-  'Passed',
-  'Resolved',
-  'Allowed',
-]);
-const NEGATIVE_OUTCOMES = new Set([
-  'Failed',
-  'Rejected',
-  'Critical',
-  'Blocked',
-  'Error',
-  'Aborted',
-]);
 
 @Component({
   selector: 'app-audit-trail-page',
@@ -73,45 +65,37 @@ const NEGATIVE_OUTCOMES = new Set([
            computed over the most recent sample (capped at 2,000 rows), so the
            scope is spelled out once under the strip rather than letting a
            sample-bounded "Last 7d = 2,000" sit beside a global 236,590.
-           Colour is reserved for outcomes: green for approvals, red for
-           failures when there are any; the rest are neutral. -->
+           Colour is reserved for outcomes: green for approvals, amber for a gate
+           saying no, red only for something that broke. -->
       <div class="kpis">
-        <app-metric-card
-          label="Total ever"
-          [value]="totalEver()"
-          format="number"
-          dotColor="#8E8E93"
-        />
+        <app-metric-card label="Total ever" [value]="totalEver()" format="number" />
         <app-metric-card
           label="Last 24h"
           [value]="last24hSaturated() ? null : last24hCount()"
           format="number"
-          dotColor="#8E8E93"
         />
         <app-metric-card
           label="Approved / Executed"
           [value]="positiveCount()"
           format="number"
-          [dotColor]="positiveCount() > 0 ? '#34C759' : '#8E8E93'"
+          [dotColor]="positiveCount() > 0 ? '#34C759' : ''"
         />
         <app-metric-card
-          label="Failed / Rejected"
-          [value]="negativeCount()"
+          label="Rejected / Blocked"
+          [value]="refusalCount()"
           format="number"
-          [dotColor]="negativeCount() > 0 ? '#FF3B30' : '#8E8E93'"
+          [dotColor]="refusalCount() > 0 ? '#FF9500' : ''"
+          caption="a gate said no"
         />
         <app-metric-card
-          label="Decision types"
-          [value]="distinctDecisionTypes()"
+          label="Failed / Critical"
+          [value]="failureCount()"
           format="number"
-          dotColor="#8E8E93"
+          [dotColor]="failureCount() > 0 ? '#FF3B30' : '#34C759'"
+          caption="something broke"
         />
-        <app-metric-card
-          label="Sources"
-          [value]="distinctSources()"
-          format="number"
-          dotColor="#8E8E93"
-        />
+        <app-metric-card label="Decision types" [value]="distinctDecisionTypes()" format="number" />
+        <app-metric-card label="Sources" [value]="distinctSources()" format="number" />
       </div>
       <p class="kpi-scope">{{ sampleScopeNote() }}</p>
 
@@ -131,97 +115,141 @@ const NEGATIVE_OUTCOMES = new Set([
         />
         <app-chart-card
           title="Activity (last 24h)"
-          subtitle="Decisions per hour"
+          subtitle="Decisions per hour, local time"
           [options]="activityByHourOptions()"
           height="220px"
         />
       </div>
 
-      <!-- Quick filter chips + filter dropdowns -->
+      <!-- Quick filter chips + labelled filter dropdowns + what is applied right now -->
       <div class="filter-bar">
-        <div class="chips">
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'all'"
-            (click)="setQuickFilter('all')"
-          >
-            All
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === '24h'"
-            (click)="setQuickFilter('24h')"
-          >
-            Last 24h
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'critical'"
-            (click)="setQuickFilter('critical')"
-          >
-            Critical / Failed only
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'kill'"
-            (click)="setQuickFilter('kill')"
-          >
-            Kill switches
-          </button>
-          <button
-            type="button"
-            [class.active]="quickFilter() === 'ml'"
-            (click)="setQuickFilter('ml')"
-          >
-            ML model events
-          </button>
+        <div class="filter-row">
+          <div class="seg" role="group" aria-label="Quick filters">
+            @for (q of quickFilters; track q.value) {
+              <button
+                type="button"
+                [class.on]="quickFilter() === q.value"
+                [attr.aria-pressed]="quickFilter() === q.value"
+                [title]="q.title"
+                (click)="setQuickFilter(q.value)"
+              >
+                {{ q.label }}
+              </button>
+            }
+          </div>
+
+          <div class="selects">
+            <label class="field">
+              <span class="label">Decision type</span>
+              <select
+                class="input"
+                [ngModel]="decisionTypeFilter()"
+                (ngModelChange)="onFilterChange('decisionType', $event)"
+              >
+                <!-- The count beside "All" was the sample size (2,000), not a number of types, and it
+                     was clipped to "(200(" by the select's width. -->
+                <option value="">All decision types</option>
+                @for (t of decisionTypeOptions(); track t.value) {
+                  <option [value]="t.value">{{ t.value }} ({{ t.count }})</option>
+                }
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Outcome</span>
+              <select
+                class="input"
+                [ngModel]="outcomeFilter()"
+                (ngModelChange)="onFilterChange('outcome', $event)"
+              >
+                <option value="">All outcomes</option>
+                @for (o of outcomeOptions(); track o.value) {
+                  <option [value]="o.value">{{ o.value }} ({{ o.count }})</option>
+                }
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Entity</span>
+              <select
+                class="input"
+                [ngModel]="entityTypeFilter()"
+                (ngModelChange)="onFilterChange('entityType', $event)"
+              >
+                <option value="">All entities</option>
+                @for (e of entityTypeOptions(); track e.value) {
+                  <option [value]="e.value">{{ e.value }} ({{ e.count }})</option>
+                }
+              </select>
+            </label>
+            <label class="field">
+              <span class="label">Period</span>
+              <select
+                class="input"
+                [ngModel]="dateRangeFilter()"
+                (ngModelChange)="onFilterChange('dateRange', $event)"
+              >
+                <option value="all">All time</option>
+                <option value="24h">Last 24h</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+            </label>
+          </div>
         </div>
 
-        <select
-          class="input"
-          [ngModel]="decisionTypeFilter()"
-          (ngModelChange)="onFilterChange('decisionType', $event)"
-        >
-          <!-- The count beside "All" was the sample size (2,000), not a number of types, and it
-               was clipped to "(200(" by the select's width. -->
-          <option value="">All decision types</option>
-          @for (t of decisionTypeOptions(); track t.value) {
-            <option [value]="t.value">{{ t.value }} ({{ t.count }})</option>
-          }
-        </select>
-        <select
-          class="input"
-          [ngModel]="outcomeFilter()"
-          (ngModelChange)="onFilterChange('outcome', $event)"
-        >
-          <option value="">All outcomes</option>
-          @for (o of outcomeOptions(); track o.value) {
-            <option [value]="o.value">{{ o.value }} ({{ o.count }})</option>
-          }
-        </select>
-        <select
-          class="input"
-          [ngModel]="entityTypeFilter()"
-          (ngModelChange)="onFilterChange('entityType', $event)"
-        >
-          <option value="">All entities</option>
-          @for (e of entityTypeOptions(); track e.value) {
-            <option [value]="e.value">{{ e.value }} ({{ e.count }})</option>
-          }
-        </select>
-        <select
-          class="input"
-          [ngModel]="dateRangeFilter()"
-          (ngModelChange)="onFilterChange('dateRange', $event)"
-        >
-          <option value="all">All time</option>
-          <option value="24h">Last 24h</option>
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-        </select>
-
+        <!-- The entity-id filter set from a detail dialog had no visible trace: the table was
+             narrowed with nothing on screen saying so. Every applied filter is listed here. -->
         @if (hasActiveFilters()) {
-          <button type="button" class="link-btn" (click)="resetFilters()">Reset filters</button>
+          <div class="active-filters" aria-label="Applied filters">
+            <span>Showing only:</span>
+            @if (decisionTypeFilter()) {
+              <span class="chip"
+                ><span class="k">Type</span> {{ decisionTypeFilter() }}
+                <button
+                  type="button"
+                  aria-label="Remove decision type filter"
+                  (click)="onFilterChange('decisionType', '')"
+                >
+                  &times;
+                </button></span
+              >
+            }
+            @if (outcomeFilter()) {
+              <span class="chip"
+                ><span class="k">Outcome</span> {{ outcomeFilter() }}
+                <button
+                  type="button"
+                  aria-label="Remove outcome filter"
+                  (click)="onFilterChange('outcome', '')"
+                >
+                  &times;
+                </button></span
+              >
+            }
+            @if (entityTypeFilter() || entityIdFilter() !== null) {
+              <span class="chip"
+                ><span class="k">Entity</span> {{ entityTypeFilter() || 'any' }}
+                @if (entityIdFilter() !== null) {
+                  #{{ entityIdFilter() }}
+                }
+                <button type="button" aria-label="Remove entity filter" (click)="clearEntity()">
+                  &times;
+                </button></span
+              >
+            }
+            @if (dateRangeFilter() !== 'all') {
+              <span class="chip"
+                ><span class="k">Period</span> last {{ dateRangeFilter() }}
+                <button
+                  type="button"
+                  aria-label="Remove period filter"
+                  (click)="onFilterChange('dateRange', 'all')"
+                >
+                  &times;
+                </button></span
+              >
+            }
+            <button type="button" class="link-btn" (click)="resetFilters()">Reset filters</button>
+          </div>
         }
       </div>
 
@@ -230,10 +258,12 @@ const NEGATIVE_OUTCOMES = new Set([
         [columnDefs]="columns"
         [fetchData]="fetchData"
         [searchable]="true"
+        emptyTitle="No decisions match"
+        emptyDescription="Nothing in the audit log matches these filters and search."
         (rowClick)="toggleExpand($event)"
       />
 
-      @if (expandedEntry()) {
+      @if (expandedEntry(); as e) {
         <!-- Escape + focus come from appModalA11y: the overlay's (keydown.escape) never fired
              because focus stayed on the clicked row, outside the dialog. -->
         <div class="detail-overlay" role="presentation" (click)="expandedEntry.set(null)">
@@ -250,8 +280,10 @@ const NEGATIVE_OUTCOMES = new Set([
           >
             <div class="detail-header">
               <h3 class="detail-title" id="audit-detail-title">
-                Decision Log #{{ expandedEntry()!.id }}
+                Decision Log #{{ e.id }}
+                <span class="sub">{{ e.decisionType }} · {{ e.createdAt | relativeTime }}</span>
               </h3>
+              <span [class]="'pill ' + toneOf(e.outcome)">{{ e.outcome ?? '—' }}</span>
               <button
                 type="button"
                 class="close-btn"
@@ -262,50 +294,53 @@ const NEGATIVE_OUTCOMES = new Set([
               </button>
             </div>
             <div class="detail-body">
+              <dl class="detail-meta">
+                <div class="meta-item wide">
+                  <dt>Logged</dt>
+                  <dd>
+                    {{ e.createdAt | date: 'MMM d, yyyy HH:mm:ss' }}
+                    <span class="meta-sub"
+                      >local · {{ utcStamp(e.createdAt) }} · {{ e.createdAt | relativeTime }}</span
+                    >
+                  </dd>
+                </div>
+                <div class="meta-item">
+                  <dt>Decision Type</dt>
+                  <dd class="mono">{{ e.decisionType ?? '—' }}</dd>
+                </div>
+                <div class="meta-item">
+                  <dt>Entity</dt>
+                  <dd>{{ e.entityType ?? '—' }} #{{ e.entityId }}</dd>
+                </div>
+                <div class="meta-item">
+                  <dt>Outcome</dt>
+                  <dd>{{ e.outcome ?? '—' }}</dd>
+                </div>
+                <div class="meta-item">
+                  <dt>Source</dt>
+                  <dd class="mono">{{ e.source ?? '—' }}</dd>
+                </div>
+              </dl>
               <div class="detail-section">
                 <h4 class="detail-label">Reason</h4>
-                <p class="detail-value">{{ expandedEntry()!.reason }}</p>
+                <p class="detail-value" [class.none]="!e.reason">
+                  {{ e.reason || 'No reason recorded' }}
+                </p>
               </div>
               <div class="detail-section">
-                <h4 class="detail-label">Context JSON</h4>
-                <pre class="detail-json">{{ formatJson(expandedEntry()!.contextJson) }}</pre>
-              </div>
-              <div class="detail-meta">
-                <div class="meta-item">
-                  <span class="meta-label">Decision Type</span>
-                  <span class="meta-value">{{ expandedEntry()!.decisionType }}</span>
+                <div class="section-head">
+                  <h4 class="detail-label">Context JSON</h4>
+                  @if (e.contextJson) {
+                    <button type="button" class="mini-btn" (click)="copyJson(e.contextJson)">
+                      {{ copied() ? 'Copied' : 'Copy JSON' }}
+                    </button>
+                  }
                 </div>
-                <div class="meta-item">
-                  <span class="meta-label">Entity</span>
-                  <span class="meta-value"
-                    >{{ expandedEntry()!.entityType }} #{{ expandedEntry()!.entityId }}</span
-                  >
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Outcome</span>
-                  <span class="meta-value">{{ expandedEntry()!.outcome }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Source</span>
-                  <span class="meta-value">{{ expandedEntry()!.source }}</span>
-                </div>
-                <div class="meta-item">
-                  <span class="meta-label">Logged</span>
-                  <span class="meta-value">
-                    {{ expandedEntry()!.createdAt | date: 'MMM d, yyyy HH:mm:ss' }}
-                    <span class="meta-sub">({{ expandedEntry()!.createdAt | relativeTime }})</span>
-                  </span>
-                </div>
+                <pre class="detail-json">{{ formatJson(e.contextJson) }}</pre>
               </div>
               <div class="related-bar">
-                <button
-                  type="button"
-                  class="related-btn"
-                  (click)="filterByEntity(expandedEntry()!)"
-                >
-                  Filter to all decisions for {{ expandedEntry()!.entityType }} #{{
-                    expandedEntry()!.entityId
-                  }}
+                <button type="button" class="related-btn" (click)="filterByEntity(e)">
+                  Filter to all decisions for {{ e.entityType }} #{{ e.entityId }}
                 </button>
               </div>
             </div>
@@ -314,276 +349,7 @@ const NEGATIVE_OUTCOMES = new Set([
       }
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-2);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      .kpi-scope {
-        margin: calc(-1 * var(--space-1)) 0 0;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .meta-sub {
-        color: var(--text-tertiary);
-        font-weight: var(--font-regular, 400);
-        margin-left: var(--space-1);
-      }
-
-      .chart-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .chart-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .filter-bar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        align-items: center;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-2) var(--space-3);
-      }
-      .chips {
-        display: inline-flex;
-        gap: 4px;
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-full);
-        padding: 2px;
-      }
-      .chips button {
-        height: 28px;
-        padding: 0 var(--space-3);
-        border: none;
-        background: transparent;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .chips button.active {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm);
-      }
-      /* Selects share the remaining width and shrink before wrapping, so the
-         last one no longer drops onto a second row on its own. */
-      .input {
-        height: 32px;
-        padding: 0 var(--space-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-        outline: none;
-        flex: 1 1 140px;
-        min-width: 120px;
-        max-width: 220px;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .link-btn {
-        background: transparent;
-        border: none;
-        padding: 0 var(--space-2);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--accent);
-        cursor: pointer;
-      }
-      .link-btn:hover {
-        text-decoration: underline;
-      }
-
-      .detail-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(8px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 1000;
-        animation: fadeIn 0.15s ease;
-      }
-      .detail-panel {
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-lg);
-        box-shadow: var(--shadow-lg);
-        width: 100%;
-        max-width: 720px;
-        max-height: 80vh;
-        overflow-y: auto;
-        animation: scaleIn 0.2s ease-out;
-      }
-      .detail-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .detail-title {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        margin: 0;
-      }
-      .close-btn {
-        width: 32px;
-        height: 32px;
-        border: none;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 18px;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background 0.15s ease;
-      }
-      .close-btn:hover {
-        background: var(--border);
-      }
-      .detail-body {
-        padding: var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .detail-section {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .detail-label {
-        font-size: var(--text-xs);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        margin: 0;
-      }
-      .detail-value {
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        margin: 0;
-        line-height: 1.5;
-      }
-      .detail-json {
-        font-family: 'SF Mono', 'Menlo', monospace;
-        font-size: 12px;
-        color: var(--text-primary);
-        background: var(--bg-tertiary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: var(--space-3);
-        margin: 0;
-        overflow-x: auto;
-        white-space: pre-wrap;
-        word-break: break-word;
-        max-height: 300px;
-        overflow-y: auto;
-      }
-      .detail-meta {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-3);
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--border);
-      }
-      @media (max-width: 600px) {
-        .detail-meta {
-          grid-template-columns: 1fr 1fr;
-        }
-      }
-      .meta-item {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .meta-label {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .meta-value {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-primary);
-      }
-      .related-bar {
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--border);
-      }
-      .related-btn {
-        height: 32px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-      }
-      .related-btn:hover {
-        background: var(--bg-tertiary);
-        border-color: var(--accent);
-      }
-
-      @keyframes fadeIn {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
-      }
-      @keyframes scaleIn {
-        from {
-          transform: scale(0.96);
-          opacity: 0;
-        }
-        to {
-          transform: scale(1);
-          opacity: 1;
-        }
-      }
-    `,
-  ],
+  styleUrl: './audit-trail-page.scss',
 })
 export class AuditTrailPageComponent {
   private readonly auditTrailService = inject(AuditTrailService);
@@ -600,7 +366,18 @@ export class AuditTrailPageComponent {
   readonly entityTypeFilter = signal('');
   readonly entityIdFilter = signal<number | null>(null);
   readonly dateRangeFilter = signal<DateRange>('all');
-  readonly quickFilter = signal<'all' | '24h' | 'critical' | 'kill' | 'ml'>('all');
+  readonly quickFilter = signal<QuickFilter>('all');
+
+  /** "Critical" was labelled "Critical / Failed only" but has always filtered outcome = Critical alone. */
+  readonly quickFilters: { value: QuickFilter; label: string; title: string }[] = [
+    { value: 'all', label: 'All', title: 'Clear the decision type, outcome and period filters' },
+    { value: '24h', label: 'Last 24h', title: 'Decisions logged in the last 24 hours' },
+    { value: 'critical', label: 'Critical', title: 'Outcome = Critical' },
+    { value: 'kill', label: 'Kill switches', title: 'Decision type = KillSwitchActivated' },
+    { value: 'ml', label: 'ML model events', title: 'Decision type = ModelActivated' },
+  ];
+
+  readonly copied = signal(false);
 
   // Analytics resource — probe-and-fetch up to the most recent 2000 decisions.
   // Used to compute KPIs, charts, and the universe of values for the filter
@@ -705,8 +482,13 @@ export class AuditTrailPageComponent {
     () => this.analyticsRows().filter((r) => POSITIVE_OUTCOMES.has(r.outcome ?? '')).length,
   );
 
-  readonly negativeCount = computed(
-    () => this.analyticsRows().filter((r) => NEGATIVE_OUTCOMES.has(r.outcome ?? '')).length,
+  /** A gate or check saying no — the system working, not breaking. */
+  readonly refusalCount = computed(
+    () => this.analyticsRows().filter((r) => REFUSAL_OUTCOMES.has(r.outcome ?? '')).length,
+  );
+
+  readonly failureCount = computed(
+    () => this.analyticsRows().filter((r) => FAILURE_OUTCOMES.has(r.outcome ?? '')).length,
   );
 
   readonly distinctDecisionTypes = computed(() => {
@@ -757,13 +539,8 @@ export class AuditTrailPageComponent {
     if (tail.length > 0) {
       entries.push([`Other (${tail.length} outcomes)`, tail.reduce((sum, [, v]) => sum + v, 0)]);
     }
-    const colorFor = (name: string): string => {
-      if (POSITIVE_OUTCOMES.has(name)) return '#34C759';
-      if (NEGATIVE_OUTCOMES.has(name)) return '#FF3B30';
-      if (name === 'Detected') return '#FF9500';
-      if (name === 'Skipped' || name.startsWith('Other')) return '#8E8E93';
-      return '#0071E3';
-    };
+    const colorFor = (name: string): string =>
+      name.startsWith('Other (') ? OUTCOME_TONE_HEX.grey : OUTCOME_TONE_HEX[outcomeTone(name)];
     return {
       tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
       legend: { bottom: 0, textStyle: { fontSize: 10, color: '#6E6E73' } },
@@ -880,7 +657,7 @@ export class AuditTrailPageComponent {
 
   // ---------- Quick filter chips ----------
 
-  setQuickFilter(value: 'all' | '24h' | 'critical' | 'kill' | 'ml'): void {
+  setQuickFilter(value: QuickFilter): void {
     this.quickFilter.set(value);
     // Translate the chip into concrete filter signal values.
     if (value === 'all') {
@@ -933,6 +710,30 @@ export class AuditTrailPageComponent {
     this.quickFilter.set('all');
   }
 
+  clearEntity(): void {
+    this.entityTypeFilter.set('');
+    this.entityIdFilter.set(null);
+  }
+
+  toneOf(outcome: string | null): OutcomeTone {
+    return outcomeTone(outcome);
+  }
+
+  utcStamp(value: string): string {
+    return value ? formatDate(value, 'yyyy-MM-dd HH:mm:ss', 'en-US', 'UTC') + ' UTC' : '—';
+  }
+
+  copyJson(json: string | null): void {
+    const text = this.formatJson(json);
+    void navigator.clipboard?.writeText(text).then(
+      () => {
+        this.copied.set(true);
+        setTimeout(() => this.copied.set(false), 1500);
+      },
+      () => undefined,
+    );
+  }
+
   filterByEntity(entry: DecisionLogDto): void {
     if (entry.entityType) this.entityTypeFilter.set(entry.entityType);
     this.entityIdFilter.set(entry.entityId);
@@ -943,55 +744,68 @@ export class AuditTrailPageComponent {
 
   columns: ColDef<DecisionLogDto>[] = [
     {
-      headerName: 'Timestamp',
+      headerName: 'Time (local)',
       field: 'createdAt',
-      width: 170,
+      width: 200,
       sortable: true,
-      // An audit trail needs the absolute time; the relative form is the tooltip.
+      // An audit trail needs the absolute time; the relative form and UTC are the tooltip.
       valueFormatter: (params) =>
-        params.value ? formatDate(params.value, 'MMM d, yyyy HH:mm:ss', 'en-US') : '—',
-      tooltipValueGetter: (params) => this.relativeTimePipe.transform(params.value),
+        params.value ? formatDate(params.value, 'yyyy-MM-dd HH:mm:ss', 'en-US') : '—',
+      tooltipValueGetter: (params) =>
+        params.value
+          ? `${this.relativeTimePipe.transform(params.value)} · ${this.utcStamp(params.value)}`
+          : '',
+      cellStyle: { fontVariantNumeric: 'tabular-nums' },
     },
-    { headerName: 'Decision Type', field: 'decisionType', flex: 1.2, minWidth: 150 },
-    { headerName: 'Entity Type', field: 'entityType', width: 130 },
-    { headerName: 'Entity ID', field: 'entityId', width: 95 },
+    {
+      headerName: 'Decision Type',
+      field: 'decisionType',
+      width: 160,
+      tooltipField: 'decisionType',
+    },
+    { headerName: 'Entity Type', field: 'entityType', width: 124 },
+    {
+      headerName: 'Entity ID',
+      field: 'entityId',
+      width: 116,
+      type: 'rightAligned',
+      // Cells are flex: rightAligned alone does not move the text.
+      cellStyle: { justifyContent: 'flex-end', fontVariantNumeric: 'tabular-nums' },
+    },
     {
       headerName: 'Outcome',
       field: 'outcome',
-      width: 120,
-      cellRenderer: (params: { value: string }) => {
-        // Theme tones: the fixed light-theme hues (#0040DD, #D70015) were dark-on-dark here.
-        const tone: Record<string, string> = {
-          Approved: '--tone-green',
-          Rejected: '--tone-red',
-          Executed: '--tone-green',
-          Skipped: '--tone-grey',
-          Passed: '--tone-green',
-          Failed: '--tone-red',
-          Critical: '--tone-red',
-          Detected: '--tone-amber',
-        };
-        const t = tone[params.value] ?? '--tone-blue';
-        const text = String(params.value ?? '')
-          .replace(/&/g, '&amp;')
-          .replace(/</g, '&lt;');
-        return `<span style="background:color-mix(in srgb, var(${t}) 16%, transparent);color:var(${t});padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${text}</span>`;
+      width: 118,
+      cellRenderer: (params: { value: string | null }) => {
+        // Theme tones; a refusal (Rejected / Blocked) is amber, a failure red.
+        const t = OUTCOME_TONE_VAR[outcomeTone(params.value)];
+        return `<span style="background:color-mix(in srgb, var(${t}) 16%, transparent);color:var(${t});padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${escapeHtml(params.value ?? '—')}</span>`;
       },
     },
     {
       headerName: 'Source',
       field: 'source',
-      flex: 1,
-      minWidth: 150,
+      width: 200,
       // Source names ("SignalOrderBridgeWorker") clipped at 130px with no
       // ellipsis; the grid's own cell truncation applies once the cell is
       // flex-sized, and the full value is the tooltip.
       tooltipField: 'source',
     },
     {
+      // The reason is the evidence; it was only reachable through the dialog. One line here,
+      // full text on hover and in Details.
+      headerName: 'Reason',
+      field: 'reason',
+      flex: 1,
+      minWidth: 220,
+      tooltipField: 'reason',
+      valueFormatter: (params) => (params.value ? String(params.value) : '—'),
+      cellStyle: { color: 'var(--text-secondary)' },
+    },
+    {
       headerName: '',
       field: 'id',
-      width: 90,
+      width: 86,
       sortable: false,
       cellRenderer: () => {
         return `<button data-action="expand" style="height:26px;padding:0 10px;border:none;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;background:color-mix(in srgb, var(--tone-blue) 16%, transparent);color:var(--tone-blue)">Details</button>`;

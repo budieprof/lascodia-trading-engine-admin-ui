@@ -7,7 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DecimalPipe } from '@angular/common';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { map } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
@@ -24,7 +24,17 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 
-type StatusFilter = 'all' | WorkerHealthStatus;
+import {
+  attentionRank,
+  formatMs,
+  latencyTone,
+  needsAttention,
+  workerReasons,
+  type WorkerReason,
+} from './worker-health.util';
+
+/** 'attention' = failed, degraded or stale — the operator's usual question. */
+type StatusFilter = 'all' | 'attention' | WorkerHealthStatus;
 type SortMode = 'category' | 'p95' | 'errors' | 'backlog';
 type ViewMode = 'cards' | 'table';
 
@@ -48,6 +58,7 @@ const CARD_GRID_CAP = 12;
     DecimalPipe,
     RelativeTimePipe,
     RefreshButtonComponent,
+    NgTemplateOutlet,
   ],
   template: `
     <div class="page">
@@ -67,14 +78,131 @@ const CARD_GRID_CAP = 12;
           (retry)="refresh()"
         />
       } @else if (workers().length > 0) {
+        <!-- Verdict first: the operator comes here to learn whether any worker is unhealthy. -->
+        <section
+          class="verdict"
+          [class.warn]="verdictTone() === 'warn'"
+          [class.bad]="verdictTone() === 'bad'"
+        >
+          <span class="v-dot" aria-hidden="true"></span>
+          <div class="v-text">
+            <h2>{{ verdictHeadline() }}</h2>
+            <p>
+              {{ verdictDetail() }}
+              @if (capturedAt()) {
+                · snapshot {{ capturedAt() | relativeTime }} · refreshes every 30 s
+              }
+            </p>
+          </div>
+        </section>
+
+        <!-- Needs attention: every failed / degraded / stale worker with the reason, worst first. -->
+        <section class="panel" aria-labelledby="wh-attention">
+          <header class="panel-head">
+            <h3 id="wh-attention">Needs attention</h3>
+            <span
+              class="count"
+              [class.bad]="failedCount() > 0"
+              [class.warn]="failedCount() === 0 && attention().length > 0"
+              >{{ attention().length }}</span
+            >
+            <span class="hint"
+              >Failed, degraded and stale workers, worst first, with the reason</span
+            >
+          </header>
+          @if (attention().length > 0) {
+            <ng-container
+              [ngTemplateOutlet]="attTable"
+              [ngTemplateOutletContext]="{ $implicit: attention() }"
+            />
+          } @else {
+            <p class="att-empty">
+              <strong>Nothing needs attention.</strong> No worker is failed, degraded or stale.
+            </p>
+          }
+          @if (idleWorkers().length > 0) {
+            <details class="idle">
+              <summary>
+                {{ idleWorkers().length }} idle worker{{ idleWorkers().length === 1 ? '' : 's' }}
+                <span class="hint">not doing work right now — usually by design; why for each</span>
+              </summary>
+              <ng-container
+                [ngTemplateOutlet]="attTable"
+                [ngTemplateOutletContext]="{ $implicit: idleWorkers() }"
+              />
+            </details>
+          }
+        </section>
+
+        <ng-template #attTable let-rows>
+          <table class="att">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Worker</th>
+                <th>Why</th>
+                <th>Last error</th>
+                <th>Last success</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (w of asWorkers(rows); track w.name) {
+                <tr>
+                  <td>
+                    @if (w.isStale && !w.isCompleted) {
+                      <span class="pill pill-stale">{{ w.status }} · stale</span>
+                    } @else {
+                      <span class="pill" [attr.data-status]="w.status">{{ w.status }}</span>
+                    }
+                  </td>
+                  <td class="w-name">
+                    {{ w.name }}
+                    <span class="sub">
+                      {{ w.category }} ·
+                      @if (w.isCompleted) {
+                        one-shot
+                      } @else {
+                        every {{ formatInterval(w.configuredIntervalSeconds) }}
+                      }
+                    </span>
+                  </td>
+                  <td>
+                    <ul class="reasons">
+                      @for (r of reasonsOf(w); track r.text) {
+                        <li [class]="r.tone">{{ r.text }}</li>
+                      } @empty {
+                        <li>{{ w.status }}</li>
+                      }
+                    </ul>
+                  </td>
+                  <td class="err-msg">
+                    @if (w.lastErrorMessage) {
+                      {{ w.lastErrorMessage }}
+                    } @else {
+                      <span class="none">—</span>
+                    }
+                    @if (w.lastErrorAt) {
+                      <span class="sub" [title]="w.lastErrorAt">{{
+                        w.lastErrorAt | relativeTime
+                      }}</span>
+                    }
+                  </td>
+                  <td class="when" [title]="w.lastSuccessAt ?? ''">
+                    @if (w.lastSuccessAt) {
+                      {{ w.lastSuccessAt | relativeTime }}
+                    } @else {
+                      never
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </ng-template>
+
         <!-- 10-card KPI strip — fleet status + tail-latency + traffic -->
         <div class="kpis">
-          <app-metric-card
-            label="Total"
-            [value]="workers().length"
-            format="number"
-            dotColor="#0071E3"
-          />
+          <app-metric-card label="Total" [value]="workers().length" format="number" />
           <app-metric-card
             label="Healthy"
             [value]="healthyCount()"
@@ -85,35 +213,46 @@ const CARD_GRID_CAP = 12;
             label="Degraded"
             [value]="degradedCount()"
             format="number"
-            [dotColor]="degradedCount() > 0 ? '#FF9500' : '#34C759'"
+            [dotColor]="degradedCount() > 0 ? '#FF9500' : ''"
+            caption="errors > 5 % or stale"
           />
           <app-metric-card
             label="Failed"
             [value]="failedCount()"
             format="number"
-            [dotColor]="failedCount() > 0 ? '#FF3B30' : '#34C759'"
+            [dotColor]="failedCount() > 0 ? '#FF3B30' : ''"
+            caption="failing cycles in a row"
           />
-          <app-metric-card label="Idle" [value]="idleCount()" format="number" dotColor="#8E8E93" />
+          <app-metric-card
+            label="Idle"
+            [value]="idleCount()"
+            format="number"
+            caption="stopped, or no work yet"
+          />
           <app-metric-card
             label="Stale"
             [value]="staleCount()"
             format="number"
-            [dotColor]="staleCount() > 0 ? '#AF52DE' : '#34C759'"
+            [dotColor]="staleCount() > 0 ? '#AF52DE' : ''"
+            caption="no success in 3× interval"
           />
           <!-- Median, not mean: one hourly 13-minute sweep dragged the mean P95 to ~17 s while
                the typical worker cycles in under 100 ms. -->
           <app-metric-card
-            label="Median P95 (ms)"
+            label="Median P95 cycle"
             [value]="fleetStats().medianP95"
+            [displayValue]="fmtMs(fleetStats().medianP95)"
             format="number"
-            [dotColor]="fleetStats().medianP95 > 1000 ? '#FF9500' : '#34C759'"
-            [attr.title]="'Mean of all P95s: ' + fleetStats().avgP95 + ' ms'"
+            [caption]="'mean of all P95s ' + fmtMs(fleetStats().avgP95)"
           />
+          <!-- Neutral: the slowest P99 is a long-cadence sweep by design; overrunning workers are
+               flagged against their own interval in the lists below. -->
           <app-metric-card
-            label="Max P99 (ms)"
+            label="Max P99 cycle"
             [value]="fleetStats().maxP99"
+            [displayValue]="fmtMs(fleetStats().maxP99)"
             format="number"
-            [dotColor]="fleetStats().maxP99 > 5000 ? '#FF3B30' : '#34C759'"
+            [caption]="fleetStats().maxP99Worker"
           />
           <app-metric-card
             label="Errors / hr"
@@ -125,34 +264,9 @@ const CARD_GRID_CAP = 12;
             label="Backlog"
             [value]="fleetStats().totalBacklog"
             format="number"
-            [dotColor]="fleetStats().totalBacklog > 100 ? '#FF9500' : '#34C759'"
+            [dotColor]="fleetStats().totalBacklog > 100 ? '#FF9500' : ''"
+            caption="items waiting, all queues"
             [attr.title]="'Sum of the backlog depth every worker reports: items waiting, not items processed. On an engine older than 2026-10-19, SpreadProfileWorker also adds the ticks it processed (millions), which then dominate the total.'"
-          />
-        </div>
-
-        <!-- Charts row: status donut + workers-by-category -->
-        <div class="chart-row">
-          <app-chart-card
-            title="Status distribution"
-            subtitle="Healthy · Degraded · Failed · Idle"
-            [options]="statusDonutOptions()"
-            height="300px"
-          />
-          <app-chart-card
-            title="Workers by category"
-            [subtitle]="categoryChartSubtitle()"
-            [options]="workersByCategoryOptions()"
-            height="300px"
-          />
-          <app-chart-card
-            title="P95 cycle by category"
-            [subtitle]="
-              'Average P95 per category, slowest ' +
-              topCategoryLimit +
-              ' shown · log scale — hover a bar for the value'
-            "
-            [options]="cycleByCategoryOptions()"
-            height="300px"
           />
         </div>
 
@@ -161,7 +275,7 @@ const CARD_GRID_CAP = 12;
           <section class="hotspot">
             <header class="hotspot-head">
               <h3>Slowest workers</h3>
-              <span class="muted">By P95 cycle (ms)</span>
+              <span class="muted">P95 cycle, against each worker's interval</span>
             </header>
             @if (topSlowest().length > 0) {
               <table class="mini">
@@ -174,10 +288,26 @@ const CARD_GRID_CAP = 12;
                       </td>
                       <td
                         class="num mono"
-                        [class.warn]="w.cycleDurationP95Ms > 1000"
-                        [class.bad]="w.cycleDurationP95Ms > 5000"
+                        [class.warn]="toneOf(w) === 'warn'"
+                        [class.bad]="toneOf(w) === 'bad'"
+                        [title]="
+                          (w.cycleDurationP95Ms | number: '1.0-0') +
+                          ' ms' +
+                          (toneOf(w) === 'bad'
+                            ? ' — longer than its interval'
+                            : toneOf(w) === 'warn'
+                              ? ' — over half its interval'
+                              : '')
+                        "
                       >
-                        {{ w.cycleDurationP95Ms | number: '1.0-0' }} ms
+                        {{ fmtMs(w.cycleDurationP95Ms) }}
+                      </td>
+                      <td class="num muted sub">
+                        @if (w.isCompleted) {
+                          one-shot
+                        } @else {
+                          / {{ formatInterval(w.configuredIntervalSeconds) }}
+                        }
                       </td>
                     </tr>
                   }
@@ -238,88 +368,109 @@ const CARD_GRID_CAP = 12;
           </section>
         </div>
 
-        <div class="toolbar">
-          <input
-            type="text"
-            class="input search"
-            placeholder="Filter by name…"
-            [ngModel]="search()"
-            (ngModelChange)="search.set($event)"
-          />
-          <select
-            class="input"
-            [ngModel]="statusFilter()"
-            (ngModelChange)="statusFilter.set($event)"
-          >
-            <option value="all">All statuses</option>
-            <option value="Healthy">Healthy ({{ healthyCount() }})</option>
-            <option value="Degraded">Degraded ({{ degradedCount() }})</option>
-            <option value="Failed">Failed ({{ failedCount() }})</option>
-            <option value="Idle">Idle ({{ idleCount() }})</option>
-          </select>
-          <select
-            class="input"
-            [ngModel]="categoryFilter()"
-            (ngModelChange)="categoryFilter.set($event)"
-          >
-            <option value="all">All categories</option>
-            @for (c of categories(); track c) {
-              <option [value]="c">{{ c }} ({{ categoryCounts()[c] }})</option>
-            }
-          </select>
-          <select
-            class="input"
-            [ngModel]="sortBy()"
-            (ngModelChange)="sortBy.set($event)"
-            title="Sort within each category"
-          >
-            <option value="category">Sort: status (default)</option>
-            <option value="p95">Sort: P95 cycle (slowest first)</option>
-            <option value="errors">Sort: errors (most first)</option>
-            <option value="backlog">Sort: backlog (largest first)</option>
-          </select>
-          <div class="view-toggle" role="group" aria-label="View mode">
-            <button
-              type="button"
-              [class.active]="viewMode() === 'cards'"
-              [attr.aria-pressed]="viewMode() === 'cards'"
-              (click)="viewMode.set('cards')"
+        <h2 class="section-title">All workers by category</h2>
+        <div class="toolbar-wrap">
+          <div class="toolbar">
+            <input
+              type="text"
+              class="input search"
+              placeholder="Filter by name…"
+              aria-label="Filter workers by name"
+              [ngModel]="search()"
+              (ngModelChange)="search.set($event)"
+            />
+            <div class="seg" role="group" aria-label="Status filter">
+              @for (s of statusOptions(); track s.value) {
+                <button
+                  type="button"
+                  [class.on]="statusFilter() === s.value"
+                  [attr.aria-pressed]="statusFilter() === s.value"
+                  [title]="s.title"
+                  (click)="statusFilter.set(s.value)"
+                >
+                  {{ s.label
+                  }}<span
+                    class="n"
+                    [class.bad]="s.tone === 'bad'"
+                    [class.warn]="s.tone === 'warn'"
+                    >{{ s.count }}</span
+                  >
+                </button>
+              }
+            </div>
+            <select
+              class="input"
+              aria-label="Category"
+              [ngModel]="categoryFilter()"
+              (ngModelChange)="categoryFilter.set($event)"
             >
-              Cards
-            </button>
-            <button
-              type="button"
-              [class.active]="viewMode() === 'table'"
-              [attr.aria-pressed]="viewMode() === 'table'"
-              (click)="viewMode.set('table')"
+              <option value="all">All categories</option>
+              @for (c of categories(); track c) {
+                <option [value]="c">{{ c }} ({{ categoryCounts()[c] }})</option>
+              }
+            </select>
+            <select
+              class="input"
+              aria-label="Sort"
+              [ngModel]="sortBy()"
+              (ngModelChange)="sortBy.set($event)"
+              title="Sort within each category"
             >
-              Dense
-            </button>
+              <option value="category">Sort: status (default)</option>
+              <option value="p95">Sort: P95 cycle (slowest first)</option>
+              <option value="errors">Sort: errors (most first)</option>
+              <option value="backlog">Sort: backlog (largest first)</option>
+            </select>
           </div>
-          <div class="expand-controls" role="group" aria-label="Expand categories">
-            <!-- Disabled with a reason when nothing is failed, degraded or stale — it used to be
-                 a live link that silently did nothing on a healthy fleet. -->
-            <button
-              type="button"
-              class="link-btn"
-              [disabled]="problemGroupCount() === 0"
-              [title]="
-                problemGroupCount() === 0
-                  ? 'No category has a failed, degraded or stale worker'
-                  : 'Expand the ' + problemGroupCount() + ' categories with problems'
-              "
-              (click)="expandProblems()"
-            >
-              Expand problems{{ problemGroupCount() > 0 ? ' (' + problemGroupCount() + ')' : '' }}
-            </button>
-            <button type="button" class="link-btn" (click)="expandAll()">Expand all</button>
-            <button type="button" class="link-btn" (click)="collapseAll()">Collapse all</button>
+          <div class="subbar">
+            <div class="seg" role="group" aria-label="View mode">
+              <button
+                type="button"
+                [class.on]="viewMode() === 'cards'"
+                [attr.aria-pressed]="viewMode() === 'cards'"
+                (click)="viewMode.set('cards')"
+              >
+                Cards
+              </button>
+              <button
+                type="button"
+                [class.on]="viewMode() === 'table'"
+                [attr.aria-pressed]="viewMode() === 'table'"
+                (click)="viewMode.set('table')"
+              >
+                Dense
+              </button>
+            </div>
+            <div class="expand-controls" role="group" aria-label="Expand categories">
+              <!-- Disabled with a reason when nothing is failed, degraded or stale — it used to be
+                   a live link that silently did nothing on a healthy fleet. -->
+              <button
+                type="button"
+                class="link-btn"
+                [disabled]="problemGroupCount() === 0"
+                [title]="
+                  problemGroupCount() === 0
+                    ? 'No category has a failed, degraded or stale worker'
+                    : 'Expand the ' + problemGroupCount() + ' categories with problems'
+                "
+                (click)="expandProblems()"
+              >
+                Expand problems{{ problemGroupCount() > 0 ? ' (' + problemGroupCount() + ')' : '' }}
+              </button>
+              <button type="button" class="link-btn" (click)="expandAll()">Expand all</button>
+              <button type="button" class="link-btn" (click)="collapseAll()">Collapse all</button>
+            </div>
+            <span class="spacer"></span>
+            <span class="muted">
+              {{ filtered().length }} of {{ workers().length }} workers · {{ expanded().size }} of
+              {{ groupedByCategory().length }} categories expanded
+            </span>
           </div>
-          <span class="muted">
-            {{ filtered().length }} of {{ workers().length }} · {{ expanded().size }} of
-            {{ groupedByCategory().length }} expanded
-          </span>
         </div>
+
+        @if (groupedByCategory().length === 0) {
+          <p class="att-empty">No worker matches these filters.</p>
+        }
 
         <!-- Collapsed categories pack two per row; an expanded one takes the
              full width. 38 single-line headers each on their own 60 px row
@@ -348,13 +499,31 @@ const CARD_GRID_CAP = 12;
                 <span class="muted">
                   {{ group.workers.length }} worker{{ group.workers.length === 1 ? '' : 's' }}
                 </span>
+                @if (group.failedCount > 0) {
+                  <span class="pill" data-status="Failed">{{ group.failedCount }} failed</span>
+                }
+                @if (group.degradedCount > 0) {
+                  <span class="pill" data-status="Degraded">
+                    {{ group.degradedCount }} degraded
+                  </span>
+                }
+                @if (group.staleCount > 0) {
+                  <span class="pill pill-stale">{{ group.staleCount }} stale</span>
+                }
                 <span
                   class="agg-pill"
-                  [class.warn-pill]="group.avgP95 > 1000"
-                  [class.bad-pill]="group.avgP95 > 5000"
-                  title="Average P95 cycle duration in this category"
+                  [class.warn-pill]="group.latencyTone === 'warn'"
+                  [class.bad-pill]="group.latencyTone === 'bad'"
+                  [title]="
+                    'Average P95 cycle duration in this category' +
+                    (group.latencyTone === 'bad'
+                      ? ' — a worker here runs longer than its own interval'
+                      : group.latencyTone === 'warn'
+                        ? ' — a worker here uses over half its interval'
+                        : '')
+                  "
                 >
-                  avg P95 {{ group.avgP95 | number: '1.0-0' }} ms
+                  avg P95 {{ fmtMs(group.avgP95) }}
                 </span>
                 <span
                   class="agg-pill"
@@ -372,17 +541,6 @@ const CARD_GRID_CAP = 12;
                   <span class="agg-pill" [class.warn-pill]="group.totalBacklog > 100">
                     backlog {{ group.totalBacklog | number }}
                   </span>
-                }
-                @if (group.failedCount > 0) {
-                  <span class="pill" data-status="Failed">{{ group.failedCount }} failed</span>
-                }
-                @if (group.degradedCount > 0) {
-                  <span class="pill" data-status="Degraded">
-                    {{ group.degradedCount }} degraded
-                  </span>
-                }
-                @if (group.staleCount > 0) {
-                  <span class="pill pill-stale">{{ group.staleCount }} stale</span>
                 }
               </header>
 
@@ -428,19 +586,27 @@ const CARD_GRID_CAP = 12;
                               }
                             </header>
 
+                            @if (reasonsOf(w).length > 0) {
+                              <ul class="reasons card-why">
+                                @for (r of reasonsOf(w); track r.text) {
+                                  <li [class]="r.tone">{{ r.text }}</li>
+                                }
+                              </ul>
+                            }
+
                             <dl class="metrics-grid">
                               <div>
                                 <dt>Cycle (p50/p95)</dt>
                                 <dd class="mono">
                                   {{ w.cycleDurationP50Ms | number: '1.0-0' }} /
                                   <span
-                                    [class.warn]="w.cycleDurationP95Ms > 1000"
-                                    [class.bad]="w.cycleDurationP95Ms > 5000"
+                                    [class.warn]="toneOf(w) === 'warn'"
+                                    [class.bad]="toneOf(w) === 'bad'"
                                     [title]="
-                                      w.cycleDurationP95Ms > 5000
-                                        ? 'P95 above 5 s'
-                                        : w.cycleDurationP95Ms > 1000
-                                          ? 'P95 above 1 s'
+                                      toneOf(w) === 'bad'
+                                        ? 'P95 longer than the worker interval'
+                                        : toneOf(w) === 'warn'
+                                          ? 'P95 over half the worker interval'
                                           : ''
                                     "
                                   >
@@ -488,7 +654,10 @@ const CARD_GRID_CAP = 12;
                               @if (w.lastSuccessAt) {
                                 <span class="foot-line">
                                   <span class="muted">Last success</span>
-                                  <span [class.warn]="w.isStale && !w.isCompleted">
+                                  <span
+                                    [class.warn]="w.isStale && !w.isCompleted"
+                                    [title]="w.lastSuccessAt"
+                                  >
                                     {{ w.lastSuccessAt | relativeTime }}
                                     @if (w.isStale && !w.isCompleted) {
                                       (stale)
@@ -501,7 +670,9 @@ const CARD_GRID_CAP = 12;
                               @if (w.lastErrorAt) {
                                 <span class="foot-line err">
                                   <span class="muted">Last error</span>
-                                  <span>{{ w.lastErrorAt | relativeTime }}</span>
+                                  <span [title]="w.lastErrorAt">{{
+                                    w.lastErrorAt | relativeTime
+                                  }}</span>
                                 </span>
                               }
                               @if (w.lastErrorMessage) {
@@ -530,6 +701,7 @@ const CARD_GRID_CAP = 12;
                             <th class="num">Backlog</th>
                             <th class="num">Cons. fail</th>
                             <th>Last success</th>
+                            <th>Why</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -555,8 +727,8 @@ const CARD_GRID_CAP = 12;
                               <td class="num mono">
                                 {{ w.cycleDurationP50Ms | number: '1.0-0' }} /
                                 <span
-                                  [class.warn]="w.cycleDurationP95Ms > 1000"
-                                  [class.bad]="w.cycleDurationP95Ms > 5000"
+                                  [class.warn]="toneOf(w) === 'warn'"
+                                  [class.bad]="toneOf(w) === 'bad'"
                                 >
                                   {{ w.cycleDurationP95Ms | number: '1.0-0' }}
                                 </span>
@@ -591,12 +763,19 @@ const CARD_GRID_CAP = 12;
                               <td class="num mono" [class.bad]="w.consecutiveFailures > 0">
                                 {{ w.consecutiveFailures }}
                               </td>
-                              <td class="mono" [class.warn]="w.isStale && !w.isCompleted">
+                              <td
+                                class="mono"
+                                [class.warn]="w.isStale && !w.isCompleted"
+                                [title]="w.lastSuccessAt ?? ''"
+                              >
                                 @if (w.lastSuccessAt) {
                                   {{ w.lastSuccessAt | relativeTime }}
                                 } @else {
                                   never
                                 }
+                              </td>
+                              <td class="why" [title]="reasonText(w)">
+                                {{ reasonText(w) || '—' }}
                               </td>
                             </tr>
                           }
@@ -609,6 +788,33 @@ const CARD_GRID_CAP = 12;
             </section>
           }
         </div>
+
+        <!-- Composition charts: context, not the answer — kept below the worker list. -->
+        <h2 class="section-title">Fleet composition</h2>
+        <div class="chart-row">
+          <app-chart-card
+            title="Status distribution"
+            subtitle="Healthy · Degraded · Failed · Idle"
+            [options]="statusDonutOptions()"
+            height="260px"
+          />
+          <app-chart-card
+            title="Workers by category"
+            [subtitle]="categoryChartSubtitle()"
+            [options]="workersByCategoryOptions()"
+            height="260px"
+          />
+          <app-chart-card
+            title="P95 cycle by category"
+            [subtitle]="
+              'Average P95 per category, slowest ' +
+              topCategoryLimit +
+              ' shown · log scale — hover a bar for the value'
+            "
+            [options]="cycleByCategoryOptions()"
+            height="260px"
+          />
+        </div>
       } @else {
         <app-empty-state
           title="No worker data"
@@ -617,558 +823,7 @@ const CARD_GRID_CAP = 12;
       }
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        border: none;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-secondary {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .metrics {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
-        gap: var(--space-4);
-      }
-      @media (max-width: 1200px) {
-        .metrics {
-          grid-template-columns: repeat(3, 1fr);
-        }
-      }
-      @media (max-width: 768px) {
-        .metrics {
-          grid-template-columns: repeat(2, 1fr);
-        }
-      }
-
-      /* KPI strip — 10 cards as 2 rows of 5; minmax(0, 1fr) keeps the columns
-         equal regardless of how long the formatted value is. */
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: var(--space-2);
-      }
-      @media (max-width: 900px) {
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* 3-col chart row */
-      .chart-row {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .chart-row {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      /* Hot spots — 3 small ranked tables */
-      .hotspots-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-3);
-      }
-      @media (max-width: 1100px) {
-        .hotspots-row {
-          grid-template-columns: 1fr;
-        }
-      }
-      .hotspot {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .hotspot-head {
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-2);
-      }
-      .hotspot-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      table.mini {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      table.mini td {
-        padding: 6px var(--space-3);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      table.mini tbody tr:last-child td {
-        border-bottom: none;
-      }
-      table.mini td.name {
-        max-width: 180px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      table.mini td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      table.mini td.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      table.mini td.bad,
-      table.mini td .bad {
-        color: var(--loss);
-      }
-      table.mini td.warn,
-      table.mini td .warn {
-        color: var(--tone-amber);
-      }
-      table.mini .empty {
-        display: block;
-        padding: var(--space-3) var(--space-4);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      table.mini .empty.good {
-        color: var(--profit);
-      }
-      .hotspot .empty {
-        display: block;
-        padding: var(--space-3) var(--space-4);
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-      .hotspot .empty.good {
-        color: var(--profit);
-      }
-
-      /* View toggle (cards / dense table) */
-      .view-toggle {
-        display: inline-flex;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-        border: 1px solid var(--border);
-      }
-      .view-toggle button {
-        height: 36px;
-        padding: 0 var(--space-3);
-        background: transparent;
-        border: none;
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--text-secondary);
-        cursor: pointer;
-      }
-      .view-toggle button.active {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm);
-      }
-
-      /* Group header aggregate pills */
-      .agg-pill {
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-medium);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-variant-numeric: tabular-nums;
-      }
-      .agg-pill.bad-pill {
-        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
-        color: var(--tone-red);
-      }
-      .agg-pill.warn-pill {
-        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
-        color: var(--tone-amber);
-      }
-
-      /* Dense table mode — many workers per screen, bounded so categories
-         like ML (83 workers) don't push the rest of the page off-screen. */
-      .dense-wrap {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: auto;
-        max-height: 540px;
-      }
-      .dense-wrap thead th {
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      table.dense {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      table.dense th,
-      table.dense td {
-        padding: 6px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-        white-space: nowrap;
-      }
-      table.dense thead th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      table.dense th.num,
-      table.dense td.num {
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-      table.dense td.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-      }
-      table.dense td.muted {
-        color: var(--text-tertiary);
-      }
-      table.dense td.name {
-        max-width: 280px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      table.dense tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      table.dense .bad {
-        color: var(--loss);
-      }
-      table.dense .warn {
-        color: var(--tone-amber);
-      }
-      .categories {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: var(--space-1) var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .categories {
-          grid-template-columns: 1fr;
-        }
-      }
-      .category-section {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        min-width: 0;
-        border: 1px solid transparent;
-        border-radius: var(--radius-md);
-        transition: border-color 0.15s ease;
-      }
-      .category-section.expanded {
-        grid-column: 1 / -1;
-        margin: var(--space-2) 0;
-      }
-      /* Collapsed state — a single 36 px header row, nothing else. */
-      .category-section.collapsed {
-        gap: 0;
-      }
-      .category-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-        min-height: 36px;
-        cursor: pointer;
-        user-select: none;
-        padding: 4px var(--space-3);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        transition: background 0.12s ease;
-      }
-      .category-head:hover {
-        background: var(--bg-tertiary);
-      }
-      .grid-cap-note {
-        margin: 0 0 var(--space-1);
-        padding: 0 var(--space-3);
-      }
-      .category-head:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-      }
-      .category-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-      }
-      .category-head .chevron {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        width: 12px;
-        display: inline-block;
-      }
-
-      /* Expand controls — link-style buttons in the toolbar */
-      .expand-controls {
-        display: inline-flex;
-        gap: var(--space-2);
-        align-items: center;
-      }
-      .link-btn {
-        background: transparent;
-        border: none;
-        padding: 0;
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--accent);
-        cursor: pointer;
-      }
-      .link-btn:hover:not(:disabled) {
-        text-decoration: underline;
-      }
-      .link-btn:disabled {
-        color: var(--text-tertiary);
-        cursor: default;
-      }
-      .expand-controls .link-btn + .link-btn::before {
-        content: '·';
-        margin-right: var(--space-2);
-        color: var(--text-tertiary);
-      }
-      .pill-stale {
-        background: color-mix(in srgb, var(--tone-purple) 16%, transparent);
-        color: var(--tone-purple);
-      }
-      .toolbar {
-        display: flex;
-        gap: var(--space-3);
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      .input {
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .search {
-        flex: 1 1 200px;
-        min-width: 200px;
-      }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-      /* Bounded scroll container for the per-category card grid — categories
-         like ML (83 workers) would otherwise produce ~21 rows of cards and
-         push every other category off-screen. The wrapper holds the cap so
-         the inner grid keeps its native auto-fill / minmax behaviour. */
-      .grid-scroll {
-        position: relative;
-      }
-      /* Only the big groups (ML etc.) get the cap — a 540 px box sliced the
-         last row of a 14-card group in half, which read as a broken layout. */
-      .grid-scroll.capped {
-        max-height: 620px;
-        overflow-y: auto;
-        padding-right: 4px;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: var(--space-3);
-      }
-      .card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-        box-shadow: var(--shadow-sm);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-        transition: border-color 0.15s ease;
-      }
-      .card[data-status='Healthy'] {
-        border-left: 3px solid var(--profit);
-      }
-      .card[data-status='Degraded'] {
-        border-left: 3px solid var(--warning);
-      }
-      .card[data-status='Failed'] {
-        border-left: 3px solid var(--loss);
-      }
-      .card[data-status='Idle'] {
-        border-left: 3px solid var(--text-tertiary);
-      }
-      .card-head {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .status-dot {
-        width: 10px;
-        height: 10px;
-        border-radius: 50%;
-        background: var(--text-tertiary);
-        flex-shrink: 0;
-      }
-      .status-dot[data-status='Healthy'] {
-        background: var(--profit);
-      }
-      .status-dot[data-status='Degraded'] {
-        background: var(--warning);
-      }
-      .status-dot[data-status='Failed'] {
-        background: var(--loss);
-      }
-      .title {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        min-width: 0;
-      }
-      .title h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-primary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .title .muted {
-        font-size: 11px;
-      }
-      .pill {
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      /* Theme tones: the light-theme hues read as dark-on-dark in the dark theme. */
-      .pill[data-status='Healthy'] {
-        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
-        color: var(--tone-green);
-      }
-      .pill[data-status='Degraded'] {
-        background: color-mix(in srgb, var(--tone-amber) 16%, transparent);
-        color: var(--tone-amber);
-      }
-      .pill[data-status='Failed'] {
-        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
-        color: var(--tone-red);
-      }
-      .pill[data-status='Idle'] {
-        background: color-mix(in srgb, var(--tone-blue) 16%, transparent);
-        color: var(--tone-blue);
-      }
-      .metrics-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: var(--space-2) var(--space-3);
-        margin: 0;
-      }
-      .metrics-grid > div.span-2 {
-        grid-column: 1 / -1;
-      }
-      .metrics-grid dt {
-        font-size: 11px;
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        margin: 0;
-      }
-      .metrics-grid dt.bad-label {
-        color: var(--loss);
-      }
-      .metrics-grid dd {
-        margin: 2px 0 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        font-weight: var(--font-medium);
-      }
-      .metrics-grid dd.mono {
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: var(--text-xs);
-      }
-      .metrics-grid dd.bad,
-      .metrics-grid dd .bad {
-        color: var(--loss);
-      }
-      .metrics-grid dd.warn,
-      .metrics-grid dd .warn {
-        color: var(--tone-amber);
-      }
-      .err-rate {
-        opacity: 0.7;
-      }
-      .card-foot {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        font-size: 11px;
-        border-top: 1px solid var(--border);
-        padding-top: var(--space-2);
-      }
-      .foot-line {
-        display: flex;
-        gap: var(--space-2);
-        align-items: baseline;
-      }
-      .card-foot .err {
-        color: var(--loss);
-      }
-      .card-foot .warn {
-        color: var(--warning);
-      }
-      .card-foot .msg {
-        color: var(--text-secondary);
-        font-family: 'SF Mono', 'Fira Code', monospace;
-        font-size: 10.5px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        word-break: break-word;
-      }
-    `,
-  ],
+  styleUrl: './worker-health-page.scss',
 })
 export class WorkerHealthPageComponent {
   private readonly workersService = inject(WorkersService);
@@ -1270,7 +925,9 @@ export class WorkerHealthPageComponent {
     const st = this.statusFilter();
     const cat = this.categoryFilter();
     return this.workers().filter((w) => {
-      if (st !== 'all' && w.status !== st) return false;
+      if (st === 'attention') {
+        if (!needsAttention(w)) return false;
+      } else if (st !== 'all' && w.status !== st) return false;
       if (cat !== 'all' && w.category !== cat) return false;
       if (q && !w.name.toLowerCase().includes(q)) return false;
       return true;
@@ -1347,6 +1004,7 @@ export class WorkerHealthPageComponent {
             degradedCount: workers.filter((w) => w.status === 'Degraded').length,
             staleCount: workers.filter((w) => w.isStale && !w.isCompleted).length,
             avgP95,
+            latencyTone: worstLatencyTone(workers),
             errorsLastHour: workers.reduce((s, w) => s + (w.errorsLastHour ?? 0), 0),
             successesLastHour: workers.reduce((s, w) => s + (w.successesLastHour ?? 0), 0),
             totalBacklog: workers.reduce((s, w) => s + (w.backlogDepth ?? 0), 0),
@@ -1366,7 +1024,14 @@ export class WorkerHealthPageComponent {
   readonly fleetStats = computed(() => {
     const ws = this.workers();
     if (ws.length === 0) {
-      return { avgP95: 0, medianP95: 0, maxP99: 0, errorsLastHour: 0, totalBacklog: 0 };
+      return {
+        avgP95: 0,
+        medianP95: 0,
+        maxP99: 0,
+        maxP99Worker: '',
+        errorsLastHour: 0,
+        totalBacklog: 0,
+      };
     }
     const p95s = ws.map((w) => w.cycleDurationP95Ms).filter((v) => Number.isFinite(v));
     const avgP95 = p95s.length > 0 ? p95s.reduce((a, b) => a + b, 0) / p95s.length : 0;
@@ -1378,17 +1043,19 @@ export class WorkerHealthPageComponent {
         : sorted.length % 2 === 0
           ? (sorted[mid - 1] + sorted[mid]) / 2
           : sorted[mid];
-    const maxP99 = ws.reduce(
-      (m, w) =>
-        Number.isFinite(w.cycleDurationP99Ms) && w.cycleDurationP99Ms > m
-          ? w.cycleDurationP99Ms
-          : m,
-      0,
-    );
+    let maxP99 = 0;
+    let maxP99Worker = '';
+    for (const w of ws) {
+      if (Number.isFinite(w.cycleDurationP99Ms) && w.cycleDurationP99Ms > maxP99) {
+        maxP99 = w.cycleDurationP99Ms;
+        maxP99Worker = w.name;
+      }
+    }
     return {
       avgP95: Math.round(avgP95),
       medianP95: Math.round(medianP95),
       maxP99: Math.round(maxP99),
+      maxP99Worker,
       errorsLastHour: ws.reduce((s, w) => s + (w.errorsLastHour ?? 0), 0),
       totalBacklog: ws.reduce((s, w) => s + (w.backlogDepth ?? 0), 0),
     };
@@ -1578,7 +1245,9 @@ export class WorkerHealthPageComponent {
             .map((r) => ({
               value: Math.round(r.avg),
               itemStyle: {
-                color: r.avg > 1000 ? '#FF9500' : r.avg > 500 ? '#FFCC00' : '#34C759',
+                // One neutral hue: a long average is often a long-cadence sweep doing its job.
+                // Whether a worker overruns its own schedule is flagged per worker above.
+                color: '#0A84FF',
                 borderRadius: [0, 4, 4, 0],
               },
             }))
@@ -1589,6 +1258,145 @@ export class WorkerHealthPageComponent {
       ],
     };
   });
+
+  // ---------- Attention ----------
+
+  /** Failed, degraded and stale workers, worst first. */
+  readonly attention = computed(() =>
+    this.workers()
+      .filter(needsAttention)
+      .sort((a, b) => attentionRank(a) - attentionRank(b) || a.name.localeCompare(b.name)),
+  );
+
+  /** Idle workers that are not already in the attention list. */
+  readonly idleWorkers = computed(() =>
+    this.workers()
+      .filter((w) => w.status === 'Idle' && !needsAttention(w))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  );
+
+  /** Newest snapshot time across the rows. */
+  readonly capturedAt = computed(() => {
+    let best: string | null = null;
+    let bestMs = -Infinity;
+    for (const w of this.workers()) {
+      const t = w.capturedAt ? new Date(w.capturedAt).getTime() : NaN;
+      if (Number.isFinite(t) && t > bestMs) {
+        bestMs = t;
+        best = w.capturedAt;
+      }
+    }
+    return best;
+  });
+
+  readonly verdictTone = computed<'ok' | 'warn' | 'bad'>(() =>
+    this.failedCount() > 0 ? 'bad' : this.attention().length > 0 ? 'warn' : 'ok',
+  );
+
+  readonly verdictHeadline = computed(() => {
+    const n = this.attention().length;
+    if (n === 0) {
+      const active = this.workers().length - this.idleCount();
+      return `All ${active} active worker${active === 1 ? ' is' : 's are'} healthy`;
+    }
+    const parts: string[] = [];
+    if (this.failedCount() > 0) parts.push(`${this.failedCount()} failed`);
+    if (this.degradedCount() > 0) parts.push(`${this.degradedCount()} degraded`);
+    const staleOnly = this.attention().filter(
+      (w) => w.status !== 'Failed' && w.status !== 'Degraded',
+    ).length;
+    if (staleOnly > 0) parts.push(`${staleOnly} stale`);
+    return `${n} worker${n === 1 ? ' needs' : 's need'} attention — ${parts.join(', ')}`;
+  });
+
+  readonly verdictDetail = computed(() => {
+    const idle = this.idleCount();
+    const errs = this.fleetStats().errorsLastHour;
+    return [
+      `${this.workers().length} workers`,
+      `${idle} idle`,
+      `${errs} error${errs === 1 ? '' : 's'} in the last hour`,
+    ].join(' · ');
+  });
+
+  readonly statusOptions = computed(() => {
+    const opts: {
+      value: StatusFilter;
+      label: string;
+      count: number;
+      tone: '' | 'warn' | 'bad';
+      title: string;
+    }[] = [
+      { value: 'all', label: 'All', count: this.workers().length, tone: '', title: 'Every worker' },
+      {
+        value: 'attention',
+        label: 'Needs attention',
+        count: this.attention().length,
+        tone: this.failedCount() > 0 ? 'bad' : this.attention().length > 0 ? 'warn' : '',
+        title: 'Failed, degraded or stale',
+      },
+      {
+        value: 'Failed',
+        label: 'Failed',
+        count: this.failedCount(),
+        tone: this.failedCount() > 0 ? 'bad' : '',
+        title: 'At least one failed cycle in a row',
+      },
+      {
+        value: 'Degraded',
+        label: 'Degraded',
+        count: this.degradedCount(),
+        tone: this.degradedCount() > 0 ? 'warn' : '',
+        title: 'Error rate above 5 % in the last hour, or stale',
+      },
+      {
+        value: 'Idle',
+        label: 'Idle',
+        count: this.idleCount(),
+        tone: '',
+        title: 'Stopped, or running with no successful cycle yet',
+      },
+      {
+        value: 'Healthy',
+        label: 'Healthy',
+        count: this.healthyCount(),
+        tone: '',
+        title: 'Cycling normally (finished one-shots count here)',
+      },
+    ];
+    return opts;
+  });
+
+  // Reasons are pure per row; memoised by object identity so the template can call them freely.
+  private reasonCache = new WeakMap<WorkerHealthDto, WorkerReason[]>();
+
+  reasonsOf(w: WorkerHealthDto): WorkerReason[] {
+    let r = this.reasonCache.get(w);
+    if (!r) {
+      r = workerReasons(w);
+      this.reasonCache.set(w, r);
+    }
+    return r;
+  }
+
+  reasonText(w: WorkerHealthDto): string {
+    return this.reasonsOf(w)
+      .map((r) => r.text)
+      .join(' · ');
+  }
+
+  /** Narrows the ng-template context (typed as any) back to worker rows. */
+  asWorkers(rows: unknown): WorkerHealthDto[] {
+    return Array.isArray(rows) ? (rows as WorkerHealthDto[]) : [];
+  }
+
+  toneOf(w: WorkerHealthDto): '' | 'warn' | 'bad' {
+    return latencyTone(w);
+  }
+
+  fmtMs(ms: number): string {
+    return formatMs(ms);
+  }
 
   formatInterval(seconds: number): string {
     if (!seconds || seconds <= 0) return '—';
@@ -1601,4 +1409,15 @@ export class WorkerHealthPageComponent {
   refresh(): void {
     this.resource.refresh();
   }
+}
+
+/** Worst schedule-relative latency tone among a category's workers. */
+function worstLatencyTone(workers: WorkerHealthDto[]): '' | 'warn' | 'bad' {
+  let worst: '' | 'warn' | 'bad' = '';
+  for (const w of workers) {
+    const t = latencyTone(w);
+    if (t === 'bad') return 'bad';
+    if (t === 'warn') worst = 'warn';
+  }
+  return worst;
 }

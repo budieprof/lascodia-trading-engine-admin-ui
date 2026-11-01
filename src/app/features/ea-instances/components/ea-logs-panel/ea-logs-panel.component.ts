@@ -141,7 +141,12 @@ const LEVEL_OPTIONS: ReadonlyArray<{ value: LevelFilter; label: string }> = [
   `,
   styles: [
     `
+      :host {
+        display: block;
+      }
       .panel {
+        height: 100%;
+        box-sizing: border-box;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -162,11 +167,16 @@ const LEVEL_OPTIONS: ReadonlyArray<{ value: LevelFilter; label: string }> = [
         font-size: var(--text-sm);
         font-weight: var(--font-semibold);
       }
+      /* Full width under the title: at 180px the component-prefix placeholder was cut off. */
       .filters {
         display: flex;
         gap: var(--space-2);
         align-items: center;
         flex-wrap: wrap;
+        flex: 1 1 100%;
+      }
+      .filters input.input {
+        flex: 1 1 200px;
       }
       .input {
         height: 32px;
@@ -231,15 +241,17 @@ const LEVEL_OPTIONS: ReadonlyArray<{ value: LevelFilter; label: string }> = [
         font-size: 10px;
         letter-spacing: 0.06em;
         text-transform: uppercase;
-        background: rgba(0, 0, 0, 0.05);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
       }
+      /* Translucent tints + tone tokens: the old #fff4e0 / #fde0de chips glared on a dark card. */
       .lvl[data-level='WARN'] {
-        background: #fff4e0;
-        color: #b56b00;
+        background: rgba(255, 149, 0, 0.16);
+        color: var(--tone-amber);
       }
       .lvl[data-level='ERROR'] {
-        background: #fde0de;
-        color: #c4290a;
+        background: rgba(255, 59, 48, 0.16);
+        color: var(--tone-red);
       }
       .row-main {
         display: flex;

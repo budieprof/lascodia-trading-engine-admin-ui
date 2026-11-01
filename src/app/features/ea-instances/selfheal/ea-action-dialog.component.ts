@@ -146,6 +146,28 @@ import { FormsModule } from '@angular/forms';
         padding-top: var(--space-2);
         border-top: 1px solid var(--border);
       }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 7px 16px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-sm);
+        font-weight: var(--font-medium);
+        cursor: pointer;
+      }
+      .btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: transparent;
+        color: #fff;
+      }
       .btn-danger {
         background: var(--tone-red, #ff3b30);
         color: #fff;

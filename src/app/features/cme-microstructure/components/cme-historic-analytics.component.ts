@@ -89,6 +89,13 @@ interface AnalyticsPanel {
         <p class="err small" role="alert">{{ e }}</p>
       }
 
+      @if (!data() && !loading() && !error()) {
+        <p class="muted small">
+          Not loaded yet — sweeping the imported sessions is on demand. Press
+          <strong>Load analytics</strong> for per-session tape, aggressor and book coverage.
+        </p>
+      }
+
       @if (loading() && !data()) {
         <p class="muted small">
           Sweeping the warm tier. The first read of a cold cache takes ~20s; after that it is
@@ -353,7 +360,6 @@ interface AnalyticsPanel {
         --surface: #fcfcfb;
         display: grid;
         gap: 1rem;
-        margin-top: 1.25rem;
       }
       @media (prefers-color-scheme: dark) {
         :host-context(:not([data-theme='light'])) .hist {
@@ -382,23 +388,29 @@ interface AnalyticsPanel {
         flex-wrap: wrap;
       }
       h3 {
-        margin: 0 0 0.15rem;
-        font-size: 1rem;
+        margin: 0 0 4px;
+        font-size: 15px;
+        font-weight: var(--font-bold);
+        color: var(--text-primary);
       }
       p {
         margin: 0;
       }
       .muted {
-        opacity: 0.7;
+        color: var(--text-tertiary);
+      }
+      .hist-head .muted {
+        color: var(--text-secondary);
       }
       .small {
-        font-size: 0.8125rem;
+        font-size: 12px;
+        line-height: 1.5;
       }
       .err {
-        color: #d7263d;
+        color: var(--tone-red);
       }
       .warn {
-        color: #b26a00;
+        color: var(--tone-amber);
       }
 
       .tiles {
@@ -414,17 +426,19 @@ interface AnalyticsPanel {
         border-radius: 8px;
         min-width: 0;
       }
+      /* Tone as a left stripe, like the page's KPI tiles — a tinted border read as a focus ring. */
       .tile[data-state='warn'] {
-        border-color: rgba(255, 149, 0, 0.55);
+        box-shadow: inset 3px 0 0 var(--warning);
       }
       .tile[data-state='good'] {
-        border-color: rgba(52, 199, 89, 0.45);
+        box-shadow: inset 3px 0 0 var(--profit);
       }
       .tile-k {
-        font-size: 0.75rem;
+        font-size: 10.5px;
+        font-weight: var(--font-semibold);
         text-transform: uppercase;
-        letter-spacing: 0.03em;
-        opacity: 0.7;
+        letter-spacing: 0.05em;
+        color: var(--text-tertiary);
       }
       .tile-v {
         font-size: 1.15rem;
@@ -535,18 +549,23 @@ interface AnalyticsPanel {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
+      /* Same button as the page's secondary actions, so the section reads as one page. */
       .btn {
-        padding: 0.4rem 0.8rem;
-        border-radius: 7px;
-        border: 1px solid var(--axis);
-        background: transparent;
-        color: inherit;
+        height: 30px;
+        padding: 0 12px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: var(--font-semibold);
         cursor: pointer;
-        font: inherit;
+        white-space: nowrap;
       }
       .btn[disabled] {
         opacity: 0.55;
-        cursor: default;
+        cursor: not-allowed;
       }
     `,
   ],

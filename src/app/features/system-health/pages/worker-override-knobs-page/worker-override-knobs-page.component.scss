@@ -1,0 +1,198 @@
+// Worker override knobs — read-only reference. Tokens only (light + dark).
+
+.page {
+  padding: var(--space-2) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.callout {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border-left: 3px solid var(--accent);
+
+  strong {
+    color: var(--text-primary);
+  }
+}
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+// ── Toolbar: search + counts on one line ──
+.toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.search {
+  position: relative;
+  flex: 1 1 280px;
+  max-width: 420px;
+
+  input {
+    width: 100%;
+    height: 34px;
+    padding: 0 12px 0 30px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+  }
+  input:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+  }
+}
+.search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-tertiary);
+  pointer-events: none;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+.stat-n {
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  margin-right: 2px;
+}
+.stat.match .stat-n {
+  color: var(--accent);
+}
+
+// ── Worker cards: two columns so 33 short cards don't make a 3,600 px page ──
+.worker-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-3) var(--space-4) var(--space-4);
+  columns: 2 460px;
+  column-gap: var(--space-3);
+}
+.worker {
+  break-inside: avoid;
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.worker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+.worker-name {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--font-semibold);
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+.count {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: var(--font-semibold);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-full);
+  padding: 1px 8px;
+  font-variant-numeric: tabular-nums;
+}
+.mono {
+  font-family: var(--font-mono, 'SF Mono', ui-monospace, monospace);
+}
+.muted {
+  color: var(--text-tertiary);
+}
+.small {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+.knob-chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Config keys read as identifiers, not as 155 primary-blue buttons.
+   They stay links (each opens the key in Engine Config) but look like
+   monospace tags; the hover state is where the affordance lives. */
+.knob-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.knob-chip:hover,
+.knob-chip:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  text-decoration: underline;
+  outline: none;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+
+  strong {
+    color: var(--text-secondary);
+  }
+  .btn {
+    margin-top: var(--space-2);
+  }
+}
+.btn-sm {
+  padding: 4px 12px;
+  font-size: var(--text-xs);
+}

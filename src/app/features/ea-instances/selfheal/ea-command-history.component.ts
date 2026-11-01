@@ -48,7 +48,9 @@ const PAGE_SIZE = 25;
           <p class="error-line">{{ p.message }}</p>
         } @else if (p.rows.length === 0) {
           <p class="empty">
-            {{ page() === 1 ? 'No commands have been sent to this instance.' : 'No older commands.' }}
+            {{
+              page() === 1 ? 'No commands have been sent to this instance.' : 'No older commands.'
+            }}
           </p>
         } @else {
           <div class="table-scroll">
@@ -81,7 +83,9 @@ const PAGE_SIZE = 25;
                     <td>
                       <span class="pill" [attr.data-tone]="tone(c.status)">{{ c.status }}</span>
                       @if (c.retries > 0) {
-                        <div class="muted small">{{ c.retries }} retr{{ c.retries === 1 ? 'y' : 'ies' }}</div>
+                        <div class="muted small">
+                          {{ c.retries }} retr{{ c.retries === 1 ? 'y' : 'ies' }}
+                        </div>
                       }
                     </td>
                     <td class="outcome">
@@ -136,6 +140,18 @@ const PAGE_SIZE = 25;
   styles: [
     SELFHEAL_PANEL_STYLES,
     `
+      /* 25 rows of mostly automated "Report deal history" ran ~1,250px; cap the box and
+         keep the column heads in view while it scrolls. */
+      .table-scroll {
+        max-height: 520px;
+        overflow-y: auto;
+      }
+      .table-scroll thead th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: var(--bg-secondary);
+      }
       .outcome {
         max-width: 420px;
         overflow-wrap: anywhere;
@@ -163,8 +179,11 @@ export class EaCommandHistoryComponent {
       const page = this.page();
       if (!id) return of(null);
       return this.admin.listCommands(id, page, PAGE_SIZE).pipe(
-        map((r): Page =>
-          r.status ? { ok: true, rows: r.data ?? [] } : { ok: false, message: r.message ?? 'Could not load commands.' },
+        map(
+          (r): Page =>
+            r.status
+              ? { ok: true, rows: r.data ?? [] }
+              : { ok: false, message: r.message ?? 'Could not load commands.' },
         ),
         catchError(() => of<Page>({ ok: false, message: 'The engine did not answer.' })),
       );

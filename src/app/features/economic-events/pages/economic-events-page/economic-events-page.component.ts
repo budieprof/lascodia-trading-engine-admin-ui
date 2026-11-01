@@ -35,6 +35,8 @@ import {
 } from '@shared/components/form-field/form-field.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 
+import { formatSurprise, parseSurprise } from './economic-events-format';
+
 /**
  * 'upcoming' is the default view (from now on). It used to be labelled "All time" while silently
  * bounding the list to the future — "Showing 1–25 of 154" under "All time" over 94,321 events.
@@ -58,6 +60,13 @@ const DATE_FMT = 'd MMM yyyy, HH:mm';
 const DAY_FMT = 'd MMM yyyy';
 
 const numberFmt = new Intl.NumberFormat('en-US');
+
+/** AG Grid cells are flex boxes, so `type: 'rightAligned'` alone leaves numbers on the left. */
+const NUM_CELL = {
+  display: 'flex',
+  justifyContent: 'flex-end',
+  fontVariantNumeric: 'tabular-nums',
+};
 const fmt = (n: number): string => numberFmt.format(n);
 
 @Component({
@@ -343,13 +352,20 @@ const fmt = (n: number): string => numberFmt.format(n);
       @if (calendarEnd(); as end) {
         @if (hasUpcoming()) {
           <p class="feed-status">
-            Calendar runs to {{ end | date: dateFmt : 'UTC' }} UTC ·
-            {{ fmt(upcomingCount()) }} upcoming events in the analytics window.
+            <span class="status-dot">Feed live</span>
+            <span>
+              Calendar runs to <strong>{{ end | date: dateFmt : 'UTC' }} UTC</strong> ·
+              <span class="num">{{ fmt(upcomingCount()) }}</span> upcoming events in the analytics
+              window.
+            </span>
           </p>
         } @else {
           <p class="feed-status stalled">
-            Calendar ends {{ end | date: dateFmt : 'UTC' }} UTC — no events are scheduled after that
-            date. The calendar feed may have stalled.
+            <span class="status-dot warn">Feed may have stalled</span>
+            <span>
+              Calendar ends <strong>{{ end | date: dateFmt : 'UTC' }} UTC</strong> — no events are
+              scheduled after that date. The calendar feed may have stalled.
+            </span>
           </p>
         }
       }
@@ -364,12 +380,7 @@ const fmt = (n: number): string => numberFmt.format(n);
         />
         <app-metric-card label="Next 24h" [value]="next24hCount()" format="number" />
         <app-metric-card label="This week" [value]="weekCount()" format="number" />
-        <app-metric-card
-          label="High impact (window)"
-          [value]="highImpactCount()"
-          format="number"
-          [dotColor]="highImpactCount() > 0 ? '#FF3B30' : undefined"
-        />
+        <app-metric-card label="High impact (window)" [value]="highImpactCount()" format="number" />
         <app-metric-card
           label="Awaiting actual (window)"
           [value]="awaitingActualCount()"
@@ -382,6 +393,49 @@ const fmt = (n: number): string => numberFmt.format(n);
           format="number"
         />
       </div>
+
+      <!-- Next high-impact releases — what the operator usually opens this page for, so it
+           sits right under the headline numbers. Rows open the event like table rows do. -->
+      @if (upcomingHighImpact().length > 0) {
+        <section class="upcoming">
+          <header class="card-head">
+            <h3>Next high-impact releases</h3>
+            <span class="muted">
+              {{ fmt(upcomingHighImpact().length) }} upcoming · the engine filters signals around
+              these
+            </span>
+          </header>
+          <ul class="up-list">
+            <li aria-hidden="true">
+              <div class="up-row up-head">
+                <span>Starts</span>
+                <span>Scheduled (UTC)</span>
+                <span>Ccy</span>
+                <span>Release</span>
+                <span class="up-num">Forecast</span>
+                <span class="up-num">Previous</span>
+              </div>
+            </li>
+            @for (e of upcomingHighImpact(); track e.id) {
+              <li>
+                <button
+                  type="button"
+                  class="up-row"
+                  (click)="openActual(e)"
+                  [attr.aria-label]="'Open ' + (e.title ?? 'event')"
+                >
+                  <span class="up-time mono">{{ countdown(e.scheduledAt) }}</span>
+                  <span class="up-when">{{ e.scheduledAt | date: 'EEE ' + dateFmt : 'UTC' }}</span>
+                  <span class="up-currency mono">{{ e.currency }}</span>
+                  <span class="up-title" [title]="e.title ?? ''">{{ e.title }}</span>
+                  <span class="up-num mono">{{ e.forecast || '—' }}</span>
+                  <span class="up-num mono">{{ e.previous || '—' }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        </section>
+      }
 
       <!-- 3-col chart row: impact donut + currency exposure + per-day density -->
       <div class="chart-row">
@@ -416,749 +470,63 @@ const fmt = (n: number): string => numberFmt.format(n);
         }
       </div>
 
-      <!-- Filter dropdowns — one control set; counts are scoped to the analytics window -->
-      <div class="filter-bar">
-        <select
-          class="input"
-          [ngModel]="currencyFilter()"
-          (ngModelChange)="onFilterChange('currency', $event)"
-        >
-          <option value="">All currencies</option>
-          @for (c of currencyOptions(); track c.value) {
-            <option [value]="c.value">{{ c.value }} ({{ fmt(c.count) }})</option>
-          }
-        </select>
-        <select
-          class="input"
-          [ngModel]="impactFilter()"
-          (ngModelChange)="onFilterChange('impact', $event)"
-        >
-          <option value="">All impacts</option>
-          <option value="High">High ({{ fmt(impactCounts().High) }})</option>
-          <option value="Medium">Medium ({{ fmt(impactCounts().Medium) }})</option>
-          <option value="Low">Low ({{ fmt(impactCounts().Low) }})</option>
-        </select>
-        <select
-          class="input"
-          [ngModel]="dateRangeFilter()"
-          (ngModelChange)="onFilterChange('dateRange', $event)"
-        >
-          <option value="upcoming">Upcoming</option>
-          <option value="all">All time</option>
-          <option value="today">Today</option>
-          <option value="next24h">Next 24h</option>
-          <option value="past24h">Past 24h</option>
-          <option value="week">This week</option>
-        </select>
-        @if (hasActiveFilters()) {
-          <button type="button" class="link-btn" (click)="resetFilters()">Reset filters</button>
-        }
-      </div>
-
-      <!-- Upcoming high-impact countdown panel -->
-      @if (upcomingHighImpact().length > 0) {
-        <section class="upcoming">
-          <header class="card-head">
-            <h3>Next high-impact releases</h3>
-            <span class="muted">
-              {{ fmt(upcomingHighImpact().length) }} upcoming · the engine filters signals around
-              these
-            </span>
-          </header>
-          <ul class="up-list">
-            @for (e of upcomingHighImpact(); track e.id) {
-              <li class="up-row">
-                <span class="up-time mono">{{ countdown(e.scheduledAt) }}</span>
-                <span class="impact-pill high">High</span>
-                <span class="up-currency mono">{{ e.currency }}</span>
-                <span class="up-title" [title]="e.title ?? ''">{{ e.title }}</span>
-                <span class="up-meta">
-                  fcst <span class="mono">{{ e.forecast || '—' }}</span> · prev
-                  <span class="mono">{{ e.previous || '—' }}</span>
-                </span>
-              </li>
+      <!-- Filters sit directly on the table they filter (they used to be separated from it by
+           the high-impact panel). -->
+      <section class="table-block">
+        <!-- Filter dropdowns — one control set; counts are scoped to the analytics window -->
+        <div class="filter-bar">
+          <span class="filter-label">Calendar</span>
+          <select
+            class="input"
+            aria-label="Filter by currency"
+            [ngModel]="currencyFilter()"
+            (ngModelChange)="onFilterChange('currency', $event)"
+          >
+            <option value="">All currencies</option>
+            @for (c of currencyOptions(); track c.value) {
+              <option [value]="c.value">{{ c.value }} ({{ fmt(c.count) }})</option>
             }
-          </ul>
-        </section>
-      }
-
-      <p class="table-note">Times in UTC · {{ sortNote() }}</p>
-      <app-data-table
-        #table
-        [columnDefs]="columns"
-        [fetchData]="fetchData"
-        [searchable]="true"
-        (rowClick)="openActual($event)"
-      />
+          </select>
+          <select
+            class="input"
+            aria-label="Filter by impact"
+            [ngModel]="impactFilter()"
+            (ngModelChange)="onFilterChange('impact', $event)"
+          >
+            <option value="">All impacts</option>
+            <option value="High">High ({{ fmt(impactCounts().High) }})</option>
+            <option value="Medium">Medium ({{ fmt(impactCounts().Medium) }})</option>
+            <option value="Low">Low ({{ fmt(impactCounts().Low) }})</option>
+          </select>
+          <select
+            class="input"
+            aria-label="Date range"
+            [ngModel]="dateRangeFilter()"
+            (ngModelChange)="onFilterChange('dateRange', $event)"
+          >
+            <option value="upcoming">Upcoming</option>
+            <option value="all">All time</option>
+            <option value="today">Today</option>
+            <option value="next24h">Next 24h</option>
+            <option value="past24h">Past 24h</option>
+            <option value="week">This week</option>
+          </select>
+          @if (hasActiveFilters()) {
+            <button type="button" class="link-btn" (click)="resetFilters()">Reset filters</button>
+          }
+        </div>
+        <p class="table-note">Times in UTC · {{ sortNote() }}</p>
+        <app-data-table
+          #table
+          [columnDefs]="columns"
+          [fetchData]="fetchData"
+          [searchable]="true"
+          (rowClick)="openActual($event)"
+        />
+      </section>
     </div>
   `,
-  styles: [
-    `
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-      .btn {
-        height: 36px;
-        padding: 0 var(--space-4);
-        border-radius: var(--radius-full);
-        border: none;
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .btn:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: white;
-      }
-      .btn-primary:hover:not(:disabled) {
-        background: var(--accent-hover);
-      }
-      .btn-secondary {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .panel {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      /* ── Chips (reused across drawer + future inline contexts) ───────────── */
-      .chip {
-        display: inline-flex;
-        align-items: center;
-        padding: 2px 10px;
-        border-radius: var(--radius-full);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        white-space: nowrap;
-      }
-      .chip-currency {
-        font-family: var(--font-mono);
-        font-weight: var(--font-semibold);
-        background: rgba(0, 113, 227, 0.12);
-        color: #0071e3;
-      }
-      .chip-impact[data-impact='High'] {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .chip-impact[data-impact='Medium'] {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .chip-impact[data-impact='Low'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .chip-source {
-        font-size: 11px;
-      }
-      .chip-desc[data-source='Scraped'] {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .chip-desc[data-source='LlmGenerated'] {
-        background: rgba(191, 90, 242, 0.14);
-        color: #8e4ec6;
-      }
-      .chip-desc[data-source='Manual'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: #0071e3;
-      }
-      .chip-desc[data-source='None'] {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-
-      /* ── Side drawer (slides in from the right) ───────────────────────────
-         Fixed-position so the underlying calendar / filters / table stay
-         in place; backdrop click + Escape both close it. */
-      .drawer-backdrop {
-        position: fixed;
-        inset: 0;
-        background: rgba(0, 0, 0, 0.36);
-        z-index: 998;
-        animation: drawer-fade-in 140ms ease-out;
-      }
-      .drawer {
-        position: fixed;
-        top: 0;
-        right: 0;
-        bottom: 0;
-        width: min(560px, 100vw);
-        z-index: 999;
-        background: var(--bg-primary);
-        border-left: 1px solid var(--border);
-        box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
-        display: flex;
-        flex-direction: column;
-        animation: drawer-slide-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
-      }
-      @keyframes drawer-fade-in {
-        from {
-          opacity: 0;
-        }
-        to {
-          opacity: 1;
-        }
-      }
-      @keyframes drawer-slide-in {
-        from {
-          transform: translateX(100%);
-        }
-        to {
-          transform: translateX(0);
-        }
-      }
-      .drawer-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-5);
-        border-bottom: 1px solid var(--border);
-        background: var(--bg-secondary);
-      }
-      .drawer-head-meta {
-        flex: 1 1 auto;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-      }
-      .drawer-chips {
-        display: flex;
-        gap: var(--space-2);
-        flex-wrap: wrap;
-      }
-      .drawer-title {
-        margin: 0;
-        font-size: var(--text-xl);
-        font-weight: var(--font-semibold);
-        line-height: 1.25;
-        color: var(--text-primary);
-        word-wrap: break-word;
-      }
-      .drawer-subtitle {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        display: flex;
-        gap: var(--space-2);
-        align-items: baseline;
-        flex-wrap: wrap;
-      }
-      .drawer-time {
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-        font-weight: var(--font-medium);
-      }
-      .drawer-time-suffix {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .drawer-sep {
-        opacity: 0.5;
-      }
-      .drawer-countdown {
-        font-size: var(--text-xs);
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .drawer-close {
-        flex: 0 0 auto;
-        background: transparent;
-        border: none;
-        font-size: 24px;
-        line-height: 1;
-        color: var(--text-secondary);
-        cursor: pointer;
-        width: 36px;
-        height: 36px;
-        border-radius: var(--radius-full);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        transition:
-          background 100ms ease,
-          color 100ms ease;
-      }
-      .drawer-close:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .drawer-body {
-        flex: 1 1 auto;
-        overflow-y: auto;
-        padding: var(--space-5);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-5);
-      }
-
-      /* ── Drawer sections ──────────────────────────────────────────────── */
-      .drawer-section {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-4);
-      }
-      .section-title {
-        margin: 0 0 var(--space-3) 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .section-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        margin-bottom: var(--space-3);
-      }
-      .section-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .section-footer {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        margin-top: var(--space-3);
-        flex-wrap: wrap;
-      }
-
-      /* Explainer section gets a soft tint to draw the eye */
-      .explainer-section {
-        background: linear-gradient(180deg, rgba(191, 90, 242, 0.04) 0%, var(--bg-secondary) 60%);
-        border-color: rgba(191, 90, 242, 0.2);
-      }
-      .explainer-prose {
-        margin: 0;
-        font-size: var(--text-sm);
-        line-height: 1.6;
-        color: var(--text-primary);
-        white-space: pre-wrap;
-      }
-
-      .loading-state,
-      .empty-state {
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        color: var(--text-secondary);
-        font-size: var(--text-sm);
-      }
-      .empty-state {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: var(--space-2);
-      }
-
-      /* Facts grid — Forecast / Previous / Actual side-by-side */
-      .facts-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-2);
-      }
-      .fact {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-      }
-      .fact-label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .fact-value {
-        font-size: var(--text-lg);
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-        color: var(--text-primary);
-      }
-      .fact-emphasis {
-        background: rgba(0, 113, 227, 0.06);
-        border-color: rgba(0, 113, 227, 0.3);
-      }
-      .fact-emphasis .fact-value {
-        color: #0071e3;
-      }
-
-      /* Key/value list for metadata */
-      .kv-list {
-        display: grid;
-        grid-template-columns: 140px 1fr;
-        gap: var(--space-2) var(--space-3);
-        margin: 0;
-      }
-      .kv-list dt {
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .kv-list dd {
-        margin: 0;
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        font-variant-numeric: tabular-nums;
-      }
-
-      /* Collapsible Update Actual */
-      .actual-details summary {
-        list-style: none;
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-2);
-      }
-      .actual-details summary::-webkit-details-marker {
-        display: none;
-      }
-      .actual-summary {
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        color: var(--text-primary);
-      }
-      .actual-summary::before {
-        content: '▸';
-        margin-right: var(--space-2);
-        color: var(--text-secondary);
-        transition: transform 120ms ease;
-        display: inline-block;
-      }
-      .actual-details[open] .actual-summary::before {
-        transform: rotate(90deg);
-      }
-      .actual-form {
-        margin-top: var(--space-3);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .actual-form-actions {
-        display: flex;
-        justify-content: flex-end;
-      }
-
-      /* Shared utility classes */
-      .btn-sm {
-        padding: 4px 10px;
-        font-size: var(--text-xs);
-      }
-      .btn-ghost {
-        background: transparent;
-        color: var(--text-secondary);
-        border: 1px solid var(--border);
-      }
-      .btn-ghost:hover:not(:disabled) {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-      .muted {
-        color: var(--text-secondary);
-      }
-      .small {
-        font-size: var(--text-xs);
-      }
-      .mono {
-        font-family: var(--font-mono);
-      }
-      .panel-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: var(--space-4) var(--space-5);
-        border-bottom: 1px solid var(--border);
-      }
-      .panel-head h3 {
-        margin: 0;
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-      }
-      .close {
-        background: transparent;
-        border: none;
-        font-size: 20px;
-        color: var(--text-secondary);
-        cursor: pointer;
-        width: 32px;
-        height: 32px;
-        border-radius: var(--radius-full);
-      }
-      .close:hover {
-        background: var(--bg-tertiary);
-      }
-      .panel-body {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: var(--space-4);
-        padding: var(--space-5);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-      }
-      .field.wide {
-        grid-column: 1 / -1;
-      }
-      .field label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        margin-bottom: var(--space-1);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: var(--font-medium);
-      }
-      .input {
-        height: 36px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .actions {
-        grid-column: 1 / -1;
-        display: flex;
-        gap: var(--space-2);
-        justify-content: flex-end;
-        padding-top: var(--space-3);
-        border-top: 1px solid var(--border);
-        margin-top: var(--space-2);
-      }
-      .spin {
-        width: 16px;
-        height: 16px;
-        border: 2px solid rgba(255, 255, 255, 0.3);
-        border-top-color: white;
-        border-radius: 50%;
-        animation: spin 0.6s linear infinite;
-      }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
-      }
-
-      .feed-status {
-        margin: 0 0 calc(-1 * var(--space-3));
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .feed-status.stalled {
-        color: var(--warning);
-        font-weight: var(--font-medium);
-      }
-
-      /* KPI strip — six equal tiles */
-      .kpis {
-        display: grid;
-        grid-template-columns: repeat(6, minmax(0, 1fr));
-        gap: var(--space-2);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .kpis {
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 720px) {
-        .kpis {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-
-      /* 3-col chart row */
-      .chart-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .chart-row {
-          grid-template-columns: 1fr;
-        }
-      }
-      .chart-empty {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-        padding: var(--space-4);
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-      }
-      .chart-empty strong {
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-      }
-      .table-note {
-        margin: 0 0 calc(-1 * var(--space-3));
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-      }
-
-      /* Filter bar */
-      .filter-bar {
-        display: flex;
-        flex-wrap: wrap;
-        gap: var(--space-2);
-        align-items: center;
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--space-2) var(--space-3);
-      }
-      .input {
-        height: 32px;
-        padding: 0 var(--space-2);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-xs);
-        outline: none;
-        max-width: 220px;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .link-btn {
-        background: transparent;
-        border: none;
-        padding: 0 var(--space-2);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        color: var(--accent);
-        cursor: pointer;
-      }
-      .link-btn:hover {
-        text-decoration: underline;
-      }
-      .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-
-      /* Upcoming high-impact panel */
-      .upcoming {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        overflow: hidden;
-      }
-      .card-head {
-        display: flex;
-        align-items: baseline;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .card-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .up-list {
-        list-style: none;
-        margin: 0;
-        padding: 0;
-        max-height: 320px;
-        overflow-y: auto;
-      }
-      .up-row {
-        display: grid;
-        grid-template-columns: 110px 60px 60px 1fr auto;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-2) var(--space-4);
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-      }
-      .up-row:last-child {
-        border-bottom: none;
-      }
-      .up-time {
-        font-variant-numeric: tabular-nums;
-        font-weight: var(--font-semibold);
-        color: var(--accent);
-      }
-      .up-currency {
-        color: var(--text-secondary);
-      }
-      .up-title {
-        color: var(--text-primary);
-        font-weight: var(--font-medium);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .up-meta {
-        color: var(--text-tertiary);
-        font-size: 11px;
-      }
-      .impact-pill {
-        display: inline-flex;
-        padding: 2px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-      }
-      .impact-pill.high {
-        background: rgba(255, 59, 48, 0.12);
-        color: var(--tone-red);
-      }
-      .impact-pill.medium {
-        background: rgba(255, 149, 0, 0.12);
-        color: var(--tone-amber);
-      }
-      .impact-pill.low {
-        background: rgba(52, 199, 89, 0.12);
-        color: var(--tone-green);
-      }
-      .mono {
-        font-family: 'SF Mono', 'Menlo', monospace;
-      }
-    `,
-  ],
+  styleUrl: './economic-events-page.component.scss',
 })
 export class EconomicEventsPageComponent {
   private readonly service = inject(EconomicEventsService);
@@ -1199,12 +567,14 @@ export class EconomicEventsPageComponent {
   readonly fmt = fmt;
 
   readonly columns: ColDef<EconomicEventDto>[] = [
-    { headerName: 'Title', field: 'title', flex: 2, minWidth: 240, tooltipField: 'title' },
-    { headerName: 'Currency', field: 'currency', width: 110, minWidth: 110 },
+    // Fixed columns trimmed so the title gets the slack: it was cut at ~190px
+    // ("5-Year Climate Transition JGB Aucti…") while Source/Currency kept spare width.
+    { headerName: 'Title', field: 'title', flex: 1, minWidth: 260, tooltipField: 'title' },
+    { headerName: 'Currency', field: 'currency', width: 112, minWidth: 112 },
     {
       headerName: 'Impact',
       field: 'impact',
-      width: 100,
+      width: 96,
       cellRenderer: (p: { value: unknown }) => {
         const v = String(p.value ?? '');
         const palette: Record<string, { bg: string; color: string }> = {
@@ -1213,53 +583,60 @@ export class EconomicEventsPageComponent {
           Low: { bg: 'rgba(52,199,89,0.12)', color: 'var(--tone-green)' },
         };
         const s = palette[v] ?? palette['Low'];
-        return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${v}</span>`;
+        return `<span style="background:${s.bg};color:${s.color};padding:2px 10px;border-radius:999px;font-size:12px;font-weight:600">${escapeHtml(v)}</span>`;
       },
     },
     {
       headerName: 'Forecast',
       field: 'forecast',
-      width: 110,
+      width: 112,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => blankDash(p.value),
     },
     {
       headerName: 'Previous',
       field: 'previous',
-      width: 110,
+      width: 112,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
       valueFormatter: (p) => blankDash(p.value),
     },
     {
       headerName: 'Actual',
       field: 'actual',
-      width: 110,
+      width: 112,
+      type: 'rightAligned',
       valueFormatter: (p) => blankDash(p.value),
-      cellStyle: (p) => (p.value ? { fontWeight: 600 } : null),
+      cellStyle: (p) => (p.value ? { ...NUM_CELL, fontWeight: 600 } : NUM_CELL),
     },
     {
-      // "Surprise" — actual vs forecast delta. Only meaningful when both
-      // strings parse as numbers; otherwise renders blank. Green = beat (actual
-      // > forecast), red = miss. Helps the operator spot release-day surprises
-      // without manually diffing the strings.
+      // "Surprise" — actual minus forecast, when both parse as numbers. Deliberately NOT
+      // green/red: "above forecast" is good news for payrolls and bad news for unemployment or
+      // inflation, so a colour would assert a verdict the page cannot make. Arrow + sign only.
       headerName: 'Surprise',
       colId: 'surprise',
-      width: 110,
+      width: 104,
       sortable: false,
+      type: 'rightAligned',
+      cellStyle: NUM_CELL,
+      headerTooltip: 'Actual minus forecast. Above forecast is not necessarily good news.',
       cellRenderer: (p: { data: EconomicEventDto }) => {
         const delta = parseSurprise(p.data?.actual ?? null, p.data?.forecast ?? null);
         if (delta === null) return '—';
-        const color =
-          delta > 0 ? 'var(--tone-green)' : delta < 0 ? 'var(--tone-red)' : 'var(--tone-grey)';
-        const sign = delta > 0 ? '+' : '';
-        return `<span style="color:${color};font-weight:600;font-variant-numeric:tabular-nums">${sign}${delta.toFixed(2)}</span>`;
+        const text = formatSurprise(delta);
+        const arrow = text === '0' ? '' : delta > 0 ? '▲ ' : '▼ ';
+        return `<span style="color:var(--text-primary);font-weight:600;font-variant-numeric:tabular-nums"><span style="color:var(--text-tertiary);font-size:9px">${arrow}</span>${escapeHtml(text)}</span>`;
       },
     },
     {
       headerName: 'Scheduled (UTC)',
       field: 'scheduledAt',
-      width: 170,
+      width: 160,
+      cellStyle: { fontVariantNumeric: 'tabular-nums' },
       valueFormatter: (p) => this.datePipe.transform(p.value as string, DATE_FMT, 'UTC') ?? '—',
     },
-    { headerName: 'Source', field: 'source', width: 120 },
+    { headerName: 'Source', field: 'source', width: 110 },
   ];
 
   // ── Filter state ────────────────────────────────────────────────────────
@@ -1873,31 +1250,10 @@ function blankDash(v: unknown): string {
   return v == null || v === '' ? '—' : String(v);
 }
 
-// Parse strings like "275K", "1.9%", "<0.75%", "-42" as numbers so we can
-// compute an actual-vs-forecast surprise. Returns null when either side fails
-// to parse — better to render "—" than a misleading delta.
-function parseEconValue(v: string | null): number | null {
-  if (v == null) return null;
-  const s = v.trim();
-  if (s === '') return null;
-  // Drop comparison operators / leading symbols (<, >, ~, ≈, ±).
-  const stripped = s.replace(/^[<>~≈±]+\s*/, '').replace(/[,\s]/g, '');
-  // Match number with optional sign + optional unit suffix (K/M/B/T).
-  const m = stripped.match(/^(-?\d+(?:\.\d+)?)\s*([KkMmBbTt%]?)/);
-  if (!m) return null;
-  let n = parseFloat(m[1]);
-  if (!Number.isFinite(n)) return null;
-  const unit = m[2].toUpperCase();
-  if (unit === 'K') n *= 1_000;
-  else if (unit === 'M') n *= 1_000_000;
-  else if (unit === 'B') n *= 1_000_000_000;
-  else if (unit === 'T') n *= 1_000_000_000_000;
-  return n;
-}
-
-function parseSurprise(actual: string | null, forecast: string | null): number | null {
-  const a = parseEconValue(actual);
-  const f = parseEconValue(forecast);
-  if (a === null || f === null) return null;
-  return a - f;
+function escapeHtml(v: string): string {
+  return v
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }

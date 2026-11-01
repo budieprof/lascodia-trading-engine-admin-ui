@@ -19,27 +19,13 @@ import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton
 import { ErrorStateComponent } from '@shared/components/feedback/error-state.component';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 
+import { dbTier, EaStats, FleetVerdict, fleetVerdict } from './fleet-verdict';
+
 /** Rows per page on the instance board. */
 const PAGE_SIZE = 25;
 
 /** Fallback liveness window when the fleet summary has not loaded yet. */
 const DEFAULT_STALE_MINUTES = 10;
-
-interface EaStats {
-  total: number;
-  active: number;
-  disconnected: number;
-  /** Disconnected with a heartbeat in the last 24 h — a live terminal that dropped, not history. */
-  disconnectedRecent: number;
-  /** ShuttingDown with a heartbeat inside the liveness window — a shutdown actually in flight. */
-  shuttingDown: number;
-  /** ShuttingDown and silent since: deregistered cleanly, finished. */
-  deregistered: number;
-  idleOverStale: number;
-  coordinatorsLive: number;
-  accounts: number;
-  versions: number;
-}
 
 /**
  * Phase-16: single-glance health page for the engine + fleet.
@@ -70,6 +56,7 @@ interface EaStats {
     ErrorStateComponent,
     RelativeTimePipe,
   ],
+  styleUrl: './fleet-health-page.component.scss',
   template: `
     <div class="page">
       <app-page-header
@@ -91,6 +78,33 @@ interface EaStats {
       @if (initialLoading()) {
         <app-card-skeleton [lines]="6" />
       } @else {
+        <!-- ── Verdict: the answer to "is anything wrong?", from the same numbers as the tiles ── -->
+        @let v = verdict();
+        <section class="verdict" [attr.data-tone]="v.tone" role="status">
+          <span class="verdict-dot" aria-hidden="true"></span>
+          <strong class="verdict-head">{{ v.headline }}</strong>
+          @if (v.issues.length > 1) {
+            <ul class="verdict-list">
+              @for (it of v.issues; track it.text) {
+                <li [attr.data-tone]="it.tone">{{ it.text }}</li>
+              }
+            </ul>
+          } @else if (v.issues.length === 0) {
+            <span class="verdict-facts">{{ v.facts.join(' · ') }}</span>
+          }
+          @if (eaStats(); as s) {
+            @if (s.disconnected - s.disconnectedRecent > 0) {
+              <span
+                class="verdict-note"
+                title="Disconnected instances whose last heartbeat is more than 24 h old — instance ids retired by restarts and upgrades. Listed below, greyed out."
+              >
+                {{ s.disconnected - s.disconnectedRecent }} disconnected for over 24 h — retired
+                ids, greyed below
+              </span>
+            }
+          }
+        </section>
+
         <!-- ── Summary cards row ─────────────────────────────────── -->
         <section class="summary-grid">
           <!--
@@ -111,7 +125,7 @@ interface EaStats {
                 <span class="hl-total">{{ s.total }}</span>
                 <span class="hl-label">active</span>
               </div>
-              <dl class="kpi-grid">
+              <dl class="kpi-grid pairs">
                 <dt>Idle &gt;{{ staleMinutes() }}m</dt>
                 <dd [class.warn]="s.idleOverStale > 0">{{ s.idleOverStale }}</dd>
                 <!-- Red only for a recent drop: 48 Disconnected rows are mostly retired instance ids
@@ -312,7 +326,7 @@ interface EaStats {
                 </thead>
                 <tbody>
                   @for (i of pagedInstances(); track i.instanceId) {
-                    <tr [attr.data-status]="i.status">
+                    <tr [attr.data-status]="i.status" [class.quiet]="!isLive(i)">
                       <td class="instance-cell">
                         <span class="mono trunc" [title]="i.instanceId">{{ i.instanceId }}</span>
                       </td>
@@ -377,33 +391,28 @@ interface EaStats {
                                   <dt>State</dt>
                                   <dd>{{ d.highlights?.stateMachine ?? '—' }}</dd>
                                   <dt>Safety stop</dt>
-                                  <dd>{{ d.highlights?.safetyStopCategory ?? 'NONE' }}</dd>
+                                  <dd
+                                    [class.bad]="isSafetyStopped(d.highlights?.safetyStopCategory)"
+                                  >
+                                    {{ d.highlights?.safetyStopCategory ?? 'NONE' }}
+                                  </dd>
                                   <dt>Market</dt>
                                   <dd>{{ d.highlights?.marketState ?? '—' }}</dd>
                                   <dt>Broker connected</dt>
-                                  <dd>
-                                    {{
-                                      boolEmoji(
-                                        $safeNavigationMigration(d.highlights?.brokerConnected)
-                                      )
-                                    }}
+                                  <dd [attr.data-good]="boolGood(d.highlights?.brokerConnected)">
+                                    {{ boolEmoji(d.highlights?.brokerConnected) }}
                                   </dd>
                                   <dt>Engine reachable</dt>
-                                  <dd>
-                                    {{
-                                      boolEmoji(
-                                        $safeNavigationMigration(d.highlights?.engineReachable)
-                                      )
-                                    }}
+                                  <dd [attr.data-good]="boolGood(d.highlights?.engineReachable)">
+                                    {{ boolEmoji(d.highlights?.engineReachable) }}
                                   </dd>
                                   <dt>Kill switch</dt>
-                                  <dd>
-                                    {{
-                                      boolEmoji(
-                                        $safeNavigationMigration(d.highlights?.killSwitchActive),
-                                        true
-                                      )
-                                    }}
+                                  <dd
+                                    [attr.data-good]="
+                                      boolGood(d.highlights?.killSwitchActive, true)
+                                    "
+                                  >
+                                    {{ boolEmoji(d.highlights?.killSwitchActive, true) }}
                                   </dd>
                                 </dl>
                               </div>
@@ -421,13 +430,10 @@ interface EaStats {
                                     }}
                                   </dd>
                                   <dt>HTTP circuit</dt>
-                                  <dd>
-                                    {{
-                                      boolEmoji(
-                                        $safeNavigationMigration(d.highlights?.httpCircuitOpen),
-                                        true
-                                      )
-                                    }}
+                                  <dd
+                                    [attr.data-good]="boolGood(d.highlights?.httpCircuitOpen, true)"
+                                  >
+                                    {{ boolEmoji(d.highlights?.httpCircuitOpen, true) }}
                                   </dd>
                                   <dt>Last tick age</dt>
                                   <dd>{{ withUnit(d.highlights?.lastTickAgeSec, 's') }}</dd>
@@ -503,448 +509,6 @@ interface EaStats {
       }
     </div>
   `,
-  styles: [
-    `
-      /* Same body inset as every other route — the extra padding put the h1 16px right of
-         its siblings. */
-      .page {
-        padding: var(--space-2) 0;
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-4);
-      }
-      .refreshing {
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        align-self: center;
-      }
-
-      /* ── Summary cards row ─────────────────────────────────────── */
-      .summary-grid {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: var(--space-3);
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .summary-grid {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
-      @media (max-width: 600px) {
-        .summary-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      .kpi-card {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-2);
-        padding: var(--space-3) var(--space-4);
-        border: 1px solid var(--border);
-        border-left: 3px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-elevated);
-        min-height: 168px;
-      }
-      .kpi-card[data-tone='ok'] {
-        border-left-color: #1d8a3e;
-      }
-      .kpi-card[data-tone='warn'] {
-        border-left-color: #cb8a17;
-      }
-      .kpi-card[data-tone='bad'] {
-        border-left-color: #c93631;
-      }
-      .kpi-card[data-tone='fast'] {
-        border-left-color: #1d8a3e;
-      }
-      .kpi-card[data-tone='slow'] {
-        border-left-color: #c93631;
-      }
-      .kpi-card[data-tone='neutral'] {
-        border-left-color: var(--border);
-      }
-      .kpi-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: baseline;
-      }
-      .kpi-head h4 {
-        margin: 0;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-      }
-      .kpi-total {
-        font-size: 12px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-total[data-tier='fast'] {
-        color: #1d8a3e;
-      }
-      .kpi-total[data-tier='warn'] {
-        color: #cb8a17;
-      }
-      .kpi-total[data-tier='slow'] {
-        color: #c93631;
-      }
-      .kpi-headline {
-        display: flex;
-        align-items: baseline;
-        gap: 6px;
-        line-height: 1;
-      }
-      .kpi-headline .hl-value {
-        font-size: 30px;
-        font-weight: var(--font-bold);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-headline .hl-value[data-tier='fast'] {
-        color: #1d8a3e;
-      }
-      .kpi-headline .hl-value[data-tier='warn'] {
-        color: #cb8a17;
-      }
-      .kpi-headline .hl-value[data-tier='slow'] {
-        color: #c93631;
-      }
-      .kpi-headline .hl-sep {
-        color: var(--text-tertiary);
-        font-size: 22px;
-      }
-      .kpi-headline .hl-unit {
-        color: var(--text-secondary);
-        font-size: 14px;
-        font-weight: var(--font-semibold);
-      }
-      .kpi-headline .hl-total {
-        color: var(--text-secondary);
-        font-size: 22px;
-        font-weight: var(--font-semibold);
-        font-variant-numeric: tabular-nums;
-      }
-      .kpi-headline .hl-label {
-        margin-left: auto;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--text-tertiary);
-      }
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: 1fr auto;
-        column-gap: var(--space-3);
-        row-gap: 3px;
-        margin: 0;
-        padding-top: 4px;
-        border-top: 1px dashed var(--border);
-        font-size: 12px;
-      }
-      .kpi-grid dt {
-        color: var(--text-tertiary);
-      }
-      .kpi-grid dd {
-        margin: 0;
-        text-align: right;
-        font-variant-numeric: tabular-nums;
-      }
-
-      /* ── Status colors (shared) — theme tones, readable in both themes ── */
-      .ok {
-        color: var(--tone-green);
-      }
-      .warn {
-        color: var(--tone-amber);
-      }
-      .bad {
-        color: var(--tone-red);
-      }
-      .muted {
-        color: var(--text-secondary);
-      }
-
-      /* ── EA instances board ────────────────────────────────────── */
-      .board-card {
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        background: var(--bg-elevated);
-        overflow: hidden;
-      }
-      .board-head {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: var(--space-3);
-        padding: var(--space-3) var(--space-4);
-        border-bottom: 1px solid var(--border);
-      }
-      .board-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .board-head .muted {
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-        font-variant-numeric: tabular-nums;
-      }
-      .filter-bar {
-        margin-left: auto;
-        display: flex;
-        align-items: center;
-        gap: var(--space-3);
-        flex-wrap: wrap;
-      }
-      .chip-row {
-        display: inline-flex;
-        gap: 4px;
-        padding: 2px;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
-      }
-      .chip {
-        appearance: none;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        padding: 4px 10px;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        transition:
-          background 120ms ease,
-          color 120ms ease;
-      }
-      .chip:hover {
-        color: var(--text-primary);
-      }
-      .chip.active {
-        background: var(--bg-elevated);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 1px var(--border);
-      }
-      .chip-count {
-        font-size: 10px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .chip.active .chip-count {
-        color: var(--text-secondary);
-      }
-      .filter-input {
-        appearance: none;
-        border: 1px solid var(--border);
-        background: var(--bg);
-        color: var(--text-primary);
-        font-size: 12px;
-        padding: 5px 10px;
-        border-radius: var(--radius-sm);
-        width: 200px;
-      }
-      .filter-input:focus {
-        outline: none;
-        border-color: var(--color-accent, #0058b8);
-      }
-
-      .table-scroll {
-        overflow-x: auto;
-      }
-      .pager {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-        padding: var(--space-2) var(--space-4);
-        border-top: 1px solid var(--border);
-        font-size: var(--text-xs);
-        font-variant-numeric: tabular-nums;
-      }
-      .pager-controls {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-      }
-      .pager .btn-secondary {
-        font-family: inherit;
-        cursor: pointer;
-      }
-      .pager .btn-secondary:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      .version-pill {
-        display: inline-block;
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        background: color-mix(in srgb, #888 18%, transparent);
-        color: var(--text-secondary);
-      }
-      .board-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .board-table th,
-      .board-table td {
-        padding: 6px var(--space-3);
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: var(--text-xs);
-        vertical-align: middle;
-      }
-      .board-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .board-table th {
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .board-table tbody tr:hover {
-        background: var(--bg-tertiary);
-      }
-      .board-table th.ctr,
-      .board-table td.ctr {
-        text-align: center;
-      }
-      .board-table th.row-actions,
-      .board-table td.row-actions {
-        text-align: right;
-        white-space: nowrap;
-        width: 1%;
-      }
-
-      .instance-cell {
-        max-width: 360px;
-      }
-      .mono {
-        font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-      }
-      .trunc {
-        display: inline-block;
-        max-width: 100%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        vertical-align: bottom;
-      }
-
-      /* ── Status pill ───────────────────────────────────────────── */
-      .status-pill {
-        display: inline-block;
-        padding: 1px 8px;
-        border-radius: var(--radius-full);
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        background: var(--bg-tertiary);
-        color: var(--text-secondary);
-      }
-      .status-pill[data-status='Active'] {
-        background: color-mix(in srgb, var(--tone-green) 16%, transparent);
-        color: var(--tone-green);
-      }
-      .status-pill[data-status='Disconnected'] {
-        background: color-mix(in srgb, var(--tone-red) 16%, transparent);
-        color: var(--tone-red);
-      }
-      .status-pill[data-status='ShuttingDown'] {
-        background: color-mix(in srgb, var(--tone-amber) 18%, transparent);
-        color: var(--tone-amber);
-      }
-      .status-pill[data-status='Deregistered'] {
-        background: color-mix(in srgb, #888 18%, transparent);
-        color: var(--text-secondary);
-      }
-
-      /* ── Detail expand row ─────────────────────────────────────── */
-      .btn-link {
-        background: none;
-        border: none;
-        color: var(--text-secondary);
-        cursor: pointer;
-        font-size: 12px;
-        padding: 2px 6px;
-        border-radius: var(--radius-sm);
-      }
-      .btn-link:hover {
-        color: var(--text-primary);
-        background: var(--bg);
-      }
-      .detail-row td {
-        background: var(--bg-tertiary);
-        padding: var(--space-3) var(--space-4);
-      }
-      .detail-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: var(--space-3);
-      }
-      .detail-grid h5 {
-        margin: 0 0 6px 0;
-        font-size: 11px;
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      dl.kv-compact {
-        display: grid;
-        grid-template-columns: max-content 1fr;
-        gap: 3px 12px;
-        margin: 0;
-        font-size: 12px;
-      }
-      dl.kv-compact dt {
-        color: var(--text-secondary);
-      }
-      dl.kv-compact dd {
-        margin: 0;
-      }
-
-      .small {
-        font-size: 12px;
-      }
-      .empty-inline {
-        margin: 0;
-        font-size: 12px;
-      }
-      .empty {
-        margin: 0;
-        padding: var(--space-4);
-        text-align: center;
-        color: var(--text-tertiary);
-        font-size: var(--text-xs);
-      }
-
-      .btn-secondary {
-        padding: 5px 12px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-elevated);
-        color: var(--text-primary);
-        text-decoration: none;
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-      }
-      .btn-secondary:hover {
-        background: var(--bg-tertiary);
-      }
-    `,
-  ],
 })
 export class FleetHealthPageComponent {
   private readonly observ = inject(ObservabilityService);
@@ -1052,6 +616,19 @@ export class FleetHealthPageComponent {
     };
   });
 
+  /** Headline over the tiles — derived from the same numbers, see fleet-verdict.ts. */
+  protected readonly verdict = computed<FleetVerdict>(() => {
+    const f = this.fleet();
+    const e = this.engine();
+    return fleetVerdict({
+      stats: this.eaStats(),
+      daemons: f ? f.daemons : null,
+      dbLatencyMs: e ? e.dbLatencyMs : null,
+      outboxPending: e ? e.outboxPending : null,
+      staleMinutes: this.staleMinutes(),
+    });
+  });
+
   /**
    * ShuttingDown is what the engine sets on a clean deregister (EA OnDeinit) — and it never moves
    * on from there (EAHealthMonitorWorker only ages Active rows). A ShuttingDown row with no
@@ -1068,6 +645,15 @@ export class FleetHealthPageComponent {
       };
     }
     if (i.status === 'ShuttingDown') return { key: i.status, label: 'Shutting down', hint: '' };
+    // Red only for a recent drop — the rest are instance ids retired by restarts long ago, and
+    // 40+ red pills drowned the one that mattered. Same 24 h rule as the tile.
+    if (i.status === 'Disconnected' && !(Date.parse(i.lastHeartbeat) >= Date.now() - 86_400_000)) {
+      return {
+        key: 'DisconnectedOld',
+        label: 'Disconnected',
+        hint: 'No heartbeat for over 24 h — most likely an instance id retired by a restart or upgrade.',
+      };
+    }
     return { key: i.status, label: i.status, hint: '' };
   }
 
@@ -1197,9 +783,7 @@ export class FleetHealthPageComponent {
 
   // ── Formatters ───────────────────────────────────────────────────
   protected dbTier(ms: number): 'fast' | 'warn' | 'slow' {
-    if (ms < 50) return 'fast';
-    if (ms < 200) return 'warn';
-    return 'slow';
+    return dbTier(ms);
   }
   protected dbTierLabel(ms: number): string {
     const tier = this.dbTier(ms);
@@ -1216,6 +800,14 @@ export class FleetHealthPageComponent {
     if (s.idleOverStale > 0 || s.shuttingDown > 0) return 'warn';
     if (s.active === 0) return 'neutral';
     return 'ok';
+  }
+  /** 'yes' when the value is the healthy one, 'no' when not, null when unknown — drives ✓/✗ colour. */
+  protected boolGood(v: boolean | null | undefined, invertGreen = false): 'yes' | 'no' | null {
+    if (v === null || v === undefined) return null;
+    return (invertGreen ? !v : v) ? 'yes' : 'no';
+  }
+  protected isSafetyStopped(cat: string | null | undefined): boolean {
+    return !!cat && cat.toUpperCase() !== 'NONE';
   }
   protected boolEmoji(v: boolean | null | undefined, invertGreen = false): string {
     if (v === null || v === undefined) return '—';
