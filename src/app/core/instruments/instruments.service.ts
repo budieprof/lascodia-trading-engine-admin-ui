@@ -146,7 +146,11 @@ export class InstrumentsService {
   private async fromInstruments(): Promise<InstrumentDto[]> {
     try {
       const data = await firstValueFrom(
-        this.api.getEnvelope<unknown>('/instruments', { silent: true }),
+        // Only instruments with stored candles: the master holds ~4,600 active crypto tokens, and the
+        // engine's default page is the first 200 by symbol ("00-USD" … "AGLD-USDT-PERP") — none with data,
+        // and neither BTC-USD nor EURUSD. With hasCandles the catalogue is exactly what can be charted:
+        // the EA's FX/CFD pairs plus every futures / crypto / stock symbol the candle builder has built.
+        this.api.getEnvelope<unknown>('/instruments?hasCandles=true&take=1000', { silent: true }),
       );
       const list = Array.isArray(data)
         ? data
