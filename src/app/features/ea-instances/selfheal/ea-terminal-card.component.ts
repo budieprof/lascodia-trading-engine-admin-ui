@@ -22,6 +22,7 @@ import { SecurityApiService } from '@features/security/security-api.service';
 import type { EaReleaseInfo } from '@features/security/security.types';
 
 import { EaActionDialogComponent } from './ea-action-dialog.component';
+import { EaPruneFilesDialogComponent } from './ea-prune-files-dialog.component';
 import { EaOpsService, type OpsAction } from './ea-ops.service';
 import {
   actionCopy,
@@ -50,7 +51,7 @@ const DISK_LOW_BYTES = 2 * 1024 ** 3;
   selector: 'app-ea-terminal-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, EaActionDialogComponent],
+  imports: [FormsModule, EaActionDialogComponent, EaPruneFilesDialogComponent],
   template: `
     <section class="panel" aria-label="Terminal">
       <header class="panel-head">
@@ -241,6 +242,17 @@ const DISK_LOW_BYTES = 2 * 1024 ** 3;
               >
                 Force recovery
               </button>
+              <button
+                type="button"
+                class="btn btn-sm"
+                [class.btn-primary]="diskLow()"
+                [class.btn-secondary]="!diskLow()"
+                (click)="pruneOpen.set(true)"
+                [disabled]="!!blocker() || busy()"
+                title="List old logs and files of retired EA instances on the host, then delete them after you confirm"
+              >
+                Clean up old files
+              </button>
               @if (t.latestRelease) {
                 <button
                   type="button"
@@ -292,6 +304,12 @@ const DISK_LOW_BYTES = 2 * 1024 ** 3;
         </label>
       }
     </app-ea-action-dialog>
+
+    <app-ea-prune-files-dialog
+      [instanceId]="instanceId()"
+      [open]="pruneOpen()"
+      (closed)="pruneOpen.set(false); resource.refresh()"
+    />
   `,
   styles: [
     SELFHEAL_PANEL_STYLES,
@@ -330,7 +348,7 @@ const DISK_LOW_BYTES = 2 * 1024 ** 3;
   ],
 })
 export class EaTerminalCardComponent {
-  readonly instanceId = input.required<string>();
+  readonly instanceId = input<string>('');
   readonly refreshTick = input(0);
 
   private readonly admin = inject(EAAdminService);
@@ -395,6 +413,7 @@ export class EaTerminalCardComponent {
   // Confirm flow -----------------------------------------------------------
   protected readonly pending = signal<OpsAction | null>(null);
   protected readonly busy = signal(false);
+  protected readonly pruneOpen = signal(false);
   protected releaseId: number | null = null;
   protected restartAfter = true;
   protected readonly copy = computed<ActionCopy | null>(() => {
@@ -412,6 +431,15 @@ export class EaTerminalCardComponent {
     const t = setInterval(() => this.now.set(Date.now()), 5000);
     inject(DestroyRef).onDestroy(() => clearInterval(t));
     this.ops.settled$.pipe(takeUntilDestroyed()).subscribe(() => this.resource.refresh());
+    // instanceId arrives after construction (the first poll ran with ''), so fetch as soon as it is known.
+    let lastId = '';
+    effect(() => {
+      const id = this.instanceId();
+      if (id && id !== lastId) {
+        lastId = id;
+        untracked(() => this.resource.refresh());
+      }
+    });
     let first = true;
     effect(() => {
       this.refreshTick();

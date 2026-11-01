@@ -17,8 +17,10 @@ import type { EADiag, EAHealthDto, EAHealthProblem } from '@core/api/ea-selfheal
 import { createPolledResource } from '@core/polling/polled-resource';
 
 import { EaActionDialogComponent } from './ea-action-dialog.component';
+import { EaPruneFilesDialogComponent } from './ea-prune-files-dialog.component';
 import { EaOpsService, type OpsAction } from './ea-ops.service';
 import {
+  PRUNE_FILES_ACTION,
   actionCopy,
   agoText,
   formatDuration,
@@ -46,7 +48,7 @@ type HealthAnswer = { ok: true; dto: EAHealthDto } | { ok: false; message: strin
   selector: 'app-ea-health-card',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [EaActionDialogComponent],
+  imports: [EaActionDialogComponent, EaPruneFilesDialogComponent],
   template: `
     <section class="panel health" [attr.data-tone]="tone()" aria-label="EA health">
       @if (answer(); as a) {
@@ -162,6 +164,12 @@ type HealthAnswer = { ok: true; dto: EAHealthDto } | { ok: false; message: strin
       [busy]="busy()"
       (confirmed)="confirmFix($event)"
       (cancelled)="pending.set(null)"
+    />
+
+    <app-ea-prune-files-dialog
+      [instanceId]="instanceId()"
+      [open]="pruneOpen()"
+      (closed)="pruneOpen.set(false); resource.refresh()"
     />
   `,
   styles: [
@@ -282,7 +290,7 @@ type HealthAnswer = { ok: true; dto: EAHealthDto } | { ok: false; message: strin
   ],
 })
 export class EaHealthCardComponent {
-  readonly instanceId = input.required<string>();
+  readonly instanceId = input<string>('');
   /** C1 diag from the latest heartbeat (recent transitions). */
   readonly diag = input<EADiag | null>(null);
   /** Bumped by the page's Refresh button. */
@@ -364,6 +372,8 @@ export class EaHealthCardComponent {
   // Fix flow ---------------------------------------------------------------
   protected readonly pending = signal<EAHealthProblem | null>(null);
   protected readonly busy = signal(false);
+  /** The clean-up fix runs its own dry-run → review → confirm dialog. */
+  protected readonly pruneOpen = signal(false);
   protected readonly pendingCopy = computed<ActionCopy | null>(() => {
     const p = this.pending();
     if (!p?.fix) return null;
@@ -376,10 +386,18 @@ export class EaHealthCardComponent {
     const tick = setInterval(() => this.now.set(Date.now()), 1000);
     destroyRef.onDestroy(() => clearInterval(tick));
     this.ops.settled$.pipe(takeUntilDestroyed()).subscribe(() => this.resource.refresh());
+    // instanceId arrives after construction (the first poll ran with ''), so fetch as soon as it is known.
+    let lastId = '';
+    effect(() => {
+      const id = this.instanceId();
+      if (id && id !== lastId) {
+        lastId = id;
+        untracked(() => this.resource.refresh());
+      }
+    });
     let firstTick = true;
     effect(() => {
       this.refreshTick();
-      this.instanceId();
       if (firstTick) {
         firstTick = false;
         return;
@@ -389,6 +407,10 @@ export class EaHealthCardComponent {
   }
 
   protected askFix(p: EAHealthProblem): void {
+    if (p.fix?.action === PRUNE_FILES_ACTION) {
+      this.pruneOpen.set(true);
+      return;
+    }
     this.pending.set(p);
   }
 

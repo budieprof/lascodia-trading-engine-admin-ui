@@ -168,7 +168,7 @@ const KINDS: { value: HostLogKind; label: string; hint: string }[] = [
   ],
 })
 export class EaHostLogsComponent {
-  readonly instanceId = input.required<string>();
+  readonly instanceId = input<string>('');
 
   private readonly admin = inject(EAAdminService);
   private readonly ops = inject(EaOpsService);
@@ -197,6 +197,7 @@ export class EaHostLogsComponent {
 
   protected fetch(): void {
     const id = this.instanceId();
+    if (!id) return;
     const kind = this.kind();
     const label = KINDS.find((k) => k.value === kind)?.label ?? kind;
     this.working.set(true);

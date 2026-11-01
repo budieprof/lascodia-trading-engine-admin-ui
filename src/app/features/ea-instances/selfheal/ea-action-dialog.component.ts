@@ -50,15 +50,17 @@ import { FormsModule } from '@angular/forms';
             </label>
           }
           <footer class="foot">
-            <button
-              type="button"
-              class="btn btn-secondary"
-              (click)="onCancel()"
-              [disabled]="busy()"
-              autofocus
-            >
-              Cancel
-            </button>
+            @if (showCancel()) {
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="onCancel()"
+                [disabled]="busy()"
+                autofocus
+              >
+                Cancel
+              </button>
+            }
             <button
               type="button"
               class="btn"
@@ -165,6 +167,8 @@ export class EaActionDialogComponent {
   readonly busy = input(false);
   /** Extra gate from projected content (e.g. a typed confirmation). */
   readonly confirmDisabled = input(false);
+  /** False for a step whose only button is "Close" (Escape still cancels). */
+  readonly showCancel = input(true);
 
   readonly confirmed = output<string>();
   readonly cancelled = output<void>();
