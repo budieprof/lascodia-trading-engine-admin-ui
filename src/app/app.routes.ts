@@ -673,6 +673,14 @@ export const routes: Routes = [
           import('@features/organisation/organisation.routes').then((m) => m.ORGANISATION_ROUTES),
       },
       {
+        // Trade surveillance (gaps program): alerts for review (observe only), detector settings, job status.
+        path: 'surveillance',
+        canActivate: [canAccessPath('surveillance')],
+        data: { breadcrumb: 'Surveillance' },
+        loadChildren: () =>
+          import('@features/surveillance/surveillance.routes').then((m) => m.SURVEILLANCE_ROUTES),
+      },
+      {
         // Fund module (enterprise program): performance statements, best-execution evidence, compliance exports.
         path: 'fund',
         canActivate: [canAccessPath('fund')],

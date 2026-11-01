@@ -215,6 +215,15 @@ export const NAV_GROUPS: NavGroup[] = [
       },
       { label: 'Best execution', route: '/fund/best-execution', icon: navIcon.BadgeCheck },
       { label: 'Compliance exports', route: '/fund/compliance', icon: navIcon.FileArchive },
+      { label: 'Regulatory reports', route: '/fund/regulatory', icon: navIcon.FileArchive },
+    ],
+  },
+  {
+    // Trade surveillance (gaps program): market-abuse pattern alerts for review — observe only.
+    label: 'Surveillance',
+    items: [
+      { label: 'Surveillance alerts', route: '/surveillance', icon: navIcon.ScanEye },
+      { label: 'Surveillance settings', route: '/surveillance/settings', icon: navIcon.Settings },
     ],
   },
   {

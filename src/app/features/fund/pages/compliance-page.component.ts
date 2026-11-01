@@ -1,5 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
+
+import { AuthService } from '@core/auth/auth.service';
+import { Permission } from '@core/auth/permissions.generated';
 
 import { errorText } from '@features/iam/iam.logic';
 import { isMissingEndpoint } from '@features/organisation/organisation.logic';
@@ -58,7 +62,7 @@ const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> =
   selector: 'app-fund-compliance-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, PageHeaderComponent],
+  imports: [FormsModule, RouterLink, PageHeaderComponent],
   styleUrls: ['../../iam/shared/iam-page.scss', './fund-page.scss', './compliance-page.scss'],
   template: `
     <div class="page">
@@ -338,6 +342,17 @@ const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> =
           </section>
         </div>
 
+        @if (canRegulatory()) {
+          <section class="card">
+            <div class="card-head">
+              <h3>Regulatory report files</h3>
+              <span class="hint">MiFIR RTS 22 / EMIR Refit-shaped files and a venue summary — signed, registered below, never submitted</span>
+              <span class="spacer"></span>
+              <a routerLink="/fund/regulatory" class="btn btn-sm btn-secondary">Open</a>
+            </div>
+          </section>
+        }
+
         <!-- ── Check a copy ──────────────────────────── -->
         <section class="card">
           <div class="card-head">
@@ -482,6 +497,8 @@ const SECTION_INFO: Record<ComplianceSection, { title: string; text: string }> =
 })
 export class CompliancePageComponent {
   private readonly fund = inject(FundApiService);
+  private readonly auth = inject(AuthService);
+  readonly canRegulatory = computed(() => this.auth.hasPermission(Permission.ComplianceRegulatoryGenerate));
 
   protected readonly shortHash = shortHash;
   protected readonly minuteUtc = minuteUtc;
@@ -568,6 +585,8 @@ export class CompliancePageComponent {
   }
 
   sectionTitle(s: string): string {
+    // Regulatory report files share the register (gaps program, surveillance).
+    if (s.startsWith('regulatory:')) return `Regulatory · ${s.slice('regulatory:'.length)}`;
     return SECTION_INFO[s as ComplianceSection]?.title ?? s;
   }
 

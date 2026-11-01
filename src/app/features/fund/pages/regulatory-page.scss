@@ -1,0 +1,115 @@
+.notice {
+  padding: 12px 16px;
+  border-left: 4px solid #d97706;
+  font-size: 0.88rem;
+}
+.kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  padding: 12px 16px;
+}
+.kind {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  cursor: pointer;
+  span {
+    font-size: 0.8rem;
+    color: var(--text-muted, #666);
+  }
+  &.on {
+    border-color: var(--accent, #2563eb);
+    box-shadow: 0 0 0 1px var(--accent, #2563eb) inset;
+  }
+}
+.check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 0.85rem;
+}
+.result {
+  margin: 10px 16px 4px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  &.ok {
+    background: #dcfce7;
+  }
+  &.bad {
+    background: #fde2e1;
+  }
+}
+.small {
+  font-size: 0.8rem;
+  color: var(--text-muted, #666);
+  padding: 0 16px;
+}
+.table-wrap {
+  overflow-x: auto;
+  padding: 0 16px;
+}
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  th,
+  td {
+    text-align: left;
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--border, #eee);
+    font-size: 0.82rem;
+    vertical-align: top;
+  }
+  tr.bad td {
+    color: #8a1c14;
+  }
+}
+.mono {
+  font-family: var(--font-mono, monospace);
+}
+.sample {
+  padding: 6px 16px;
+}
+.receipt {
+  margin: 10px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border, #ddd);
+  border-radius: 8px;
+}
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 12px 16px;
+  align-items: end;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.narrow {
+  width: 70px;
+}
+.bad {
+  color: #8a1c14;
+}
+.problems {
+  margin: 4px 16px 12px;
+  font-size: 0.82rem;
+  color: #8a1c14;
+}
+.ok-line {
+  color: #14532d;
+  padding: 4px 16px 12px;
+}
+.empty {
+  color: var(--text-muted, #666);
+  padding: 16px;
+}

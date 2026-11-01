@@ -64,6 +64,7 @@ const ALERT_TYPES: AlertType[] = [
   'ScriptPositionsOrphaned',
   'ChartAlert',
   'ScriptParityDrift',
+  'SurveillanceAlert',
 ];
 
 const SEVERITIES: AlertSeverity[] = ['Info', 'Medium', 'High', 'Critical'];

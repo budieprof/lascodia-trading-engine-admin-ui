@@ -12,6 +12,13 @@ import { SUPPRESS_ERROR_TOAST, ApiService } from '@core/api/api.service';
 import { ApiError, type ResponseData } from '@core/api/api.types';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { fileNameFromContentDisposition } from '@features/scripting/shared/download';
+import type {
+  RegulatoryAccount,
+  RegulatoryFirm,
+  RegulatoryKind,
+  RegulatoryPreview,
+  RegulatoryReferenceData,
+} from '@features/surveillance/surveillance.types';
 
 import type {
   ComplianceExportPreview,
@@ -239,6 +246,61 @@ export class FundApiService {
         `/fund/compliance-exports/verify${fundQuery({ sha256 })}`,
         SILENT,
       ),
+    );
+  }
+
+  // ── Regulatory report files (gaps program; never submitted anywhere) ──
+  regulatoryReference(): Observable<RegulatoryReferenceData> {
+    return settled(
+      this.api.get<ResponseData<RegulatoryReferenceData>>('/fund/regulatory/reference-data', SILENT),
+    );
+  }
+
+  updateRegulatoryFirm(body: RegulatoryFirm): Observable<RegulatoryReferenceData> {
+    return settled(
+      this.api.put<ResponseData<RegulatoryReferenceData>>('/fund/regulatory/reference-data/firm', body, SILENT),
+    );
+  }
+
+  updateRegulatoryAccount(
+    tradingAccountId: number,
+    body: Pick<RegulatoryAccount, 'clientIdType' | 'clientIdentifier' | 'clientCountry' | 'counterpartyLei' | 'venueMic'>,
+  ): Observable<RegulatoryReferenceData> {
+    return settled(
+      this.api.put<ResponseData<RegulatoryReferenceData>>(
+        `/fund/regulatory/reference-data/accounts/${tradingAccountId}`,
+        body,
+        SILENT,
+      ),
+    );
+  }
+
+  regulatoryPreview(params: {
+    kind: RegulatoryKind;
+    from: string;
+    to: string;
+    includeDemo?: boolean;
+    tradingCapacity?: string | null;
+  }): Observable<RegulatoryPreview> {
+    return settled(
+      this.api.get<ResponseData<RegulatoryPreview>>(
+        `/fund/regulatory/reports/preview${fundQuery({ ...params, includeDemo: params.includeDemo ? 'true' : null })}`,
+        SILENT,
+      ),
+    );
+  }
+
+  downloadRegulatory(params: {
+    kind: RegulatoryKind;
+    from: string;
+    to: string;
+    format: 'csv' | 'xml';
+    includeDemo?: boolean;
+    tradingCapacity?: string | null;
+  }): Observable<DownloadedFile> {
+    return this.download(
+      `/fund/regulatory/reports/download${fundQuery({ ...params, includeDemo: params.includeDemo ? 'true' : null })}`,
+      `${params.kind}.zip`,
     );
   }
 
