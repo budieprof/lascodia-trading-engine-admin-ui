@@ -12,15 +12,23 @@ import {
   input,
   signal,
 } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { finalize } from 'rxjs';
 
 import { EAAdminService } from '@core/services/ea-admin.service';
+import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
-import type { EAConfigInputs, UpdateInstanceConfigRequest } from '@core/api/api.types';
+import type {
+  CurrencyPairDto,
+  EAConfigInputs,
+  EAFleetItem,
+  UpdateInstanceConfigRequest,
+} from '@core/api/api.types';
 import { SkeletonComponent } from '@shared/components/ui/skeleton/skeleton.component';
 import { EaOpsService } from '../../selfheal/ea-ops.service';
 import { EaActionDialogComponent } from '../../selfheal/ea-action-dialog.component';
+import { fleetStatusOf } from '../../current-fleet';
 import {
   RESTART_BADGED_INPUTS,
   RESTART_INPUTS,
@@ -30,33 +38,62 @@ import {
   type InputEdit,
   type InputType,
 } from '../../selfheal/selfheal.logic';
+import {
+  BADGE_WORDS,
+  HOT_RELOAD_FIELDS,
+  HOT_RELOAD_GROUPS,
+  MT5_TIMEFRAMES,
+  RESTART_HELP,
+  RESTART_UNITS,
+  formatSymbolMap,
+  normalizeTimeframes,
+  parseSymbolCsv,
+  parseSymbolMap,
+  sameSymbolSet,
+  validateField,
+  type FieldDef,
+  type FieldGroup,
+  type HotReloadKey,
+  type ReloadBadge,
+} from './ea-config-fields';
+import { EaSymbolPickerComponent, type SymbolOption } from './ea-symbol-picker.component';
 
 /**
- * Phase-4 EA configuration editor.  Two tabs:
- *   - **Editable** — 16 hot-reloadable input shadows grouped by Timing /
- *     Entry tolerance / Execution / Runtime safety.  Each field shows the
- *     current value (from the heartbeat envelope), an editable input, and
- *     a "Hot-reloadable" badge.  Only dirty fields (non-empty, non-equal to
- *     current) are sent on submit.
- *   - **Restart required** — Inp* declarations the EA reads at attach time
- *     (engine URL, magic number, DLL bridge, …) plus the restart-badged
- *     fields. Changed through SetInputs (C3 23): the EA rewrites its chart
- *     template and reloads itself on the new values.
- *
- * The component is purely client-side: it inspects `inputs()` for current
- * values and posts to `EAAdminService.updateInstanceConfig`.  Parent page
- * passes the state envelope's inputs block and listens for `configPushed`
- * to refresh.
+ * EA configuration editor (EA detail page). Two tabs:
+ *   - **Live settings** — the EA's hot-reloadable settings, grouped by topic.
+ *     Every control starts at the EA's current value; changing it marks the
+ *     row, Save (or ⏎) pushes that row, "Review & push" pushes them all after
+ *     a from → to summary. Symbols are picked from the engine's instruments,
+ *     on/off settings are switches, numbers carry their unit.
+ *   - **Restart settings** — inputs the EA reads only when it starts, changed
+ *     through SetInputs (C3 23): the EA rewrites its chart template and
+ *     reloads itself on the new values.
  */
 @Component({
   selector: 'app-ea-config-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, SkeletonComponent, EaActionDialogComponent],
+  imports: [
+    FormsModule,
+    NgTemplateOutlet,
+    SkeletonComponent,
+    EaActionDialogComponent,
+    EaSymbolPickerComponent,
+  ],
+  styleUrl: './ea-config-panel.component.scss',
   template: `
     <section class="panel" aria-label="EA configuration">
       <header class="panel-head">
-        <h3>Configuration</h3>
+        <div>
+          <h3>Configuration</h3>
+          <p class="sub">
+            @if (tab() === 'editable') {
+              Changes apply to this EA within seconds — no restart.
+            } @else {
+              Read when the EA starts. Applying restarts the EA (offline for a few seconds).
+            }
+          </p>
+        </div>
         <div class="tabs" role="tablist">
           <button
             type="button"
@@ -65,8 +102,11 @@ import {
             (click)="tab.set('editable')"
             [attr.aria-selected]="tab() === 'editable'"
           >
-            Editable
-            <span class="badge tone-ok">{{ HOT_RELOAD_FIELDS.length }}</span>
+            Live settings
+            <span class="n">{{ HOT_RELOAD_FIELDS.length }}</span>
+            @if (dirtyCount() > 0) {
+              <span class="n dirty">{{ dirtyCount() }} changed</span>
+            }
           </button>
           <button
             type="button"
@@ -75,14 +115,17 @@ import {
             (click)="tab.set('readonly')"
             [attr.aria-selected]="tab() === 'readonly'"
           >
-            Restart required
-            <span class="badge tone-muted">{{ restartFields.length }}</span>
+            Restart settings
+            <span class="n">{{ restartFields.length }}</span>
+            @if (restartChangeCount() > 0) {
+              <span class="n dirty">{{ restartChangeCount() }} changed</span>
+            }
           </button>
         </div>
       </header>
 
       @if (loading() && !inputs()) {
-        <div class="form-grid skeleton-grid" aria-label="Loading configuration" role="status">
+        <div class="skeleton-grid" aria-label="Loading configuration" role="status">
           @for (i of skeletonFields(); track i) {
             <div class="skeleton-field">
               <ui-skeleton height="11px" width="48%" borderRadius="4px" />
@@ -91,43 +134,42 @@ import {
           }
         </div>
       } @else if (!inputs()) {
-        <p class="empty muted">
-          No input envelope yet — the EA pushes one on each heartbeat starting at v8.47.137. Older
-          builds report only legacy safety params via the existing "Push safety config" modal.
+        <p class="empty">
+          No settings reported yet — the EA sends them with each heartbeat from v8.47.137. Older
+          builds only accept the legacy safety values from the "Push safety config" dialog.
         </p>
       } @else if (tab() === 'editable') {
-        <!-- ── Sticky toolbar (search + filters + save-all) ─────── -->
-        <div class="cfg-toolbar">
-          <div class="cfg-search-wrap">
-            <span class="cfg-search-icon" aria-hidden="true">⌕</span>
+        <!-- ── Toolbar ─────────────────────────────────────────── -->
+        <div class="toolbar">
+          <div class="search">
+            <span class="search-icon" aria-hidden="true">⌕</span>
             <input
               #searchInput
               type="text"
-              class="cfg-search"
-              [placeholder]="'Search ' + HOT_RELOAD_FIELDS.length + ' fields…'"
+              [placeholder]="'Find a setting…'"
               [ngModel]="searchTerm()"
               (ngModelChange)="searchTerm.set($event)"
-              aria-label="Search configuration fields"
+              aria-label="Find a setting"
             />
             @if (searchTerm()) {
               <button
                 type="button"
-                class="cfg-search-clear"
+                class="search-clear"
                 (click)="searchTerm.set('')"
                 aria-label="Clear search"
               >
                 ✕
               </button>
+            } @else {
+              <kbd>/</kbd>
             }
-            <kbd class="cfg-kbd">/</kbd>
           </div>
-          <div class="chip-row" role="tablist" aria-label="Filter by reload behaviour">
+          <div class="seg" role="tablist" aria-label="Filter by when a change applies">
             @for (b of badgeFilterOptions; track b.value) {
               <button
                 type="button"
                 role="tab"
-                class="chip"
-                [class.active]="badgeFilter() === b.value"
+                [class.on]="badgeFilter() === b.value"
                 [attr.aria-selected]="badgeFilter() === b.value"
                 (click)="badgeFilter.set(b.value)"
               >
@@ -135,311 +177,359 @@ import {
               </button>
             }
           </div>
-          <label class="cfg-dirty-toggle" [class.active]="dirtyOnly()">
+          <label class="pill-toggle" [class.on]="dirtyOnly()">
             <input type="checkbox" [checked]="dirtyOnly()" (change)="dirtyOnly.set(!dirtyOnly())" />
-            Unsaved only
-            @if (dirtyCount() > 0) {
-              <span class="cfg-toolbar-count">{{ dirtyCount() }}</span>
-            }
+            Changed only
           </label>
-          <div class="cfg-spacer"></div>
+          <div class="grow"></div>
+          @if (dirtyCount() > 0 || errorCount() > 0) {
+            <button
+              type="button"
+              class="btn btn-quiet"
+              (click)="clearEdits()"
+              [disabled]="submitting()"
+            >
+              Discard
+            </button>
+          }
           <button
             type="button"
-            class="btn btn-primary cfg-save-all"
-            [disabled]="submitting() || !hasDirty()"
-            (click)="submit()"
-            [title]="hasDirty() ? 'Push pending changes (⌘/Ctrl + S)' : 'No unsaved changes'"
+            class="btn btn-primary"
+            [disabled]="submitting() || !hasDirty() || errorCount() > 0"
+            (click)="openReview()"
+            [title]="
+              errorCount() > 0
+                ? 'Fix the highlighted values first'
+                : hasDirty()
+                  ? 'Review, then push (⌘/Ctrl + S)'
+                  : 'Change a setting to enable'
+            "
           >
             @if (submitting()) {
               Pushing…
             } @else if (hasDirty()) {
-              Push {{ dirtyCount() }} change{{ dirtyCount() === 1 ? '' : 's' }}
-              <kbd class="save-bar-kbd">⌘S</kbd>
+              Review & push {{ dirtyCount() }}
             } @else {
-              Push 0 changes
+              No changes
             }
           </button>
         </div>
 
         @if (filteredGroups().length === 0) {
-          <p class="cfg-empty muted">
-            No fields match the current filter.
+          <p class="empty">
+            No settings match.
             <button type="button" class="link-btn" (click)="clearSearch()">Clear filters</button>
           </p>
         } @else {
-          <!-- ── Master-detail body ─────────────────────────────── -->
-          <div class="cfg-body">
-            <aside class="cfg-sidebar" aria-label="Sections">
-              <div class="cfg-sb-head">
-                <span>Sections</span>
-                <span class="muted">{{ sidebarGroups().length }}</span>
-              </div>
-              <input
-                type="search"
-                class="cfg-sb-filter"
-                placeholder="Filter sections…"
-                [ngModel]="categoryFilter()"
-                (ngModelChange)="categoryFilter.set($event)"
-                aria-label="Filter sections"
-              />
-              <nav class="cfg-sb-list">
-                <button
-                  type="button"
-                  class="cat"
-                  [class.active]="selectedCategory() === ALL_CATEGORY"
-                  (click)="selectCategory(ALL_CATEGORY)"
-                >
-                  <span class="cat-name">All sections</span>
-                  <span class="cat-meta">
-                    @if (dirtyCount() > 0) {
-                      <span class="cat-dirty">{{ dirtyCount() }}</span>
-                    }
-                    <span class="cat-count">{{ visibleCount() }}</span>
-                  </span>
+          <div class="body">
+            <nav class="side" aria-label="Sections">
+              @for (group of filteredGroups(); track group.title) {
+                <button type="button" class="cat" (click)="scrollTo(group.title)">
+                  <span class="cat-name">{{ group.title }}</span>
+                  @if (groupDirtyCount(group) > 0) {
+                    <span class="cat-dirty">{{ groupDirtyCount(group) }}</span>
+                  } @else {
+                    <span class="cat-count">{{ group.fields.length }}</span>
+                  }
                 </button>
-                @for (group of sidebarGroups(); track group.title) {
-                  <button
-                    type="button"
-                    class="cat"
-                    [class.active]="selectedCategory() === group.title"
-                    (click)="selectCategory(group.title)"
-                  >
-                    <span class="cat-name">{{ group.title }}</span>
-                    <span class="cat-meta">
-                      @if (groupDirtyCount(group) > 0) {
-                        <span class="cat-dirty">{{ groupDirtyCount(group) }}</span>
-                      }
-                      <span class="cat-count">{{ group.fields.length }}</span>
-                    </span>
-                  </button>
-                }
-              </nav>
-            </aside>
+              }
+            </nav>
 
-            <main class="cfg-editor">
-              <header class="cfg-editor-head">
-                <div class="cfg-editor-title">
-                  <h4>{{ selectedCategoryTitle() }}</h4>
-                  <span class="muted">
-                    {{ visibleCount() }}
-                    {{ visibleCount() === 1 ? 'field' : 'fields' }}
-                    @if (dirtyOnly() || searchTerm() || badgeFilter() !== 'all') {
-                      · filtered
-                    }
-                  </span>
-                </div>
-                <p class="cfg-editor-hint muted">
-                  Hot-reload takes effect on the next read-site cycle. Empty = keep current; ⏎ saves
-                  the row, Esc reverts it.
-                </p>
-              </header>
-              @if (visibleFields().length === 0) {
-                <p class="cfg-empty muted">No fields in this section match the current filter.</p>
-              } @else {
-                <div class="cfg-table-scroll">
-                  <table class="cfg-table">
-                    <thead>
-                      <tr>
-                        <th class="col-key">Field</th>
-                        <th class="col-value">Value</th>
-                        <th class="col-reload">Reload</th>
-                        <th class="col-current">Current</th>
-                        <th class="col-actions"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (field of visibleFields(); track field.key) {
-                        <tr [class.row-dirty]="isDirty(field)">
-                          <td class="col-key">
-                            <span class="field-label">{{ field.label }}</span>
-                            <code class="field-key" [title]="field.takesEffect">{{
-                              field.key
-                            }}</code>
-                          </td>
-                          <td class="col-value">
-                            @switch (field.kind) {
-                              @case ('bool') {
-                                <select
-                                  [(ngModel)]="edits[field.key]"
-                                  (ngModelChange)="markEdited()"
-                                  (keydown)="onFieldKey($event, field)"
-                                  class="input"
-                                >
-                                  <option [ngValue]="undefined">— keep current —</option>
-                                  <option [ngValue]="true">true</option>
-                                  <option [ngValue]="false">false</option>
-                                </select>
-                              }
-                              @case ('enum') {
-                                <select
-                                  [(ngModel)]="edits[field.key]"
-                                  (ngModelChange)="markEdited()"
-                                  (keydown)="onFieldKey($event, field)"
-                                  class="input"
-                                >
-                                  <option [ngValue]="undefined">— keep current —</option>
-                                  @for (opt of field.options ?? []; track opt) {
-                                    <option [ngValue]="opt">{{ opt }}</option>
-                                  }
-                                </select>
-                              }
-                              @case ('string') {
-                                <input
-                                  type="text"
-                                  [placeholder]="
-                                    'current: ' + (formatCurrent(field.key) || '(blank)')
-                                  "
-                                  [(ngModel)]="edits[field.key]"
-                                  (ngModelChange)="markEdited()"
-                                  (keydown)="onFieldKey($event, field)"
-                                  class="input"
-                                  autocomplete="off"
-                                />
-                              }
-                              @default {
-                                <input
-                                  type="number"
-                                  [step]="field.step ?? 'any'"
-                                  [min]="field.min ?? null"
-                                  [max]="field.max ?? null"
-                                  [placeholder]="'current: ' + formatCurrent(field.key)"
-                                  [(ngModel)]="edits[field.key]"
-                                  (ngModelChange)="markEdited()"
-                                  (keydown)="onFieldKey($event, field)"
-                                  class="input"
-                                />
-                              }
-                            }
-                          </td>
-                          <td class="col-reload">
+            <div class="groups">
+              @for (group of filteredGroups(); track group.title) {
+                <section class="grp" [id]="anchorId(group.title)">
+                  <header class="grp-head">
+                    <h4>{{ group.title }}</h4>
+                    <span>{{ group.blurb }}</span>
+                  </header>
+                  @for (field of group.fields; track field.key) {
+                    <div
+                      class="row"
+                      [class.dirty]="isDirty(field)"
+                      [class.invalid]="!!fieldError(field)"
+                      [class.wide]="field.kind === 'symbols'"
+                    >
+                      <div class="row-text">
+                        <div class="row-label">
+                          <span class="label">{{ field.label }}</span>
+                          @if (field.badge !== 'live') {
                             <span
-                              class="badge"
+                              class="when"
                               [attr.data-badge]="field.badge"
-                              [title]="field.takesEffect"
-                              >{{ field.badge }}</span
+                              [title]="badgeTitle(field.badge)"
+                              >{{ badgeLabel(field.badge) }}</span
                             >
-                          </td>
-                          <td class="col-current">
-                            <!-- Long CSV / URL values break after each "," or "/"
-                                 (a <wbr> per segment) instead of mid-token. -->
-                            <span class="current mono" [title]="formatCurrent(field.key)">
-                              @for (seg of currentSegments(field.key); track $index) {
-                                <span>{{ seg }}</span
-                                ><wbr />
-                              }
-                            </span>
-                          </td>
-                          <td class="col-actions">
-                            @if (isDirty(field)) {
-                              <button
-                                type="button"
-                                class="reset-btn"
-                                (click)="revertField(field)"
-                                title="Discard this edit (Esc)"
-                              >
-                                ↺
-                              </button>
-                            }
+                          }
+                          <span
+                            class="info"
+                            [title]="field.key + ' — ' + field.takesEffect"
+                            aria-hidden="true"
+                            >ⓘ</span
+                          >
+                        </div>
+                        <p class="help">{{ field.help }}</p>
+                      </div>
+
+                      <div class="row-ctl">
+                        @switch (field.kind) {
+                          @case ('symbols') {
+                            <app-ea-symbol-picker
+                              [value]="symbolValue()"
+                              [original]="symbolOriginal()"
+                              [options]="symbolOptions()"
+                              [disabled]="submitting()"
+                              (valueChange)="setSymbols($event)"
+                            />
+                          }
+                          @case ('bool') {
                             <button
                               type="button"
-                              class="btn-row-save"
-                              [disabled]="!isDirty(field) || submitting()"
-                              (click)="saveField(field)"
-                              [title]="isDirty(field) ? 'Save this row (⏎)' : 'No changes'"
+                              role="switch"
+                              class="switch"
+                              [class.on]="boolValue(field)"
+                              [attr.aria-checked]="boolValue(field)"
+                              [attr.aria-label]="field.label"
+                              (click)="setBool(field, !boolValue(field))"
                             >
-                              Save
+                              <span class="knob"></span>
                             </button>
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                </div>
+                            <span class="switch-text">{{ boolValue(field) ? 'On' : 'Off' }}</span>
+                          }
+                          @case ('enum') {
+                            <div
+                              class="seg seg-ctl"
+                              role="radiogroup"
+                              [attr.aria-label]="field.label"
+                            >
+                              @for (opt of field.options ?? []; track opt) {
+                                <button
+                                  type="button"
+                                  role="radio"
+                                  [class.on]="display(field) === opt"
+                                  [attr.aria-checked]="display(field) === opt"
+                                  (click)="setChoice(field, opt)"
+                                >
+                                  {{ opt }}
+                                </button>
+                              }
+                            </div>
+                          }
+                          @case ('int') {
+                            <ng-container
+                              *ngTemplateOutlet="numberCtl; context: { $implicit: field }"
+                            />
+                          }
+                          @case ('double') {
+                            <ng-container
+                              *ngTemplateOutlet="numberCtl; context: { $implicit: field }"
+                            />
+                          }
+                          @default {
+                            <input
+                              type="text"
+                              class="input text"
+                              autocomplete="off"
+                              spellcheck="false"
+                              [class.mono]="field.kind === 'url'"
+                              [placeholder]="field.kind === 'url' ? 'https://…' : 'not set'"
+                              [ngModel]="display(field)"
+                              (ngModelChange)="setEdit(field, $event)"
+                              (blur)="onBlur(field)"
+                              (keydown)="onFieldKey($event, field)"
+                            />
+                          }
+                        }
+                        @if (fieldError(field); as err) {
+                          <span class="err">{{ err }}</span>
+                        } @else if (isDirty(field) && field.kind !== 'symbols') {
+                          <span class="was">
+                            was <span class="mono">{{ currentText(field) }}</span>
+                            <button type="button" class="link-btn" (click)="revertField(field)">
+                              Undo
+                            </button>
+                          </span>
+                        } @else if (!hasCurrent(field)) {
+                          <span class="was">This EA build does not report it.</span>
+                        }
+                      </div>
+
+                      <div class="row-act">
+                        @if (isDirty(field)) {
+                          <button
+                            type="button"
+                            class="btn btn-save"
+                            [disabled]="submitting()"
+                            (click)="saveField(field)"
+                            title="Push just this setting (⏎)"
+                          >
+                            Save
+                          </button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </section>
               }
-            </main>
+            </div>
           </div>
         }
       } @else {
-        <!-- Restart-required inputs: changed here through SetInputs (C3 23), which rewrites the
-             EA's chart template and reloads the EA on it — no terminal access needed. -->
-        <p class="hint muted">
-          The EA reads these only when it starts. Change them here and press
-          <strong>Apply &amp; restart</strong>: the engine sends the new values, the EA saves them
-          into its chart template and reloads itself on them (offline for a few seconds). Blank =
-          keep the current value.
-        </p>
+        <!-- ── Restart settings ──────────────────────────────── -->
         @if (restartReady() === false) {
           <p class="ro-blocker" role="note">
-            Remote restart is not ready on this EA (its chart template is not saved yet), so input
-            changes cannot be applied. Restart the terminal from the Terminal card first — the EA
-            saves its template when it starts.
+            Remote restart is not ready on this EA (its chart template is not saved yet), so these
+            cannot be applied. Restart the terminal from the Terminal card first — the EA saves its
+            template when it starts.
           </p>
         }
-        @for (section of restartSections; track section.title) {
-          <h4 class="ro-section">{{ section.title }}</h4>
-          <div class="form-grid">
-            @for (field of section.fields; track field.key) {
-              <div
-                class="ro-field"
-                [class.ro-dirty]="restartDirty(field)"
-                [class.ro-danger]="field.dangerous"
-              >
-                <span class="field-label">
-                  {{ field.label }}
-                  <code class="field-key">{{ field.inp }}</code>
-                </span>
-                @if (readOnlyValue(field.key); as v) {
-                  <span class="ro-value mono" [class.muted]="v.empty">now: {{ v.text }}</span>
-                }
-                @switch (field.type) {
-                  @case ('b') {
-                    <select
-                      class="input"
-                      [ngModel]="restartEdits[field.key]"
-                      (ngModelChange)="setRestartEdit(field.key, $event)"
-                      [disabled]="applyingInputs()"
-                    >
-                      <option [ngValue]="undefined">— keep current —</option>
-                      <option [ngValue]="true">yes</option>
-                      <option [ngValue]="false">no</option>
-                    </select>
-                  }
-                  @case ('s') {
-                    <input
-                      type="text"
-                      class="input"
-                      autocomplete="off"
-                      placeholder="keep current"
-                      [ngModel]="restartEdits[field.key]"
-                      (ngModelChange)="setRestartEdit(field.key, $event)"
-                      [disabled]="applyingInputs()"
-                    />
-                  }
-                  @default {
-                    <input
-                      type="text"
-                      inputmode="decimal"
-                      class="input"
-                      autocomplete="off"
-                      placeholder="keep current"
-                      [ngModel]="restartEdits[field.key]"
-                      (ngModelChange)="setRestartEdit(field.key, $event)"
-                      [disabled]="applyingInputs()"
-                    />
-                  }
-                }
-                @if (restartError(field); as err) {
-                  <span class="ro-error">{{ err }}</span>
-                }
-                @if (field.warning && (field.dangerous || restartDirty(field))) {
-                  <span class="ro-warning">{{ field.warning }}</span>
-                }
-              </div>
-            }
-          </div>
-        }
+        <div class="groups">
+          @for (section of restartSections; track section.title) {
+            <section class="grp">
+              <header class="grp-head">
+                <h4>{{ section.title }}</h4>
+                <span>{{ section.blurb }}</span>
+              </header>
+              @for (field of section.fields; track field.key) {
+                <div
+                  class="row"
+                  [class.dirty]="restartDirty(field) && !restartError(field)"
+                  [class.invalid]="!!restartError(field)"
+                  [class.danger]="field.dangerous"
+                  [class.wide]="field.key === 'symbolMapping'"
+                >
+                  <div class="row-text">
+                    <div class="row-label">
+                      <span class="label">{{ field.label }}</span>
+                      @if (field.dangerous) {
+                        <span class="when" data-badge="danger">Careful</span>
+                      }
+                      <span class="info" [title]="field.inp" aria-hidden="true">ⓘ</span>
+                    </div>
+                    @if (restartHelp(field.key); as h) {
+                      <p class="help">{{ h }}</p>
+                    }
+                    @if (field.warning && (field.dangerous || restartDirty(field))) {
+                      <p class="help warn">{{ field.warning }}</p>
+                    }
+                  </div>
+                  <div class="row-ctl">
+                    @if (field.key === 'timeframes') {
+                      <div class="tf-grid" role="group" aria-label="Timeframes">
+                        @for (tf of MT5_TIMEFRAMES; track tf) {
+                          <button
+                            type="button"
+                            class="tf"
+                            [class.on]="timeframeOn(tf)"
+                            [attr.aria-pressed]="timeframeOn(tf)"
+                            [disabled]="applyingInputs()"
+                            (click)="toggleTimeframe(field, tf)"
+                          >
+                            {{ tf }}
+                          </button>
+                        }
+                      </div>
+                    } @else if (field.key === 'symbolMapping') {
+                      <div class="map">
+                        @for (r of mapRows(); track $index; let i = $index) {
+                          <div class="map-row">
+                            <input
+                              type="text"
+                              class="input mono"
+                              placeholder="Broker name, e.g. EURUSDm"
+                              spellcheck="false"
+                              autocomplete="off"
+                              [ngModel]="r.broker"
+                              (ngModelChange)="setMapRow(field, i, 'broker', $event)"
+                              [disabled]="applyingInputs()"
+                              aria-label="Broker symbol"
+                            />
+                            <span class="arrow" aria-hidden="true">→</span>
+                            <select
+                              class="input mono"
+                              [ngModel]="r.engine"
+                              (ngModelChange)="setMapRow(field, i, 'engine', $event)"
+                              [disabled]="applyingInputs()"
+                              aria-label="Engine symbol"
+                            >
+                              <option value="">Engine symbol…</option>
+                              @for (s of mapEngineOptions(r.engine); track s) {
+                                <option [value]="s">{{ s }}</option>
+                              }
+                            </select>
+                            <button
+                              type="button"
+                              class="icon-btn"
+                              (click)="removeMapRow(field, i)"
+                              [disabled]="applyingInputs()"
+                              aria-label="Remove mapping"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        }
+                        <button
+                          type="button"
+                          class="link-btn add-map"
+                          (click)="addMapRow()"
+                          [disabled]="applyingInputs()"
+                        >
+                          + Add a mapping
+                        </button>
+                      </div>
+                    } @else if (field.type === 'b') {
+                      <button
+                        type="button"
+                        role="switch"
+                        class="switch"
+                        [class.on]="restartBool(field)"
+                        [attr.aria-checked]="restartBool(field)"
+                        [attr.aria-label]="field.label"
+                        [disabled]="applyingInputs()"
+                        (click)="setRestartBool(field, !restartBool(field))"
+                      >
+                        <span class="knob"></span>
+                      </button>
+                      <span class="switch-text">{{ restartBool(field) ? 'On' : 'Off' }}</span>
+                    } @else {
+                      <div class="num">
+                        <input
+                          type="text"
+                          class="input"
+                          [class.text]="field.type === 's'"
+                          [class.mono]="field.type === 's'"
+                          [attr.inputmode]="field.type === 's' ? null : 'decimal'"
+                          autocomplete="off"
+                          spellcheck="false"
+                          placeholder="not set"
+                          [ngModel]="restartDisplay(field)"
+                          (ngModelChange)="setRestartRaw(field, $event)"
+                          (blur)="onRestartBlur(field)"
+                          [disabled]="applyingInputs()"
+                        />
+                        @if (restartUnit(field.key); as u) {
+                          <span class="unit">{{ u }}</span>
+                        }
+                      </div>
+                    }
+                    @if (restartError(field); as err) {
+                      <span class="err">{{ err }}</span>
+                    } @else if (restartDirty(field)) {
+                      <span class="was">
+                        was <span class="mono">{{ restartCurrentText(field) }}</span>
+                        <button type="button" class="link-btn" (click)="revertRestart(field)">
+                          Undo
+                        </button>
+                      </span>
+                    }
+                  </div>
+                  <div class="row-act"></div>
+                </div>
+              }
+            </section>
+          }
+        </div>
         <div class="ro-foot">
-          <span class="muted small">
+          <span class="muted">
             @if (restartChangeCount() === 0) {
               No changes.
             } @else {
@@ -448,7 +538,7 @@ import {
           </span>
           <button
             type="button"
-            class="btn btn-secondary"
+            class="btn btn-quiet"
             (click)="clearRestartEdits()"
             [disabled]="restartChangeCount() === 0 || applyingInputs()"
           >
@@ -471,12 +561,77 @@ import {
       }
     </section>
 
+    <ng-template #numberCtl let-field>
+      <div class="num">
+        <button
+          type="button"
+          class="stp"
+          (click)="step(field, -1)"
+          [attr.aria-label]="'Decrease ' + field.label"
+          tabindex="-1"
+        >
+          −
+        </button>
+        <input
+          type="text"
+          inputmode="decimal"
+          class="input"
+          autocomplete="off"
+          [placeholder]="hasCurrent(field) ? '' : 'not reported'"
+          [ngModel]="display(field)"
+          (ngModelChange)="setEdit(field, $event)"
+          (blur)="onBlur(field)"
+          (keydown)="onFieldKey($event, field)"
+          [attr.aria-label]="field.label"
+        />
+        <button
+          type="button"
+          class="stp"
+          (click)="step(field, 1)"
+          [attr.aria-label]="'Increase ' + field.label"
+          tabindex="-1"
+        >
+          +
+        </button>
+        @if (field.unit) {
+          <span class="unit">{{ field.unit }}</span>
+        }
+        @if (field.zeroMeans && isZero(field)) {
+          <span class="zero">{{ field.zeroMeans }}</span>
+        }
+      </div>
+    </ng-template>
+
+    <!-- Review before a bulk push -->
+    <app-ea-action-dialog
+      [open]="reviewing()"
+      [title]="'Push ' + dirtyCount() + ' change' + (dirtyCount() === 1 ? '' : 's') + ' to this EA'"
+      description="The EA applies these within a few seconds. Settings marked “after restart” are stored now and used the next time the EA starts."
+      confirmLabel="Push changes"
+      tone="ok"
+      [askReason]="false"
+      [busy]="submitting()"
+      (confirmed)="submit()"
+      (cancelled)="reviewing.set(false)"
+    >
+      <ul class="change-list">
+        @for (c of reviewChanges(); track c.key) {
+          <li>
+            <span class="cl-label">{{ c.label }}</span>
+            <span class="cl-diff">
+              <span class="mono from">{{ c.from }}</span> → <strong class="mono">{{ c.to }}</strong>
+            </span>
+          </li>
+        }
+      </ul>
+    </app-ea-action-dialog>
+
     <app-ea-action-dialog
       [open]="confirmingInputs()"
-      title="Apply inputs and restart the EA"
+      title="Apply settings and restart the EA"
       description="The EA saves these values into its chart template and reloads itself on them. It is offline for a few seconds; open positions keep their stop loss and take profit.
 
-If a value stops the EA from starting, its health card shows why and the old values can be applied again from here — unless the EA can no longer reach the engine (a wrong engine URL)."
+If a value stops the EA from starting, its health card shows why and the old values can be applied again from here — unless the EA can no longer reach the engine (a wrong engine address)."
       [warning]="dangerWarning()"
       confirmLabel="Apply &amp; restart"
       [tone]="dangerWarning() ? 'bad' : 'warn'"
@@ -490,8 +645,10 @@ If a value stops the EA from starting, its health card shows why and the old val
       <ul class="change-list">
         @for (c of pendingChanges(); track c.key) {
           <li>
-            <span>{{ c.label }}</span>
-            <span class="mono">{{ c.from }}</span> → <strong class="mono">{{ c.to }}</strong>
+            <span class="cl-label">{{ c.label }}</span>
+            <span class="cl-diff">
+              <span class="mono from">{{ c.from }}</span> → <strong class="mono">{{ c.to }}</strong>
+            </span>
           </li>
         }
       </ul>
@@ -503,697 +660,11 @@ If a value stops the EA from starting, its health card shows why and the old val
       }
     </app-ea-action-dialog>
   `,
-  styles: [
-    `
-      .panel {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-3);
-      }
-      .panel-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--space-3);
-      }
-      .panel-head h3 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .tabs {
-        display: flex;
-        gap: 4px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        padding: 2px;
-      }
-      .tabs button {
-        padding: 6px 14px;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-size: var(--text-xs);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        border-radius: calc(var(--radius-sm) - 2px);
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .tabs button.active {
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, 0.06));
-      }
-      .badge {
-        font-size: 10px;
-        padding: 1px 6px;
-        border-radius: var(--radius-full);
-        font-weight: var(--font-semibold);
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        white-space: nowrap;
-      }
-      .badge.tone-ok,
-      .badge[data-badge='live'] {
-        background: rgba(52, 199, 89, 0.15);
-        color: var(--tone-green);
-      }
-      .badge.tone-muted {
-        background: rgba(0, 0, 0, 0.06);
-        color: var(--text-secondary);
-      }
-      .badge[data-badge='next-job'] {
-        background: rgba(0, 113, 227, 0.12);
-        color: var(--tone-blue);
-      }
-      .badge[data-badge='restart'] {
-        background: rgba(255, 149, 0, 0.15);
-        color: var(--tone-amber);
-      }
-      .hint,
-      .empty {
-        margin: 0;
-        font-size: var(--text-xs);
-      }
-      .muted {
-        color: var(--text-tertiary);
-      }
-      .form-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-        gap: var(--space-3);
-      }
-      .skeleton-grid {
-        margin-top: var(--space-2);
-      }
-      .skeleton-field {
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .field-label {
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .input {
-        padding: 5px 10px;
-        border-radius: var(--radius-sm);
-        border: 1px solid var(--border);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-variant-numeric: tabular-nums;
-        width: 100%;
-        outline: none;
-        transition: border-color 0.12s ease;
-      }
-      .input:focus {
-        border-color: var(--accent);
-      }
-      .current {
-        font-size: 11px;
-        color: var(--text-tertiary);
-      }
-      .ro-field {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 8px 10px;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-      }
-      .ro-value {
-        font-size: var(--text-sm);
-        color: var(--text-primary);
-        font-weight: var(--font-medium);
-        font-variant-numeric: tabular-nums;
-        overflow-wrap: anywhere;
-      }
-      .ro-section {
-        margin: var(--space-2) 0 0;
-        font-size: var(--text-xs);
-        color: var(--text-tertiary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-      }
-      .ro-field .input {
-        margin-top: 4px;
-      }
-      .ro-dirty {
-        border-color: var(--accent);
-      }
-      .ro-danger .field-label {
-        color: var(--tone-red);
-      }
-      .ro-error {
-        font-size: var(--text-xs);
-        color: var(--tone-red);
-      }
-      .ro-warning {
-        font-size: var(--text-xs);
-        color: var(--tone-amber);
-      }
-      .ro-blocker {
-        margin: 0;
-        padding: 8px 12px;
-        border-left: 3px solid var(--tone-amber, #ff9500);
-        background: rgba(255, 149, 0, 0.08);
-        font-size: var(--text-sm);
-      }
-      .ro-foot {
-        display: flex;
-        justify-content: flex-end;
-        align-items: center;
-        gap: var(--space-3);
-        padding-top: var(--space-2);
-        border-top: 1px solid var(--border);
-      }
-      .change-list {
-        margin: 0;
-        padding-left: 18px;
-        font-size: var(--text-sm);
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-      }
-      .change-list li span:first-child {
-        margin-right: 8px;
-        color: var(--text-secondary);
-      }
-      .ack {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        font-size: var(--text-sm);
-      }
-      .ro-value.muted {
-        color: var(--text-tertiary);
-        font-weight: var(--font-normal, 400);
-      }
-      .mono {
-        font-family: var(--font-mono);
-      }
-      .actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
-      }
-
-      /* ── Search toolbar (sticky inside the panel) ────────────── */
-      .cfg-toolbar {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        padding: var(--space-2) var(--space-3);
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        flex-wrap: wrap;
-        position: sticky;
-        top: 0;
-        z-index: 3;
-      }
-      .cfg-search-wrap {
-        position: relative;
-        flex: 1 1 280px;
-        min-width: 220px;
-        display: inline-flex;
-        align-items: center;
-      }
-      .cfg-search-icon {
-        position: absolute;
-        left: 10px;
-        color: var(--text-tertiary);
-        font-size: 14px;
-        pointer-events: none;
-      }
-      .cfg-search {
-        width: 100%;
-        height: 30px;
-        padding: 0 56px 0 30px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        outline: none;
-        transition: border-color 0.12s ease;
-      }
-      .cfg-search:focus {
-        border-color: var(--accent);
-      }
-      .cfg-search-clear {
-        position: absolute;
-        right: 32px;
-        background: transparent;
-        border: none;
-        color: var(--text-tertiary);
-        cursor: pointer;
-        font-size: 11px;
-        padding: 3px 5px;
-      }
-      .cfg-search-clear:hover {
-        color: var(--text-primary);
-      }
-      .cfg-kbd,
-      .save-bar-kbd {
-        font-family: 'SF Mono', 'Menlo', monospace;
-        font-size: 10px;
-        color: var(--text-tertiary);
-        background: var(--bg-tertiary);
-        padding: 1px 5px;
-        border-radius: var(--radius-sm);
-      }
-      .cfg-kbd {
-        position: absolute;
-        right: 8px;
-      }
-      .chip-row {
-        display: inline-flex;
-        gap: 2px;
-        padding: 2px;
-        background: var(--bg-tertiary);
-        border-radius: var(--radius-full);
-      }
-      .chip {
-        appearance: none;
-        border: none;
-        background: transparent;
-        color: var(--text-secondary);
-        font-family: inherit;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        padding: 3px 10px;
-        border-radius: var(--radius-full);
-        cursor: pointer;
-        transition:
-          background 0.12s ease,
-          color 0.12s ease;
-      }
-      .chip:hover {
-        color: var(--text-primary);
-      }
-      .chip.active {
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        box-shadow: 0 0 0 1px var(--border);
-      }
-      .cfg-dirty-toggle {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--text-xs);
-        color: var(--text-secondary);
-        cursor: pointer;
-        user-select: none;
-        padding: 3px 8px;
-        border-radius: var(--radius-full);
-        transition: background 0.12s ease;
-      }
-      .cfg-dirty-toggle:hover {
-        background: var(--bg-tertiary);
-      }
-      .cfg-dirty-toggle input {
-        accent-color: var(--accent);
-        margin: 0;
-      }
-      .cfg-dirty-toggle.active {
-        color: var(--text-primary);
-      }
-      .cfg-toolbar-count {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        background: var(--accent);
-        color: white;
-        border-radius: var(--radius-full);
-        padding: 1px 6px;
-        font-variant-numeric: tabular-nums;
-      }
-      .cfg-empty {
-        padding: var(--space-4);
-        text-align: center;
-        font-size: var(--text-xs);
-        background: var(--bg-primary);
-        border: 1px dashed var(--border);
-        border-radius: var(--radius-sm);
-      }
-      .link-btn {
-        background: transparent;
-        border: none;
-        color: var(--accent);
-        font-weight: var(--font-medium);
-        font-size: var(--text-xs);
-        cursor: pointer;
-        padding: 0 0 0 6px;
-      }
-      .link-btn:hover {
-        text-decoration: underline;
-      }
-
-      /* ── Toolbar spacer + save-all CTA ──────────────────────── */
-      .cfg-spacer {
-        flex: 1;
-      }
-      .cfg-save-all {
-        height: 32px;
-        padding: 0 14px;
-        font-size: 12px;
-        font-weight: var(--font-semibold);
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        margin-left: auto;
-      }
-      .save-bar-kbd {
-        background: rgba(255, 255, 255, 0.22);
-        color: rgba(255, 255, 255, 0.9);
-        padding: 1px 5px;
-        border-radius: var(--radius-sm);
-        font-size: 9px;
-        font-family: 'SF Mono', 'Menlo', monospace;
-      }
-
-      /* ── Master-detail body (sidebar | editor) ──────────────── */
-      /* Sized by content, capped by the table's own scroll box: a fixed
-         440-720px frame left a three-field section mostly empty and cut
-         the last row of a long one in half at every height. */
-      .cfg-body {
-        display: grid;
-        grid-template-columns: 200px 1fr;
-        gap: var(--space-3);
-        align-items: stretch;
-      }
-      @media (max-width: 900px) {
-        .cfg-body {
-          grid-template-columns: 1fr;
-        }
-      }
-
-      .cfg-sidebar {
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-      }
-      .cfg-sb-head {
-        display: flex;
-        align-items: baseline;
-        justify-content: space-between;
-        padding: 6px 10px;
-        font-size: 10.5px;
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        border-bottom: 1px solid var(--border);
-      }
-      .cfg-sb-head .muted {
-        font-size: 10px;
-        color: var(--text-tertiary);
-      }
-      .cfg-sb-filter {
-        appearance: none;
-        margin: 6px 6px;
-        height: 26px;
-        padding: 0 8px;
-        border: 1px solid var(--border);
-        background: var(--bg-secondary);
-        color: var(--text-primary);
-        border-radius: var(--radius-sm);
-        font-size: 11px;
-        outline: none;
-      }
-      .cfg-sb-filter:focus {
-        border-color: var(--accent);
-      }
-      .cfg-sb-list {
-        flex: 1;
-        overflow-y: auto;
-        padding: 4px;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-      }
-      .cat {
-        appearance: none;
-        background: transparent;
-        border: none;
-        color: var(--text-primary);
-        font-family: inherit;
-        font-size: 12px;
-        text-align: left;
-        padding: 6px 10px;
-        border-radius: var(--radius-sm);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        transition:
-          background 0.1s ease,
-          color 0.1s ease;
-      }
-      .cat:hover {
-        background: var(--bg-tertiary);
-      }
-      .cat.active {
-        background: color-mix(in srgb, var(--accent, #0071e3) 14%, transparent);
-        color: var(--accent, #0071e3);
-        font-weight: var(--font-semibold);
-      }
-      .cat-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .cat-meta {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        flex-shrink: 0;
-      }
-      .cat-count {
-        font-size: 10.5px;
-        color: var(--text-tertiary);
-        font-variant-numeric: tabular-nums;
-      }
-      .cat.active .cat-count {
-        color: var(--accent, #0071e3);
-      }
-      .cat-dirty {
-        font-size: 10px;
-        font-weight: var(--font-semibold);
-        background: rgba(255, 149, 0, 0.18);
-        color: #b86200;
-        padding: 0 6px;
-        border-radius: var(--radius-full);
-        font-variant-numeric: tabular-nums;
-        min-width: 16px;
-        text-align: center;
-      }
-
-      /* ── Editor pane ────────────────────────────────────────── */
-      .cfg-editor {
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        background: var(--bg-primary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        overflow: hidden;
-      }
-      .cfg-editor-head {
-        padding: 10px var(--space-3) 8px;
-        border-bottom: 1px solid var(--border);
-      }
-      .cfg-editor-title {
-        display: flex;
-        align-items: baseline;
-        gap: 8px;
-      }
-      .cfg-editor-title h4 {
-        margin: 0;
-        font-size: var(--text-sm);
-        font-weight: var(--font-semibold);
-      }
-      .cfg-editor-title .muted {
-        font-size: 11px;
-        color: var(--text-tertiary);
-      }
-      .cfg-editor-hint {
-        margin: 6px 0 0 0;
-        font-size: 11px;
-      }
-
-      .cfg-table-scroll {
-        flex: 1;
-        overflow: auto;
-        max-height: min(64vh, 640px);
-      }
-      .cfg-sidebar {
-        max-height: min(64vh, 640px);
-      }
-      .cfg-table {
-        width: 100%;
-        border-collapse: collapse;
-      }
-      .cfg-table th {
-        text-align: left;
-        padding: 6px var(--space-3);
-        font-weight: var(--font-semibold);
-        color: var(--text-secondary);
-        font-size: 10.5px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        background: var(--bg-secondary);
-        border-bottom: 1px solid var(--border);
-        position: sticky;
-        top: 0;
-        z-index: 1;
-      }
-      .cfg-table td {
-        padding: 6px var(--space-3);
-        border-bottom: 1px solid var(--border);
-        vertical-align: middle;
-      }
-      .cfg-table tbody tr:hover {
-        background: var(--bg-secondary);
-      }
-      .cfg-table tbody tr:last-child td {
-        border-bottom: none;
-      }
-      .row-dirty {
-        background: rgba(255, 149, 0, 0.05) !important;
-        box-shadow: inset 3px 0 0 0 #ff9500;
-      }
-      .col-key {
-        min-width: 240px;
-        max-width: 380px;
-      }
-      .col-value {
-        min-width: 200px;
-      }
-      .col-reload {
-        width: 80px;
-      }
-      .col-current {
-        width: 140px;
-      }
-      .col-actions {
-        width: 110px;
-        text-align: right;
-        white-space: nowrap;
-      }
-      .cfg-table .field-label {
-        display: block;
-        color: var(--text-primary);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        line-height: 1.3;
-      }
-      .field-key {
-        display: block;
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--text-tertiary);
-        margin-top: 2px;
-      }
-      .cfg-table .current {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        color: var(--text-secondary);
-        /* Prefer the <wbr> after each separator; only split inside a
-           segment when one segment alone is wider than the column. */
-        overflow-wrap: anywhere;
-        word-break: normal;
-      }
-      .btn-row-save {
-        height: 24px;
-        padding: 0 10px;
-        border: none;
-        border-radius: var(--radius-sm);
-        background: var(--accent);
-        color: white;
-        font-size: 11px;
-        font-weight: var(--font-semibold);
-        cursor: pointer;
-        font-family: inherit;
-        min-width: 52px;
-      }
-      .btn-row-save:hover:not(:disabled) {
-        filter: brightness(1.05);
-      }
-      .btn-row-save:disabled {
-        background: var(--bg-tertiary);
-        color: var(--text-tertiary);
-        cursor: not-allowed;
-      }
-      .reset-btn {
-        height: 24px;
-        width: 24px;
-        margin-right: 4px;
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-secondary);
-        font-size: 13px;
-        cursor: pointer;
-        vertical-align: middle;
-      }
-      .reset-btn:hover {
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-      }
-
-      .btn {
-        padding: 8px 18px;
-        border-radius: var(--radius-sm);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        border: 1px solid transparent;
-      }
-      .btn-primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
-      }
-      .btn-secondary {
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        border: 1px solid var(--border);
-      }
-      .btn:disabled {
-        opacity: 0.55;
-        cursor: not-allowed;
-      }
-    `,
-  ],
 })
 export class EAConfigPanelComponent {
   readonly instanceId = input.required<string>();
   readonly inputs = input<EAConfigInputs | null>(null);
-  /**
-   * True while the parent detail resource is still mid-flight on first
-   * load.  Shimmers placeholder fields instead of the "no input envelope
-   * yet" copy — that copy is reserved for the legitimate case of a pre-
-   * 8.47.137 EA build that never publishes the inputs block.
-   */
+  /** True while the parent detail resource is still loading for the first time. */
   readonly loading = input(false);
   @Output() readonly configPushed = new EventEmitter<void>();
   /** C1 `diag.restartTemplateSeeded`: false = SetInputs cannot work; null = not reported. */
@@ -1201,569 +672,439 @@ export class EAConfigPanelComponent {
 
   /** Follows the command each push / input change queues (provided by the EA detail page). */
   private readonly ops = inject(EaOpsService, { optional: true });
-
-  /** Six placeholder rows for the loading skeleton — enough to fill the panel. */
-  protected readonly skeletonFields = computed(() => Array.from({ length: 6 }, (_, i) => i));
-
   private readonly admin = inject(EAAdminService);
+  private readonly pairsApi = inject(CurrencyPairsService);
   private readonly notify = inject(NotificationService);
   private readonly cdr = inject(ChangeDetectorRef);
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
 
-  // Per-key edit values.  Number fields use strings to preserve
-  // empty-vs-zero semantics (empty = keep current).  Bool fields use
-  // true/false/undefined.  Enum fields use the option string or undefined.
-  // String fields use the raw text (empty = keep current).
-  protected edits: Partial<Record<HotReloadKey, string | number | boolean | null | undefined>> = {};
+  protected readonly skeletonFields = computed(() => Array.from({ length: 6 }, (_, i) => i));
+
+  protected readonly HOT_RELOAD_FIELDS = HOT_RELOAD_FIELDS;
+  protected readonly MT5_TIMEFRAMES = MT5_TIMEFRAMES;
+
+  /**
+   * Per-key edits. Numbers and text hold the raw typed string (so "" while
+   * typing doesn't snap back), switches a boolean, symbols a CSV. A key is
+   * only present while it differs from the EA's value or is being typed.
+   */
+  protected edits: Partial<Record<HotReloadKey, string | boolean>> = {};
   protected readonly tab = signal<'editable' | 'readonly'>('editable');
   protected readonly submitting = signal(false);
+  protected readonly reviewing = signal(false);
 
-  // ── Browse / search state ─────────────────────────────────────────
-  protected readonly ALL_CATEGORY = '__all__';
-
-  protected readonly searchTerm = signal<string>('');
-  protected readonly badgeFilter = signal<'all' | 'live' | 'next-job' | 'restart'>('all');
-  protected readonly dirtyOnly = signal<boolean>(false);
-  /** Currently selected section in the sidebar; `__all__` means show everything. */
-  protected readonly selectedCategory = signal<string>(this.ALL_CATEGORY);
-  /** Small filter on the sidebar list itself — for finding a section fast. */
-  protected readonly categoryFilter = signal<string>('');
-  /**
-   * Spike counter that ticks whenever an edit changes — used purely to
-   * invalidate the dirty-derived computeds since `edits` is a plain
-   * object (no Angular signal under it). Anything that reads dirty
-   * state in a computed must read this via `dirtyRevision()` to opt
-   * into recomputation.
-   */
+  protected readonly searchTerm = signal('');
+  protected readonly badgeFilter = signal<'all' | ReloadBadge>('all');
+  protected readonly dirtyOnly = signal(false);
+  /** Ticks on every edit: `edits` is a plain object, so computeds read this to recompute. */
   private readonly dirtyRevision = signal(0);
 
   @ViewChild('searchInput') private searchInput?: ElementRef<HTMLInputElement>;
 
   protected readonly badgeFilterOptions: ReadonlyArray<{
     label: string;
-    value: 'all' | 'live' | 'next-job' | 'restart';
+    value: 'all' | ReloadBadge;
   }> = [
     { label: 'All', value: 'all' },
-    { label: 'Live', value: 'live' },
-    { label: 'Next-job', value: 'next-job' },
-    { label: 'Restart', value: 'restart' },
+    { label: 'Instant', value: 'live' },
+    { label: 'Next backfill', value: 'next-job' },
+    { label: 'After restart', value: 'restart' },
   ];
 
-  // ── Field catalogues (driven from the engine DTO schema) ───────────────
+  // ── Symbol catalogue + sibling ownership ─────────────────────────────
 
-  protected readonly HOT_RELOAD_GROUPS: readonly FieldGroup[] = [
-    {
-      title: 'Symbols',
-      fields: [
-        {
-          key: 'symbols',
-          label: 'Owned symbols (CSV)',
-          kind: 'string',
-          badge: 'live',
-          takesEffect:
-            'CInstanceManager.TryUpdateOwnedSymbols — diff against current set, ' +
-            'release ownership of removed symbols + claim added ones via SymbolOwnership CAS. ' +
-            'REFUSED when any removed symbol still has open positions — close them first. ' +
-            'Empty / "CHART" / "ALL" rejected as init-only modes. ' +
-            'Sibling instances on the same MT5 terminal can only own NON-overlapping sets.',
-        },
-      ],
-    },
-    {
-      title: 'Connection',
-      fields: [
-        {
-          key: 'engineBaseUrl',
-          label: 'Engine API base URL',
-          kind: 'string',
-          badge: 'live',
-          takesEffect:
-            'Probe-gated. The EA GETs /health/live at the candidate host before ' +
-            'switching; if that probe fails the change is REJECTED, the current URL ' +
-            'is kept, and nothing is persisted. Plain http:// is accepted only for ' +
-            'localhost or a private-LAN (RFC1918) address — anything public must be ' +
-            'https://. The URL must also be in that MT5 terminal WebRequest allowlist ' +
-            '(Tools -> Options -> Expert Advisors), or the probe fails with error 4060. ' +
-            'Host-specific, so it is excluded from config profiles: a bulk apply cannot ' +
-            'repoint the whole fleet at one host. If a saved override later stops ' +
-            'resolving, the EA falls back to its compiled-in input URL on restart ' +
-            'rather than stranding itself.',
-        },
-      ],
-    },
-    {
-      title: 'Timing',
-      fields: [
-        {
-          key: 'tickThrottleMs',
-          label: 'Tick throttle (ms)',
-          kind: 'int',
-          step: 10,
-          badge: 'live',
-          takesEffect: 'Next AutotuneThrottle cycle.',
-        },
-        {
-          key: 'signalPollSec',
-          label: 'Signal poll (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next Phase-6 cycle.',
-        },
-        {
-          key: 'positionSyncSec',
-          label: 'Position sync (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next Phase-7 cycle.',
-        },
-        {
-          key: 'accountSyncSec',
-          label: 'Account sync (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next Phase-7 cycle.',
-        },
-        {
-          key: 'heartbeatSec',
-          label: 'Heartbeat (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CHeartbeat.SetIntervalSec — next heartbeat cycle. Floored at 5s.',
-        },
-        {
-          key: 'commandPollSec',
-          label: 'Command poll (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next Phase-6 cycle.',
-        },
-      ],
-    },
-    {
-      title: 'Entry tolerance',
-      fields: [
-        {
-          key: 'entryToleranceBandPct',
-          label: 'Tolerance band — legacy fraction of price (0 to use TP-frac only)',
-          kind: 'double',
-          step: 0.0001,
-          badge: 'live',
-          takesEffect:
-            'Next signal ClassifyExecutionType. Used as fallback when entryToleranceTpFrac=0 or TP missing.',
-        },
-        {
-          key: 'entryToleranceTpFrac',
-          label: 'Tolerance band (fraction of |TP-entry|, 0 = use legacy band)',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect:
-            'Next signal ClassifyExecutionType — dimensionally-correct fast-market-fill threshold.',
-        },
-        {
-          key: 'entryToleranceMaxSignalAgeSec',
-          label: 'Max signal age (s) — tolerance band gate',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next signal ClassifyExecutionType.',
-        },
-        {
-          key: 'maxSignalAgeSec',
-          label: 'Hard staleness gate (s, 0 = disabled)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'Next SignalProcessor::Poll cycle — older signals are skipped locally.',
-        },
-        {
-          key: 'maxAdverseTpDriftPct',
-          label: 'Max adverse drift (fraction of TP distance, 0 = disabled)',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect:
-            'Next SignalProcessor::Poll cycle — signals whose market has overshot entry past this fraction of |TP-entry| are skipped locally.',
-        },
-      ],
-    },
-    {
-      title: 'Execution',
-      fields: [
-        {
-          key: 'maxSlippagePoints',
-          label: 'Max slippage (points) — legacy fallback',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect:
-            'COrderExecutor.SetMaxSlippagePoints — next OrderSend. Only used when maxSlippageSlFrac=0.',
-        },
-        {
-          key: 'maxSlippageSlFrac',
-          label: 'Max slippage (fraction of SL distance, 0 = use legacy points)',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect: 'Next OrderSend — request.deviation scales with the signal’s SL distance.',
-        },
-        {
-          key: 'maxSpreadSlFrac',
-          label: 'Max spread (fraction of SL distance, 0 = use legacy points)',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect: 'Next signal validation + execution-time spread re-check.',
-        },
-        {
-          key: 'maxOrderRetries',
-          label: 'Max order retries',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'COrderExecutor.SetMaxRetries — next retry loop.',
-        },
-        {
-          key: 'httpTimeoutData',
-          label: 'HTTP timeout: data (ms)',
-          kind: 'int',
-          step: 100,
-          badge: 'live',
-          takesEffect:
-            'CHttpClient.SetDefaultDataTimeoutMs — next request without an explicit timeout.',
-        },
-        {
-          key: 'httpTimeoutOrder',
-          label: 'HTTP timeout: order (ms)',
-          kind: 'int',
-          step: 100,
-          badge: 'live',
-          takesEffect: 'Shadow available for code that opts in — wiring lands in Phase 4c.',
-        },
-      ],
-    },
-    {
-      title: 'Runtime safety',
-      fields: [
-        {
-          key: 'maxNotionalExposurePct',
-          label: 'Max notional exposure %',
-          kind: 'double',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.SetMaxNotionalExposurePct — next exposure check.',
-        },
-        {
-          key: 'maxPeakDrawdownPct',
-          label: 'Max peak drawdown %',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.SetMaxPeakDrawdownPct — next drawdown check.',
-        },
-        {
-          key: 'flashCrashPct',
-          label: 'Flash-crash threshold %',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect:
-            'CGlobalCircuitBreaker.SetFlashCrashPct — rolling window resets on each update.',
-        },
-        {
-          key: 'dailyProfitTargetAbs',
-          label: 'Daily profit target ($)',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect:
-            'Per-instance: when combined daily P&L (realized + floating) reaches this, the EA cancels pendings, flattens, and enters SAFETY_STOP until next trading day. 0 = disabled. If % is also set, % wins.',
-        },
-        {
-          key: 'dailyProfitTargetPct',
-          label: 'Daily profit target (% of start equity)',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect:
-            'Per-instance: same as the $ target but expressed as % of start-of-day equity. 0 = disabled. Takes precedence over the $ target when both are set.',
-        },
-        {
-          key: 'engineTimeoutSec',
-          label: 'Engine timeout (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect:
-            'CConnectionMonitor.SetEngineTimeoutSec + CGlobalCircuitBreaker.SetEngineTimeoutSec — next SAFE_MODE gate. Floored at 5s.',
-        },
-        {
-          key: 'engineFailThreshold',
-          label: 'Engine fail threshold',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CConnectionMonitor.SetEngineFailThreshold — next failure check.',
-        },
-        {
-          key: 'unmatchedDealExpirySec',
-          label: 'Unmatched deal expiry (s)',
-          kind: 'int',
-          step: 30,
-          badge: 'restart',
-          takesEffect: 'Cached on TradeTransactionHandler at OnInit.',
-        },
-        {
-          key: 'safeModeTimeoutSec',
-          label: 'SAFE_MODE → SAFETY_STOP escalation (s)',
-          kind: 'int',
-          step: 30,
-          badge: 'live',
-          takesEffect: 'Read every cycle in EAEngineHealthAndCoordinationPhases.',
-        },
-      ],
-    },
-    {
-      title: 'Data + backfill',
-      fields: [
-        {
-          key: 'backfillBars',
-          label: 'Backfill bars / TF / symbol',
-          kind: 'int',
-          step: 100,
-          badge: 'next-job',
-          takesEffect: 'Read at backfill-job creation — new jobs use the new value.',
-        },
-        {
-          key: 'backfillChunkSize',
-          label: 'Backfill chunk size',
-          kind: 'int',
-          step: 100,
-          badge: 'next-job',
-          takesEffect: 'Read at backfill-chunk creation.',
-        },
-        {
-          key: 'specRefreshHour',
-          label: 'Daily spec-refresh hour',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'BackfillCursor reads shadow each scheduler check.',
-        },
-        {
-          key: 'tickBufferMax',
-          label: 'Max ticks to buffer',
-          kind: 'int',
-          step: 100,
-          badge: 'restart',
-          takesEffect: 'Cached on tick buffer at OnInit.',
-        },
-      ],
-    },
-    {
-      title: 'Telemetry',
-      fields: [
-        {
-          key: 'telemetryEndpoint',
-          label: 'Telemetry push URL (blank = file-only)',
-          kind: 'string',
-          badge: 'restart',
-          takesEffect: 'Cached on telemetry config at OnInit.',
-        },
-        {
-          key: 'telemetryPushSec',
-          label: 'Telemetry push interval (s)',
-          kind: 'int',
-          step: 1,
-          badge: 'restart',
-          takesEffect: 'Same cached path.',
-        },
-      ],
-    },
-    {
-      title: 'News blackout',
-      fields: [
-        {
-          key: 'enableNewsBlackout',
-          label: 'Reject entries during scheduled news',
-          kind: 'bool',
-          badge: 'restart',
-          takesEffect: 'Cached on news-blackout manager at OnInit.',
-        },
-        {
-          key: 'newsBlackoutFilePath',
-          label: 'Override schedule file path',
-          kind: 'string',
-          badge: 'restart',
-          takesEffect: 'Same cached path.',
-        },
-      ],
-    },
-    {
-      title: 'Logging + chart',
-      fields: [
-        {
-          key: 'logLevel',
-          label: 'Log verbosity',
-          kind: 'enum',
-          options: ['DEBUG', 'INFO', 'WARN', 'ERROR'],
-          badge: 'live',
-          takesEffect: 'CLogger.SetLevel — propagates to file sink.',
-        },
-        {
-          key: 'enableFileLogging',
-          label: 'Write logs to file',
-          kind: 'bool',
-          badge: 'restart',
-          takesEffect: 'File logger init cached at OnInit.',
-        },
-        {
-          key: 'logJsonFormat',
-          label: 'JSON-per-line log format',
-          kind: 'bool',
-          badge: 'restart',
-          takesEffect: 'File logger init cached at OnInit.',
-        },
-        {
-          key: 'enableChartPanel',
-          label: 'Show status panel on chart',
-          kind: 'bool',
-          badge: 'restart',
-          takesEffect: 'Chart panel init cached at OnInit.',
-        },
-        {
-          key: 'enableChartMarkers',
-          label: 'Show trade markers on chart',
-          kind: 'bool',
-          badge: 'live',
-          takesEffect: 'OperationalHelpers reads shadow before each marker.',
-        },
-      ],
-    },
-    {
-      title: 'Safety — per-instance',
-      fields: [
-        {
-          key: 'maxPosPerSymbol',
-          label: 'Max positions per symbol',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CCircuitBreaker.HotReload — next safety check.',
-        },
-        {
-          key: 'maxLotPerOrder',
-          label: 'Max lot per order',
-          kind: 'double',
-          step: 0.01,
-          badge: 'live',
-          takesEffect:
-            'CCircuitBreaker.HotReload + COrderExecutor.SetMaxLotPerOrder — next OrderSend.',
-        },
-        {
-          key: 'maxSpreadPoints',
-          label: 'Max spread (points)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CCircuitBreaker.HotReload — next pre-send check.',
-        },
-        {
-          key: 'maxConsecLosses',
-          label: 'Max consecutive losses',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CCircuitBreaker.HotReload — next loss tally.',
-        },
-        {
-          key: 'consecLossPauseMin',
-          label: 'Consec-loss pause (min)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CCircuitBreaker.HotReload — applies when pause is next armed.',
-        },
-        {
-          key: 'maxDailyLossPerSymbolPct',
-          label: 'Max daily loss % / symbol',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect: 'CCircuitBreaker.HotReload — next daily-PnL check. 0 = disabled.',
-        },
-      ],
-    },
-    {
-      title: 'Safety — fleet',
-      fields: [
-        {
-          key: 'maxOpenPositions',
-          label: 'Max total open positions (global)',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.HotReload — next position-count check.',
-        },
-        {
-          key: 'maxDailyLossPct',
-          label: 'Max daily loss % of equity',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.HotReload — next equity check.',
-        },
-        {
-          key: 'maxOrdersPerMin',
-          label: 'Max orders per minute',
-          kind: 'int',
-          step: 1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.HotReload — next rate-limit window.',
-        },
-        {
-          key: 'maxTotalLots',
-          label: 'Max total open lots',
-          kind: 'double',
-          step: 0.1,
-          badge: 'live',
-          takesEffect: 'CGlobalCircuitBreaker.HotReload — next position-open check.',
-        },
-      ],
-    },
-  ];
+  private readonly pairs = signal<CurrencyPairDto[]>([]);
+  private readonly fleet = signal<EAFleetItem[]>([]);
 
-  protected readonly HOT_RELOAD_FIELDS = this.HOT_RELOAD_GROUPS.flatMap((g) => g.fields);
+  constructor() {
+    this.pairsApi.list({ currentPage: 1, itemCountPerPage: 500, filter: null }).subscribe({
+      next: (res) => this.pairs.set((res.data?.data ?? []).filter((p) => p.isActive && !!p.symbol)),
+      error: () => this.pairs.set([]),
+    });
+    this.admin.listFleet().subscribe({
+      next: (res) => this.fleet.set(res.data ?? []),
+      error: () => this.fleet.set([]),
+    });
+  }
 
-  // The attach-time inputs (engine URL, magic number, DLL bridge, …) live in RESTART_INPUTS
-  // (selfheal.logic.ts) with the EA's own input names, so the Restart-required tab can change them.
+  /** Engine instruments, grouped by asset class, with symbols other live EAs on this account own. */
+  protected readonly symbolOptions = computed<SymbolOption[]>(() => {
+    const me = this.instanceId();
+    const fleet = this.fleet();
+    const mine = fleet.find((f) => f.instanceId === me);
+    const now = Date.now();
+    const owner = new Map<string, string>();
+    if (mine) {
+      for (const f of fleet) {
+        if (f.instanceId === me || f.tradingAccountId !== mine.tradingAccountId) continue;
+        if (f.deregisteredAt || fleetStatusOf(f, now) !== 'Active') continue;
+        for (const s of parseSymbolCsv(f.symbols)) if (!owner.has(s)) owner.set(s, f.instanceId);
+      }
+    }
+    return this.pairs().map((p) => {
+      const g = assetGroup(p.assetClass);
+      const symbol = (p.symbol ?? '').toUpperCase();
+      return { symbol, group: g.label, groupRank: g.rank, takenBy: owner.get(symbol) ?? null };
+    });
+  });
 
-  // ── Restart-required inputs (C3 SetInputs) ───────────────────────────
+  protected readonly symbolOriginal = computed(() =>
+    parseSymbolCsv(this.inputs()?.['symbols'] as string),
+  );
+  protected symbolValue(): string[] {
+    this.dirtyRevision();
+    const e = this.edits.symbols;
+    return typeof e === 'string' ? parseSymbolCsv(e) : this.symbolOriginal();
+  }
+  protected setSymbols(list: string[]): void {
+    if (sameSymbolSet(list, this.symbolOriginal())) delete this.edits.symbols;
+    else this.edits.symbols = list.join(',');
+    this.markEdited();
+  }
 
-  /**
-   * Two sections: inputs the EA reads only at attach time, and the
-   * restart-badged fields of the Editable tab (a config push stores them but
-   * they only take effect after a restart — SetInputs does both at once).
-   */
+  // ── Values ───────────────────────────────────────────────────────────
+
+  private current(f: FieldDef): unknown {
+    return this.inputs()?.[f.key];
+  }
+
+  protected hasCurrent(f: FieldDef): boolean {
+    return this.current(f) != null;
+  }
+
+  protected currentText(f: FieldDef): string {
+    return this.fmt(f, this.current(f));
+  }
+
+  /** What the control shows: the pending edit, else the EA's value. */
+  protected display(f: FieldDef): string {
+    this.dirtyRevision();
+    const e = this.edits[f.key];
+    if (e !== undefined && typeof e !== 'boolean') return e;
+    const c = this.current(f);
+    return c == null ? '' : String(c);
+  }
+
+  protected boolValue(f: FieldDef): boolean {
+    this.dirtyRevision();
+    const e = this.edits[f.key];
+    return typeof e === 'boolean' ? e : this.current(f) === true;
+  }
+
+  protected isZero(f: FieldDef): boolean {
+    const v = this.display(f).trim();
+    return v !== '' && Number(v) === 0;
+  }
+
+  protected setEdit(f: FieldDef, value: string): void {
+    this.edits[f.key] = value ?? '';
+    if (!this.changed(f) && value !== '') delete this.edits[f.key];
+    this.markEdited();
+  }
+
+  protected setBool(f: FieldDef, v: boolean): void {
+    if (v === (this.current(f) === true)) delete this.edits[f.key];
+    else this.edits[f.key] = v;
+    this.markEdited();
+  }
+
+  protected setChoice(f: FieldDef, v: string): void {
+    if (v === String(this.current(f) ?? '')) delete this.edits[f.key];
+    else this.edits[f.key] = v;
+    this.markEdited();
+  }
+
+  /** Leaving a field empty means "keep the EA's value". */
+  protected onBlur(f: FieldDef): void {
+    const e = this.edits[f.key];
+    if (typeof e === 'string' && (e.trim() === '' || !this.changed(f))) {
+      delete this.edits[f.key];
+      this.markEdited();
+    }
+  }
+
+  protected step(f: FieldDef, dir: 1 | -1): void {
+    const step = f.step ?? 1;
+    const base = Number(this.display(f));
+    const start = Number.isFinite(base) ? base : 0;
+    const decimals = (String(step).split('.')[1] ?? '').length;
+    let next = Math.round((start + dir * step) * 10 ** decimals) / 10 ** decimals;
+    if (f.min !== undefined) next = Math.max(f.min, next);
+    if (f.max !== undefined) next = Math.min(f.max, next);
+    this.setEdit(f, String(next));
+  }
+
+  /** Differs from the EA's current value (valid or not). */
+  private changed(f: FieldDef): boolean {
+    const raw = this.edits[f.key];
+    if (raw === undefined || raw === '') return false;
+    const cur = this.current(f);
+    switch (f.kind) {
+      case 'bool':
+        return raw !== (cur === true);
+      case 'symbols':
+        return !sameSymbolSet(parseSymbolCsv(String(raw)), parseSymbolCsv(cur as string));
+      case 'int':
+      case 'double': {
+        const n = Number(String(raw).trim());
+        return !(Number.isFinite(n) && n === cur);
+      }
+      default:
+        return String(raw).trim() !== String(cur ?? '');
+    }
+  }
+
+  protected fieldError(f: FieldDef): string | null {
+    this.dirtyRevision();
+    return this.changed(f) ? validateField(f, this.edits[f.key]) : null;
+  }
+
+  protected isDirty(f: FieldDef): boolean {
+    this.dirtyRevision();
+    return this.changed(f) && this.fieldError(f) === null;
+  }
+
+  protected readonly dirtyCount = computed(() => {
+    this.dirtyRevision();
+    this.inputs();
+    return HOT_RELOAD_FIELDS.filter((f) => this.isDirty(f)).length;
+  });
+  protected readonly errorCount = computed(() => {
+    this.dirtyRevision();
+    this.inputs();
+    return HOT_RELOAD_FIELDS.filter((f) => this.fieldError(f) !== null).length;
+  });
+  protected hasDirty(): boolean {
+    return this.dirtyCount() > 0;
+  }
+
+  private fmt(f: FieldDef, v: unknown): string {
+    if (v == null || v === '') return f.kind === 'url' || f.kind === 'string' ? '(blank)' : '—';
+    if (f.kind === 'bool') return v ? 'On' : 'Off';
+    if (f.kind === 'symbols') return parseSymbolCsv(String(v)).join(', ');
+    const s = String(v).trim();
+    return f.unit && (f.kind === 'int' || f.kind === 'double') ? `${s} ${f.unit}` : s;
+  }
+
+  protected readonly reviewChanges = computed(() => {
+    this.dirtyRevision();
+    return HOT_RELOAD_FIELDS.filter((f) => this.isDirty(f)).map((f) => {
+      if (f.kind === 'symbols') {
+        const before = this.symbolOriginal();
+        const after = parseSymbolCsv(String(this.edits.symbols));
+        const added = after.filter((s) => !before.includes(s));
+        const removed = before.filter((s) => !after.includes(s));
+        const to = [...added.map((s) => `+${s}`), ...removed.map((s) => `−${s}`)].join(' ');
+        return { key: f.key, label: f.label, from: `${before.length} symbols`, to };
+      }
+      return {
+        key: f.key,
+        label: f.label,
+        from: this.currentText(f),
+        to: this.fmt(f, this.edits[f.key]),
+      };
+    });
+  });
+
+  protected markEdited(): void {
+    this.dirtyRevision.update((n) => n + 1);
+    this.cdr.markForCheck();
+  }
+
+  protected revertField(f: FieldDef): void {
+    delete this.edits[f.key];
+    this.markEdited();
+  }
+
+  protected clearEdits(): void {
+    this.edits = {};
+    this.markEdited();
+  }
+
+  // ── Search / filter ──────────────────────────────────────────────────
+
+  private fieldMatches(f: FieldDef): boolean {
+    const q = this.searchTerm().trim().toLowerCase();
+    if (q && !`${f.label} ${f.help} ${f.key}`.toLowerCase().includes(q)) return false;
+    const bf = this.badgeFilter();
+    if (bf !== 'all' && f.badge !== bf) return false;
+    if (this.dirtyOnly() && !this.changed(f)) return false;
+    return true;
+  }
+
+  protected readonly filteredGroups = computed<FieldGroup[]>(() => {
+    this.dirtyRevision();
+    this.searchTerm();
+    this.badgeFilter();
+    this.dirtyOnly();
+    this.inputs();
+    const out: FieldGroup[] = [];
+    for (const g of HOT_RELOAD_GROUPS) {
+      const fields = g.fields.filter((f) => this.fieldMatches(f));
+      if (fields.length > 0) out.push({ ...g, fields });
+    }
+    return out;
+  });
+
+  protected groupDirtyCount(group: FieldGroup): number {
+    this.dirtyRevision();
+    return group.fields.filter((f) => this.changed(f)).length;
+  }
+
+  protected badgeLabel(b: ReloadBadge): string {
+    return BADGE_WORDS[b].label;
+  }
+  protected badgeTitle(b: ReloadBadge): string {
+    return BADGE_WORDS[b].title;
+  }
+
+  protected anchorId(title: string): string {
+    return 'cfg-' + title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  }
+
+  protected scrollTo(title: string): void {
+    const el = this.host.nativeElement.querySelector('#' + this.anchorId(title));
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  protected clearSearch(): void {
+    this.searchTerm.set('');
+    this.badgeFilter.set('all');
+    this.dirtyOnly.set(false);
+  }
+
+  // ── Keyboard ─────────────────────────────────────────────────────────
+
+  /** `/` focuses the search; ⌘S / Ctrl+S opens the review when there are changes. */
+  @HostListener('document:keydown', ['$event'])
+  onKey(ev: KeyboardEvent): void {
+    if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
+      if (this.tab() === 'editable' && this.hasDirty() && !this.submitting()) {
+        ev.preventDefault();
+        this.openReview();
+      }
+      return;
+    }
+    const target = ev.target as HTMLElement | null;
+    const inEditable =
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target?.isContentEditable ?? false);
+    if (ev.key === '/' && !inEditable && this.tab() === 'editable') {
+      ev.preventDefault();
+      this.searchInput?.nativeElement.focus();
+      this.searchInput?.nativeElement.select();
+    }
+  }
+
+  /** ⏎ saves the row, Esc reverts it. */
+  protected onFieldKey(ev: KeyboardEvent, f: FieldDef): void {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      if (this.isDirty(f)) this.saveField(f);
+    } else if (ev.key === 'Escape') {
+      ev.preventDefault();
+      this.revertField(f);
+      (ev.target as HTMLElement).blur();
+    } else if (ev.key === 'ArrowUp' && (f.kind === 'int' || f.kind === 'double')) {
+      ev.preventDefault();
+      this.step(f, 1);
+    } else if (ev.key === 'ArrowDown' && (f.kind === 'int' || f.kind === 'double')) {
+      ev.preventDefault();
+      this.step(f, -1);
+    }
+  }
+
+  // ── Push ─────────────────────────────────────────────────────────────
+
+  protected openReview(): void {
+    if (!this.hasDirty() || this.errorCount() > 0) return;
+    this.reviewing.set(true);
+  }
+
+  private packField(body: UpdateInstanceConfigRequest, f: FieldDef): void {
+    const raw = this.edits[f.key];
+    let value: number | string | boolean;
+    if (f.kind === 'bool') value = raw as boolean;
+    else if (f.kind === 'symbols') value = parseSymbolCsv(String(raw)).join(',');
+    else if (f.kind === 'int' || f.kind === 'double') value = Number(String(raw).trim());
+    else value = String(raw).trim();
+    (body as Record<string, number | string | boolean>)[f.key] = value;
+  }
+
+  protected submit(): void {
+    if (!this.hasDirty() || this.errorCount() > 0) return;
+    // The server DTO marks `instanceId` required, so it is echoed in the body too.
+    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
+    const fields = HOT_RELOAD_FIELDS.filter((f) => this.isDirty(f));
+    for (const f of fields) this.packField(body, f);
+    this.pushBody(body, fields);
+  }
+
+  protected saveField(f: FieldDef): void {
+    if (!this.isDirty(f) || this.submitting()) return;
+    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
+    this.packField(body, f);
+    this.pushBody(body, [f]);
+  }
+
+  private pushBody(body: UpdateInstanceConfigRequest, fields: FieldDef[]): void {
+    this.submitting.set(true);
+    this.admin
+      .updateInstanceConfig(this.instanceId(), body)
+      .pipe(
+        finalize(() => {
+          this.submitting.set(false);
+          this.cdr.markForCheck();
+        }),
+      )
+      .subscribe({
+        next: (res) => {
+          if (res.status) {
+            const label = fields.length === 1 ? fields[0].label : `${fields.length} settings`;
+            if (this.ops) {
+              this.ops.trackLatestCommand(
+                this.instanceId(),
+                'UpdateConfig',
+                `Config change: ${label}`,
+              );
+              this.notify.info(`${label} sent — waiting for the EA's answer.`);
+            } else {
+              this.notify.success(`${label} queued.`);
+            }
+            for (const f of fields) delete this.edits[f.key];
+            this.reviewing.set(false);
+            this.markEdited();
+            this.configPushed.emit();
+          } else {
+            this.notify.error(res.message ?? 'Config push failed.');
+          }
+        },
+        error: () => this.notify.error('Config push failed.'),
+      });
+  }
+
+  // ── Restart settings (C3 SetInputs) ──────────────────────────────────
+
   protected readonly restartSections: readonly {
     title: string;
+    blurb: string;
     fields: readonly RestartField[];
   }[] = [
     {
       title: 'Read when the EA starts',
+      blurb: 'Connection, identity and order transport.',
       fields: RESTART_INPUTS.map((d) => ({ ...d })),
     },
     {
       title: 'Also take effect only after a restart',
+      blurb: 'The same as on Live settings, applied with an immediate restart.',
       fields: Object.entries(RESTART_BADGED_INPUTS).map(([key, v]) => ({
         key,
         inp: v.inp,
         type: v.type,
-        label: this.HOT_RELOAD_FIELDS.find((f) => f.key === key)?.label ?? key,
+        label: HOT_RELOAD_FIELDS.find((f) => f.key === key)?.label ?? key,
       })),
     },
   ];
@@ -1776,27 +1117,176 @@ export class EAConfigPanelComponent {
   protected readonly confirmingInputs = signal(false);
   protected readonly applyingInputs = signal(false);
   protected dangerAck = false;
+  /** Rows of the symbol-map editor while it is being edited (null = mirror the EA's value). */
+  private readonly mapDraft = signal<{ broker: string; engine: string }[] | null>(null);
 
-  protected setRestartEdit(key: string, value: InputEdit): void {
-    if (value === '' || value === undefined) delete this.restartEdits[key];
-    else this.restartEdits[key] = value;
+  protected restartHelp(key: string): string | null {
+    return RESTART_HELP[key] ?? null;
+  }
+  protected restartUnit(key: string): string | null {
+    return RESTART_UNITS[key] ?? null;
+  }
+
+  private restartCurrent(field: RestartField): unknown {
+    return this.inputs()?.[field.key];
+  }
+
+  protected restartCurrentText(field: RestartField): string {
+    const v = this.restartCurrent(field);
+    if (v == null || v === '') return '(blank)';
+    if (typeof v === 'boolean') return v ? 'On' : 'Off';
+    return String(v);
+  }
+
+  protected restartDisplay(field: RestartField): string {
+    this.restartRevision();
+    const e = this.restartEdits[field.key];
+    if (e !== undefined && e !== null && typeof e !== 'boolean') return String(e);
+    const c = this.restartCurrent(field);
+    return c == null ? '' : String(c);
+  }
+
+  protected restartBool(field: RestartField): boolean {
+    this.restartRevision();
+    const e = this.restartEdits[field.key];
+    return typeof e === 'boolean' ? e : this.restartCurrent(field) === true;
+  }
+
+  private bumpRestart(): void {
     this.restartRevision.update((n) => n + 1);
+    this.cdr.markForCheck();
+  }
+
+  protected setRestartBool(field: RestartField, v: boolean): void {
+    if (v === (this.restartCurrent(field) === true)) delete this.restartEdits[field.key];
+    else this.restartEdits[field.key] = v;
+    this.bumpRestart();
+  }
+
+  /** Stores what was typed; drops the edit when it matches the EA's value again. */
+  protected setRestartRaw(field: RestartField, v: string): void {
+    const cur = this.restartCurrent(field);
+    const same =
+      field.type === 's' ? v === String(cur ?? '') : v.trim() !== '' && Number(v.trim()) === cur;
+    if (same) delete this.restartEdits[field.key];
+    else this.restartEdits[field.key] = v;
+    this.bumpRestart();
+  }
+
+  protected onRestartBlur(field: RestartField): void {
+    if (field.type !== 's' && String(this.restartEdits[field.key] ?? '').trim() === '') {
+      delete this.restartEdits[field.key];
+      this.bumpRestart();
+    }
+  }
+
+  protected revertRestart(field: RestartField): void {
+    delete this.restartEdits[field.key];
+    if (field.key === 'symbolMapping') this.mapDraft.set(null);
+    this.bumpRestart();
+  }
+
+  // Timeframes
+  protected timeframeOn(tf: string): boolean {
+    const f = this.restartFields.find((x) => x.key === 'timeframes');
+    return !!f && normalizeTimeframes(this.restartDisplay(f)).includes(tf);
+  }
+  protected toggleTimeframe(field: RestartField, tf: string): void {
+    const set = new Set(normalizeTimeframes(this.restartDisplay(field)));
+    if (set.has(tf)) set.delete(tf);
+    else set.add(tf);
+    const next = MT5_TIMEFRAMES.filter((t) => set.has(t)).join(',');
+    const cur = normalizeTimeframes(String(this.restartCurrent(field) ?? '')).join(',');
+    if (next === cur) delete this.restartEdits[field.key];
+    else this.restartEdits[field.key] = next;
+    this.bumpRestart();
+  }
+
+  // Symbol map
+  protected mapRows(): { broker: string; engine: string }[] {
+    this.restartRevision();
+    return this.mapDraft() ?? parseSymbolMap(String(this.inputs()?.['symbolMapping'] ?? ''));
+  }
+  protected mapEngineOptions(selected: string): string[] {
+    const list = this.pairs()
+      .map((p) => (p.symbol ?? '').toUpperCase())
+      .sort();
+    return selected && !list.includes(selected) ? [selected, ...list] : list;
+  }
+  private commitMap(field: RestartField, rows: { broker: string; engine: string }[]): void {
+    this.mapDraft.set(rows);
+    const next = formatSymbolMap(rows);
+    const cur = formatSymbolMap(parseSymbolMap(String(this.restartCurrent(field) ?? '')));
+    if (next === cur) delete this.restartEdits[field.key];
+    else this.restartEdits[field.key] = next;
+    this.bumpRestart();
+  }
+  protected setMapRow(field: RestartField, i: number, side: 'broker' | 'engine', v: string): void {
+    const rows = this.mapRows().map((r) => ({ ...r }));
+    rows[i] = { ...rows[i], [side]: side === 'engine' ? v.toUpperCase() : v };
+    this.commitMap(field, rows);
+  }
+  protected removeMapRow(field: RestartField, i: number): void {
+    this.commitMap(
+      field,
+      this.mapRows().filter((_, j) => j !== i),
+    );
+  }
+  protected addMapRow(): void {
+    this.mapDraft.set([...this.mapRows(), { broker: '', engine: '' }]);
+    this.bumpRestart();
   }
 
   protected clearRestartEdits(): void {
     this.restartEdits = {};
-    this.restartRevision.update((n) => n + 1);
+    this.mapDraft.set(null);
+    this.bumpRestart();
   }
 
   protected restartDirty(field: RestartField): boolean {
     this.restartRevision();
-    return isInputEdited(field, this.restartEdits[field.key], this.inputs()?.[field.key]);
+    return isInputEdited(field, this.restartEdits[field.key], this.restartCurrent(field));
+  }
+
+  /** Checks beyond the type check: a usable engine address, at least one timeframe, complete map rows. */
+  private extraRestartError(field: RestartField, edit: InputEdit): string | null {
+    if (field.key === 'engineBaseUrl') {
+      if (String(edit ?? '').trim() === '') return 'Enter the engine address.';
+      return validateField(
+        { key: 'engineBaseUrl', kind: 'url', label: '', help: '', badge: 'live', takesEffect: '' },
+        edit,
+      );
+    }
+    if (field.key === 'telemetryEndpoint' && String(edit ?? '').trim() !== '') {
+      return validateField(
+        {
+          key: 'telemetryEndpoint',
+          kind: 'url',
+          label: '',
+          help: '',
+          badge: 'restart',
+          takesEffect: '',
+        },
+        edit,
+      );
+    }
+    if (field.key === 'timeframes' && normalizeTimeframes(String(edit ?? '')).length === 0)
+      return 'Pick at least one timeframe.';
+    if (field.key === 'symbolMapping') {
+      const rows = this.mapDraft() ?? [];
+      if (rows.some((r) => !!r.broker.trim() !== !!r.engine.trim()))
+        return 'Each mapping needs both a broker name and an engine symbol.';
+      const brokers = rows.map((r) => r.broker.trim()).filter(Boolean);
+      if (new Set(brokers).size !== brokers.length) return 'A broker name is mapped twice.';
+    }
+    return null;
   }
 
   protected restartError(field: RestartField): string | null {
     this.restartRevision();
     if (!this.restartDirty(field)) return null;
-    return validateInputEdit(field, this.restartEdits[field.key]);
+    const edit = this.restartEdits[field.key];
+    return validateInputEdit(field, edit) ?? this.extraRestartError(field, edit);
   }
 
   private readonly restartBuild = computed(() => {
@@ -1807,11 +1297,17 @@ export class EAConfigPanelComponent {
       (this.inputs() ?? null) as Record<string, unknown> | null,
     );
   });
+  private readonly restartExtraErrors = computed(() => {
+    this.restartRevision();
+    return this.restartFields.filter(
+      (f) => this.restartDirty(f) && this.extraRestartError(f, this.restartEdits[f.key]) !== null,
+    ).length;
+  });
   protected readonly restartChangeCount = computed(
     () => this.restartBuild().changed.length + Object.keys(this.restartBuild().errors).length,
   );
   protected readonly restartHasErrors = computed(
-    () => Object.keys(this.restartBuild().errors).length > 0,
+    () => Object.keys(this.restartBuild().errors).length > 0 || this.restartExtraErrors() > 0,
   );
 
   protected readonly pendingChanges = computed(() => {
@@ -1820,7 +1316,7 @@ export class EAConfigPanelComponent {
       const f = this.restartFields.find((x) => x.key === key)!;
       const edit = this.restartEdits[key];
       const fmt = (v: unknown) =>
-        v == null || v === '' ? '(blank)' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : String(v);
+        v == null || v === '' ? '(blank)' : typeof v === 'boolean' ? (v ? 'On' : 'Off') : String(v);
       return { key, label: f.label, from: fmt(this.inputs()?.[key]), to: fmt(edit) };
     });
   });
@@ -1839,7 +1335,8 @@ export class EAConfigPanelComponent {
 
   protected applyInputs(reason: string): void {
     const { inputs, changed, errors } = this.restartBuild();
-    if (changed.length === 0 || Object.keys(errors).length > 0) return;
+    if (changed.length === 0 || Object.keys(errors).length > 0 || this.restartExtraErrors() > 0)
+      return;
     if (this.dangerWarning() && !this.dangerAck) return;
     const id = this.instanceId();
     this.applyingInputs.set(true);
@@ -1855,8 +1352,14 @@ export class EAConfigPanelComponent {
         next: (res) => {
           if (res.status && res.data) {
             if (this.ops) {
-              this.ops.trackCommand(id, res.data.commandId, `Change ${changed.length} input${changed.length === 1 ? '' : 's'} + restart`);
-              this.notify.info("Input change sent — the EA answers, then restarts on the new values.");
+              this.ops.trackCommand(
+                id,
+                res.data.commandId,
+                `Change ${changed.length} input${changed.length === 1 ? '' : 's'} + restart`,
+              );
+              this.notify.info(
+                'Input change sent — the EA answers, then restarts on the new values.',
+              );
             } else {
               this.notify.success(`Input change queued (command #${res.data.commandId}).`);
             }
@@ -1871,368 +1374,7 @@ export class EAConfigPanelComponent {
           this.notify.error(err?.error?.message ?? 'Input change could not be sent.'),
       });
   }
-
-  // ── Field helpers ──────────────────────────────────────────────────────
-
-  protected formatCurrent(key: string): string {
-    const inputs = this.inputs();
-    if (!inputs) return '—';
-    const v = inputs[key];
-    if (v == null) return '—';
-    if (typeof v === 'boolean') return v ? 'yes' : 'no';
-    return String(v);
-  }
-
-  /**
-   * Current value split so the template can put a <wbr> after every "," and
-   * "/" — a CSV of symbols or a URL then wraps at its natural joints.
-   */
-  protected currentSegments(key: string): string[] {
-    const text = this.formatCurrent(key);
-    if (!text) return ['(blank)'];
-    return text.split(/(?<=[,/])/);
-  }
-
-  /**
-   * Read-only cards: the envelope sends "" for an input the operator never
-   * set (symbol map, instance label, cert fingerprint), and omits keys an
-   * older build does not report. Both used to render as an empty card.
-   */
-  protected readOnlyValue(key: string): { text: string; empty: boolean } {
-    const inputs = this.inputs();
-    const v = inputs?.[key];
-    if (v == null) return { text: 'not reported', empty: true };
-    if (typeof v === 'boolean') return { text: v ? 'yes' : 'no', empty: false };
-    const text = String(v).trim();
-    return text ? { text, empty: false } : { text: 'not set', empty: true };
-  }
-
-  protected hasDirty(): boolean {
-    return this.dirtyCount() > 0;
-  }
-
-  protected dirtyCount(): number {
-    this.dirtyRevision(); // opt computeds into recomputation when edits change
-    let n = 0;
-    for (const f of this.HOT_RELOAD_FIELDS) {
-      if (this.isDirty(f)) n++;
-    }
-    return n;
-  }
-
-  protected isDirty(field: FieldDef): boolean {
-    const raw = this.edits[field.key];
-    if (raw === undefined || raw === null || raw === '') return false;
-    const current = this.inputs()?.[field.key];
-    if (field.kind === 'bool') return typeof raw === 'boolean' && raw !== current;
-    if (field.kind === 'enum' || field.kind === 'string')
-      return String(raw) !== String(current ?? '');
-    const num = Number(raw);
-    if (!Number.isFinite(num)) return false;
-    return current !== num;
-  }
-
-  /**
-   * Bump after any field edit so dirty-derived computeds invalidate.
-   * Called inline from the template via (ngModelChange) on every input.
-   */
-  protected markEdited(): void {
-    this.dirtyRevision.update((n) => n + 1);
-  }
-
-  protected revertField(field: FieldDef): void {
-    delete this.edits[field.key];
-    this.markEdited();
-    this.cdr.markForCheck();
-  }
-
-  // ── Search / filter helpers ──────────────────────────────────────
-
-  protected fieldMatchesGlobalFilters(field: FieldDef): boolean {
-    const q = this.searchTerm().trim().toLowerCase();
-    if (q) {
-      const hay = (field.label + ' ' + field.key).toLowerCase();
-      if (!hay.includes(q)) return false;
-    }
-    const bf = this.badgeFilter();
-    if (bf !== 'all' && field.badge !== bf) return false;
-    if (this.dirtyOnly() && !this.isDirty(field)) return false;
-    return true;
-  }
-
-  /**
-   * Group buckets used by the sidebar — derived from the global filter
-   * set (search / badge / dirty-only) so sidebar counts react live, but
-   * NOT scoped to the currently-selected category (that scoping happens
-   * on the right pane only).
-   */
-  protected readonly filteredGroups = computed<FieldGroup[]>(() => {
-    this.dirtyRevision();
-    this.searchTerm();
-    this.badgeFilter();
-    this.dirtyOnly();
-    const out: FieldGroup[] = [];
-    for (const g of this.HOT_RELOAD_GROUPS) {
-      const fields = g.fields.filter((f) => this.fieldMatchesGlobalFilters(f));
-      if (fields.length > 0) out.push({ title: g.title, fields });
-    }
-    return out;
-  });
-
-  /**
-   * Sidebar list: filteredGroups passed through the sidebar's own
-   * filter input and sorted alphabetically (stable order is important
-   * for a nav surface — dirty-first sorting would make sections jump
-   * around as the operator edits, which is disorienting).
-   */
-  protected readonly sidebarGroups = computed<FieldGroup[]>(() => {
-    const filter = this.categoryFilter().toLowerCase().trim();
-    return this.filteredGroups()
-      .filter((g) => !filter || g.title.toLowerCase().includes(filter))
-      .slice()
-      .sort((a, b) => a.title.localeCompare(b.title));
-  });
-
-  /**
-   * The fields actually rendered in the editor — flat list scoped to
-   * the selected category. `__all__` flattens every visible field
-   * across every group.
-   */
-  protected readonly visibleFields = computed<FieldDef[]>(() => {
-    const cat = this.selectedCategory();
-    const groups = this.filteredGroups();
-    if (cat === this.ALL_CATEGORY) return groups.flatMap((g) => g.fields);
-    const match = groups.find((g) => g.title === cat);
-    return match ? match.fields.slice() : [];
-  });
-
-  protected readonly visibleCount = computed(() => this.visibleFields().length);
-
-  protected groupDirtyCount(group: FieldGroup): number {
-    this.dirtyRevision();
-    let n = 0;
-    for (const f of group.fields) if (this.isDirty(f)) n++;
-    return n;
-  }
-
-  protected selectedCategoryTitle(): string {
-    const cat = this.selectedCategory();
-    return cat === this.ALL_CATEGORY ? 'All sections' : cat;
-  }
-
-  protected selectCategory(title: string): void {
-    this.selectedCategory.set(title);
-  }
-
-  protected clearSearch(): void {
-    this.searchTerm.set('');
-    this.badgeFilter.set('all');
-    this.dirtyOnly.set(false);
-    this.categoryFilter.set('');
-  }
-
-  protected clearEdits(): void {
-    this.edits = {};
-    this.markEdited();
-    this.cdr.markForCheck();
-  }
-
-  // ── Keyboard shortcuts ───────────────────────────────────────────
-  /**
-   * `/` focuses the field search; `⌘S` / `Ctrl+S` pushes pending
-   * changes. Both are scoped to the document so the operator can hit
-   * them from anywhere on the EA detail page while this panel has
-   * unsaved state.
-   */
-  @HostListener('document:keydown', ['$event'])
-  onKey(ev: KeyboardEvent): void {
-    if ((ev.metaKey || ev.ctrlKey) && (ev.key === 's' || ev.key === 'S')) {
-      // Only intercept when this panel is the one holding dirty state — avoids
-      // hijacking ⌘S on pages that don't have a config form active.
-      if (this.tab() === 'editable' && this.hasDirty() && !this.submitting()) {
-        ev.preventDefault();
-        this.submit();
-      }
-      return;
-    }
-    const target = ev.target as HTMLElement | null;
-    const inEditable =
-      target instanceof HTMLInputElement ||
-      target instanceof HTMLTextAreaElement ||
-      target instanceof HTMLSelectElement ||
-      (target?.isContentEditable ?? false);
-    if (ev.key === '/' && !inEditable && this.tab() === 'editable') {
-      ev.preventDefault();
-      this.searchInput?.nativeElement.focus();
-      this.searchInput?.nativeElement.select();
-    }
-  }
-
-  /**
-   * Pack one dirty field into the bulk-push body shape. The API only
-   * ships an `UpdateInstanceConfigRequest` endpoint (no per-key route),
-   * so per-row saves are a one-field bulk push.
-   */
-  private packField(body: UpdateInstanceConfigRequest, f: FieldDef): void {
-    const raw = this.edits[f.key];
-    let value: number | string | boolean;
-    if (f.kind === 'bool') value = raw as boolean;
-    else if (f.kind === 'enum' || f.kind === 'string') value = String(raw);
-    else value = Number(raw);
-    (body as Record<string, number | string | boolean>)[f.key] = value;
-  }
-
-  protected submit(): void {
-    if (!this.hasDirty()) return;
-    // Echo `instanceId` in the body even though the API takes it from the
-    // route — the server-side DTO marks it `required` and System.Text.Json
-    // rejects the request body otherwise (the controller's route-binding
-    // assignment runs *after* JSON deserialisation).
-    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
-    const fields: FieldDef[] = [];
-    for (const f of this.HOT_RELOAD_FIELDS) {
-      if (!this.isDirty(f)) continue;
-      this.packField(body, f);
-      fields.push(f);
-    }
-    this.pushBody(body, fields);
-  }
-
-  /**
-   * Push a single field via the bulk endpoint. Mirrors the
-   * engine-config page's per-row Save UX so the operator can commit
-   * one knob without disturbing other in-flight edits.
-   */
-  protected saveField(field: FieldDef): void {
-    if (!this.isDirty(field) || this.submitting()) return;
-    const body: UpdateInstanceConfigRequest = { instanceId: this.instanceId() };
-    this.packField(body, field);
-    this.pushBody(body, [field]);
-  }
-
-  private pushBody(body: UpdateInstanceConfigRequest, fields: FieldDef[]): void {
-    this.submitting.set(true);
-    this.admin
-      .updateInstanceConfig(this.instanceId(), body)
-      .pipe(
-        finalize(() => {
-          this.submitting.set(false);
-          this.cdr.markForCheck();
-        }),
-      )
-      .subscribe({
-        next: (res) => {
-          if (res.status) {
-            const label = `Config change (${fields.length} field${fields.length === 1 ? '' : 's'})`;
-            if (this.ops) {
-              // The push answers a sentence, not a command id: find the command it queued.
-              this.ops.trackLatestCommand(this.instanceId(), 'UpdateConfig', label);
-              this.notify.info(`${label} sent — waiting for the EA's answer.`);
-            } else {
-              this.notify.success(`${label} queued.`);
-            }
-            for (const f of fields) delete this.edits[f.key];
-            this.markEdited();
-            this.configPushed.emit();
-          } else {
-            this.notify.error(res.message ?? 'Config push failed.');
-          }
-        },
-        error: () => this.notify.error('Config push failed.'),
-      });
-  }
-
-  /**
-   * Per-row keyboard: Enter on a field input saves that field, Esc
-   * reverts it. Shift+Enter passes through in textareas (none in this
-   * panel today but kept as a safety net for future Json fields).
-   */
-  protected onFieldKey(ev: KeyboardEvent, field: FieldDef): void {
-    if (ev.key === 'Enter' && !ev.shiftKey && !(ev.target instanceof HTMLTextAreaElement)) {
-      ev.preventDefault();
-      if (this.isDirty(field)) this.saveField(field);
-    } else if (ev.key === 'Escape') {
-      ev.preventDefault();
-      this.revertField(field);
-      (ev.target as HTMLElement).blur();
-    }
-  }
 }
-
-type HotReloadKey =
-  | 'tickThrottleMs'
-  | 'signalPollSec'
-  | 'positionSyncSec'
-  | 'accountSyncSec'
-  | 'heartbeatSec'
-  | 'commandPollSec'
-  | 'entryToleranceBandPct'
-  | 'entryToleranceTpFrac'
-  | 'entryToleranceMaxSignalAgeSec'
-  | 'maxSignalAgeSec'
-  | 'maxAdverseTpDriftPct'
-  | 'maxSlippageSlFrac'
-  | 'maxSpreadSlFrac'
-  | 'maxSlippagePoints'
-  | 'maxOrderRetries'
-  | 'httpTimeoutData'
-  | 'httpTimeoutOrder'
-  | 'maxNotionalExposurePct'
-  | 'maxPeakDrawdownPct'
-  | 'flashCrashPct'
-  | 'engineTimeoutSec'
-  | 'dailyProfitTargetAbs'
-  | 'dailyProfitTargetPct'
-  // Phase-4c
-  | 'engineFailThreshold'
-  | 'unmatchedDealExpirySec'
-  | 'safeModeTimeoutSec'
-  | 'backfillBars'
-  | 'backfillChunkSize'
-  | 'specRefreshHour'
-  | 'tickBufferMax'
-  | 'telemetryEndpoint'
-  | 'engineBaseUrl'
-  | 'telemetryPushSec'
-  | 'enableNewsBlackout'
-  | 'newsBlackoutFilePath'
-  | 'logLevel'
-  | 'enableFileLogging'
-  | 'logJsonFormat'
-  | 'enableChartPanel'
-  | 'enableChartMarkers'
-  // Phase-13: owned-symbol CSV (string)
-  | 'symbols'
-  // Phase-4d: legacy safety knobs (already hot-reloadable via CB.HotReload)
-  | 'maxPosPerSymbol'
-  | 'maxLotPerOrder'
-  | 'maxSpreadPoints'
-  | 'maxConsecLosses'
-  | 'consecLossPauseMin'
-  | 'maxDailyLossPerSymbolPct'
-  | 'maxOpenPositions'
-  | 'maxDailyLossPct'
-  | 'maxOrdersPerMin'
-  | 'maxTotalLots';
-
-interface FieldDef {
-  key: HotReloadKey;
-  label: string;
-  kind: 'int' | 'double' | 'string' | 'bool' | 'enum';
-  step?: number;
-  min?: number;
-  max?: number;
-  options?: readonly string[];
-  /** UI hint: `live` = next read-cycle; `next-job` = applies to subsequent jobs; `restart` = re-attach to take effect. */
-  badge: 'live' | 'next-job' | 'restart';
-  takesEffect: string;
-}
-
-interface FieldGroup {
-  title: string;
-  fields: readonly FieldDef[];
-}
-
 
 interface RestartField {
   key: string;
@@ -2241,4 +1383,23 @@ interface RestartField {
   type: InputType;
   warning?: string;
   dangerous?: boolean;
+}
+
+function assetGroup(cls: string | null | undefined): { label: string; rank: number } {
+  switch (cls) {
+    case 'FxMajor':
+      return { label: 'FX majors', rank: 0 };
+    case 'FxMinor':
+      return { label: 'FX crosses', rank: 1 };
+    case 'FxExotic':
+      return { label: 'FX exotics', rank: 2 };
+    case 'Index':
+      return { label: 'Indices', rank: 3 };
+    case 'Commodity':
+      return { label: 'Commodities', rank: 4 };
+    case 'Crypto':
+      return { label: 'Crypto', rank: 5 };
+    default:
+      return { label: 'Other', rank: 9 };
+  }
 }
