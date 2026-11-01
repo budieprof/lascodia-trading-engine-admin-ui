@@ -37,6 +37,7 @@ import type {
   EnrollmentProgress,
   TerminalSetup,
 } from './connect/terminal-wizard.types';
+import type { SupervisorSetup } from './connect/add-computer.types';
 
 /** The override writes' answer: the envelope plus `outcome`, `effectiveAt`, `pendingChangeId`, `breakGlass`. */
 interface OverrideWriteResponse extends ResponseData<number> {
@@ -167,6 +168,14 @@ export class OrganisationApiService {
           version: res.headers.get('X-Lascodia-EA-Version'),
         })),
       );
+  }
+
+  /**
+   * `accounts.read` (self-heal program C9). "Add a computer": the engine address, the macOS and
+   * Windows install lines (with `{token}`), the WebRequest allow-list address, the published bundles.
+   */
+  supervisorSetup(): Observable<SupervisorSetup> {
+    return this.get('/onboarding/supervisor/setup');
   }
 
   /** `accounts.read`. Where one enrollment token stands, with the troubleshooting hints. */

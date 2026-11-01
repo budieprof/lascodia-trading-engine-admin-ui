@@ -106,7 +106,10 @@ import {
         title="Connect a terminal"
         subtitle="Every EA and every supervisor has its own credential. Create a token to connect one, and revoke what you no longer trust."
       >
-        <a class="btn btn-primary" routerLink="/organisation/terminals/connect"
+        <a class="btn btn-primary" routerLink="/organisation/terminals/add-computer"
+          >Add a computer</a
+        >
+        <a class="btn btn-secondary" routerLink="/organisation/terminals/connect"
           >Guided connection</a
         >
         <button

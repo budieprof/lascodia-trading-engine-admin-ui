@@ -194,6 +194,7 @@ export const ROUTE_ACCESS = {
   'organisation/terminals': rule(P.AccountsRead), // GET machine/enrollments, machine/credentials
   // The guided connection (enterprise onboarding): GET onboarding/terminal-setup + machine/enrollments/{id}/progress.
   'organisation/terminals/connect': rule(P.AccountsRead),
+  'organisation/terminals/add-computer': rule(P.AccountsRead), // GET onboarding/supervisor/setup, machine/enrollments/{id}/progress
   'organisation/settings': rule(P.EngineConfig), // GET config/effective, config/overrides
   // GET admin/kill-switch/tenant + account/{id}; flatten and TenantRisk:* limits are sections by their keys.
   'organisation/risk': rule(P.EngineKillswitch, P.PositionsFlatten, P.EngineConfig),

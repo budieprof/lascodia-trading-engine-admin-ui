@@ -25,7 +25,8 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AddBrokerTerminalWizardComponent } from '../../components/add-broker-terminal-wizard/add-broker-terminal-wizard.component';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { supervisorUpdatePill, supervisorVersionText } from '../../supervisor-status.logic';
 import { EAInstancesService } from '@core/services/ea-instances.service';
 import type { EAInstanceDto } from '@core/api/api.types';
 
@@ -59,10 +60,9 @@ interface RotatedKey {
  *   2. Sessions — active + recently-closed terminal processes the daemon
  *      reported in its heartbeat, with a kill button per session.
  *
- * Operator workflow: install the daemon (see lascodia-mt5-supervisor/README),
- * configure ~/.lascodia/supervisor.yaml with the MT5 installs, start the
- * daemon → it appears here within ~30s.  Click "Launch" → engine proxies
- * the call to the daemon → MT5 process starts.
+ * Operator workflow: "Add a computer" (organisation/terminals/add-computer, C9) gives one line to
+ * paste on the host; the supervisor installs itself, finds the MT5 installs and appears here within
+ * ~30s.  Click "Launch" → engine proxies the call to the daemon → MT5 process starts.
  */
 @Component({
   selector: 'app-terminals-page',
@@ -87,8 +87,9 @@ interface RotatedKey {
     <div class="page">
       <app-page-header
         title="Terminals"
-        subtitle="Launch, monitor and close MT5 terminals through the supervisor daemon running on each host."
+        subtitle="Launch, monitor and close MT5 terminals through the supervisor running on each computer."
       >
+        <a class="btn btn-primary" routerLink="/organisation/terminals/add-computer">Add a computer</a>
         <!-- Bound to the resources' first-load flag, the old button never changed on a click. -->
         <app-refresh-button
           [refreshing]="daemonsResource.refreshing() || sessionsResource.refreshing()"
@@ -117,8 +118,10 @@ interface RotatedKey {
             />
           } @else if (daemons().length === 0) {
             <app-empty-state
-              title="No daemons registered"
-              description="Install the lascodia-mt5-supervisor daemon on a host with one or more MT5 terminals and start it. The daemon registers itself on boot; it will appear here within ~30 seconds."
+              title="No computers connected yet"
+              description="Add the computer that runs MetaTrader 5: you get one line to paste on it, and it appears here within a minute with its terminals."
+              actionLabel="Add a computer"
+              (actionClick)="addComputer()"
             />
           } @else {
             <div class="cards">
@@ -133,6 +136,12 @@ interface RotatedKey {
                       {{ d.isOnline ? 'online' : 'offline' }}
                     </span>
                   </header>
+                  <p class="small supervisor-line">
+                    <span class="muted">{{ supervisorText(d.supervisor) }}</span>
+                    @if (supervisorPill(d.supervisor); as pill) {
+                      <span class="sup-pill" [attr.data-tone]="pill.tone" [title]="pill.title">{{ pill.text }}</span>
+                    }
+                  </p>
                   <dl class="kv">
                     <dt>Base URL</dt>
                     <dd class="mono small">{{ d.baseUrl }}</dd>
@@ -695,6 +704,35 @@ interface RotatedKey {
       .card-head p {
         margin: 2px 0 0;
       }
+      .supervisor-line {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-2);
+        margin: 0 0 var(--space-2);
+      }
+      .sup-pill {
+        padding: 1px 8px;
+        border-radius: var(--radius-full);
+        font-size: var(--text-xs);
+        border: 1px solid var(--border);
+      }
+      .sup-pill[data-tone='ok'] {
+        color: var(--success, #2e9e5b);
+        border-color: color-mix(in srgb, var(--success, #2e9e5b) 40%, transparent);
+      }
+      .sup-pill[data-tone='warn'] {
+        color: var(--warning, #d98e04);
+        border-color: color-mix(in srgb, var(--warning, #d98e04) 40%, transparent);
+      }
+      .sup-pill[data-tone='info'] {
+        color: var(--accent);
+        border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+      }
+      .sup-pill[data-tone='bad'] {
+        color: var(--danger, #d64545);
+        border-color: color-mix(in srgb, var(--danger, #d64545) 40%, transparent);
+      }
       .status-pill {
         font-size: 10px;
         font-weight: var(--font-semibold);
@@ -992,6 +1030,15 @@ export class TerminalsPageComponent {
     this.eaInstances().filter((e) => e.status === 'Active'),
   );
   private readonly notify = inject(NotificationService);
+  private readonly router = inject(Router);
+
+  // C9: the supervisor version / self-update line on each computer card.
+  protected readonly supervisorText = supervisorVersionText;
+  protected readonly supervisorPill = supervisorUpdatePill;
+
+  protected addComputer(): void {
+    void this.router.navigate(['/organisation/terminals/add-computer']);
+  }
 
   constructor() {
     this.eaService.list().subscribe({

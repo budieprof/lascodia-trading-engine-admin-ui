@@ -800,6 +800,13 @@ export const PAGE_CATALOG: readonly PageCommand[] = [
   },
   {
     group: 'Organisation',
+    label: 'Add a computer',
+    route: '/organisation/terminals/add-computer',
+    keywords:
+      'add computer install supervisor one line command mac windows powershell terminal host daemon pair webrequest allow list onboarding',
+  },
+  {
+    group: 'Organisation',
     label: 'Organisation — Settings',
     route: '/organisation/settings',
     keywords:

@@ -2561,6 +2561,23 @@ export interface TerminalDaemonDto {
   lastSeenAt: string;
   isOnline: boolean;
   installs: TerminalInstallDto[];
+  /** C9: the supervisor's version, platform and self-update state (absent from older engines). */
+  supervisor?: DaemonSupervisorDto | null;
+}
+
+/**
+ * C9: a daemon's supervisor against the newest published bundle of its platform. `updateState`:
+ * `unknown` (does not report its version), `no-release`, `current`, `available` (automatic updates
+ * off), `updating` (offered, not switched yet), `failed` (offered 30 min without switching).
+ */
+export interface DaemonSupervisorDto {
+  version: string | null;
+  platform: string | null;
+  latestVersion: string | null;
+  updateState: 'unknown' | 'no-release' | 'current' | 'available' | 'updating' | 'failed' | string;
+  offeredVersion: string | null;
+  offeredAt: string | null;
+  autoUpdate: boolean;
 }
 
 /** One running (or recently-closed) MT5 terminal session. */
