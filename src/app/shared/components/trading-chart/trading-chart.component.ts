@@ -13,7 +13,7 @@ import {
   OnDestroy,
   HostListener,
 } from '@angular/core';
-import { resolveInstrument } from '@core/instruments/instrument-math';
+import { distanceUnitOf, resolveInstrument } from '@core/instruments/instrument-math';
 import { FormsModule } from '@angular/forms';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
@@ -689,6 +689,9 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
             (chartInit)="onChartReady($event)"
             class="echart-instance"
           ></div>
+          @if (noCandlesMessage(); as msg) {
+            <div class="chart-empty" role="status">{{ msg }}</div>
+          }
         }
 
         <!-- ── Live recommendation bubble ─────────────────────────────
@@ -1957,6 +1960,16 @@ const DEEP_LINK_STORAGE_KEY = 'tradingChart.deepLink.v1';
         height: 100%;
       }
 
+      .chart-empty {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-tertiary);
+        font-size: var(--text-sm);
+        pointer-events: none;
+      }
       .chart-skeleton {
         width: 100%;
         height: 100%;
@@ -2127,6 +2140,8 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   candles = signal<CandleDto[]>([]);
   livePrice = signal<LivePriceDto | null>(null);
   previousBid = signal<number>(0);
+  /** Shown over the plot when the selected series has no candles (or failed to load). */
+  readonly noCandlesMessage = signal<string | null>(null);
   showVolume = signal(true);
 
   /** Show open-position overlay lines (entry + SL + TP) on the chart. Default
@@ -2755,6 +2770,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
 
   onSymbolChange(symbol: string) {
     this.selectedSymbol.set(symbol);
+    this.resetSeriesState();
     this.loading.set(true);
     this.loadChartConfig();
     this.loadCandles();
@@ -2762,9 +2778,24 @@ export class TradingChartComponent implements OnInit, OnDestroy {
 
   onTimeframeChange(tf: string) {
     this.selectedTimeframe.set(tf);
+    this.resetSeriesState();
     this.loading.set(true);
     this.loadChartConfig();
     this.loadCandles();
+  }
+
+  /**
+   * Forget everything that belongs to the series being replaced. The forming
+   * bar and the last live tick are per (symbol, timeframe): carried into the
+   * next series they grafted the old symbol's price onto the new one — a
+   * switch from EUR/USD to US500 drew a bar from 1.12 to 7,628 and squashed
+   * the real chart into a line at the top (and AAPL, with no tick while its
+   * market is closed, showed EUR/USD's 1.12 as its live price).
+   */
+  private resetSeriesState(): void {
+    this.candles.set([]);
+    this.livePrice.set(null);
+    this.previousBid.set(0);
   }
 
   toggleVolume() {
@@ -3677,7 +3708,8 @@ export class TradingChartComponent implements OnInit, OnDestroy {
   }
 
   private loadCandles() {
-    const sym = this.selectedSymbol().replace(/\//g, '');
+    const shown = this.selectedSymbol();
+    const sym = shown.replace(/\//g, '');
     const tf = this.selectedTimeframe();
 
     this.marketData
@@ -3691,12 +3723,21 @@ export class TradingChartComponent implements OnInit, OnDestroy {
         takeUntil(this.destroy$),
       )
       .subscribe((res: any) => {
+        // A reply for the series shown before a symbol/timeframe switch.
+        if (this.selectedSymbol() !== shown || this.selectedTimeframe() !== tf) return;
         let data: CandleDto[] = res?.data?.data ?? [];
 
-        // If backend returns no candles, generate sample data
-        if (data.length === 0) {
-          data = this.generateSampleCandles();
-        }
+        // No candles is shown as no candles. This used to draw 200 random
+        // bars around 1.085 (EUR/USD-like) instead, so a symbol without
+        // history - or a failed request - showed a made-up chart under a real
+        // name (an AAPL or US500 chart priced at 1.08).
+        this.noCandlesMessage.set(
+          data.length > 0
+            ? null
+            : res
+              ? `No ${shown} ${tf} candles yet`
+              : `Could not load ${shown} candles - retrying in a minute`,
+        );
 
         // Backend returns candles in DESCENDING timestamp order (newest first
         // so the paged endpoint can serve "give me the latest N" cheaply).
@@ -3762,16 +3803,21 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       )
       .subscribe((res: any) => {
         const price: LivePriceDto | null = res?.data ?? null;
+        // A reply for the symbol the chart showed before a switch is not this
+        // symbol's price (the poll can be in flight across the switch).
+        const norm = (s: string | null | undefined) => (s ?? '').replace(/\//g, '').toUpperCase();
+        if (price?.symbol && norm(price.symbol) !== norm(this.selectedSymbol())) return;
         if (price?.bid) {
-          // Engine returns spread in raw price units; FX convention is pips.
-          // Convert at the source so the "0.0 sp" badge in the chart header
-          // shows pip values consistent with the rest of the page.
+          // Engine returns spread in raw price units; show it in the
+          // instrument's display unit (pips for FX, points for indices,
+          // metals, stocks and crypto) so the "sp" badge reads the same way
+          // as the rest of the page. The old fixed x10000 turned gold's
+          // 0.35 spread into "3500.0 sp".
           const sym = price.symbol ?? this.selectedSymbol();
-          const isJPY = (sym ?? '').includes('JPY');
-          const pipFactor = isJPY ? 100 : 10000;
+          const unit = distanceUnitOf(norm(sym));
           const normalised: LivePriceDto = {
             ...price,
-            spread: +(price.spread * pipFactor).toFixed(1),
+            spread: unit > 0 ? +(price.spread / unit).toFixed(1) : price.spread,
           };
           this.previousBid.set(this.livePrice()?.bid ?? 0);
           this.livePrice.set(normalised);
@@ -5508,41 +5554,5 @@ export class TradingChartComponent implements OnInit, OnDestroy {
     if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
     if (v >= 1_000) return `${(v / 1_000).toFixed(1)}K`;
     return v.toFixed(0);
-  }
-
-  private generateSampleCandles(): CandleDto[] {
-    const candles: CandleDto[] = [];
-    const symbol = this.selectedSymbol();
-    const isJPY = symbol.includes('JPY');
-    let price = isJPY ? 150.5 : 1.085;
-    const volatility = isJPY ? 0.2 : 0.0008;
-    const now = new Date();
-    const tfMinutes: Record<string, number> = { M1: 1, M5: 5, M15: 15, H1: 60, H4: 240, D1: 1440 };
-    const interval = tfMinutes[this.selectedTimeframe()] ?? 60;
-
-    for (let i = 199; i >= 0; i--) {
-      const time = new Date(now.getTime() - i * interval * 60000);
-      const change = (Math.random() - 0.48) * volatility;
-      const open = price;
-      const close = price + change;
-      const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-      const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-      const volume = Math.floor(500 + Math.random() * 2000);
-      price = close;
-
-      candles.push({
-        id: 200 - i,
-        symbol,
-        timeframe: this.selectedTimeframe(),
-        open: +open.toFixed(isJPY ? 3 : 5),
-        high: +high.toFixed(isJPY ? 3 : 5),
-        low: +low.toFixed(isJPY ? 3 : 5),
-        close: +close.toFixed(isJPY ? 3 : 5),
-        volume,
-        timestamp: time.toISOString(),
-        isClosed: i > 0,
-      });
-    }
-    return candles;
   }
 }
