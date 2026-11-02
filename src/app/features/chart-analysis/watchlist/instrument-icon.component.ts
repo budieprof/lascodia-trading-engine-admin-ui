@@ -142,12 +142,12 @@ export class InstrumentIconComponent {
     () => this.assetClass() ?? resolveInstrument(this.symbol()).assetClass,
   );
   /**
-   * FX always goes to `app-pair-icon` (flags, or nothing when a currency has no artwork — exactly as before); a metal
-   * quoted in a currency (XAUUSD) keeps its flags; anything else gets its asset-class badge.
+   * An FX pair or a metal quoted in a currency (XAUUSD) shows its two flags when both have artwork; an FX pair
+   * without artwork (USDSEK) falls through to the "FX" badge rather than an empty gap.
    */
   readonly flags = computed(() => {
     const ac = this.resolvedClass();
-    return ac === 'Fx' || (ac === 'Commodity' && !!pairFlags(this.symbol()));
+    return (ac === 'Fx' || ac === 'Commodity') && !!pairFlags(this.symbol());
   });
   /** Trusted static artwork from `symbol-art.ts` only — never user input. */
   readonly art = computed<{ front: SafeHtml; back: SafeHtml | null; label: string } | null>(() => {

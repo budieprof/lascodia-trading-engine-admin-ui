@@ -61,9 +61,7 @@
                   (click)="selectSymbol(p.symbol)"
                 >
                   <span class="sym-icon">
-                    @if (p.assetClass !== 'Fx') {
-                      <app-instrument-icon [symbol]="p.symbol" [assetClass]="p.assetClass" />
-                    }
+                    <app-instrument-icon [symbol]="p.symbol" [assetClass]="p.assetClass" />
                   </span>
                   <span class="sym-name">{{ p.symbol }}</span>
                   <span class="sym-desc">{{ symbolDescription(p.symbol, p.description) }}</span>
