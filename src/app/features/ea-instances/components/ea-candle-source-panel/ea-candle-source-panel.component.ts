@@ -106,14 +106,35 @@ interface PendingChange {
 
         <!-- Per-symbol overrides -->
         <div class="csp-block">
-          <label class="csp-block-label">Per-symbol overrides</label>
+          <div class="csp-block-head">
+            <label class="csp-block-label">
+              Per-symbol overrides
+              @if (data()!.perSymbol.length > 0) {
+                <span class="csp-count">{{ data()!.perSymbol.length }}</span>
+              }
+            </label>
+            @if (data()!.perSymbol.length > filterThreshold) {
+              <input
+                class="csp-input csp-filter"
+                type="search"
+                placeholder="Filter symbol or instance…"
+                [value]="overrideFilter()"
+                (input)="overrideFilter.set($any($event.target).value)"
+                aria-label="Filter per-symbol overrides"
+              />
+            }
+          </div>
           @if (data()!.perSymbol.length === 0) {
             <span class="csp-desc muted small"
               >None — the global default applies to all symbols.</span
             >
+          } @else if (visibleOverrides().length === 0) {
+            <span class="csp-desc muted small">No override matches “{{ overrideFilter() }}”.</span>
           } @else {
-            <div class="csp-overrides">
-              @for (ov of data()!.perSymbol; track ov.symbol) {
+            <!-- Bounded: a fleet with ~100 overrides otherwise grew this card (and the whole
+                 settings row beside it) to thousands of pixels. -->
+            <div class="csp-overrides" tabindex="0" aria-label="Per-symbol overrides">
+              @for (ov of visibleOverrides(); track ov.symbol) {
                 <div class="csp-override">
                   <span class="csp-sym mono">{{ ov.symbol }}</span>
                   <select
@@ -257,10 +278,34 @@ interface PendingChange {
         display: flex;
         gap: var(--space-2);
       }
+      .csp-block-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-2);
+        flex-wrap: wrap;
+      }
+      .csp-count {
+        margin-left: 6px;
+        padding: 0 6px;
+        border-radius: var(--radius-full);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-variant-numeric: tabular-nums;
+      }
+      .csp-input.csp-filter {
+        width: auto;
+        flex: 0 1 220px;
+        min-width: 140px;
+      }
       .csp-overrides {
         display: flex;
         flex-direction: column;
         gap: 6px;
+        max-height: 360px;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 2px 4px 2px 0;
       }
       .csp-override {
         display: flex;
@@ -360,6 +405,18 @@ export class EACandleSourcePanelComponent implements OnInit {
   protected newInstanceId = '';
 
   protected readonly fleet = computed(() => this.data()?.fleet ?? []);
+
+  /** Show the filter only once the list is long enough to need it. */
+  protected readonly filterThreshold = 8;
+  protected readonly overrideFilter = signal('');
+  protected readonly visibleOverrides = computed(() => {
+    const all = this.data()?.perSymbol ?? [];
+    const q = this.overrideFilter().trim().toLowerCase();
+    if (!q) return all;
+    return all.filter(
+      (ov) => ov.symbol.toLowerCase().includes(q) || ov.instanceId.toLowerCase().includes(q),
+    );
+  });
 
   ngOnInit(): void {
     this.load();
