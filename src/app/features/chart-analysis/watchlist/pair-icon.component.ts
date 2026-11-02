@@ -19,6 +19,15 @@ function star(cx: number, cy: number, r: number, fill: string, stroke = ''): str
   return `<polygon points="${pts.join(' ')}" fill="${fill}"${s}/>`;
 }
 
+/** A precious-metal coin (as TradingView shows XAU / XAG / XPT / XPD): rim colour, face colour, mark colour. */
+function metalCoin(rim: string, face: string, mark: string): string {
+  return (
+    `<rect width="32" height="32" fill="${rim}"/><circle cx="16" cy="16" r="12" fill="${face}"/>` +
+    `<circle cx="16" cy="16" r="9" fill="none" stroke="${rim}" stroke-width="1.2"/>` +
+    `<path d="M11 19.5l3-8h4l3 8" fill="none" stroke="${mark}" stroke-width="1.6" stroke-linejoin="round"/>`
+  );
+}
+
 const UNION =
   '<rect width="32" height="32" fill="#012169"/>' +
   '<path d="M0 0L32 32M32 0L0 32" stroke="#fff" stroke-width="6"/>' +
@@ -31,8 +40,9 @@ const EU_STARS = Array.from({ length: 12 }, (_, i) => {
   return star(16 + 9.5 * Math.cos(a), 16 + 9.5 * Math.sin(a), 1.9, '#FFCC00');
 }).join('');
 
-const US_STRIPES = Array.from({ length: 7 }, (_, i) =>
-  `<rect y="${(i * 64) / 13}" width="32" height="${32 / 13}" fill="#B22234"/>`,
+const US_STRIPES = Array.from(
+  { length: 7 },
+  (_, i) => `<rect y="${(i * 64) / 13}" width="32" height="${32 / 13}" fill="#B22234"/>`,
 ).join('');
 
 /** The flag artwork per ISO currency code (XAU: a gold coin, as TradingView shows metals). */
@@ -40,7 +50,11 @@ export const CURRENCY_FLAG_SVG: Readonly<Record<string, string>> = {
   USD:
     `<rect width="32" height="32" fill="#fff"/>${US_STRIPES}` +
     '<rect width="15" height="17.2" fill="#3C3B6E"/>' +
-    [3.5, 7.5, 11.5].flatMap((x) => [3.5, 8.6, 13.7].map((y) => `<circle cx="${x}" cy="${y}" r="1" fill="#fff"/>`)).join(''),
+    [3.5, 7.5, 11.5]
+      .flatMap((x) =>
+        [3.5, 8.6, 13.7].map((y) => `<circle cx="${x}" cy="${y}" r="1" fill="#fff"/>`),
+      )
+      .join(''),
   EUR: `<rect width="32" height="32" fill="#003399"/>${EU_STARS}`,
   GBP: UNION,
   JPY: '<rect width="32" height="32" fill="#fff"/><circle cx="16" cy="16" r="8" fill="#BC002D"/>',
@@ -69,10 +83,20 @@ export const CURRENCY_FLAG_SVG: Readonly<Record<string, string>> = {
     star(19, 13, 1.6, '#FFFF00') +
     star(16, 16, 1.6, '#FFFF00'),
   NGN: '<rect width="32" height="32" fill="#fff"/><path d="M0 0h10.67v32H0zM21.33 0H32v32H21.33z" fill="#008751"/>',
-  XAU:
-    '<rect width="32" height="32" fill="#B8860B"/><circle cx="16" cy="16" r="12" fill="#E6BE3A"/>' +
-    '<circle cx="16" cy="16" r="9" fill="none" stroke="#B8860B" stroke-width="1.2"/>' +
-    '<path d="M11 19.5l3-8h4l3 8" fill="none" stroke="#8B6508" stroke-width="1.6" stroke-linejoin="round"/>',
+  HKD:
+    '<rect width="32" height="32" fill="#DE2910"/>' +
+    [0, 1, 2, 3, 4]
+      .map((i) => {
+        const a = -Math.PI / 2 + (i * 2 * Math.PI) / 5;
+        const x = (16 + 5.2 * Math.cos(a)).toFixed(2);
+        const y = (16 + 5.2 * Math.sin(a)).toFixed(2);
+        return `<ellipse cx="${x}" cy="${y}" rx="2.6" ry="5" fill="#fff" transform="rotate(${i * 72 + 20} ${x} ${y})"/>`;
+      })
+      .join(''),
+  XAU: metalCoin('#B8860B', '#E6BE3A', '#8B6508'),
+  XAG: metalCoin('#7D8288', '#D4D7DB', '#5E6369'),
+  XPT: metalCoin('#6F7A86', '#C3CCD6', '#4F5A66'),
+  XPD: metalCoin('#7A7466', '#CFC8B8', '#5A5446'),
 };
 
 /** Currency names as TradingView titles a pair ("Euro / U.S. Dollar"). */
@@ -87,7 +111,11 @@ export const CURRENCY_NAME: Readonly<Record<string, string>> = {
   NZD: 'New Zealand Dollar',
   CNH: 'Chinese Yuan (offshore)',
   NGN: 'Nigerian Naira',
+  HKD: 'Hong Kong Dollar',
   XAU: 'Gold',
+  XAG: 'Silver',
+  XPT: 'Platinum',
+  XPD: 'Palladium',
 };
 
 /** "Euro / U.S. Dollar" for a pair whose two currencies are named, else null (the caller keeps its own label). */
@@ -160,7 +188,9 @@ export class PairIconComponent {
     const pair = pairFlags(this.symbol());
     if (!pair) return null;
     const wrap = (ccy: string): SafeHtml =>
-      this.sanitizer.bypassSecurityTrustHtml(`<svg viewBox="0 0 32 32" width="100%" height="100%" style="display:block" aria-hidden="true">${CURRENCY_FLAG_SVG[ccy]}</svg>`);
+      this.sanitizer.bypassSecurityTrustHtml(
+        `<svg viewBox="0 0 32 32" width="100%" height="100%" style="display:block" aria-hidden="true">${CURRENCY_FLAG_SVG[ccy]}</svg>`,
+      );
     return { base: wrap(pair[0]), quote: wrap(pair[1]), label: `${pair[0]} / ${pair[1]}` };
   });
 }
