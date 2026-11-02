@@ -2742,7 +2742,8 @@ export class TradingChartComponent implements OnInit, OnDestroy {
           .filter((p) => p.isActive && !!p.symbol)
           .map((p) => {
             const s = p.symbol!.toUpperCase();
-            return s.length === 6 ? `${s.slice(0, 3)}/${s.slice(3)}` : s;
+            // Only a 6-LETTER code is a pair (EURUSD, BTCUSD); NAS100 / AUS200 are not.
+            return /^[A-Z]{6}$/.test(s) ? `${s.slice(0, 3)}/${s.slice(3)}` : s;
           })
           .sort();
         if (formatted.length > 0) this.symbols.set(formatted);
@@ -3509,7 +3510,7 @@ export class TradingChartComponent implements OnInit, OnDestroy {
       const sym = typeof parsed.symbol === 'string' ? parsed.symbol.toUpperCase() : '';
       const tf = typeof parsed.timeframe === 'string' ? parsed.timeframe : '';
       if (sym.length > 0) {
-        const display = sym.length === 6 ? `${sym.slice(0, 3)}/${sym.slice(3)}` : sym;
+        const display = /^[A-Z]{6}$/.test(sym) ? `${sym.slice(0, 3)}/${sym.slice(3)}` : sym;
         this.selectedSymbol.set(display);
       }
       if (tf.length > 0) {
