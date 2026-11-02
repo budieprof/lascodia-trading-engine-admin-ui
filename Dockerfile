@@ -31,7 +31,7 @@ RUN npm run build -- --configuration production
 # Unprivileged nginx (uid 101, listens on 8080): nothing in the container runs as root (gaps program security,
 # Trivy DS-0002 / triage T-2 closed). PORT CHANGE: the staging image now serves :8080, not :80 — map it with
 # `docker run -p 80:8080 …` (or point the staging proxy at :8080).
-FROM nginxinc/nginx-unprivileged:1.28-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 WORKDIR /usr/share/nginx/html
 
 # The base image's default site listens on 8080 already; ours replaces it.
