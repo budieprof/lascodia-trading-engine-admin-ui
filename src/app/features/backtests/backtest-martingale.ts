@@ -1,8 +1,5 @@
 import type { StrategyReport } from '@features/scripting/report/strategy-report.model';
-import {
-  medianR,
-  type LadderTrade,
-} from '@shared/components/martingale-simulator/martingale-ladder.logic';
+import { type LadderTrade } from '@shared/components/martingale-simulator/martingale-ladder.logic';
 
 /** What the backtest page hands the martingale simulator. */
 export interface BacktestLadder {
@@ -30,6 +27,13 @@ export interface DslLadderTrade {
 
 const fmtR = (v: number) => v.toFixed(2);
 
+/** Smallest positive value, rounded DOWN to 0.01 so a win at that R always clears; null if none. */
+function smallestR(values: number[]): number | null {
+  const v = values.filter((x) => Number.isFinite(x) && x > 0);
+  if (v.length === 0) return null;
+  return Math.max(0.01, Math.floor(Math.min(...v) * 100) / 100);
+}
+
 /**
  * A Pine script run's closed trades as ladder trades.
  *
@@ -38,9 +42,15 @@ const fmtR = (v: number) => v.toFixed(2);
  * bar has no R and is skipped (it never defined a risk the ladder could scale).</p>
  *
  * <p>The report does not record a take-profit price, so the entry-known reward:risk recovery
- * stakes divide by is not available per trade. The default stand-in is the median R of trades that
- * closed at their take-profit leg (the script's target geometry, net of costs); without such trades
- * it is 1R. The operator can override it.</p>
+ * stakes divide by is not available per trade. The default stand-in is the SMALLEST R among trades
+ * that closed at their take-profit leg (the script's target geometry, net of costs), rounded down;
+ * without such trades it is 1R. The operator can override it.</p>
+ *
+ * <p>Smallest, not median: a rung is sized so that a win at exactly this R pays deficit + target.
+ * Take-profit wins land a little above or below their target as costs vary, and with the median
+ * half of them fall short by cents. Falling short keeps the chain open one more rung, which
+ * spends depth and forces abandons. #4813: median 2.98R left 74-92 of 183 take-profit wins
+ * short; smallest (2.94R) leaves none short.</p>
  */
 export function ladderFromScriptReport(report: StrategyReport): BacktestLadder {
   const symbol = report.meta.symbol || '—';
@@ -58,11 +68,11 @@ export function ladderFromScriptReport(report: StrategyReport): BacktestLadder {
   const tpRs = closed
     .filter((t) => t.exitLeg === 'TakeProfit' && t.rMultiple != null)
     .map((t) => t.rMultiple as number);
-  const med = medianR(tpRs);
-  const assumedGeomR = med != null ? Math.round(med * 100) / 100 : 1;
+  const low = smallestR(tpRs);
+  const assumedGeomR = low ?? 1;
   const geomNote =
-    med != null
-      ? `This report records no take-profit price, so recovery stakes size for ${fmtR(med)}R: the median R of the ${tpRs.length} trade${tpRs.length === 1 ? '' : 's'} that closed at their take-profit. Change it if the script's target differs.`
+    low != null
+      ? `This report records no take-profit price, so recovery stakes size for ${fmtR(low)}R: the smallest R among the ${tpRs.length} trade${tpRs.length === 1 ? '' : 's'} that closed at their take-profit, so any take-profit win pays the chain off. Change it if the script's target differs.`
       : 'This report records no take-profit price and no trade closed at one, so recovery stakes size for 1R. Set the R:R the script actually targets.';
 
   const trimmed = report.meta.trimmedTrades ?? 0;
@@ -94,7 +104,9 @@ export function ladderFromDslTrades(
       const priceR = (dir * (t.ExitPrice - t.EntryPrice)) / risk;
       r = t.GrossPnL && priceR ? priceR * (t.PnL / t.GrossPnL) : priceR;
       if (t.TakeProfit != null) {
-        const g = Math.abs(t.TakeProfit - t.EntryPrice) / risk;
+        // Net of this trade's own costs (priceR - r is the R the costs took). Gross geometry would
+        // size every rung as if a take-profit win paid more than it does, so it would fall short.
+        const g = Math.abs(t.TakeProfit - t.EntryPrice) / risk - (priceR - r);
         geomR = Number.isFinite(g) && g > 0 ? g : null;
       }
     }
@@ -109,11 +121,11 @@ export function ladderFromDslTrades(
   });
 
   const recorded = trades.filter((t) => t.geomR != null).map((t) => t.geomR as number);
-  const med = medianR(recorded);
-  const assumedGeomR = med != null ? Math.round(med * 100) / 100 : 1;
+  const low = smallestR(recorded);
+  const assumedGeomR = low ?? 1;
   const geomNote =
-    med != null
-      ? `Trades without a recorded take-profit size for ${fmtR(med)}R, the median of the ${recorded.length} that recorded one.`
+    low != null
+      ? `Trades without a recorded take-profit size for ${fmtR(low)}R, the smallest net reward:risk of the ${recorded.length} that recorded one.`
       : 'This run recorded no take-profit prices, so recovery stakes size for 1R. Set the R:R the strategy actually targets.';
   const noStop = trades.filter((t) => t.r === null).length;
   const notice =

@@ -14,7 +14,7 @@ const report = (trades: unknown[], trimmedTrades = 0) =>
   ({ meta: { symbol: 'EURUSD', trimmedTrades }, trades }) as unknown as StrategyReport;
 
 describe('ladderFromScriptReport', () => {
-  it('uses the report R, drops open trades and assumes the median take-profit R', () => {
+  it('uses the report R, drops open trades and sizes for the smallest take-profit R', () => {
     const l = ladderFromScriptReport(
       report([
         rt(1, -1, 'StopLoss'),
@@ -26,7 +26,7 @@ describe('ladderFromScriptReport', () => {
     );
     expect(l.trades.map((t) => t.r)).toEqual([-1, 2.9, 3.1, 0.4]);
     expect(l.trades.every((t) => t.geomR === null && t.symbol === 'EURUSD')).toBe(true);
-    expect(l.assumedGeomR).toBeCloseTo(3);
+    expect(l.assumedGeomR).toBe(2.9);
     expect(l.geomNote).toContain('2 trades');
     expect(l.notice).toBeNull();
   });
@@ -69,9 +69,10 @@ describe('ladderFromDslTrades', () => {
       'EURUSD',
     );
     expect(l.trades[0].r).toBeCloseTo(2 * 0.9);
-    expect(l.trades[0].geomR).toBeCloseTo(2);
+    // Net of the trade's own costs: a win at its target is exactly its sizing R.
+    expect(l.trades[0].geomR).toBeCloseTo(l.trades[0].r!);
     expect(l.trades[1].r).toBeCloseTo(-1.1);
-    expect(l.trades[1].geomR).toBeCloseTo(2);
+    expect(l.trades[1].geomR).toBeCloseTo(2 - 0.1);
     expect(l.trades[2].r).toBeNull();
     expect(l.notice).toContain('1 trade');
   });
