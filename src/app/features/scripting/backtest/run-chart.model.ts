@@ -1,7 +1,13 @@
 import type { CandleDto } from '@core/api/api.types';
 import { timeframeMs } from '@shared/pine-chart/core/timeline';
 import { toPineChartData, type PineChartData } from '@shared/pine-chart/model/chart-data';
+import type {
+  PineInputValue,
+  PineRunRequest,
+  PineRunResult,
+} from '@shared/pine-chart/model/pine-outputs.types';
 
+import type { RunProvenance } from '../report/engine-run';
 import type { StrategyReport } from '../report/strategy-report.model';
 
 /**
@@ -125,6 +131,66 @@ export function candleChartData(
     outputs: null,
     report: chartReport(report, bars[0].t),
   });
+}
+
+/**
+ * The `scripting/run` request that recomputes a script run's plots over the bars the run executed
+ * on, with the input overrides it applied, so the chart shows what the strategy drew — as the chart
+ * page does for an indicator. With the run's warm-up and traded bar counts known (provenance), it
+ * asks for exactly that many bars ending at the run's last bar, so every series starts from the same
+ * history the backtest had; otherwise the run's window. Null for a run without a strategy.
+ */
+export function scriptPlotsRequest(
+  run: {
+    strategyId: number;
+    symbol: string | null;
+    timeframe: string;
+    fromDate: string;
+    toDate: string;
+  },
+  report: StrategyReport | null | undefined,
+  provenance: RunProvenance | null | undefined,
+): PineRunRequest | null {
+  if (!run.strategyId) return null;
+  const symbol = (report?.meta.symbol || run.symbol || '').replace(/\//g, '').toUpperCase();
+  const timeframe = report?.meta.timeframe || run.timeframe;
+  if (!symbol || !timeframe) return null;
+
+  const inputs: Record<string, PineInputValue> = {};
+  for (const [id, v] of Object.entries(provenance?.inputs ?? {})) {
+    if (typeof v === 'number' || typeof v === 'boolean' || typeof v === 'string') inputs[id] = v;
+  }
+
+  const window = runWindow(run, report);
+  const base: PineRunRequest = {
+    strategyId: run.strategyId,
+    symbol,
+    timeframe,
+    toUtc: window.to,
+    mode: 'backtest',
+    inputs,
+  };
+  const total = (provenance?.warmupBars ?? 0) + (provenance?.bars ?? 0);
+  if (provenance?.bars && total <= MAX_SCRIPT_PLOT_BARS) return { ...base, lastBars: total };
+  return { ...base, fromUtc: window.from };
+}
+
+/** Most bars the engine runs a script over for a chart (its range cap). */
+export const MAX_SCRIPT_PLOT_BARS = 20_000;
+
+/** A recomputed script run as chart data: its bars and plots, with the stored run's trades. */
+export function scriptPlotsChartData(
+  result: PineRunResult,
+  report: StrategyReport | null | undefined,
+): PineChartData | null {
+  if (!result.bars.length) return null;
+  const data = toPineChartData({
+    compile: result.compile,
+    bars: result.bars,
+    outputs: result.outputs,
+    report: chartReport(report, result.bars[0].t),
+  });
+  return data && data.bars.length ? data : null;
 }
 
 /** The candle-store window of a run: the report's first/last bar times, else the run's dates. */

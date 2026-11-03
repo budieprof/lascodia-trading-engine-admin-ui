@@ -13,9 +13,11 @@ import type { Subscription } from 'rxjs';
 
 import type { BacktestRunDto, CandleDto } from '@core/api/api.types';
 import { MarketDataService } from '@core/services/market-data.service';
+import { ScriptingRunService } from '@shared/pine-chart/api/scripting-run.service';
 import { PineChartComponent } from '@shared/pine-chart/components/pine-chart.component';
 import type { PineChartData } from '@shared/pine-chart/model/chart-data';
 
+import { parseEngineRun } from '../report/engine-run';
 import type { StrategyReport } from '../report/strategy-report.model';
 import { describeFailure, isOk } from '../shared/api-error';
 import {
@@ -23,6 +25,8 @@ import {
   candleChartData,
   engineTimeframe,
   runWindow,
+  scriptPlotsChartData,
+  scriptPlotsRequest,
   storedRunChartData,
   tradesBefore,
 } from './run-chart.model';
@@ -31,8 +35,10 @@ let nextRunChartUid = 0;
 
 /**
  * The chart of a script strategy's backtest run, above its Strategy report: the run's own bars and
- * outputs when its `resultJson` carries them, else the price from the engine's candle store over
- * the run's window — with the report's trades drawn on it either way.
+ * outputs when its `resultJson` carries them; else the strategy's script re-run over the run's bars
+ * (`scripting/run`, the run's inputs) so its plots show as on the chart page; else, when that fails,
+ * the price from the engine's candle store over the run's window. The report's trades are drawn on
+ * it in every case.
  */
 @Component({
   selector: 'app-script-run-chart',
@@ -103,6 +109,7 @@ let nextRunChartUid = 0;
 })
 export class ScriptRunChartComponent {
   private readonly marketData = inject(MarketDataService);
+  private readonly scriptRuns = inject(ScriptingRunService);
 
   readonly run = input.required<BacktestRunDto>();
   /** The run's Strategy report (normalised) — its trades are drawn, its meta names the window. */
@@ -110,8 +117,13 @@ export class ScriptRunChartComponent {
 
   readonly uid = `run-chart-${nextRunChartUid++}`;
   readonly loading = signal(false);
+  readonly plotsLoading = signal(false);
   readonly error = signal<string | null>(null);
   readonly candleData = signal<PineChartData | null>(null);
+  /** The strategy's re-run over the run's bars: bars + plots. */
+  readonly plotData = signal<PineChartData | null>(null);
+  /** Why the plots could not be drawn (the chart then shows price only). */
+  private readonly plotError = signal<string | null>(null);
   /** Set once the candle store answered: how many bars exist in the window and how many trades predate the chart. */
   private readonly candleInfo = signal<{
     total: number;
@@ -122,20 +134,35 @@ export class ScriptRunChartComponent {
 
   /** The run's own bars (and outputs), when `resultJson` carries them. */
   readonly stored = computed(() => storedRunChartData(this.run().resultJson, this.report()));
-  readonly data = computed(() => this.stored() ?? this.candleData());
+  readonly data = computed(() => this.stored() ?? this.plotData() ?? this.candleData());
   readonly symbol = computed(() => this.report()?.meta.symbol || this.run().symbol || '');
   readonly timeframe = computed(() => this.report()?.meta.timeframe || this.run().timeframe || '');
 
   readonly caption = computed(() =>
     this.stored()
       ? 'The run’s own bars and script outputs, with its trades.'
-      : 'Price from the candle store over the run’s window, with the run’s trades.',
+      : this.plotData()
+        ? 'The strategy’s plots, recomputed over the bars the run executed on (with its inputs), and the run’s trades.'
+        : 'Price from the candle store over the run’s window, with the run’s trades.',
   );
 
   readonly note = computed(() => {
-    const info = this.candleInfo();
-    if (this.stored() || !info) return null;
+    if (this.stored()) return null;
     const parts: string[] = [];
+    const plots = this.plotData();
+    if (plots) {
+      const earlier = tradesBefore(this.report(), plots.bars[0].t);
+      if (earlier > 0) {
+        parts.push(
+          `${earlier.toLocaleString()} earlier trade${earlier === 1 ? '' : 's'} closed before the charted bars — see the report's List of trades.`,
+        );
+      }
+      return parts.length ? parts.join(' ') : null;
+    }
+    const plotError = this.plotError();
+    if (plotError) parts.push(`The strategy's plots could not be drawn: ${plotError}`);
+    const info = this.candleInfo();
+    if (!info) return parts.length ? parts.join(' ') : null;
     if (info.total > info.shown) {
       parts.push(
         `Showing the newest ${info.shown.toLocaleString()} of ${info.total.toLocaleString()} bars in the window.`,
@@ -150,6 +177,7 @@ export class ScriptRunChartComponent {
   });
 
   readonly emptyText = computed(() => {
+    if (this.plotsLoading()) return 'Running the strategy over the run’s bars…';
     if (this.loading()) return 'Loading the run window’s candles…';
     const err = this.error();
     if (err) return `The candles could not be loaded: ${err}`;
@@ -161,10 +189,44 @@ export class ScriptRunChartComponent {
       const run = this.run();
       const report = this.report();
       untracked(() => {
-        if (!this.stored()) this.loadCandles(run, report);
+        if (!this.stored()) this.loadPlots(run, report);
       });
     });
     inject(DestroyRef).onDestroy(() => this.sub?.unsubscribe());
+  }
+
+  /** The strategy re-run over the run's bars; on any failure, the candle-store chart. */
+  private loadPlots(run: BacktestRunDto, report: StrategyReport | null): void {
+    this.sub?.unsubscribe();
+    this.plotData.set(null);
+    this.plotError.set(null);
+    const request = scriptPlotsRequest(run, report, parseEngineRun(run.resultJson)?.provenance);
+    if (!request) {
+      this.loadCandles(run, report);
+      return;
+    }
+    this.plotsLoading.set(true);
+    this.sub = this.scriptRuns.run(request).subscribe({
+      next: (result) => {
+        this.plotsLoading.set(false);
+        const data =
+          result.compile?.success === false ? null : scriptPlotsChartData(result, report);
+        if (data) {
+          this.plotData.set(data);
+          return;
+        }
+        const firstError = result.compile?.diagnostics?.find((d) => d.severity === 'error');
+        this.plotError.set(
+          firstError?.message ?? result.runtimeError?.message ?? 'the script run returned no bars.',
+        );
+        this.loadCandles(run, report);
+      },
+      error: (err: unknown) => {
+        this.plotsLoading.set(false);
+        this.plotError.set(describeFailure(err, 'the script run failed'));
+        this.loadCandles(run, report);
+      },
+    });
   }
 
   private loadCandles(run: BacktestRunDto, report: StrategyReport | null): void {

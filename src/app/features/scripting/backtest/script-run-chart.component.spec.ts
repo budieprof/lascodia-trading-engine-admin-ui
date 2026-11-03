@@ -34,6 +34,7 @@ class PineChartStubComponent {
 declareSignalIo(ScriptRunChartComponent, { inputs: ['run', 'report'] });
 
 const CANDLES_URL = 'http://test/api/v1/lascodia-trading-engine/market-data/candle/list';
+const RUN_URL = 'http://test/api/v1/lascodia-trading-engine/scripting/run';
 const report = normalizeStrategyReport(strategyReportFixture())!;
 
 function run(resultJson: string | null): BacktestRunDto {
@@ -81,13 +82,96 @@ describe('ScriptRunChartComponent', () => {
     http = TestBed.inject(HttpTestingController);
   });
 
+  /** The strategy re-run is refused, so the chart falls back to the candle store. */
+  function refuseScriptRun(message = 'Strategy 41 not found.'): void {
+    http.expectOne(RUN_URL).flush({ status: false, data: null, message, responseCode: '-14' });
+  }
+
   afterEach(() => {
     http.verify();
     fixture?.destroy();
   });
 
+  it('draws the strategy’s plots over the run’s bars, with the run’s trades', () => {
+    const resultJson = JSON.stringify({
+      ...strategyReportFixture(),
+      script: {
+        inputs: { 'Plan::Target': 1, ignored: { nested: true } },
+        warmupBars: 1000,
+        bars: 6243,
+      },
+    });
+    render(resultJson);
+    const req = http.expectOne(RUN_URL);
+    expect(req.request.body).toMatchObject({
+      strategyId: 41,
+      symbol: 'EURUSD',
+      timeframe: '60',
+      lastBars: 7243,
+      toUtc: new Date(report.meta.lastBarTimeClose as number).toISOString(),
+      mode: 'backtest',
+      inputs: { 'Plan::Target': 1 },
+    });
+    expect(req.request.body.fromUtc).toBeUndefined();
+    expect(chart().emptyText).toContain('Running the strategy');
+    const first = report.trades[0].entryTime as number;
+    req.flush({
+      status: true,
+      data: {
+        compile: { success: true, diagnostics: [], declaration: null },
+        bars: [
+          { t: first, o: 1, h: 2, l: 0.5, c: 1.5, v: 1 },
+          { t: first + 3_600_000, o: 1.5, h: 2, l: 1, c: 1.8, v: 1 },
+        ],
+        outputs: {
+          plots: [
+            { id: 0, title: 'FVT upper', style: 'line', values: [1.9, 1.95], colors: [null, null] },
+          ],
+        },
+        report: null,
+      },
+      message: 'Successful',
+      responseCode: '00',
+    });
+    fixture.detectChanges();
+    http.expectNone(CANDLES_URL);
+    expect(chart().result?.bars).toHaveLength(2);
+    expect(chart().result?.outputs?.plots.map((p) => p.title)).toEqual(['FVT upper']);
+    expect(chart().result?.report?.trades.length).toBe(report.trades.length);
+    expect(el.textContent).toContain('strategy’s plots');
+  });
+
+  it('falls back to price only when the strategy cannot be re-run, and says why', () => {
+    render(JSON.stringify(strategyReportFixture()));
+    refuseScriptRun('Strategy 41 not found.');
+    http.expectOne(CANDLES_URL).flush({
+      status: true,
+      data: {
+        pager: { totalItemCount: 1 },
+        data: [
+          {
+            timestamp: new Date(report.trades[0].entryTime as number).toISOString(),
+            open: 1,
+            high: 1,
+            low: 1,
+            close: 1,
+            volume: 1,
+          },
+        ],
+      },
+      message: 'Successful',
+      responseCode: '00',
+    });
+    fixture.detectChanges();
+    expect(chart().result?.bars).toHaveLength(1);
+    expect(el.querySelector('.note')!.textContent).toContain(
+      "The strategy's plots could not be drawn: Strategy 41 not found.",
+    );
+  });
+
   it('charts the run window from the candle store, with the run’s trades', () => {
     render(JSON.stringify(strategyReportFixture()));
+    refuseScriptRun();
     const req = http.expectOne(CANDLES_URL);
     expect(req.request.body).toEqual({
       currentPage: 1,
@@ -135,6 +219,7 @@ describe('ScriptRunChartComponent', () => {
 
   it('says how much of a long window it shows', () => {
     render(JSON.stringify(strategyReportFixture()));
+    refuseScriptRun();
     const last = report.trades[report.trades.length - 1].entryTime as number;
     http.expectOne(CANDLES_URL).flush({
       status: true,
@@ -167,12 +252,14 @@ describe('ScriptRunChartComponent', () => {
     ];
     render(JSON.stringify({ report: strategyReportFixture(), bars }));
     http.expectNone(CANDLES_URL);
+    http.expectNone(RUN_URL);
     expect(chart().result?.bars).toHaveLength(2);
     expect(el.textContent).toContain('own bars');
   });
 
   it('explains an engine refusal instead of an empty chart', () => {
     render(JSON.stringify(strategyReportFixture()));
+    refuseScriptRun();
     http.expectOne(CANDLES_URL).flush({
       status: false,
       data: null,

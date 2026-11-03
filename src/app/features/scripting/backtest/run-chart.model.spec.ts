@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CandleDto } from '@core/api/api.types';
+import { parseProvenance } from '../report/engine-run';
 import { normalizeStrategyReport } from '../report/strategy-report.model';
 import { strategyReportFixture } from '../testing/strategy-report.fixture';
 import {
@@ -8,6 +9,8 @@ import {
   chartReport,
   engineTimeframe,
   runWindow,
+  scriptPlotsChartData,
+  scriptPlotsRequest,
   storedRunChartData,
   tradesBefore,
 } from './run-chart.model';
@@ -86,5 +89,86 @@ describe('run chart model', () => {
       to: new Date(report.meta.lastBarTimeClose as number).toISOString(),
     });
     expect(runWindow(run, null)).toEqual({ from: run.fromDate, to: run.toDate });
+  });
+});
+
+describe('scriptPlotsRequest', () => {
+  const run = {
+    strategyId: 1215,
+    symbol: 'EURUSD',
+    timeframe: 'H1',
+    fromDate: '2025-11-03T00:00:00Z',
+    toDate: '2026-11-03T00:00:00Z',
+  };
+
+  it('asks for the run’s warm-up + traded bars ending at its last bar, with its inputs', () => {
+    const prov = parseProvenance({
+      inputs: { a: 1, b: true, c: 'x', d: [1] },
+      warmupBars: 1000,
+      bars: 6243,
+    });
+    const req = scriptPlotsRequest(run, report, prov)!;
+    expect(req).toEqual({
+      strategyId: 1215,
+      symbol: 'EURUSD',
+      timeframe: '60',
+      toUtc: new Date(report.meta.lastBarTimeClose as number).toISOString(),
+      mode: 'backtest',
+      inputs: { a: 1, b: true, c: 'x' },
+      lastBars: 7243,
+    });
+  });
+
+  it('runs over the window when the run’s bar counts are unknown or exceed the cap', () => {
+    const window = runWindow(run, report);
+    expect(scriptPlotsRequest(run, report, null)).toMatchObject({
+      fromUtc: window.from,
+      toUtc: window.to,
+    });
+    const huge = parseProvenance({ warmupBars: 1000, bars: 40_000 });
+    expect(scriptPlotsRequest(run, report, huge)!.lastBars).toBeUndefined();
+  });
+
+  it('is null without a strategy', () => {
+    expect(scriptPlotsRequest({ ...run, strategyId: 0 }, report, null)).toBeNull();
+  });
+});
+
+describe('scriptPlotsChartData', () => {
+  it('keeps the re-run’s bars and plots, and draws the stored run’s trades', () => {
+    const t0 = report.trades[0].entryTime as number;
+    const data = scriptPlotsChartData(
+      {
+        compile: null,
+        bars: [{ t: t0, o: 1, h: 1, l: 1, c: 1, v: 1 }],
+        outputs: null,
+        report: null,
+        trace: [],
+        profile: [],
+        runtimeError: null,
+        elapsedMs: null,
+      },
+      report,
+    )!;
+    expect(data.bars).toHaveLength(1);
+    expect(data.report?.trades.length).toBe(report.trades.length);
+  });
+
+  it('is null when the run returned no bars', () => {
+    expect(
+      scriptPlotsChartData(
+        {
+          compile: null,
+          bars: [],
+          outputs: null,
+          report: null,
+          trace: [],
+          profile: [],
+          runtimeError: null,
+          elapsedMs: null,
+        },
+        report,
+      ),
+    ).toBeNull();
   });
 });
