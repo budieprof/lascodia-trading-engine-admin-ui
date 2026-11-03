@@ -35,7 +35,8 @@ import {
 } from '@core/api/api.types';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
-import { MartingaleSimulatorComponent } from '@features/signal-sensitivity/components/martingale-simulator.component';
+import { MartingaleSimulatorComponent } from '@shared/components/martingale-simulator/martingale-simulator.component';
+import { ladderTradesFromSensitivity } from '../../martingale-sensitivity';
 
 const SOURCES = ['SpotAnalysis', 'Strategy', 'Manual', 'SyntheticAnalyser'] as const;
 
@@ -914,7 +915,7 @@ const WINDOW_OPTIONS = [
              Sits directly after the equity view because it is a SIZING overlay
              on the same replayed signals: it consumes the result above and
              re-simulates whenever the TP/SL multipliers change. -->
-        <app-martingale-simulator [result]="result()" />
+        <app-martingale-simulator [trades]="mgTrades()" />
 
         <!-- ── Distributions + streaks + risk metrics ─────────────────────── -->
         <section class="analytics-grid">
@@ -2490,6 +2491,8 @@ export class SignalSensitivityPageComponent implements OnInit {
    * duplicating the simulation — one model, two views of it.
    */
   private readonly mgSim = viewChild(MartingaleSimulatorComponent);
+  /** The replayed signals as ladder trades (re-derived whenever the TP/SL multipliers change). */
+  protected readonly mgTrades = computed(() => ladderTradesFromSensitivity(this.result()));
   protected readonly mgTradeMap = computed(() => this.mgSim()?.tradeBySignalId() ?? null);
   protected readonly mgSkipReasons = computed(() => this.mgSim()?.skipReasonBySignalId() ?? null);
   /** Running-ledger columns are opt-in — the table is already wide. */

@@ -1,93 +1,42 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  inject,
+  input,
+  linkedSignal,
+  signal,
+} from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { NgxEchartsDirective } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 
 import { ThemeService } from '@core/theme/theme.service';
-import type {
-  AnalyzeSignalSensitivityResultDto,
-  AnalyzeSignalSensitivitySignalDto,
-} from '@core/api/api.types';
+import {
+  simulateLadder,
+  type CapPolicy,
+  type LadderMode,
+  type LadderTrade,
+  type SimResult,
+  type SimTrade,
+  type SkipInfo,
+} from './martingale-ladder.logic';
 
-/** How the next stake is chosen after a loss. */
-type LadderMode = 'recovery' | 'fixed';
+export type { SimTrade, SkipInfo } from './martingale-ladder.logic';
 
-/** What happens when the ladder hits its depth cap without recovering. */
-type CapPolicy = 'abandon' | 'continue';
-
-/** One simulated trade in sequence. Exported so the page's per-signal table can render it. */
-export interface SimTrade {
-  index: number;
-  signalId: number;
-  at: string;
-  symbol: string;
-  r: number;
-  laddered: boolean;
-  depth: number;
-  stakePct: number;
-  pnl: number;
-  equity: number;
-  /** Running P&L since the start of the run — equity minus the opening balance. */
-  cumPnl: number;
-  /** What flat sizing had made by this same point, so the two ledgers compare row by row. */
-  baselineEquity: number;
-}
-
-interface SimResult {
-  trades: SimTrade[];
-  baselineEquity: number[];
-  finalEquity: number;
-  baselineFinal: number;
-  maxDrawdownPct: number;
-  ruinedAtIndex: number | null;
-  maxDepth: number;
-  laddersStarted: number;
-  laddersRecovered: number;
-  laddersAbandoned: number;
-  peakStakePct: number;
-  usableTrades: number;
-  skippedNoR: number;
-  /**
-   * Flat sizing over EVERY filled trade — no serialisation, no ladder. The population the page's
-   * own equity curve walks, and the control that separates what the one-position rule did from
-   * what the ladder did.
-   */
-  baselineAllFilledFinal: number;
-  /** How many filled trades that population contains. */
-  allFilledCount: number;
-  /** Signals skipped because they filled while the symbol's simulated position was still open. */
-  skippedOverlap: number;
-  /** Why each unsimulated signal was skipped. Post-break signals are simply absent. */
-  skipReasons: Map<number, SkipInfo>;
-}
-
-/** Why a signal was not simulated; for overlaps, which executed trade held the position. */
-export interface SkipInfo {
-  reason: 'unfilled' | 'overlap';
-  blockedBySignalId?: number;
-  blockedUntil?: string;
-}
+const DEFAULT_INTRO =
+  "Replays the signals above as a per-symbol recovery ladder under the one-position rule: a signal that fills while the symbol's previous position is still open is skipped, as it could never have been placed live. The deficit is tracked in money and a chain only resets once losses plus the target are actually PAID — a trade that merely closes positive shrinks the deficit and the chain continues. Stakes size by each trade's entry-known TP/SL geometry.";
 
 /**
- * Martingale / recovery-sizing simulator over the sensitivity result.
+ * Martingale / recovery-sizing simulator. The host page adapts its own trades into
+ * {@link LadderTrade}s (signal-sensitivity replay, backtest trade list); the simulation itself is
+ * the pure {@link simulateLadder} in `martingale-ladder.logic.ts`.
  *
  * <p><b>Why this lives client-side.</b> A ladder is a pure function of an ORDERED sequence of
- * per-trade R multiples, and the sensitivity result already carries exactly that — entry, SL, TP,
- * outcome, scenario P&L and timing for every replayed signal. Recomputing in the browser means the
- * ladder re-simulates instantly as the operator drags depth / base risk, instead of a round-trip per
- * knob, and it stays automatically consistent with whatever TP/SL multipliers are active above.</p>
- *
- * <p><b>Outcomes are normalised to R; the ladder ledger is MONEY.</b> Each trade's outcome is a
- * multiple of the risk it took (raw P&L has lot size baked in and cannot be restaked), but the
- * deficit a ladder must repay is tracked in currency: percent losses and percent gains are not
- * symmetric, so an R-unit ledger recovered against post-loss equity systematically under-recovers,
- * compounding with depth. A chain resets only when deficit + target is actually paid — a trade that
- * merely closes positive shrinks the deficit and the chain continues.</p>
- *
- * <p><b>The ladder is per-symbol and strictly sequential</b>, matching the intended rule: a symbol
- * running a ladder holds at most one position at a time, so its trades form one ordered chain and
- * other symbols are untouched.</p>
+ * per-trade R multiples, and both hosts already carry exactly that. Recomputing in the browser means
+ * the ladder re-simulates instantly as the operator drags depth / base risk, instead of a round-trip
+ * per knob.</p>
  */
 @Component({
   selector: 'app-martingale-simulator',
@@ -99,14 +48,7 @@ export interface SkipInfo {
       <header class="mg-head">
         <div>
           <h2 id="mg-h">Martingale simulation</h2>
-          <p class="sub">
-            Replays the signals above as a per-symbol recovery ladder under the one-position rule: a
-            signal that fills while the symbol's previous position is still open is skipped, as it
-            could never have been placed live. The deficit is tracked in money and a chain only
-            resets once losses plus the target are actually PAID — a trade that merely closes
-            positive shrinks the deficit and the chain continues. Stakes size by each trade's
-            entry-known TP/SL geometry.
-          </p>
+          <p class="sub">{{ intro() }}</p>
         </div>
         <label class="toggle">
           <input type="checkbox" [(ngModel)]="enabledModel" (ngModelChange)="enabled.set($event)" />
@@ -114,8 +56,8 @@ export interface SkipInfo {
         </label>
       </header>
 
-      @if (!result()) {
-        <p class="sub">Run a sensitivity analysis first — the ladder replays its signals.</p>
+      @if (!trades()) {
+        <p class="sub">{{ emptyText() }}</p>
       } @else if (enabled()) {
         <!-- ── Controls ──────────────────────────────────────────────────── -->
         <div class="controls">
@@ -160,6 +102,20 @@ export interface SkipInfo {
               />
             </label>
           }
+          @if (mode() === 'recovery' && needsAssumedGeom()) {
+            <label [title]="assumedGeomNote() ?? ''">
+              <span>Reward:risk for sizing (R)</span>
+              <input
+                type="number"
+                min="0.1"
+                max="20"
+                step="0.1"
+                data-testid="mg-assumed-geom"
+                [ngModel]="assumedGeomR()"
+                (ngModelChange)="assumedGeomR.set(+$event)"
+              />
+            </label>
+          }
           <label>
             <span>Base risk %</span>
             <input
@@ -191,17 +147,19 @@ export interface SkipInfo {
               <option value="continue">Continue — keep laddering</option>
             </select>
           </label>
-          <label class="chk">
-            <span>Running ledger</span>
-            <span class="chk-row">
-              <input
-                type="checkbox"
-                [(ngModel)]="showCumulativeModel"
-                (ngModelChange)="showCumulative.set($event)"
-              />
-              <span class="chk-lbl">Cumulative columns in the table</span>
-            </span>
-          </label>
+          @if (showLedgerToggle()) {
+            <label class="chk">
+              <span>Running ledger</span>
+              <span class="chk-row">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="showCumulativeModel"
+                  (ngModelChange)="showCumulative.set($event)"
+                />
+                <span class="chk-lbl">Cumulative columns in the table</span>
+              </span>
+            </label>
+          }
           <label>
             <span>Start balance</span>
             <input
@@ -214,6 +172,12 @@ export interface SkipInfo {
           </label>
         </div>
 
+        @if (mode() === 'recovery' && needsAssumedGeom() && assumedGeomNote(); as note) {
+          <p class="sub" data-testid="mg-geom-note">{{ note }}</p>
+        }
+        @if (notice(); as n) {
+          <p class="warn">{{ n }}</p>
+        }
         @if (sim(); as s) {
           @if (s.usableTrades === 0) {
             <p class="warn">
@@ -299,7 +263,7 @@ export interface SkipInfo {
                 <span class="k">Trades simulated</span>
                 <span class="v">{{ s.usableTrades | number }}</span>
                 <span class="s">
-                  {{ s.skippedNoR }} unfilled · {{ s.skippedOverlap }} overlap-skipped
+                  {{ s.skippedNoR }} {{ noRiskLabel() }} · {{ s.skippedOverlap }} overlap-skipped
                 </span>
               </div>
             </div>
@@ -515,16 +479,34 @@ export interface SkipInfo {
 export class MartingaleSimulatorComponent {
   private readonly theme = inject(ThemeService);
 
-  /** The sensitivity result to replay. Null until the operator runs an analysis. */
-  readonly result = input<AnalyzeSignalSensitivityResultDto | null>(null);
+  /** The trades to replay, in any order. Null until the host has something to replay. */
+  readonly trades = input<LadderTrade[] | null>(null);
+  /** The panel's explanatory paragraph. */
+  readonly intro = input<string>(DEFAULT_INTRO);
+  /** Shown while {@link trades} is null. */
+  readonly emptyText = input<string>(
+    'Run a sensitivity analysis first — the ladder replays its signals.',
+  );
+  /** What a trade with no R is called in the "Trades simulated" tile ("unfilled", "no stop"). */
+  readonly noRiskLabel = input<string>('unfilled');
+  /** Opening balance until the operator edits it (a backtest passes its own initial balance). */
+  readonly defaultStartBalance = input<number | null>(null);
+  /** Reward:risk used for recovery sizing when a trade records no target; editable. */
+  readonly defaultAssumedGeomR = input<number | null>(null);
+  /** Where {@link defaultAssumedGeomR} came from, shown under the controls. */
+  readonly assumedGeomNote = input<string | null>(null);
+  /** Whether the host has a trade table with ladder columns the "Running ledger" box controls. */
+  readonly showLedgerToggle = input<boolean>(true);
+  /** A caveat about the trade list itself (e.g. a report that lists only recent trades). */
+  readonly notice = input<string | null>(null);
 
-  /** Public: the page's per-signal table shows ladder columns only while this is on. */
+  /** Public: the host's trade table shows ladder columns only while this is on. */
   readonly enabled = signal(false);
   protected enabledModel = false;
 
   /**
-   * Public per-signal lookup for the page's outcomes table. Null when off or before a result —
-   * the table hides its ladder columns entirely then, rather than rendering a wall of dashes.
+   * Public per-trade lookup for the host's table, keyed by {@link LadderTrade.id}. Null when off or
+   * before trades exist — the table hides its ladder columns entirely then.
    */
   readonly tradeBySignalId = computed<Map<number, SimTrade> | null>(() => {
     if (!this.enabled()) return null;
@@ -536,16 +518,15 @@ export class MartingaleSimulatorComponent {
   });
 
   /**
-   * Why a signal was NOT simulated, keyed by id. 'unfilled' = never took risk; 'overlap' = it
-   * filled while the symbol's simulated position was still open, so under the one-position rule
-   * it would never have been placed. Absent = after the ladder broke (simulation stopped).
+   * Why a trade was NOT simulated, keyed by id. 'unfilled' = never took risk; 'overlap' = it filled
+   * while the symbol's simulated position was still open. Absent = after the ladder broke.
    */
   readonly skipReasonBySignalId = computed<Map<number, SkipInfo> | null>(() => {
     if (!this.enabled()) return null;
     return this.sim()?.skipReasons ?? null;
   });
 
-  /** Public: adds running-ledger columns (cum P&L, equity) to the page's per-signal table. */
+  /** Public: adds running-ledger columns (cum P&L, equity) to the host's table. */
   readonly showCumulative = signal(true);
   protected showCumulativeModel = true;
 
@@ -556,312 +537,34 @@ export class MartingaleSimulatorComponent {
   protected readonly baseRiskPct = signal(1);
   protected readonly maxDepth = signal(6);
   protected readonly capPolicy = signal<CapPolicy>('abandon');
-  protected readonly startBalance = signal(10000);
+  protected readonly startBalance = linkedSignal(() => this.defaultStartBalance() ?? 10000);
+  protected readonly assumedGeomR = linkedSignal(() => this.defaultAssumedGeomR() ?? 1);
+
+  /** The reward:risk control appears only when some trade records no target of its own. */
+  protected readonly needsAssumedGeom = computed(() =>
+    (this.trades() ?? []).some((t) => t.r !== null && t.geomR === null),
+  );
 
   protected readonly echartsTheme = computed(() => (this.theme.theme() === 'dark' ? 'dark' : ''));
 
   protected readonly symbols = computed(() =>
-    [...new Set((this.result()?.signals ?? []).map((s) => s.symbol))].sort(),
+    [...new Set((this.trades() ?? []).map((t) => t.symbol))].sort(),
   );
 
-  /**
-   * Per-trade outcome as a multiple of the risk that trade took.
-   *
-   * <p>Derived from prices rather than read off a field, because the sensitivity replay applies
-   * TP/SL multipliers that the stored levels do not reflect. A stopped-out trade is −1R by
-   * definition; anything else is scaled by how far it actually travelled against its own stop
-   * distance, so the number restakes correctly at any lot size.</p>
-   *
-   * <p>Returns null when the trade never took risk (no fill, zero stop distance) — those are
-   * excluded rather than silently counted as scratches, since a ladder must not advance on a trade
-   * that never happened.</p>
-   */
-  private rMultiple(
-    sig: AnalyzeSignalSensitivitySignalDto,
-    slMult: number,
-    tpMult: number,
-  ): number | null {
-    if (!sig.fillAt) return null; // never filled — no risk taken
-    const riskDist = Math.abs(sig.entryPrice - sig.originalSL) * (slMult || 1);
-    if (!isFinite(riskDist) || riskDist <= 0) return null;
-
-    if (sig.outcome === 'HitSL') return -1;
-    if (sig.outcome === 'HitTP') {
-      const rewardDist = Math.abs(sig.originalTP - sig.entryPrice) * (tpMult || 1);
-      return rewardDist / riskDist;
-    }
-    // EarlyExit / Expired / Open — use realised travel, signed by direction.
-    if (sig.exitPrice == null) return null;
-    const move = sig.exitPrice - sig.entryPrice;
-    const signed = (sig.direction || '').toLowerCase().startsWith('s') ? -move : move;
-    return signed / riskDist;
-  }
-
-  /**
-   * The trade's reward:risk as knowable AT ENTRY — TP distance over SL distance under the active
-   * multipliers. Recovery stakes divide by this, never by the realised outcome: the realised R
-   * does not exist when the stake is placed, and sizing by it is lookahead a live implementation
-   * cannot reproduce.
-   */
-  private geometryR(
-    sig: AnalyzeSignalSensitivitySignalDto,
-    slMult: number,
-    tpMult: number,
-  ): number {
-    const riskDist = Math.abs(sig.entryPrice - sig.originalSL) * (slMult || 1);
-    const rewardDist = Math.abs(sig.originalTP - sig.entryPrice) * (tpMult || 1);
-    if (!isFinite(riskDist) || riskDist <= 0 || !isFinite(rewardDist)) return 1;
-    return rewardDist / riskDist;
-  }
-
-  /**
-   * Absolute slack for the paid-in-full comparison, scaled to the amount being compared so it
-   * stays meaningful whether the ladder deals in cents or millions. Large enough to absorb
-   * double-rounding on a multiply-then-divide round trip, far too small to forgive a genuinely
-   * unpaid deficit.
-   */
-  private clearTolerance(targetMoney: number): number {
-    return 1e-9 * Math.max(1, Math.abs(targetMoney));
-  }
-
   protected readonly sim = computed<SimResult | null>(() => {
-    const res = this.result();
-    if (!res) return null;
-
-    const scope = this.symbolScope();
-    const slMult = res.slMultiplier ?? 1;
-    const tpMult = res.tpMultiplier ?? 1;
-
-    // Chronological by fill, then id — the ladder is a SEQUENCE, so order is the whole model.
-    const ordered = [...res.signals].sort((a, b) => {
-      const ta = Date.parse(a.fillAt ?? a.triggeredAt ?? a.generatedAt);
-      const tb = Date.parse(b.fillAt ?? b.triggeredAt ?? b.generatedAt);
-      return ta === tb ? a.signalId - b.signalId : ta - tb;
+    const trades = this.trades();
+    if (!trades) return null;
+    return simulateLadder(trades, {
+      symbolScope: this.symbolScope(),
+      mode: this.mode(),
+      fixedMult: this.fixedMult(),
+      targetProfitR: this.targetProfitR(),
+      baseRiskPct: this.baseRiskPct(),
+      maxDepth: this.maxDepth(),
+      capPolicy: this.capPolicy(),
+      startBalance: this.startBalance(),
+      assumedGeomR: this.assumedGeomR(),
     });
-
-    const base = this.baseRiskPct() / 100;
-    const target = this.targetProfitR();
-    const cap = Math.max(1, Math.trunc(this.maxDepth()));
-    const useRecovery = this.mode() === 'recovery';
-    const mult = Math.max(1, this.fixedMult());
-
-    let equity = this.startBalance();
-    let baseline = this.startBalance();
-    let peakEquity = equity;
-    let maxDd = 0;
-    let peakStakePct = 0;
-    let ruinedAt: number | null = null;
-    let maxDepthSeen = 0;
-    let started = 0;
-    let recovered = 0;
-    let abandoned = 0;
-    let skipped = 0;
-    let skippedOverlap = 0;
-    const skipReasons = new Map<number, SkipInfo>();
-
-    // One position per symbol, enforced. The intended live rule is that a laddered symbol cannot
-    // open a new position until the previous one has closed — so the simulation must not let
-    // overlapping historical signals all "execute" and advance the chain with outcomes that did
-    // not exist yet at the next fill. A signal that fills while the symbol's simulated position
-    // is still open is skipped: under the rule it would never have been placed.
-    const busyUntil = new Map<string, { until: number; bySignalId: number }>();
-
-    // Ladder state is PER SYMBOL: a symbol running a ladder is serialised, and other symbols
-    // continue on flat sizing untouched. That is the rule being modelled, not a simplification.
-    //
-    // The DEFICIT is tracked in MONEY, not in percent-of-equity R units. Percent losses and
-    // percent gains are not symmetric: losses booked as fractions of a larger equity and then
-    // "recovered" as the same fraction of the post-loss equity systematically under-recover, and
-    // the gap compounds with ladder depth. Money in, money out — the rule is "cover what was
-    // actually lost", so the ledger must be in the unit the loss happened in.
-    const ladder = new Map<string, { depth: number; deficit: number; targetMoney: number }>();
-
-    const trades: SimTrade[] = [];
-    const baselineEquity: number[] = [];
-
-    for (const sig of ordered) {
-      const r = this.rMultiple(sig, slMult, tpMult);
-      if (r === null) {
-        skipped++;
-        skipReasons.set(sig.signalId, { reason: 'unfilled' });
-        continue;
-      }
-
-      const inScope = scope === '__all__' || sig.symbol === scope;
-
-      // Serialise in-scope symbols. Out-of-scope symbols keep their historical concurrency —
-      // they are flat-sized context, not the scheme under test.
-      const fillMs = Date.parse(sig.fillAt ?? sig.triggeredAt ?? sig.generatedAt);
-      if (inScope) {
-        const busy = busyUntil.get(sig.symbol);
-        if (busy && fillMs < busy.until) {
-          skippedOverlap++;
-          // Name the blocker: "skipped: overlap" is only auditable if the row can say WHICH
-          // executed trade held the position and until when. Generation order and fill order
-          // disagree on limit entries, so this is routinely non-obvious from the table.
-          skipReasons.set(sig.signalId, {
-            reason: 'overlap',
-            blockedBySignalId: busy.bySignalId,
-            blockedUntil: new Date(busy.until).toISOString(),
-          });
-          continue;
-        }
-      }
-      const st = ladder.get(sig.symbol) ?? { depth: 0, deficit: 0, targetMoney: 0 };
-      const inLadder = inScope && st.depth > 0;
-
-      // Stake sizing. Recovery mode sizes by the trade's ENTRY-KNOWN geometry (TP distance over
-      // SL distance under the active multipliers) — what a live implementation would have to use,
-      // since the realised outcome does not exist yet. Sizing by realised R would be lookahead.
-      let stakeMoney = equity * base;
-      if (inLadder) {
-        if (useRecovery) {
-          const geomR = this.geometryR(sig, slMult, tpMult);
-          // A micro-TP trade cannot be asked to recover a large deficit — the stake explodes.
-          // Floor the divisor at 0.1R and let the ruin check catch what still cannot fit,
-          // loudly, rather than silently skipping the trade.
-          stakeMoney = (st.deficit + st.targetMoney) / Math.max(0.1, geomR);
-        } else {
-          stakeMoney = equity * base * Math.pow(mult, st.depth);
-        }
-      }
-
-      const stakePct = equity > 0 ? stakeMoney / equity : 1;
-      peakStakePct = Math.max(peakStakePct, stakePct * 100);
-
-      // Ruin: the stake the ladder demands exceeds what is left. This ENDS the simulation — the
-      // scheme as specified is unexecutable from here, and quietly skipping the unaffordable trade
-      // while others continue would let post-ruin trading launder the verdict.
-      if (stakeMoney > equity || equity <= 0) {
-        ruinedAt = trades.length;
-        break;
-      }
-
-      const pnl = r * stakeMoney;
-      equity += pnl;
-      baseline += r * (baseline * base);
-      baselineEquity.push(baseline);
-
-      peakEquity = Math.max(peakEquity, equity);
-      maxDd = Math.max(maxDd, peakEquity > 0 ? ((peakEquity - equity) / peakEquity) * 100 : 0);
-
-      if (inScope) {
-        // Busy until the position closes. exitAt is always stamped by the walk; guard against a
-        // malformed row by never letting the busy window end before the fill itself.
-        busyUntil.set(sig.symbol, {
-          until: Math.max(fillMs, Date.parse(sig.exitAt) || fillMs),
-          bySignalId: sig.signalId,
-        });
-      }
-
-      trades.push({
-        index: trades.length,
-        signalId: sig.signalId,
-        at: sig.fillAt ?? sig.triggeredAt ?? sig.generatedAt,
-        symbol: sig.symbol,
-        r,
-        laddered: inLadder,
-        depth: inScope ? st.depth : 0,
-        stakePct: stakePct * 100,
-        pnl,
-        equity,
-        cumPnl: equity - this.startBalance(),
-        baselineEquity: baseline,
-      });
-
-      if (equity <= 0) {
-        ruinedAt = trades.length - 1;
-        break;
-      }
-
-      // Advance ladder state — on the MONEY ledger.
-      //
-      // The ladder only resets when the deficit plus target has actually been PAID. A trade that
-      // merely closes positive does not recover a ladder: an Expired exit at +0.05R used to reset
-      // the whole chain while covering almost none of it, which is exactly the "winnings are not
-      // covering the losses" behaviour this replaces. Partial wins now shrink the deficit and the
-      // chain continues.
-      if (inScope) {
-        const newDeficit = st.deficit - pnl;
-        if (st.depth === 0) {
-          if (pnl < 0) {
-            started++;
-            maxDepthSeen = Math.max(maxDepthSeen, 1);
-            ladder.set(sig.symbol, {
-              depth: 1,
-              deficit: -pnl,
-              // The profit target is fixed in money at LADDER START (target R × the base stake
-              // that opened the chain), so later stakes cannot inflate what "recovered" means.
-              targetMoney: target * stakeMoney,
-            });
-          }
-        } else if (newDeficit <= -st.targetMoney + this.clearTolerance(st.targetMoney)) {
-          // Deficit fully paid AND the target banked — the chain is genuinely recovered.
-          //
-          // Compared with a relative tolerance, not exactly. A HitTP realises exactly the entry
-          // geometry the stake was sized from, so it repays deficit + target to the cent — and in
-          // floating point that lands a hair ABOVE the threshold, failing an exact <= and running
-          // the chain one rung further than it earned. Observed live on GBPUSD #8956: it paid
-          // 16,190.26 against a 16,190.26 requirement and still did not reset, which pushed #9020
-          // to depth 2 when its chain was already square.
-          recovered++;
-          ladder.delete(sig.symbol);
-        } else {
-          const nextDepth = st.depth + 1;
-          maxDepthSeen = Math.max(maxDepthSeen, nextDepth);
-          // Internal `depth` counts losses so far (the base loss makes it 1), so the trade taken
-          // at depth d is recovery rung d. The cap counts RECOVERY RUNGS, matching the engine's
-          // MaxDepth since 2026-09-05 (base loss = depth 0 there): rung N is permitted when
-          // N <= cap, so the chain abandons only when the NEXT rung would be cap + 1. This was
-          // `>=`, which stopped one rung short of the cap — the same off-by-one the engine had.
-          if (nextDepth > cap && this.capPolicy() === 'abandon') {
-            // Take the remaining deficit as a realised loss and reset. This is the survivable
-            // variant: bounded worst case, at the price of sometimes eating the loss.
-            abandoned++;
-            ladder.delete(sig.symbol);
-          } else {
-            ladder.set(sig.symbol, {
-              depth: nextDepth,
-              deficit: Math.max(0, newDeficit),
-              targetMoney: st.targetMoney,
-            });
-          }
-        }
-      }
-    }
-
-    // Flat sizing over every filled trade, ignoring serialisation. Without this the panel credits
-    // the ladder for gains the one-position rule produced by SELECTION: on a symbol whose losses
-    // cluster in stacked entries, dropping the overlaps can turn a losing population into a
-    // winning subset before a single stake is resized.
-    let allFilledEquity = this.startBalance();
-    let allFilledCount = 0;
-    for (const sig of ordered) {
-      const r = this.rMultiple(sig, slMult, tpMult);
-      if (r === null) continue;
-      allFilledCount++;
-      allFilledEquity += r * (allFilledEquity * base);
-    }
-
-    return {
-      trades,
-      baselineEquity,
-      finalEquity: equity,
-      baselineFinal: baseline,
-      maxDrawdownPct: maxDd,
-      ruinedAtIndex: ruinedAt,
-      maxDepth: maxDepthSeen,
-      laddersStarted: started,
-      laddersRecovered: recovered,
-      laddersAbandoned: abandoned,
-      peakStakePct,
-      usableTrades: trades.length,
-      skippedNoR: skipped,
-      skippedOverlap,
-      skipReasons,
-      baselineAllFilledFinal: allFilledEquity,
-      allFilledCount,
-    };
   });
 
   protected readonly equityOptions = computed<EChartsOption>(() => {
@@ -876,9 +579,15 @@ export class MartingaleSimulatorComponent {
     const bl = s?.baselineEquity.map((v) => +v.toFixed(2)) ?? [];
     // Date labels, not trade numbers: the page's own equity curve above speaks in dates, and the
     // operator's first move is to compare the two. Same sequence semantics, comparable axis.
-    const labels = (s?.trades ?? []).map((t) => {
+    // A multi-year backtest needs the year; a few weeks of signals reads better with the time.
+    const ts = s?.trades ?? [];
+    const spanDays =
+      ts.length > 1 ? (Date.parse(ts[ts.length - 1].at) - Date.parse(ts[0].at)) / 86_400_000 : 0;
+    const labels = ts.map((t) => {
       const d = new Date(t.at);
-      return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      return spanDays > 300
+        ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+        : `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
     });
 
     return {

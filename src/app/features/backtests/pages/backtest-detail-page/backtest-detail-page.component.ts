@@ -39,6 +39,12 @@ import type { ReportTrade } from '@features/scripting/report/strategy-report.mod
 import { StrategyReportComponent } from '@features/scripting/report/strategy-report.component';
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
 import { MonteCarloPanelComponent } from '@features/scripting/research/monte-carlo-panel.component';
+import { MartingaleSimulatorComponent } from '@shared/components/martingale-simulator/martingale-simulator.component';
+import {
+  ladderFromDslTrades,
+  ladderFromScriptReport,
+  type BacktestLadder,
+} from '../../backtest-martingale';
 import {
   extractStrategyReport,
   type StrategyReport,
@@ -146,6 +152,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     StrategyReportComponent,
     ScriptRunChartComponent,
     MonteCarloPanelComponent,
+    MartingaleSimulatorComponent,
     RouterLink,
     DatePipe,
     DecimalPipe,
@@ -592,6 +599,24 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
           <app-monte-carlo-panel [source]="mc" />
         }
 
+        <!-- ── Martingale simulation: the same recovery-ladder overlay as Signal Sensitivity,
+             replaying this run's trades in R. Off until the operator enables it. ─────────── -->
+        @if (martingale(); as mg) {
+          <section class="info-card mg-card" data-testid="backtest-martingale">
+            <app-martingale-simulator
+              [trades]="mg.trades"
+              [intro]="martingaleIntro"
+              emptyText="This run has no trades to replay."
+              noRiskLabel="without a stop"
+              [showLedgerToggle]="false"
+              [defaultStartBalance]="bt.initialBalance"
+              [defaultAssumedGeomR]="mg.assumedGeomR"
+              [assumedGeomNote]="mg.geomNote"
+              [notice]="mg.notice"
+            />
+          </section>
+        }
+
         <!-- ── Trade log ───────────────────────────────────────────────── -->
         @if (sortedTrades().length > 0) {
           <section class="info-card">
@@ -865,6 +890,10 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
         overflow: hidden;
+      }
+      /* The simulator brings its own top margin; the card adds the side and bottom inset. */
+      .mg-card {
+        padding: 0 var(--space-5) var(--space-4);
       }
       .cost-head,
       .info-head {
@@ -1330,6 +1359,21 @@ export class BacktestDetailPageComponent implements OnInit {
     },
     { equal: (a, b) => a?.id === b?.id },
   );
+  /**
+   * The run's trades for the martingale simulator: a script run's report trades (R from the
+   * report), else the JSON-DSL trade list. Null for runs that are not completed or have no trades.
+   */
+  readonly martingale = computed<BacktestLadder | null>(() => {
+    const bt = this.backtest();
+    if (!bt || bt.status !== 'Completed') return null;
+    const report = this.scriptReport();
+    const ladder = report
+      ? ladderFromScriptReport(report)
+      : ladderFromDslTrades(this.sortedTrades(), bt.symbolOverride ?? bt.symbol ?? '—');
+    return ladder.trades.length > 0 ? ladder : null;
+  });
+  protected readonly martingaleIntro =
+    "Replays this run's trades as a recovery ladder: same entries, same exits, same R per trade — only the stake changes. After a loss the next stake is sized to win back the losses plus a profit target (or multiplied, in fixed mode). The deficit is tracked in money and a chain only resets once it is actually PAID; a trade that merely closes positive shrinks it and the chain continues. Flat sizing is the run's trades at a constant risk %.";
   /** How a script run modelled the news blackout; null on older and non-script runs. */
   readonly newsBlackout = signal<NewsBlackoutSummary | null>(null);
   /** A script run's benchmarks (BT-I10); null on older and rule-engine runs. */
