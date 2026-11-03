@@ -558,8 +558,10 @@ export class ScriptBacktestLauncherComponent {
       strategyId: s.id,
       symbol: s.symbol,
       timeframe: s.timeframe,
-      fromDate: this.fromDate(),
-      toDate: this.toDate(),
+      // UTC midnight, like the portfolio form. A bare "YYYY-MM-DD" reaches the engine as a DateTime with
+      // no kind, which PostgreSQL's timestamptz refuses -- every launcher run answered HTTP 500.
+      fromDate: `${this.fromDate()}T00:00:00Z`,
+      toDate: `${this.toDate()}T00:00:00Z`,
     };
     const sym = this.symbolOverride().trim().toUpperCase();
     if (sym && sym !== s.symbol.toUpperCase()) req.symbolOverride = sym;
