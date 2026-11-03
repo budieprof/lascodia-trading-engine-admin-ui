@@ -55,6 +55,16 @@ describe('currentFleetIds', () => {
     expect(ids.has('old')).toBe(false);
   });
 
+  it('hides a recently retired instance while its account still has a live EA', () => {
+    // The engine retires a replaced EA (ShuttingDown + deregistered) an hour after it went silent.
+    const ids = currentFleetIds(
+      [row('respawn', 17, 'Active', 0), row('replaced', 17, 'ShuttingDown', 5)],
+      isActive,
+      NOW,
+    );
+    expect([...ids]).toEqual(['respawn']);
+  });
+
   it('keeps the newest instance of an active account that has no live EA', () => {
     const ids = currentFleetIds(
       [row('older', 25, 'Disconnected', 900), row('newest', 25, 'Disconnected', 300)],

@@ -42,7 +42,9 @@ export const FLEET_STATUS_LABELS: Record<FleetStatus, string> = {
  * (`GET /admin/ea` keeps them all: 57 rows for 5 live EAs):
  *
  * - every Active instance, and every ShuttingDown one still inside the liveness window;
- * - any instance that stopped heartbeating in the last 24 h (Disconnected or Deregistered);
+ * - any Disconnected instance that stopped heartbeating in the last 24 h. A Deregistered one is finished — shut down
+ *   cleanly, or retired by the engine once another EA replaced it (a re-attach, or a sibling the heal ladder respawned
+ *   on a new chart) — so it is history, not a down EA;
  * - the newest instance of an ACTIVE account that has no live EA — an account that lost its EA a
  *   week ago is the most urgent row on the page, not history.
  *
@@ -65,7 +67,8 @@ export function currentFleetIds(
       continue;
     }
     const hb = Date.parse(i.lastHeartbeat);
-    if (Number.isFinite(hb) && nowMs - hb < RECENT_DISCONNECT_MS) ids.add(i.instanceId);
+    if (status === 'Disconnected' && Number.isFinite(hb) && nowMs - hb < RECENT_DISCONNECT_MS)
+      ids.add(i.instanceId);
     if (!liveAccounts.has(i.tradingAccountId) && isAccountActive(i.tradingAccountId)) {
       const prev = newestOrphan.get(i.tradingAccountId);
       if (!prev || Date.parse(i.lastHeartbeat) > Date.parse(prev.lastHeartbeat)) {
