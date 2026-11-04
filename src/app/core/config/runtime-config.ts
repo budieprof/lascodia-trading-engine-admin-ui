@@ -49,8 +49,8 @@ const FALLBACK_CONFIG: RuntimeConfig = {
 
 /** `config.json` could not be read after every retry (production builds only). */
 export class RuntimeConfigUnavailableError extends Error {
-  constructor(readonly cause?: unknown) {
-    super('The console settings (config.json) could not be loaded.');
+  constructor(cause?: unknown) {
+    super('The console settings (config.json) could not be loaded.', { cause });
     this.name = 'RuntimeConfigUnavailableError';
   }
 }
