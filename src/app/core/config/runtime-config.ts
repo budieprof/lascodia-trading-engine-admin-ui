@@ -47,28 +47,101 @@ const FALLBACK_CONFIG: RuntimeConfig = {
   apiBaseUrl: environment.apiBaseUrl,
 };
 
-export async function loadRuntimeConfig(): Promise<RuntimeConfig> {
+/** `config.json` could not be read after every retry (production builds only). */
+export class RuntimeConfigUnavailableError extends Error {
+  constructor(readonly cause?: unknown) {
+    super('The console settings (config.json) could not be loaded.');
+    this.name = 'RuntimeConfigUnavailableError';
+  }
+}
+
+export interface LoadRuntimeConfigOptions {
+  /** Waits before each retry, in ms. Three attempts in all by default. */
+  retryDelaysMs?: readonly number[];
+  /** Per-attempt timeout, in ms. */
+  timeoutMs?: number;
+  /**
+   * What to do when every attempt failed. `fallback` (development builds) starts with the built-in
+   * defaults; `throw` (production) refuses to start.
+   */
+  onFailure?: 'fallback' | 'throw';
+  fetchFn?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const DEFAULT_RETRY_DELAYS_MS = [500, 1500] as const;
+const DEFAULT_TIMEOUT_MS = 8000;
+
+/**
+ * One attempt. Anything other than a 200 carrying a JSON object fails it: a 404 during a release
+ * swap, a timeout, or an HTML page from the network edge (a challenge or error page answers 200
+ * with HTML, and `res.json()` throws on it).
+ */
+async function fetchConfigOnce(
+  fetchFn: typeof fetch,
+  timeoutMs: number,
+): Promise<Partial<RuntimeConfig>> {
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
   try {
-    const res = await fetch('config.json', { cache: 'no-store' });
-    if (!res.ok) return FALLBACK_CONFIG;
-    const cfg = (await res.json()) as Partial<RuntimeConfig>;
-    return {
-      apiBaseUrl: cfg.apiBaseUrl ?? FALLBACK_CONFIG.apiBaseUrl,
-      sentryDsn: cfg.sentryDsn,
-      sentryEnvironment: cfg.sentryEnvironment,
-      sentryRelease: cfg.sentryRelease,
-      sentryTracesSampleRate: cfg.sentryTracesSampleRate,
-      sentryReplaysSessionSampleRate: cfg.sentryReplaysSessionSampleRate,
-      sentryReplaysOnErrorSampleRate: cfg.sentryReplaysOnErrorSampleRate,
-      featureFlags: cfg.featureFlags,
-      appVersion: cfg.appVersion,
-      buildSha: cfg.buildSha,
-      buildTime: cfg.buildTime,
-      environmentLabel: cfg.environmentLabel,
-      releaseId: cfg.releaseId,
-      identityAccountUrl: cfg.identityAccountUrl,
-    };
-  } catch {
+    const res = await fetchFn('config.json', { cache: 'no-store', signal: ctrl?.signal });
+    if (!res.ok) throw new Error(`config.json answered HTTP ${res.status}`);
+    const body: unknown = await res.json();
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new Error('config.json is not a JSON object');
+    }
+    return body as Partial<RuntimeConfig>;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Reads `config.json`, retrying a failed read.
+ *
+ * In production this NEVER falls back to built-in defaults. Those defaults carry no feature flags,
+ * and `bffAuth` decides how people sign in: falling back once showed the retired Admin / Operator
+ * password form instead of the Keycloak sign-in (2026-11-04). Refusing to start is the safe answer;
+ * `main.ts` shows a "could not load, retry" screen instead.
+ */
+export async function loadRuntimeConfig(
+  options: LoadRuntimeConfigOptions = {},
+): Promise<RuntimeConfig> {
+  const fetchFn = options.fetchFn ?? fetch.bind(globalThis);
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const delays = options.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  const onFailure = options.onFailure ?? (environment.production ? 'throw' : 'fallback');
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
+  let cfg: Partial<RuntimeConfig> | null = null;
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    if (attempt > 0) await sleep(delays[attempt - 1]);
+    try {
+      cfg = await fetchConfigOnce(fetchFn, timeoutMs);
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  if (cfg === null) {
+    if (onFailure === 'throw') throw new RuntimeConfigUnavailableError(lastError);
     return FALLBACK_CONFIG;
   }
+  return {
+    apiBaseUrl: cfg.apiBaseUrl ?? FALLBACK_CONFIG.apiBaseUrl,
+    sentryDsn: cfg.sentryDsn,
+    sentryEnvironment: cfg.sentryEnvironment,
+    sentryRelease: cfg.sentryRelease,
+    sentryTracesSampleRate: cfg.sentryTracesSampleRate,
+    sentryReplaysSessionSampleRate: cfg.sentryReplaysSessionSampleRate,
+    sentryReplaysOnErrorSampleRate: cfg.sentryReplaysOnErrorSampleRate,
+    featureFlags: cfg.featureFlags,
+    appVersion: cfg.appVersion,
+    buildSha: cfg.buildSha,
+    buildTime: cfg.buildTime,
+    environmentLabel: cfg.environmentLabel,
+    releaseId: cfg.releaseId,
+    identityAccountUrl: cfg.identityAccountUrl,
+  };
 }
