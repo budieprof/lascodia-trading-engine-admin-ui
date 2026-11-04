@@ -35,29 +35,20 @@ import { scriptInputsOf, scriptSourceOf } from '../shared/script-strategy';
 import { InputOverridesEditorComponent } from '../shared/input-overrides-editor.component';
 import { BasketMatrixComponent } from './basket-matrix.component';
 import { MAJOR_PAIRS, parseBasket } from './run-compare.model';
+import {
+  DATE_RANGE_PRESETS,
+  describeSpan,
+  matchingPreset,
+  presetRange,
+  type DateRangePresetKey,
+} from './backtest-date-range';
 
 export const ENGINE_TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
 type MagnifierChoice = 'script' | 'on' | 'off';
 
-function isoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Checks the launcher form; returns the first problem, or null. */
-export function validateBacktestForm(f: {
-  fromDate: string;
-  toDate: string;
-  symbolOverride: string;
-}): string | null {
-  if (!f.fromDate || !f.toDate) return 'Choose a start and an end date.';
-  if (Date.parse(f.toDate) <= Date.parse(f.fromDate))
-    return 'The end date must be after the start.';
-  const sym = f.symbolOverride.trim();
-  if (sym && !/^[A-Za-z0-9]{1,10}$/.test(sym))
-    return 'The symbol override must be 1–10 letters or digits.';
-  return null;
-}
+export { validateBacktestForm } from './script-backtest-launcher.model';
+import { validateBacktestForm } from './script-backtest-launcher.model';
 
 /**
  * Queues a backtest of a script strategy (§4 `POST backtest`): the date range, plus the
@@ -74,24 +65,30 @@ export function validateBacktestForm(f: {
   imports: [InputOverridesEditorComponent, RouterLink, BasketMatrixComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <section class="card" [attr.aria-labelledby]="uid + '-title'">
-      <header class="head">
-        <div>
-          <h3 class="title" [id]="uid + '-title'">Run a script backtest</h3>
-          <p class="sub">
-            Runs the script through the broker emulator — the same engine the live session uses.
-          </p>
-        </div>
-        <button
-          type="button"
-          class="btn ghost"
-          [attr.aria-expanded]="open()"
-          [attr.aria-controls]="uid + '-form'"
-          (click)="open.set(!open())"
-        >
-          {{ open() ? 'Hide' : 'Configure…' }}
-        </button>
-      </header>
+    <section
+      class="card"
+      [class.embedded]="embedded()"
+      [attr.aria-labelledby]="embedded() ? null : uid + '-title'"
+    >
+      @if (!embedded()) {
+        <header class="head">
+          <div>
+            <h3 class="title" [id]="uid + '-title'">Run a script backtest</h3>
+            <p class="sub">
+              Runs the script through the broker emulator — the same engine the live session uses.
+            </p>
+          </div>
+          <button
+            type="button"
+            class="btn ghost"
+            [attr.aria-expanded]="open()"
+            [attr.aria-controls]="uid + '-form'"
+            (click)="open.set(!open())"
+          >
+            {{ open() ? 'Hide' : 'Configure…' }}
+          </button>
+        </header>
+      }
 
       @if (basketRunIds(); as ids) {
         <p class="queued" role="status">
@@ -106,7 +103,7 @@ export function validateBacktestForm(f: {
         </p>
       }
 
-      @if (open()) {
+      @if (isOpen()) {
         <!-- novalidate: validateBacktestForm() owns validation; a browser step mismatch on an
              input would otherwise block the submit without a word. -->
         <form
@@ -115,6 +112,24 @@ export function validateBacktestForm(f: {
           novalidate
           (submit)="$event.preventDefault(); submit()"
         >
+          <div class="presets" role="group" aria-label="Date range">
+            <span class="presets-label">Window</span>
+            @for (p of presets; track p.key) {
+              <button
+                type="button"
+                class="chip"
+                [class.active]="activePreset() === p.key"
+                [attr.aria-pressed]="activePreset() === p.key"
+                [title]="p.title"
+                (click)="applyPreset(p.key)"
+              >
+                {{ p.label }}
+              </button>
+            }
+            @if (spanText()) {
+              <span class="presets-span">{{ spanText() }}</span>
+            }
+          </div>
           <div class="grid">
             <label class="field">
               <span>From</span>
@@ -266,6 +281,49 @@ export function validateBacktestForm(f: {
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
+      }
+      .card.embedded {
+        margin: 0;
+        padding: 0;
+        background: transparent;
+        border: 0;
+      }
+      .presets {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: var(--space-1);
+      }
+      .presets-label {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        margin-right: var(--space-1);
+      }
+      .presets-span {
+        font-size: var(--text-xs);
+        color: var(--text-tertiary);
+        margin-left: var(--space-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .chip {
+        height: 26px;
+        padding: 0 var(--space-3);
+        border-radius: var(--radius-full);
+        border: 1px solid var(--border);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        font: inherit;
+        font-size: var(--text-xs);
+        cursor: pointer;
+      }
+      .chip.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .chip:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
       }
       .head {
         display: flex;
@@ -424,16 +482,25 @@ export class ScriptBacktestLauncherComponent {
   private readonly notifications = inject(NotificationService);
 
   readonly strategy = input.required<StrategyDto & ScriptStrategyFields>();
+  /**
+   * Inside a host form that already names the strategy (the Backtests page's queue form): no
+   * card chrome or title, and the form is open from the start.
+   */
+  readonly embedded = input(false);
   /** A run was queued; carries its id. */
   readonly queued = output<number>();
 
   private static nextUid = 0;
   readonly uid = `sbl-${ScriptBacktestLauncherComponent.nextUid++}`;
   readonly timeframes = ENGINE_TIMEFRAMES;
+  readonly presets = DATE_RANGE_PRESETS;
 
   readonly open = signal(false);
-  readonly fromDate = signal(isoDate(new Date(Date.now() - 365 * 86_400_000)));
-  readonly toDate = signal(isoDate(new Date()));
+  readonly isOpen = computed(() => this.open() || this.embedded());
+  readonly fromDate = signal(presetRange('1Y').fromDate);
+  readonly toDate = signal(presetRange('1Y').toDate);
+  readonly activePreset = computed(() => matchingPreset(this.fromDate(), this.toDate()));
+  readonly spanText = computed(() => describeSpan(this.fromDate(), this.toDate()));
   readonly symbolOverride = signal('');
   readonly timeframeOverride = signal('');
   readonly magnifier = signal<MagnifierChoice>('script');
@@ -481,7 +548,7 @@ export class ScriptBacktestLauncherComponent {
   constructor() {
     // Compile on first open (and again if the script changed) to learn the inputs schema.
     effect(() => {
-      const isOpen = this.open();
+      const isOpen = this.isOpen();
       const source = scriptSourceOf(this.strategy());
       untracked(() => {
         if (isOpen && source !== this.compiledFor) this.compile(source);
@@ -572,6 +639,12 @@ export class ScriptBacktestLauncherComponent {
     if (this.deep()) req.deep = true;
     if (this.magnifier() !== 'script') req.barMagnifier = this.magnifier() === 'on';
     return req;
+  }
+
+  applyPreset(key: DateRangePresetKey): void {
+    const r = presetRange(key);
+    this.fromDate.set(r.fromDate);
+    this.toDate.set(r.toDate);
   }
 
   /** The liquid majors, the strategy's own market left out. */

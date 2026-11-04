@@ -16,7 +16,10 @@ import { BasketMatrixComponent } from './basket-matrix.component';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { BREAKOUT_SOURCE } from '../testing/pine-sources';
 
-declareSignalIo(ScriptBacktestLauncherComponent, { inputs: ['strategy'], outputs: ['queued'] });
+declareSignalIo(ScriptBacktestLauncherComponent, {
+  inputs: ['strategy', 'embedded'],
+  outputs: ['queued'],
+});
 declareSignalIo(InputOverridesEditorComponent, {
   inputs: ['inputs', 'baseline', 'disabled'],
   outputs: ['overridesChange', 'validityChange'],

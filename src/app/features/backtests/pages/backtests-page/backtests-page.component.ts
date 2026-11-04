@@ -8,7 +8,7 @@ import {
   viewChild,
   OnInit,
 } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { DecimalPipe, NgTemplateOutlet, formatDate } from '@angular/common';
 import { formatDistanceToNow, parseISO } from 'date-fns';
 import { Observable, map } from 'rxjs';
@@ -19,8 +19,7 @@ import { TabsComponent } from '@shared/components/ui/tabs/tabs.component';
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { BacktestsService } from '@core/services/backtests.service';
 import { WalkForwardService } from '@core/services/walk-forward.service';
-import { StrategiesService } from '@core/services/strategies.service';
-import { NotificationService } from '@core/notifications/notification.service';
+import { BacktestQueueFormComponent } from '../../backtest-queue-form.component';
 import type { ColDef } from 'ag-grid-community';
 import {
   PagedData,
@@ -28,9 +27,7 @@ import {
   BacktestRunDto,
   WalkForwardRunDto,
   ResponseData,
-  CreateBacktestRequest,
 } from '@core/api/api.types';
-import { FormsModule } from '@angular/forms';
 import { analyticsSampleSize, newestRowsRequest } from '../../analytics-sample';
 
 type SampleState = 'loading' | 'ready' | 'error';
@@ -161,7 +158,7 @@ function latestOf(isos: (string | null | undefined)[]): { rel: string; abs: stri
     DataTableComponent,
     TabsComponent,
     ChartCardComponent,
-    FormsModule,
+    BacktestQueueFormComponent,
     DecimalPipe,
     NgTemplateOutlet,
   ],
@@ -177,68 +174,13 @@ function latestOf(isos: (string | null | undefined)[]): { rel: string; abs: stri
       </app-page-header>
 
       @if (showForm()) {
-        <div class="form-card">
-          <h3 class="form-title">Queue New Backtest</h3>
-          <div class="form-grid">
-            <div class="field">
-              <label>Strategy ID</label>
-              <input
-                type="number"
-                [(ngModel)]="formData.strategyId"
-                (ngModelChange)="onStrategyIdChange($event)"
-                placeholder="1"
-              />
-            </div>
-            <div class="field">
-              <label>Symbol</label>
-              <input type="text" [(ngModel)]="formData.symbol" placeholder="EURUSD" />
-            </div>
-            <div class="field">
-              <label>Timeframe</label>
-              <select [(ngModel)]="formData.timeframe">
-                <option value="M1">1 Min</option>
-                <option value="M5">5 Min</option>
-                <option value="M15">15 Min</option>
-                <option value="H1">1 Hour</option>
-                <option value="H4">4 Hours</option>
-                <option value="D1">Daily</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Initial Balance</label>
-              <input type="number" [(ngModel)]="formData.initialBalance" placeholder="10000" />
-            </div>
-            <div class="field">
-              <label>From Date</label>
-              <input type="date" [(ngModel)]="formData.fromDate" />
-            </div>
-            <div class="field">
-              <label>To Date</label>
-              <input type="date" [(ngModel)]="formData.toDate" />
-            </div>
-          </div>
-          @if (strategyInfo(); as s) {
-            <p class="form-hint">
-              #{{ s.id }} {{ s.name }} — trades {{ s.symbol }} {{ s.timeframe }}.
-              @if (isOverride()) {
-                <strong>Override run</strong> on {{ normalizedSymbol() || s.symbol }}
-                {{ formData.timeframe }}: the strategy's rules on another market — never promotion
-                evidence.
-              }
-            </p>
-          } @else if (strategyLookupError()) {
-            <p class="form-hint form-hint-error">{{ strategyLookupError() }}</p>
-          }
-          @if (queueError()) {
-            <p class="form-hint form-hint-error">{{ queueError() }}</p>
-          }
-          <div class="form-actions">
-            <button class="btn-secondary" (click)="showForm.set(false)">Cancel</button>
-            <button class="btn-primary" [disabled]="queueing()" (click)="queueBacktest()">
-              {{ queueing() ? 'Queueing…' : 'Queue' }}
-            </button>
-          </div>
-        </div>
+        <app-backtest-queue-form
+          [recentStrategyIds]="recentStrategyIds()"
+          [knownSymbols]="knownSymbols()"
+          [initialStrategyId]="initialStrategyId()"
+          (queued)="onQueued()"
+          (cancelled)="showForm.set(false)"
+        />
       }
 
       <ui-tabs [tabs]="tabs" [(activeTab)]="activeTab" />
@@ -830,78 +772,6 @@ function latestOf(isos: (string | null | undefined)[]): { rel: string; abs: stri
       .btn-primary:active {
         transform: scale(0.97);
       }
-      .btn-secondary {
-        height: 36px;
-        padding: 0 var(--space-5);
-        background: var(--bg-tertiary);
-        color: var(--text-primary);
-        border: none;
-        border-radius: var(--radius-full);
-        font-size: var(--text-sm);
-        font-weight: var(--font-medium);
-        cursor: pointer;
-        font-family: inherit;
-      }
-
-      .form-card {
-        background: var(--bg-secondary);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-md);
-        padding: var(--card-padding);
-      }
-      .form-title {
-        font-size: var(--text-base);
-        font-weight: var(--font-semibold);
-        margin: 0 0 var(--space-4);
-        color: var(--text-primary);
-      }
-      .form-hint {
-        margin: 0 0 var(--space-3);
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-      }
-      .form-hint-error {
-        color: var(--loss);
-      }
-      .form-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: var(--space-4);
-        margin-bottom: var(--space-4);
-      }
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: var(--space-1);
-      }
-      .field label {
-        font-size: var(--text-sm);
-        color: var(--text-secondary);
-        font-weight: var(--font-medium);
-      }
-      .field input,
-      .field select {
-        height: 40px;
-        padding: 0 var(--space-3);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-sm);
-        background: var(--bg-primary);
-        color: var(--text-primary);
-        font-size: var(--text-base);
-        font-family: inherit;
-        outline: none;
-      }
-      .field input:focus,
-      .field select:focus {
-        border-color: var(--accent);
-        box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.3);
-      }
-      .form-actions {
-        display: flex;
-        justify-content: flex-end;
-        gap: var(--space-3);
-      }
-
       /* ── Shared list-page look (same as Drift Report) ───────────── */
       .muted {
         color: var(--text-tertiary);
@@ -1365,9 +1235,8 @@ function latestOf(isos: (string | null | undefined)[]): { rel: string; abs: stri
 export class BacktestsPageComponent implements OnInit {
   private backtestsService = inject(BacktestsService);
   private walkForwardService = inject(WalkForwardService);
-  private notifications = inject(NotificationService);
-  private strategiesService = inject(StrategiesService);
   private router = inject(Router);
+  private route = inject(ActivatedRoute);
   private readonly btTable = viewChild<DataTableComponent<BacktestRunDto>>('btTable');
 
   tabs = [
@@ -1377,69 +1246,30 @@ export class BacktestsPageComponent implements OnInit {
   activeTab = signal('backtests');
   showForm = signal(false);
 
-  formData = {
-    strategyId: 1,
-    symbol: 'EURUSD',
-    timeframe: 'H1',
-    initialBalance: 10000,
-    fromDate: '2025-01-01',
-    toDate: '2025-12-31',
-  };
+  /** `?strategyId=` opens the form on that strategy (links from a strategy page). */
+  readonly initialStrategyId = signal<number | null>(null);
 
-  /** The strategy the form points at; its own symbol/timeframe are what a normal run must send. */
-  readonly strategyInfo = signal<{
-    id: number;
-    name: string;
-    symbol: string;
-    timeframe: string;
-  } | null>(null);
-  readonly strategyLookupError = signal<string | null>(null);
-  readonly queueing = signal(false);
-  readonly queueError = signal<string | null>(null);
-  private strategyLookupSeq = 0;
+  /** Strategies with the newest runs, newest first — one-click picks in the queue form. */
+  readonly recentStrategyIds = computed(() => {
+    const rows = [...this.btSample()].sort(
+      (a, b) => Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? '') || b.id - a.id,
+    );
+    const ids: number[] = [];
+    for (const r of rows) {
+      if (!ids.includes(r.strategyId)) ids.push(r.strategyId);
+      if (ids.length >= 6) break;
+    }
+    return ids;
+  });
 
-  /** "EUR/USD" / "eurusd " → "EURUSD": the engine's symbols carry no separators. */
-  normalizedSymbol(): string {
-    return (this.formData.symbol ?? '').toUpperCase().replace(/[^A-Z0-9.]/g, '');
-  }
-
-  isOverride(): boolean {
-    const s = this.strategyInfo();
-    if (!s) return false;
-    const sym = this.normalizedSymbol();
-    return (!!sym && sym !== s.symbol) || this.formData.timeframe !== s.timeframe;
-  }
-
-  /** Looks the strategy up and fills its own symbol/timeframe, so a normal run never trips the engine's market check. */
-  onStrategyIdChange(id: number | null): void {
-    const seq = ++this.strategyLookupSeq;
-    this.strategyInfo.set(null);
-    this.strategyLookupError.set(null);
-    this.queueError.set(null);
-    if (!id || id <= 0) return;
-    this.strategiesService.getById(id).subscribe({
-      next: (res) => {
-        if (seq !== this.strategyLookupSeq) return;
-        const s = res?.status ? res.data : null;
-        if (!s || !s.symbol) {
-          this.strategyLookupError.set(res?.message || `Strategy ${id} not found`);
-          return;
-        }
-        this.strategyInfo.set({
-          id: s.id,
-          name: s.name ?? `Strategy ${s.id}`,
-          symbol: s.symbol,
-          timeframe: s.timeframe,
-        });
-        this.formData.symbol = s.symbol;
-        this.formData.timeframe = s.timeframe;
-      },
-      error: () => {
-        if (seq === this.strategyLookupSeq)
-          this.strategyLookupError.set(`Strategy ${id} could not be loaded`);
-      },
-    });
-  }
+  /** Every symbol the sampled runs touched — symbol-override suggestions. */
+  readonly knownSymbols = computed(() => [
+    ...new Set(
+      this.btSample()
+        .map((r) => r.symbol)
+        .filter((s): s is string => !!s),
+    ),
+  ]);
 
   // ── Analytics samples (probe-and-fetch, sized by analyticsSampleSize) ─────
   readonly btSample = signal<BacktestRunDto[]>([]);
@@ -1462,7 +1292,11 @@ export class BacktestsPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.loadBtAnalyticsSample();
-    this.onStrategyIdChange(this.formData.strategyId);
+    const fromLink = Number(this.route.snapshot.queryParamMap.get('strategyId'));
+    if (Number.isSafeInteger(fromLink) && fromLink > 0) {
+      this.initialStrategyId.set(fromLink);
+      this.showForm.set(true);
+    }
   }
 
   // ── Presentation helpers ──────────────────────────────────────────
@@ -2322,50 +2156,9 @@ export class BacktestsPageComponent implements OnInit {
     this.router.navigate(['/walk-forward', row.id]);
   }
 
-  /**
-   * Queues the run and reports the ENGINE's verdict: a refusal arrives as `status: false` with its reason (unknown
-   * strategy, a symbol/timeframe that is not the strategy's own, a script that no longer compiles…) and used to be
-   * shown as "queued successfully". A run on another market is sent as an explicit override.
-   */
-  queueBacktest() {
-    const symbol = this.normalizedSymbol();
-    const own = this.strategyInfo();
-    const req: CreateBacktestRequest = {
-      strategyId: this.formData.strategyId,
-      symbol,
-      timeframe: this.formData.timeframe,
-      initialBalance: this.formData.initialBalance,
-      fromDate: this.formData.fromDate,
-      toDate: this.formData.toDate,
-    };
-    if (own && own.id === this.formData.strategyId) {
-      req.symbol = own.symbol;
-      req.timeframe = own.timeframe;
-      if (symbol && symbol !== own.symbol) req.symbolOverride = symbol;
-      if (this.formData.timeframe !== own.timeframe)
-        req.timeframeOverride = this.formData.timeframe;
-    }
-    this.queueing.set(true);
-    this.queueError.set(null);
-    this.backtestsService.create(req).subscribe({
-      next: (res) => {
-        this.queueing.set(false);
-        if (!res?.status) {
-          const msg = res?.message || 'The engine refused the backtest';
-          this.queueError.set(msg);
-          this.notifications.error(msg);
-          return;
-        }
-        this.notifications.success(res.data ? `Backtest #${res.data} queued` : 'Backtest queued');
-        this.showForm.set(false);
-        this.btTable()?.loadData();
-      },
-      error: (err: unknown) => {
-        this.queueing.set(false);
-        const msg = (err as { message?: string })?.message || 'Failed to queue backtest';
-        this.queueError.set(msg);
-        this.notifications.error(msg);
-      },
-    });
+  /** A run was queued from the form: the table and analytics pick it up; the form stays open for the next. */
+  onQueued(): void {
+    this.btTable()?.loadData();
+    this.loadBtAnalyticsSample();
   }
 }
