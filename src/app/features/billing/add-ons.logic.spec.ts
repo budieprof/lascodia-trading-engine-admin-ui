@@ -9,6 +9,7 @@ import {
   grantsLabel,
   heldLabel,
   planAllowancesBody,
+  showsBar,
   unitFormFrom,
   usageTone,
   usd,
@@ -33,6 +34,10 @@ describe('usage units', () => {
   it('labels used against the allowance, fractional follow-ups included', () => {
     expect(usedLabel({ used: 2.25, allowance: 3 })).toBe('2.25 of 3');
     expect(usedLabel({ used: 4, allowance: null })).toBe('4 (unlimited)');
+    expect(usedLabel({ used: 0, allowance: 0 })).toBe('Not included');
+    expect(usedLabel({ used: 1, allowance: 0 })).toBe('1 of 0');   // over a lowered allowance: still shown
+    expect(showsBar({ used: 0, allowance: 0 })).toBe(false);
+    expect(showsBar({ used: 1, allowance: 3 })).toBe(true);
   });
 
   it('fills the bar and turns amber at the 80% mark and red when used up', () => {

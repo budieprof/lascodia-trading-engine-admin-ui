@@ -17,6 +17,7 @@ import {
   grantsLabel,
   heldLabel,
   priceLabel,
+  showsBar,
   usageTone,
   usedLabel,
   usedPercent,
@@ -73,7 +74,7 @@ import { PAYSTACK_CONFIRM_FALLBACK, billingRefusal, isFollowableRedirect, paysta
                 <span>{{ u.label }}</span>
                 <span class="small" [class.muted]="!u.nearLimit">{{ usedLabel(u) }}</span>
               </div>
-              @if (u.allowance !== null) {
+              @if (showsBar(u)) {
                 <div class="track" role="progressbar" [attr.aria-valuenow]="usedPercent(u)" aria-valuemin="0" aria-valuemax="100"
                   [attr.aria-label]="u.label">
                   <div class="fill" [class]="usageTone(u)" [style.width.%]="usedPercent(u)"></div>
@@ -159,6 +160,7 @@ export class AddOnsComponent {
   protected readonly when = when;
   protected readonly usedLabel = usedLabel;
   protected readonly usedPercent = usedPercent;
+  protected readonly showsBar = showsBar;
   protected readonly usageTone = usageTone;
   protected readonly grantsLabel = grantsLabel;
   protected readonly priceLabel = priceLabel;

@@ -453,6 +453,18 @@ type PlanFeatureKey =
                   </tr>
                 }
                 <tr>
+                  <th scope="row" class="rowhead">Full tick / order-book capture</th>
+                  @for (p of plans.value(); track p.id) {
+                    <td class="num">
+                      @if (p.limitMarketDataCapture === true) {
+                        <span class="dim" aria-label="Sampled ticks only">Sampled ticks</span>
+                      } @else {
+                        <span class="yes" aria-label="Included">✓</span>
+                      }
+                    </td>
+                  }
+                </tr>
+                <tr>
                   <th scope="row" class="rowhead">Data feeds</th>
                   @for (p of plans.value(); track p.id) {
                     <td class="num small">
