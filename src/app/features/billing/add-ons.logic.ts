@@ -30,9 +30,16 @@ export function amount(n: number | null | undefined): string {
   return Number(n.toFixed(2)).toString();
 }
 
-/** "2.25 of 3", "1 (unlimited)". */
+/** "2.25 of 3", "1 (unlimited)", "Not included" (an allowance of 0 with nothing in use — an add-on adds it). */
 export function usedLabel(u: Pick<UsageUnit, 'used' | 'allowance'>): string {
-  return u.allowance === null ? `${amount(u.used)} (unlimited)` : `${amount(u.used)} of ${amount(u.allowance)}`;
+  if (u.allowance === null) return `${amount(u.used)} (unlimited)`;
+  if (u.allowance === 0 && u.used === 0) return 'Not included';
+  return `${amount(u.used)} of ${amount(u.allowance)}`;
+}
+
+/** Whether the unit shows a bar: not when unlimited, nor when not included at all. */
+export function showsBar(u: Pick<UsageUnit, 'used' | 'allowance'>): boolean {
+  return u.allowance !== null && !(u.allowance === 0 && u.used === 0);
 }
 
 /** 0-100 for the bar; 0 when unlimited, 100 when the allowance is 0 or used up. */
