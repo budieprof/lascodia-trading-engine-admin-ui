@@ -181,6 +181,18 @@
     min-width: 260px;
     max-width: 100%;
   }
+  // Phones: a 260px picker beside its label ran off the screen. Each field takes the full row.
+  @media (max-width: 600px) {
+    .inline-field {
+      flex: 1 1 100%;
+      min-width: 0; // else the label is as wide as the select's longest option
+    }
+    .inline-field .select,
+    .inline-field .input {
+      flex: 1;
+      min-width: 0;
+    }
+  }
 }
 .inline-field {
   display: inline-flex;

@@ -15,6 +15,17 @@ import type { BillingUsageMonth } from '../billing.types';
   styleUrl: '../../iam/shared/iam-page.scss',
   styles: [
     `
+      /* The host holds several cards: give them the page's spacing (an inline host stacked them edge to edge). */
+      :host {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-3);
+        min-width: 0;
+      }
+      /* Identifiers in a table cell stay whole: squeezed, "house" broke into ho/us/e. */
+      td code {
+        white-space: nowrap;
+      }
       .tiles {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));

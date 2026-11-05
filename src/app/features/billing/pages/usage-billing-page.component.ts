@@ -39,30 +39,45 @@ import { AddOnsComponent } from '../components/add-ons.component';
     InvoiceDetailComponent,
   ],
   styleUrl: '../../iam/shared/iam-page.scss',
+  styles: [
+    `
+      /* Month and Refresh are one control group: they wrap together, never one under the other. */
+      .header-tools {
+        display: flex;
+        align-items: center;
+        gap: var(--space-2);
+      }
+      .header-tools .select {
+        min-width: 11rem;
+      }
+    `,
+  ],
   template: `
     <div class="page">
       <app-page-header
         title="Usage & billing"
         subtitle="Your plan, usage and add-ons, metered usage per UTC day, this month's estimate and your invoices."
       >
-        <select
-          class="select"
-          aria-label="Month"
-          [ngModel]="month()"
-          (ngModelChange)="month.set($event); usage.reload()"
-        >
-          @for (m of months; track m) {
-            <option [ngValue]="m">{{ monthLabel(m) }}</option>
-          }
-        </select>
-        <button
-          type="button"
-          class="btn btn-secondary"
-          (click)="refresh()"
-          [disabled]="usage.loading()"
-        >
-          {{ usage.loading() ? 'Loading…' : 'Refresh' }}
-        </button>
+        <div class="header-tools">
+          <select
+            class="select"
+            aria-label="Month"
+            [ngModel]="month()"
+            (ngModelChange)="month.set($event); usage.reload()"
+          >
+            @for (m of months; track m) {
+              <option [ngValue]="m">{{ monthLabel(m) }}</option>
+            }
+          </select>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            (click)="refresh()"
+            [disabled]="usage.loading()"
+          >
+            {{ usage.loading() ? 'Loading…' : 'Refresh' }}
+          </button>
+        </div>
       </app-page-header>
 
       <app-billing-your-plan />

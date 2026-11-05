@@ -54,7 +54,11 @@ export function unavailableReason(m: BffMembership): string | null {
           [attr.aria-expanded]="open()"
           aria-haspopup="menu"
           [disabled]="switching() || locked()"
-          [title]="locked() ? 'End the impersonation to switch organisation' : 'Organisation: ' + (active()?.name ?? '')"
+          [title]="
+            locked()
+              ? 'End the impersonation to switch organisation'
+              : 'Organisation: ' + (active()?.name ?? '')
+          "
           (click)="open.set(!open())"
         >
           <span class="org-label">Org:</span>
@@ -200,6 +204,12 @@ export function unavailableReason(m: BffMembership): string | null {
         }
         .org-pill {
           max-width: 160px;
+        }
+      }
+      @media (max-width: 600px) {
+        .org-pill {
+          max-width: 7rem;
+          padding: 0 10px;
         }
       }
     `,

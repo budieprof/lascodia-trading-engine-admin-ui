@@ -144,6 +144,12 @@ import { AccountScopeService } from './account-scope.service';
           text-overflow: ellipsis;
         }
       }
+      @media (max-width: 600px) {
+        .scope-select,
+        .scope-value {
+          max-width: 6rem;
+        }
+      }
     `,
   ],
 })
