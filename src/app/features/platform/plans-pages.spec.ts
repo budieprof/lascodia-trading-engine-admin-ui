@@ -24,6 +24,7 @@ const trial: PlanDto = {
   name: 'Trial',
   description: null,
   maxTradingAccounts: 2,
+  maxRealTradingAccounts: null,
   maxActiveEaInstances: 4,
   maxMembers: 5,
   maxConcurrentResearchJobs: 2,

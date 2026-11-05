@@ -315,6 +315,15 @@ type PlanFeatureKey =
                   />
                   Fund module (best execution, performance statements, compliance exports)
                 </label>
+                <label class="toggle" [class.on]="draft().limitMarketDataCapture === true">
+                  <input
+                    type="checkbox"
+                    name="limitCapture"
+                    [ngModel]="draft().limitMarketDataCapture === true"
+                    (ngModelChange)="patch({ limitMarketDataCapture: $event })"
+                  />
+                  Sampled ticks only (no full tick / order-book capture — keeps a free plan's storage small)
+                </label>
               </div>
               <label class="check">
                 <input

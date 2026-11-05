@@ -29,6 +29,7 @@ export const QUOTA_NOUNS: Readonly<Record<string, string>> = {
   concurrentResearchJobs: 'backtests and optimisations at a time',
   strategies: 'strategies',
   scripts: 'saved scripts and libraries',
+  realTradingAccounts: 'real (live-money) trading accounts',
 };
 
 /** "single sign-on", … — the feature a person reads. */
@@ -40,6 +41,7 @@ export const FEATURE_NOUNS: Readonly<Record<string, string>> = {
   brokerModule: 'the broker dealing-desk module',
   fundModule:
     'the fund module (best-execution reports, performance statements and compliance exports)',
+  fullMarketDataCapture: 'full tick and order-book capture',
 };
 
 type Envelope = { responseCode?: unknown; message?: unknown; data?: unknown };

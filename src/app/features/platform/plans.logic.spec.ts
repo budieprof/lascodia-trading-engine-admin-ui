@@ -30,6 +30,7 @@ const plan = (over: Partial<PlanDto> = {}): PlanDto => ({
   name: 'Pro',
   description: null,
   maxTradingAccounts: 10,
+  maxRealTradingAccounts: null,
   maxActiveEaInstances: 20,
   maxMembers: 25,
   maxConcurrentResearchJobs: 5,
