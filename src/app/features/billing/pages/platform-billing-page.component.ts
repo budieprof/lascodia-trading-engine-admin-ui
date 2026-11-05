@@ -33,8 +33,9 @@ import {
 import type { BillingUsageMonth, Invoice, PaymentProviderInfo, PriceBook } from '../billing.types';
 import { InvoiceDetailComponent } from '../components/invoice-detail.component';
 import { UsageMonthViewComponent } from '../components/usage-month-view.component';
+import { AddOnsAdminComponent } from '../components/add-ons-admin.component';
 
-type Tab = 'invoices' | 'price-books' | 'usage';
+type Tab = 'invoices' | 'price-books' | 'usage' | 'add-ons';
 type Pending =
   | { kind: 'generate' }
   | { kind: 'finalise'; invoice: Invoice }
@@ -58,6 +59,7 @@ type Pending =
     ConfirmDialogComponent,
     InvoiceDetailComponent,
     UsageMonthViewComponent,
+    AddOnsAdminComponent,
     AuditTrailComponent,
   ],
   styleUrls: ['../../iam/shared/iam-page.scss', './platform-billing-page.component.scss'],
@@ -645,6 +647,10 @@ type Pending =
       }
 
       <!-- ── Usage ── -->
+      @if (tab() === 'add-ons') {
+        <app-billing-add-ons-admin />
+      }
+
       @if (tab() === 'usage') {
         <section class="card">
           <header class="card-head">
@@ -787,6 +793,7 @@ export class PlatformBillingPageComponent {
     { id: 'invoices', label: 'Invoices' },
     { id: 'price-books', label: 'Price books' },
     { id: 'usage', label: 'Usage' },
+    { id: 'add-ons', label: 'Add-ons & unit costs' },
   ];
   protected readonly statusFilters: { value: string; label: string }[] = [
     { value: '', label: 'Any status' },

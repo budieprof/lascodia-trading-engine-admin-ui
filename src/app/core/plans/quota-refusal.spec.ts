@@ -52,7 +52,7 @@ describe('quota refusals', () => {
 
   it('says what the plan allows, what is in use and what to do', () => {
     expect(describeQuotaRefusal(refusal)).toBe(
-      "Your organisation's plan (Trial) allows 2 trading accounts; 2 are in use. Free one up, or ask platform staff for a larger plan.",
+      "Your organisation's plan (Trial) allows 2 trading accounts; 2 are in use. Free one up, or see Usage & billing for a larger plan.",
     );
     expect(
       describeQuotaRefusal({ ...refusal, quota: 'activeEaInstances', limit: 1, used: 1 }),

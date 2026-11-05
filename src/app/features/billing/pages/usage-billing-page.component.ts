@@ -19,6 +19,7 @@ import type { BillingUsageMonth, Invoice } from '../billing.types';
 import { InvoiceDetailComponent } from '../components/invoice-detail.component';
 import { UsageMonthViewComponent } from '../components/usage-month-view.component';
 import { YourPlanComponent } from '../components/your-plan.component';
+import { AddOnsComponent } from '../components/add-ons.component';
 
 /**
  * The organisation's "Usage & billing" (engine billing-metering, `tenant.billing.read`): its plan (self-serve
@@ -33,6 +34,7 @@ import { YourPlanComponent } from '../components/your-plan.component';
     FormsModule,
     PageHeaderComponent,
     YourPlanComponent,
+    AddOnsComponent,
     UsageMonthViewComponent,
     InvoiceDetailComponent,
   ],
@@ -41,7 +43,7 @@ import { YourPlanComponent } from '../components/your-plan.component';
     <div class="page">
       <app-page-header
         title="Usage & billing"
-        subtitle="Your plan, metered usage per UTC day, this month's estimate and your invoices."
+        subtitle="Your plan, usage and add-ons, metered usage per UTC day, this month's estimate and your invoices."
       >
         <select
           class="select"
@@ -64,6 +66,7 @@ import { YourPlanComponent } from '../components/your-plan.component';
       </app-page-header>
 
       <app-billing-your-plan />
+      <app-billing-add-ons />
 
       @if (usage.error(); as err) {
         <section class="card">
@@ -157,6 +160,7 @@ export class UsageBillingPageComponent {
   readonly month = signal(this.months[0]);
   readonly selected = signal<Invoice | null>(null);
   private readonly plan = viewChild(YourPlanComponent);
+  private readonly addOns = viewChild(AddOnsComponent);
 
   readonly usage = iamResource<BillingUsageMonth | null>(
     () => this.api.myUsage(this.month()),
@@ -176,6 +180,7 @@ export class UsageBillingPageComponent {
 
   refresh(): void {
     this.plan()?.reload();
+    this.addOns()?.reload();
     this.usage.reload();
     this.invoices.reload();
   }

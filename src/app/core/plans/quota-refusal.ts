@@ -84,6 +84,25 @@ export function quotaRefusalOf(err: unknown): QuotaRefusal | null {
   return isRefusal(env.data) ? env.data : null;
 }
 
+/**
+ * Priced units (freemium program): `ai.analysis`, `research.backtest`, `signals.symbols`, `watches.active`. Their
+ * amounts can be fractional (a chat follow-up is 0.25), so the engine's own sentence — exact, and naming the add-on
+ * or the reset date — is shown for them.
+ */
+export function isUnitRefusal(r: Pick<QuotaRefusal, 'quota'>): boolean {
+  return r.quota.includes('.');
+}
+
+/** Where a refused organisation can see its usage and add more: Organisation → Usage & billing. */
+export const USAGE_AND_ADD_ONS_LINK = { label: 'See usage & add-ons', route: '/organisation/billing' } as const;
+
+/** The toast link for a quota refusal (limits and priced units), or null for anything else. */
+export function quotaRefusalLink(err: unknown): { label: string; route: string } | null {
+  const r = quotaRefusalOf(err);
+  if (!r || !r.plan || r.quota === 'feature') return null;
+  return { ...USAGE_AND_ADD_ONS_LINK };
+}
+
 /** One plain sentence for a refusal. */
 export function describeQuotaRefusal(r: QuotaRefusal): string {
   if (!r.plan) {
@@ -96,7 +115,7 @@ export function describeQuotaRefusal(r: QuotaRefusal): string {
   const noun = QUOTA_NOUNS[r.quota] ?? r.quota;
   const inUse = r.used === 1 ? '1 is in use' : `${r.used} are in use`;
   const adding = r.requested && r.requested > 1 ? ` and this would add ${r.requested}` : '';
-  return `Your organisation's plan (${r.plan}) allows ${r.limit} ${noun}; ${inUse}${adding}. Free one up, or ask platform staff for a larger plan.`;
+  return `Your organisation's plan (${r.plan}) allows ${r.limit} ${noun}; ${inUse}${adding}. Free one up, or see Usage & billing for a larger plan.`;
 }
 
 /**
@@ -106,7 +125,10 @@ export function describeQuotaRefusal(r: QuotaRefusal): string {
 export function quotaRefusalMessage(err: unknown): string | null {
   const env = envelopeOf(err);
   if (env?.responseCode !== QUOTA_RESPONSE_CODE) return null;
-  if (isRefusal(env.data)) return describeQuotaRefusal(env.data);
+  if (isRefusal(env.data)) {
+    if (isUnitRefusal(env.data) && typeof env.message === 'string' && env.message) return env.message;
+    return describeQuotaRefusal(env.data);
+  }
   return typeof env.message === 'string' && env.message
     ? env.message
     : "Your organisation's plan does not allow this. Ask platform staff for a larger plan.";
