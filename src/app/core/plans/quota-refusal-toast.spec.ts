@@ -16,7 +16,7 @@ import { AuthService } from '@core/auth/auth.service';
 import { csrfInterceptor } from '@core/auth/csrf.interceptor';
 import { errorInterceptor } from '@core/auth/error.interceptor';
 import { IdleTimeoutService } from '@core/auth/idle-timeout.service';
-import { QUOTA_RESPONSE_CODE } from './quota-refusal';
+import { QUOTA_RESPONSE_CODE, USAGE_AND_ADD_ONS_LINK } from './quota-refusal';
 
 ensureTestBed();
 
@@ -37,7 +37,7 @@ const quotaBody = {
   },
 };
 const QUOTA_TEXT =
-  "Your organisation's plan (Trial) allows 2 trading accounts; 2 are in use. Free one up, or ask platform staff for a larger plan.";
+  "Your organisation's plan (Trial) allows 2 trading accounts; 2 are in use. Free one up, or see Usage & billing for a larger plan.";
 
 let configured = false;
 
@@ -97,7 +97,7 @@ describe('a plan quota refusal (-403-quota) is explained, not called a permissio
     t.ctl
       .expectOne(`${ENGINE}/trading-account`)
       .flush(quotaBody, { status: 403, statusText: 'Forbidden' });
-    expect(t.notify.error).toHaveBeenCalledWith(QUOTA_TEXT);
+    expect(t.notify.error).toHaveBeenCalledWith(QUOTA_TEXT, USAGE_AND_ADD_ONS_LINK);
 
     // An ordinary refusal keeps the engine's reason.
     t.notify.error.mockClear();
@@ -119,7 +119,7 @@ describe('a plan quota refusal (-403-quota) is explained, not called a permissio
     t.ctl
       .expectOne(`${ENGINE}/trading-account`)
       .flush(quotaBody, { status: 403, statusText: 'Forbidden' });
-    expect(t.notify.error).toHaveBeenCalledWith(QUOTA_TEXT);
+    expect(t.notify.error).toHaveBeenCalledWith(QUOTA_TEXT, USAGE_AND_ADD_ONS_LINK);
 
     t.notify.error.mockClear();
     t.http.post(`${ENGINE}/order`, {}).subscribe({ error: () => undefined });

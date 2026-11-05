@@ -8,7 +8,7 @@ import { SUPPRESS_ERROR_TOAST } from '../api/api.service';
 import { AuthResponseCode, CSRF_HEADER } from './bff.types';
 import { CSRF_RETRIED, SKIP_SESSION_HANDLING } from './http-context';
 import { StepUpService } from './step-up.service';
-import { quotaRefusalMessage } from '../plans/quota-refusal';
+import { quotaRefusalLink, quotaRefusalMessage } from '../plans/quota-refusal';
 import { entitlementRefusalMessage } from '../market-data/entitlement-refusal';
 
 function responseCodeOf(error: HttpErrorResponse): string | null {
@@ -121,10 +121,12 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
           // organisation, policy) — show it rather than the generic line.
           if (error.status === 403 && !req.context.get(SUPPRESS_ERROR_TOAST)) {
             const body = error.error as ResponseData<unknown> | null;
-            notificationService.error(
+            showRefusal(
+              notificationService,
               quotaRefusalMessage(error) ??
                 entitlementRefusalMessage(error) ??
                 (body?.message || 'You do not have permission to perform this action.'),
+              error,
             );
             return throwError(() => error);
           }
@@ -192,10 +194,12 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
         if (error.status === 403) {
           // A plan quota refusal says what the plan allows, a market-data entitlement refusal which feed the
           // organisation lacks; anything else is a permission refusal.
-          notificationService.error(
+          showRefusal(
+            notificationService,
             quotaRefusalMessage(error) ??
               entitlementRefusalMessage(error) ??
               'You do not have permission to perform this action.',
+            error,
           );
           return throwError(() => error);
         }
@@ -224,3 +228,10 @@ export const errorInterceptor: HttpInterceptorFn = (original, next) => {
 
   return run(original);
 };
+
+/** A refusal toast; a plan-limit refusal carries a link to Usage & billing (freemium program). */
+function showRefusal(notify: NotificationService, message: string, error: unknown): void {
+  const link = quotaRefusalLink(error);
+  if (link) notify.error(message, link);
+  else notify.error(message);
+}

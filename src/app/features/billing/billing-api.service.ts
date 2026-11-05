@@ -19,6 +19,14 @@ import type {
   PriceBookBody,
 } from './billing.types';
 import { normaliseSubscription } from './plan-offers.logic';
+import type {
+  AddOn,
+  AddOnBody,
+  PlanAllowances,
+  TenantAddOn,
+  UnitCostReport,
+  UsageUnit,
+} from './add-ons.types';
 
 const SILENT = { silent: true } as const;
 
@@ -110,6 +118,118 @@ export class BillingApiService {
         { reference },
         SILENT,
       ),
+    );
+  }
+
+  // ── Priced units and add-ons (freemium program) ──
+  /** `tenant.usage.read`: the organisation's priced units (used / allowance / resets on). */
+  myUnits(): Observable<UsageUnit[]> {
+    return settled(this.api.get<ResponseData<{ units?: UsageUnit[] }>>('/tenant/usage', SILENT)).pipe(
+      map((r) => r?.units ?? []),
+    );
+  }
+  /** `tenant.billing.read`: the add-ons offered and what the organisation holds. */
+  myAddOns(): Observable<AddOn[]> {
+    return settled(this.api.get<ResponseData<AddOn[]>>('/tenant/billing/add-ons', SILENT)).pipe(
+      map((r) => r ?? []),
+    );
+  }
+  /** `tenant.billing.manage`: start an add-on's free trial (once per organisation). */
+  startAddOnTrial(slug: string): Observable<TenantAddOn> {
+    return settled(
+      this.api.post<ResponseData<TenantAddOn>>(
+        `/tenant/billing/add-ons/${encodeURIComponent(slug)}/trial`,
+        {},
+        SILENT,
+      ),
+    );
+  }
+  /** `tenant.billing.manage`: a payment page for an add-on; the caller sends the browser to `url`. */
+  addOnCheckout(slug: string): Observable<BillingRedirect> {
+    return settled(
+      this.api.post<ResponseData<BillingRedirect>>(
+        `/tenant/billing/add-ons/${encodeURIComponent(slug)}/checkout`,
+        {},
+        SILENT,
+      ),
+    );
+  }
+  /** `tenant.billing.manage`: where to update the card or cancel a paid add-on. */
+  manageAddOn(slug: string): Observable<BillingRedirect> {
+    return settled(
+      this.api.post<ResponseData<BillingRedirect>>(
+        `/tenant/billing/add-ons/${encodeURIComponent(slug)}/manage`,
+        {},
+        SILENT,
+      ),
+    );
+  }
+  /** `tenant.billing.manage`: after Paystack's page, what became of an add-on payment. */
+  confirmAddOnPaystack(reference: string): Observable<PaystackConfirmation> {
+    return settled(
+      this.api.post<ResponseData<PaystackConfirmation>>(
+        '/tenant/billing/add-ons/paystack/confirm',
+        { reference },
+        SILENT,
+      ),
+    );
+  }
+
+  // ── Platform staff: add-ons, allowances, unit costs ──
+  addOns(): Observable<AddOn[]> {
+    return settled(this.api.get<ResponseData<AddOn[]>>('/platform/billing/add-ons', SILENT)).pipe(
+      map((r) => r ?? []),
+    );
+  }
+  saveAddOn(slug: string, body: AddOnBody): Observable<AddOn> {
+    return settled(
+      this.api.put<ResponseData<AddOn>>(
+        `/platform/billing/add-ons/${encodeURIComponent(slug)}`,
+        body,
+        SILENT,
+      ),
+    );
+  }
+  planAllowances(planId: number): Observable<PlanAllowances> {
+    return settled(
+      this.api.get<ResponseData<PlanAllowances>>(`/platform/billing/plans/${planId}/allowances`, SILENT),
+    );
+  }
+  setPlanAllowances(planId: number, allowances: PlanAllowances): Observable<PlanAllowances> {
+    return settled(
+      this.api.put<ResponseData<PlanAllowances>>(
+        `/platform/billing/plans/${planId}/allowances`,
+        { allowances },
+        SILENT,
+      ),
+    );
+  }
+  tenantAddOns(tenantId: number): Observable<TenantAddOn[]> {
+    return settled(
+      this.api.get<ResponseData<TenantAddOn[]>>(`/platform/billing/tenants/${tenantId}/add-ons`, SILENT),
+    ).pipe(map((r) => r ?? []));
+  }
+  grantAddOn(tenantId: number, slug: string, endsAtUtc: string | null, note: string | null): Observable<TenantAddOn> {
+    return settled(
+      this.api.post<ResponseData<TenantAddOn>>(
+        `/platform/billing/tenants/${tenantId}/add-ons`,
+        { slug, endsAtUtc, note },
+        SILENT,
+      ),
+    );
+  }
+  endAddOn(tenantId: number, tenantAddOnId: number, reason: string | null): Observable<TenantAddOn> {
+    return settled(
+      this.api.post<ResponseData<TenantAddOn>>(
+        `/platform/billing/tenants/${tenantId}/add-ons/${tenantAddOnId}/end`,
+        { reason },
+        SILENT,
+      ),
+    );
+  }
+  unitCosts(month: string | null): Observable<UnitCostReport> {
+    return settled(
+      this.api.get<ResponseData<UnitCostReport>>(`/platform/billing/unit-costs${query({ month })}`, SILENT),
     );
   }
 
