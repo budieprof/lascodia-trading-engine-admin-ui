@@ -484,7 +484,7 @@ const TIMEFRAMES: Timeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
       .tests-explained {
         margin: 0;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
         gap: 0.75rem 1.5rem;
       }
       .tests-explained dt {

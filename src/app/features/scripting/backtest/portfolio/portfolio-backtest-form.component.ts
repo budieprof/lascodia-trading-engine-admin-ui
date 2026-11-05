@@ -471,7 +471,7 @@ interface InputsPanel {
       .member-head .btn { margin-left: auto; }
       .kinds { display: flex; gap: var(--space-4); flex-wrap: wrap; font-size: 13px; }
       .kinds label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--space-3); }
+      .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr)); gap: var(--space-3); }
       .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-secondary); min-width: 0; }
       .field.wide { grid-column: 1 / -1; }
       .source { height: auto; padding: 8px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; resize: vertical; }

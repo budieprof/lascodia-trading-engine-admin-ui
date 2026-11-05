@@ -431,7 +431,7 @@ const DEFAULT_TIMEFRAME: Timeframe = 'H1';
       }
       .symbol-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
         gap: var(--space-4);
         margin-bottom: var(--space-6);
       }
@@ -694,7 +694,7 @@ const DEFAULT_TIMEFRAME: Timeframe = 'H1';
       /* Multi-symbol strip on the regime tab */
       .sn-symbol-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-2);
         margin-bottom: var(--space-3);
       }

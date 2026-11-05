@@ -684,7 +684,7 @@ interface AnomalyFlag {
       /* ── Histogram ── */
       .histogram {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(4px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(4px, 100%), 1fr));
         gap: 1px;
         height: 60px;
         align-items: end;

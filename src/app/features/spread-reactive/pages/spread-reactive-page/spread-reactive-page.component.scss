@@ -155,7 +155,7 @@
    positions+orders grid so cards feel consistent across pages. */
 .config-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
   gap: var(--space-4, 16px);
 }
 .config-grid > .card {
@@ -409,6 +409,7 @@
 .tabs {
   display: flex;
   gap: 4px;
+  overflow-x: auto; // a phone scrolls the tab row instead of the page
   border-bottom: 1px solid var(--border, #e3e3e3);
   padding: 0;
 }

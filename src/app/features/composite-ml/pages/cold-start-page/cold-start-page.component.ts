@@ -478,7 +478,7 @@ function scopeKeyOf(symbol: string | null, timeframe: Timeframe | null): string 
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-3);
         align-items: start;
       }

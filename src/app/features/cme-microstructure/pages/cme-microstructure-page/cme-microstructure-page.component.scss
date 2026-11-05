@@ -111,7 +111,7 @@
 // ── Feed health ───────────────────────────────────────────────────────
 .health-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
   gap: 10px;
   margin-top: 12px;
 }
@@ -440,7 +440,7 @@ tr.front code {
   --series-proxy: #eb6834;
   --chart-axis: rgba(0, 0, 0, 0.22);
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 18px;
   margin-bottom: 4px;
 }

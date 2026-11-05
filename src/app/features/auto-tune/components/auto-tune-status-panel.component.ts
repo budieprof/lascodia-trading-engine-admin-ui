@@ -48,34 +48,36 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
         />
         <section class="knobs">
           <h3>Knobs the tuner can propose</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Setting</th>
-                <th>What it controls</th>
-                <th>Tuner</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdLow</td>
-                <td>
-                  Below this saturation (how far a policy step pushes its knobs against their
-                  per-cycle cap) the CompositeML trainer skips PPO and takes one plain step. Default
-                  0.3.
-                </td>
-                <td>PPO</td>
-              </tr>
-              <tr>
-                <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdHigh</td>
-                <td>
-                  At and above this saturation PPO runs at full intensity; in between it runs about
-                  half its inner iterations. Default 0.7.
-                </td>
-                <td>PPO</td>
-              </tr>
-            </tbody>
-          </table>
+          <div class="scroll-x">
+            <table>
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>What it controls</th>
+                  <th>Tuner</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdLow</td>
+                  <td>
+                    Below this saturation (how far a policy step pushes its knobs against their
+                    per-cycle cap) the CompositeML trainer skips PPO and takes one plain step.
+                    Default 0.3.
+                  </td>
+                  <td>PPO</td>
+                </tr>
+                <tr>
+                  <td class="mono">CompositeMLReinforceTraining:PpoSaturationThresholdHigh</td>
+                  <td>
+                    At and above this saturation PPO runs at full intensity; in between it runs
+                    about half its inner iterations. Default 0.7.
+                  </td>
+                  <td>PPO</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
         <app-config-history-card
           prefix="CompositeMLReinforceTraining:"

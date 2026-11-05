@@ -557,6 +557,7 @@ const STATUS_LABELS: Record<string, string> = {
       }
       .control-group {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }
@@ -567,6 +568,7 @@ const STATUS_LABELS: Record<string, string> = {
       }
       .status-tabs {
         display: inline-flex;
+        flex-wrap: wrap;
         gap: 4px;
         background: var(--bg-secondary);
         padding: 4px;
@@ -594,7 +596,7 @@ const STATUS_LABELS: Record<string, string> = {
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-3);
       }
       .status-card {

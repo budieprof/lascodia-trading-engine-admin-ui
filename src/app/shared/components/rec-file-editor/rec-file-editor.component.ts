@@ -241,7 +241,7 @@ const MAX_EXPIRY_MINUTES = 24 * 60;
       }
       .rfe-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(7.5rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(7.5rem, 100%), 1fr));
         gap: 0.5rem;
       }
       .rfe-field {

@@ -465,10 +465,10 @@ export const MEMBER_TRADES_SHOWN = 500;
       .head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
       .title { margin: 0; font-size: var(--text-base); font-weight: var(--font-semibold); }
       .spacer { flex: 1; }
-      .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
+      .facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: var(--space-2) var(--space-4); margin: 0; }
       .facts dt { font-size: var(--text-xs); color: var(--text-secondary); }
       .facts dd { margin: 2px 0 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
-      .figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--space-3); }
+      .figures { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(130px, 100%), 1fr)); gap: var(--space-3); }
       .figures > div { display: flex; flex-direction: column; gap: 2px; }
       .label { font-size: var(--text-xs); color: var(--text-secondary); }
       .value { font-size: var(--text-lg); font-weight: var(--font-semibold); font-variant-numeric: tabular-nums; }

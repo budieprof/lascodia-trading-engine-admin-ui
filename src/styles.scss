@@ -153,6 +153,13 @@ dialog:modal {
 // ── Filter-bar polish ────────────────────────────────────────────────────────
 // Many list pages use `.filter-bar` as a strip of controls above the table.
 // Give it a glass treatment so it reads as a distinct utility surface.
+// A wide table (or any wide block) scrolls inside its card instead of pushing the page sideways.
+.scroll-x {
+  position: relative; // keeps absolutely positioned children (e.g. .sr-only labels) inside the scroll box
+  overflow-x: auto;
+  max-width: 100%;
+}
+
 .filter-bar {
   background: var(--bg-glass);
   backdrop-filter: var(--blur-md);

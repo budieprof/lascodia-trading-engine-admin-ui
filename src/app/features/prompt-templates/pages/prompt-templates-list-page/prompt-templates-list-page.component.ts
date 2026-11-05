@@ -849,7 +849,7 @@ const DEFAULT_PAGE_SIZE = 25;
         }
         .layout .history-list {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+          grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
         }
       }
       .history {

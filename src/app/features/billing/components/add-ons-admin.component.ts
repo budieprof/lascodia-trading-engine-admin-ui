@@ -50,7 +50,7 @@ import type { AddOn, TenantAddOn, UnitCostReport } from '../add-ons.types';
         display: grid;
         gap: 0.6rem;
         padding: 1rem;
-        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(13rem, 100%), 1fr));
       }
       .form-grid label {
         display: grid;

@@ -918,7 +918,7 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
       }
       .counters {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(104px, 100%), 1fr));
         gap: var(--space-4) var(--space-3);
         margin: 0;
       }
@@ -1050,7 +1050,7 @@ function toggled(set: ReadonlySet<number>, id: number): ReadonlySet<number> {
         margin: 0;
         padding: 6px;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(110px, 100%), 1fr));
         gap: 4px 12px;
         max-height: 220px;
         overflow-y: auto;

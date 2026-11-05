@@ -53,7 +53,7 @@ import { SELFHEAL_PANEL_STYLES } from './selfheal-styles';
         margin: 0;
         padding: 0;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
         gap: 6px var(--space-4);
       }
       .rows-list.is-stale {

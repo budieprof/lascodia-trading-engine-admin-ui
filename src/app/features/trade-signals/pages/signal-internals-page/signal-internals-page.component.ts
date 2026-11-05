@@ -132,28 +132,31 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
                    one compact table for the halted accounts, not a loose
                    dl per account floating under the chips. -->
                 @if (haltedAccounts(g).length > 0) {
-                  <table class="halted">
-                    <thead>
-                      <tr>
-                        <th>Account</th>
-                        <th class="num">Equity</th>
-                        <th class="num">Anchor peak</th>
-                        <th class="num">Drawdown</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (a of haltedAccounts(g); track a.tradingAccountId) {
+                  <div class="scroll-x">
+                    <table class="halted">
+                      <thead>
                         <tr>
-                          <td>
-                            {{ a.accountName }} <span class="muted">#{{ a.tradingAccountId }}</span>
-                          </td>
-                          <td class="num">{{ a.equity | number: '1.2-2' }}</td>
-                          <td class="num">{{ a.peakEquity | number: '1.2-2' }}</td>
-                          <td class="num neg">{{ a.drawdownPct | number: '1.2-2' }}%</td>
+                          <th>Account</th>
+                          <th class="num">Equity</th>
+                          <th class="num">Anchor peak</th>
+                          <th class="num">Drawdown</th>
                         </tr>
-                      }
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        @for (a of haltedAccounts(g); track a.tradingAccountId) {
+                          <tr>
+                            <td>
+                              {{ a.accountName }}
+                              <span class="muted">#{{ a.tradingAccountId }}</span>
+                            </td>
+                            <td class="num">{{ a.equity | number: '1.2-2' }}</td>
+                            <td class="num">{{ a.peakEquity | number: '1.2-2' }}</td>
+                            <td class="num neg">{{ a.drawdownPct | number: '1.2-2' }}%</td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  </div>
                 }
               </article>
             }
@@ -653,7 +656,7 @@ import { ErrorStateComponent } from '@shared/components/feedback/error-state.com
 
       .stages {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3);
         align-items: stretch;
         padding: var(--space-4);

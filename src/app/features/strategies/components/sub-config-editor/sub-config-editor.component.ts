@@ -187,7 +187,7 @@ import {
       }
       .sub-config-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
         gap: var(--space-3) var(--space-4);
       }
       .sub-config-grid.disabled {

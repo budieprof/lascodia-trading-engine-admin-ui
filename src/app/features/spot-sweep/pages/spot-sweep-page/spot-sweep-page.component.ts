@@ -1291,7 +1291,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
          the total to 10. On a wide status card all fit in a single row. */
       .counters {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(104px, 100%), 1fr));
         gap: var(--space-4) var(--space-3);
         margin: 0;
       }
@@ -1467,7 +1467,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
         margin: 0;
         padding: 6px;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(110px, 100%), 1fr));
         gap: 4px 12px;
         max-height: 220px;
         overflow-y: auto;
@@ -1508,7 +1508,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
         margin: 0;
         padding: 8px 10px;
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
         gap: 6px 16px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);

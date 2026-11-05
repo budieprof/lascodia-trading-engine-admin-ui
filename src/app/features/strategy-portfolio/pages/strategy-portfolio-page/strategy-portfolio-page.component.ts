@@ -327,36 +327,40 @@ import { DatePipe } from '@angular/common';
           @if (f.byHypothesisClass.length > 0) {
             <section class="drift-card">
               <h4 class="card-title">Per-hypothesis-class breakdown</h4>
-              <table class="fwer-table">
-                <thead>
-                  <tr>
-                    <th>Hypothesis class</th>
-                    <th class="num">Active</th>
-                    <th class="num">Trials</th>
-                    <th class="num">Bonferroni survivors</th>
-                    <th class="num">Survival rate</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (row of f.byHypothesisClass; track row.hypothesisClass) {
+              <div class="scroll-x">
+                <table class="fwer-table">
+                  <thead>
                     <tr>
-                      <td>{{ row.hypothesisClass }}</td>
-                      <td class="num">{{ row.activeStrategies }}</td>
-                      <td class="num">{{ row.trialsInWindow }}</td>
-                      <td class="num" [class.profit]="row.bonferroniSurvivors > 0">
-                        {{ row.bonferroniSurvivors }}
-                      </td>
-                      <td class="num">
-                        @if (row.activeStrategies > 0) {
-                          {{ ((row.bonferroniSurvivors / row.activeStrategies) * 100).toFixed(1) }}%
-                        } @else {
-                          —
-                        }
-                      </td>
+                      <th>Hypothesis class</th>
+                      <th class="num">Active</th>
+                      <th class="num">Trials</th>
+                      <th class="num">Bonferroni survivors</th>
+                      <th class="num">Survival rate</th>
                     </tr>
-                  }
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    @for (row of f.byHypothesisClass; track row.hypothesisClass) {
+                      <tr>
+                        <td>{{ row.hypothesisClass }}</td>
+                        <td class="num">{{ row.activeStrategies }}</td>
+                        <td class="num">{{ row.trialsInWindow }}</td>
+                        <td class="num" [class.profit]="row.bonferroniSurvivors > 0">
+                          {{ row.bonferroniSurvivors }}
+                        </td>
+                        <td class="num">
+                          @if (row.activeStrategies > 0) {
+                            {{
+                              ((row.bonferroniSurvivors / row.activeStrategies) * 100).toFixed(1)
+                            }}%
+                          } @else {
+                            —
+                          }
+                        </td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
             </section>
           }
         } @else {
@@ -518,7 +522,7 @@ import { DatePipe } from '@angular/common';
 
       .fwer-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
         gap: var(--space-4);
         padding: var(--space-4) var(--space-5);
         background: var(--bg-secondary);

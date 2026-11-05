@@ -36,6 +36,9 @@ import { Component, input, computed, ChangeDetectionStrategy } from '@angular/co
       :host {
         display: block;
         height: 100%;
+        /* A grid cell may shrink below the figure's width (it ellipsises); otherwise a two-up
+           strip on a phone ran ~75px past the screen. */
+        min-width: 0;
       }
       /* Compact tile shared by every KPI strip: small uppercase label on top, the figure (and its
          delta / caption) pinned to the bottom so values line up across a row whatever the label

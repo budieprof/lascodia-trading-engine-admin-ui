@@ -242,7 +242,7 @@ export interface ApprovalComposerResult {
       }
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(9rem, 100%), 1fr));
         gap: 6px;
       }
       .field {

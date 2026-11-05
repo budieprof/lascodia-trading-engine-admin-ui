@@ -537,7 +537,7 @@ import { RationaleInlineComponent } from '@features/llm/components/rationale-inl
          row by itself); the container clips the last-column right border. */
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
         gap: 0;
         margin: 0;
         overflow: hidden;

@@ -1448,7 +1448,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       }
       .typed-params-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
         gap: 8px 12px;
       }
       .typed-params-field {
@@ -1487,7 +1487,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
       }
       .preview-stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
         gap: 8px;
         margin-top: 8px;
       }

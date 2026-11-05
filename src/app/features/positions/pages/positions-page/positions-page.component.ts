@@ -649,7 +649,7 @@ import {
       .closed-stats,
       .analytics-kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(175px, 100%), 1fr));
         gap: var(--space-3);
         margin-bottom: var(--space-3);
         align-items: start;

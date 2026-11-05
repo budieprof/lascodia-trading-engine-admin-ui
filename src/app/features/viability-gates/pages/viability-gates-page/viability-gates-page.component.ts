@@ -602,14 +602,14 @@ import {
       }
       .ghost-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
         gap: var(--space-3);
       }
       /* Cards keep their own height; stretching short ones to the tallest
          card in the row left hundreds of pixels of empty card. */
       .gate-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
         gap: var(--space-4);
         align-items: start;
       }

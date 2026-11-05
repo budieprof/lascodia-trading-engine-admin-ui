@@ -28,7 +28,7 @@ import type { BillingUsageMonth } from '../billing.types';
       }
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
         gap: 12px;
         padding: 12px 16px;
       }

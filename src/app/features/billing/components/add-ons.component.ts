@@ -55,7 +55,7 @@ import {
         display: grid;
         gap: 1rem 1.5rem;
         padding: 1rem;
-        grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
       }
       .unit {
         display: grid;
@@ -98,7 +98,7 @@ import {
         display: grid;
         gap: 0.75rem;
         padding: 0 1rem 1rem;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
       }
       .addon {
         border: 1px solid var(--border, rgba(127, 127, 127, 0.25));

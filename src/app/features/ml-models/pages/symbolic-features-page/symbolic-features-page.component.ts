@@ -514,6 +514,7 @@ export function renderExpression(json: string): string | null {
       }
       .control-group {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }
@@ -524,6 +525,7 @@ export function renderExpression(json: string): string | null {
       }
       .status-tabs {
         display: inline-flex;
+        flex-wrap: wrap;
         gap: 4px;
         background: var(--bg-secondary);
         padding: 4px;

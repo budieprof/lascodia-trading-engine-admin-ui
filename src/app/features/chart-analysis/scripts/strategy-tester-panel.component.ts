@@ -903,7 +903,7 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
       }
       .tester__inputs {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
         gap: 8px 16px;
         align-items: end;
       }
@@ -1030,7 +1030,7 @@ const isoDate = (ms: number) => new Date(ms).toISOString().slice(0, 10);
       }
       .td__cols {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: 0 24px;
       }
       .td dl {

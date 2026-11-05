@@ -157,6 +157,8 @@ const FALLBACK_KEYS = [GENERATOR_SWITCH, POLICY_TRAINER_SWITCH, CPC_SWITCH, LAST
       }
       .full {
         display: grid;
+        /* A minmax(0) track: an auto track grew to its widest child and ran off a phone. */
+        grid-template-columns: minmax(0, 1fr);
         gap: var(--space-3);
       }
       .strip {

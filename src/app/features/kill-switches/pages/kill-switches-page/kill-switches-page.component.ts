@@ -486,7 +486,7 @@ const PAGE_SIZE = 25;
       }
       .global-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
         gap: var(--space-4);
         margin: 0;
         padding-top: var(--space-4);
@@ -641,6 +641,7 @@ const PAGE_SIZE = 25;
       }
       .pager-controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }

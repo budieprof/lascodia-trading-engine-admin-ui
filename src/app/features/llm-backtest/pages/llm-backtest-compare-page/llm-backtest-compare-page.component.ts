@@ -394,15 +394,17 @@ interface DeltaRow {
 
       .head-grid {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        /* minmax(0): the run name (one line, ellipsised) must not widen its column past a phone. */
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--space-4);
       }
       @media (max-width: 980px) {
         .head-grid {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
       }
       .side {
+        min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 0.6rem;
@@ -459,6 +461,8 @@ interface DeltaRow {
       }
       .kv-list dd {
         margin: 0;
+        min-width: 0;
+        overflow-wrap: anywhere; /* long prompt versions wrap instead of widening the card */
         text-align: right;
         font-variant-numeric: tabular-nums;
       }

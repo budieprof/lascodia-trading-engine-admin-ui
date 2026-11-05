@@ -729,7 +729,7 @@ interface ActivityEntry {
       /* One strip style for the demoted hero stats and the status footer. */
       .stat-strip {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
         gap: var(--space-2);
         position: relative;
         z-index: 1;

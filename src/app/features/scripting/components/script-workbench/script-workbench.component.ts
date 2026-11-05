@@ -475,6 +475,7 @@ export const COMPILE_DEBOUNCE_MS = 700;
       }
       .toolbar {
         display: flex;
+        flex-wrap: wrap; /* ~640px of buttons: on a phone they wrap rather than run off */
         align-items: center;
         gap: 4px;
         min-height: 28px;

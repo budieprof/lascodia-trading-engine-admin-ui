@@ -178,6 +178,7 @@ const FIXTURES: Record<FixtureKey, Fixture> = {
       }
       .controls {
         display: flex;
+        flex-wrap: wrap;
         gap: 12px;
         align-items: center;
         font-size: 13px;

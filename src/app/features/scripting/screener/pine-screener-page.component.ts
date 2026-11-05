@@ -556,7 +556,7 @@ const SOURCE_PLACEHOLDER = '//@version=6\nindicator("My screener")\nplot(ta.rsi(
       }
       .symbol-list {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(110px, 100%), 1fr));
         gap: var(--space-1) var(--space-3);
         max-height: 220px;
         overflow: auto;

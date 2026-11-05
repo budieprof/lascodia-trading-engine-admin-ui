@@ -593,7 +593,7 @@ tr.detail-row td {
 }
 .kv-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
   gap: 6px 24px;
   margin: 0;
   padding: 0;

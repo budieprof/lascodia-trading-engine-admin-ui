@@ -1236,7 +1236,7 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
       }
       .panel-body {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
         gap: var(--space-4);
         padding: var(--space-5);
       }
@@ -1516,7 +1516,7 @@ import { ConfigHistoryCardComponent } from '@features/strategies/components/conf
       .tier2-guide dl {
         margin: 0;
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
         gap: var(--space-3);
       }
       .tier2-guide dt {

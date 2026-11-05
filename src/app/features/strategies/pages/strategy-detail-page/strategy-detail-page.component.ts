@@ -937,7 +937,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
       }
       .health-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr));
         gap: var(--space-4) var(--space-5);
         margin: 0;
         flex: 1;
@@ -1089,7 +1089,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
       }
       .param-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3) var(--space-4);
         margin: 0;
       }
@@ -1179,7 +1179,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
 
       .detail-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
         gap: var(--space-4);
       }
 

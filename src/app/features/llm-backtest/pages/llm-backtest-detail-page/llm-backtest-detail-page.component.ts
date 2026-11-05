@@ -1298,7 +1298,7 @@ const OUTCOME_FILTERS = [
 
       .stat-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-3);
       }
       .live-banner {
@@ -1368,7 +1368,7 @@ const OUTCOME_FILTERS = [
       }
       .stability-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3);
         margin-bottom: var(--space-3);
       }
@@ -1666,7 +1666,7 @@ const OUTCOME_FILTERS = [
 
       .sens-form {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: 0.75rem;
         align-items: end;
         padding: 0.5rem 0 1rem;
@@ -1690,7 +1690,7 @@ const OUTCOME_FILTERS = [
       }
       .sens-kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
         gap: 0.75rem;
         margin: 1rem 0;
       }
@@ -1744,7 +1744,7 @@ const OUTCOME_FILTERS = [
       }
       .sens-breakdowns {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
         gap: 1rem;
       }
       .breakdown-block h4 {

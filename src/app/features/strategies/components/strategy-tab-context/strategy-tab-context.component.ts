@@ -420,7 +420,7 @@ import {
       }
       .grid-dl {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
         gap: var(--space-3);
         margin: 0;
       }

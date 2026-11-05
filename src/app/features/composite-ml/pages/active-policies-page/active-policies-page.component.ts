@@ -310,7 +310,7 @@ type TierFilter = 'all' | 'live' | 'coldstart';
       /* KPI strip — Drift Report family: tone stripe, short label, figure, one-line caption. */
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3);
       }
       .kpi {

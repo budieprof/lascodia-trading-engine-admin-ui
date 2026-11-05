@@ -201,7 +201,8 @@ const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
         margin: 4px 0 0;
         padding: 6px 10px;
         display: grid;
-        grid-template-columns: repeat(7, 1fr);
+        /* Seven across when they fit; on a phone the days wrap instead of running off the screen. */
+        grid-template-columns: repeat(auto-fit, minmax(3.25rem, 1fr));
         gap: 6px 12px;
         border: 1px solid var(--border);
         border-radius: var(--radius-sm);

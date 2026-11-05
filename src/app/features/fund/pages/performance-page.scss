@@ -78,7 +78,7 @@ tr.picked td:first-child {
     grid-template-columns: 1fr;
   }
   .hero .kpis {
-    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
   }
 }
 .hero-main {

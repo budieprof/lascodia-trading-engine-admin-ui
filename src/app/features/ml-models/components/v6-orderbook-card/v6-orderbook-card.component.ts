@@ -48,50 +48,52 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
         </header>
 
         @if (d.slotStats.length > 0) {
-          <table class="slots-table">
-            <thead>
-              <tr>
-                <th>Slot</th>
-                <th>Feature</th>
-                <th class="num">Above threshold</th>
-                <th class="num">Mean importance</th>
-                <th class="num">Max importance</th>
-                <th class="num">Share above threshold</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (slot of d.slotStats; track slot.slotIndex) {
+          <div class="scroll-x">
+            <table class="slots-table">
+              <thead>
                 <tr>
-                  <td class="mono">{{ slot.slotIndex }}</td>
-                  <td class="mono small">{{ slot.semanticName }}</td>
-                  <td class="num mono">
-                    {{ slot.modelsAboveThreshold }} / {{ slot.modelsWithFeature }}
-                  </td>
-                  <td class="num mono">{{ slot.meanImportance | number: '1.0-3' }}</td>
-                  <td class="num mono">{{ slot.maxImportance | number: '1.0-3' }}</td>
-                  <td class="num">
-                    <!-- The number is always printed: an empty track alone
-                         reads as a full grey bar, i.e. the opposite of 0%. -->
-                    <span class="frac-cell">
-                      <span class="bar-track" aria-hidden="true">
-                        <span
-                          class="bar-fill"
-                          [style.width.%]="slot.fractionAboveThreshold * 100"
-                          [attr.data-tier]="fractionTier(slot.fractionAboveThreshold)"
-                        ></span>
-                      </span>
-                      <span
-                        class="frac-value mono"
-                        [class.muted]="slot.fractionAboveThreshold === 0"
-                      >
-                        {{ slot.fractionAboveThreshold * 100 | number: '1.0-0' }}%
-                      </span>
-                    </span>
-                  </td>
+                  <th>Slot</th>
+                  <th>Feature</th>
+                  <th class="num">Above threshold</th>
+                  <th class="num">Mean importance</th>
+                  <th class="num">Max importance</th>
+                  <th class="num">Share above threshold</th>
                 </tr>
-              }
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                @for (slot of d.slotStats; track slot.slotIndex) {
+                  <tr>
+                    <td class="mono">{{ slot.slotIndex }}</td>
+                    <td class="mono small">{{ slot.semanticName }}</td>
+                    <td class="num mono">
+                      {{ slot.modelsAboveThreshold }} / {{ slot.modelsWithFeature }}
+                    </td>
+                    <td class="num mono">{{ slot.meanImportance | number: '1.0-3' }}</td>
+                    <td class="num mono">{{ slot.maxImportance | number: '1.0-3' }}</td>
+                    <td class="num">
+                      <!-- The number is always printed: an empty track alone
+                           reads as a full grey bar, i.e. the opposite of 0%. -->
+                      <span class="frac-cell">
+                        <span class="bar-track" aria-hidden="true">
+                          <span
+                            class="bar-fill"
+                            [style.width.%]="slot.fractionAboveThreshold * 100"
+                            [attr.data-tier]="fractionTier(slot.fractionAboveThreshold)"
+                          ></span>
+                        </span>
+                        <span
+                          class="frac-value mono"
+                          [class.muted]="slot.fractionAboveThreshold === 0"
+                        >
+                          {{ slot.fractionAboveThreshold * 100 | number: '1.0-0' }}%
+                        </span>
+                      </span>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
         }
       </section>
     }

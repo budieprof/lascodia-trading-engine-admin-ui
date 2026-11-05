@@ -578,7 +578,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
       }
       .capture-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr));
         gap: var(--space-3);
         width: 100%;
       }
