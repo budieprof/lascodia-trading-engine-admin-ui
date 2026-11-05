@@ -638,7 +638,7 @@ const STALE_MINUTES = 240;
       }
       .facts {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
         gap: var(--space-3);
       }
       .fact {
@@ -685,7 +685,7 @@ const STALE_MINUTES = 240;
       }
       .kv {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
         gap: var(--space-2) var(--space-5);
         margin: var(--space-2) 0 0;
       }

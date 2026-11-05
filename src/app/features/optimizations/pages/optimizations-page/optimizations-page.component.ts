@@ -851,7 +851,7 @@ const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
       }
       .dry-run dl {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-4);
         margin: 0;
       }
@@ -1397,7 +1397,7 @@ const NUM_CELL = { fontVariantNumeric: 'tabular-nums' };
       }
       .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-4);
         margin: 0;
       }

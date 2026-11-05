@@ -1244,7 +1244,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
       }
       .bm-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
         gap: var(--space-4) var(--space-6, 32px);
         padding: var(--space-4) var(--space-5) 0;
       }

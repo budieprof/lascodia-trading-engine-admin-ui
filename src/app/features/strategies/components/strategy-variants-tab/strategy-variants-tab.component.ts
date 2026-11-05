@@ -221,7 +221,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .variants-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
         gap: var(--space-3);
       }
       .variant {
@@ -277,7 +277,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
       }
       .metrics {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr));
         gap: var(--space-2) var(--space-3);
         margin: 0;
       }

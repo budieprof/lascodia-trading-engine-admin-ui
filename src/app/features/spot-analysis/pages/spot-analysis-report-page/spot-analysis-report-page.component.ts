@@ -814,7 +814,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
          "-$54,744.83" fits without clipping, and tiles do not stretch. */
       .kpi-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(190px, 100%), 1fr));
         gap: var(--space-3);
         align-items: start;
       }
@@ -991,6 +991,7 @@ const EMPTY_SUMMARY: SpotAnalysisSummaryDto = {
       }
       .pager-controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }

@@ -365,7 +365,7 @@ const DEFAULT_INTRO =
 
       .controls {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
         gap: 0.6rem;
         padding: 0.7rem;
         border: 1px solid var(--line);
@@ -428,7 +428,7 @@ const DEFAULT_INTRO =
 
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
         gap: 0.55rem;
       }
       .tile {

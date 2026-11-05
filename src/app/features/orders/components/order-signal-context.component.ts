@@ -159,7 +159,7 @@ import { ago, day } from '@features/strategies/util/figures';
       }
       .grid-dl {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
         gap: var(--space-3);
         margin: 0;
       }

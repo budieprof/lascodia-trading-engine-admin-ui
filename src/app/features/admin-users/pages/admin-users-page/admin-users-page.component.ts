@@ -423,7 +423,7 @@ type RolesState = { id: number; username: string; selected: Set<number> };
     `
       .ctx-cols {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
         gap: var(--space-3);
         align-items: start;
       }

@@ -63,7 +63,7 @@ type ReturnState = 'confirming' | 'waiting' | 'done' | 'late' | 'cancelled' | nu
       }
       .plans {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(210px, 100%), 1fr));
         gap: var(--space-3);
       }
       .plan {

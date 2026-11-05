@@ -292,6 +292,7 @@ const EMPTY_SUMMARY: CatalogueDriftSummaryDto = {
       }
       .control-group {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }

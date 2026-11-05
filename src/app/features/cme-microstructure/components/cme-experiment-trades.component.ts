@@ -405,7 +405,7 @@ import type {
 
       .arms {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(16rem, 100%), 1fr));
         gap: 0.75rem;
       }
       .arm {
@@ -441,7 +441,7 @@ import type {
 
       .panel-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(21rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(21rem, 100%), 1fr));
         gap: 0.9rem;
       }
       .panel {

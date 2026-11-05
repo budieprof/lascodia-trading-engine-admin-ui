@@ -74,7 +74,7 @@ import { declarationRows } from './declaration-summary.model';
       }
       .props {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(min(190px, 100%), 1fr));
         gap: 4px 16px;
         margin: 0;
       }

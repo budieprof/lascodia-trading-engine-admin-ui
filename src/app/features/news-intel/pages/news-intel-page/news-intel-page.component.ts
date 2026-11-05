@@ -374,71 +374,73 @@ import {
           </div>
 
           @if (st.latestPressure.length) {
-            <table class="board">
-              <thead>
-                <tr>
-                  <th>Currency</th>
-                  <th class="num">Score</th>
-                  <th>Direction</th>
-                  <th class="num">In play</th>
-                  <th class="num">Live</th>
-                  <th class="num">Stories</th>
-                  <th>Dominant</th>
-                  <th class="num">As of</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (row of st.latestPressure; track row.currency) {
-                  <tr class="clickable" (click)="selectFocus(row.currency)">
-                    <td class="mono strong">{{ row.currency }}</td>
-                    <td
-                      class="num mono"
-                      [class.pos]="row.weightedScore > 0.02"
-                      [class.neg]="row.weightedScore < -0.02"
-                    >
-                      {{ row.weightedScore > 0 ? '+' : ''
-                      }}{{ row.weightedScore | number: '1.3-3' }}
-                    </td>
-                    <td>
-                      <div class="bar-wrap slim">
-                        <div class="bar-mid"></div>
-                        <div
-                          class="bar-fill"
-                          [class.pos]="row.weightedScore >= 0"
-                          [style.width.%]="barWidth(row.weightedScore)"
-                          [style.left.%]="
-                            row.weightedScore >= 0 ? 50 : 50 - barWidth(row.weightedScore)
-                          "
-                        ></div>
-                      </div>
-                    </td>
-                    <!-- The header always named this column; its cell was missing, so every value
-                         from here on sat one column left (Live under "In play", stories under
-                         "Live", …) and "As of" stood over nothing. -->
-                    <td
-                      class="num mono"
-                      title="Unsigned weight — how much news is active regardless of direction"
-                    >
-                      {{ row.absolutePressure | number: '1.3-3' }}
-                    </td>
-                    <td
-                      class="num mono"
-                      [class.stale]="row.liveShare === 0"
-                      [title]="boardLiveHint(row)"
-                    >
-                      @if (row.liveShare === null) {
-                        <span class="muted">—</span>
-                      } @else {
-                        {{ row.liveShare * 100 | number: '1.0-0' }}%
-                      }
-                    </td>
-                    <td class="num mono">{{ row.storyCount }} / {{ row.articleCount }}</td>
-                    <td>{{ row.dominantCategory || '—' }}</td>
-                    <td class="num muted small">{{ row.asOfUtc | date: 'MMM d HH:mm' }}</td>
+            <div class="scroll-x">
+              <table class="board">
+                <thead>
+                  <tr>
+                    <th>Currency</th>
+                    <th class="num">Score</th>
+                    <th>Direction</th>
+                    <th class="num">In play</th>
+                    <th class="num">Live</th>
+                    <th class="num">Stories</th>
+                    <th>Dominant</th>
+                    <th class="num">As of</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (row of st.latestPressure; track row.currency) {
+                    <tr class="clickable" (click)="selectFocus(row.currency)">
+                      <td class="mono strong">{{ row.currency }}</td>
+                      <td
+                        class="num mono"
+                        [class.pos]="row.weightedScore > 0.02"
+                        [class.neg]="row.weightedScore < -0.02"
+                      >
+                        {{ row.weightedScore > 0 ? '+' : ''
+                        }}{{ row.weightedScore | number: '1.3-3' }}
+                      </td>
+                      <td>
+                        <div class="bar-wrap slim">
+                          <div class="bar-mid"></div>
+                          <div
+                            class="bar-fill"
+                            [class.pos]="row.weightedScore >= 0"
+                            [style.width.%]="barWidth(row.weightedScore)"
+                            [style.left.%]="
+                              row.weightedScore >= 0 ? 50 : 50 - barWidth(row.weightedScore)
+                            "
+                          ></div>
+                        </div>
+                      </td>
+                      <!-- The header always named this column; its cell was missing, so every value
+                           from here on sat one column left (Live under "In play", stories under
+                           "Live", …) and "As of" stood over nothing. -->
+                      <td
+                        class="num mono"
+                        title="Unsigned weight — how much news is active regardless of direction"
+                      >
+                        {{ row.absolutePressure | number: '1.3-3' }}
+                      </td>
+                      <td
+                        class="num mono"
+                        [class.stale]="row.liveShare === 0"
+                        [title]="boardLiveHint(row)"
+                      >
+                        @if (row.liveShare === null) {
+                          <span class="muted">—</span>
+                        } @else {
+                          {{ row.liveShare * 100 | number: '1.0-0' }}%
+                        }
+                      </td>
+                      <td class="num mono">{{ row.storyCount }} / {{ row.articleCount }}</td>
+                      <td>{{ row.dominantCategory || '—' }}</td>
+                      <td class="num muted small">{{ row.asOfUtc | date: 'MMM d HH:mm' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
           } @else {
             <p class="muted small">
               No roll-ups yet. Either the module has not completed a cycle or nothing has been
@@ -751,34 +753,36 @@ import {
           }
 
           @if (st.sourceBreakdown.length) {
-            <table class="board">
-              <thead>
-                <tr>
-                  <th>Publisher</th>
-                  <th>Channel</th>
-                  <th class="num">Articles</th>
-                  <th class="num">Labelled</th>
-                  <th class="num">Skip rate</th>
-                  <th class="num">Newest</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (src of visibleSources(); track src.source + src.kind) {
+            <div class="scroll-x">
+              <table class="board">
+                <thead>
                   <tr>
-                    <td>{{ src.source }}</td>
-                    <td>
-                      <span class="tag subtle">{{ src.kind }}</span>
-                    </td>
-                    <td class="num mono">{{ src.count }}</td>
-                    <td class="num mono">{{ src.labelled }}</td>
-                    <td class="num mono" [class.neg]="src.skipRate >= 0.8">
-                      {{ src.skipRate | percent: '1.0-0' }}
-                    </td>
-                    <td class="num muted small">{{ src.newest | date: 'MMM d HH:mm' }}</td>
+                    <th>Publisher</th>
+                    <th>Channel</th>
+                    <th class="num">Articles</th>
+                    <th class="num">Labelled</th>
+                    <th class="num">Skip rate</th>
+                    <th class="num">Newest</th>
                   </tr>
-                }
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  @for (src of visibleSources(); track src.source + src.kind) {
+                    <tr>
+                      <td>{{ src.source }}</td>
+                      <td>
+                        <span class="tag subtle">{{ src.kind }}</span>
+                      </td>
+                      <td class="num mono">{{ src.count }}</td>
+                      <td class="num mono">{{ src.labelled }}</td>
+                      <td class="num mono" [class.neg]="src.skipRate >= 0.8">
+                        {{ src.skipRate | percent: '1.0-0' }}
+                      </td>
+                      <td class="num muted small">{{ src.newest | date: 'MMM d HH:mm' }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
             @if (hiddenSourceCount() > 0) {
               <button type="button" class="btn subtle" (click)="toggleAllSources()">
                 {{
@@ -1249,7 +1253,7 @@ import {
       }
       .leg-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
         gap: var(--space-3);
       }
       .leg-card {
@@ -1634,7 +1638,7 @@ import {
 
       .channels {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-2);
       }
       .channel-card {

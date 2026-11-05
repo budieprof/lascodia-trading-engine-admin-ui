@@ -45,7 +45,7 @@ import type { DealingClientDetail } from '../dealing.types';
       }
       .facts {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
         gap: var(--space-2);
       }
       .facts div {
@@ -54,7 +54,7 @@ import type { DealingClientDetail } from '../dealing.types';
       }
       .charts {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
         gap: var(--space-3);
       }
     `,

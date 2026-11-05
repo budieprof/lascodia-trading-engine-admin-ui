@@ -397,7 +397,7 @@ function noTradeRun(row: { totalTrades: number | null } | undefined): boolean {
 
       .rejections-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr));
         gap: var(--space-4);
         padding: var(--space-4) var(--space-5);
         background: var(--bg-secondary);

@@ -45,7 +45,7 @@ const TAB_KEY = 'lascodia.dealing.tab';
          screen, wrapping to as many columns as fit (two on a phone). */
       .filter-bar {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
         gap: var(--space-2) var(--space-3);
         align-items: end;
         padding: var(--space-3) var(--space-4);

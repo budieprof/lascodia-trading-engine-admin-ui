@@ -45,7 +45,7 @@ export interface FactTile {
     `
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
         gap: var(--space-3);
       }
       .tile {

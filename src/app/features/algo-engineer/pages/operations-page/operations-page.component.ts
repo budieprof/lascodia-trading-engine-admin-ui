@@ -719,8 +719,14 @@ function collect<T>(sources: Observable<T>[]): Observable<T[]> {
       .summary:hover {
         text-decoration: underline;
       }
+      /* A long reference shortens with "…" (full text in the row's link title) instead of
+         pushing the row past a phone screen. */
       .feed code {
-        flex: none;
+        flex: 0 1 auto;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
         font-family: var(--font-mono, monospace);
         font-size: 10px;
         padding: 0 5px;

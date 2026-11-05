@@ -97,7 +97,7 @@ import type { TenantUsage } from '@features/platform/plans.types';
       }
       .images {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
         gap: var(--space-4);
       }
       .image-box {

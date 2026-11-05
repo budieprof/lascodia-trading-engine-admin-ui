@@ -171,7 +171,7 @@ import { LandingIconComponent } from './landing-icon.component';
         align-items: stretch;
       }
       .pl--many {
-        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
       }
       .pl__card {
         display: flex;

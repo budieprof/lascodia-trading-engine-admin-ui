@@ -206,11 +206,13 @@ import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
       }
       .controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-3);
       }
       .control-group {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }

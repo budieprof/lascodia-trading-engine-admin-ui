@@ -287,11 +287,13 @@ interface DriftHistoryResult {
       }
       .controls {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-4);
       }
       .control-group {
         display: flex;
+        flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2);
       }

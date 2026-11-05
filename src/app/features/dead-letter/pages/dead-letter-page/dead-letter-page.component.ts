@@ -821,7 +821,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
       /* ── Histogram ── */
       .histogram {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(4px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(4px, 100%), 1fr));
         gap: 1px;
         height: 60px;
         align-items: end;
@@ -1110,7 +1110,7 @@ const AGE_FORMAT_1DP = new Intl.NumberFormat('en-US', {
       }
       .detail-meta {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3);
         margin: 0;
       }

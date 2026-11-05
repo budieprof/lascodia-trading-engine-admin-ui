@@ -308,6 +308,7 @@ interface DepthLevel {
         font-size: var(--text-sm);
       }
       .board-wrap {
+        position: relative; /* hidden labels inside stay in the scroll box instead of widening the page */
         overflow-x: auto;
       }
       .board-table {
@@ -425,7 +426,7 @@ interface DepthLevel {
       }
       .kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-3);
       }
       .ladder-wrap {
@@ -450,8 +451,14 @@ interface DepthLevel {
       }
       .ladder {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         gap: var(--space-2);
+      }
+      /* Phones: asks above bids (a vertical book) instead of two tables side by side off-screen. */
+      @media (max-width: 600px) {
+        .ladder {
+          grid-template-columns: minmax(0, 1fr);
+        }
       }
       .side {
         width: 100%;

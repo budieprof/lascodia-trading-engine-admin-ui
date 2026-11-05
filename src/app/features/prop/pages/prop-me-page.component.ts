@@ -40,7 +40,7 @@ import type { PropDashboard, PropOverview } from '../prop.types';
       }
       .shows {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
         gap: var(--space-3);
         padding: var(--space-3) var(--space-4);
       }

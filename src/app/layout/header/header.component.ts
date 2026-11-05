@@ -77,7 +77,7 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         }
         <button
           type="button"
-          class="icon-btn"
+          class="icon-btn wall-btn"
           (click)="wallMode.toggle()"
           [attr.aria-pressed]="wallMode.enabled()"
           aria-label="Toggle wall mode"
@@ -240,6 +240,7 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
       }
 
       .user-name {
+        white-space: nowrap;
         font-size: var(--text-sm);
         font-weight: var(--font-medium);
         color: var(--text-primary);
@@ -324,6 +325,37 @@ import { TenantBrandingService } from '@core/branding/tenant-branding.service';
         }
         .search-text,
         .search-shortcut {
+          display: none;
+        }
+      }
+
+      /* Phones. A staff header carries menu, back, search, organisation, account scope, bell,
+         avatar, wall mode and sign-out: at 390px that was ~470px, so every page panned sideways
+         and the menu and back buttons were squeezed to 16px and overlapped. Wall mode (a kiosk
+         view) and the avatar (decoration) leave, the back arrow gives way to the phone's own back
+         gesture and the console title to the page's own heading, the controls stop shrinking,
+         and the two pills shorten their text instead. */
+      @media (max-width: 600px) {
+        .header {
+          padding: 0 var(--space-3);
+        }
+        .header-left,
+        .header-right {
+          gap: var(--space-1);
+        }
+        /* Sized by its (capped) contents: allowed to shrink, it slid under the search icon. */
+        .header-right {
+          flex: none;
+        }
+        .menu-btn,
+        .search-trigger,
+        .header-right > .icon-btn {
+          flex-shrink: 0;
+        }
+        .back-btn,
+        .header-title,
+        .wall-btn,
+        .user-pill {
           display: none;
         }
       }

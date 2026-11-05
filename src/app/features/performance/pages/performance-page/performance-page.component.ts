@@ -530,7 +530,7 @@ const DD_CAP = 100;
        * viewport; align-items:start keeps short tiles from stretching. */
       .perf-kpis {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
         gap: var(--space-2);
         margin-bottom: var(--space-3);
         align-items: start;

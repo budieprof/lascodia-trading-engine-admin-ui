@@ -415,7 +415,7 @@ interface AnalyticsPanel {
 
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(11rem, 100%), 1fr));
         gap: 0.6rem;
       }
       .tile {
@@ -451,7 +451,7 @@ interface AnalyticsPanel {
 
       .panel-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr));
         gap: 0.9rem;
       }
       .panel {

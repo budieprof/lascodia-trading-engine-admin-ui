@@ -171,7 +171,7 @@
 // ── Fleet summary ──
 .kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
   gap: var(--space-3);
 }
 .kpi {
@@ -297,7 +297,7 @@
 // ── Computer (daemon) cards ──
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
   gap: var(--space-3);
   align-items: start;
 }
@@ -562,6 +562,9 @@
 
 // ── Sessions ──
 .tablecard {
+  // Positioned, so the hidden "Actions" header label stays inside this scroll box; it escaped
+  // and widened a phone page by 200px.
+  position: relative;
   background: var(--bg-secondary);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

@@ -611,13 +611,13 @@ const MULTI_SAMPLE_DEFAULT = 3;
       }
       .layout {
         display: grid;
-        grid-template-columns: 1fr 320px;
+        grid-template-columns: minmax(0, 1fr) 320px;
         gap: var(--space-5);
         align-items: start;
       }
       @media (max-width: 980px) {
         .layout {
-          grid-template-columns: 1fr;
+          grid-template-columns: minmax(0, 1fr);
         }
       }
       .form-card,

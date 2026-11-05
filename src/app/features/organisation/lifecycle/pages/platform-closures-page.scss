@@ -33,7 +33,7 @@
 
 .cols {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
   gap: var(--space-3);
   align-items: start;
 }
@@ -182,7 +182,7 @@ table.grid tr.selected td:first-child {
   margin: 0;
   padding: var(--space-3) var(--space-4) 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(170px, 100%), 1fr));
   gap: var(--space-2);
 
   li {

@@ -26,7 +26,7 @@ import type { DealingAlert, DealingClients, DealingCurves, DealingFeed } from '.
     `
       .tiles {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(9.5rem, 100%), 1fr));
         gap: var(--space-3);
       }
       .tile {

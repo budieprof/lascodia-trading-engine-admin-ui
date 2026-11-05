@@ -84,7 +84,7 @@
 .facts-strip {
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
   gap: var(--space-3) var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--bg-secondary);
@@ -222,18 +222,18 @@
 // ── Grids ──
 .ea-selfheal-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
   gap: var(--space-3);
 }
 .ea-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(440px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(440px, 100%), 1fr));
   gap: var(--space-3);
 }
 .ea-logs-audit-grid,
 .ea-positions-orders-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(520px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(520px, 100%), 1fr));
   gap: var(--space-3);
 }
 .ea-selfheal-grid > *,
@@ -654,7 +654,7 @@
 // KPI tiles with a tone stripe (house `.kpi`).
 .account-tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: var(--space-3);
 }
 .acct-tile {
@@ -727,7 +727,7 @@
 // Each label/value pair is one grid item, so a wrap never separates them.
 .account-kv {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: var(--space-2) var(--space-4);
   margin: 0;
   padding-top: var(--space-3);
@@ -852,7 +852,7 @@
 }
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
   gap: var(--space-3);
 }
 .field {

@@ -359,7 +359,7 @@ import { DatePipe } from '@angular/common';
 
       .totals {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
         gap: var(--space-4);
         padding: var(--space-4) var(--space-5);
         background: var(--bg-secondary);
