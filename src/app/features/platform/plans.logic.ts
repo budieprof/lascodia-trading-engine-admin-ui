@@ -28,6 +28,7 @@ export const LIMIT_LABELS: Readonly<Record<PlanLimitField, string>> = {
   maxConcurrentResearchJobs: 'Backtests / optimisations at a time',
   maxStrategies: 'Strategies',
   maxScripts: 'Saved scripts and libraries',
+  maxRealTradingAccounts: 'Real (live-money) trading accounts',
 };
 
 /** The usage item key of each plan limit (the engine's quota keys). */
@@ -38,6 +39,7 @@ export const LIMIT_QUOTA_KEYS: Readonly<Record<PlanLimitField, string>> = {
   maxConcurrentResearchJobs: 'concurrentResearchJobs',
   maxStrategies: 'strategies',
   maxScripts: 'scripts',
+  maxRealTradingAccounts: 'realTradingAccounts',
 };
 
 // ── Plan form ─────────────────────────────────────────────────────────
@@ -54,6 +56,8 @@ export function emptyPlanDraft(): SavePlanBody {
     maxConcurrentResearchJobs: null,
     maxStrategies: null,
     maxScripts: null,
+    maxRealTradingAccounts: null,
+    limitMarketDataCapture: false,
     maxMonthlyLlmUsd: null,
     logRetentionDays: null,
     allowsSso: false,
@@ -79,6 +83,8 @@ export function draftFromPlan(p: PlanDto): SavePlanBody {
     maxConcurrentResearchJobs: p.maxConcurrentResearchJobs,
     maxStrategies: p.maxStrategies,
     maxScripts: p.maxScripts,
+    maxRealTradingAccounts: p.maxRealTradingAccounts ?? null,
+    limitMarketDataCapture: p.limitMarketDataCapture === true,
     maxMonthlyLlmUsd: p.maxMonthlyLlmUsd,
     logRetentionDays: p.logRetentionDays,
     allowsSso: p.allowsSso,

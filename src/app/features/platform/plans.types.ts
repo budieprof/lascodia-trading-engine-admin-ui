@@ -15,6 +15,10 @@ export interface PlanDto {
   maxConcurrentResearchJobs: number | null;
   maxStrategies: number | null;
   maxScripts: number | null;
+  /** Real / contest accounts (freemium program), a subset of trading accounts; older engines omit it. */
+  maxRealTradingAccounts: number | null;
+  /** True = the organisation's EAs send sampled ticks and candles only (no full tick / order-book capture). */
+  limitMarketDataCapture?: boolean;
   maxMonthlyLlmUsd: number | null;
   logRetentionDays: number | null;
   allowsSso: boolean;
@@ -45,6 +49,7 @@ export const PLAN_LIMIT_FIELDS = [
   'maxConcurrentResearchJobs',
   'maxStrategies',
   'maxScripts',
+  'maxRealTradingAccounts',
 ] as const;
 export type PlanLimitField = (typeof PLAN_LIMIT_FIELDS)[number];
 
@@ -59,6 +64,10 @@ export interface SavePlanBody {
   maxConcurrentResearchJobs: number | null;
   maxStrategies: number | null;
   maxScripts: number | null;
+  /** Real / contest accounts (freemium program), a subset of trading accounts; older engines omit it. */
+  maxRealTradingAccounts: number | null;
+  /** True = the organisation's EAs send sampled ticks and candles only (no full tick / order-book capture). */
+  limitMarketDataCapture?: boolean;
   maxMonthlyLlmUsd: number | null;
   logRetentionDays: number | null;
   allowsSso: boolean;
