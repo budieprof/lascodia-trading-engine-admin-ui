@@ -281,7 +281,7 @@ import {
               <header class="gate-head">
                 <div>
                   <h2>{{ gate.displayName }}</h2>
-                  <p class="muted">{{ gate.description }}</p>
+                  <p class="muted gate-desc" [title]="gate.description">{{ gate.description }}</p>
                 </div>
                 <span class="mode-badge" [class]="'mode-' + gate.mode.toLowerCase()">{{
                   gate.mode
@@ -605,15 +605,17 @@ import {
         grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
         gap: var(--space-3);
       }
-      /* Cards keep their own height; stretching short ones to the tallest
-         card in the row left hundreds of pixels of empty card. */
+      /* Every card is the same fixed height so the grid reads as even rows.
+         Header, stats and the Save row stay put; only the knob editor scrolls
+         inside the card when a gate has more settings than fit. */
       .gate-grid {
         display: grid;
         grid-template-columns: repeat(auto-fill, minmax(min(420px, 100%), 1fr));
         gap: var(--space-4);
-        align-items: start;
       }
       .gate-card {
+        --gate-card-height: 640px;
+        height: var(--gate-card-height);
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: 10px;
@@ -621,6 +623,21 @@ import {
         display: flex;
         flex-direction: column;
         gap: var(--space-3);
+        overflow: hidden;
+      }
+      .gate-card > .gate-head,
+      .gate-card > .pending-row,
+      .gate-card > .stats,
+      .gate-card > .actions {
+        flex-shrink: 0;
+      }
+      /* Long descriptions are clamped; the full text is in the tooltip. */
+      .gate-desc {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 4;
+        line-clamp: 4;
+        overflow: hidden;
       }
       .gate-head {
         display: flex;
@@ -710,7 +727,15 @@ import {
       .editor {
         display: grid;
         grid-template-columns: 1fr;
+        align-content: start;
         gap: var(--space-3);
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        /* Room so focus rings and the scrollbar don't clip the inputs. */
+        padding: 2px var(--space-2) 2px 2px;
+        margin: -2px calc(-1 * var(--space-2)) -2px -2px;
       }
       .field {
         display: flex;
