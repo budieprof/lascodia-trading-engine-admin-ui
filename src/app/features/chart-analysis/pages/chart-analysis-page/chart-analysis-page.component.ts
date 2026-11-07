@@ -31,7 +31,7 @@ import {
 } from './dock-layout';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
+import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import {
   LiveRerunScheduler,
@@ -74,7 +74,7 @@ import {
   mergeSessionTail,
 } from '../../datafeed/session-bars';
 import { TradingCalendar, nextSessionPeriod, type SessionSpec } from '../../datafeed/session-calendar';
-import { liveTick, tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
+import { tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { priceScaleFor } from '../../datafeed/symbol-info';
@@ -308,7 +308,6 @@ import {
   concernsSymbol,
   orderLines,
   positionLines,
-  type ChartPosition,
   type LiveQuote,
 } from '../../overlays/trade-layer';
 import type { ChartMarker } from '../../chart/chart-host.component';
@@ -524,7 +523,6 @@ import {
   panelSymbolGroups,
   PANEL_SCALES,
   restoredPanelView,
-  type PanelLoad,
   type PanelView,
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
