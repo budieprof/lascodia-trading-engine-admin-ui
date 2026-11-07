@@ -1,4 +1,4 @@
-import { DecimalPipe } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ChangeDetectionStrategy,
@@ -27,8 +27,8 @@ import { errorText } from '@features/iam/iam.logic';
 import { VenuesApiService } from '@features/venues/venues-api.service';
 import { unitWord } from '@features/venues/venues.logic';
 import type {
+  CryptoFundamentals,
   ExecutionAccount,
-  MarginMode,
   VenueOrderType,
   VenueTicketPreview,
   VenueTif,
@@ -48,6 +48,7 @@ import {
   tifChoices,
   venueKindOf,
   venueTicketProblems,
+  venueTicketWarnings,
   type VenueSide,
   type VenueTicketState,
 } from './venue-ticket-model';
@@ -87,7 +88,7 @@ const PREVIEW_DEBOUNCE_MS = 350;
   selector: 'app-venue-order-ticket',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DecimalPipe, ModalA11yDirective, RouterLink],
+  imports: [DatePipe, DecimalPipe, ModalA11yDirective, RouterLink],
   template: `
     <section
       class="ticket"
@@ -101,7 +102,11 @@ const PREVIEW_DEBOUNCE_MS = 350;
     >
       <header class="ticket-head">
         <strong>{{ instrument().symbol }}</strong>
-        <span class="ticket-sub">{{ kindLabel() }} · {{ instrument().exchange || '' }}</span>
+        <span class="ticket-sub">{{ kindLabel() }}</span>
+        <!-- UI05: which route this ticket is — always visible. -->
+        <span class="route-badge" data-testid="ticket-route" title="Placed by the engine at this venue, never via MT5"
+          >Venue: {{ instrument().exchange || 'exchange' }}</span
+        >
         <button
           type="button"
           class="ticket-x"
@@ -265,28 +270,15 @@ const PREVIEW_DEBOUNCE_MS = 350;
       @if (kind() === 'crypto-derivative') {
         <div class="ticket-row">
           <span>Leverage</span>
-          <input
-            class="lev"
-            type="number"
-            min="1"
-            max="500"
-            step="1"
-            [value]="state().leverage ?? ''"
-            [placeholder]="preview()?.accountLeverage ?? 'account'"
-            (change)="setLeverage($any($event.target).value)"
-            aria-label="Leverage"
-          />
-          <select
-            [value]="state().marginMode ?? ''"
-            (change)="setMarginMode($any($event.target).value)"
-            aria-label="Margin mode"
-          >
-            <option value="">{{ preview()?.accountMarginMode ?? 'Account' }} (account)</option>
-            <option value="Isolated" [selected]="state().marginMode === 'Isolated'">
-              Isolated
-            </option>
-            <option value="Cross" [selected]="state().marginMode === 'Cross'">Cross</option>
-          </select>
+          <!-- UI06: the send path ignores a per-order leverage / margin mode — the account's configured values apply —
+               so they are shown read-only, as the account holds them, never as an input that does nothing. -->
+          <output class="lev" aria-label="Leverage" data-testid="venue-ticket-leverage">{{
+            preview()?.accountLeverage != null ? (preview()!.accountLeverage | number: '1.0-2') + '×' : '—'
+          }}</output>
+          <output aria-label="Margin mode" data-testid="venue-ticket-margin-mode">{{
+            preview()?.accountMarginMode ?? '—'
+          }}</output>
+          <span class="muted">(the account's)</span>
         </div>
       }
 
@@ -324,6 +316,9 @@ const PREVIEW_DEBOUNCE_MS = 350;
       @for (p of problems(); track p) {
         <p class="ticket-warn">{{ p }}</p>
       }
+      @for (w of warnings(); track w) {
+        <p class="ticket-note" data-testid="venue-ticket-warning">{{ w }}</p>
+      }
 
       @if (previewError(); as e) {
         <p class="ticket-why" role="alert">{{ e }}</p>
@@ -357,6 +352,22 @@ const PREVIEW_DEBOUNCE_MS = 350;
             @if (m.liquidationPrice !== null) {
               <dt>Liquidation</dt>
               <dd>{{ m.liquidationPrice | number: fmt() }}</dd>
+            }
+            @if (kind() === 'crypto-derivative') {
+              <dt>Funding</dt>
+              <dd data-testid="venue-ticket-funding">
+                @if (funding(); as f) {
+                  {{ f.fundingRate === null ? '—' : (f.fundingRate * 100 | number: '1.4-4') + ' %' }}
+                  @if (f.fundingIntervalHours) {
+                    / {{ f.fundingIntervalHours }} h
+                  }
+                  @if (f.nextFundingT !== null) {
+                    · next {{ f.nextFundingT | date: 'HH:mm' : 'UTC' }} UTC
+                  }
+                } @else {
+                  — (not reported)
+                }
+              </dd>
             }
           }
           @if (pv.riskMoney !== null) {
@@ -478,8 +489,7 @@ const PREVIEW_DEBOUNCE_MS = 350;
         }
         <p class="ticket-note">
           Send creates a manual signal: Tier 1, then the venue entry path (Tier 2 + Risk:MultiAsset)
-          places it at the venue. Leverage and margin mode here are preview-only — the account's
-          configured values apply.
+          places it at the venue. Leverage and margin mode are the account's configured values.
         </p>
       </footer>
     </section>
@@ -508,6 +518,14 @@ const PREVIEW_DEBOUNCE_MS = 350;
       .ticket-sub {
         opacity: 0.7;
         flex: 1;
+      }
+      .route-badge {
+        border: 1px solid currentColor;
+        border-radius: 3px;
+        padding: 0 4px;
+        font-size: 10px;
+        opacity: 0.85;
+        white-space: nowrap;
       }
       .ticket-x {
         background: none;
@@ -805,12 +823,23 @@ export class VenueOrderTicketComponent {
   );
   readonly unit = computed(() => unitWord(this.instrument().quantityUnit, this.state().quantity));
   readonly unitOne = computed(() => unitWord(this.instrument().quantityUnit, 1));
-  readonly tifs = computed<VenueTif[]>(() => tifChoices(this.state().orderType));
+  readonly tifs = computed<VenueTif[]>(() => tifChoices(this.state().orderType, this.instrument()));
   readonly fmt = computed(() => {
     const d = Math.max(this.instrument().priceDecimals, stepDecimals(this.instrument().tickSize));
     return `1.${d}-${d}`;
   });
-  readonly problems = computed(() => venueTicketProblems(this.state(), this.instrument()));
+  /** The price the order is valued at for the venue-minimum check: its own price, else the side's quote. */
+  private readonly refPrice = computed(() => {
+    const q = this.quote();
+    return ticketEntry(this.state(), q ? { bid: q.bid, ask: q.ask } : null);
+  });
+  readonly problems = computed(() =>
+    venueTicketProblems(this.state(), this.instrument(), { refPrice: this.refPrice() }),
+  );
+  /** Said, not refused (UI06): near expiry, not shortable, fractional unknown, inverse money. */
+  readonly warnings = computed(() => venueTicketWarnings(this.state(), this.instrument()));
+  /** Crypto perpetual funding, shown next to the liquidation price (UI06); null until read / when not served. */
+  readonly funding = signal<CryptoFundamentals | null>(null);
   readonly brackets = computed(() => {
     const s = this.state();
     const q = this.quote();
@@ -831,6 +860,24 @@ export class VenueOrderTicketComponent {
   private lastKey: string | null = null;
 
   constructor() {
+    // UI06: a crypto perpetual's funding, read once per instrument (the fundamentals panel's endpoint and source).
+    effect(() => {
+      const inst = this.instrument();
+      untracked(() => {
+        this.funding.set(null);
+        if (venueKindOf(inst) !== 'crypto-derivative') return;
+        const sourceId = `crypto-${(inst.exchange ?? '').toLowerCase()}`;
+        this.api
+          .cryptoFundamentals(inst.symbol, sourceId)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (f) => {
+              if (this.instrument().symbol === inst.symbol) this.funding.set(f);
+            },
+            error: () => this.funding.set(null),
+          });
+      });
+    });
     // A new instrument is a new ticket.
     effect(() => {
       const inst = this.instrument();
@@ -888,7 +935,7 @@ export class VenueOrderTicketComponent {
   }
 
   patch(p: Partial<VenueTicketState>): void {
-    this.state.update((s) => patchVenueTicket(s, p));
+    this.state.update((s) => patchVenueTicket(s, p, this.instrument()));
   }
 
   setAccount(v: string): void {
@@ -996,15 +1043,6 @@ export class VenueOrderTicketComponent {
   setTicks(field: 'stopLossTicks' | 'takeProfitTicks', v: string): void {
     const n = Math.round(Number(v));
     this.patch({ [field]: v === '' || !(n > 0) ? null : n });
-  }
-
-  setLeverage(v: string): void {
-    const n = Number(v);
-    this.patch({ leverage: v === '' || !(n >= 1) ? null : Math.min(500, n) });
-  }
-
-  setMarginMode(v: string): void {
-    this.patch({ marginMode: v === 'Isolated' || v === 'Cross' ? (v as MarginMode) : null });
   }
 
   private schedulePreview(symbol: string, s: VenueTicketState, bad: boolean): void {

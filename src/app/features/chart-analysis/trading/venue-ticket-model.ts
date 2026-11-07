@@ -81,9 +81,17 @@ export function onGrid(value: number, step: number): boolean {
   return Math.abs(n - Math.round(n)) < 1e-7;
 }
 
-/** The time-in-force choices for an order type (a market order fills now: IOC / FOK only). */
-export function tifChoices(orderType: VenueOrderType): VenueTif[] {
-  return orderType === 'Market' ? ['Ioc', 'Fok'] : ['Gtc', 'Day', 'Ioc', 'Fok'];
+/**
+ * The time-in-force choices for an order type (a market order fills now: IOC / FOK only), narrowed to what the
+ * instrument's execution venue supports when it says (C2 `timeInForce`; empty / absent = unknown → not narrowed).
+ */
+export function tifChoices(
+  orderType: VenueOrderType,
+  inst?: Pick<InstrumentDto, 'timeInForce'> | null,
+): VenueTif[] {
+  const all: VenueTif[] = orderType === 'Market' ? ['Ioc', 'Fok'] : ['Gtc', 'Day', 'Ioc', 'Fok'];
+  const venue = (inst?.timeInForce ?? []).map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return venue.length ? all.filter((t) => venue.includes(t.toLowerCase())) : all;
 }
 
 /** The entry the bracket is measured from: the order's own price, else the side's live quote. */
@@ -117,13 +125,63 @@ export function ticksBetween(a: number, b: number, tick: number): number {
   return tick > 0 ? Math.round(Math.abs(a - b) / tick) : 0;
 }
 
-/** Money of a move of `ticks` on `qty` units, quote currency (tick value × ticks × quantity). */
-export function moneyForTicks(inst: Pick<InstrumentDto, 'tickValue'>, ticks: number, qty: number): number {
+/**
+ * Money of a move of `ticks` on `qty` units. Linear: tick value × ticks × quantity, in the quote currency. Inverse
+ * (coin-margined, C2 `contractType`): contracts × contract value × |1/entry − 1/(entry + ticks × tick)|, in the coin —
+ * not linear in price, so it needs the entry; null without one.
+ */
+export function moneyForTicks(
+  inst: Pick<InstrumentDto, 'tickValue'> & Partial<Pick<InstrumentDto, 'contractType' | 'multiplier' | 'tickSize'>>,
+  ticks: number,
+  qty: number,
+  entry?: number | null,
+): number | null {
+  if (inst.contractType === 'Inverse') {
+    const tick = inst.tickSize ?? 0;
+    if (!entry || !(entry > 0) || !(tick > 0) || !(inst.multiplier && inst.multiplier > 0)) return null;
+    const exit = entry + ticks * tick;
+    if (!(exit > 0)) return null;
+    return qty * inst.multiplier * Math.abs(1 / entry - 1 / exit);
+  }
   return inst.tickValue * ticks * qty;
 }
 
-/** The ticket's shape problems, in the engine's words (blocking). */
-export function venueTicketProblems(s: VenueTicketState, inst: InstrumentDto): string[] {
+/** What the ticket checks beyond its shape: the price it is valued at and the clock (expiry). */
+export interface VenueTicketContext {
+  /** The price the order is valued at (its own limit / trigger, else the side's quote); null = unknown. */
+  refPrice?: number | null;
+  /** Now, Unix ms (tests pin it). */
+  now?: number;
+}
+
+/** Days before a contract's last trade date the ticket starts warning. */
+const EXPIRY_WARN_DAYS = 3;
+
+function lastTradeMs(inst: InstrumentDto): number | null {
+  const d = inst.future?.lastTradeDate ?? inst.future?.expiry ?? null;
+  if (!d) return null;
+  const t = Date.parse(d.length === 10 ? `${d}T23:59:59Z` : d);
+  return Number.isFinite(t) ? t : null;
+}
+
+/** The order's value in the quote currency (inverse: contracts × contract value, already in USD); null = unknown. */
+export function orderNotional(s: Pick<VenueTicketState, 'quantity'>, inst: InstrumentDto, refPrice: number | null | undefined): number | null {
+  if (!(s.quantity > 0)) return null;
+  const mult = inst.multiplier > 0 ? inst.multiplier : 1;
+  if (inst.contractType === 'Inverse') return s.quantity * mult;
+  return refPrice && refPrice > 0 ? s.quantity * mult * refPrice : null;
+}
+
+/**
+ * The ticket's problems, in the engine's words (blocking): its shape, and what the venue would refuse (UI06) — below
+ * the minimum order value, a fractional quantity of a whole-share stock, a TIF the venue does not offer, an expired
+ * futures contract. These only ever refuse MORE than the engine's dry run; the engine judges again.
+ */
+export function venueTicketProblems(
+  s: VenueTicketState,
+  inst: InstrumentDto,
+  ctx: VenueTicketContext = {},
+): string[] {
   const p: string[] = [];
   const kind = venueKindOf(inst);
   const step = inst.quantityStep > 0 ? inst.quantityStep : 1;
@@ -140,6 +198,19 @@ export function venueTicketProblems(s: VenueTicketState, inst: InstrumentDto): s
   if (needsPrice && s.price && !onGrid(s.price, inst.tickSize)) p.push(`Price must be on the ${inst.tickSize} tick grid.`);
   if (needsStop && s.stopPrice && !onGrid(s.stopPrice, inst.tickSize)) p.push(`Trigger must be on the ${inst.tickSize} tick grid.`);
   if (!tifChoices(s.orderType).includes(s.tif)) p.push(`${s.tif.toUpperCase()} is not offered for a ${s.orderType} order.`);
+  else if (!tifChoices(s.orderType, inst).includes(s.tif))
+    p.push(`${inst.exchange || 'The venue'} does not offer ${s.tif.toUpperCase()} for ${inst.symbol}.`);
+  if (kind === 'equity' && inst.fractionable === false && s.quantity > 0 && !Number.isInteger(s.quantity))
+    p.push(`${inst.symbol} trades in whole shares only.`);
+  const minNotional = inst.minNotional ?? 0;
+  const notional = minNotional > 0 ? orderNotional(s, inst, ctx.refPrice) : null;
+  if (notional !== null && notional < minNotional - 1e-9)
+    p.push(
+      `Order value ≈ ${roundTo(notional, 2)} ${inst.quoteCurrency ?? ''} is below the venue minimum of ${minNotional} ${inst.quoteCurrency ?? ''}.`.replace(/ +\./g, '.'),
+    );
+  const last = kind === 'future' ? lastTradeMs(inst) : null;
+  if (last !== null && (ctx.now ?? Date.now()) > last && !s.reduceOnly)
+    p.push(`${inst.symbol} stopped trading (last trade ${new Date(last).toISOString().slice(0, 10)}): use the next contract.`);
   if (s.postOnly && !(s.orderType === 'Limit' && (s.tif === 'Gtc' || s.tif === 'Day')))
     p.push('Post-only needs a Limit order resting Gtc or Day.');
   if (s.reduceOnly && !(kind === 'future' || kind === 'crypto-derivative'))
@@ -148,6 +219,33 @@ export function venueTicketProblems(s: VenueTicketState, inst: InstrumentDto): s
   if (s.marginMode !== null && kind !== 'crypto-derivative') p.push('Margin mode is set only for crypto derivatives.');
   if (s.leverage !== null && !(s.leverage >= 1 && s.leverage <= 500)) p.push('Leverage between 1 and 500.');
   return p;
+}
+
+/**
+ * What the ticket should say but not refuse (UI06): a contract close to its last trade date, a sell of a stock the
+ * venue will not lend (the ticket cannot see what you hold — a sell beyond your long is refused there), a TIF list the
+ * venue did not publish.
+ */
+export function venueTicketWarnings(
+  s: VenueTicketState,
+  inst: InstrumentDto,
+  ctx: VenueTicketContext = {},
+): string[] {
+  const w: string[] = [];
+  const kind = venueKindOf(inst);
+  const last = kind === 'future' ? lastTradeMs(inst) : null;
+  const now = ctx.now ?? Date.now();
+  if (last !== null && now <= last && last - now < EXPIRY_WARN_DAYS * 86_400_000)
+    w.push(`${inst.symbol} stops trading ${new Date(last).toISOString().slice(0, 10)}: consider the next contract.`);
+  if (last !== null && now > last && s.reduceOnly)
+    w.push(`${inst.symbol} is past its last trade date: only closing is possible, if the venue still accepts it.`);
+  if (kind === 'equity' && s.side === 'Sell' && inst.equity && inst.equity.shortable === false)
+    w.push(`${inst.symbol} is not shortable here: a sell can only close shares you hold.`);
+  if (kind === 'equity' && inst.fractionable == null && s.quantity > 0 && !Number.isInteger(s.quantity))
+    w.push(`Whether ${inst.symbol} takes fractional shares is not known: the venue may refuse ${s.quantity}.`);
+  if (inst.contractType === 'Inverse')
+    w.push(`Inverse contract: P&L and margin are in ${inst.crypto?.settleAsset || inst.baseCurrency || 'the coin'}, one contract = ${inst.multiplier} ${inst.quoteCurrency ?? ''}.`.trim());
+  return w;
 }
 
 export function defaultVenueTicket(inst: InstrumentDto, side: VenueSide = 'Buy'): VenueTicketState {
@@ -159,7 +257,7 @@ export function defaultVenueTicket(inst: InstrumentDto, side: VenueSide = 'Buy')
     quantity: inst.minQuantity > 0 ? inst.minQuantity : step,
     price: null,
     stopPrice: null,
-    tif: 'Gtc',
+    tif: tifChoices('Limit', inst)[0] ?? 'Gtc',
     postOnly: false,
     reduceOnly: false,
     leverage: null,
@@ -170,9 +268,14 @@ export function defaultVenueTicket(inst: InstrumentDto, side: VenueSide = 'Buy')
 }
 
 /** A ticket change that keeps it valid where a choice depends on another (market → IOC, post-only off, …). */
-export function patchVenueTicket(s: VenueTicketState, patch: Partial<VenueTicketState>): VenueTicketState {
+export function patchVenueTicket(
+  s: VenueTicketState,
+  patch: Partial<VenueTicketState>,
+  inst?: Pick<InstrumentDto, 'timeInForce'> | null,
+): VenueTicketState {
   const next = { ...s, ...patch };
-  if (!tifChoices(next.orderType).includes(next.tif)) next.tif = tifChoices(next.orderType)[0];
+  const tifs = tifChoices(next.orderType, inst);
+  if (!tifs.includes(next.tif) && tifs.length) next.tif = tifs[0];
   if (next.postOnly && next.orderType !== 'Limit') next.postOnly = false;
   if (next.orderType === 'Market') {
     next.price = null;
