@@ -4,7 +4,16 @@
  */
 
 /** How an article reached the engine. */
-export type NewsSourceKind = 'Rss' | 'Search' | 'LlmSweep' | 'CentralBank' | 'EconomicCalendar';
+export type NewsSourceKind =
+  | 'Rss'
+  | 'Search'
+  | 'LlmSweep'
+  | 'CentralBank'
+  | 'EconomicCalendar'
+  // Sourcing v2 (news-intel program, 2026-11-07).
+  | 'Filing'
+  | 'PressWire'
+  | 'Vendor';
 
 /** Where an article sits in the labelling pipeline. */
 export type NewsClassificationStatus =
@@ -94,6 +103,53 @@ export interface NewsPressureContext {
   asOfNote: string;
   /** Scores computed under different fingerprints are not comparable. */
   paramsFingerprint: string;
+  /**
+   * Every exposure leg of the symbol (ADR-0035) with weight, basis, coverage, score and
+   * contribution. Null/absent for a single-key request or an engine before ADR-0035.
+   */
+  legs?: NewsExposureLegView[] | null;
+  /**
+   * tanh(Σ weight × score) over the covered legs — equals pairBias for a fully covered FX pair.
+   * NULL when coverage would mislead (a ±1 leg untracked, or nothing covered): never render it as 0.
+   */
+  symbolBias?: number | null;
+  /** Share of Σ|weight| on tracked legs, 0..1. */
+  coverage?: number | null;
+  /** True for indices, stocks, energy, crypto: the prompt renders the multi-leg block. */
+  multiLeg?: boolean;
+}
+
+/** One exposure leg of a symbol's news reading (engine `NewsExposureLegView`, ADR-0035). */
+export interface NewsExposureLegView {
+  /** Exposure key: `USD`, `WTI`, `IDX:US500`, `EQ:AAPL`, `CR:BTC`, `F:RISK`. */
+  key: string;
+  weight: number;
+  /** base, quote, own, constituent, factor:static, factor:fitted. */
+  basis: string;
+  /** Whether the module tracks this key — an untracked leg has no score, not a zero one. */
+  covered: boolean;
+  /** Null when untracked; 0 for a tracked key that is quiet. */
+  score: number | null;
+  contribution: number | null;
+  absolutePressure: number | null;
+  storyCount: number | null;
+}
+
+/** One static/fitted exposure leg as the exposure map resolved it (engine `ExposureLeg`). */
+export interface ExposureLegDto {
+  key: string;
+  weight: number;
+  basis: string;
+}
+
+/** A symbol resolved through the exposure map (engine `SymbolExposure`). */
+export interface SymbolExposureDto {
+  symbol: string;
+  legs: ExposureLegDto[];
+  /** Calendar codes whose High-impact scheduled events block entries on this symbol. */
+  calendarKeys: string[];
+  /** `catalogue` | `instrument` | `fitted`. */
+  source: string;
 }
 
 /**
@@ -107,6 +163,8 @@ export interface NewsFocusResult {
   omissionReason: string | null;
   baseCurrency: string;
   quoteCurrency: string | null;
+  /** How the symbol resolved through the exposure map; null for a single-key request. */
+  exposure?: SymbolExposureDto | null;
 }
 
 /** One label as returned by the article listing. */
@@ -209,6 +267,35 @@ export interface NewsIntelStatusView {
   channelBreakdown: NewsChannelStatView[];
   sourceBreakdown: NewsSourceStatView[];
   latestPressure: NewsPressureSummaryView[];
+  /** Sourcing v2: publish→first-seen p50/p90 per channel (source null) and per publisher, 24 h and 7 d. */
+  latency?: NewsSourceLatencyView[] | null;
+  /** Sourcing v2: conditional-GET state per polled feed URL. */
+  feeds?: NewsFeedStateView[] | null;
+  /** Sourcing v2: one sentence per source that is OFF, naming the knob that turns it on. */
+  sourceNotes?: string[] | null;
+}
+
+/** Publish→first-seen lag for one channel (source null) or one publisher over one window. */
+export interface NewsSourceLatencyView {
+  channel: string;
+  source: string | null;
+  /** 24 or 168. */
+  windowHours: number;
+  count: number;
+  p50Minutes: number;
+  p90Minutes: number;
+}
+
+/** One polled feed's conditional-GET state. */
+export interface NewsFeedStateView {
+  url: string;
+  /** Last HTTP status (304 = not modified). */
+  lastStatus: number;
+  lastPolledUtc: string;
+  /** Consecutive 304s. */
+  notModifiedStreak: number;
+  /** The publisher sends ETag/Last-Modified, so a conditional GET is possible at all. */
+  hasValidators: boolean;
 }
 
 /** One point on a currency's pressure time series. */
@@ -325,6 +412,53 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
       'Every term of the score. weight = severity × source reliability × certainty × novelty × relevance × confidence × decay × corroboration × market response. Changing any of these re-scores everything on the next roll-up.',
   },
   {
+    match: 'Exposures:',
+    title: 'Exposures',
+    blurb:
+      'Which news exposures the module tracks (currencies, commodities, indices, stocks, crypto, factors). Empty means the same list as NewsIntel:Currencies. "Recommended" is derived from the symbol universe and read-only — copy from it.',
+  },
+  {
+    match: 'Vendor:',
+    title: 'Paid news vendors',
+    blurb:
+      'Benzinga, Polygon, Finnhub, Marketaux. Off by default. API keys are secrets: they show only as set / not set and are changed on the Sources tab.',
+  },
+  {
+    match: 'Calendar:',
+    title: 'Scheduled market events',
+    blurb:
+      'Earnings, EIA inventories, rig counts, expiries, OPEC+, promoted central-bank decisions and extra calendar countries. Recording only — whether they block entries is NewsBlackout:MultiAsset:Mode.',
+  },
+  {
+    match: 'Story:',
+    title: 'Stories',
+    blurb:
+      'Clustering articles into stories and their lifecycle (Developing / Confirmed / Denied / Resolved). Observe records stories without changing any weight; Enforce demotes echoes and zeroes denied claims.',
+  },
+  {
+    match: 'Eval:',
+    title: 'Evaluation',
+    blurb: 'Bounds for operator-triggered classifier evaluations over the gold set.',
+  },
+  {
+    match: 'EventStudy:',
+    title: 'Event study',
+    blurb:
+      'The nightly study of what the market did after news, which the recommended severities and the direction verdict come from.',
+  },
+  {
+    match: 'BreakingGate:',
+    title: 'Breaking-news gate',
+    blurb:
+      'Refuses new entries on a symbol for a few minutes after a fresh, official, high-severity story on one of its main legs. Observe records what would have been refused.',
+  },
+  {
+    match: 'Risk:',
+    title: 'News as risk',
+    blurb:
+      'Stop widening from the news volatility forecast. Never tightens a stop. Observe logs the would-be stop only.',
+  },
+  {
     match: 'Retention:',
     title: 'Retention',
     blurb:
@@ -359,3 +493,189 @@ export interface NewsArticleAnalysis {
   /** Why the body could not be read, when it could not. */
   contentNote: string | null;
 }
+
+/** Config keys the engine lists but refuses to write (derived values). */
+export const NEWS_READ_ONLY_KEYS: ReadonlySet<string> = new Set(['NewsIntel:Exposures:Recommended']);
+
+/** The engine's masked placeholders for a secret value (`SecretConfigKeys`). */
+export const SECRET_SET = '***SET';
+export const SECRET_UNSET = '***UNSET';
+
+// ── Exposure keys (ADR-0035) ─────────────────────────────────────────────
+
+/** What an exposure key names (engine `ExposureKind`). */
+export type ExposureKindName =
+  | 'Currency'
+  | 'Commodity'
+  | 'EquityIndex'
+  | 'Equity'
+  | 'Crypto'
+  | 'Factor';
+
+// ── Scheduled market events (sourcing v2) ────────────────────────────────
+
+/** Engine `ScheduledMarketEventKind`, serialised as its name. */
+export type ScheduledMarketEventKind =
+  | 'Earnings'
+  | 'Inventories'
+  | 'RigCount'
+  | 'OpecMeeting'
+  | 'OptionsExpiry'
+  | 'IndexRebalance'
+  | 'TokenUnlock'
+  | 'CentralBankDecision'
+  | 'Other';
+
+/** One scheduled market event (`GET /news-intel/scheduled-events`). */
+export interface ScheduledMarketEventRow {
+  id: number;
+  exposureKey: string;
+  kind: ScheduledMarketEventKind | string;
+  scheduledAtUtc: string;
+  /** High / Medium / Low. Only High blocks (and only under Enforce). */
+  impact: string;
+  title: string;
+  source: string;
+  /** When the engine first knew of it — the point-in-time anchor. */
+  firstSeenUtc: string;
+  notes: string | null;
+  actual: string | null;
+}
+
+// ── Stories (understanding v2) ───────────────────────────────────────────
+
+export type NewsStoryState = 'Developing' | 'Confirmed' | 'Denied' | 'Resolved';
+
+/** One story cluster (`GET /news-intel/stories`). The state is the LIVE reading. */
+export interface NewsStoryView {
+  id: number;
+  eventKey: string | null;
+  title: string;
+  firstArticleId: number;
+  firstSeenUtc: string;
+  lastSeenUtc: string;
+  /** Comma-separated exposure keys. */
+  exposures: string;
+  state: NewsStoryState | string;
+  stateChangedAtUtc: string;
+  deniedAtUtc: string | null;
+  resolvedAtUtc: string | null;
+  articleCount: number;
+  publisherCount: number;
+  /** How the newest member joined: event key or lexical similarity. */
+  lastMatchBasis: string | null;
+}
+
+// ── Gold set + evaluation (understanding v2) ─────────────────────────────
+
+export type NewsGoldProvenance = 'AgentDraft' | 'OperatorConfirmed' | 'OperatorEdited';
+
+/** One gold label (`GET /news-intel/gold`). */
+export interface NewsGoldLabelView {
+  id: number;
+  articleId: number;
+  title: string;
+  sourceName: string;
+  firstSeenUtc: string;
+  exposureKey: string;
+  relevant: boolean;
+  category: string;
+  direction: string;
+  certainty: string;
+  relevance: number;
+  stance: string;
+  eventKey: string | null;
+  provenance: NewsGoldProvenance | string;
+  labeller: string;
+  labelledAtUtc: string;
+  note: string | null;
+}
+
+export interface NewsGoldPage {
+  total: number;
+  items: NewsGoldLabelView[];
+  countsByProvenance: Record<string, number>;
+}
+
+/** `PUT /news-intel/gold/{id}` — only the fields sent are judged. */
+export interface NewsGoldEditRequest {
+  category?: string;
+  direction?: string;
+  certainty?: string;
+  relevance?: number;
+  relevant?: boolean;
+  stance?: string;
+  eventKey?: string;
+  note?: string;
+}
+
+export interface NewsGoldSeedResult {
+  [field: string]: unknown;
+}
+
+/** One evaluation run (`GET /news-intel/eval/runs[/{id}]`). The list omits `metricsJson`. */
+export interface NewsEvalRunView {
+  id: number;
+  /** Running / Completed / Failed / Abandoned. */
+  status: string;
+  classifierModel: string | null;
+  promptVersion: string | null;
+  triageMode: string | null;
+  articleCount: number;
+  draftLabelCount: number;
+  repeats: number;
+  relevanceF1: number | null;
+  categoryMacroF1: number | null;
+  directionMacroF1: number | null;
+  runToRunAgreement: number | null;
+  metricsJson: string | null;
+  requestedBy: string | null;
+  error: string | null;
+  startedAtUtc: string;
+  completedAtUtc: string | null;
+}
+
+/** `POST /news-intel/eval/run` body. */
+export interface NewsEvalRunRequest {
+  maxArticles?: number;
+  repeats?: number;
+  reviewedOnly?: boolean;
+}
+
+/** Engine enum names the gold-label editor offers (domain `NewsIntelEnums.cs`). */
+export const NEWS_CATEGORIES = [
+  'Other',
+  'MonetaryPolicy',
+  'Inflation',
+  'Employment',
+  'Growth',
+  'FiscalPolicy',
+  'TradePolicy',
+  'Geopolitical',
+  'Politics',
+  'CentralBankSpeak',
+  'Intervention',
+  'CreditStress',
+  'Commodity',
+  'RiskSentiment',
+  'NaturalDisaster',
+  'Earnings',
+  'Guidance',
+  'MergersAcquisitions',
+  'RegulationLegal',
+  'SupplyDisruption',
+  'Inventories',
+  'CryptoSecurity',
+  'EtfFlows',
+  'Stablecoin',
+  'IndexRebalance',
+] as const;
+export const NEWS_DIRECTIONS = ['Neutral', 'Bullish', 'Bearish'] as const;
+export const NEWS_CERTAINTIES = ['Rumor', 'Reported', 'Confirmed', 'Official'] as const;
+export const NEWS_STANCES = ['Asserts', 'Denies', 'Updates', 'Resolves'] as const;
+export const NEWS_STORY_STATES: readonly NewsStoryState[] = [
+  'Developing',
+  'Confirmed',
+  'Denied',
+  'Resolved',
+];

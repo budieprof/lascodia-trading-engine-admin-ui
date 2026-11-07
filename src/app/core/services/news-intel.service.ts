@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { ApiService } from '@core/api/api.service';
+import { ApiCallOptions, ApiService } from '@core/api/api.service';
 import { ResponseData } from '@core/api/api.types';
 import {
   NEWS_CONFIG_SECTIONS,
@@ -18,6 +18,15 @@ import {
   NewsLivenessBackfillResult,
   NewsPressureSummaryView,
   NewsArticleAnalysis,
+  NewsEvalRunRequest,
+  NewsEvalRunView,
+  NewsGoldEditRequest,
+  NewsGoldPage,
+  NewsGoldProvenance,
+  NewsGoldSeedResult,
+  NewsStoryState,
+  NewsStoryView,
+  ScheduledMarketEventRow,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -37,15 +46,15 @@ export class NewsIntelService {
    * Accepts a pair symbol (`EURUSD`) or a single currency (`USD`). This hits the same engine
    * service the snapshot builder uses, so the cockpit cannot show a number the model never saw.
    */
-  getFocus(symbol: string, asOfUtc?: string): Observable<NewsFocusResult> {
+  getFocus(symbol: string, asOfUtc?: string, opts?: ApiCallOptions): Observable<NewsFocusResult> {
     const qs = new URLSearchParams({ symbol });
     if (asOfUtc) qs.set('asOfUtc', asOfUtc);
-    return this.api.getEnvelope<NewsFocusResult>(`/news-intel/focus?${qs}`);
+    return this.api.getEnvelope<NewsFocusResult>(`/news-intel/focus?${qs}`, opts);
   }
 
   /** Module health: article counts by status, per-source ingestion, latest pressure. */
-  getStatus(hours = 24): Observable<NewsIntelStatusView> {
-    return this.api.getEnvelope<NewsIntelStatusView>(`/news-intel/status?hours=${hours}`);
+  getStatus(hours = 24, opts?: ApiCallOptions): Observable<NewsIntelStatusView> {
+    return this.api.getEnvelope<NewsIntelStatusView>(`/news-intel/status?hours=${hours}`, opts);
   }
 
   /** Current weighted pressure per currency, with contributing headlines. */
@@ -126,6 +135,93 @@ export class NewsIntelService {
     });
   }
 
+  // ── Sourcing v2: scheduled market events ──────────────────────────────
+
+  /**
+   * Scheduled market events in [from, to] (engine caps the window at 120 days), optionally for one
+   * exposure key. What the multi-asset blackout reads.
+   */
+  getScheduledEvents(opts?: {
+    from?: string;
+    to?: string;
+    key?: string;
+    take?: number;
+  }): Observable<ScheduledMarketEventRow[]> {
+    const qs = new URLSearchParams();
+    if (opts?.from) qs.set('from', opts.from);
+    if (opts?.to) qs.set('to', opts.to);
+    if (opts?.key) qs.set('key', opts.key);
+    qs.set('take', String(opts?.take ?? 1000));
+    return this.api.getEnvelope<ScheduledMarketEventRow[]>(
+      `/news-intel/scheduled-events?${qs}`,
+      { silent: true },
+    );
+  }
+
+  // ── Understanding v2: stories, gold set, evaluation ───────────────────
+
+  /** Story clusters active in the window, newest first. */
+  getStories(opts?: {
+    hours?: number;
+    exposure?: string;
+    state?: NewsStoryState | null;
+    take?: number;
+  }): Observable<NewsStoryView[]> {
+    const qs = new URLSearchParams();
+    qs.set('hours', String(opts?.hours ?? 48));
+    if (opts?.exposure) qs.set('exposure', opts.exposure);
+    if (opts?.state) qs.set('state', opts.state);
+    qs.set('take', String(opts?.take ?? 200));
+    return this.api.getEnvelope<NewsStoryView[]>(`/news-intel/stories?${qs}`, { silent: true });
+  }
+
+  /** Gold labels with their article headline, filtered by provenance / exposure. */
+  getGold(opts?: {
+    provenance?: NewsGoldProvenance | null;
+    exposure?: string;
+    skip?: number;
+    take?: number;
+  }): Observable<NewsGoldPage> {
+    const qs = new URLSearchParams();
+    if (opts?.provenance) qs.set('provenance', opts.provenance);
+    if (opts?.exposure) qs.set('exposure', opts.exposure);
+    qs.set('skip', String(opts?.skip ?? 0));
+    qs.set('take', String(opts?.take ?? 50));
+    return this.api.getEnvelope<NewsGoldPage>(`/news-intel/gold?${qs}`, { silent: true });
+  }
+
+  /** Applies the shipped agent-drafted fixture. Idempotent; never overwrites a review. */
+  seedGold(): Observable<NewsGoldSeedResult> {
+    return this.api.postEnvelope<NewsGoldSeedResult>('/news-intel/gold/seed', {}, { silent: true });
+  }
+
+  /** Confirms a gold label as it stands. Returns the new provenance. */
+  confirmGold(id: number): Observable<string> {
+    return this.api.postEnvelope<string>(`/news-intel/gold/${id}/confirm`, {}, { silent: true });
+  }
+
+  /** Edits a gold label. Returns the new provenance (OperatorEdited, or OperatorConfirmed for a no-op). */
+  editGold(id: number, body: NewsGoldEditRequest): Observable<string> {
+    return this.api.putEnvelope<string>(`/news-intel/gold/${id}`, body, { silent: true });
+  }
+
+  /** Starts an evaluation run (background). One at a time — a refusal says why. */
+  runEval(body: NewsEvalRunRequest): Observable<NewsEvalRunView> {
+    return this.api.postEnvelope<NewsEvalRunView>('/news-intel/eval/run', body, { silent: true });
+  }
+
+  /** Recent evaluation runs, newest first (without metricsJson). */
+  getEvalRuns(take = 20): Observable<NewsEvalRunView[]> {
+    return this.api.getEnvelope<NewsEvalRunView[]>(`/news-intel/eval/runs?take=${take}`, {
+      silent: true,
+    });
+  }
+
+  /** One evaluation run with its full metric set. */
+  getEvalRun(id: number): Observable<NewsEvalRunView> {
+    return this.api.getEnvelope<NewsEvalRunView>(`/news-intel/eval/runs/${id}`, { silent: true });
+  }
+
   /** Every `NewsIntel:` knob with its current value and description. */
   getConfig(): Observable<NewsConfigEntry[]> {
     return this.api.getEnvelope<NewsConfigEntry[]>('/news-intel/config');
@@ -174,8 +270,11 @@ export class NewsIntelService {
     const other: NewsConfigEntry[] = [];
 
     for (const entry of entries) {
-      const idx = NEWS_CONFIG_SECTIONS.findIndex((s) =>
-        entry.key.startsWith(`NewsIntel:${s.match}`),
+      const idx = NEWS_CONFIG_SECTIONS.findIndex(
+        (s) =>
+          entry.key.startsWith(`NewsIntel:${s.match}`) ||
+          // A section's own bare key (`NewsIntel:Exposures` for `Exposures:`) belongs to it too.
+          (s.match.endsWith(':') && entry.key === `NewsIntel:${s.match.slice(0, -1)}`),
       );
       if (idx >= 0) groups[idx].entries.push(entry);
       else other.push(entry);
