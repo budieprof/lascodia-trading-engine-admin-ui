@@ -35,7 +35,7 @@ function setup(n = 10) {
     bars,
     resolution: () => '60',
     digits: () => 5,
-    symbolFacts: () => ({ pipSize: 0.0001, contractSize: 100_000 }),
+    symbolFacts: () => ({ pipSize: 0.0001, unitLabel: 'pips', valuePerPrice: 100_000 }),
     fetchIntrabar,
   });
   return { c, bars, fetchIntrabar };

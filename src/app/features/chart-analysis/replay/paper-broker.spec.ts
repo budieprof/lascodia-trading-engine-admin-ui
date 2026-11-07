@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { PaperBook, levelsProblem, pnlOf, unitOf, type PaperUnit } from './paper-broker';
+import { PaperBook, levelsProblem, pnlOf, unitOf, type PaperTrade, type PaperUnit } from './paper-broker';
 
-const sym = { pipSize: 0.0001, contractSize: 100_000 };
+const sym = { pipSize: 0.0001, unitLabel: 'pips', valuePerPrice: 100_000 };
 const u = (time: number, o: number, h: number, l: number, c: number, spread = 0.0001): PaperUnit => ({
   time,
   open: o,
@@ -85,5 +85,58 @@ describe('levelsProblem', () => {
     expect(levelsProblem('buy', head, 1.2, null)).toMatch(/below the ask/);
     expect(levelsProblem('sell', head, null, 1.2)).toMatch(/below the bid/);
     expect(levelsProblem('buy', head, 1.09, 1.11)).toBeNull();
+  });
+});
+
+describe('paper money in the instrument\'s own terms (UI03)', () => {
+  const trade = (over: Partial<PaperTrade>): PaperTrade => ({
+    id: 1,
+    side: 'buy',
+    lots: 1,
+    entry: 100,
+    entrySpread: 0,
+    stop: null,
+    target: null,
+    openedAt: 0,
+    ...over,
+  });
+
+  it('FX: diff × lots × 100 000, exactly the old formula', () => {
+    const t = trade({ entry: 1.1, lots: 0.5 });
+    expect(pnlOf(t, 1.1012, sym).money).toBe((1.1012 - 1.1) * 0.5 * 100_000);
+  });
+
+  it('BTC spot (linear): move × coins', () => {
+    const btc = { pipSize: 0.01, unitLabel: 'points', valuePerPrice: 1 };
+    const p = pnlOf(trade({ entry: 60_000, lots: 0.015 }), 61_000, btc);
+    expect(p.money).toBeCloseTo(15, 9);
+    expect(p.pips).toBeCloseTo(100_000, 6);
+  });
+
+  it('ES future: 4 ticks a point × $12.50 = $50 a point per contract', () => {
+    const es = { pipSize: 0.25, unitLabel: 'ticks', valuePerPrice: 50 };
+    const p = pnlOf(trade({ entry: 5000, lots: 2, side: 'sell' }), 4990, es);
+    expect(p.money).toBeCloseTo(1000, 9);
+    expect(p.pips).toBeCloseTo(40, 9);
+  });
+
+  it('inverse perpetual: contracts × value × (1/entry − 1/exit), in the coin', () => {
+    const inv = { pipSize: 0.5, unitLabel: 'points', valuePerPrice: null, inverse: true, contractValue: 100 };
+    const long = pnlOf(trade({ entry: 50_000, lots: 10 }), 60_000, inv);
+    expect(long.money).toBeCloseTo(10 * 100 * (1 / 50_000 - 1 / 60_000), 12);
+    const short = pnlOf(trade({ entry: 50_000, lots: 10, side: 'sell' }), 60_000, inv);
+    expect(short.money).toBeCloseTo(-long.money!, 12);
+  });
+
+  it('unknown money stays unknown — the tally says so instead of counting an FX lot', () => {
+    const unknown = { pipSize: 0.01, unitLabel: 'points', valuePerPrice: null };
+    expect(pnlOf(trade({}), 101, unknown).money).toBeNull();
+    const book = new PaperBook();
+    const head = { time: 1, open: 100, high: 100, low: 100, close: 100, spread: 0 };
+    const t = book.place('buy', 1, head, null, null);
+    book.close(t.id, { ...head, time: 2, close: 101 });
+    const tally = book.tally(unknown, null);
+    expect(tally.money).toBeNull();
+    expect(tally.wins).toBe(1);
   });
 });

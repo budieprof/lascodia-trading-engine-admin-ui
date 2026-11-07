@@ -1,3 +1,4 @@
+import { shortDistanceLabel } from '../datafeed/instrument-facts';
 import { computed, signal } from '@angular/core';
 import type { Bar } from '../datafeed/candle-feed.service';
 import type { TvResolution } from '../datafeed/resolution';
@@ -66,7 +67,8 @@ export interface PaperRow {
   stop: number | null;
   target: number | null;
   pips: number;
-  money: number;
+  /** Null when the instrument's money facts are not known. */
+  money: number | null;
   r: number | null;
 }
 
@@ -510,7 +512,7 @@ export class ReplayController {
   place(side: PaperSide, lots: number, stopPips: number | null, targetPips: number | null): string | null {
     const head = this.headUnit();
     if (!this.active() || !head) return 'Start Bar Replay first.';
-    if (!Number.isFinite(lots) || lots <= 0) return 'Enter a size above 0 lots.';
+    if (!Number.isFinite(lots) || lots <= 0) return 'Enter a size above 0.';
     const pip = this.deps.symbolFacts().pipSize;
     const fill = side === 'buy' ? head.close + head.spread : head.close;
     const dir = side === 'buy' ? 1 : -1;
@@ -582,7 +584,7 @@ export class ReplayController {
           position: t.side === 'buy' ? 'aboveBar' : 'belowBar',
           shape: 'circle',
           color: PAPER_COLOUR,
-          text: `${t.reason === 'stop' ? 'Stop' : t.reason === 'target' ? 'Target' : 'Close'} ${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}p`,
+          text: `${t.reason === 'stop' ? 'Stop' : t.reason === 'target' ? 'Target' : 'Close'} ${p.pips >= 0 ? '+' : ''}${p.pips.toFixed(1)}${shortDistanceLabel(sym.unitLabel)}`,
         });
       }
     }
