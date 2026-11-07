@@ -290,25 +290,25 @@
         class="tb-menu-item tb-check"
         [class.on]="page.orderFlow().cvd"
         (click)="page.toggleOrderFlow('cvd')"
-        title="Cumulative tick delta in its own pane: quote up-ticks minus down-ticks (tick rule) — no traded volume exists for spot FX"
+        title="Cumulative delta in its own pane: real aggressor volume where the venue publishes trades (crypto), else ESTIMATED with the tick rule (quote up-ticks minus down-ticks; spot FX has no traded volume). The pane title says which."
       >
-        <app-chart-icon name="delta" [size]="28" /> Tick delta (CVD)
+        <app-chart-icon name="delta" [size]="28" /> Delta (CVD)
       </button>
       <button
         type="button"
         class="tb-menu-item tb-check"
         [class.on]="page.orderFlow().footprint"
         (click)="page.toggleOrderFlow('footprint')"
-        title="Per-bar tick counts (down × up) per price row with 3:1 diagonal imbalances — zoom in to see it"
+        title="Per price row: traded volume (sell × buy) where the venue publishes trades, else estimated tick counts (down × up, tick rule), with 3:1 diagonal imbalances — zoom in to see it"
       >
-        <app-chart-icon name="structure" [size]="28" /> Footprint (tick counts)
+        <app-chart-icon name="structure" [size]="28" /> Footprint
       </button>
       @if (page.orderFlow().footprint) {
         <div
           class="tb-menu-chips"
-          title="Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)"
+          [title]="page.footprintRowUnit() === 'points' ? 'Footprint row height (MT5 points; 10 points = 1 pip on a 5-digit pair)' : 'Footprint row height in the instrument\'s ticks'"
         >
-          @for (r of page.footprintRowChoices; track r.label) {
+          @for (r of page.footprintRowChoices(); track r.label) {
             <button
               type="button"
               role="menuitem"

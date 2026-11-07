@@ -57,6 +57,7 @@ import {
   footprintCells,
   footprintRowPoints,
   formatRowSize,
+  formatRowTicks,
   medianBarRange,
   liquidityPulled,
   tickBarsRequest,
@@ -64,6 +65,7 @@ import {
 } from './tick-flow';
 import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
 import type { InstrumentFacts } from '../datafeed/instrument-facts';
+import { coverageNote, cvdTitle, flowOrigin, flowUnitWord, footprintCaption } from './flow-labels';
 import {
   cryptoFlowLabel,
   formatFlowVolume,
@@ -143,7 +145,11 @@ interface FlowFetched {
   endUtc: number;
   /** The newest bar the chart held then. */
   lastBarUtc: number;
+  /** Footprint row height: MT5 points, or instrument ticks when `rowTicks` (C4, every non-MT5 symbol). */
   rowPoints?: number;
+  rowTicks?: boolean;
+  /** The price of one row unit when asked (the tick or the point). */
+  rowUnit?: number;
 }
 
 /** The newest-first refresh while the live edge is on screen (ticks keep arriving). */
@@ -421,7 +427,9 @@ export class OrderFlowFeed {
       () =>
         this.heatMode() === 'grid' &&
         deps.view()?.rightEdgeInView === true &&
-        deps.replayClip() === null,
+        deps.replayClip() === null &&
+        // UF03: the poll folds a broker DOM; a venue symbol's grid is the venue's book (C5) and is not mixed with it.
+        !this.venueSymbol(),
     );
     effect((onCleanup) => {
       const want = wantLive();
@@ -512,6 +520,17 @@ export class OrderFlowFeed {
   private factsNow(): InstrumentFacts | null {
     const f = this.deps.facts?.() ?? null;
     return f && !f.resolving ? f : null;
+  }
+
+  /** A symbol with instrument facts but no MT5 pair row: its depth is a venue's book, never a broker DOM. */
+  private readonly venueSymbol = computed(() => {
+    const f = this.factsNow();
+    return !!f && f.origin !== 'pair';
+  });
+
+  /** "Broker DOM depth" (FX / MT5, as always) or "Depth" (a venue symbol, before its source is known). */
+  private depthWord(): string {
+    return this.venueSymbol() ? 'Depth' : 'Broker DOM depth';
   }
 
   /** The symbol's pinned candle source id (C2 `candleSource`), e.g. `crypto-coinbase`; null for MT5 / unknown. */
@@ -824,13 +843,30 @@ export class OrderFlowFeed {
   ): number {
     const manual = this.deps.settings().footprintRowPoints;
     if (manual !== null) return manual;
+    const ticks = this.rowsInTicks();
     const sameSeries =
-      held?.symbol === this.deps.symbol() && held?.resolution === this.deps.resolution();
+      held?.symbol === this.deps.symbol() &&
+      held?.resolution === this.deps.resolution() &&
+      (held?.rowTicks ?? false) === ticks;
     return footprintRowPoints(
       medianBarRange(bars, view.fromIndex, view.toIndex),
-      this.point(),
+      this.rowUnitPrice(ticks),
       sameSeries ? (held?.rowPoints ?? null) : null,
     );
+  }
+
+  /**
+   * UF02: footprint rows are counted in the instrument's TICKS (C4 `footprintRowTicks`) for every symbol that is not an
+   * MT5 pair; an MT5 symbol (and a chart whose instrument is still resolving) keeps MT5 points, exactly as before.
+   */
+  private rowsInTicks(): boolean {
+    const f = this.factsNow();
+    return !!f && f.origin !== 'pair' && f.tickSize > 0;
+  }
+
+  /** The price of one row unit: the instrument tick, else the MT5 point. */
+  private rowUnitPrice(ticks: boolean): number {
+    return ticks ? this.factsNow()!.tickSize : this.point();
   }
 
   private refreshFootprint(symbol: string, view: OrderFlowView, force: boolean): void {
@@ -840,9 +876,23 @@ export class OrderFlowFeed {
     if (!span?.allowed) return;
     const held = this.foot()?.span ?? null;
     const rowPoints = this.rowPointsFor(view, bars, held);
-    if (!force && held?.rowPoints === rowPoints && this.covers(held, view, bars, symbol)) return;
+    const rowTicks = this.rowsInTicks();
+    if (
+      !force &&
+      held?.rowPoints === rowPoints &&
+      (held?.rowTicks ?? false) === rowTicks &&
+      this.covers(held, view, bars, symbol)
+    )
+      return;
     const barMs = resolutionMs(this.deps.resolution() as TvResolution);
-    const req = tickBarsRequest(symbol, bars, span, barMs, this.cap(), { rowPoints });
+    const req = tickBarsRequest(
+      symbol,
+      bars,
+      span,
+      barMs,
+      this.cap(),
+      rowTicks ? { rowTicks: rowPoints } : { rowPoints },
+    );
     if (!req) return;
     const fetched: FlowFetched = {
       symbol,
@@ -852,6 +902,7 @@ export class OrderFlowFeed {
       endUtc: span.endUtc,
       lastBarUtc: bars.at(-1)!.time,
       rowPoints,
+      ...(rowTicks ? { rowTicks: true, rowUnit: this.rowUnitPrice(true) } : {}),
     };
     const n = ++this.seq.foot;
     this.footState.set({ kind: 'loading' });
@@ -907,6 +958,7 @@ export class OrderFlowFeed {
     bars: TickBarDto[];
     coverage: number | null;
     fromUtc: number;
+    dto: TickBarsDto;
   } | null>(
     () => {
       const f = this.flow();
@@ -920,6 +972,7 @@ export class OrderFlowFeed {
         bars: f.data.bars,
         coverage: Number.isFinite(coverage) ? coverage : null,
         fromUtc: f.span.fromUtc,
+        dto: f.data,
       };
     },
     // The same answer stays the same value while the replay head moves, so the panes are not rewritten per step.
@@ -951,9 +1004,9 @@ export class OrderFlowFeed {
     const st = this.streamHeat.state;
     const sourceId = this.streamHeat.sourceId();
     if (st.kind === 'loading' && !sourceId)
-      return { model: null, lines: ['Broker DOM depth: loading every book event…'] };
+      return { model: null, lines: [`${this.depthWord()}: loading every book event…`] };
     if (st.kind === 'idle' && !sourceId)
-      return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
+      return { model: null, lines: [`${this.depthWord()}: waiting for the chart`] };
     const src = this.mdSources()?.find((s) => s.sourceId === sourceId) ?? null;
     const live =
       this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
@@ -968,7 +1021,12 @@ export class OrderFlowFeed {
       if (note) lines.push(note);
       return { model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity }, lines };
     }
-    const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
+    const kind =
+      src?.kind === 'CmeFutures'
+        ? 'CME'
+        : src?.kind === 'FixVenue' || src?.kind === 'CryptoExchange'
+          ? 'Venue'
+          : 'Broker';
     this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
     const futures = futuresSymbolOf(src, this.deps.symbol());
     const spotState = futures && sourceId ? this.cmeSpot.stateOf(this.deps.symbol(), sourceId) : null;
@@ -979,7 +1037,9 @@ export class OrderFlowFeed {
       `${kind} depth — ${who}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
       futures
         ? `Sizes in contracts of ${futures.contractSize.toLocaleString('en-US')} ${futures.contractCurrency}${futures.priceTransform === 'Invert' ? '; prices inverted (1 / futures) with the book sides swapped' : ''}; CME book history is kept 400 days`
-        : `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
+        : src?.kind === 'CryptoExchange'
+          ? `Sizes in ${this.factsNow()?.instrument.baseCurrency ?? 'coins'} (the exchange's L2 book, aggregated per price); book history is kept 90 days`
+          : `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
     ];
     const note = this.streamHeat.note();
     if (note) lines.push(note);
@@ -1042,13 +1102,18 @@ export class OrderFlowFeed {
     const symbol = this.deps.symbol();
     const lines: string[] = [];
     const h = this.heat();
-    const note = this.stateNote(this.heatState(), 'Broker DOM depth');
+    const note = this.stateNote(this.heatState(), this.depthWord());
     if (!h || h.grid.symbol !== symbol) {
-      lines.push(note ?? 'Broker DOM depth: waiting for the chart');
+      lines.push(note ?? `${this.depthWord()}: waiting for the chart`);
       return { model: null, lines };
     }
+    if (h.grid.source?.kind === 'venue') return this.venueHeatCaptions(h.grid, view, note);
     if (h.grid.oldestAvailableUtc === null) {
-      lines.push(`Broker DOM depth — none stored for ${symbol} (no EA streams its book)`);
+      lines.push(
+        this.venueSymbol()
+          ? `Depth — no book stored for ${symbol}: no MT5 broker streams it and no venue book was found`
+          : `Broker DOM depth — none stored for ${symbol} (no EA streams its book)`,
+      );
       return { model: null, lines };
     }
     const grid = clipHeatGrid(h.grid, this.deps.replayClip());
@@ -1072,6 +1137,38 @@ export class OrderFlowFeed {
         );
       }
     }
+    if (note && this.heatState().kind === 'error') lines.push(note);
+    return { model: { grid, opacity: this.deps.settings().heatmapOpacity }, lines };
+  }
+
+  /**
+   * UF03 / C5: the bucketed heatmap of a VENUE's book (the symbol's source in the market-data store): named by the venue,
+   * sizes in the instrument's unit, and only the span the engine read (≤ 2 h before the window's end) — buckets before it
+   * were not read, which is not the same as "no book".
+   */
+  private venueHeatCaptions(
+    g: HeatGrid,
+    view: OrderFlowView | null,
+    note: string | null,
+  ): { model: OrderFlowModel['heatmap']; lines: string[] } {
+    const name = g.source?.label || g.source?.id || 'venue';
+    const unit = this.factsNow()?.instrument.baseCurrency ?? null;
+    const lines: string[] = [];
+    if (g.oldestAvailableUtc === null) {
+      lines.push(`${name} book — none stored for ${this.deps.symbol()}`);
+      return { model: null, lines };
+    }
+    const grid = clipHeatGrid(g, this.deps.replayClip());
+    lines.push(
+      `${name} book (venue L2) — last book in each ${formatBucket(grid.bucketMs)}${unit ? `, sizes in ${unit}` : ''}`,
+    );
+    if (grid.readFromUtc != null && view && view.fromUtc < grid.readFromUtc)
+      lines.push(
+        `Read from ${formatUtcShort(grid.readFromUtc)} only (venue books are read 2 h at a time): earlier buckets were not read — zoom in or pan to see them`,
+      );
+    else if (view && view.fromUtc < g.oldestAvailableUtc)
+      lines.push(`${name} book history starts ${formatUtcShort(g.oldestAvailableUtc)}`);
+    if (grid.columns.length === 0) lines.push(`No ${name} book in this window`);
     if (note && this.heatState().kind === 'error') lines.push(note);
     return { model: { grid, opacity: this.deps.settings().heatmapOpacity }, lines };
   }
@@ -1104,7 +1201,7 @@ export class OrderFlowFeed {
       (clip !== null && f.span.endUtc > clip)
     )
       return { model: null, lines: note ? [note] : [] };
-    const rowPrice = (f.span.rowPoints ?? 10) * this.point();
+    const rowPrice = (f.span.rowPoints ?? 10) * (f.span.rowUnit ?? this.point());
     const out: FootprintBar[] = [];
     let candleOnly = 0;
     f.data.bars.forEach((b, i) => {
@@ -1133,17 +1230,21 @@ export class OrderFlowFeed {
         else out.push(fb);
       }
     }
-    const rows = formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
+    const rows = f.span.rowTicks
+      ? formatRowTicks(f.span.rowPoints ?? 10)
+      : formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
     const mode = this.deps.settings().footprintRowPoints === null ? ' (auto)' : '';
-    const lines = [
-      `Footprint — tick counts (down × up, tick rule on broker quotes), rows of ${rows}${mode}; shaded: 3:1 diagonal imbalance`,
-    ];
+    const base = this.factsNow()?.instrument.baseCurrency ?? null;
+    // UF02: real aggressor trades vs the estimated tick rule, named in the caption; traded volume gets a fraction.
+    const lines = [footprintCaption(f.data, `rows of ${rows}${mode}`, base)];
     if (candleOnly > 0)
       lines.push(
         `${candleOnly} bar${candleOnly === 1 ? '' : 's'} without retained ticks: no footprint`,
       );
     if (note && this.footState().kind === 'error') lines.push(note);
-    return { model: { bars: out, rowPrice }, lines };
+    const volume = flowOrigin(f.data) !== 'tickRuleQuotes';
+    if (volume) lines.push(`Cells in ${flowUnitWord(f.data, base)}; ${f.data.source?.label ?? 'venue'} trades are read for the last 24 h`);
+    return { model: { bars: out, rowPrice, ...(volume ? { format: formatFlowVolume } : {}) }, lines };
   }
 
   /** cme-tier2 / UF01: the CVD pane from the REAL aggressor delta (a CME or crypto exchange source is picked). */
@@ -1222,18 +1323,14 @@ export class OrderFlowFeed {
     const note = this.stateNote(this.flowState(), 'tick flow');
     const notes: string[] = [];
     if (!f) return { bars: [], notes: note ? [note] : ['waiting for the chart'] };
-    if (f.coverage === null) notes.push('no ticks retained for this symbol');
-    else if (f.fromUtc < f.coverage)
-      notes.push(
-        kind === 'cvd'
-          ? `no ticks before ${formatUtcShort(f.coverage)} (ticks are kept 14 days)`
-          : `ticks from ${formatUtcShort(f.coverage)} (kept 14 days); older bars: candle spread only`,
-      );
+    const cover = coverageNote(f.dto, kind, f.coverage, f.fromUtc, formatUtcShort);
+    if (cover) notes.push(cover);
     if (kind === 'ribbon') notes.push('● liquidity pulled: spread ≥ 2× median while ticks spike');
     if (note && this.flowState().kind === 'error') notes.push(note);
+    // UF02: the title says whether the delta is real (trades) or estimated (tick rule), and its unit.
     return kind === 'ribbon'
       ? { bars: f.bars, pulled: this.pulled(), notes }
-      : { bars: f.bars, notes };
+      : { bars: f.bars, notes, title: cvdTitle(f.dto, this.factsNow()?.instrument.baseCurrency ?? null) };
   }
 
   /** The panes' models, recomputed only when their answer or load state changes — not on a pan. */

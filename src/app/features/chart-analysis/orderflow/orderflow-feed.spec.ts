@@ -430,7 +430,9 @@ describe('OrderFlowFeed', () => {
     expect(req.footprint).toBe(true);
     // Bars span 2 pips (20 points): adaptive rows of 2 points cut each into ten.
     expect(req.footprintRowPoints).toBe(2);
+    expect(req.footprintRowTicks).toBeUndefined();
     expect(feed.model()!.captions[0]).toContain('rows of 0.2 pip (auto)');
+    expect(feed.model()!.captions[0]).toContain('estimated (tick rule on broker quotes)');
     // The operator's fixed size wins and is re-asked.
     settings.update((s) => ({ ...s, footprintRowPoints: 10 }));
     await settle();
@@ -459,6 +461,7 @@ describe('OrderFlowFeed', () => {
   describe('UF01 real crypto order flow', () => {
     const btcFacts = {
       symbol: 'BTC-USD',
+      origin: 'catalogue',
       resolving: false,
       isFx: false,
       tickSize: 0.01,
@@ -495,6 +498,51 @@ describe('OrderFlowFeed', () => {
       const cvd = feed.model()!.cvd!;
       expect(cvd.title).toBe('Real aggressor delta (CVD) — Coinbase Advanced Trade BTC-USD (exchange trades), BTC');
       expect(cvd.notes[0]).toContain('not a tick rule');
+    });
+
+    it('UF02: footprint rows go in instrument ticks and the caption names real trades', async () => {
+      api.tickBars.mockImplementation((req: TickBarsRequest) =>
+        Promise.resolve({
+          ...tickAnswer(req),
+          deltaSource: 'trades',
+          volumeUnit: 'base',
+          source: { id: 'crypto-coinbase', kind: 'venue', label: 'Coinbase' },
+          bars: tickAnswer(req).bars.map((b) => ({ ...b, footprint: [{ price: 1.1, up: 0.0153, down: 1.25 }] })),
+        }),
+      );
+      settings.set({ ...DEFAULT_ORDER_FLOW, footprint: true, cvd: true });
+      view.update((v) => ({ ...v!, barSpacing: 80, fromIndex: 38, fromUtc: T0 + 38 * H }));
+      const feed = make('BTC-USD', btcFacts);
+      await settle();
+      const fpReq = api.tickBars.mock.calls.map((c) => c[0] as TickBarsRequest).find((r) => r.footprint)!;
+      expect(fpReq.footprintRowTicks).toBe(1);
+      expect(fpReq.footprintRowPoints).toBeUndefined();
+      const m = feed.model()!;
+      expect(m.captions[0]).toContain('Coinbase trades: BTC traded (sell × buy, aggressor side as reported), rows of 1 tick (auto)');
+      expect(m.footprint!.rowPrice).toBeCloseTo(0.01);
+      expect(m.footprint!.format!(0.0153)).toBe('0.0153');
+      expect(m.cvd!.title).toBe('Trade delta (CVD) — Coinbase trades, BTC (aggressor side as reported)');
+    });
+
+    it('UF03: a venue heatmap names the venue, its unit and the span read; no broker DOM poll', async () => {
+      api.heatmap.mockImplementation((sym: string, f: number, t: number, b: number) =>
+        Promise.resolve({
+          ...heatAnswer(sym, f, t, b),
+          sourceInstanceIds: [],
+          source: { id: 'crypto-coinbase', kind: 'venue', label: 'Coinbase' },
+          readFromUtc: iso(t - 2 * H),
+          readToUtc: iso(t),
+        }),
+      );
+      settings.set({ ...DEFAULT_ORDER_FLOW, heatmap: true });
+      const feed = make('BTC-USD', btcFacts);
+      await settle();
+      const lines = feed.model()!.captions;
+      expect(lines[0]).toBe('Coinbase book (venue L2) — last book in each ' + lines[0].split('last book in each ')[1]);
+      expect(lines[0]).toContain('sizes in BTC');
+      expect(lines.join(' ')).toContain('earlier buckets were not read');
+      expect(lines.join(' ')).not.toContain('Broker DOM');
+      expect(watch).not.toHaveBeenCalled();
     });
 
     it('an FX chart never reads a crypto tape for its trades layer', async () => {
