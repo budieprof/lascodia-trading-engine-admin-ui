@@ -3,8 +3,10 @@ import {
   Component,
   DestroyRef,
   computed,
+  effect,
   inject,
   signal,
+  untracked,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -613,6 +615,21 @@ export class NewsEvalsPageComponent {
 
   constructor() {
     this.loadGold();
+    // The list is polled; an open run that changed status there (Running → Completed) is re-read
+    // so its metrics appear without a click.
+    effect(() => {
+      const list = this.runs.value() ?? [];
+      untracked(() => {
+        const d = this.detail();
+        const fresh = d ? list.find((r) => r.id === d.id) : undefined;
+        if (d && fresh && fresh.status !== d.status) {
+          this.svc
+            .getEvalRun(d.id)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({ next: (full) => this.detail.set(full), error: () => undefined });
+        }
+      });
+    });
   }
 
   loadGold(): void {
