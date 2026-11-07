@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthService } from '@core/auth/auth.service';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
 import { MarketDataStreamService } from '@core/realtime/marketdata-stream.service';
-import type { MdHistoryRequest } from '@core/realtime/marketdata.types';
+import type { CmeOrderFlow, CmeOrderFlowRequest, MdHistoryRequest, MdSource } from '@core/realtime/marketdata.types';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import { ensureTestBed } from '@core/testing/zoneless-test-bed';
 import type { Bar } from '../datafeed/candle-feed.service';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
@@ -83,12 +84,77 @@ function heatAnswer(
   };
 }
 
+const MT5_AND_CRYPTO: MdSource[] = [
+  {
+    sourceId: 'mt5-metaquotes-demo',
+    kind: 'Mt5Broker',
+    displayName: 'MetaQuotes-Demo (MT5 broker)',
+    feedId: 'broker-ticks',
+    feeds: { ticks: 'broker-ticks', book: 'broker-dom' },
+    enabled: true,
+    sizeUnit: 'Lots',
+    contractSize: 0,
+    priceTransform: 'None',
+    symbolMap: {},
+  },
+  {
+    sourceId: 'crypto-coinbase',
+    kind: 'CryptoExchange',
+    displayName: 'Coinbase Advanced Trade (spot)',
+    feedId: 'crypto:coinbase',
+    feeds: { ticks: 'crypto:coinbase', book: 'crypto:coinbase', trades: 'crypto:coinbase' },
+    enabled: true,
+    sizeUnit: 'Coins',
+    contractSize: 1,
+    priceTransform: 'None',
+    symbolMap: { 'BTC-USD': 'BTC-USD' },
+  },
+];
+
+function cryptoFlowAnswer(r: CmeOrderFlowRequest): CmeOrderFlow {
+  return {
+    sourceId: r.sourceId ?? '',
+    symbol: r.symbol,
+    from: r.from,
+    to: r.to,
+    barSeconds: r.barSeconds,
+    label: 'Coinbase Advanced Trade (spot) — BTC-USD (exchange trades)',
+    spot: { mapped: false, inverted: false, basisAdjusted: false, basis: null, rowsWithoutBasis: 0, sizeUnit: 'coins', contractSize: 1, contractCurrency: '' },
+    contracts: [],
+    thresholds: {
+      barSeconds: r.barSeconds,
+      bubbleMinContracts: 0.1321,
+      largeLotContracts: 3.304,
+      sweepWindowMs: 50,
+      sweepMinLevels: 3,
+      icebergMinRatio: 2,
+      icebergMinContracts: 1.3,
+      absorptionMinContracts: 2,
+      absorptionHoldMs: 2000,
+      episodeIdleMs: 500,
+      maxItems: 500,
+    },
+    cvdAnchor: 'window',
+    bars: [
+      { t: T0 + 46 * H, o: 1, h: 1, l: 1, c: 1, volume: 7.5, buy: 1.5, sell: 6, delta: -4.5, cvd: -4.5, trades: 10, footprint: [[1, 1.5, 6]] },
+    ],
+    bubbles: [],
+    largeLots: [],
+    sweeps: [],
+    icebergs: [],
+    absorptions: [],
+    bookAnalysed: true,
+    notes: [],
+  };
+}
+
 describe('OrderFlowFeed', () => {
   let api: {
     heatmap: ReturnType<typeof vi.fn>;
     tickBars: ReturnType<typeof vi.fn>;
     fills: ReturnType<typeof vi.fn>;
     bookAsOf: ReturnType<typeof vi.fn>;
+    cryptoOrderFlow: ReturnType<typeof vi.fn>;
   };
   let liveSnapshot: ReturnType<typeof signal<OrderBookSnapshot | null>>;
   let watch: ReturnType<typeof vi.fn>;
@@ -123,6 +189,7 @@ describe('OrderFlowFeed', () => {
       tickBars: vi.fn((req: TickBarsRequest) => Promise.resolve(tickAnswer(req))),
       fills: vi.fn(() => Promise.resolve({ logs: [], orders: [], truncated: false })),
       bookAsOf: vi.fn(),
+      cryptoOrderFlow: vi.fn((r: CmeOrderFlowRequest) => Promise.resolve(cryptoFlowAnswer(r))),
     };
     liveSnapshot = signal<OrderBookSnapshot | null>(null);
     watch = vi.fn(() => ({
@@ -189,12 +256,13 @@ describe('OrderFlowFeed', () => {
     vi.useRealTimers();
   });
 
-  const make = () =>
+  const make = (symbol = 'EURUSD', facts: InstrumentFacts | null = null) =>
     TestBed.runInInjectionContext(
       () =>
         new OrderFlowFeed({
           settings: () => settings(),
-          symbol: () => 'EURUSD',
+          symbol: () => symbol,
+          facts: () => facts,
           resolution: () => '60',
           bars: () => bars,
           style: () => style(),
@@ -386,5 +454,56 @@ describe('OrderFlowFeed', () => {
     await settle();
     expect(api.tickBars).not.toHaveBeenCalled();
     expect(feed.model()!.cvd!.notes[0]).toContain('price-based');
+  });
+
+  describe('UF01 real crypto order flow', () => {
+    const btcFacts = {
+      symbol: 'BTC-USD',
+      resolving: false,
+      isFx: false,
+      tickSize: 0.01,
+      precision: 2,
+      instrument: { baseCurrency: 'BTC', candleSource: { id: 'crypto-coinbase', kind: 'venue', label: 'Coinbase' } },
+    } as unknown as InstrumentFacts;
+
+    beforeEach(() => {
+      md.sources.mockImplementation(() => Promise.resolve([...MT5_AND_CRYPTO]));
+    });
+
+    it('markers come from md/crypto/orderflow of the pinned exchange, sizes in the base coin', async () => {
+      settings.set({ ...DEFAULT_ORDER_FLOW, cmeFlow: true });
+      const feed = make('BTC-USD', btcFacts);
+      await settle();
+      await settle();
+      expect(api.cryptoOrderFlow).toHaveBeenCalled();
+      const req = api.cryptoOrderFlow.mock.calls[0][0] as CmeOrderFlowRequest;
+      expect(req.sourceId).toBe('crypto-coinbase');
+      expect(req.symbol).toBe('BTC-USD');
+      const m = feed.model()!;
+      expect(m.captions[0]).toContain('Exchange order flow — Coinbase Advanced Trade BTC-USD (exchange trades)');
+      expect(m.captions[0]).toContain('large lots ≥ 3.3 BTC');
+      expect(m.captions.join(' ')).toContain('L2 book has no order ids');
+      expect(m.cme).toMatchObject({ sizeUnit: 'BTC', book: 'L2' });
+    });
+
+    it('a picked exchange drives the CVD pane with its real aggressor delta in coins', async () => {
+      settings.set({ ...DEFAULT_ORDER_FLOW, cvd: true, sourceId: 'crypto-coinbase' });
+      const feed = make('BTC-USD', btcFacts);
+      await settle();
+      await settle();
+      expect(api.cryptoOrderFlow).toHaveBeenCalled();
+      const cvd = feed.model()!.cvd!;
+      expect(cvd.title).toBe('Real aggressor delta (CVD) — Coinbase Advanced Trade BTC-USD (exchange trades), BTC');
+      expect(cvd.notes[0]).toContain('not a tick rule');
+    });
+
+    it('an FX chart never reads a crypto tape for its trades layer', async () => {
+      settings.set({ ...DEFAULT_ORDER_FLOW, trades: true });
+      const feed = make();
+      await settle();
+      await settle();
+      expect(feed.model()!.captions[0]).toContain('no source you are entitled to publishes trades for EURUSD');
+      expect(api.cryptoOrderFlow).not.toHaveBeenCalled();
+    });
   });
 });
