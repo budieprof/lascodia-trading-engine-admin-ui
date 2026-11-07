@@ -14,7 +14,6 @@ import {
 } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { StrategyPreviewPanelComponent } from '../strategy-preview-panel/strategy-preview-panel.component';
-import { DatePipe } from '@angular/common';
 import {
   CLASSIC_PINE_LIBRARY_HINT,
   CREATABLE_STRATEGY_TYPES,
@@ -29,7 +28,6 @@ import {
   CreateStrategyTemplateRequest,
   StrategyParameterSchemaDto,
   StrategyParameterFieldDto,
-  StrategyVersionDto,
   RiskProfileDto,
   CurrencyPairDto,
 } from '@core/api/api.types';
@@ -50,7 +48,7 @@ import { RiskProfilesService } from '@core/services/risk-profiles.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { CloneStrategyDialogComponent } from '../clone-strategy-dialog/clone-strategy-dialog.component';
-import { StrategyVersionDiffComponent } from '../strategy-version-diff/strategy-version-diff.component';
+import { StrategyVersionHistoryComponent } from '../strategy-version-history/strategy-version-history.component';
 import { failureMessage } from '../../util/api-failure';
 import type { StrategyVersionFields } from '../../util/version-diff';
 import { SUB_CONFIG_SCHEMAS } from '../../util/sub-config-schema';
@@ -102,9 +100,8 @@ const TIMEFRAME_LABELS: Record<string, string> = {
     StrategyPreviewPanelComponent,
     ReactiveFormsModule,
     SubConfigEditorComponent,
-    DatePipe,
     CloneStrategyDialogComponent,
-    StrategyVersionDiffComponent,
+    StrategyVersionHistoryComponent,
     ScriptAuthoringComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -559,106 +556,16 @@ const TIMEFRAME_LABELS: Record<string, string> = {
             }
 
             @if (strategy(); as s) {
-              <div class="version-history">
-                <div class="version-history-head">
-                  <button
-                    type="button"
-                    class="btn btn-link"
-                    (click)="toggleVersionHistory()"
-                    [attr.aria-expanded]="showVersionHistory()"
-                  >
-                    {{ showVersionHistory() ? '▾' : '▸' }} Version history
-                    @if (versions().length > 0) {
-                      <span class="muted small">({{ versions().length }})</span>
-                    }
-                  </button>
-                  @if (loadingVersions()) {
-                    <span class="muted small">Loading…</span>
-                  }
-                </div>
-                @if (showVersionHistory()) {
-                  <div class="version-manual-capture">
-                    <input
-                      class="form-input small"
-                      type="text"
-                      placeholder="Reason / label (optional)"
-                      [value]="manualCaptureReason()"
-                      (input)="manualCaptureReason.set($any($event.target).value)"
-                    />
-                    <button
-                      type="button"
-                      class="btn btn-link"
-                      [disabled]="capturingVersion()"
-                      (click)="captureVersionNow()"
-                      title="Bookmark the current configuration as a fresh version. Roll back later if needed."
-                    >
-                      📌 Capture snapshot now
-                    </button>
-                  </div>
-                  @if (versions().length === 0 && !loadingVersions()) {
-                    <p class="muted small" style="padding:6px 4px;">
-                      No prior versions captured. The first edit will create a snapshot of the
-                      current state.
-                    </p>
-                  }
-                  @if (versions().length > 0) {
-                    <table class="version-table">
-                      <thead>
-                        <tr>
-                          <th>v</th>
-                          <th>Captured</th>
-                          <th>By</th>
-                          <th>Reason</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        @for (v of versions(); track v.id) {
-                          <tr>
-                            <td class="mono">v{{ v.versionNumber }}</td>
-                            <td>{{ v.capturedAt | date: 'yyyy-MM-dd HH:mm:ss' }}</td>
-                            <td
-                              class="small"
-                              [class.muted]="!v.createdBy"
-                              [title]="v.createdBy ? '' : 'Author not recorded for this version'"
-                            >
-                              {{ v.createdBy || '—' }}
-                            </td>
-                            <td class="muted small">{{ v.changeReason ?? '' }}</td>
-                            <td>
-                              <button
-                                type="button"
-                                class="btn btn-link"
-                                (click)="diffWithCurrent(v)"
-                                title="Show what changed between this version and current"
-                              >
-                                Diff
-                              </button>
-                              <button
-                                type="button"
-                                class="btn btn-link"
-                                [disabled]="rollingBack()"
-                                (click)="rollbackToVersion(v)"
-                                [title]="'Restore strategy to v' + v.versionNumber"
-                              >
-                                Roll back
-                              </button>
-                            </td>
-                          </tr>
-                        }
-                      </tbody>
-                    </table>
-                    @if (diffVersion(); as dv) {
-                      <app-strategy-version-diff
-                        [version]="dv"
-                        [current]="currentVersionFields()"
-                        [inputDefs]="scriptPanel()?.lastGood()?.inputs ?? null"
-                        (closed)="diffVersion.set(null)"
-                      />
-                    }
-                  }
-                }
-              </div>
+              <!-- U13 (fu-ui): the version-history drawer is its own component; a rollback comes back here
+                   (restored) to patch the form and the script editor. -->
+              <app-strategy-version-history
+                [strategy]="s"
+                [current]="currentVersionFields()"
+                [inputDefs]="scriptPanel()?.lastGood()?.inputs ?? null"
+                [isScriptEdited]="scriptEditPending"
+                (restored)="applyRestoredVersion($event)"
+                (changed)="strategyChanged.emit()"
+              />
             }
 
             <!-- Sticky footer: the engine's refusal and the template-name panel
@@ -1180,47 +1087,6 @@ const TIMEFRAME_LABELS: Record<string, string> = {
         font-size: 11px;
         padding: 2px 8px;
       }
-      .version-history {
-        margin-top: 16px;
-        padding: 10px 12px;
-        background: var(--bg-secondary, #f7f8fa);
-        border: 1px solid var(--border, #e4e7eb);
-        border-radius: 6px;
-      }
-      .version-history-head {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-      }
-      .version-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12px;
-        margin-top: 8px;
-      }
-      .version-table th,
-      .version-table td {
-        text-align: left;
-        padding: 4px 6px;
-        border-bottom: 1px solid var(--border);
-      }
-      .version-table tr:last-child td {
-        border-bottom: none;
-      }
-      .version-manual-capture {
-        display: flex;
-        gap: 6px;
-        align-items: center;
-        padding: 6px 0;
-        margin-bottom: 6px;
-        border-bottom: 1px dashed var(--border);
-      }
-      .version-manual-capture .form-input {
-        flex: 1;
-        font-size: 12px;
-        padding: 4px 6px;
-        height: 26px;
-      }
       /* Script mode needs room for the editor beside its side panel, and the preview under them. */
       .dialog.dialog-wide {
         max-width: min(1320px, 96vw);
@@ -1354,20 +1220,11 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     () => this.strategy()?.symbol ?? this.parsedSymbols()[0] ?? null,
   );
 
-  // Captured-version history for an existing strategy. Lazily loaded on
-  // first expand to keep the create-modal payload light.
-  showVersionHistory = signal(false);
-  loadingVersions = signal(false);
-  versions = signal<StrategyVersionDto[]>([]);
-  rollingBack = signal(false);
-  capturingVersion = signal(false);
-  /// Free-text reason for the manual-snapshot button OR the next update —
-  /// stored on the auto-captured pre-edit version row so operators see why
-  /// the change was made.
-  manualCaptureReason = signal('');
+  /// Free-text reason for the next update — stored on the auto-captured pre-edit version row so operators
+  /// see why the change was made. (The version-history drawer is `app-strategy-version-history`.)
   updateChangeReason = signal('');
-  // Currently-selected version for the diff panel. Null when no diff open.
-  diffVersion = signal<StrategyVersionDto | null>(null);
+  /** U13 (fu-ui): the version-history drawer (rendered for an existing strategy). */
+  private readonly versionHistory = viewChild(StrategyVersionHistoryComponent);
   /// The form's current values in the shape a captured version records —
   /// what the version-diff panel compares the selected version against.
   readonly currentVersionFields = computed<StrategyVersionFields>(() => {
@@ -1555,143 +1412,29 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     }
   }
 
-  /** Open the inline diff panel for the chosen version. */
-  diffWithCurrent(v: StrategyVersionDto): void {
-    this.diffVersion.set(v);
-  }
+  /** Asked by the version-history drawer at confirm time: would a rollback replace an unsaved script edit? */
+  readonly scriptEditPending = (): boolean =>
+    this.isScriptAuthoring() && (this.scriptAuthoring?.isDirty() ?? false);
 
   /**
-   * Manually snapshot the strategy's current state. The optional reason from
-   * {@link manualCaptureReason} annotates the version row so operators see
-   * what the bookmark was for.
+   * A rollback went through and the drawer re-read the strategy: patch the form fields in place so the operator sees
+   * the restored values without closing and reopening the modal.
    */
-  captureVersionNow(): void {
-    const s = this.strategy();
-    if (!s || this.capturingVersion()) return;
-    this.capturingVersion.set(true);
-    this.strategiesService.captureVersion(s.id, this.manualCaptureReason()).subscribe({
-      next: (res) => {
-        this.capturingVersion.set(false);
-        if (res?.status) {
-          this.notifications.success(res.message ?? 'Snapshot captured');
-          this.manualCaptureReason.set('');
-          this.refreshVersionHistory();
-        } else {
-          this.notifications.error(res?.message ?? 'Failed to capture snapshot');
-        }
-      },
-      error: () => {
-        this.capturingVersion.set(false);
-        this.notifications.error('Failed to capture snapshot');
-      },
+  applyRestoredVersion(restored: StrategyDto): void {
+    this.form.patchValue({
+      name: restored.name,
+      description: restored.description,
+      parametersJson: restored.parametersJson ?? '',
+      riskProfileId: restored.riskProfileId,
+      riskOverridesJson: restored.riskOverridesJson ?? '',
+      sizingConfigJson: restored.sizingConfigJson ?? '',
+      sessionFilterJson: restored.sessionFilterJson ?? '',
+      regimeGateJson: restored.regimeGateJson ?? '',
+      multiTimeframeGateJson: restored.multiTimeframeGateJson ?? '',
     });
-  }
-
-  /**
-   * Toggle the version-history drawer. Lazy-loads the version list on first
-   * expand so the modal payload stays light when operators don't open it.
-   */
-  toggleVersionHistory(): void {
-    const next = !this.showVersionHistory();
-    this.showVersionHistory.set(next);
-    if (next && this.versions().length === 0 && !this.loadingVersions()) {
-      this.refreshVersionHistory();
-    }
-  }
-
-  private refreshVersionHistory(): void {
-    const s = this.strategy();
-    if (!s) return;
-    this.loadingVersions.set(true);
-    this.strategiesService.getVersions(s.id, 100).subscribe({
-      next: (res) => {
-        this.loadingVersions.set(false);
-        this.versions.set(res?.data ?? []);
-      },
-      error: () => {
-        this.loadingVersions.set(false);
-        this.versions.set([]);
-        this.notifications.error('Failed to load version history');
-      },
-    });
-  }
-
-  /**
-   * Restore the strategy to a captured version. The engine snapshots the
-   * current state first, so the rollback is reversible (operators see the
-   * "pre-rollback" snapshot appear in the list afterwards). After the
-   * server confirms the rollback we re-fetch the strategy and patch the
-   * form fields in place so the operator sees the restored values without
-   * having to close and reopen the modal.
-   */
-  async rollbackToVersion(v: StrategyVersionDto): Promise<void> {
-    const s = this.strategy();
-    if (!s || this.rollingBack()) return;
-    const scriptEdited = this.isScriptAuthoring() && (this.scriptAuthoring?.isDirty() ?? false);
-    const ok = await this.dialogs.confirm({
-      title: `Roll back to v${v.versionNumber}?`,
-      message: `Strategy "${s.name}" returns to v${v.versionNumber}. Its current state is captured as a version first, so the rollback can be undone.`,
-      details: scriptEdited
-        ? ['Your unsaved script edit is replaced by the script of that version.']
-        : [],
-      confirmLabel: 'Roll back',
-      tone: scriptEdited ? 'danger' : 'primary',
-    });
-    if (!ok) return;
-
-    this.rollingBack.set(true);
-    this.strategiesService.rollbackVersion(s.id, v.id).subscribe({
-      next: (res) => {
-        if (res?.status) {
-          // Refetch the strategy so the form patches with the restored
-          // server-side state — the rollback handler updates the row
-          // in-place; we just need the new values.
-          this.strategiesService.getById(s.id).subscribe({
-            next: (g) => {
-              this.rollingBack.set(false);
-              const restored = g?.data;
-              if (restored) {
-                this.form.patchValue({
-                  name: restored.name,
-                  description: restored.description,
-                  parametersJson: restored.parametersJson ?? '',
-                  riskProfileId: restored.riskProfileId,
-                  riskOverridesJson: restored.riskOverridesJson ?? '',
-                  sizingConfigJson: restored.sizingConfigJson ?? '',
-                  sessionFilterJson: restored.sessionFilterJson ?? '',
-                  regimeGateJson: restored.regimeGateJson ?? '',
-                  multiTimeframeGateJson: restored.multiTimeframeGateJson ?? '',
-                });
-                // PE-03: the editor shows the restored script and saves from its revision — the
-                // next save must not quietly put the rolled-back script back.
-                this.scriptAuthoring?.applySaved(restored);
-              }
-              this.notifications.success(res.message ?? `Rolled back to v${v.versionNumber}`);
-              this.refreshVersionHistory();
-              this.strategyChanged.emit();
-            },
-            error: () => {
-              this.rollingBack.set(false);
-              // Even if the refetch fails, the rollback itself succeeded. The editor still holds
-              // the old script, but a save from it is refused as stale (PE-01) instead of undoing
-              // the rollback.
-              this.notifications.success(
-                `Rolled back to v${v.versionNumber} (form will refresh on next open)`,
-              );
-              this.refreshVersionHistory();
-              this.strategyChanged.emit();
-            },
-          });
-        } else {
-          this.rollingBack.set(false);
-          this.notifications.error(res?.message ?? 'Rollback failed');
-        }
-      },
-      error: () => {
-        this.rollingBack.set(false);
-        this.notifications.error('Rollback failed');
-      },
-    });
+    // PE-03: the editor shows the restored script and saves from its revision — the
+    // next save must not quietly put the rolled-back script back.
+    this.scriptAuthoring?.applySaved(restored);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
@@ -1708,9 +1451,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     const s = this.strategy();
     // Reset version-history drawer when the focused strategy changes — stale
     // versions from a previously edited row would mislead the operator.
-    this.showVersionHistory.set(false);
-    this.versions.set([]);
-    this.diffVersion.set(null);
+    this.versionHistory()?.reset();
     this.leaving = false;
     this.templateNameDraft.set(null);
     this.templateError.set(null);
