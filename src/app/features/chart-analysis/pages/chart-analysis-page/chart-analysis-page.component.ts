@@ -472,24 +472,7 @@ interface ScriptUpdate {
 }
 
 /** One of a multi-chart layout's other charts (CC-12, CC-I5). */
-export interface ComparePanel {
-  id: string;
-  symbol: string;
-  resolution: TvResolution;
-  bars: Bar[];
-  /** Its oldest bar is the start of the engine's history: scroll-back stops asking (CC-14). */
-  historyComplete?: boolean;
-  /** Its own built-in studies (CC-I5). */
-  indicators: ActiveIndicator[];
-  /** Its link group, 1 … 3; 0: not linked (CC-I5). */
-  link: number;
-  /** Its own Pine indicators (CC-I5). */
-  scripts: PanelScript[];
-  /** US03: its own style / scale / volume (absent: the main chart's style and scale, no volume). */
-  view?: PanelView;
-  /** US03: loading, on screen, nothing to show (and why), or failed. */
-  load?: PanelLoad;
-}
+export type { ComparePanel } from '../../compare/split-panels.controller';
 
 import {
   RESOLUTION_GROUPS,
@@ -521,16 +504,20 @@ import type { SeriesOptions } from '../../datafeed/chart-market-chips.component'
 import { intervalNote, noDataMessage } from '../../datafeed/data-availability';
 import {
   panelCandidates,
-  panelLoadError,
   panelLook,
   panelSymbolGroups,
   PANEL_SCALES,
   restoredPanelView,
-  withView,
   type PanelLoad,
   type PanelView,
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
+import {
+  SPLIT_LAYOUTS,
+  SplitPanelsController,
+  type ComparePanel,
+  type SplitLayoutId,
+} from '../../compare/split-panels.controller';
 import { ChartAnnouncer } from './chart-announcer';
 import { ChartScheduler, browserSchedulerEnv } from './chart-scheduler';
 import {
@@ -2414,21 +2401,26 @@ export class ChartAnalysisPageComponent {
   // The primary chart keeps every tool. Comparison panels are their own charts
   // with their own symbol, timeframe, bars and drawings — drawings are scoped
   // per symbol+timeframe, so each panel renders only its own.
-  readonly splitLayout = signal<'1' | '2h' | '2v' | '4' | '6' | '8'>('1');
-  readonly comparePanels = signal<ComparePanel[]>([]);
-
-  readonly splitLayouts: Array<{
-    id: '1' | '2h' | '2v' | '4' | '6' | '8';
-    label: string;
-    panels: number;
-  }> = [
-    { id: '1', label: '▢', panels: 0 },
-    { id: '2h', label: '◫', panels: 1 },
-    { id: '2v', label: '⊟', panels: 1 },
-    { id: '4', label: '⊞', panels: 3 },
-    { id: '6', label: '⊟⊞', panels: 5 },
-    { id: '8', label: '⊞⊞', panels: 7 },
-  ];
+  /** US02: the split view's other charts ({@link SplitPanelsController}); the page keeps their ties to the main chart. */
+  readonly split = new SplitPanelsController({
+    feed: this.feed,
+    isSessionResolution: (r) => isSessionResolution(r),
+    noDataMessage: (symbol, r) => noDataMessage(symbol, this.resolutionLabel(r), this.catalogueRow(symbol)),
+    candidates: (taken) => panelCandidates(this.symbols(), this.instruments.all(), taken),
+    mainSymbol: () => this.symbol(),
+    mainResolution: () => this.resolution(),
+    hostAt: (index) => this.panelHosts()[index],
+    now: () => this.serverClock.now(),
+    calendarOf: (symbol) => this.calendarOf(symbol),
+    calendarCodeOf: (symbol) =>
+      this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null,
+    loadCalendar: (code) => this.instruments.calendar(code).then((cal) => (cal ? exchangeSessionsOf(cal) : null)),
+    linkSymbol: (id, symbol) => this.linkSymbol(id, symbol),
+    linkInterval: (id, r) => this.linkInterval(id, r),
+  });
+  readonly splitLayout = this.split.layout;
+  readonly comparePanels = this.split.panels;
+  readonly splitLayouts = SPLIT_LAYOUTS;
 
   /**
    * The left rail, grouped as TradingView groups it: one button per family, the rest of the
@@ -4212,26 +4204,7 @@ export class ChartAnalysisPageComponent {
 
   /** A live price moves the split panels that show its symbol (CC-12: they were static). */
   private applyPanelTick(tick: PriceTick): void {
-    const symbol = tick?.symbol?.toUpperCase();
-    const price = tickPrice(tick);
-    if (!symbol || price === null) return;
-    const panels = this.comparePanels();
-    if (!panels.some((p) => p.symbol.toUpperCase() === symbol && p.bars.length)) return;
-    const now = tickTimeMs(tick, this.serverClock.now());
-    this.comparePanels.set(
-      panels.map((p) => {
-        if (p.symbol.toUpperCase() !== symbol || !p.bars.length) return p;
-        const next = liveTick(
-          p.bars,
-          price,
-          now,
-          p.resolution,
-          this.calendarOf(symbol),
-          this.feed.gridOf(symbol),
-        );
-        return next ? { ...p, bars: next } : p;
-      }),
-    );
+    this.split.applyTick(tick);
   }
 
   /** A symbol's trading calendar, once the engine has reported its session. */
@@ -5589,77 +5562,17 @@ export class ChartAnalysisPageComponent {
 
   // ── Split view ───────────────────────────────────────────────────────────
 
-  setSplitLayout(id: '1' | '2h' | '2v' | '4' | '6' | '8'): void {
-    this.splitLayout.set(id);
-    const wanted = this.splitLayouts.find((l) => l.id === id)?.panels ?? 0;
-    const current = this.comparePanels();
-    if (current.length === wanted) return;
-
-    if (current.length > wanted) {
-      this.comparePanels.set(current.slice(0, wanted));
-      return;
-    }
-    // New panels open on a different symbol from the primary chart: two
-    // identical charts side by side is never what the operator wanted.
-    // US03: the broker's symbols first, as before, then the catalogue's chartable instruments.
-    const candidates = panelCandidates(this.symbols(), this.instruments.all(), [
-      this.symbol(),
-      ...current.map((p) => p.symbol),
-    ]);
-    const added: ComparePanel[] = [];
-    for (let i = current.length; i < wanted; i++) {
-      const symbol = candidates[i - current.length] ?? this.symbol();
-      added.push({
-        id: `p${Date.now().toString(36)}${i}`,
-        symbol,
-        resolution: this.resolution(),
-        bars: [],
-        indicators: [],
-        link: 0,
-        scripts: [],
-      });
-    }
-    this.comparePanels.set([...current, ...added]);
-    for (const panel of added) void this.loadPanel(panel.id);
+  setSplitLayout(id: SplitLayoutId): void {
+    this.split.setLayout(id);
   }
 
-  /**
-   * A panel's bars (US03): says it is loading, then shows them — or why there are none, or that the request failed,
-   * with a retry (a failure used to leave an empty panel saying nothing). An answer for a series the panel has left
-   * meanwhile is dropped.
-   */
-  private async loadPanel(id: string): Promise<void> {
-    const panel = this.comparePanels().find((p) => p.id === id);
-    if (!panel) return;
-    const { symbol, resolution } = panel;
-    const land = (patch: Partial<ComparePanel>): void =>
-      this.comparePanels.update((list) =>
-        list.map((p) =>
-          p.id === id && p.symbol === symbol && p.resolution === resolution ? { ...p, ...patch } : p,
-        ),
-      );
-    land({ load: { kind: 'loading' } });
-    // As on the main chart: the stored grid's candles carry no session (nor the C1 facts), so they are asked for once.
-    if (!isSessionResolution(resolution)) void this.feed.learnSession(symbol);
-    try {
-      const { bars } = await this.feed.getBars(symbol, resolution, 0, Date.now(), PAGE_BARS);
-      land({
-        bars,
-        load: bars.length
-          ? { kind: 'ready' }
-          : {
-              kind: 'empty',
-              message: noDataMessage(symbol, this.resolutionLabel(resolution), this.catalogueRow(symbol)),
-            },
-      });
-    } catch (e) {
-      land({ bars: [], load: { kind: 'error', message: panelLoadError(e) } });
-    }
+  private loadPanel(id: string): Promise<void> {
+    return this.split.load(id);
   }
 
   /** US03: ask again for a panel that failed or had nothing. */
   retryPanel(id: string): void {
-    void this.loadPanel(id);
+    void this.split.load(id);
   }
 
   /** US03: the symbols a panel's select offers — the broker's, then the catalogue's chartable instruments. */
@@ -5675,11 +5588,8 @@ export class ChartAnalysisPageComponent {
     return panelLook(panel.view, { style: this.style(), scaleMode: this.scaleMode() });
   }
 
-  /** US03: one of a panel's own settings; '' follows the main chart again. */
   setPanelView<K extends keyof PanelView>(id: string, key: K, value: PanelView[K] | '' | undefined): void {
-    this.comparePanels.update((list) =>
-      list.map((p) => (p.id === id ? { ...p, view: withView(p.view, key, value === '' ? undefined : value) } : p)),
-    );
+    this.split.setView(id, key, value);
   }
 
   /** US03: a panel symbol's trading session (the day-based studies, the time axis), as the main chart has its own. */
@@ -5692,108 +5602,29 @@ export class ChartAnalysisPageComponent {
     return this.feed.factsOf(symbol)?.volumeKind ?? null;
   }
 
-  /** US03: each panel symbol's Pre / Regular / Post sessions, by calendar code (loaded once per code). */
-  private readonly panelCalendars = signal<Record<string, ExchangeSessions | null>>({});
-  private panelCalendarCode(symbol: string): string | null {
-    return this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null;
-  }
   panelExchangeSessions(symbol: string): ExchangeSessions | null {
-    const code = this.panelCalendarCode(symbol);
-    return code ? (this.panelCalendars()[code] ?? null) : null;
+    return this.split.exchangeSessionsOf(symbol);
   }
-  private readonly panelCalendarsLoad = effect(() => {
-    const codes = new Set<string>();
-    for (const p of this.comparePanels()) {
-      const code = this.panelCalendarCode(p.symbol);
-      if (code) codes.add(code);
-    }
-    untracked(() => {
-      const have = this.panelCalendars();
-      for (const code of codes) {
-        if (code in have) continue;
-        this.panelCalendars.update((all) => ({ ...all, [code]: null }));
-        void this.instruments.calendar(code).then((cal) =>
-          this.panelCalendars.update((all) => ({ ...all, [code]: cal ? exchangeSessionsOf(cal) : null })),
-        );
-      }
-    });
-  });
+  private readonly panelCalendarsLoad = effect(() => this.split.loadCalendars());
 
   /** The split panels' chart hosts, in panel order. */
   private readonly panelHosts = viewChildren<ChartHostComponent>('panelHost');
 
-  /**
-   * Scroll-back on a split panel (CC-12: panels held their first 1,500 bars and never loaded more):
-   * the page before its oldest bar, prepended; an empty page is the start of its history.
-   */
-  async loadPanelOlder(id: string): Promise<void> {
-    const index = this.comparePanels().findIndex((p) => p.id === id);
-    const panel = this.comparePanels()[index];
-    const host = () => this.panelHosts()[index];
-    if (!panel?.bars.length || panel.historyComplete) {
-      host()?.historyLoaded();
-      return;
-    }
-    const oldest = panel.bars[0].time;
-    try {
-      const { bars } = await this.feed.getBars(
-        panel.symbol,
-        panel.resolution,
-        0,
-        oldest - 1,
-        PAGE_BARS,
-      );
-      const older = bars.filter((b) => b.time < oldest);
-      this.comparePanels.update((list) =>
-        list.map((p) => {
-          // A panel switched meanwhile has bars of its own.
-          if (p.id !== id || p.symbol !== panel.symbol || p.resolution !== panel.resolution)
-            return p;
-          return older.length
-            ? { ...p, bars: [...older, ...p.bars.filter((b) => b.time >= oldest)] }
-            : { ...p, historyComplete: true };
-        }),
-      );
-    } catch {
-      // Unreachable: the panel keeps what it has, and the next scroll to the edge asks again.
-    } finally {
-      host()?.historyLoaded();
-    }
+  loadPanelOlder(id: string): Promise<void> {
+    return this.split.loadOlder(id);
   }
 
-  /** Each split panel's legend: the bar under its crosshair (CC-12). */
-  readonly panelLegends = signal<Record<string, LegendSnapshot>>({});
+  readonly panelLegends = this.split.legends;
   onPanelLegend(id: string, snapshot: LegendSnapshot): void {
-    this.panelLegends.update((all) => ({ ...all, [id]: snapshot }));
+    this.split.onLegend(id, snapshot);
   }
 
   setPanelSymbol(id: string, symbol: string, propagate = true): void {
-    if (propagate) this.linkSymbol(id, symbol.toUpperCase());
-    this.comparePanels.update((list) =>
-      list.map((p) =>
-        p.id === id
-          ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) }
-          : p,
-      ),
-    );
-    void this.loadPanel(id);
+    this.split.setSymbol(id, symbol, propagate);
   }
 
   setPanelResolution(id: string, resolution: string, propagate = true): void {
-    if (propagate) this.linkInterval(id, resolution);
-    this.comparePanels.update((list) =>
-      list.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              resolution: resolution as TvResolution,
-              bars: [],
-              scripts: freshRuns(p.scripts),
-            }
-          : p,
-      ),
-    );
-    void this.loadPanel(id);
+    this.split.setResolution(id, resolution, propagate);
   }
 
   /** Promote a comparison panel to the primary chart. */

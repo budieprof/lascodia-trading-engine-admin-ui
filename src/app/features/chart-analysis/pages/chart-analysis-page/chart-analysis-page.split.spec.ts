@@ -4,6 +4,8 @@ import { of } from 'rxjs';
 
 import type { Bar } from '../../datafeed/candle-feed.service';
 import { ChartAnalysisPageComponent, type ComparePanel } from './chart-analysis-page.component';
+import { SplitPanelsController } from '../../compare/split-panels.controller';
+import { noDataMessage } from '../../datafeed/data-availability';
 
 // The split view (CC-12) run against just the state it touches, as the page's other specs do:
 // panels restored from a layout, moved by live prices, and paged back on scroll.
@@ -58,13 +60,38 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
       strategiesError: null,
     }),
   });
+  // US02: the split view lives in its controller; the page's split members are its signals.
+  const split = new SplitPanelsController({
+    feed: p.feed,
+    isSessionResolution: () => false,
+    noDataMessage: (symbol: string, r: string) => noDataMessage(symbol, r, null),
+    candidates: (taken: string[]) =>
+      p.symbols().map((x: { symbol: string }) => x.symbol).filter((x: string) => !taken.includes(x)),
+    mainSymbol: () => p.symbol(),
+    mainResolution: () => p.resolution(),
+    hostAt: (i: number) => p['panelHosts']()[i],
+    now: () => NOW,
+    calendarOf: () => null,
+    calendarCodeOf: () => null,
+    loadCalendar: () => Promise.resolve(null),
+    // As the page wires them: a panel's switch reaches its link group.
+    linkSymbol: (id: string, symbol: string) => p['linkSymbol'](id, symbol),
+    linkInterval: (id: string, r: string) => p['linkInterval'](id, r),
+  });
+  split.panels.set(comparePanels());
+  Object.assign(p, {
+    split,
+    comparePanels: split.panels,
+    splitLayout: split.layout,
+    panelLegends: split.legends,
+  });
   Object.defineProperty(p, 'panelScriptChoices', {
     value: computed(() => [...p.scriptCatalog()!.mine, ...p.scriptCatalog()!.examples]),
   });
   // As the page derives the layout's other charts (v2 `charts`, CC-I5).
   Object.defineProperty(p, 'panelStates', {
     value: computed(() =>
-      comparePanels().map((x) => ({
+      split.panels().map((x) => ({
         symbol: x.symbol,
         resolution: x.resolution,
         ...(x.indicators.length ? { indicators: x.indicators } : {}),
