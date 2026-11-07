@@ -10,6 +10,7 @@ import {
   formatPercent,
   formatUnits,
 } from './report-format';
+import { intrabarRows } from './intrabar-evidence';
 
 interface PropRow {
   label: string;
@@ -160,6 +161,8 @@ export class ReportPropertiesComponent {
       { label: 'Account currency', value: m.accountCurrency || NA },
       { label: 'Symbol currency', value: m.symbolCurrency || NA },
       { label: 'Bar magnifier', value: m.useBarMagnifier ? 'On' : 'Off' },
+      // C3: intrabar resolution, ambiguous bars and magnifier coverage (absent on older engines).
+      ...intrabarRows(m),
     ];
     if ((m.trimmedTrades ?? 0) > 0) {
       rows.push({ label: 'Trimmed closed trades', value: formatInteger(m.trimmedTrades) });

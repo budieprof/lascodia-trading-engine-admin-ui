@@ -270,6 +270,11 @@ export interface ScriptBacktestRequest {
   /** Overrides the script's `use_bar_magnifier`; omitted = the script's own setting. */
   barMagnifier?: boolean;
   /**
+   * C3: which extreme of a bar the emulator visits first when OHLC cannot tell. Omitted = the
+   * engine's evidence policy (`Backtest:Evidence:IntrabarResolution`, default Pessimistic).
+   */
+  intrabarResolution?: 'ScriptDefault' | 'Pessimistic' | 'Optimistic';
+  /**
    * PC-I5: the Strategy Tester's Properties over the script's `strategy()` (scripting API §3d). Recorded with the run;
    * such a run is never evidence about the strategy as deployed.
    */

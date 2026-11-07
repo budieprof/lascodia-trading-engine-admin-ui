@@ -8,6 +8,7 @@ import {
   computed,
   OnInit,
   ViewChild,
+  untracked,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -40,6 +41,8 @@ import { StatusBadgeComponent } from '@shared/components/status-badge/status-bad
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
+import { readTabParam, tabQueryParam } from '../../util/tab-url';
+import { fmtProfitFactor } from '@shared/utils/metric-format';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
@@ -299,7 +302,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
               </div>
               <div>
                 <dt>Profit factor</dt>
-                <dd>{{ s.profitFactor.toFixed(2) }}</dd>
+                <dd>{{ fmtProfitFactor(s.profitFactor, 2, s.windowTrades > 0) }}</dd>
               </div>
               <div>
                 <dt>Sharpe</dt>
@@ -1595,6 +1598,33 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     }
   });
 
+  /**
+   * U06: the tab on show is written back to `?tab=` (replaceUrl — one history entry per page, not
+   * per click), so a reload or a shared link reopens it. The default tab is the bare URL.
+   */
+  private readonly tabUrlSync = effect(() => {
+    const tab = this.activeTab();
+    untracked(() => this.writeTabToUrl(tab));
+  });
+
+  private writeTabToUrl(tab: string): void {
+    const want = tabQueryParam(tab);
+    const current = this.route.snapshot?.queryParamMap?.get('tab') ?? null;
+    if (current === want) return;
+    try {
+      void this.router
+        .navigate([], {
+          relativeTo: this.route,
+          queryParams: { tab: want },
+          queryParamsHandling: 'merge',
+          replaceUrl: true,
+        })
+        .catch(() => undefined);
+    } catch {
+      /* a router without this route (tests) — the URL simply is not updated */
+    }
+  }
+
   ancestorCount = computed(
     () => this.lineage()?.nodes.filter((n) => n.depthOffset < 0).length ?? 0,
   );
@@ -1755,6 +1785,9 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
 
   protected strategyId!: number;
 
+  /** PF 9999 = no losing trades → "∞" (U04). */
+  protected readonly fmtProfitFactor = fmtProfitFactor;
+
   readonly detailTabs: TabItem[] = [
     { label: 'Config', value: 'config' },
     { label: 'Promotion', value: 'promotion' },
@@ -1861,6 +1894,8 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     this.tabQuestionOpen = true;
     try {
       if (await confirmDiscard(this.dialogs, unsaved)) this.activeTab.set(tab);
+      // Kept: a `?tab=` change that asked must not leave the URL naming the other tab.
+      else this.writeTabToUrl(this.activeTab());
     } finally {
       this.tabQuestionOpen = false;
     }
@@ -2218,9 +2253,20 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       )
       .subscribe((id) => this.showStrategy(id));
 
-    // `?tab=` opens a tab directly — the full-page editor sends the operator to Execution.
-    const tab = this.route.snapshot?.queryParamMap?.get('tab');
+    // `?tab=` opens a tab directly — the full-page editor sends the operator to Execution — and
+    // follows later changes to it (a link to another tab of this page reuses the component).
+    const known = this.detailTabs.map((t) => t.value);
+    const tab = readTabParam(this.route.snapshot?.queryParamMap?.get('tab'), known);
     if (tab) this.activeTab.set(tab);
+    this.route.queryParamMap
+      ?.pipe(
+        map((q) => readTabParam(q.get('tab'), known) ?? 'config'),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((t) => {
+        if (t !== this.activeTab()) this.requestTab(t);
+      });
 
     // Push refresh: filter to events for this strategy id, throttle to 5s so
     // a chatty 60s-cadence worker can't pile up if the page sits open. The

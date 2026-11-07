@@ -12,6 +12,7 @@ import type {
 import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
+import { GateRowsTableComponent } from '../gate-rows-table/gate-rows-table.component';
 import {
   APPROVAL_MAX_POLL_FAILURES,
   APPROVAL_POLL_MS,
@@ -22,6 +23,7 @@ import {
 // verdict gate by gate; refusals; an evaluation that outlives the dialog; "no verdict" only for real
 // failures.
 
+declareSignalIo(GateRowsTableComponent, { inputs: ['rows', 'showCounts', 'ariaLabel'] });
 declareSignalIo(SubmitForApprovalDialogComponent, {
   inputs: ['strategy'],
   outputs: ['closed', 'changed', 'historyRequested'],
@@ -134,6 +136,60 @@ describe('SubmitForApprovalDialogComponent', () => {
     expect(el.textContent).toContain('PaperTrading → Approved');
     expect(el.textContent).not.toContain('Draft → Approved');
     expect(el.textContent).toContain('keeps');
+  });
+
+  it('shows the C2 gate rows of a verdict (Not measurable is not a Pass), else the C2 outcome per gate', () => {
+    submit.mockReturnValue(of(RUNNING));
+    poll.mockReturnValueOnce(
+      of(
+        envelope(
+          job(
+            'done',
+            {
+              approved: false,
+              stage: 'Draft',
+              gates: [
+                { name: 'dsr', passed: false, detail: 'DSR=0.81', outcome: 'Fail' },
+                { name: 'pbo', passed: true, detail: 'no candidates', outcome: 'NotMeasurable' },
+              ],
+              rows: [
+                {
+                  gate: 'dsr',
+                  outcome: 'Fail',
+                  value: 0.81,
+                  threshold: 0.95,
+                  unit: 'probability',
+                  comparator: '>=',
+                  detail: '',
+                },
+                {
+                  gate: 'pbo',
+                  outcome: 'NotMeasurable',
+                  value: null,
+                  threshold: 0.5,
+                  unit: null,
+                  comparator: '<=',
+                  detail: 'no candidates',
+                },
+              ],
+            },
+            'Not approved',
+          ),
+        ),
+      ),
+    );
+    open();
+    run();
+    tick();
+    const chips = [...el.querySelectorAll('app-gate-rows-table .chip')].map((c) =>
+      c.textContent!.trim(),
+    );
+    expect(chips).toEqual(['Fail', 'Not measurable']);
+    expect(el.querySelector('.verdict')!.textContent).toContain('1 of 2 gates failed');
+    expect(
+      fixture.componentInstance.gateResultLabel({ passed: true, outcome: 'NotMeasurable' }),
+    ).toBe('Not measurable');
+    expect(fixture.componentInstance.gateResultLabel({ passed: true })).toBe('Pass');
   });
 
   it('starts the job, polls it while it runs, then shows an approval; the host re-reads the strategy', () => {
