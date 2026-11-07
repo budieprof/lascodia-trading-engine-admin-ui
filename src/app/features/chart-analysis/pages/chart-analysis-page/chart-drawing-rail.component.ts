@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_DRAWING_RAIL } from './chart-page.token';
 
 /**
  * The left drawing rail: the cursor, one button per tool family with its flyout, magnet, stay-in-drawing, lock, hide and remove.
@@ -18,5 +18,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-drawing-rail.component.scss',
 })
 export class ChartDrawingRailComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_DRAWING_RAIL);
 }

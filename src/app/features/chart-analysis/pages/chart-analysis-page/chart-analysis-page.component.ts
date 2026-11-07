@@ -328,7 +328,23 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ReplayController } from '../../replay/replay-controller';
-import { CHART_PAGE } from './chart-page.token';
+import {
+  pageSlice,
+  CHART_LEGEND,
+  LEGEND_KEYS,
+  CHART_STUDIES_STRIP,
+  STUDIES_STRIP_KEYS,
+  CHART_CONTEXT_MENUS,
+  CONTEXT_MENUS_KEYS,
+  CHART_PANEL_STRIP,
+  PANEL_STRIP_KEYS,
+  CHART_OVERLAYS_MENU,
+  OVERLAYS_MENU_KEYS,
+  CHART_DRAWING_RAIL,
+  DRAWING_RAIL_KEYS,
+  CHART_SIDE_PANE,
+  SIDE_PANE_KEYS,
+} from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
 import { ChartLegendComponent } from './chart-legend.component';
@@ -596,7 +612,44 @@ export { normaliseView };
     ChartStudiesStripComponent,
   ],
   // The template's sections (rail, strip, legend, menus, side pane, studies) render this page's state.
-  providers: [{ provide: CHART_PAGE, useExisting: forwardRef(() => ChartAnalysisPageComponent) }],
+  // US02: each template section gets its slice of the page, not the page.
+  providers: [
+    {
+      provide: CHART_LEGEND,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, LEGEND_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_STUDIES_STRIP,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, STUDIES_STRIP_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_CONTEXT_MENUS,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, CONTEXT_MENUS_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_PANEL_STRIP,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, PANEL_STRIP_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_OVERLAYS_MENU,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, OVERLAYS_MENU_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_DRAWING_RAIL,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, DRAWING_RAIL_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_SIDE_PANE,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, SIDE_PANE_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+  ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: {
