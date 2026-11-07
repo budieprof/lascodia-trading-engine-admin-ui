@@ -35,7 +35,7 @@ import {
   type ChartWatchlist,
   type RemovedItem,
 } from '@features/chart-analysis/watchlist/watchlist.model';
-import { pipSizeFor } from '@features/chart-analysis/datafeed/symbol-info';
+import { pairDistanceUnit } from '@features/chart-analysis/datafeed/instrument-facts';
 
 import {
   MiniChartTileComponent,
@@ -815,7 +815,7 @@ export class WatchlistPageComponent implements OnInit {
       if (!symbol) continue;
       // `assetClass` is on the wire but not yet on the generated DTO.
       const assetClass = (p as { assetClass?: string | null }).assetClass ?? null;
-      meta[symbol] = { pipSize: pipSizeFor(p.decimalPlaces, assetClass), digits: p.decimalPlaces };
+      meta[symbol] = { pipSize: pairDistanceUnit({ ...p, assetClass }), digits: p.decimalPlaces };
     }
     return meta;
   });

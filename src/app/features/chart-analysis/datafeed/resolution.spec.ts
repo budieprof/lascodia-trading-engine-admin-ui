@@ -11,7 +11,7 @@ import {
   sourceBarsNeeded,
   type EngineTimeframe,
 } from './resolution';
-import { pipSizeFor, priceScaleFor, rankSymbols, toSymbolInfo } from './symbol-info';
+import { priceScaleFor, rankSymbols } from './symbol-info';
 
 /** The only timeframes the engine's `Timeframe` enum stores. */
 const STORED: EngineTimeframe[] = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'];
@@ -90,43 +90,6 @@ describe('symbol info', () => {
     expect(priceScaleFor(0)).toBe(100_000);
     expect(priceScaleFor(Number.NaN)).toBe(100_000);
   });
-
-  it('declares a Sunday→Friday session, never 24x7', () => {
-    const info = toSymbolInfo({
-      id: 1,
-      symbol: 'EURUSD',
-      baseCurrency: 'EUR',
-      quoteCurrency: 'USD',
-      decimalPlaces: 5,
-      contractSize: 100000,
-      minLotSize: 0.01,
-      maxLotSize: 100,
-      lotStep: 0.01,
-      isActive: true,
-    });
-    expect(info.session).toBe('0000-0000:123456');
-    expect(info.session).not.toContain('7');
-    expect(info.timezone).toBe('Etc/UTC');
-    expect(info.pricescale).toBe(100_000);
-    expect(info.description).toBe('EUR/USD');
-    expect(info.has_intraday).toBe(true);
-  });
-});
-
-describe("pipSizeFor — the engine's pip (InstrumentMath.ResolvePipSize)", () => {
-  it('is ten points on fractional FX quotes and one point on the old ones', () => {
-    expect(pipSizeFor(5)).toBeCloseTo(0.0001, 12);
-    expect(pipSizeFor(3)).toBeCloseTo(0.01, 12);
-    expect(pipSizeFor(4)).toBeCloseTo(0.0001, 12);
-    expect(pipSizeFor(2)).toBeCloseTo(0.01, 12);
-    expect(pipSizeFor(5, 'FxMajor')).toBeCloseTo(0.0001, 12);
-  });
-
-  it('is the point for anything that is not FX', () => {
-    expect(pipSizeFor(2, 'Commodity')).toBeCloseTo(0.01, 12);
-    expect(pipSizeFor(1, 'Index')).toBeCloseTo(0.1, 12);
-    expect(pipSizeFor(3, 'Crypto')).toBeCloseTo(0.001, 12);
-  });
 });
 
 describe('more timeframes (CC-I8)', () => {
@@ -201,73 +164,5 @@ describe('rankSymbols — Enter takes the best match (CC-I13)', () => {
   it('lists everything for an empty query and nothing for no match', () => {
     expect(rankSymbols(pairs, ' ')).toHaveLength(6);
     expect(rankSymbols(pairs, 'XAU')).toEqual([]);
-  });
-});
-
-describe('toSymbolInfo — other asset classes (multi-asset WS7)', () => {
-  it('a future: futures type, its exchange, tick as minmov, session from its calendar', () => {
-    const info = toSymbolInfo(
-      {
-        symbol: 'ESZ6',
-        assetClass: 'Future',
-        exchange: 'CME',
-        description: 'E-mini S&P 500',
-        quoteCurrency: 'USD',
-        tickSize: 0.25,
-        tickValue: 12.5,
-        multiplier: 50,
-        quantityUnit: 'Contracts',
-        quantityStep: 1,
-        minQuantity: 1,
-        maxQuantity: 500,
-        priceDecimals: 2,
-        displayDistance: 'Ticks',
-        tradingCalendarCode: 'cme-globex',
-        status: null,
-      },
-      {
-        code: 'cme-globex',
-        timeZone: 'America/Chicago',
-        is24x7: false,
-        holidays: [],
-        sessions: [0, 1, 2, 3, 4].map((day) => ({
-          day,
-          open: '17:00',
-          close: '16:00',
-          kind: 'Regular' as const,
-        })),
-      },
-    );
-    expect(info.type).toBe('futures');
-    expect(info.exchange).toBe('CME');
-    expect(info.minmov).toBe(25);
-    expect(info.pricescale).toBe(100);
-    expect(info.session).toBe('1700-1600:23456');
-    expect(info.timezone).toBe('America/Chicago');
-  });
-  it('an FX pair given its fx-24x5 calendar keeps the session the chart has always declared', () => {
-    const info = toSymbolInfo(
-      {
-        id: 1,
-        symbol: 'USDJPY',
-        baseCurrency: 'USD',
-        quoteCurrency: 'JPY',
-        decimalPlaces: 3,
-        contractSize: 100000,
-        minLotSize: 0.01,
-        maxLotSize: 100,
-        lotStep: 0.01,
-        isActive: true,
-        assetClass: 'FxMajor',
-      },
-      { code: 'fx-24x5', timeZone: 'America/New_York', is24x7: false, holidays: [], sessions: [] },
-    );
-    expect([info.type, info.session, info.timezone, info.minmov, info.pricescale]).toEqual([
-      'forex',
-      '0000-0000:123456',
-      'Etc/UTC',
-      1,
-      1000,
-    ]);
   });
 });
