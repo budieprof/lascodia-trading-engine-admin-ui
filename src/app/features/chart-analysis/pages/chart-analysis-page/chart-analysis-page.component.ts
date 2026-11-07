@@ -2,6 +2,7 @@ import {
   consolidatedId,
   consolidatedSubset,
   isConsolidatedId,
+  type MdSource,
 } from '@core/realtime/marketdata.types';
 import {
   ChangeDetectionStrategy,
@@ -1894,11 +1895,12 @@ export class ChartAnalysisPageComponent {
       history: (req) => this.mdApi.history(req),
       symbol: () => this.symbol(),
       // The consolidated book has no tick tape: tick replay then reads the automatic source.
-      sourceId: () => {
+      sourceId: (): string | null => {
         const s = this.orderFlow().sourceId;
         if (isConsolidatedId(s)) return null;
         // UF07: a picked source that does not carry this symbol (a crypto exchange on an FX chart) → automatic.
-        const src = this.orderFlowFeed.mdSources()?.find((x) => x.sourceId === s);
+        const list: readonly MdSource[] = this.orderFlowFeed.mdSources() ?? [];
+        const src = list.find((x) => x.sourceId === s);
         return src && !sourceCarries(src, this.symbol()) ? null : s;
       },
       now: () => this.serverClock.now(),
