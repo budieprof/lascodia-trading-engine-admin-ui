@@ -10,6 +10,9 @@ import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { MAX_BUSY_RETRIES } from '../../scripts/script-run-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
+import { dockPageState } from './chart-analysis-page.dock.testing';
+import { editorPageState } from './chart-analysis-page.editor.testing';
+import { attachScriptEngine } from './chart-analysis-page.engine.testing';
 import { ReplayController } from '../../replay/replay-controller';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { normalizeOutputs } from '@shared/pine-chart/model/normalize';
@@ -110,8 +113,12 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   });
   const showCompile = vi.fn();
   const scriptRuns = signal(runs);
-  const editorKey = signal<string | null>(null);
   const pendingScripts = signal(new Map());
+  // The dock (U13 fu-ui: ChartDockState): the editor open in front, Pine Logs (PC-I6) closed.
+  const dockState = dockPageState(scriptRuns, { editorOpen: true, dockPreference: 'editor' });
+  // The Pine Editor's link to the chart (U13 fu-ui: ChartEditorState): the run it shows, or a script whose first run
+  // failed — as the page derives it.
+  const editorState = editorPageState(scriptRuns, pendingScripts, dockState.dock);
   const runningKeys = signal<ReadonlyMap<string, number>>(new Map());
   // Bar Replay, as the page derives its head.
   const replayActive = signal(false);
@@ -119,9 +126,7 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
   Object.assign(p, {
     // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
     ...realtimePageState(),
-    // The dock's Pine Logs (PC-I6): closed.
-    logsKey: signal(null),
-    logsFront: signal(false),
+    ...dockState,
     replayActive,
     displayBars,
     replayClosedHead: computed(() => (replayActive() ? (displayBars().at(-1) ?? null) : null)),
@@ -150,28 +155,14 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
         ({ key, source: 'mine', name, description: '', kind, pineSource: source }) as ChartScriptItem,
     },
     destroyRef: { destroyed: false, onDestroy: () => () => undefined },
-    testerOpen: signal(true),
-    dockPreference: signal('editor'),
     settings: { loadStoredInputs: vi.fn(), run: () => null, close: vi.fn() },
     replacedNotice: signal(null),
-    editorKey,
-    editorOpen: signal(true),
-    editorDraft: signal(null),
-    assistSource: signal(null),
-    editorCleared: signal(false),
-    strategySources: signal({}),
+    ...editorState,
     scriptEditor: () => ({ showCompile, revealLine: vi.fn() }),
     notify: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
   });
-  // As the page derives it: the run the editor shows, or a script whose first run failed.
-  Object.assign(p, {
-    editorTarget: computed(() => {
-      const key = editorKey();
-      const run = scriptRuns().find((r) => r.item.key === key);
-      const it = run?.item ?? (key ? pendingScripts().get(key)?.item : undefined);
-      return it ? { key: it.key, name: it.name, source: it.pineSource ?? null } : null;
-    }),
-  });
+  // The script-run engine (U13 fu-ui: ChartScriptEngine) over this page and the run state above.
+  attachScriptEngine(p);
   return { p, runOnChart, answers, showCompile };
 }
 

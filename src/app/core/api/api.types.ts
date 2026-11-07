@@ -1355,6 +1355,12 @@ export interface BacktestRunDto {
   failureDetailsJson: string | null;
   /** What queued it (engine `ValidationQueueSource`). */
   queueSource: string | null;
+  /**
+   * Set when the engine has excluded the run from evidence (gates, graduation, evidence picker) after the fact, e.g. the
+   * runs that converted money at rate 1 on non-USD-quoted pairs. Optional: older engine builds do not send it.
+   */
+  evidenceInvalidatedReason?: string | null;
+  evidenceInvalidatedAtUtc?: string | null;
   // Lifecycle timestamps (UTC). There is no `startedAt` on the wire — the type used to declare
   // one, so every "Started" column read blank. The worker began executing at
   // `executionStartedAt` (falling back to `claimedAt` for older rows).

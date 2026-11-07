@@ -25,8 +25,7 @@ import {
   type CompareBasis,
   type NormalisedSeries,
 } from './compare-normalise';
-
-const NOT_EVIDENCE = new Set(['Parity', 'LabReproduction']);
+import { isEvidenceRun } from '@features/backtests/run-provenance';
 
 interface RunState {
   run: BacktestRunDto | null;
@@ -333,7 +332,7 @@ export class NormalisedCompareComponent {
             }),
           );
           const run =
-            (res?.data?.data ?? []).find((r) => !NOT_EVIDENCE.has(String(r.queueSource ?? ''))) ??
+            (res?.data?.data ?? []).find((r) => isEvidenceRun(r)) ??
             null;
           return [id, { run, error: null }];
         } catch {

@@ -12,6 +12,7 @@ import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/sc
 import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
 import { configHashColumn } from '../../util/config-hash-column';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
+import { evidenceInvalidation } from '@features/backtests/run-provenance';
 
 /** A backtest row that closed at least one trade; without one its ratios are not measured. */
 function runHasTrades(row: { totalTrades?: number | null } | null | undefined): boolean {
@@ -96,12 +97,17 @@ export class StrategyBacktestsTabComponent {
         if (!d) return p.value ?? '—';
         // The timeframe code ("H1"), as on the Backtests page: "1 Hour (override)" did not fit.
         const market = `${d.symbol ?? '—'} · ${d.timeframe ?? '—'}`;
-        return d.symbolOverride || d.timeframeOverride ? `${market} (override)` : market;
+        const shown = d.symbolOverride || d.timeframeOverride ? `${market} (override)` : market;
+        // fu-ui item 6: a run the engine excluded from evidence after the fact (reason in the tooltip).
+        return evidenceInvalidation(p.data) ? `${shown} (excluded)` : shown;
       },
-      tooltipValueGetter: (p: any) =>
-        p.data?.symbolOverride || p.data?.timeframeOverride
+      tooltipValueGetter: (p: any) => {
+        const inv = evidenceInvalidation(p.data);
+        if (inv) return `Excluded from evidence: ${inv.reason}`;
+        return p.data?.symbolOverride || p.data?.timeframeOverride
           ? "Override run: the strategy's rules on another market or timeframe — not promotion evidence"
-          : null,
+          : null;
+      },
     },
     // UTC dates: toLocaleDateString printed a window ending 2026-09-30T23:00Z as "10/1/2026".
     // One "from – to" column (sorts by its start) leaves room for the rest.

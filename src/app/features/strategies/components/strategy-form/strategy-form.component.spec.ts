@@ -272,6 +272,23 @@ describe('StrategyFormComponent (legacy rules, parameters, edit mode)', () => {
       });
     });
 
+    it('a rollback from the version-history drawer writes the restored values into the form', () => {
+      cmp.form.patchValue({ name: 'edited', description: 'edited too' });
+      cmp.applyRestoredVersion({
+        ...COMPOSITE,
+        name: 'Restored v3',
+        description: null,
+        sizingConfigJson: null,
+        riskProfileId: 7,
+      } as StrategyDto);
+      expect(cmp.form.value).toMatchObject({
+        name: 'Restored v3',
+        description: null,
+        sizingConfigJson: '',
+        riskProfileId: 7,
+      });
+    });
+
     it('closes itself after a clone so the copy can open', () => {
       let cancelled = 0;
       cmp.cancelled.subscribe(() => cancelled++);

@@ -7,6 +7,11 @@ import {
   inject,
   signal,
 } from '@angular/core';
+import {
+  PF_SENSITIVITY_NO_LOSS,
+  fmtProfitFactor,
+  profitFactorTitle,
+} from '@shared/utils/metric-format';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -759,7 +764,7 @@ const OUTCOME_FILTERS = [
                 </div>
                 <div class="kpi">
                   <span class="kpi-label">Profit factor</span>
-                  <span class="kpi-value">{{ sr.aggregate.profitFactor | number: '1.2-2' }}</span>
+                  <span class="kpi-value" [title]="pfTitle(sr.aggregate.profitFactor)">{{ pf(sr.aggregate.profitFactor) }}</span>
                   <span class="kpi-sub"
                     >payoff {{ sr.riskMetrics.payoffRatio | number: '1.2-2' }}</span
                   >
@@ -1833,6 +1838,12 @@ const OUTCOME_FILTERS = [
   ],
 })
 export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
+  /** Profit factor: this analysis writes 999 for "no losing trades" — shown as "∞", never as a ratio. */
+  protected readonly pf = (v: number | null | undefined): string =>
+    fmtProfitFactor(v, 2, true, PF_SENSITIVITY_NO_LOSS);
+  protected readonly pfTitle = (v: number | null | undefined): string =>
+    profitFactorTitle(v, PF_SENSITIVITY_NO_LOSS);
+
   readonly BacktestStatus = BacktestStatus;
   readonly outcomeOptions = OUTCOME_FILTERS;
 
@@ -2805,7 +2816,7 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
             Win rate: ${fmt(a.winRatePct)}% (${a.winCount}/${a.lossCount})<br/>
             Realized: ${fmt(a.realizedPnL)} p<br/>
             Expired: ${a.expiredCount} (${fmt(a.unrealizedPnL)} p)<br/>
-            Profit factor: ${fmt(a.profitFactor)}<br/>
+            Profit factor: ${this.pf(a.profitFactor)}<br/>
             Walkable: ${a.walkable}
           `;
         },
@@ -2843,10 +2854,12 @@ export class LlmBacktestDetailPageComponent implements OnInit, OnDestroy {
           data,
           label: {
             show: true,
-            formatter: (params: { value: [number, number, number] }) => {
+            formatter: (params: { value: [number, number, number]; dataIndex: number }) => {
               const v = params.value[2];
               if (metric === 'winRatePct') return v.toFixed(0) + '%';
-              if (metric === 'profitFactor') return v.toFixed(2);
+              // The colour value is capped at 5; the label shows the cell's own profit factor ("∞" = no losses).
+              if (metric === 'profitFactor')
+                return this.pf(r.heatmap[params.dataIndex]?.aggregate.profitFactor ?? v);
               return Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(0);
             },
             fontSize: 10,

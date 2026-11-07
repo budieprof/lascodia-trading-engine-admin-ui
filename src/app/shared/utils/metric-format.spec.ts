@@ -4,11 +4,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   PF_NO_LOSS_SENTINEL,
+  PF_NO_LOSS_TITLE,
+  PF_SENSITIVITY_NO_LOSS,
   fmtFraction,
   fmtPct,
   fmtProfitFactor,
+  fmtProfitFactorDelta,
   fractionToPct,
   isNoLossProfitFactor,
+  profitFactorTitle,
 } from './metric-format';
 
 describe('metric-format', () => {
@@ -46,6 +50,25 @@ describe('metric-format', () => {
     expect(fmtProfitFactor(9999, 2, false)).toBe('—');
     expect(fmtProfitFactor(null)).toBe('—');
   });
+
+  it('honours another producer\'s sentinel (sensitivity analyses write 999)', () => {
+    expect(PF_SENSITIVITY_NO_LOSS).toBe(999);
+    expect(fmtProfitFactor(999)).toBe('999.00');
+    expect(fmtProfitFactor(999, 2, true, PF_SENSITIVITY_NO_LOSS)).toBe('∞');
+    expect(fmtProfitFactor(3.21, 2, true, PF_SENSITIVITY_NO_LOSS)).toBe('3.21');
+    expect(isNoLossProfitFactor(999, PF_SENSITIVITY_NO_LOSS)).toBe(true);
+    // CME experiments send decimal.MaxValue
+    expect(fmtProfitFactor(79228162514264337593543950335)).toBe('∞');
+  });
+
+  it('explains ∞ in a title and blanks a meaningless delta', () => {
+    expect(profitFactorTitle(9999)).toBe(PF_NO_LOSS_TITLE);
+    expect(profitFactorTitle(1.2)).toBe('');
+    expect(profitFactorTitle(999, PF_SENSITIVITY_NO_LOSS)).toBe(PF_NO_LOSS_TITLE);
+    expect(fmtProfitFactorDelta(-0.234)).toBe('-0.23');
+    expect(fmtProfitFactorDelta(79228162514264337593543950335)).toBe('—');
+    expect(fmtProfitFactorDelta(null)).toBe('—');
+  });
 });
 
 describe('no fraction printed as a percent', () => {
@@ -72,6 +95,23 @@ describe('no fraction printed as a percent', () => {
         .split('\n')
         .forEach((line, i) => {
           if (BAD.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  // A profit factor printed through the number pipe or toFixed shows the no-loss sentinel (9999 / 999 /
+  // decimal.MaxValue) as a ratio. Use fmtProfitFactor.
+  const RAW_PF = /[pP]rofitFactor\s*(\(\))?\s*\|\s*number\b|[pP]rofitFactor\s*(\(\))?\s*\??\.\s*toFixed\s*\(/;
+
+  it('finds no profit factor printed raw in the app', () => {
+    const offenders: string[] = [];
+    for (const file of walk(root)) {
+      const rel = relative(root, file);
+      readFileSync(file, 'utf8')
+        .split('\n')
+        .forEach((line, i) => {
+          if (RAW_PF.test(line) && !/isNoLossProfitFactor/.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
         });
     }
     expect(offenders).toEqual([]);

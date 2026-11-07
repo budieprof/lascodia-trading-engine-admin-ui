@@ -23,6 +23,7 @@ import { ResearchCockpitApiService } from '@features/strategies/research-cockpit
 import type { BacktestRunDiffDto } from '@features/strategies/research-cockpit/research-cockpit.types';
 
 import { intrabarEvidence, manifestView } from './run-manifest.model';
+import { evidenceInvalidation, queueSourceLabel } from '../../run-provenance';
 
 /** C9 fields the engine stores on a run; on the DTO only once the engine maps them (optional). */
 export type ManifestRun = BacktestRunDto & {
@@ -183,7 +184,7 @@ const VERDICT_TONE: Record<string, string> = {
           @for (o of others(); track o.id) {
             <option [value]="o.id">
               #{{ o.id }} · {{ o.fromDate.slice(0, 10) }} → {{ o.toDate.slice(0, 10) }} ·
-              {{ o.queueSource ?? '' }}
+              {{ o.queueSource ? queueSourceLabel(o.queueSource) : '' }}{{ isInvalidated(o) ? ' · excluded from evidence' : '' }}
             </option>
           }
         </select>
@@ -306,6 +307,9 @@ export class RunManifestCardComponent {
   private readonly auth = inject(AuthService);
 
   readonly run = input.required<ManifestRun>();
+
+  protected readonly queueSourceLabel = queueSourceLabel;
+  protected readonly isInvalidated = (r: BacktestRunDto): boolean => evidenceInvalidation(r) !== null;
 
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);

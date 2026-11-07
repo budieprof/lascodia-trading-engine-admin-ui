@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { computed, signal } from '@angular/core';
+import { signal } from '@angular/core';
 import { of } from 'rxjs';
 
 import type { ScriptInputValues } from '@core/api/scripting.types';
@@ -8,6 +8,9 @@ import { ScriptSettings } from '../../scripts/script-settings';
 import { dockStateOf, restoredDock } from '../../workspace/workspace-state';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
+import { dockPageState } from './chart-analysis-page.dock.testing';
+import { editorPageState } from './chart-analysis-page.editor.testing';
+import { attachScriptEngine } from './chart-analysis-page.engine.testing';
 
 // The page's own methods, run against just the state they touch: the component's prototype with
 // the editor's, the runs' and the settings' signals — no template, no chart, no engine. runScript
@@ -36,31 +39,25 @@ type Page = ChartAnalysisPageComponent & Record<string, any>;
 function page(runs: ChartScriptRun[]): Page {
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   const scriptRuns = signal(runs);
-  const editorKey = signal<string | null>(null);
-  const editorOpen = signal(false);
+  // The dock (U13 fu-ui: ChartDockState): the editor starts closed, the tester has no strategy to show.
+  const dockState = dockPageState(scriptRuns);
+  const editorOpen = dockState.editorOpen;
+  const pendingScripts = signal(new Map());
+  // The Pine Editor's link to the chart (U13 fu-ui: ChartEditorState), as the page derives it.
+  const editorState = editorPageState(scriptRuns, pendingScripts, dockState.dock);
   Object.assign(p, {
     // Warm sessions (PC-I1) and realtime truthfulness (PC-I9): no hub connected.
     ...realtimePageState(),
-    // The dock's Pine Logs (PC-I6): closed.
-    logsKey: signal(null),
-    logsFront: signal(false),
+    // The dock, its Pine Logs (PC-I6) closed.
+    ...dockState,
     scriptRuns,
     restoringScripts: signal([]),
     runsInFlight: new Map(),
     runningKeys: signal(new Map()),
     runScheduler: { cancel: vi.fn() },
-    editorOpen,
-    editorKey,
-    editorDraft: signal(null),
-    assistSource: signal(null),
-    dockPreference: signal('tester'),
-    testerOpen: signal(true),
-    testerPrompt: signal(false),
-    assistSeq: 0,
-    strategySources: signal({}),
-    editorCleared: signal(false),
+    ...editorState,
     runScript: vi.fn(),
-    pendingScripts: signal(new Map()),
+    pendingScripts,
     scriptFailures: signal(new Map()),
     waitingScripts: signal(new Map()),
     scriptUpdates: signal(new Map()),
@@ -80,18 +77,6 @@ function page(runs: ChartScriptRun[]): Page {
       }),
       savedScripts: () => [],
     },
-    // As the page derives them.
-    editorTarget: computed(() => {
-      const r = scriptRuns().find((x) => x.item.key === editorKey());
-      return r
-        ? {
-            key: r.item.key,
-            name: r.result.title || r.item.name,
-            source: r.item.pineSource ?? null,
-          }
-        : null;
-    }),
-    dockTab: computed(() => (editorOpen() ? 'editor' : null)),
   });
   Object.assign(p, {
     settings: new ScriptSettings(scriptRuns, {
@@ -101,6 +86,8 @@ function page(runs: ChartScriptRun[]): Page {
       notify: vi.fn(),
     }),
   });
+  // The script-run engine (U13 fu-ui: ChartScriptEngine) over this page and the run state above.
+  attachScriptEngine(p);
   return p;
 }
 

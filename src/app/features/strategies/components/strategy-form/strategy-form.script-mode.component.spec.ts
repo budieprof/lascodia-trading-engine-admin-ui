@@ -8,10 +8,17 @@ import { of } from 'rxjs';
 
 import { StrategyFormComponent } from './strategy-form.component';
 import { StrategyPreviewPanelComponent } from '../strategy-preview-panel/strategy-preview-panel.component';
+import { StrategyVersionHistoryComponent } from '../strategy-version-history/strategy-version-history.component';
+import { By } from '@angular/platform-browser';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 // U13: the preview panel is a child component now; its signal input needs the JIT metadata.
 declareSignalIo(StrategyPreviewPanelComponent, { inputs: ['form'] });
+// U13 (fu-ui): the version-history drawer is a child component the form renders for an existing strategy.
+declareSignalIo(StrategyVersionHistoryComponent, {
+  inputs: ['strategy', 'current', 'inputDefs', 'isScriptEdited'],
+  outputs: ['restored', 'changed'],
+});
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
@@ -588,6 +595,13 @@ describe('StrategyFormComponent — Pine script authoring', () => {
   describe('PE-03 — rolling back refreshes the script editor', () => {
     beforeEach(() => create(STRATEGY));
 
+    /** U13 (fu-ui): Roll back lives in the version-history drawer the form renders; the form applies its result. */
+    function drawer(): StrategyVersionHistoryComponent {
+      fixture.detectChanges();
+      return fixture.debugElement.query(By.directive(StrategyVersionHistoryComponent))
+        .componentInstance as StrategyVersionHistoryComponent;
+    }
+
     it('confirms, rolls back, and puts the restored script (and its revision) in the editor', async () => {
       const stub = panel(
         { source: SCRIPT, inputs: {}, executionPolicy: 'Direct' },
@@ -596,7 +610,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
         applySaved: ReturnType<typeof vi.fn>;
       };
       stub.applySaved = vi.fn();
-      await cmp.rollbackToVersion({ id: 9, versionNumber: 3 } as any);
+      await drawer().rollbackToVersion({ id: 9, versionNumber: 3 } as any);
       expect(dialogs.confirm).toHaveBeenCalledWith(
         expect.objectContaining({
           details: ['Your unsaved script edit is replaced by the script of that version.'],
@@ -613,7 +627,7 @@ describe('StrategyFormComponent — Pine script authoring', () => {
     it('does nothing when the operator declines', async () => {
       panel({ source: SCRIPT, inputs: {}, executionPolicy: 'Direct' }, false);
       dialogs.confirm.mockResolvedValueOnce(false);
-      await cmp.rollbackToVersion({ id: 9, versionNumber: 3 } as any);
+      await drawer().rollbackToVersion({ id: 9, versionNumber: 3 } as any);
       expect(strategiesApi['rollbackVersion']).not.toHaveBeenCalled();
     });
   });

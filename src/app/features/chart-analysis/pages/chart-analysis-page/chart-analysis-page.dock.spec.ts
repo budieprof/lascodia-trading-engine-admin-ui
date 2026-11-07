@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { computed, signal } from '@angular/core';
+import { signal } from '@angular/core';
 
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
+import { dockPageState } from './chart-analysis-page.dock.testing';
 
 // The page's own methods, run against just the state they touch (as chart-analysis-page.editor.spec
 // does): the component's prototype with the dock's signals, derived as the page derives them.
@@ -13,36 +14,8 @@ type Page = ChartAnalysisPageComponent & Record<string, any>;
 function page(runs: unknown[] = []): Page {
   const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   const scriptRuns = signal(runs as ChartScriptRun[]);
-  const strategyRun = computed(
-    () => scriptRuns().find((r) => r.result.kind === 'strategy') ?? null,
-  );
-  const testerOpen = signal(true);
-  const testerPrompt = signal(false);
-  const editorOpen = signal(false);
-  const dockPreference = signal<'editor' | 'tester'>('tester');
-  const testerShown = computed(() => testerOpen() && (!!strategyRun() || testerPrompt()));
-  const logsFront = signal(false);
-  const logsKey = signal<string | null>(null);
-  const logsRun = computed(() => scriptRuns().find((r) => r.item.key === logsKey()) ?? null);
-  Object.assign(p, {
-    scriptRuns,
-    strategyRun,
-    testerOpen,
-    testerPrompt,
-    testerShown,
-    editorOpen,
-    dockPreference,
-    logsFront,
-    logsKey,
-    logsRun,
-    dockTab: computed(() => {
-      const editor = editorOpen();
-      const tester = testerShown();
-      if (logsRun() && (logsFront() || (!editor && !tester))) return 'logs';
-      if (editor && tester) return dockPreference();
-      return editor ? 'editor' : tester ? 'tester' : null;
-    }),
-  });
+  // U13 (fu-ui): the dock is ChartDockState — the real class, where this spec used to re-derive dockTab.
+  Object.assign(p, { scriptRuns, ...dockPageState(scriptRuns) });
   return p;
 }
 

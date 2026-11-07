@@ -29,6 +29,7 @@ import {
   ResponseData,
 } from '@core/api/api.types';
 import { analyticsSampleSize, newestRowsRequest } from '../../analytics-sample';
+import { invalidatedBadgeHtml } from '../../run-provenance';
 
 type SampleState = 'loading' | 'ready' | 'error';
 
@@ -1954,6 +1955,9 @@ export class BacktestsPageComponent implements OnInit {
       cellStyle: { fontWeight: '600' },
       valueFormatter: (p: any) =>
         p.data ? `${p.data.symbol ?? '—'} · ${p.data.timeframe ?? '—'}` : (p.value ?? '—'),
+      // fu-ui item 6: a run the engine excluded from evidence carries a badge (reason in its tooltip).
+      cellRenderer: (p: any) =>
+        esc(String(p.valueFormatted ?? p.value ?? '—')) + invalidatedBadgeHtml(p.data),
     },
     {
       field: 'status',

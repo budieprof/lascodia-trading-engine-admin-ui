@@ -55,6 +55,11 @@ import { CmeHistoricAnalyticsComponent } from '@features/cme-microstructure/comp
 import { CmeExperimentTradesComponent } from '@features/cme-microstructure/components/cme-experiment-trades.component';
 import { splitContracts } from '@features/cme-microstructure/cme-calendar.logic';
 import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.logic';
+import {
+  fmtProfitFactor,
+  fmtProfitFactorDelta,
+  profitFactorTitle,
+} from '@shared/utils/metric-format';
 
 /**
  * CME Microstructure operator panel (engine ADR-0021 / ADR-0022).
@@ -487,7 +492,7 @@ import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.
                 <div class="verdict-headline">{{ verdictHeadline(x) }}</div>
                 <div class="verdict-sub muted small">
                   OOS net-PnL delta {{ x.oosNetPnlDelta | number: '1.2-2' }} USD · PF delta
-                  {{ x.oosProfitFactorDelta | number: '1.2-2' }} ·
+                  {{ pfDelta(x.oosProfitFactorDelta) }} ·
                   {{ x.fractionFoldsRealBeatsProxy * 100 | number: '1.0-0' }}% of
                   {{ x.foldsScored }} sessions · {{ x.eventsLoaded | number }} events
                 </div>
@@ -518,8 +523,8 @@ import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.
                     <span aria-hidden="true">⚠</span>
                     <span>
                       Both arms lose money (profit factor
-                      {{ x.real.profitFactor | number: '1.2-2' }} and
-                      {{ x.proxy.profitFactor | number: '1.2-2' }}). This compares two losing
+                      {{ pf(x.real.profitFactor) }} and
+                      {{ pf(x.proxy.profitFactor) }}). This compares two losing
                       configurations — it measures which way a losing system fails, not whether real
                       flow carries edge.
                     </span>
@@ -547,7 +552,7 @@ import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.
                           }}</strong>
                         </td>
                         <td class="num">{{ arm.netPnl | number: '1.2-2' }}</td>
-                        <td class="num">{{ arm.profitFactor | number: '1.2-2' }}</td>
+                        <td class="num" [title]="pfTitle(arm.profitFactor)">{{ pf(arm.profitFactor) }}</td>
                         <td class="num">{{ arm.tradeCount | number }}</td>
                         <td class="num">{{ arm.winRate * 100 | number: '1.0-1' }}%</td>
                       </tr>
@@ -730,8 +735,8 @@ import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.
                         <span class="nw">{{ r.toUtc | date: 'yyyy-MM-dd' : 'UTC' }}</span>
                       </td>
                       <td class="num">{{ r.foldsScored }}</td>
-                      <td class="num">{{ r.realProfitFactor | number: '1.2-2' }}</td>
-                      <td class="num">{{ r.proxyProfitFactor | number: '1.2-2' }}</td>
+                      <td class="num" [title]="pfTitle(r.realProfitFactor)">{{ pf(r.realProfitFactor) }}</td>
+                      <td class="num" [title]="pfTitle(r.proxyProfitFactor)">{{ pf(r.proxyProfitFactor) }}</td>
                       <td
                         class="num"
                         [class.pos]="r.ran && r.oosNetPnlDelta > 0"
@@ -908,6 +913,11 @@ import { runVerdict, signedUsd } from '@features/cme-microstructure/cme-verdict.
 export class CmeMicrostructurePageComponent {
   private readonly cme = inject(CmeMicrostructureService);
   private readonly notify = inject(NotificationService);
+
+  /** Profit factor: the engine's no-loss value (decimal.MaxValue) reads "∞", never a 29-digit ratio. */
+  protected readonly pf = (v: number | null | undefined): string => fmtProfitFactor(v);
+  protected readonly pfTitle = (v: number | null | undefined): string => profitFactorTitle(v);
+  protected readonly pfDelta = (v: number | null | undefined): string => fmtProfitFactorDelta(v);
 
   protected readonly status = signal<CmeStatusDto | null>(null);
   protected readonly experiment = signal<CmeOrderflowExperimentResultDto | null>(null);
