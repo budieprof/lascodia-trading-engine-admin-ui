@@ -55,6 +55,8 @@ export interface IndicatorVote {
   /** Why it voted that way, in plain words — the rule that fired, or why none did. */
   reason: string;
   study: StudyRef;
+  /** UA05: the history its lookback needs (bars) — set on a row with no value, for "n/a: 87 of 200 bars". */
+  need?: number;
 }
 
 export interface GroupRating {
@@ -498,11 +500,47 @@ function oscVotes(bars: Ohlc[]): IndicatorVote[] {
   return out;
 }
 
+/** Bars each oscillator row needs before it has a value (its lookback with its smoothing; TradingView's inputs). */
+const OSC_NEED: Record<string, number> = {
+  'Relative Strength Index (14)': 15,
+  'Stochastic %K (14, 3, 3)': 16,
+  'Commodity Channel Index (20)': 20,
+  'Average Directional Index (14)': 28,
+  'Awesome Oscillator': 34,
+  'Momentum (10)': 11,
+  'MACD Level (12, 26)': 26,
+  'Stochastic RSI Fast (3, 3, 14, 14)': 30,
+  'Williams Percent Range (14)': 14,
+  'Bull Bear Power': 13,
+  'Ultimate Oscillator (7, 14, 28)': 29,
+};
+
+/** The bars a row needs: a moving average its length (Hull its length + √length), Ichimoku 52 + 26, else the table. */
+export function historyNeed(name: string): number | null {
+  if (name.startsWith('Ichimoku')) return 78;
+  const hull = /^Hull Moving Average \((\d+)\)$/.exec(name);
+  if (hull) return Number(hull[1]) + Math.floor(Math.sqrt(Number(hull[1]))) - 1;
+  const ma = /Moving Average \((\d+)\)$/.exec(name);
+  if (ma) return Number(ma[1]);
+  return OSC_NEED[name] ?? null;
+}
+
+/** "n/a: 87 of 200 bars" on every row without a value (the history held is shorter than its lookback). */
+function markThin(votes: IndicatorVote[], bars: number): IndicatorVote[] {
+  return votes.map((v) => {
+    if (v.value !== null) return v;
+    const need = historyNeed(v.name);
+    return need === null
+      ? v
+      : { ...v, need, reason: `n/a: ${bars} of ${need} bars (not enough history to compute)` };
+  });
+}
+
 /** The rating over ascending bars. Empty input → everything neutral with zero voters. */
 export function technicalRating(bars: readonly Ohlc[]): TechnicalRating {
   const b = bars.slice();
-  const movingAverages = group(b.length ? maVotes(b) : []);
-  const oscillators = group(b.length ? oscVotes(b) : []);
+  const movingAverages = group(b.length ? markThin(maVotes(b), b.length) : []);
+  const oscillators = group(b.length ? markThin(oscVotes(b), b.length) : []);
   const rating = (movingAverages.rating + oscillators.rating) / 2;
   return {
     summary: {
