@@ -76,8 +76,8 @@
                     <span class="sym-name">{{ p.symbol }}</span>
                     <span class="sym-desc"
                       >{{ symbolDescription(p.symbol, p.description) }}
-                      @if (p.exchange || p.source) {
-                        <span class="sym-venue">· {{ p.exchange || p.source }}</span>
+                      @if (p.venue) {
+                        <span class="sym-venue">· {{ p.venue }}</span>
                       }
                       @if (p.noDataReason) {
                         <span class="sym-nodata" data-testid="symbol-no-data">· {{ p.noDataReason }}</span>
