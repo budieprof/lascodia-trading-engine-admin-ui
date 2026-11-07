@@ -15,6 +15,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { formatDate } from '@angular/common';
 import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
+import { configHashColumn } from '../../util/config-hash-column';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
@@ -76,6 +77,7 @@ import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/
 import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
 import { OptimizationWorkbenchComponent } from '@features/scripting/research/optimization-workbench.component';
 import { WalkForwardWorkbenchComponent } from '@features/scripting/research/walk-forward-workbench.component';
+import { ResearchCockpitComponent } from '../../research-cockpit/research-cockpit.component';
 import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
 import { OPERATOR_PERMISSION } from '@features/scripting/shared/permissions';
@@ -129,6 +131,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     RunComparisonComponent,
     OptimizationWorkbenchComponent,
     WalkForwardWorkbenchComponent,
+    ResearchCockpitComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -669,6 +672,20 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
               [embedded]="true"
               (openTab)="onContextTab($event)"
             />
+          }
+
+          <!-- Research Tab — U12 cockpit: validation pipeline, lineage holdout, stitched OOS, live evidence, lab import.
+               Deferred: none of it loads until the tab opens. -->
+          @if (activeTab() === 'research' && !isSentinel()) {
+            @defer (on immediate) {
+              <app-research-cockpit
+                [strategyId]="strategyId"
+                [symbol]="strategy()?.symbol ?? null"
+                [currentHash]="$any(strategy())?.strategyConfigHash ?? null"
+              />
+            } @loading (minimum 150ms) {
+              <p class="muted small"><span class="spinner"></span> Loading the research cockpit…</p>
+            }
           }
 
           <!-- Walk-Forward Tab — BT-I5 workbench: launcher, runs, stitched OOS analysis, Monte Carlo. -->
@@ -1801,6 +1818,7 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     { label: 'Optimization', value: 'optimization' },
     { label: 'Backtests', value: 'backtests' },
     { label: 'Walk-Forward', value: 'walkforward' },
+    { label: 'Research', value: 'research' },
     { label: 'Variants', value: 'variants' },
     { label: 'Capacity', value: 'capacity' },
     { label: 'Reviews', value: 'reviews' },
@@ -2059,6 +2077,11 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
       flex: 1,
       valueFormatter: (p: any) => this.relativeTime.transform(p.value),
     },
+    configHashColumn(
+      () =>
+        (this.strategy() as { strategyConfigHash?: string | null } | null)?.strategyConfigHash ??
+        null,
+    ),
   ];
 
   readonly orderColumns: ColDef[] = [
@@ -2230,6 +2253,11 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
           ? `${formatDate(p.value, 'MMM d, yyyy HH:mm', 'en-US', 'UTC')} UTC · ${this.relativeTime.transform(p.value)}`
           : null,
     },
+    configHashColumn(
+      () =>
+        (this.strategy() as { strategyConfigHash?: string | null } | null)?.strategyConfigHash ??
+        null,
+    ),
   ];
 
   /** "Sep 30, 2026" in UTC — a backtest window is a UTC range. */

@@ -40,6 +40,7 @@ import { StrategyReportComponent } from '@features/scripting/report/strategy-rep
 import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run-chart.component';
 import { MonteCarloPanelComponent } from '@features/scripting/research/monte-carlo-panel.component';
 import { fileStamp, saveBlob } from '@features/scripting/shared/download';
+import { RunManifestCardComponent } from '../../components/run-manifest-card/run-manifest-card.component';
 import {
   hasExcursions,
   legacyTradeRows,
@@ -163,6 +164,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     RouterLink,
     DatePipe,
     DecimalPipe,
+    RunManifestCardComponent,
   ],
   template: `
     <div class="page">
@@ -814,6 +816,9 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
             }
           </section>
         }
+
+        <!-- ── U11/U12: run manifest (C9), intrabar evidence (C3), exact re-run and diff — any run. ── -->
+        <app-run-manifest-card [run]="bt" />
 
         <!-- ── Run config ──────────────────────────────────────────────── -->
         <div class="info-card">

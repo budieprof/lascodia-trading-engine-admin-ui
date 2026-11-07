@@ -271,6 +271,18 @@ export interface WalkForwardRunExtraFields {
   holdoutResultJson?: string | null;
   failureCode?: string | null;
   queuedAt?: string | null;
+  // ── C10 (strategy program `wf`): the stitched out-of-sample verdict + provenance; absent on older engines/runs ──
+  strategyConfigHash?: string | null;
+  oosExpectancyR?: number | null;
+  oosSharpeR?: number | null;
+  oosTrades?: number | null;
+  oosRTrades?: number | null;
+  walkForwardEfficiency?: number | null;
+  parameterDriftScore?: number | null;
+  zeroTradeFolds?: number | null;
+  foldCount?: number | null;
+  foldEmbargoBars?: number | null;
+  strategyHoldoutId?: number | null;
 }
 
 export interface WalkForwardLaunchRequest {

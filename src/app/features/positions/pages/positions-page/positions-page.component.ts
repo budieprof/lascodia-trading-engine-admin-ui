@@ -14,6 +14,7 @@ import {
 } from '@angular/core';
 import { catchError, forkJoin, map, merge, Observable, of, throttleTime } from 'rxjs';
 import type { ColDef } from 'ag-grid-community';
+import { configHashColumn } from '@features/strategies/util/config-hash-column';
 import type { EChartsOption } from 'echarts';
 
 import { MarketDataService } from '@core/services/market-data.service';
@@ -1393,6 +1394,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
         }
       },
     },
+    configHashColumn<PositionDto>(),
   ];
 
   readonly closedColumnDefs: ColDef<PositionDto>[] = [
@@ -1511,6 +1513,7 @@ export class PositionsPageComponent implements OnInit, OnDestroy {
       width: 105,
       valueFormatter: (p: any) => (p.value ? this.relativeTimePipe.transform(p.value) : '—'),
     },
+    configHashColumn<PositionDto>(),
   ];
 
   // ── Filters ────────────────────────────────────────────────────────
