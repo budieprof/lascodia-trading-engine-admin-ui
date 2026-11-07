@@ -18,7 +18,15 @@ import { FeatureStateComponent } from '@shared/components/feedback/feature-state
 import { errorText } from '@features/iam/iam.logic';
 import { NewsIntelNavComponent } from '../components/news-intel-nav.component';
 import {
-  ciGeometry,
+  NiDbarComponent,
+  NiInfoComponent,
+  NiMeterComponent,
+  NiPanelComponent,
+  NiStatComponent,
+} from '../components/viz/ni-primitives';
+import { ForestRow, NiForestComponent } from '../components/viz/ni-tabs-c';
+import { compact as compactNum } from '../components/viz/ni-viz';
+import {
   ciVerdict,
   configValue,
   fmt,
@@ -40,7 +48,6 @@ import {
 } from '../news-intel.types';
 
 const SEVERITY_KEY = 'NewsIntel:Weight:CategorySeverityJson';
-const BAR_W = 220;
 
 /**
  * Event study — does news predict what the market did next? For every label first seen in a window,
@@ -63,17 +70,28 @@ const BAR_W = 220;
     NewsIntelNavComponent,
     ConfirmDialogComponent,
     FeatureStateComponent,
+    NiDbarComponent,
+    NiInfoComponent,
+    NiMeterComponent,
+    NiPanelComponent,
+    NiStatComponent,
+    NiForestComponent,
   ],
   styleUrls: ['../news-intel-shared.scss'],
   template: `
     <div class="page">
-      <header>
-        <h1>Event study</h1>
-        <p class="muted small">
-          What the market did after news, measured point-in-time: forward returns start at the first
-          candle close AFTER the engine first saw the article. Positive = the price moved the way
-          the label said.
-        </p>
+      <header class="page-head">
+        <div class="title">
+          <h1>Event study</h1>
+          <app-ni-info
+            text="What the market did after news, measured point-in-time: forward returns start at the first candle close AFTER the engine first saw the article, in ATR(14, H1) units, signed by label direction × leg sign. Positive = the price moved the way the label said."
+          />
+          @if (detail(); as d) {
+            <span class="pill" [class.ok]="d.run.alignmentVerdict === 'Positive'" [class.bad]="d.run.alignmentVerdict === 'Negative'" [class.warn]="d.run.alignmentVerdict === 'Inconclusive'">
+              run #{{ d.run.id }} · {{ d.run.alignmentVerdict ?? d.run.status }}
+            </span>
+          }
+        </div>
       </header>
       <app-news-intel-nav [showRefresh]="true" [refreshing]="loading()" (refresh)="loadRuns()" />
 
@@ -92,349 +110,270 @@ const BAR_W = 220;
           [links]="[{ label: 'Risk use', route: '/news-intel/risk' }]"
         />
       } @else {
-        <section class="card">
-          <div class="card-head">
-            <h2>Runs</h2>
-            @if (canRun()) {
-              <div class="filters">
-                <label class="small"
-                  >Window
-                  <select class="sel" (change)="windowDays.set(+$any($event.target).value)">
-                    <option value="14">14 days</option>
-                    <option value="30" selected>30 days</option>
-                    <option value="45">45 days</option>
-                  </select></label
-                >
-                <button
-                  type="button"
-                  class="btn primary"
-                  [disabled]="busy() || anyRunning()"
-                  (click)="confirmRun.set(true)"
-                >
-                  {{ anyRunning() ? 'A run is in progress' : 'Run study' }}
-                </button>
-              </div>
-            }
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Started (UTC)</th>
-                  <th>Status</th>
-                  <th>Window</th>
-                  <th>Lineage</th>
-                  <th class="num">Labels / obs.</th>
-                  <th>Alignment verdict</th>
-                </tr>
-              </thead>
-              <tbody>
-                @for (r of runs(); track r.id) {
-                  <tr
-                    class="clickable"
-                    (click)="open(r)"
-                    [class.sel-row]="detail()?.run?.id === r.id"
-                  >
-                    <td class="mono">{{ r.id }}</td>
-                    <td class="xsmall">
-                      {{ r.startedAtUtc | date: 'MMM d HH:mm' : 'UTC' }}
-                      <span class="muted">{{ r.trigger }}</span>
-                    </td>
-                    <td>
-                      <span
-                        class="pill"
-                        [class.ok]="r.status === 'Completed'"
-                        [class.bad]="r.status === 'Failed'"
-                        [class.info]="r.status === 'Running'"
-                        >{{ r.status }}</span
-                      >
-                    </td>
-                    <td class="xsmall">
-                      {{ r.fromUtc | date: 'MMM d' : 'UTC' }} →
-                      {{ r.toUtc | date: 'MMM d' : 'UTC' }}
-                    </td>
-                    <td class="mono xsmall">{{ r.lineageFilter ?? 'each lineage' }}</td>
-                    <td class="num">{{ r.labelsConsidered }} / {{ r.observations }}</td>
-                    <td class="small">
-                      <span
-                        class="pill"
-                        [class.ok]="r.alignmentVerdict === 'Positive'"
-                        [class.bad]="r.alignmentVerdict === 'Negative'"
-                        >{{ r.alignmentVerdict ?? '—' }}</span
-                      >
-                      @if (r.alignmentMean !== null) {
-                        <span class="mono xsmall">
-                          {{ sg(r.alignmentMean) }} [{{ sg(r.alignmentCiLow) }},
-                          {{ sg(r.alignmentCiHigh) }}] ATR @ {{ r.alignmentHorizonMinutes }}m</span
-                        >
-                      }
-                    </td>
-                  </tr>
-                } @empty {
-                  <tr>
-                    <td colspan="7" class="empty">
-                      No study has run yet. The nightly worker runs one; "Run study" starts one now.
-                    </td>
-                  </tr>
-                }
-              </tbody>
-            </table>
-          </div>
-        </section>
-
         @if (detail(); as d) {
           @if (d.run.error) {
             <div class="banner error">Run #{{ d.run.id }} failed: {{ d.run.error }}</div>
           }
-          <section class="card">
-            <div class="card-head">
-              <div>
-                <h2>Run #{{ d.run.id }} — mean signed forward return (ATR) with 95% CI</h2>
-                <p class="muted xsmall">
-                  CIs are cluster-robust (resampled by story/day). A bucket under 30 observations is
-                  marked thin and is not evidence either way. Fingerprint
-                  <code>{{ d.run.paramsFingerprint ?? '—' }}</code
-                  >.
-                </p>
-              </div>
-              <div class="filters">
-                <select
-                  class="sel"
-                  aria-label="Group by"
-                  (change)="dimension.set($any($event.target).value)"
-                >
-                  @for (dm of dimensions(); track dm) {
-                    <option [value]="dm" [selected]="dm === dimension()">{{ dm }}</option>
+          <!-- ── KPI strip ── -->
+          <div class="ni-kpis k8">
+            <app-ni-stat
+              label="Verdict"
+              [value]="d.run.alignmentVerdict ?? '—'"
+              [sub]="d.run.alignmentHorizonMinutes ? 'news alignment @ ' + d.run.alignmentHorizonMinutes + 'm' : null"
+              [tone]="d.run.alignmentVerdict === 'Positive' ? 'ok' : d.run.alignmentVerdict === 'Negative' ? 'bad' : d.run.alignmentVerdict ? 'warn' : null"
+              info="Positive = trading WITH the label beat zero (CI above 0). Inconclusive = the CI spans zero — no proven edge from news direction. Drives DirectionMode=Auto."
+            />
+            <app-ni-stat label="Effect" [value]="sg(d.run.alignmentMean)" unit="ATR" [sub]="'CI ' + sg(d.run.alignmentCiLow) + ' … ' + sg(d.run.alignmentCiHigh)" info="Mean signed forward return of all labels at the verdict horizon, with its cluster-robust 95% CI." />
+            <app-ni-stat label="Hit rate" [value]="p(allRow()?.hitRate)" [sub]="'all labels @ ' + horizon() + 'm'" info="Share of observations where price moved the way the label said (50% = coin flip)." />
+            <app-ni-stat label="Observations" [value]="compact(d.run.observations)" [sub]="compact(d.run.labelsConsidered) + ' labels'" info="Label × symbol × horizon observations measured; labels = article × exposure labels first seen in the window." />
+            <app-ni-stat label="Symbols" [value]="coverage().measured + '/' + coverage().total" [sub]="coverage().skipped + ' without candles'" [tone]="coverage().skipped ? 'warn' : null" info="Symbols with M5/M1 candles to measure against. A symbol without candles is skipped, not counted as zero." />
+            <app-ni-stat label="Window" [value]="(d.run.fromUtc | date: 'MMM d' : 'UTC') + ' →'" [sub]="(d.run.toUtc | date: 'MMM d' : 'UTC') + ' · ' + (d.run.trigger ?? '')" info="Labels first seen in this window were studied." />
+            <app-ni-stat label="Best term IC" [value]="bestTerm()?.value ?? '—'" [sub]="bestTerm()?.name ?? null" info="The weight term whose rank IC vs signed forward return is largest in magnitude at this horizon. |IC| < 0.03 is noise." />
+            <app-ni-stat label="Lineage" [value]="d.run.lineageFilter || 'all'" [sub]="d.run.paramsFingerprint ?? null" info="Prompt lineage studied (labels from different prompt versions are never pooled) and the weight-params fingerprint." />
+          </div>
+
+          <!-- ── Forest | horizons + term ICs ── -->
+          <div class="ni-grid-main">
+            <app-ni-panel
+              title="Effect by group"
+              info="Mean signed forward return (dot, sized by n) with its 95% cluster-robust CI (resampled by story/day). Green = CI above zero (helps), red = below (hurts), grey = spans zero, faded = under 30 observations (not evidence)."
+            >
+              <div actions class="ni-toolbar">
+                <span class="seg" role="tablist" aria-label="Group by">
+                  @for (dm of mainDims(); track dm) {
+                    <button type="button" [class.on]="dm === dimension()" (click)="dimension.set(dm)">{{ dimLabel(dm) }}</button>
                   }
-                </select>
-                <select
-                  class="sel"
-                  aria-label="Horizon"
-                  (change)="horizon.set(+$any($event.target).value)"
-                >
+                </span>
+                @if (otherDims().length) {
+                  <select class="sel" aria-label="More groupings" (change)="dimension.set($any($event.target).value)">
+                    <option value="" disabled [selected]="!otherDims().includes(dimension())">more…</option>
+                    @for (dm of otherDims(); track dm) {
+                      <option [value]="dm" [selected]="dm === dimension()">{{ dimLabel(dm) }}</option>
+                    }
+                  </select>
+                }
+                <span class="seg" role="tablist" aria-label="Horizon">
                   @for (h of horizons(); track h) {
-                    <option [value]="h" [selected]="h === horizon()">{{ h }} min</option>
+                    <button type="button" [class.on]="h === horizon()" (click)="horizon.set(h)">{{ h }}m</button>
                   }
-                </select>
+                </span>
               </div>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>{{ dimension() }}</th>
-                    <th class="num">n / clusters</th>
-                    <th class="num">Mean</th>
-                    <th class="num">95% CI</th>
-                    <th class="num">Hit rate</th>
-                    <th class="num">t</th>
-                    <th>
-                      <span class="axis-lbl">← against label · 0 · with label →</span>
-                    </th>
-                    <th>Reading</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  @for (r of groupRows(); track r.bucket) {
-                    <tr>
-                      <td>{{ r.bucket }}</td>
-                      <td class="num">{{ r.n }} / {{ r.clusters }}</td>
-                      <td class="num">{{ sg(r.mean) }}</td>
-                      <td class="num">[{{ sg(r.ciLow) }}, {{ sg(r.ciHigh) }}]</td>
-                      <td class="num">{{ p(r.hitRate) }}</td>
-                      <td class="num">{{ f(r.tStat, 2) }}</td>
-                      <td>
-                        <svg
-                          class="ci"
-                          [attr.viewBox]="'0 0 ' + barW + ' 16'"
-                          role="img"
-                          [attr.aria-label]="r.bucket + ' mean ' + sg(r.mean)"
-                        >
-                          <title>
-                            {{ r.bucket }}: mean {{ sg(r.mean) }} ATR, CI [{{ sg(r.ciLow) }},
-                            {{ sg(r.ciHigh) }}], n {{ r.n }}
-                          </title>
-                          <line
-                            class="zero"
-                            [attr.x1]="geo().zero"
-                            [attr.x2]="geo().zero"
-                            y1="0"
-                            y2="16"
-                          />
-                          @if (r.ciLow !== null && r.ciHigh !== null) {
-                            <line
-                              class="whisker"
-                              [class.thin]="verdict(r) === 'thin'"
-                              [attr.x1]="geo().scale(r.ciLow)"
-                              [attr.x2]="geo().scale(r.ciHigh)"
-                              y1="8"
-                              y2="8"
-                            />
-                          }
-                          <circle
-                            class="dot"
-                            [class.thin]="verdict(r) === 'thin'"
-                            [attr.cx]="geo().scale(r.mean)"
-                            cy="8"
-                            r="4"
-                          />
-                        </svg>
-                      </td>
-                      <td class="xsmall">
-                        @switch (verdict(r)) {
-                          @case ('positive') {
-                            <span class="pos">helps (CI &gt; 0)</span>
-                          }
-                          @case ('negative') {
-                            <span class="neg">hurts (CI &lt; 0)</span>
-                          }
-                          @case ('thin') {
-                            <span class="muted">too few</span>
-                          }
-                          @default {
-                            <span class="muted">no effect shown</span>
-                          }
-                        }
-                      </td>
-                    </tr>
-                  } @empty {
-                    <tr>
-                      <td colspan="8" class="empty">
-                        No result rows for this grouping and horizon.
-                      </td>
-                    </tr>
-                  }
-                </tbody>
-              </table>
-            </div>
-          </section>
+              <app-ni-forest [rows]="forestRows()" [dimLabel]="dimLabel(dimension())" />
+              <div class="legend-line">
+                <span><i class="dotk pos"></i>helps</span>
+                <span><i class="dotk neg"></i>hurts</span>
+                <span><i class="dotk"></i>no effect shown</span>
+                <span><i class="dotk thin"></i>too few (&lt;30)</span>
+                <span class="faint">dot area ∝ n · {{ forestRows().length }} groups</span>
+              </div>
+            </app-ni-panel>
 
-          <section class="card">
-            <h2>Weight terms — rank IC vs signed forward return ({{ horizon() }} min)</h2>
-            <p class="muted xsmall">
-              Does a bigger term (severity, reliability, certainty, novelty, decay…) go with a
-              bigger move in the labelled direction? Near zero means the term is not earning its
-              place.
-            </p>
-            <div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Term</th>
-                    <th class="num">n</th>
-                    <th class="num">Rank IC</th>
-                    <th class="num">95% CI</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <div class="ni-stack">
+              <app-ni-panel title="All labels by horizon" info="The pooled effect at each horizon. A real edge shows a CI clear of zero that holds or grows with the horizon.">
+                <app-ni-forest [rows]="horizonRows()" dimLabel="horizon" [compact]="true" />
+              </app-ni-panel>
+              <app-ni-panel
+                title="Weight terms · rank IC"
+                info="Does a bigger term (severity, reliability, certainty, novelty, decay…) go with a bigger move in the labelled direction? Bar = rank IC at the selected horizon (scale ±0.1); near zero means the term is not earning its place."
+              >
+                <span meta>{{ horizon() }}m</span>
+                <div class="ics">
                   @for (r of termRows(); track r.dimension + r.bucket) {
-                    <tr>
-                      <td>{{ r.bucket || r.dimension }}</td>
-                      <td class="num">{{ r.n }}</td>
-                      <td class="num">{{ sg(r.mean) }}</td>
-                      <td class="num">[{{ sg(r.ciLow) }}, {{ sg(r.ciHigh) }}]</td>
-                    </tr>
+                    <div class="ic" [title]="(r.bucket || r.dimension) + ': IC ' + sg(r.mean) + ' CI [' + sg(r.ciLow) + ', ' + sg(r.ciHigh) + '] n ' + r.n">
+                      <span class="icn">{{ r.bucket || r.dimension }}</span>
+                      <app-ni-dbar [value]="r.mean" [max]="0.1" [digits]="3" />
+                    </div>
                   } @empty {
-                    <tr>
-                      <td colspan="4" class="empty">No term ICs at this horizon.</td>
-                    </tr>
+                    <p class="empty">No term ICs at this horizon.</p>
                   }
-                </tbody>
-              </table>
+                </div>
+              </app-ni-panel>
             </div>
-          </section>
+          </div>
 
-          <section class="card">
-            <div class="card-head">
-              <div>
-                <h2>Recommended severities vs current</h2>
-                <p class="muted xsmall">
-                  Shrunk toward today's values by sample size; a category with too little data keeps
-                  its current severity. Applying writes <code>{{ severityKey }}</code> through the
-                  normal config governance — a loosening change needs a reason and may be queued for
-                  cooling-off.
-                </p>
-              </div>
-              @if (canApply() && changedCount() > 0) {
-                <button
-                  type="button"
-                  class="btn primary"
-                  [disabled]="busy()"
-                  (click)="confirmApply.set(true)"
-                >
-                  Apply via governance ({{ changedCount() }})
-                </button>
-              }
-            </div>
-            @if (recError(); as re) {
-              <p class="muted small">{{ re }}</p>
+          <!-- ── Recommended severities ── -->
+          <app-ni-panel
+            title="Recommended severities"
+            [info]="'Shrunk toward today’s values by sample size; a category with too little data keeps its current severity. Applying writes ' + severityKey + ' through the normal config governance — a loosening change needs a reason and may be queued for cooling-off.'"
+            [flush]="true"
+          >
+            <span meta>{{ changedCount() }} of {{ diff().length }} change · Δ scale ±{{ deltaMax().toFixed(2) }}</span>
+            @if (canApply() && changedCount() > 0) {
+              <button actions type="button" class="btn primary" [disabled]="busy()" (click)="confirmApply.set(true)">
+                Apply via governance ({{ changedCount() }})
+              </button>
             }
-            <div class="table-wrap">
+            @if (recError(); as re) {
+              <p class="empty pad">{{ re }}</p>
+            }
+            <div class="table-wrap sev-wrap">
               <table>
                 <thead>
                   <tr>
                     <th>Category</th>
                     <th class="num">Current</th>
+                    <th></th>
                     <th class="num">Recommended</th>
-                    <th class="num">Δ</th>
+                    <th>Δ</th>
                     <th class="num">n / clusters</th>
                     <th>Basis</th>
                   </tr>
                 </thead>
                 <tbody>
                   @for (r of diff(); track r.category) {
-                    <tr>
+                    <tr [class.unchanged]="!r.changed">
                       <td>{{ r.category }}</td>
                       <td class="num">{{ f(r.current, 2) }}</td>
-                      <td class="num">{{ f(r.recommended, 2) }}</td>
-                      <td
-                        class="num"
-                        [class.pos]="(r.delta ?? 0) > 0"
-                        [class.neg]="(r.delta ?? 0) < 0"
-                      >
-                        {{ r.changed ? sg(r.delta, 2) : '' }}
+                      <td class="arrow faint">→</td>
+                      <td class="num"><b>{{ f(r.recommended, 2) }}</b></td>
+                      <td style="min-width: 170px">
+                        @if (r.changed) {
+                          <app-ni-dbar [value]="r.delta" [max]="deltaMax()" [digits]="2" />
+                        } @else {
+                          <span class="faint xs">kept</span>
+                        }
                       </td>
-                      <td class="num">{{ meta(r.category) }}</td>
-                      <td class="xsmall muted">{{ basis(r.category) }}</td>
+                      <td class="num faint">{{ meta(r.category) }}</td>
+                      <td class="xs faint ellipsis" [title]="basis(r.category)">{{ basis(r.category) }}</td>
                     </tr>
                   } @empty {
                     <tr>
-                      <td colspan="6" class="empty">No recommendation for this run.</td>
+                      <td colspan="7" class="empty pad">No recommendation for this run.</td>
                     </tr>
                   }
                 </tbody>
               </table>
             </div>
-          </section>
+          </app-ni-panel>
 
-          <section class="card">
-            <h2>Coverage &amp; calibration</h2>
-            <p class="muted xsmall">
-              What could be measured (candles per symbol/timeframe) and the volatility calibration
-              the risk forecast uses. Raw, as the engine recorded them.
-            </p>
-            @for (blk of rawBlocks(); track blk.title) {
-              <details>
-                <summary class="small">{{ blk.title }}</summary>
-                <pre class="raw">{{ blk.body }}</pre>
-              </details>
-            }
-            <p class="xsmall">
-              <a routerLink="/news-intel/risk">How these feed the risk settings →</a>
-            </p>
-          </section>
+          <!-- ── Coverage & calibration ── -->
+          <div class="ni-grid-2">
+            <app-ni-panel title="Candle coverage" info="What could be measured: per symbol, the bars available and how many label observations were measured or skipped (no entry bar / no ATR). Raw JSON below." [flush]="true">
+              <span meta>{{ coverage().measured }} of {{ coverage().total }} symbols measured</span>
+              <div class="table-wrap cov-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th>TF</th>
+                      <th class="num">Bars</th>
+                      <th>Measured</th>
+                      <th class="num">Skipped</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (c of coverage().rows; track c.symbol + c.timeframe) {
+                      <tr [class.unchanged]="!c.measured">
+                        <td class="mono">{{ c.symbol }}</td>
+                        <td class="faint">{{ c.timeframe }}</td>
+                        <td class="num">{{ compact(c.bars) }}</td>
+                        <td style="min-width: 120px"><app-ni-meter [value]="c.share" [label]="compact(c.measured)" [tone]="c.measured ? 'ok' : 'muted'" /></td>
+                        <td class="num faint">{{ compact(c.skipped) }}</td>
+                      </tr>
+                    } @empty {
+                      <tr><td colspan="5" class="empty pad">No coverage recorded.</td></tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            </app-ni-panel>
+            <div class="ni-stack">
+              <app-ni-panel title="Volatility calibration" info="Realised range vs normal, by how much news was in play. The risk forecast's expected-range multiplier is read from this table when Risk:Vol:Source = LatestStudy.">
+                <span meta>{{ vol() ? vol()!.horizon + 'm · baseline ' + f(vol()!.baseline, 3) : '' }}</span>
+                @if (vol(); as v) {
+                  <div class="vol">
+                    @for (b of v.bands; track b.band) {
+                      <div class="vb" [title]="b.band + ': n ' + b.n + ', mean ratio ' + f(b.ratio, 3) + ', multiplier ×' + f(b.mult, 2)">
+                        <span class="vbl">{{ b.band }}</span>
+                        <app-ni-meter [value]="b.mult / v.maxMult" [label]="'×' + f(b.mult, 2)" />
+                        <span class="faint num">{{ compact(b.n) }}</span>
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  <p class="empty">No calibration recorded.</p>
+                }
+                <a class="lnk" routerLink="/news-intel/risk">How these feed the risk settings →</a>
+              </app-ni-panel>
+              <app-ni-panel title="Raw" info="Exactly as the engine recorded them.">
+                @for (blk of rawBlocks(); track blk.title) {
+                  <details>
+                    <summary class="xsmall">{{ blk.title }}</summary>
+                    <pre class="raw">{{ blk.body }}</pre>
+                  </details>
+                }
+              </app-ni-panel>
+            </div>
+          </div>
         }
+
+        <!-- ── Runs ── -->
+        <app-ni-panel title="Runs" info="The nightly worker runs one; 'Run study' starts one now (read-only over labels and candles, no model calls)." [flush]="true">
+          @if (canRun()) {
+            <div actions class="ni-toolbar">
+              <span class="seg" role="group" aria-label="Window">
+                @for (w of [14, 30, 45]; track w) {
+                  <button type="button" [class.on]="windowDays() === w" (click)="windowDays.set(w)">{{ w }}d</button>
+                }
+              </span>
+              <button type="button" class="btn primary" [disabled]="busy() || anyRunning()" (click)="confirmRun.set(true)">
+                {{ anyRunning() ? 'Run in progress…' : 'Run study' }}
+              </button>
+            </div>
+          }
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Started</th>
+                  <th>Status</th>
+                  <th>Window</th>
+                  <th>Lineage</th>
+                  <th class="num">Labels</th>
+                  <th class="num">Obs.</th>
+                  <th>Verdict</th>
+                  <th class="num">Effect [CI] ATR</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (r of runs(); track r.id) {
+                  <tr class="clickable" (click)="open(r)" [class.sel]="detail()?.run?.id === r.id">
+                    <td class="mono">{{ r.id }}</td>
+                    <td class="faint">{{ r.startedAtUtc | date: 'MMM d HH:mm' : 'UTC' }} · {{ r.trigger }}</td>
+                    <td>
+                      <span class="pill" [class.ok]="r.status === 'Completed'" [class.bad]="r.status === 'Failed'" [class.info]="r.status === 'Running'">{{ r.status }}</span>
+                    </td>
+                    <td class="faint">{{ r.fromUtc | date: 'MMM d' : 'UTC' }} → {{ r.toUtc | date: 'MMM d' : 'UTC' }}</td>
+                    <td class="mono xs">{{ r.lineageFilter || 'each lineage' }}</td>
+                    <td class="num">{{ compact(r.labelsConsidered) }}</td>
+                    <td class="num">{{ compact(r.observations) }}</td>
+                    <td>
+                      <span class="pill" [class.ok]="r.alignmentVerdict === 'Positive'" [class.bad]="r.alignmentVerdict === 'Negative'" [class.warn]="r.alignmentVerdict === 'Inconclusive'">{{ r.alignmentVerdict ?? '—' }}</span>
+                    </td>
+                    <td class="num">
+                      @if (r.alignmentMean !== null) {
+                        {{ sg(r.alignmentMean) }} <span class="faint">[{{ sg(r.alignmentCiLow) }}, {{ sg(r.alignmentCiHigh) }}] @ {{ r.alignmentHorizonMinutes }}m</span>
+                      } @else {
+                        —
+                      }
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="9" class="empty pad">No study has run yet. The nightly worker runs one; "Run study" starts one now.</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </app-ni-panel>
       }
 
       <app-confirm-dialog
         [open]="confirmRun()"
         title="Run the event study?"
-        [message]="
-          'Reads ' +
-          windowDays() +
-          ' days of labels and candles (research process, read-only) and stores the aggregates. No model calls.'
-        "
+        [message]="'Reads ' + windowDays() + ' days of labels and candles (research process, read-only) and stores the aggregates. No model calls.'"
         confirmLabel="Run"
         [loading]="busy()"
         (confirm)="run()"
@@ -451,60 +390,134 @@ const BAR_W = 220;
       >
         <label class="small reason">
           Reason (required for a loosening change)
-          <input
-            class="inp"
-            [value]="reason()"
-            (input)="reason.set($any($event.target).value)"
-            placeholder="e.g. event study #12, 30 days"
-          />
+          <input class="inp" [value]="reason()" (input)="reason.set($any($event.target).value)" placeholder="e.g. event study #12, 30 days" />
         </label>
       </app-confirm-dialog>
     </div>
   `,
   styles: [
     `
-      .sel-row td {
-        background: var(--bg-tertiary);
+      .ni-kpis.k8 {
+        grid-template-columns: repeat(8, minmax(0, 1fr));
       }
-      .ci {
-        width: 220px;
-        height: 16px;
-        display: block;
+      @media (max-width: 1320px) {
+        .ni-kpis.k8 {
+          grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+        }
       }
-      .ci .zero {
-        stroke: var(--text-tertiary);
-        stroke-width: 1;
+      .legend-line {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 12px;
+        font-size: 10.5px;
+        color: var(--text-secondary);
       }
-      .ci .whisker {
-        stroke: var(--accent);
-        stroke-width: 2;
-        stroke-linecap: round;
+      .legend-line span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
       }
-      .ci .dot {
-        fill: var(--accent);
-        stroke: var(--bg-secondary);
-        stroke-width: 2;
+      .dotk {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--text-secondary);
       }
-      .ci .thin {
+      .dotk.pos {
+        background: var(--ni-up);
+      }
+      .dotk.neg {
+        background: var(--ni-down);
+      }
+      .dotk.thin {
         opacity: 0.35;
       }
-      .axis-lbl {
-        font-weight: var(--font-regular);
+      .ics {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+      }
+      .ic {
+        display: grid;
+        grid-template-columns: 116px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        font-size: 11.5px;
+      }
+      .icn {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text-secondary);
+      }
+      .sev-wrap {
+        max-height: 520px;
+      }
+      .sev-wrap th:first-child,
+      .sev-wrap td:first-child,
+      .cov-wrap th:first-child,
+      .cov-wrap td:first-child,
+      app-ni-panel table th:first-child,
+      app-ni-panel table td:first-child {
+        padding-left: 12px;
+      }
+      .arrow {
+        width: 14px;
+        text-align: center;
+        padding: 0;
+      }
+      tr.unchanged td {
+        color: var(--text-tertiary);
+      }
+      td.ellipsis {
+        max-width: 220px;
+        width: auto;
+      }
+      .xs {
+        font-size: 11px;
+      }
+      .cov-wrap {
+        max-height: 420px;
+      }
+      .vol {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .vb {
+        display: grid;
+        grid-template-columns: 92px minmax(0, 1fr) 40px;
+        align-items: center;
+        gap: 8px;
+        font-size: 11.5px;
+      }
+      .vbl {
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
+      .lnk {
+        font-size: 11px;
+        color: var(--accent);
+        text-decoration: none;
       }
       .raw {
-        max-height: 260px;
+        max-height: 240px;
         overflow: auto;
-        font-size: var(--text-xs);
-        background: var(--bg-primary);
-        padding: var(--space-2);
-        border-radius: var(--radius-sm);
+        font-size: 10.5px;
+        background: var(--ni-sunken);
+        padding: 8px;
+        border-radius: 6px;
         white-space: pre-wrap;
+        margin: 4px 0 0;
       }
       .reason {
         display: flex;
         flex-direction: column;
         gap: 4px;
         margin-top: var(--space-2);
+      }
+      .empty.pad {
+        padding: 12px;
       }
     `,
   ],
@@ -514,7 +527,6 @@ export class NewsEventStudyPageComponent {
   private readonly auth = inject(AuthService);
   private readonly destroyRef = inject(DestroyRef);
 
-  protected readonly barW = BAR_W;
   protected readonly severityKey = SEVERITY_KEY;
 
   readonly canRun = computed(() => this.auth.hasPermission(Permission.PlatformDataManage));
@@ -545,7 +557,6 @@ export class NewsEventStudyPageComponent {
     studyRows(this.results(), 'group', this.dimension(), this.horizon()),
   );
   readonly termRows = computed(() => studyRows(this.results(), 'term-ic', null, this.horizon()));
-  readonly geo = computed(() => ciGeometry(this.groupRows(), BAR_W));
 
   readonly currentSeverities = computed(() =>
     parseSeverityMap(configValue(this.config(), SEVERITY_KEY)),
@@ -715,5 +726,113 @@ export class NewsEventStudyPageComponent {
 
   p(v: number | null | undefined): string {
     return pct(v);
+  }
+
+  // ── Dense redesign ──
+
+  private static readonly MAIN_DIMS = ['category', 'kind', 'channel', 'certainty', 'novelty', 'storyState'];
+  private static readonly DIM_LABEL: Record<string, string> = {
+    category: 'Category',
+    kind: 'Kind',
+    channel: 'Channel',
+    certainty: 'Certainty',
+    novelty: 'Novelty',
+    storyState: 'Story',
+    liveness: 'Liveness',
+    weightDecile: 'Weight decile',
+    symbol: 'Symbol',
+    lineage: 'Lineage',
+    all: 'All',
+  };
+  dimLabel(d: string): string {
+    return NewsEventStudyPageComponent.DIM_LABEL[d] ?? d;
+  }
+  readonly mainDims = computed(() =>
+    NewsEventStudyPageComponent.MAIN_DIMS.filter((d) => this.dimensions().includes(d)),
+  );
+  readonly otherDims = computed(() =>
+    this.dimensions().filter((d) => d !== 'all' && !NewsEventStudyPageComponent.MAIN_DIMS.includes(d)),
+  );
+
+  private toForest(r: NewsEventStudyResultView, bucket = r.bucket): ForestRow {
+    return {
+      bucket,
+      n: r.n,
+      clusters: r.clusters,
+      mean: r.mean,
+      ciLow: r.ciLow,
+      ciHigh: r.ciHigh,
+      hitRate: r.hitRate,
+      tStat: r.tStat,
+      verdict: ciVerdict(r),
+    };
+  }
+  readonly forestRows = computed(() => this.groupRows().map((r) => this.toForest(r)));
+  readonly horizonRows = computed(() =>
+    this.results()
+      .filter((r) => r.section === 'group' && r.dimension === 'all')
+      .sort((a, b) => a.horizonMinutes - b.horizonMinutes)
+      .map((r) => this.toForest(r, `${r.horizonMinutes} min`)),
+  );
+  readonly allRow = computed(() =>
+    this.results().find((r) => r.section === 'group' && r.dimension === 'all' && r.horizonMinutes === this.horizon()) ?? null,
+  );
+  readonly bestTerm = computed(() => {
+    const rows = [...this.termRows()].sort((a, b) => Math.abs(b.mean) - Math.abs(a.mean));
+    const t = rows[0];
+    return t ? { name: `${t.bucket || t.dimension} @ ${this.horizon()}m`, value: this.sg(t.mean) } : null;
+  });
+
+  readonly deltaMax = computed(() => Math.max(0.05, ...this.diff().map((d) => Math.abs(d.delta ?? 0))));
+
+  readonly coverage = computed(() => {
+    type Cov = { symbol: string; timeframe: string; bars: number; measured: number; skippedNoEntry: number; skippedNoAtr: number };
+    let raw: Cov[] = [];
+    try {
+      const parsed = JSON.parse(this.detail()?.run.coverageJson ?? '[]');
+      if (Array.isArray(parsed)) raw = parsed as Cov[];
+    } catch {
+      raw = [];
+    }
+    const rows = raw
+      .map((c) => {
+        const skipped = (c.skippedNoEntry ?? 0) + (c.skippedNoAtr ?? 0);
+        const measured = c.measured ?? 0;
+        return {
+          symbol: c.symbol,
+          timeframe: c.timeframe,
+          bars: c.bars ?? 0,
+          measured,
+          skipped,
+          share: measured + skipped ? measured / (measured + skipped) : 0,
+        };
+      })
+      .sort((a, b) => b.measured - a.measured || a.symbol.localeCompare(b.symbol));
+    const measuredSymbols = rows.filter((r) => r.measured > 0).length;
+    return { rows, total: rows.length, measured: measuredSymbols, skipped: rows.length - measuredSymbols };
+  });
+
+  readonly vol = computed(() => {
+    try {
+      const v = JSON.parse(this.detail()?.run.volCalibrationJson ?? 'null') as {
+        HorizonMinutes?: number;
+        Baseline?: number;
+        Bands?: { Band: string; N: number; MeanRatio: number; Multiplier: number }[];
+      } | null;
+      if (!v || !Array.isArray(v.Bands) || !v.Bands.length) return null;
+      const bands = v.Bands.map((b) => ({ band: b.Band, n: b.N, ratio: b.MeanRatio, mult: b.Multiplier }));
+      return {
+        horizon: v.HorizonMinutes ?? null,
+        baseline: v.Baseline ?? null,
+        bands,
+        maxMult: Math.max(1, ...bands.map((b) => b.mult)),
+      };
+    } catch {
+      return null;
+    }
+  });
+
+  compact(n: number | null | undefined): string {
+    return compactNum(n);
   }
 }
