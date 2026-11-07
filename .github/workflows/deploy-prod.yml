@@ -1,0 +1,71 @@
+name: Deploy to production (mac2)
+
+# Continuous deployment of the console to the hosting Mac (mac2): every push to main is
+# published by mac2's self-hosted runner with scripts/release.sh (build → stamp → atomic swap →
+# verify by releaseId). Runbook: lascodia-trading-engine deploy/prod-host/README.md.
+#
+# This repository is PUBLIC and the runner is a production machine. Therefore:
+#   * only `push` and `workflow_dispatch` trigger this workflow — never pull_request;
+#   * the job refuses to run anywhere but this repository;
+#   * fork PRs need maintainer approval before ANY workflow runs (repo setting).
+# Switch: repository variable PROD_DEPLOY_ENABLED must be 'true'.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 'publish (latest main), rollback (previous release) or status'
+        type: choice
+        options: [publish, rollback, status]
+        default: publish
+
+concurrency:
+  group: prod-deploy-ui
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: vars.PROD_DEPLOY_ENABLED == 'true' && github.repository == 'budieprof/lascodia-trading-engine-admin-ui' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, lascodia-prod]
+    timeout-minutes: 30
+    steps:
+      - name: Publish
+        shell: bash
+        env:
+          ACTION: ${{ inputs.action || 'publish' }}
+          TARGET: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          export PATH="/opt/homebrew/opt/node@24/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+          UI="$HOME/lascodia-prod/lascodia-trading-engine-admin-ui"
+          cd "$UI"
+          case "$ACTION" in
+            status)   scripts/release.sh status; exit 0 ;;
+            rollback) scripts/release.sh rollback; scripts/release.sh status; exit 0 ;;
+          esac
+          git fetch --quiet --prune origin
+          [ "${{ github.event_name }}" = push ] || TARGET=$(git rev-parse origin/main)
+          git merge-base --is-ancestor "$TARGET" origin/main || { echo "$TARGET is not on main"; exit 2; }
+          # a newer push already published? (out-of-order runs)
+          LIVE=$(curl -fsS -m 5 http://localhost:8080/config.json | sed -n 's/.*"buildSha": *"\([0-9a-f]*\).*/\1/p' || true)
+          if [ -n "$LIVE" ] && git cat-file -e "$LIVE^{commit}" 2>/dev/null \
+             && git merge-base --is-ancestor "$TARGET" "$LIVE" && [ "$(git rev-parse "$LIVE")" != "$(git rev-parse "$TARGET")" ]; then
+            echo "live $LIVE is newer than $TARGET — nothing to do"; exit 0
+          fi
+          git checkout --quiet --detach "$TARGET"
+          git reset --quiet --hard && git clean -fdq -e node_modules -e dist
+          LOCK_HASH=$(shasum package-lock.json | cut -c1-40)
+          if [ "$(cat node_modules/.lock-hash 2>/dev/null)" != "$LOCK_HASH" ]; then
+            npm ci --no-audit --no-fund
+            echo "$LOCK_HASH" > node_modules/.lock-hash
+          fi
+          scripts/release.sh publish
+          scripts/release.sh status
