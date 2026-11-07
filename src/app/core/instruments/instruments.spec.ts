@@ -85,6 +85,13 @@ describe('instrument math — other asset classes', () => {
     expect(classifySymbol('EURUSD')).toBe('Fx');
     expect(classifySymbol('USDJPY')).toBe('Fx');
     expect(classifySymbol('ES1!')).toBe('Future');
+    // UI09: dated contract codes are futures, not FX; index CFDs with a one-letter "root" stay indices.
+    expect(classifySymbol('ESZ5')).toBe('Future');
+    expect(classifySymbol('CLF6')).toBe('Future');
+    expect(classifySymbol('6EH26')).toBe('Future');
+    expect(classifySymbol('RTYM5')).toBe('Future');
+    expect(classifySymbol('HK50')).not.toBe('Future');
+    expect(classifySymbol('DJ30')).toBe('Index');
     expect(classifySymbol('US500')).toBe('Index');
     expect(classifySymbol('XAUUSD')).toBe('Commodity');
     expect(classifySymbol('EURUSD')).toBe('Fx');
@@ -96,7 +103,7 @@ describe('instrument math — other asset classes', () => {
   });
   it('a computed resolving a symbol follows the catalogue load', () => {
     const pip = computed(() => distanceUnitOf('ESZ6'));
-    expect(pip()).toBeCloseTo(0.0001, 12); // unknown → FX fallback
+    expect(pip()).toBeCloseTo(0.01, 12); // unknown dated future (UI09): a tick guess, never an FX pip
     setInstrumentCatalogue([normaliseInstrument(ES)!]);
     expect(pip()).toBe(0.25);
   });
@@ -209,5 +216,25 @@ describe('InstrumentsService', () => {
     expect(await svc.calendar('fx-24x5')).toBeNull();
     expect(await svc.calendar('fx-24x5')).toBeNull();
     expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('UI09: a symbol the list does not carry is looked up alone; resolving until it answers', async () => {
+    const get = vi.fn((path: string) =>
+      path.startsWith('/instruments?') ? of([BTC]) : path === '/instruments/ESZ6' ? of(ES) : throwError(() => ({ status: 404 })),
+    );
+    const svc = setup({ getEnvelope: get as never, post: vi.fn() as never });
+    expect(svc.lookupState('ESZ6')).toBe('resolving'); // the list is loading
+    await svc.load();
+    expect(svc.lookupState('BTC-USDT')).toBe('found');
+    expect(svc.lookupState('ESZ6')).toBe('resolving'); // looked up on its own now
+    expect(svc.lookupState('NOPE1')).toBe('resolving');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(svc.lookupState('ESZ6')).toBe('found');
+    expect(resolveInstrument('ESZ6').tickSize).toBe(0.25);
+    expect(svc.lookupState('NOPE1')).toBe('missing');
+    expect(get.mock.calls.filter((c) => c[0] === '/instruments/ESZ6')).toHaveLength(1);
+    // A list reload keeps the looked-up row.
+    await svc.load(true);
+    expect(resolveInstrument('ESZ6').tickSize).toBe(0.25);
   });
 });
