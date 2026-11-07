@@ -489,6 +489,7 @@ import {
   type ToolbarMenu,
   type StyleChoice,
 } from './chart-page.config';
+import { ChartHistoryPager } from './chart-history-pager';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 
 /** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
@@ -3536,66 +3537,27 @@ export class ChartAnalysisPageComponent {
     }
   }
 
-  /**
-   * Scroll-back paging: fetch the window ENDING just before the oldest bar we hold
-   * and prepend it. Asking by `to` rather than by `from` matches how the engine
-   * pages (newest-first from a cutoff), so each page is a clean extension
-   * backwards with no gap and no overlap to reconcile.
-   *
-   * The cutoff is the oldest bar's open less 1 ms, not less one bar width: on the
-   * session grid a period is not a fixed width (a month, a week across a DST
-   * change), and `oldest − width` skipped the bar before; on 30m it cut the M15
-   * page between the two halves of the bar before, which then joined the chart
-   * half-built.
-   */
-  async loadOlder(): Promise<void> {
-    const series: SeriesId = { symbol: this.symbol(), resolution: this.resolution() };
-    const held = this.bars();
-    // Nothing to extend, a load under way, or the bars on screen are not this series' yet.
-    if (held.length === 0 || this.loading() || !sameSeries(this.barsFor(), series)) {
-      this.host()?.historyLoaded();
-      return;
-    }
-    const oldest = held[0].time;
-    this.loading.set(true);
-    try {
-      const { bars } = await this.feed.getBars(
-        series.symbol,
-        series.resolution,
-        0,
-        oldest - 1,
-        PAGE_BARS,
-      );
-      // After a switch made meanwhile these are another series' history: not prepended.
-      if (sameSeries(this.barsFor(), series)) {
-        const older = bars.filter((b) => b.time < oldest);
-        if (older.length === 0) {
-          // Nothing before the oldest bar: the start of history. Stop asking at the left edge.
-          this.historyStart.set(`${series.symbol}|${series.resolution}`);
-        } else {
-          const merged = new Map<number, Bar>();
-          for (const b of older) merged.set(b.time, b);
-          // The bars as they are now: ticks may have moved the newest one during the load.
-          for (const b of this.bars()) merged.set(b.time, b);
-          const next = [...merged.values()].sort((a, b) => a.time - b.time);
-          const added = next.length - this.bars().length;
-          this.bars.set(next);
-          // Replay counts bars from the left: the head stays on its bar (CC-11 — it jumped ~1,500
-          // bars into the future with every page of history).
-          this.replay.shift(added);
-          // The events of the history just loaded (the layer covered the first window only), and the
-          // compare studies' other symbols over it.
-          this.loadEvents(true);
-          void this.extendCompareBars(next[0].time);
-        }
-      }
-    } catch {
-      // The engine refused or could not be reached: the history stays as it is, and the next
-      // scroll to the left edge asks again.
-    } finally {
-      this.loading.set(false);
-      this.host()?.historyLoaded();
-    }
+  /** Scroll-back paging (CC-11, CC-14) — {@link ChartHistoryPager}. */
+  loadOlder(): Promise<void> {
+    return this.historyPager.loadOlder();
+  }
+
+  /** Built on first use: its accessors read the page's fields, so field order does not matter. */
+  private _historyPager?: ChartHistoryPager;
+  private get historyPager(): ChartHistoryPager {
+    return (this._historyPager ??= new ChartHistoryPager({
+      symbol: () => this.symbol(),
+      resolution: () => this.resolution(),
+      bars: this.bars,
+      barsFor: () => this.barsFor(),
+      loading: this.loading,
+      historyStart: this.historyStart,
+      feed: this.feed,
+      replay: () => this.replay,
+      host: () => this.host(),
+      loadEvents: (extend) => this.loadEvents(extend),
+      extendCompareBars: (oldestMs) => this.extendCompareBars(oldestMs),
+    }));
   }
 
   /**

@@ -2,14 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { signal } from '@angular/core';
 
 import type { Bar } from '../../datafeed/candle-feed.service';
-import { ChartAnalysisPageComponent } from './chart-analysis-page.component';
+import { ChartHistoryPager } from './chart-history-pager';
 import { ReplayController } from '../../replay/replay-controller';
 
-// Scroll-back paging (`loadOlder`) run against just the state it touches, as the page's other
-// specs do: the replay head keeps its bar when history is prepended (CC-11), and an empty page
+// Scroll-back paging (`loadOlder`) — U13: moved from the page into ChartHistoryPager, cases unchanged: the replay head keeps its bar when history is prepended (CC-11), and an empty page
 // marks the start of history so the chart stops asking (CC-14).
-
-type Page = ChartAnalysisPageComponent & Record<string, any>;
 
 const H = 3_600_000;
 const bar = (i: number): Bar => ({ time: i * H, open: 1, high: 1, low: 1, close: 1, volume: 1 });
@@ -21,7 +18,6 @@ function setup(older: Bar[]) {
     getBars: vi.fn(() => Promise.resolve({ bars: older, noData: older.length === 0 })),
   };
   const host = { historyLoaded: vi.fn() };
-  const p = Object.create(ChartAnalysisPageComponent.prototype) as Page;
   const bars = signal(range(100, 200));
   const replay = new ReplayController({
     bars,
@@ -30,22 +26,30 @@ function setup(older: Bar[]) {
     symbolFacts: () => ({ pipSize: 0.0001, contractSize: 100_000 }),
     fetchIntrabar: () => Promise.resolve([]),
   });
-  Object.assign(p, {
-    symbol: signal('EURUSD'),
-    resolution: signal('60'),
+  const historyStart = signal<string | null>(null);
+  const loadEvents = vi.fn();
+  const pager = new ChartHistoryPager({
+    symbol: () => 'EURUSD',
+    resolution: () => '60',
     bars,
-    barsFor: signal({ symbol: 'EURUSD', resolution: '60' }),
+    barsFor: () => ({ symbol: 'EURUSD', resolution: '60' }),
     loading: signal(false),
-    replay,
-    replayActive: replay.active,
-    replayIndex: replay.index,
-    historyStart: signal<string | null>(null),
-    compareBars: signal({}),
-    compareRequest: 0,
-    host: () => host,
-    loadEvents: vi.fn(),
+    historyStart,
     feed,
+    replay: () => replay,
+    host: () => host,
+    loadEvents,
+    extendCompareBars: () => Promise.resolve(),
   });
+  // The shape the cases were written against (the page's members of the same names).
+  const p = {
+    loadOlder: () => pager.loadOlder(),
+    bars,
+    replay,
+    replayIndex: replay.index,
+    historyStart,
+    loadEvents,
+  } as Record<string, any>;
   return { p, feed, host };
 }
 
