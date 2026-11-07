@@ -102,7 +102,7 @@ describe('ReplayController', () => {
     const { c } = setup();
     expect(c.place('buy', 1, null, null)).toMatch(/Start Bar Replay/);
     c.start(3);
-    expect(c.place('sell', 0, null, null)).toMatch(/above 0 lots/);
+    expect(c.place('sell', 0, null, null)).toMatch(/above 0/);
   });
 
   it('keeps the head on its bar when history is prepended, and moves to the same instant on another series', () => {

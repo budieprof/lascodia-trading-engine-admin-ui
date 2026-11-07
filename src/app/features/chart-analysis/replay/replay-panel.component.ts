@@ -126,7 +126,7 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
     }
     <div class="rp-row rp-paper" aria-label="Paper trading">
       <span class="rp-tag" title="Simulated in this browser tab only: nothing is sent to the engine or a broker">Paper</span>
-      <label class="rp-muted">{{ qtyTitle() }} <input class="rp-num" type="number" [min]="qtyStep() ?? 'any'" [step]="qtyStep() ?? 'any'" [value]="size() ?? ''" (input)="lots.set(num($any($event.target).value))" /></label>
+      <label class="rp-muted">{{ qtyTitle() }} <input class="rp-num" type="number" [min]="qtyStep() ?? 0" [step]="qtyStep() ?? 'any'" [value]="size() ?? ''" (input)="lots.set(num($any($event.target).value))" /></label>
       <label class="rp-muted">Stop <input class="rp-num" type="number" min="0" step="1" [placeholder]="unitLabel()" [value]="stopPips() ?? ''" (input)="stopPips.set(num($any($event.target).value))" /></label>
       <label class="rp-muted">Target <input class="rp-num" type="number" min="0" step="1" [placeholder]="unitLabel()" [value]="targetPips() ?? ''" (input)="targetPips.set(num($any($event.target).value))" /></label>
       <button type="button" class="rp-btn rp-buy" (click)="order('buy')" [disabled]="!head()">
