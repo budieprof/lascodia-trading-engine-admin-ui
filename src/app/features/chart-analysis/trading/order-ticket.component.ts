@@ -73,6 +73,8 @@ const PREVIEW_REFRESH_MS = 10_000;
       <header class="ticket-head">
         <strong>{{ symbol() }}</strong>
         <span class="ticket-sub">manual order</span>
+        <!-- UI05: which route this ticket is — always visible. -->
+        <span class="route-badge" data-testid="ticket-route" title="Sent as a manual signal to the MT5 EA">MT5 broker</span>
         <button
           type="button"
           class="ticket-x"
@@ -166,7 +168,7 @@ const PREVIEW_REFRESH_MS = 10_000;
         />
         @if ((preview()?.stopPips ?? null) !== null) {
           <small
-            >{{ preview()!.stopPips | number: '1.1-1' }} pips ·
+            >{{ preview()!.stopPips | number: '1.1-1' }} {{ unitLabel() }} ·
             {{ preview()!.atr?.stopInAtr | number: '1.2-2' }} ATR</small
           >
         }
@@ -182,7 +184,7 @@ const PREVIEW_REFRESH_MS = 10_000;
           data-testid="ticket-target"
         />
         @if ((preview()?.targetPips ?? null) !== null) {
-          <small>{{ preview()!.targetPips | number: '1.1-1' }} pips</small>
+          <small>{{ preview()!.targetPips | number: '1.1-1' }} {{ unitLabel() }}</small>
         }
       </label>
       @if (guardProblem(); as problem) {
@@ -298,7 +300,7 @@ const PREVIEW_REFRESH_MS = 10_000;
           }
           @if (p.quote) {
             <dt>Spread</dt>
-            <dd>{{ p.quote.spreadPips | number: '1.1-1' }} pips</dd>
+            <dd>{{ p.quote.spreadPips | number: '1.1-1' }} {{ unitLabel() }}</dd>
           }
           @if ((p.swap?.perNight ?? null) !== null) {
             <dt>Swap / night</dt>
@@ -404,6 +406,14 @@ const PREVIEW_REFRESH_MS = 10_000;
       .ticket-sub {
         opacity: 0.7;
         flex: 1;
+      }
+      .route-badge {
+        border: 1px solid currentColor;
+        border-radius: 3px;
+        padding: 0 4px;
+        font-size: 10px;
+        opacity: 0.85;
+        white-space: nowrap;
       }
       .ticket-x {
         background: none;
@@ -549,7 +559,11 @@ export class OrderTicketComponent {
 
   readonly symbol = input.required<string>();
   readonly precision = input(5);
-  readonly pipSize = input(0.0001);
+  /**
+   * The label of the engine preview's distances (`stopPips`, `spreadPips`, …: the engine's pip, which is the point off
+   * FX) — the chart's instrument facts (UI02). "—" until they are known.
+   */
+  readonly unitLabel = input<string>('—');
   readonly quote = input<LiveQuote | null>(null);
   /** The ticket's own state, two-way: the page moves its brackets when they are dragged on the chart. */
   readonly state = model.required<TicketState>();

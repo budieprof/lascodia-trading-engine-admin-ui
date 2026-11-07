@@ -25,7 +25,7 @@ const KEYS = Object.keys(PROVENANCE) as ProvenanceKey[];
 
 describe('provenance map (PR-4)', () => {
   it('has a title and at least one plain sentence for every key, with or without facts', () => {
-    const s = marketStructure(REAL);
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'pips' });
     for (const key of KEYS) {
       for (const facts of [{}, { structure: s.basis, bars: 120, rows: 48, label: 'London 20 Oct', touches: 3 }]) {
         const p = provenanceOf(key, facts);
@@ -42,7 +42,7 @@ describe('provenance map (PR-4)', () => {
   });
 
   it('maps every label the structure read draws to its own entry', () => {
-    const s = marketStructure(REAL);
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'pips' });
     const keys = new Set<ProvenanceKey>([
       ...s.levels.map(structureLevelKey),
       ...s.zones.map(structureZoneKey),
@@ -71,7 +71,7 @@ describe('provenance map (PR-4)', () => {
   });
 
   it('says the stop pool is an estimate placed N × ATR beyond the range edge, in pips', () => {
-    const s = marketStructure(REAL);
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'pips' });
     const p = provenanceOf('structure.pool', { structure: s.basis });
     expect(p.estimate).toBe(true);
     expect(p.title).toMatch(/estimate/i);
@@ -81,7 +81,7 @@ describe('provenance map (PR-4)', () => {
   });
 
   it('states the balance threshold and bar count from the read itself', () => {
-    const s = marketStructure(REAL);
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'pips' });
     const line = provenanceOf('structure.balance', { structure: s.basis }).lines[0];
     expect(line).toContain(`${s.basis!.balanceBars} bars here`);
     expect(line).toMatch(/6 × ATR\(14\) ≈ \d+ pips/);

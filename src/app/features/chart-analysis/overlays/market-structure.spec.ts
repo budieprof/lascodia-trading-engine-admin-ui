@@ -32,7 +32,8 @@ describe('marketStructure', () => {
   });
 
   describe('on real EURUSD H1 bars', () => {
-    const s = marketStructure(REAL);
+    // The chart passes the instrument's pip and its label (instrument facts, UI02).
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'pips' });
 
     it('finds a balance and describes it in pips and bars', () => {
       const balance = s.zones.find((z) => z.kind === 'balance');
@@ -128,5 +129,17 @@ describe('marketStructure', () => {
       const times = new Set(REAL.map((b) => b.time));
       for (const m of s.markers) expect(times.has(m.time)).toBe(true);
     });
+  });
+
+  it('without the instrument unit, states widths in price — never a guessed "pips" (UI02)', () => {
+    const s = marketStructure(REAL);
+    const balance = s.zones.find((z) => z.kind === 'balance');
+    expect(balance!.label).toMatch(/^Balance — [\d.]+ in price, \d+ bars$/);
+    expect(s.basis!.unitLabel).toBe('');
+  });
+
+  it('speaks ticks for a future', () => {
+    const s = marketStructure(REAL, { pipSize: 0.0001, unitLabel: 'ticks' });
+    expect(s.zones.find((z) => z.kind === 'balance')!.label).toMatch(/^Balance — \d+ ticks, \d+ bars$/);
   });
 });

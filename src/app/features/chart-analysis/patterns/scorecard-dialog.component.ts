@@ -57,11 +57,11 @@ const SECTIONS: { source: ScoreSource; title: string }[] = [
             type="number"
             min="0"
             step="0.1"
-            aria-label="Spread in pips"
+            [attr.aria-label]="'Spread in ' + unitLabel()"
             [value]="spreadPips()"
             (change)="spreadPipsSet($any($event.target).value)"
           />
-          pips
+          {{ unitLabel() }}
         </label>
         <span class="sc-meta">{{ bars().length }} bars</span>
       </div>
@@ -269,9 +269,11 @@ export class PatternScorecardDialogComponent {
   readonly bars = input.required<readonly Ohlc[]>();
   readonly symbol = input('');
   readonly resolution = input('');
-  /** One pip, in price. */
-  readonly pipSize = input(0.0001);
-  /** The live spread in price units; null = 1 pip. */
+  /** One display unit (the pip on FX, else the tick / point), in price — the chart's instrument facts (UI02). */
+  readonly pipSize = input.required<number>();
+  /** That unit's label: `pips`, `ticks`, `points`. */
+  readonly unitLabel = input.required<string>();
+  /** The live spread in price units; null = 1 unit. */
   readonly spread = input<number | null>(null);
   /** The candlestick studies' trend filter (the first one's), and the chart-pattern study's swing size. */
   readonly trend = input<CandleTrendFilter>('sma50');
@@ -288,9 +290,9 @@ export class PatternScorecardDialogComponent {
   readonly spreadPips = computed(() => {
     const o = this.spreadOverride();
     if (o !== null) return o;
-    const pip = this.pipSize() || 0.0001;
+    const pip = this.pipSize();
     const s = this.spread();
-    return s !== null && s >= 0 ? Math.round((s / pip) * 10) / 10 : 1;
+    return s !== null && s >= 0 && pip > 0 ? Math.round((s / pip) * 10) / 10 : 1;
   });
 
   private readonly signals = computed(() => {
@@ -305,7 +307,8 @@ export class PatternScorecardDialogComponent {
   readonly sections = computed(() => {
     const scores = scoreSignals(this.bars(), this.signals(), {
       horizon: this.horizon(),
-      spread: this.spreadPips() * (this.pipSize() || 0.0001),
+      // No usable unit: score without a spread rather than with an FX pip's.
+      spread: this.pipSize() > 0 ? this.spreadPips() * this.pipSize() : 0,
     });
     return SECTIONS.map((s) => ({ ...s, rows: scores.filter((r) => r.source === s.source) }));
   });

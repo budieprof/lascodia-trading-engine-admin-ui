@@ -17,12 +17,16 @@ export function changeText(
   changePct: number | null,
   pip: number | null,
   precision: number,
+  /** The unit's words (the chart's instrument facts): `tick` / `ticks`, `point` / `points`; pips when absent. */
+  unit?: { distanceLabelOne: string; distanceLabel: string } | null,
 ): string | null {
   if (change === null || !Number.isFinite(change)) return null;
   const parts = [signed(change, precision)];
   if (pip !== null && pip > 0) {
     const pips = change / pip;
-    parts.push(`${signed(pips, 1)} ${Math.abs(pips) === 1 ? 'pip' : 'pips'}`);
+    const one = unit?.distanceLabelOne ?? 'pip';
+    const many = unit?.distanceLabel ?? 'pips';
+    parts.push(`${signed(pips, 1)} ${Math.abs(pips) === 1 ? one : many}`);
   }
   const price = parts.join(' / ');
   return changePct === null || !Number.isFinite(changePct)
