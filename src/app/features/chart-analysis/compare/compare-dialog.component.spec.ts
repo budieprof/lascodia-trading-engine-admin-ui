@@ -52,7 +52,20 @@ describe('CompareDialogComponent (CC-I12)', () => {
     const { fixture, host, remove } = render([{ id: 'r1', kind: 'ratio', symbols: ['EURUSD', 'GBPUSD'], color: '#FF6D00' }]);
     fixture.detectChanges();
     expect(host.querySelector('.cd-name')?.textContent).toContain('EURUSD ÷ GBPUSD');
-    (host.querySelector('.cd-list .cd-link') as HTMLButtonElement).click();
+    const links = host.querySelectorAll<HTMLButtonElement>('.cd-list .cd-link');
+    // US04: a ratio / spread can be opened as the chart; Remove is the last link.
+    expect(links[0].textContent).toContain('Open as chart');
+    links[links.length - 1].click();
     expect(remove).toHaveBeenCalledWith('r1');
+  });
+
+  it('US04: opens a ratio as the main chart', () => {
+    const spec: CompareSeriesSpec = { id: 'r1', kind: 'ratio', symbols: ['EURUSD', 'GBPUSD'], color: '#FF6D00' };
+    const { fixture, host, cmp } = render([spec]);
+    const open = vi.fn();
+    cmp.openAsChart.subscribe(open);
+    fixture.detectChanges();
+    host.querySelector<HTMLButtonElement>('.cd-list .cd-link')!.click();
+    expect(open).toHaveBeenCalledWith(spec);
   });
 });

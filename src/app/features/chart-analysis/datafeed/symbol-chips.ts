@@ -11,7 +11,7 @@ import { isVenueSource, volumeLabel, type ChartSource, type SymbolFacts } from '
 
 export interface SymbolChip {
   /** Stable identity for `@for` tracking. */
-  id: 'kind' | 'source' | 'exchange' | 'contract' | 'perp' | 'volume' | 'adjustment';
+  id: 'kind' | 'source' | 'exchange' | 'contract' | 'perp' | 'volume' | 'adjustment' | 'synthetic';
   text: string;
   title: string;
   /** Draws attention (an expiring contract, a non-front month, unknown volume). */

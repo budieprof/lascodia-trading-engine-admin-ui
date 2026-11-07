@@ -857,7 +857,7 @@
           [historyComplete]="historyComplete()"
           [dataWindowOpen]="sidePane() === 'datawindow'"
           [style]="style()"
-          [showVolume]="showVolume()"
+          [showVolume]="showVolume() && !synthetic()"
           [indicators]="active()"
           [positionFacts]="positionFacts()"
           [autoAnalysis]="autoAnalysisOn() ? autoAnalysis() : null"
@@ -911,6 +911,8 @@
         />
 
         <!-- SP-I3/SP-I4 (trading): the order ticket and the draggable trading lines on the price pane. -->
+        <!-- US04: none on a synthetic (spread / ratio) series: it is no instrument. -->
+        @if (!synthetic()) {
         <app-chart-trading
           [host]="host"
           [symbol]="symbol()"
@@ -925,6 +927,7 @@
           (submitted)="onTicketSubmitted()"
           (changed)="onChartTradeChanged()"
         />
+        }
 
         <!-- SP-I5 (analysis): the analysis panel, the plan / watch lines and the watches' fire markers. -->
         <app-chart-analysis
@@ -1312,10 +1315,11 @@
   @if (compareOpen()) {
     <app-compare-dialog
       [series]="compareSeries()"
-      [symbols]="symbolNames()"
+      [symbols]="compareSymbolNames()"
       [chartSymbol]="symbol()"
       (add)="addCompare($event)"
       (remove)="removeCompare($event)"
+      (openAsChart)="openCompareAsChart($event)"
       (closed)="compareOpen.set(false)"
     />
   }

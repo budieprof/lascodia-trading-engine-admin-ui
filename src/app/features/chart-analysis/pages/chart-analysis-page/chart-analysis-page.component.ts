@@ -532,6 +532,13 @@ import {
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
 import {
+  parseSynthetic,
+  syntheticNotice,
+  syntheticSymbol,
+  SyntheticTicks,
+  type SyntheticSpec,
+} from '../../compare/synthetic';
+import {
   RemoteSymbolSearch,
   groupSearch,
   mergeSearch,
@@ -542,6 +549,7 @@ import {
   instrumentDescription,
   instrumentKindLabel,
   symbolChips,
+  type SymbolChip,
 } from '../../datafeed/symbol-chips';
 
 /** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
@@ -2313,13 +2321,35 @@ export class ChartAnalysisPageComponent {
   /** The legend's three-state tone (kept for older bindings): open / closed / stale. */
   readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => this.marketView().tone);
   /** What the bars are (UD07): kind, source, exchange, contract, perpetual, volume unit, adjustment. */
-  readonly symbolChips = computed(() =>
-    symbolChips(
+  readonly symbolChips = computed((): SymbolChip[] => {
+    // US04: a spread / ratio symbol says what it is and how it was built.
+    const syn = this.synthetic();
+    if (syn)
+      return [
+        {
+          id: 'synthetic',
+          text: syn.kind === 'ratio' ? 'Synthetic ratio' : 'Synthetic spread',
+          title: this.syntheticNote() ?? syntheticNotice(syn, { carriedA: 0, carriedB: 0, dropped: 0 }),
+        },
+      ];
+    return symbolChips(
       this.feed.factsOf(this.symbol()),
       this.catalogueRow(this.symbol()),
       this.marketClock(),
-    ),
-  );
+    );
+  });
+
+  /** US04: the main symbol as a spread / ratio of two symbols (`RATIO(A,B)`, `SPREAD(A,B,m)`), or null. */
+  readonly synthetic = computed(() => parseSynthetic(this.symbol()));
+  /** US04: what the synthetic was built from (the legs held as of each bar), for its chip. */
+  readonly syntheticNote = signal<string | null>(null);
+  /** US04: the synthetic's live price from its legs' ticks. */
+  private readonly syntheticTicks = new SyntheticTicks();
+
+  /** US04: open a compare dialog's ratio / spread as the main chart's symbol. */
+  openSynthetic(spec: SyntheticSpec): void {
+    this.selectSymbol(syntheticSymbol(spec));
+  }
 
   // ── Split view ───────────────────────────────────────────────────────────
   //
@@ -2517,7 +2547,9 @@ export class ChartAnalysisPageComponent {
     () =>
       instrumentFacts(this.symbol(), {
         pair: this.currentPair() ?? null,
-        lookup: this.instruments.lookupState(this.symbol()),
+        // US04: a synthetic is no instrument — never looked up, and (as while resolving) no ticket, ladder or proposal
+        // can place anything on it.
+        lookup: this.synthetic() ? 'resolving' : this.instruments.lookupState(this.symbol()),
         refPrice: () => this.bars().at(-1)?.close ?? null,
         digitsHint: () => decimalsOfPrices(this.bars().slice(-50).map((b) => b.close)),
       }),
@@ -3800,7 +3832,7 @@ export class ChartAnalysisPageComponent {
     this.rollover.reset();
     // The symbol's session, which the day-based studies count trading days by, comes with every
     // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
-    if (!isSessionResolution(resolution)) void this.feed.learnSession(symbol);
+    if (!isSessionResolution(resolution) && !parseSynthetic(symbol)) void this.feed.learnSession(symbol);
     const now = Date.now();
     try {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
@@ -3809,6 +3841,11 @@ export class ChartAnalysisPageComponent {
       this.historyStart.set(null);
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
+      // US04: a synthetic's legs seed its live price; its chip says how it was built.
+      const syn = parseSynthetic(symbol);
+      const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
+      this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
+      this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
       if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
       this.tailMergedAt = this.ticksApplied;
       this.lastStored = lastCompleteBarTime(bars, resolution);
@@ -3953,6 +3990,13 @@ export class ChartAnalysisPageComponent {
   }
 
   private applyTick(tick: PriceTick): void {
+    // US04: a leg of the synthetic main series moves it (its price from both legs' latest).
+    if (this.synthetic() && tick?.symbol && this.syntheticTicks.isLeg(tick.symbol)) {
+      const leg = tickPrice(tick);
+      const price = leg === null ? null : this.syntheticTicks.price(tick.symbol, leg);
+      if (price === null) return;
+      tick = { symbol: this.symbol(), bid: price, timeUtc: tick.timeUtc };
+    }
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
     // UD04/UD05: MT5 = the bid (bid bars, unchanged); a venue = its last trade / mid. Placed at the tick's own time.
     const price = tickPrice(tick);
@@ -6169,14 +6213,39 @@ export class ChartAnalysisPageComponent {
     return comparePanes(
       specs,
       (sym) => (sym === own ? bars : others[sym]),
-      (sym) => digits.get(sym) ?? 5,
+      // A pair's digits as before; any other symbol at its instrument's precision (US04), not 5.
+      (sym) => digits.get(sym) ?? this.panelFacts(sym).precision,
+      (sym) => this.joinCalendarOf(sym),
     );
   });
+  /**
+   * US04: the calendar a compare leg trades on, for the join — every FX pair the same (so FX legs join exactly as
+   * before), else the instrument's calendar (C1, then the catalogue), else its own (unknown: joined as of).
+   */
+  private joinCalendarOf(symbol: string): string {
+    const facts = this.panelFacts(symbol);
+    if (facts.isFx) return 'fx';
+    return this.feed.factsOf(symbol)?.calendarCode ?? facts.instrument.tradingCalendarCode ?? `own:${symbol}`;
+  }
+
   /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
   readonly chartExternalPanes = computed(() => [
     ...this.externalPanes(),
     ...this.comparePaneList(),
   ]);
+
+  /** US04: what the compare dialog offers — the broker's symbols, then the catalogue's chartable instruments. */
+  readonly compareSymbolNames = computed(() =>
+    this.panelSymbolChoices().flatMap((g) => g.options.map((o) => o.symbol)),
+  );
+
+  /** US04: a ratio / spread from the compare dialog, charted as the main symbol. */
+  openCompareAsChart(spec: CompareSeriesSpec): void {
+    const [a, b] = spec.symbols.map((x) => x.toUpperCase());
+    if (!a || !b || (spec.kind !== 'ratio' && spec.kind !== 'spread')) return;
+    this.compareOpen.set(false);
+    this.openSynthetic({ kind: spec.kind, a, b, mult: spec.kind === 'spread' ? (spec.mult ?? 1) : 1 });
+  }
 
   /** Add a compare series (the scale rule: {@link ChartCompareState.add}). */
   addCompare(spec: CompareSeriesSpec): void {
