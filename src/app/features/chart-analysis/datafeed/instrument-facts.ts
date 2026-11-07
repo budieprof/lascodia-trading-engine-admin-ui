@@ -124,6 +124,32 @@ function read(v: number | null | undefined | (() => number | null)): number | nu
   return typeof v === 'function' ? v() : (v ?? null);
 }
 
+/**
+ * The distance unit of a broker CFD (not exchange-traded) measured in MT5 points (`displayDistance` Points, the
+ * default for a non-FX pair): an MT5 point is 10^-digits of the price, which on an index or a share is not what anyone
+ * calls a point — US500 "+276.0 points" for a 2.76 move. Index CFDs are measured in index points (1.0), equity / ETF
+ * CFDs in price (their currency), commodity CFDs in their tick. FX (pips) and explicit catalogue units are untouched.
+ */
+function cfdDistance(
+  inst: InstrumentDto,
+  tickSize: number,
+): { unit: number; label: string; one: string } | null {
+  if (inst.displayDistance !== 'Points') return null;
+  switch (inst.assetClass) {
+    case 'Index':
+      return { unit: 1, label: 'points', one: 'point' };
+    case 'Equity':
+    case 'Etf': {
+      const ccy = (inst.quoteCurrency ?? '').trim().toUpperCase() || 'in price';
+      return { unit: 1, label: ccy, one: ccy };
+    }
+    case 'Commodity':
+      return { unit: tickSize, label: 'ticks', one: 'tick' };
+    default:
+      return null;
+  }
+}
+
 /** The instrument and where it came from, by the precedence in the file comment. */
 function pick(
   key: string,
@@ -158,8 +184,9 @@ export function instrumentFacts(
   const point = 10 ** -precision;
   const tickSize = inst.tickSize > 0 ? inst.tickSize : point;
   const ref = inst.displayDistance === 'Bps' ? read(ctx.refPrice) : null;
-  const distanceUnit = distanceUnitSize(inst, ref);
-  const distanceLabel = distanceUnitLabel(inst, ref);
+  const cfd = isExchangeTraded(row) ? null : cfdDistance(inst, tickSize);
+  const distanceUnit = cfd?.unit ?? distanceUnitSize(inst, ref);
+  const distanceLabel = cfd?.label ?? distanceUnitLabel(inst, ref);
 
   // Money: what the row says. A guess knows the FX lot (100 000 units — the engine's own fallback) and nothing else.
   const moneyKnown = origin !== 'guess' || isFx;
@@ -205,7 +232,7 @@ export function instrumentFacts(
     tickSize,
     distanceUnit,
     distanceLabel,
-    distanceLabelOne: ONE[distanceLabel] ?? distanceLabel,
+    distanceLabelOne: cfd?.one ?? ONE[distanceLabel] ?? distanceLabel,
     quoteCurrency: inst.quoteCurrency ?? null,
     tickValue,
     contractValue,
