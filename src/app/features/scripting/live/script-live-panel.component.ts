@@ -74,6 +74,7 @@ import {
 import { liveClosedTradesCsv } from '../report/report-csv';
 import { fileStamp, saveBlob } from '../shared/download';
 import { ScriptParityPanelComponent } from './script-parity-panel.component';
+import { LiveVsBacktestPanelComponent } from './live-vs-backtest-panel.component';
 
 /** Fallback cadence; a live session advances on bar closes, so 15 s is plenty. */
 const POLL_MS = 15_000;
@@ -97,7 +98,12 @@ const STALE_MINUTES = 240;
 @Component({
   selector: 'app-script-live-panel',
   standalone: true,
-  imports: [StrategyReportComponent, EATradeChartModalComponent, ScriptParityPanelComponent],
+  imports: [
+    StrategyReportComponent,
+    EATradeChartModalComponent,
+    ScriptParityPanelComponent,
+    LiveVsBacktestPanelComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="stack">
@@ -501,6 +507,15 @@ const STALE_MINUTES = 240;
         <!-- BT-I3 / PE-I2: live fills vs the emulator, and a session reconciled with a backtest. -->
         <app-script-parity-panel [strategyId]="strategyId()" [accountNames]="accountNames()" />
 
+        <!-- U08 / U09: the session's trades against the backtest's expectation, rolling R, slippage. -->
+        <app-live-vs-backtest-panel
+          [strategyId]="strategyId()"
+          [trades]="l.closedTrades"
+          [divergences]="l.divergences"
+          [lifecycleStage]="lifecycleStage()"
+          [lifecycleStageEnteredAt]="lifecycleStageEnteredAt()"
+        />
+
         @if (hasReport()) {
           <app-strategy-report
             [report]="l.report"
@@ -854,6 +869,9 @@ export class ScriptLivePanelComponent {
   private readonly executionApi = inject(StrategyExecutionService);
 
   readonly strategyId = input.required<number>();
+  /** The strategy's lifecycle stage and when it entered it (U09 milestones); optional. */
+  readonly lifecycleStage = input<string | null>(null);
+  readonly lifecycleStageEnteredAt = input<string | null>(null);
   /** The strategy's engine symbol / timeframe, for the trade chart; the live report's are the fallback. */
   readonly symbol = input<string | null>(null);
   readonly timeframe = input<string | null>(null);

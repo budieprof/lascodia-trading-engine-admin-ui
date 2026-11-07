@@ -271,6 +271,18 @@ export interface WalkForwardRunExtraFields {
   holdoutResultJson?: string | null;
   failureCode?: string | null;
   queuedAt?: string | null;
+  // ── C10 (strategy program `wf`): the stitched out-of-sample verdict + provenance; absent on older engines/runs ──
+  strategyConfigHash?: string | null;
+  oosExpectancyR?: number | null;
+  oosSharpeR?: number | null;
+  oosTrades?: number | null;
+  oosRTrades?: number | null;
+  walkForwardEfficiency?: number | null;
+  parameterDriftScore?: number | null;
+  zeroTradeFolds?: number | null;
+  foldCount?: number | null;
+  foldEmbargoBars?: number | null;
+  strategyHoldoutId?: number | null;
 }
 
 export interface WalkForwardLaunchRequest {
@@ -430,6 +442,26 @@ export interface MonteCarloResult {
   riskOfRuin: number;
   probabilityOfLoss: number;
   unrecoveredShare: number;
+  /**
+   * U07 — the paths' equity percentiles trade by trade (the cone). OPTIONAL: an engine that does not send it gets the
+   * table only — the console never draws a cone of its own (one source of truth: the engine's resampling).
+   */
+  equityCone?: MonteCarloEquityCone | null;
+}
+
+/**
+ * Engine contract assumption (U07, not yet in the engine at 2026-11-07): per trade index `trades[i]` (1-based, sampled to
+ * at most a few hundred points), the 5th/25th/50th/75th/95th percentile of the paths' equity change since the start,
+ * PERCENT (−100…), and optionally the run's own order of trades (`observed`). Arrays are as long as `trades`.
+ */
+export interface MonteCarloEquityCone {
+  trades: number[];
+  p5: number[];
+  p25?: number[] | null;
+  p50: number[];
+  p75?: number[] | null;
+  p95: number[];
+  observed?: number[] | null;
 }
 
 export interface MonteCarloDto {

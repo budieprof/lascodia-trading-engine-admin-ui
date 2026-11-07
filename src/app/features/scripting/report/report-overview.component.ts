@@ -4,6 +4,8 @@ import { ChartCardComponent } from '@shared/components/chart-card/chart-card.com
 
 import type { StrategyReport } from './strategy-report.model';
 import { buildEquityChartOptions, underwaterPercent, type ReportPalette } from './report-charts';
+import { RollingRChartComponent } from './rolling-r-chart.component';
+import { rPointsFromReport } from './rolling-metrics';
 import {
   formatDateTime,
   formatInteger,
@@ -32,7 +34,7 @@ const TABLE_ROWS = 120;
 @Component({
   selector: 'app-report-overview',
   standalone: true,
-  imports: [ChartCardComponent],
+  imports: [ChartCardComponent, RollingRChartComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <ul class="tiles" aria-label="Key statistics">
@@ -58,6 +60,13 @@ const TABLE_ROWS = 120;
       [emptyHint]="chartOptions() ? null : 'The run processed fewer than two bars with equity.'"
       alt="Strategy equity and buy-and-hold equity over time, with the underwater drawdown and the position size in panels below"
       height="500px"
+    />
+
+    <!-- U08: does the edge hold across the run, or did a few early trades make it? -->
+    <app-rolling-r-chart
+      [points]="rPoints().points"
+      [closed]="rPoints().closed"
+      source="closed trades"
     />
 
     @if (tableRows().length > 0) {
@@ -259,6 +268,8 @@ export class ReportOverviewComponent {
     }
     return tiles;
   });
+
+  readonly rPoints = computed(() => rPointsFromReport(this.report()));
 
   readonly chartOptions = computed(() =>
     buildEquityChartOptions(this.report(), this.palette(), this.currency()),

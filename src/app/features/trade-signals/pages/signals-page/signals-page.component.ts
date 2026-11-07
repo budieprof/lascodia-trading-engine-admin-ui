@@ -13,6 +13,7 @@ import { RouterLink } from '@angular/router';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed, toObservable, toSignal } from '@angular/core/rxjs-interop';
 import type { ColDef } from 'ag-grid-community';
+import { configHashColumn } from '@features/strategies/util/config-hash-column';
 import type { EChartsOption } from 'echarts';
 import {
   catchError,
@@ -1654,6 +1655,7 @@ export class SignalsPageComponent {
         );
       },
     },
+    configHashColumn<TradeSignalDto>(),
   ];
 
   // No per-row Actions column: a row click opens the detail modal, which

@@ -11,6 +11,7 @@ import { PageHeaderComponent } from '@shared/components/page-header/page-header.
 import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
 import { CardSkeletonComponent } from '@shared/components/feedback/card-skeleton.component';
 import { EmptyStateComponent } from '@shared/components/feedback/empty-state.component';
+import { NormalisedCompareComponent } from './normalised-compare.component';
 
 /**
  * Side-by-side comparison of 2–4 strategies. Picker drives a forkJoin over
@@ -35,6 +36,7 @@ const NO_SYMBOL = '__none__';
     CardSkeletonComponent,
     EmptyStateComponent,
     FormsModule,
+    NormalisedCompareComponent,
   ],
   template: `
     <div class="page">
@@ -280,6 +282,15 @@ const NO_SYMBOL = '__none__';
           <app-empty-state
             title="No closed positions in the selected strategies"
             description="None of the picked strategies have any closed positions yet, so there's nothing to overlay."
+          />
+        }
+        <!-- U11: R / % of capital from the newest backtests, drawdown and daily correlation. -->
+        @if (!curvesLoading()) {
+          <app-normalised-compare
+            [ids]="picked()"
+            [names]="nameById()"
+            [curves]="curves()"
+            [colors]="LINE_COLORS"
           />
         }
       } @else {
@@ -634,7 +645,7 @@ export class StrategiesComparePageComponent {
   // Distinct line colors for the up-to-4 picked strategies. Reused as
   // chip dots, table dots, and chart line colors so the visual mapping
   // is consistent everywhere.
-  private readonly LINE_COLORS = ['#0071E3', '#34C759', '#FF9500', '#AF52DE'];
+  protected readonly LINE_COLORS = ['#0071E3', '#34C759', '#FF9500', '#AF52DE'];
 
   private readonly strategiesService = inject(StrategiesService);
   private readonly route = inject(ActivatedRoute);
@@ -655,6 +666,9 @@ export class StrategiesComparePageComponent {
   readonly pickerExpanded = signal(true);
 
   readonly strategyById = computed(() => new Map(this.allStrategies().map((s) => [s.id, s])));
+  readonly nameById = computed(
+    () => new Map(this.allStrategies().map((s) => [s.id, s.name ?? `#${s.id}`] as const)),
+  );
 
   readonly symbolFilters = computed(() => {
     const counts = new Map<string, number>();

@@ -32,22 +32,89 @@ export interface HeatmapGrid {
   scale: number;
 }
 
+/** What the cells are coloured by: the engine's mean R, or the worst mean R of the cell's 3×3 neighbourhood (U10). */
+export type HeatmapColourBy = 'mean' | 'neighbourhood';
+
+/**
+ * U10 — neighbourhood stability of one cell, from the engine's cells only: over the populated cells of its 3×3 block
+ * (itself included) the WORST mean R (a pessimistic contour — an edge that survives a step in any direction) and the
+ * share of them above 0R. Null for an empty cell.
+ */
+export interface CellStability {
+  worstMeanR: number;
+  positiveShare: number;
+  populated: number;
+}
+
+export function cellStability(
+  cells: readonly (readonly (HeatmapCell | null)[])[],
+  x: number,
+  y: number,
+): CellStability | null {
+  if (!cells[y]?.[x]) return null;
+  let worst = Infinity;
+  let positive = 0;
+  let populated = 0;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const c = cells[y + dy]?.[x + dx];
+      if (!c) continue;
+      populated++;
+      worst = Math.min(worst, c.meanExpectancyR);
+      if (c.meanExpectancyR > 0) positive++;
+    }
+  }
+  return { worstMeanR: worst, positiveShare: positive / populated, populated };
+}
+
+/**
+ * The most stable cell: the highest worst-of-neighbourhood mean R among cells with at least `minPopulated` populated
+ * cells in their block (a lone cell has no neighbourhood to vouch for it). Null when none qualifies.
+ */
+export function mostStableCell(
+  dto: OptimizationHeatmapDto,
+  minPopulated = 4,
+): { x: number; y: number; stability: CellStability } | null {
+  const h = dto.heatmap;
+  if (!h) return null;
+  let best: { x: number; y: number; stability: CellStability } | null = null;
+  for (let y = 0; y < h.cells.length; y++) {
+    for (let x = 0; x < h.cells[y].length; x++) {
+      const s = cellStability(h.cells, x, y);
+      if (!s || s.populated < minPopulated) continue;
+      if (!best || s.worstMeanR > best.stability.worstMeanR) best = { x, y, stability: s };
+    }
+  }
+  return best;
+}
+
 /** The grid of an engine heatmap, or null when the engine drew none (`whyNot`). */
 export function heatmapGrid(
   dto: OptimizationHeatmapDto,
   palette: ReportPalette,
+  colourBy: HeatmapColourBy = 'mean',
 ): HeatmapGrid | null {
   const h = dto.heatmap;
   if (!h) return null;
+  const valueOf = (cell: HeatmapCell | null, x: number, y: number): number | null => {
+    if (!cell) return null;
+    if (colourBy === 'mean') return cell.meanExpectancyR;
+    return cellStability(h.cells, x, y)?.worstMeanR ?? null;
+  };
   let scale = 0;
-  for (const row of h.cells)
-    for (const c of row) if (c) scale = Math.max(scale, Math.abs(c.meanExpectancyR));
+  for (let y = 0; y < h.cells.length; y++)
+    for (let x = 0; x < h.cells[y].length; x++) {
+      const v = valueOf(h.cells[y][x], x, y);
+      if (v !== null) scale = Math.max(scale, Math.abs(v));
+    }
   const rows: HeatmapGrid['rows'] = [];
   for (let y = h.cells.length - 1; y >= 0; y--) {
     const cells: GridCell[] = h.cells[y].map((cell, x) => {
       const peak = x === h.peakX && y === h.peakY;
       const neighbour = !peak && Math.abs(x - h.peakX) <= 1 && Math.abs(y - h.peakY) <= 1;
-      const colours = cell ? heatCellColors(cell.meanExpectancyR, scale, palette) : null;
+      const value = valueOf(cell, x, y);
+      const colours = value !== null ? heatCellColors(value, scale, palette) : null;
+      const stability = cell ? cellStability(h.cells, x, y) : null;
       const where = `${h.x.id} ${h.x.labels[x] ?? x}, ${h.y.id} ${h.y.labels[y] ?? y}`;
       return {
         x,
@@ -57,10 +124,14 @@ export function heatmapGrid(
         neighbour,
         background: colours?.background ?? 'transparent',
         color: colours?.color ?? 'inherit',
-        text: cell ? formatNumber(cell.meanExpectancyR, 2) : '',
+        text: value !== null ? formatNumber(value, 2) : '',
         title: cell
           ? `${where}: mean ${formatNumber(cell.meanExpectancyR, 3)} R over ${cell.count} candidate${cell.count === 1 ? '' : 's'}` +
-            ` (best ${formatNumber(cell.bestExpectancyR, 3)} R)${peak ? ' — the peak' : ''}`
+            ` (best ${formatNumber(cell.bestExpectancyR, 3)} R)` +
+            (stability
+              ? `; neighbourhood worst ${formatNumber(stability.worstMeanR, 3)} R, ${formatPercent(stability.positiveShare * 100, { decimals: 0 })} of ${stability.populated} cells above 0R`
+              : '') +
+            (peak ? ' — the peak' : '')
           : `${where}: no candidate`,
       };
     });

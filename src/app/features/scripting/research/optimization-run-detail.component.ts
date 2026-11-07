@@ -18,6 +18,7 @@ import { reportPalette } from '../report/report-charts';
 import { formatNumber, formatRatio } from '../report/report-format';
 import { describeFailure } from '../shared/api-error';
 import { valueText } from './parameter-space.model';
+import { topCandidatesWithDiff } from './top-candidates';
 import type { PlateauGate } from './heatmap.model';
 import { ParameterHeatmapComponent } from './parameter-heatmap.component';
 import { ResearchApiService } from './research-api.service';
@@ -224,6 +225,85 @@ const SPACE_MARKER = '__ScriptInputs';
           }
         </section>
 
+        <!-- U10: the best few, showing only what changes from the reference. -->
+        @if (top().rows.length > 1) {
+          <section class="card" aria-labelledby="top-title" data-testid="top-candidates">
+            <header class="head">
+              <h3 id="top-title" class="title">Top {{ top().rows.length }} — what changes</h3>
+              <label class="sort">
+                <span class="muted small">Show</span>
+                <select
+                  class="field-input"
+                  (change)="topN.set(+$any($event.target).value)"
+                  aria-label="How many top candidates"
+                >
+                  @for (n of topChoices; track n) {
+                    <option [value]="n" [selected]="n === topN()">top {{ n }}</option>
+                  }
+                </select>
+              </label>
+            </header>
+            <p class="muted small">
+              In the order above ({{ sortLabel() }}). Each row lists only the inputs that differ
+              from
+              {{
+                top().reference?.isWinner
+                  ? "the run's chosen parameters"
+                  : 'the first-ranked candidate'
+              }}
+              (#{{ top().reference?.rank }}). Results that hold while many inputs move point to a
+              plateau; a sharp drop on a one-input change points to a knife edge.
+            </p>
+            <div class="table-wrap">
+              <table class="candidates">
+                <thead>
+                  <tr>
+                    <th scope="col" class="num">#</th>
+                    <th scope="col" class="num">Expectancy (R)</th>
+                    <th scope="col" class="num">vs reference</th>
+                    <th scope="col" class="num">Sharpe in R</th>
+                    <th scope="col" class="num">Trades</th>
+                    <th scope="col">Inputs that differ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (row of top().rows; track row.rank) {
+                    <tr [class.winner]="row.isReference">
+                      <td class="num">
+                        {{ row.rank }}
+                        @if (row.isReference) {
+                          <span class="chip">reference</span>
+                        }
+                      </td>
+                      <td class="num">{{ r(row.expectancyR) }}</td>
+                      <td
+                        class="num"
+                        [class.pos]="(row.deltaExpectancyR ?? 0) > 0"
+                        [class.neg]="(row.deltaExpectancyR ?? 0) < 0"
+                      >
+                        {{ row.isReference ? '—' : r(row.deltaExpectancyR) }}
+                      </td>
+                      <td class="num">{{ ratio(row.sharpeR) }}</td>
+                      <td class="num">{{ row.trades ?? '—' }}</td>
+                      <td class="mono small">
+                        @if (row.isReference) {
+                          <span class="muted">—</span>
+                        } @else if (row.changes.length === 0) {
+                          <span class="muted">same inputs</span>
+                        } @else {
+                          @for (c of row.changes; track c.id) {
+                            <span class="diff">{{ c.id }} {{ c.from }} → {{ c.to }}</span>
+                          }
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </section>
+        }
+
         <app-parameter-heatmap [runId]="d.optimizationRunId" [gate]="plateauGate()" />
       }
     </div>
@@ -233,6 +313,13 @@ const SPACE_MARKER = '__ScriptInputs';
     `
       :host {
         display: block;
+      }
+      .diff {
+        display: inline-block;
+        margin: 0 8px 2px 0;
+        padding: 0 4px;
+        border-radius: 3px;
+        background: var(--bg-tertiary);
       }
       .stack {
         display: flex;
@@ -358,6 +445,13 @@ export class OptimizationRunDetailComponent {
     if (!sel || typeof sel.minPlateauScore !== 'number') return null;
     return { enabled: !!sel.plateauGateEnabled, minScore: sel.minPlateauScore };
   });
+  readonly topChoices = [5, 10, 20] as const;
+  readonly topN = signal<number>(10);
+  readonly top = computed(() => topCandidatesWithDiff(this.dto()?.rows ?? [], this.topN()));
+  readonly sortLabel = computed(
+    () => this.sorts.find((x) => x.id === this.sortBy())?.label ?? this.sortBy(),
+  );
+
   readonly paramColumns = computed(() => {
     const seen = new Set<string>();
     for (const c of this.dto()?.rows ?? [])
