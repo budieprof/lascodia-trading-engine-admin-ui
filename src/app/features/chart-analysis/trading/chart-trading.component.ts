@@ -52,7 +52,14 @@ import {
   type TicketPrefill,
   type TicketState,
 } from './ticket-model';
-import { roundPrice, type TradeLine } from './trade-lines';
+import type { TradeLine } from './trade-lines';
+import {
+  formatFactsDistance,
+  formatFactsQuantity,
+  quantityWord,
+  snapQuantityDown,
+  type InstrumentFacts,
+} from '../datafeed/instrument-facts';
 import { TradeLinesPrimitive, type TradeLineMove } from './trade-lines-primitive';
 
 /** How often a pending change asks whether the EA has answered. */
@@ -111,7 +118,17 @@ type ChartAction =
   imports: [OrderTicketComponent, VenueOrderTicketComponent, DecimalPipe],
   template: `
     @if (open()) {
-      @if (venueInstrument(); as vi) {
+      @if (resolving()) {
+        <!-- UI05: while the catalogue loads (or the symbol is looked up) neither ticket is offered: an exchange-traded
+             symbol must never get the MT5 ticket for a moment. -->
+        <div class="ticket-dock">
+          <section class="resolving" role="status" data-testid="ticket-resolving">
+            <strong>{{ symbol() }}</strong> · Resolving instrument… The ticket opens once the engine says whether
+            this is an MT5 broker symbol or a venue's.
+            <button type="button" class="ticket-x" (click)="open.set(false)" aria-label="Close">×</button>
+          </section>
+        </div>
+      } @else if (venueInstrument(); as vi) {
         <!-- Multi-asset WS7 7.5: an EXCHANGE-TRADED instrument (futures / crypto / equities) gets the venue ticket.
              Every MT5 symbol (FX and CFDs) has no venue instrument and keeps the ticket below, unchanged. -->
         <app-venue-order-ticket
@@ -126,7 +143,7 @@ type ChartAction =
           class="ticket-dock"
           [symbol]="symbol()"
           [precision]="precision()"
-          [pipSize]="pipSize()"
+          [unitLabel]="unitLabel()"
           [quote]="quote()"
           [(state)]="ticket"
           (previewChange)="ticketPreview.set($event)"
@@ -159,10 +176,8 @@ type ChartAction =
               <p>
                 {{ a.order.orderType }} {{ a.order.quantity }} {{ a.order.symbol }} at
                 {{ a.order.price | number: digits() }}: {{ a.from | number: digits() }} →
-                <strong>{{ a.to | number: digits() }}</strong> ({{
-                  orderDistancePips(a) | number: '1.1-1'
-                }}
-                pips from its entry)
+                <strong>{{ a.to | number: digits() }}</strong> ({{ orderDistanceText(a) }} from its
+                entry)
               </p>
               <p class="muted">
                 The engine checks the stop against the noise guard before it is sent.
@@ -194,10 +209,10 @@ type ChartAction =
             @case ('close') {
               <h3>Close the position</h3>
               <label class="row">
-                Lots to close
+                {{ qtyWordTitle() }} to close
                 <input
                   type="number"
-                  [step]="lotStep()"
+                  [step]="facts()?.quantityStep ?? 'any'"
                   min="0"
                   [value]="a.lots"
                   (change)="setCloseLots($any($event.target).value)"
@@ -234,7 +249,7 @@ type ChartAction =
               @if (p.newStop !== null) {
                 <dt>Distance</dt>
                 <dd>
-                  {{ p.stopDistancePips | number: '1.1-1' }} pips ·
+                  {{ p.stopDistancePips | number: '1.1-1' }} {{ unitLabel() }} ·
                   {{ p.stopDistanceAtr | number: '1.2-2' }} ATR from the
                   {{ p.isLong ? 'bid' : 'ask' }}
                 </dd>
@@ -257,7 +272,7 @@ type ChartAction =
               }
               @if (p.closeLots !== null) {
                 <dt>Closes</dt>
-                <dd>{{ p.closeLots }} of {{ p.openLots }} lots</dd>
+                <dd>{{ p.closeLots }} of {{ qtyText(p.openLots) }}</dd>
                 <dt>Result ≈</dt>
                 <dd>
                   {{ p.closePnl | number: '1.2-2' }} {{ p.currency }} (the broker's fill decides)
@@ -282,14 +297,14 @@ type ChartAction =
               @if (e.distanceFromMarketPips !== null) {
                 <dt>From the market</dt>
                 <dd>
-                  {{ e.distanceFromMarketPips | number: '1.1-1' }} pips from the
+                  {{ e.distanceFromMarketPips | number: '1.1-1' }} {{ unitLabel() }} from the
                   {{ e.isBuy ? 'ask' : 'bid' }}
                 </dd>
               }
               @if (e.stopDistancePips !== null) {
                 <dt>Stop</dt>
                 <dd>
-                  {{ e.stopDistancePips | number: '1.1-1' }} pips
+                  {{ e.stopDistancePips | number: '1.1-1' }} {{ unitLabel() }}
                   @if (e.stopDistanceAtr !== null) {
                     · {{ e.stopDistanceAtr | number: '1.2-2' }} ATR
                   }
@@ -354,6 +369,22 @@ type ChartAction =
         display: flex;
         align-items: flex-start;
         pointer-events: none;
+      }
+      .resolving {
+        pointer-events: auto;
+        max-width: 260px;
+        padding: 8px 10px;
+        border: 1px solid var(--border-1, #363a45);
+        border-radius: 6px;
+        background: var(--surface-1, #1e222d);
+        color: var(--text-1, #d1d4dc);
+        font-size: 12px;
+      }
+      .ticket-x {
+        background: none;
+        border: 0;
+        color: inherit;
+        cursor: pointer;
       }
       .trade-action {
         max-width: 420px;
@@ -430,10 +461,12 @@ export class ChartTradingComponent {
   readonly host = input<ChartHostComponent | undefined>(undefined);
   readonly symbol = input.required<string>();
   readonly precision = input(5);
-  readonly pipSize = input(0.0001);
+  /**
+   * The symbol's instrument facts (UI01/UI02/UI04): the distance unit and its label (pips on FX, ticks / points off it)
+   * and the quantity step partial closes snap to. Null = not known: distances show "—" and a close is refused.
+   */
+  readonly facts = input<InstrumentFacts | null>(null);
   readonly quote = input<LiveQuote | null>(null);
-  /** The symbol's lot step (partial closes are multiples of it). */
-  readonly lotStep = input(0.01);
   /** The trade layer's open positions and working orders, and the account scope they are filtered by. */
   readonly positions = input<readonly ChartPosition[]>([]);
   readonly orders = input<readonly OrderDto[]>([]);
@@ -452,6 +485,8 @@ export class ChartTradingComponent {
   readonly ticketPreview = signal<ManualTradePreview | null>(null);
 
   private readonly venueBus = inject(VenueTicketBus);
+  /** The instrument is still being resolved: no ticket of either kind yet (UI05). */
+  readonly resolving = computed(() => this.facts()?.resolving ?? false);
   /** The symbol's exchange-traded instrument (venue ticket), or null for every MT5 symbol (today's ticket). */
   readonly venueInstrument = computed(() => venueInstrumentFor(this.symbol()));
   /** The DOM ladder's latest request for THIS symbol (multi-asset WS7 7.6). */
@@ -481,13 +516,28 @@ export class ChartTradingComponent {
     (line) => this.onLineClicked(line),
   );
 
+  /** One display unit in price (NaN when not known) and its label. */
+  readonly pipSize = computed(() => this.facts()?.distanceUnit ?? Number.NaN);
+  readonly unitLabel = computed(() => this.facts()?.distanceLabel ?? '—');
+  /** "Lots" / "Contracts" / "BTC" — what a close counts in. */
+  readonly qtyWordTitle = computed(() => {
+    const f = this.facts();
+    const w = f ? quantityWord(f) : 'lots';
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  });
+
+  qtyText(qty: number | null | undefined): string {
+    const f = this.facts();
+    return f ? formatFactsQuantity(f, qty) : `${qty ?? '—'}`;
+  }
+
   /** The ticket's brackets as chart lines while it is open. */
   private readonly ticketBrackets = computed(() =>
     this.open()
       ? ticketLines(
           this.ticket(),
           ticketEntry(this.ticket(), this.quote()),
-          this.pipSize(),
+          { distanceUnit: this.pipSize(), distanceLabel: this.unitLabel() },
           this.ticketPreview(),
         )
       : [],
@@ -540,7 +590,7 @@ export class ChartTradingComponent {
         return 'Move the order';
       case 'close':
         return a.lots < (this.changePreview()?.openLots ?? Infinity)
-          ? 'Close these lots'
+          ? `Close these ${this.facts() ? quantityWord(this.facts()!) : 'lots'}`
           : 'Close the position';
       case 'cancel':
         return 'Cancel the order';
@@ -793,12 +843,40 @@ export class ChartTradingComponent {
     if (a?.type !== 'close') return;
     const lots = Number(raw);
     if (!Number.isFinite(lots) || lots <= 0) return;
-    this.action.set({ ...a, lots });
-    this.loadChangePreview(a.positionId, { closeLots: lots });
+    const qty = this.closeQuantity(a.positionId, lots);
+    if (qty === null) {
+      this.actionError.set(this.closeStepProblem(lots));
+      return;
+    }
+    this.actionError.set(null);
+    this.action.set({ ...a, lots: qty });
+    this.loadChangePreview(a.positionId, { closeLots: qty });
   }
 
-  orderDistancePips(a: Extract<ChartAction, { type: 'orderMove' }>): number {
-    return this.pipSize() > 0 ? Math.abs(a.to - a.order.price) / this.pipSize() : 0;
+  /**
+   * What a close of `requested` sends (UI04): the whole position as the engine holds it when `requested` reaches it,
+   * else `requested` floored to the instrument's quantity step at the step's decimals — 0.012 BTC on a 0.001 step,
+   * 0.015 lots on a 0.001 MT5 step (the old 2-decimal rounding sent 0.01 / 0.02). Null when it is below one step or
+   * the step is not known.
+   */
+  closeQuantity(positionId: number, requested: number): number | null {
+    const open = this.positions().find((x) => x.id === positionId)?.openLots ?? null;
+    if (open !== null && open > 0 && requested >= open - 1e-12) return open;
+    const f = this.facts();
+    return f ? snapQuantityDown(f, requested) : null;
+  }
+
+  private closeStepProblem(requested: number): string {
+    const f = this.facts();
+    if (!f?.quantityStep)
+      return `The quantity step of ${this.symbol()} is not known yet: close the whole position, or wait.`;
+    return `${requested} is below one step (${f.quantityStep} ${quantityWord(f, f.quantityStep)}).`;
+  }
+
+  /** A working order's new stop / target distance from its entry, in the instrument's unit ("—" when not known). */
+  orderDistanceText(a: Extract<ChartAction, { type: 'orderMove' }>): string {
+    const f = this.facts();
+    return f ? formatFactsDistance(f, Math.abs(a.to - a.order.price)) : '—';
   }
 
   apply(): void {
@@ -854,9 +932,14 @@ export class ChartTradingComponent {
       }
       case 'close': {
         const p = this.changePreview();
-        if (!p || p.triggerPrice === null) return;
+        const qty = this.closeQuantity(a.positionId, a.lots);
+        if (!p || p.triggerPrice === null || qty === null) {
+          this.sending.set(false);
+          if (qty === null) this.actionError.set(this.closeStepProblem(a.lots));
+          return;
+        }
         this.send(
-          this.trading.closePosition(a.positionId, p.triggerPrice, roundPrice(a.lots, 2), cid),
+          this.trading.closePosition(a.positionId, p.triggerPrice, qty, cid),
           {
             correlationId: cid,
             kind: 'close',

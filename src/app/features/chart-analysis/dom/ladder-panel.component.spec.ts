@@ -7,6 +7,7 @@ import { Permission } from '@core/auth/permissions.generated';
 import { NotificationService } from '@core/notifications/notification.service';
 import { AccountScopeService } from '@core/scope/account-scope.service';
 import { provideAuthWithPermissions } from '@core/testing/auth-test-double';
+import { instrumentFacts } from '../datafeed/instrument-facts';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 import { ChartPanelsService } from '../panels/side/chart-panels.service';
@@ -21,7 +22,7 @@ import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
 import { LadderArmingService } from './ladder-arming.service';
 import { LadderPanelComponent } from './ladder-panel.component';
 
-declareSignalIo(LadderPanelComponent, { inputs: ['symbol', 'digits'] });
+declareSignalIo(LadderPanelComponent, { inputs: ['symbol', 'digits', 'facts'] });
 
 const ok = <T>(data: T) => ({ data, status: true, message: 'Successful', responseCode: '00' });
 
@@ -264,6 +265,28 @@ describe('LadderPanelComponent (price ladder + trading)', () => {
     await settle();
     expect(byId('ladder-armed')).toBeNull();
     expect(TestBed.inject(LadderArmingService).armed()).toBe(false);
+  });
+
+  it('UI05: while the instrument is resolving, an armed one-click ladder sends nothing and says why', async () => {
+    setup();
+    await settle();
+    expect(byId('ladder-route')?.textContent).toContain('MT5 broker');
+    byId<HTMLInputElement>('ladder-live')!.dispatchEvent(new Event('change'));
+    await settle();
+    byId<HTMLButtonElement>('ladder-arm')!.click();
+    await settle();
+    byId<HTMLButtonElement>('ladder-confirm')!.click();
+    await settle();
+    expect(byId('ladder-armed')).not.toBeNull();
+
+    fixture.componentRef.setInput('facts', instrumentFacts('EURUSD', { lookup: 'resolving' }));
+    await settle();
+    expect(byId('ladder-route')?.textContent).toContain('Resolving instrument');
+    byId('bid-109990')!.dispatchEvent(new MouseEvent('click'));
+    await settle();
+    expect(trading.submit).not.toHaveBeenCalled();
+    expect(trading.preview).not.toHaveBeenCalled();
+    expect(byId('ladder-hint')?.textContent).toContain('Resolving the instrument');
   });
 
   it('OCO mode takes one buy and one sell leg and sends them as one pair', async () => {
