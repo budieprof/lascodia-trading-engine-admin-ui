@@ -110,6 +110,18 @@ export function dayOfYear(t: number): number {
 }
 
 /**
+ * The calendar date's place on a 365-day axis (UA04): 1 March is day 59 every year. A leap year's 29 February shares
+ * 28 February's slot and every later day moves back one — `dayOfYear` put a leap year a day ahead of every other year
+ * from March on (and its 31 December at 365, off the axis).
+ */
+export function seasonalDay(t: number): number {
+  const day = dayOfYear(t);
+  const year = new Date(t).getUTCFullYear();
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  return leap && day >= 59 ? day - 1 : day;
+}
+
+/**
  * Year-over-year cumulative % lines, aligned on day-of-year so years overlay.
  * Each year's base is the previous year's last close when the data holds it,
  * else the year's first open. Returns the latest year and `priorYears` before
@@ -119,20 +131,43 @@ export function seasonalYears(bars: readonly DailyBar[], priorYears = 2): Season
   if (bars.length === 0) return [];
   const latestYear = new Date(bars[bars.length - 1].time).getUTCFullYear();
   const out: SeasonalYear[] = [];
+  // UA04: each year's bars found by binary search and read once — it filtered the whole history per year.
   for (let year = latestYear; year >= latestYear - priorYears; year--) {
     const start = Date.UTC(year, 0, 1);
     const end = Date.UTC(year + 1, 0, 1);
-    const inYear = bars.filter((b) => b.time >= start && b.time < end);
-    if (inYear.length === 0) continue;
     const prevIdx = lastIndexAtOrBefore(bars, start - 1);
-    const base = prevIdx >= 0 ? bars[prevIdx].close : inYear[0].open;
+    const first = prevIdx + 1;
+    if (first >= bars.length || bars[first].time >= end) continue;
+    const base = prevIdx >= 0 ? bars[prevIdx].close : bars[first].open;
     const points: SeasonalPoint[] = [];
-    for (const b of inYear) {
-      const pct = pctChange(base, b.close);
-      if (pct !== null) points.push({ day: dayOfYear(b.time), pct });
+    for (let i = first; i < bars.length && bars[i].time < end; i++) {
+      const pct = pctChange(base, bars[i].close);
+      if (pct !== null) points.push({ day: seasonalDay(bars[i].time), pct });
     }
     out.push({ year, points });
   }
+  return out;
+}
+
+/** The year history starts in (the oldest bar's), or null without bars. */
+export function firstYearOf(bars: readonly DailyBar[]): number | null {
+  return bars.length ? new Date(bars[0].time).getUTCFullYear() : null;
+}
+
+/**
+ * The year ranges worth offering (UA04): those the history covers (`3 years` needs four years of bars: three prior
+ * and the current), then "All" labelled with the year it starts — never "All (2011+)" on a symbol with ten days. `all`
+ * is how many prior years "All" asks for.
+ */
+export function seasonalRanges(
+  latestYear: number | null,
+  firstYear: number | null,
+  all = 30,
+): { years: number; label: string }[] {
+  const out = [3, 5, 10]
+    .filter((y) => latestYear === null || firstYear === null || latestYear - firstYear >= y)
+    .map((years) => ({ years, label: `${years} years` }));
+  out.push({ years: all, label: firstYear !== null ? `All (${firstYear}+)` : 'All' });
   return out;
 }
 

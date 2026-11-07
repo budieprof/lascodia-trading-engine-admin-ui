@@ -16,9 +16,11 @@ import {
 import { DecimalPipe } from '@angular/common';
 import { DailyBarsService } from './daily-bars.service';
 import {
+  firstYearOf,
   pctOnDay,
   seasonalAverage,
   seasonalColor,
+  seasonalRanges,
   seasonalYears,
   type DailyBar,
   type SeasonalPoint,
@@ -29,13 +31,8 @@ const H = 400;
 const PAD = { l: 8, r: 150, t: 12, b: 26 };
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MONTH_DAYS = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-/** The engine's H1 history starts in 2010, so 15 prior years is "all". */
-const RANGES = [
-  { years: 3, label: '3 years' },
-  { years: 5, label: '5 years' },
-  { years: 10, label: '10 years' },
-  { years: 15, label: 'All (2011+)' },
-];
+/** UA04: "All" asks for this many prior years; the label says where the symbol's history really starts. */
+const ALL_YEARS = 30;
 const LABEL_GAP = 15;
 
 const CURRENCY_NAMES: Readonly<Record<string, string>> = {
@@ -70,13 +67,20 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
         <h2 class="sv-title">
           <span class="sv-name">{{ pairName() }}</span
           ><span class="sv-sub">· Seasonals</span>
+          @if (seriesSymbol() && seriesSymbol() !== symbol()) {
+            <span
+              class="sv-sub"
+              title="A futures contract's seasonals are read from its continuous series"
+              >(continuous {{ seriesSymbol() }})</span
+            >
+          }
         </h2>
         <button type="button" class="sv-btn" (click)="closed.emit()">Back to chart</button>
       </header>
 
       <div class="sv-controls">
         <div class="sv-seg" role="group" aria-label="Years">
-          @for (r of ranges; track r.years) {
+          @for (r of ranges(); track r.years) {
             <button type="button" [class.on]="years() === r.years" (click)="years.set(r.years)">
               {{ r.label }}
             </button>
@@ -180,8 +184,9 @@ const CURRENCY_NAMES: Readonly<Record<string, string>> = {
         }
       </div>
       <p class="sv-foot">
-        Cumulative % change from each year's previous close, from the engine's daily sessions (days
-        roll at 17:00 New York, each counted on the date it closes).
+        Cumulative % change from each year's previous close, from the engine's daily sessions ({{
+          sessionWords()
+        }}, each counted on the date it closes; 29 February shares 28 February's place).
         @if (showAverage()) {
           The dashed line averages the prior years shown.
         }
@@ -344,6 +349,10 @@ export class SeasonalsViewComponent {
   readonly symbol = input.required<string>();
   readonly base = input<string | null>(null);
   readonly quote = input<string | null>(null);
+  /** UA04: the series read — a dated future's continuous symbol (ES1!); absent = the symbol itself. */
+  readonly seriesSymbol = input<string | null>(null);
+  /** UA04: how the daily sessions are cut, in words (FX "days roll at 17:00 New York"). */
+  readonly sessionWords = input('days roll at 17:00 New York');
   readonly closed = output<void>();
 
   private readonly daily = inject(DailyBarsService);
@@ -351,7 +360,17 @@ export class SeasonalsViewComponent {
 
   protected readonly H = H;
   protected readonly PAD = PAD;
-  protected readonly ranges = RANGES;
+  /** The year the history starts, once a load came back shorter than asked (it is the whole history then). */
+  private readonly historyStart = signal<number | null>(null);
+  protected readonly ranges = computed(() =>
+    seasonalRanges(
+      this.bars().length
+        ? new Date(this.bars()[this.bars().length - 1].time).getUTCFullYear()
+        : null,
+      this.historyStart(),
+      ALL_YEARS,
+    ),
+  );
   protected readonly months = MONTHS.map((label, i) => ({ label, day: MONTH_DAYS[i] }));
 
   readonly years = signal(5);
@@ -469,7 +488,7 @@ export class SeasonalsViewComponent {
 
   constructor() {
     effect((onCleanup) => {
-      const sym = this.symbol();
+      const sym = this.seriesSymbol() || this.symbol();
       const years = this.years();
       let live = true;
       onCleanup(() => (live = false));
@@ -477,6 +496,11 @@ export class SeasonalsViewComponent {
       void this.daily.daily(sym, years).then((b) => {
         if (!live) return;
         this.bars.set(b);
+        const first = firstYearOf(b);
+        const latest = b.length ? new Date(b[b.length - 1].time).getUTCFullYear() : null;
+        this.historyStart.set(
+          first !== null && latest !== null && latest - first < years ? first : null,
+        );
         this.loading.set(false);
       });
     });

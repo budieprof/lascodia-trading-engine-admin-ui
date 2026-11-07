@@ -1,3 +1,4 @@
+import type { ExchangeSessions } from '../indicators/exchange-sessions';
 import type { TradingDays } from '../datafeed/session-calendar';
 import type { Ohlc } from '../indicators/math';
 import type { IndicatorInput } from '../indicators/registry';
@@ -81,6 +82,10 @@ export interface ProfileContext {
    * chart's own bars.
    */
   lowerTimeframeMs?: number;
+  /** UA02: the symbol trades every day (Asia / London / New York profiles run all week). */
+  everyDay?: boolean;
+  /** UA02: the instrument's Pre / Regular / Post sessions for the `pre` / `regular` / `post` profiles. */
+  exchangeSessions?: ExchangeSessions | null;
 }
 
 const ROWS: IndicatorInput = {
@@ -107,7 +112,9 @@ const VA: IndicatorInput = {
   max: 100,
 };
 const COMMON: readonly ProfileInput[] = [ROWS, TICK, VA];
-const TV = 'FX volume is tick volume.';
+// UA07: the unit is the chart's (C1 volumeKind) — the studies strip names it beside each profile.
+const TV =
+  "Volume in the unit the chart's data reports: tick count on MT5 bars (FX, CFDs), coins, shares or contracts on venues.";
 const ON_OFF = ['Off', 'On'] as const;
 const DEVELOPING: ProfileInput = {
   key: 'developing',
@@ -128,20 +135,21 @@ export const PROFILE_STUDIES: readonly ProfileStudyDef[] = [
   {
     id: 'vp-visible',
     name: 'Volume Profile Visible Range',
-    description: `Profile of the visible bars (tick volume). ${TV}`,
+    description: `Profile of the visible bars. ${TV}`,
     inputs: COMMON,
   },
   {
     id: 'vp-session',
     name: 'Session Volume Profile',
-    description: `One profile per trading session (tick volume). ${TV}`,
+    description: `One profile per trading session. ${TV}`,
     inputs: [
       {
         key: 'session',
         label: 'Session',
         type: 'select',
         default: 'daily',
-        options: ['daily', 'asia', 'london', 'newyork'],
+        // UA02: pre / regular / post are the instrument's own sessions (its trading calendar: NYSE RTH, Globex…).
+        options: ['daily', 'asia', 'london', 'newyork', 'regular', 'pre', 'post'],
       },
       {
         key: 'tzOffsetMinutes',
@@ -159,7 +167,7 @@ export const PROFILE_STUDIES: readonly ProfileStudyDef[] = [
   {
     id: 'vp-periodic',
     name: 'Periodic Volume Profile',
-    description: `One profile per day / week / month (tick volume). ${TV}`,
+    description: `One profile per day / week / month. ${TV}`,
     inputs: [
       {
         key: 'period',
@@ -176,7 +184,7 @@ export const PROFILE_STUDIES: readonly ProfileStudyDef[] = [
   {
     id: 'vp-fixed',
     name: 'Fixed Range Volume Profile',
-    description: `Profile between two times you pick on the chart (tick volume). ${TV}`,
+    description: `Profile between two times you pick on the chart. ${TV}`,
     inputs: [
       { key: 'fromTime', label: 'From', type: 'time', default: 0 },
       { key: 'toTime', label: 'To', type: 'time', default: 0 },
@@ -186,7 +194,7 @@ export const PROFILE_STUDIES: readonly ProfileStudyDef[] = [
   {
     id: 'vp-composite',
     name: 'Composite Volume Profile',
-    description: `One profile of the last N trading days together (tick volume). ${TV}`,
+    description: `One profile of the last N trading days together. ${TV}`,
     inputs: [
       { key: 'periods', label: 'Trading days', type: 'number', default: 5, min: 1, max: 260 },
       ...COMMON,
@@ -195,7 +203,7 @@ export const PROFILE_STUDIES: readonly ProfileStudyDef[] = [
   {
     id: 'vp-auto-anchored',
     name: 'Auto Anchored Volume Profile',
-    description: `Profile from an automatic anchor to the last bar (tick volume). ${TV}`,
+    description: `Profile from an automatic anchor to the last bar. ${TV}`,
     inputs: [
       {
         key: 'anchor',
@@ -305,12 +313,25 @@ export function computeProfileStudy(
       return one(visibleRangeProfile(bars, from, to, o), 'right');
     }
     case 'vp-session':
+      if (
+        ['pre', 'regular', 'post'].includes(String(p['session'])) &&
+        (!ctx.exchangeSessions || ctx.exchangeSessions.is24x7)
+      )
+        return {
+          kind: 'volume',
+          anchor: 'span',
+          blocks: [],
+          notice: ctx.exchangeSessions?.is24x7
+            ? 'This market trades 24/7: it has no pre / regular / post sessions. Use daily, or Asia / London / New York.'
+            : "The instrument's exchange calendar is not known yet: no pre / regular / post sessions to profile.",
+        };
       return periods(
         sessionProfiles(bars, {
           ...o,
           session: String(p['session']) as SessionName,
           tzOffsetMinutes: Number(p['tzOffsetMinutes']) || 0,
           days,
+          scope: { exchange: ctx.exchangeSessions, everyDay: ctx.everyDay },
         }),
       );
     case 'vp-periodic':

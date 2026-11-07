@@ -36,10 +36,11 @@ const STORED_FETCHES: readonly {
 ];
 
 /**
- * The tabs on the engine's session grid (2h … 1M, `scripting/chart-bars`): the 17:00 New York day,
- * Monday–Friday weeks and calendar months of trading days that TradingView rates and takes pivots
- * from, with the forming bar already built. Counts leave room for SMA/EMA 200 plus warm-up where the
- * history reaches; the engine's H1 starts in 2010, so a month asks for all of it.
+ * The tabs on the engine's session grid (2h … 1M, `scripting/chart-bars`): the symbol's own trading days
+ * (FX: the 17:00 New York day, Monday–Friday weeks), weeks and calendar months, that TradingView rates and
+ * takes pivots from, with the forming bar already built. Counts leave room for SMA/EMA 200 plus warm-up
+ * where the history reaches — FX H1 starts in 2010; a venue symbol's history can be days (UA05: rows the
+ * history is too short for say "n/a: 87 of 200 bars" and are not counted as votes).
  */
 export const SESSION_FETCHES: readonly { resolution: TvResolution; count: number }[] = [
   { resolution: '120', count: 800 },
@@ -82,6 +83,8 @@ export interface SymbolTechnicals {
   weekly: Bar[];
   /** Months of session days, ascending — monthly pivots, and yearly ones folded from them. */
   monthly: Bar[];
+  /** UA06: the 15-minute bars (stored grid), for pivots on the regular session only. */
+  intraday?: Bar[];
 }
 
 interface FormingPlan {
@@ -229,6 +232,7 @@ export class TechnicalsService {
       daily: bars['1D'] ?? [],
       weekly: bars['1W'] ?? [],
       monthly: bars['1M'] ?? [],
+      intraday: bars['15'] ?? [],
     };
   }
 

@@ -42,7 +42,7 @@
         <span class="muted">{{ ind.label }}</span>
         @for (v of ind.values; track v.title) {
           <span class="legend-value" [style.color]="v.color">
-            {{ v.value === null ? '—' : (v.value | number: '1.2-5') }}
+            {{ v.value === null ? '—' : (v.value | number: digitsFormat(ind.digits)) }}
           </span>
         }
       </div>

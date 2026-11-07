@@ -1,5 +1,6 @@
 import type { UpcomingEconomicEvent } from '@core/services/economic-calendar.service';
 import type { EconomicEventDto } from '@core/api/api.types';
+import type { ScheduledMarketEventRow } from '@features/news-intel/news-intel.types';
 
 /**
  * Economic events on the chart's time axis (CC-07, CC-I2, SP-08) — the pure half: what to fetch,
@@ -9,15 +10,33 @@ import type { EconomicEventDto } from '@core/api/api.types';
 
 export type EventImpact = 'High' | 'Medium' | 'Low';
 
+/**
+ * What a mark is (UA01): an economic release (`economic-event/list`, opens the calendar modal), a scheduled market event
+ * (`news-intel/scheduled-events`: earnings, inventories, expiries, token unlocks), a futures contract's last trading day,
+ * a perpetual's funding time (from the derivatives feed), or an equity's ex-dividend date / split (corporate actions). Absent = economic (marks from before UA01).
+ */
+export type EventMarkKind = 'economic' | 'market' | 'corporate' | 'expiry' | 'funding';
+
 /** An event on the chart. `time` is its UTC instant; the chart places it on the display clock. */
 export interface EventMark {
   id: number;
   time: number;
   title: string;
+  /** The currency (economic) or the exposure key (`EQ:AAPL`, `WTI`) the event belongs to. */
   currency: string;
   impact: EventImpact;
-  /** The row as the calendar modal shows it (click → `EconomicEventModal`). */
-  event: UpcomingEconomicEvent;
+  /** The row as the calendar modal shows it (click → `EconomicEventModal`). Economic releases only. */
+  event?: UpcomingEconomicEvent;
+  kind?: EventMarkKind;
+  /** The flag's text when it is not a currency: `ERN`, `INV`, `EXP`, `FND`. */
+  badge?: string;
+  /** The card's rows for a non-economic mark (source, kind, what it is). */
+  detail?: { label: string; value: string }[];
+}
+
+/** One identity across kinds: ids of different sources may collide. */
+export function markKey(m: Pick<EventMark, 'id' | 'kind'>): string {
+  return `${m.kind ?? 'economic'}:${m.id}`;
 }
 
 /** An events-list row as the engine sends it since C3 (the reading fields are new). */
@@ -86,9 +105,9 @@ export function mergeMarks(
   held: readonly EventMark[],
   incoming: readonly EventMark[],
 ): EventMark[] {
-  const byId = new Map<number, EventMark>();
-  for (const m of held) byId.set(m.id, m);
-  for (const m of incoming) byId.set(m.id, m);
+  const byId = new Map<string, EventMark>();
+  for (const m of held) byId.set(markKey(m), m);
+  for (const m of incoming) byId.set(markKey(m), m);
   return [...byId.values()].sort((a, b) => a.time - b.time || a.id - b.id);
 }
 
@@ -102,8 +121,9 @@ export interface BlackoutWindow {
 
 /**
  * The spans live refuses new entries in around Tier-1 events — `[event − before, event + after]`
- * for every High event of the pair's currencies (`NewsBlackoutRules`: the symbol's base and quote)
- * — merged where they overlap. UTC ms. Empty when the blackout is off.
+ * for every High economic release of the currencies live enforces for the symbol (`NewsBlackoutRules.CurrenciesOf`,
+ * `event-relevance.ts`) — merged where they overlap. UTC ms. Empty when the blackout is off, and when the symbol has
+ * no enforced currencies (live blocks nothing for it: AAPL, US30) — it used to shade every High event then.
  */
 export function blackoutBands(
   marks: readonly EventMark[],
@@ -112,8 +132,11 @@ export function blackoutBands(
 ): { from: number; to: number }[] {
   if (!window?.active || (window.minutesBefore <= 0 && window.minutesAfter <= 0)) return [];
   const wanted = new Set(currencies.map((c) => c.toUpperCase()));
+  if (wanted.size === 0) return [];
   const spans = marks
-    .filter((m) => m.impact === 'High' && (wanted.size === 0 || wanted.has(m.currency)))
+    .filter(
+      (m) => (m.kind ?? 'economic') === 'economic' && m.impact === 'High' && wanted.has(m.currency),
+    )
     .map((m) => ({
       from: m.time - Math.max(0, window.minutesBefore) * 60_000,
       to: m.time + Math.max(0, window.minutesAfter) * 60_000,
@@ -164,6 +187,17 @@ export function eventCard(mark: EventMark, when: string, nowMs: number): EventCa
   const countdown = eventCountdown(nowMs, mark.time);
   if (countdown && countdown !== 'now' && mark.time > nowMs)
     rows.push({ label: 'Due', value: countdown });
+  if (!e) {
+    rows.push(...(mark.detail ?? []));
+    return {
+      title: mark.title,
+      currency: mark.currency,
+      impact: mark.impact,
+      when,
+      rows,
+      surprise: null,
+    };
+  }
   rows.push({ label: 'Actual', value: e.actual ?? '—' });
   rows.push({ label: 'Forecast', value: e.forecast ?? '—' });
   rows.push({ label: 'Previous', value: e.previous ?? '—' });

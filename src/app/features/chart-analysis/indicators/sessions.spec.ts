@@ -62,6 +62,8 @@ describe('sessions on their own clocks (DR-18)', () => {
       'londonZone',
       'nySession',
       'nyZone',
+      // UA02: the trading days (Auto = Mon–Fri, every day on a 24/7 calendar).
+      'days',
     ]);
     const winter = Array.from({ length: 24 }, (_, i) => ({
       time: Date.UTC(2026, 0, 14, i),

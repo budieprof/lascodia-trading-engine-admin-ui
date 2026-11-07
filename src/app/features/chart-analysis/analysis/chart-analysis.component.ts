@@ -40,6 +40,8 @@ import {
   watchTimeframe,
 } from './analysis-overlay';
 import { ChartAnalysisService } from './chart-analysis.service';
+import { onTick, priceText, proposeGate } from './propose-gate';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import type {
   AnalysisRequestMode,
   ChartAnalysisMonitors,
@@ -124,14 +126,20 @@ interface WatchForm {
           >
             {{ modeLabels.spot }}
           </button>
-          <details class="ca-directed">
-            <summary>Directed…</summary>
-            @for (m of directedModes; track m) {
-              <button type="button" [disabled]="running() !== null" (click)="analyse(m)">
-                {{ modeLabels[m] }}
-              </button>
-            }
-          </details>
+          @if (gate().allowed) {
+            <details class="ca-directed">
+              <summary>Directed…</summary>
+              @for (m of directedModes; track m) {
+                <button type="button" [disabled]="running() !== null" (click)="analyse(m)">
+                  {{ modeLabels[m] }}
+                </button>
+              }
+            </details>
+          } @else {
+            <span class="muted" data-testid="directed-gated" [title]="gate().reason ?? ''"
+              >Directed: n/a</span
+            >
+          }
         </div>
         @if (running(); as r) {
           <p class="muted" data-testid="analyse-running">
@@ -168,9 +176,9 @@ interface WatchForm {
               <div class="trade" [class.sell]="t.rec.action === 'Sell'">
                 <div class="ca-row">
                   <strong>{{ t.rec.action }}</strong>
-                  <span>entry {{ t.rec.entryPrice ?? 'at market' }}</span>
-                  <span>stop {{ t.rec.stopLoss ?? '—' }}</span>
-                  <span>target {{ t.rec.takeProfit ?? '—' }}</span>
+                  <span>entry {{ price(t.rec.entryPrice, 'at market') }}</span>
+                  <span>stop {{ price(t.rec.stopLoss, '—') }}</span>
+                  <span>target {{ price(t.rec.takeProfit, '—') }}</span>
                 </div>
                 <div class="ca-row">
                   <span class="muted"
@@ -548,6 +556,10 @@ export class ChartAnalysisComponent {
   /** The chart's resolution (TradingView form: "60", "240", "1D"…). */
   readonly resolution = input.required<string>();
   readonly precision = input<number>(5);
+  /** UA09: the instrument's facts — whether directed proposals can be traded, and the tick their prices sit on. */
+  readonly facts = input<InstrumentFacts | null>(null);
+  /** Directed (limit / stop) proposals are offered only where an order can be placed. */
+  readonly gate = computed(() => proposeGate(this.facts(), Date.now()));
   /** The newest price, the default level for "Watch this". */
   readonly lastPrice = input<number | null>(null);
   /** UTC ms of the oldest loaded bar: the start of the window watches' events are read for. */
@@ -727,6 +739,15 @@ export class ChartAnalysisComponent {
         ok: false,
         message: 'An analysis is already running on this chart.',
       });
+    // UA09: the assistant's chart.analyse cannot ask for a directed proposal the panel does not offer.
+    const gate = this.gate();
+    if (mode !== 'spot' && !gate.allowed) {
+      this.error.set(gate.reason);
+      return Promise.resolve({
+        ok: false,
+        message: gate.reason ?? 'Directed proposals are not offered here.',
+      });
+    }
     const seq = ++this.analysisSeq;
     const symbol = this.symbol();
     const tf = this.timeframe();
@@ -775,12 +796,18 @@ export class ChartAnalysisComponent {
     takeProfit: number | null;
   }): void {
     if (rec.action !== 'Buy' && rec.action !== 'Sell') return;
+    // UA09: the ticket gets prices on the instrument's tick grid (an AI price between ticks is not orderable).
+    const facts = this.facts();
     this.ticket.emit({
       direction: rec.action,
-      entry: rec.entryPrice ?? null,
-      stop: rec.stopLoss ?? null,
-      target: rec.takeProfit ?? null,
+      entry: onTick(rec.entryPrice, facts),
+      stop: onTick(rec.stopLoss, facts),
+      target: onTick(rec.takeProfit, facts),
     });
+  }
+
+  protected price(v: number | null | undefined, fallback: string): string {
+    return priceText(v, this.facts(), fallback);
   }
 
   protected describe(m: ChartMonitor): string {

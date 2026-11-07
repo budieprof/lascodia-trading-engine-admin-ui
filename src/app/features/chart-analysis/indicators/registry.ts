@@ -122,6 +122,15 @@ import {
   sessionHighLow,
   type SessionWindow,
 } from './sessions';
+import { QUOTE_NOTIONAL, VOLUME_MEASURES, notionalAllowed } from './volume-labels';
+import { previousPeriodLevels } from './prev-period-levels';
+import type { VolumeKind } from '../datafeed/chart-facts';
+import {
+  SESSION_DAY_CHOICES,
+  dayDigitsOf,
+  kindHighLow,
+  type ExchangeSessions,
+} from './exchange-sessions';
 
 /**
  * The indicator catalogue.
@@ -193,6 +202,8 @@ export interface IndicatorInput {
   max?: number;
   /** Choices for `select` inputs. */
   options?: readonly string[];
+  /** False: left out of the study's label (inputs added later, so saved layouts' labels do not change). */
+  inLabel?: boolean;
 }
 
 export const INDICATOR_CATEGORIES = [
@@ -232,6 +243,15 @@ export interface IndicatorContext {
    * 365 for one that never closes. Absent: 260.
    */
   tradingDaysPerYear?: number;
+  /**
+   * UA02: the symbol's calendar trades every day (crypto 24/7) — the Sessions study's `Auto` days are then every day.
+   * Absent / false: Monday to Friday (FX unchanged).
+   */
+  everyDay?: boolean;
+  /** UA02: the instrument's own Pre / Regular / Post sessions (engine calendar); absent until it is known. */
+  exchangeSessions?: ExchangeSessions | null;
+  /** UA07: what the bars' volume counts (C1 `volumeKind`): tick / base / contracts / shares; absent = not reported. */
+  volumeKind?: VolumeKind | null;
 }
 
 export type PriceSource = 'close' | 'open' | 'high' | 'low' | 'hl2' | 'hlc3' | 'ohlc4';
@@ -2037,15 +2057,31 @@ export const INDICATORS: readonly IndicatorDef[] = [
     id: 'volume',
     name: 'Volume',
     category: 'Volume',
-    description: 'Bar volume (tick volume for FX) with a moving average.',
-    keywords: ['vol', 'tick volume'],
+    description:
+      'Bar volume with a moving average, in the unit the data reports: tick count on MT5 bars (FX and CFDs), the coin ' +
+      'on crypto venues, shares or contracts where traded volume exists. Quote notional (volume × typical price) for ' +
+      'coins and shares.',
+    keywords: ['vol', 'tick volume', 'notional', 'dollar volume'],
     target: 'pane',
-    inputs: [LENGTH(20, 'MA length')],
+    inputs: [
+      LENGTH(20, 'MA length'),
+      { ...SELECT('measure', 'Measure', VOLUME_MEASURES, 'Volume'), inLabel: false },
+    ],
     plots: [
       { key: 'volume', title: 'Volume', kind: 'histogram', color: '#26A69A', colorBy: 'candle' },
       { key: 'ma', title: 'Vol MA', kind: 'line', color: '#2962FF' },
     ],
-    compute: (bars, p) => volumeWithMa(bars, num(p, 'length', 20)),
+    compute: (bars, p, ctx) => {
+      if (p['measure'] !== QUOTE_NOTIONAL) return volumeWithMa(bars, num(p, 'length', 20));
+      // Volume × price is a notional only for coins and shares: anything else draws nothing (the strip says why).
+      if (!notionalAllowed(ctx?.volumeKind))
+        return { volume: bars.map((): Maybe => null), ma: bars.map((): Maybe => null) };
+      const notional = bars.map((b) => ({
+        ...b,
+        volume: b.volume * ((b.high + b.low + b.close) / 3),
+      }));
+      return volumeWithMa(notional, num(p, 'length', 20));
+    },
   },
   {
     id: 'vwap-bands',
@@ -2216,6 +2252,24 @@ export const INDICATORS: readonly IndicatorDef[] = [
     compute: (bars, p) => pivotsHighLow(bars, num(p, 'left', 10), num(p, 'right', 10)),
   },
   {
+    id: 'prev-period-levels',
+    name: 'Previous Day / Week High Low Close',
+    category: 'Structure',
+    description:
+      "The previous trading day's (or week's / month's) high, low and close as levels, stepping at each period's " +
+      "open — on the symbol's own trading days (FX 17:00 New York, an exchange's session, crypto's UTC day).",
+    keywords: ['pdh', 'pdl', 'pdc', 'previous day high', 'prior day', 'weekly high', 'pwh', 'pwl'],
+    target: 'overlay',
+    inputs: [SELECT('period', 'Period', PERIODS, 'Day')],
+    plots: [
+      { key: 'high', title: 'Prev H', kind: 'line', color: '#26A69A' },
+      { key: 'low', title: 'Prev L', kind: 'line', color: '#EF5350' },
+      { key: 'close', title: 'Prev C', kind: 'line', color: '#787B86' },
+    ],
+    compute: (bars, p, ctx) =>
+      previousPeriodLevels(bars, str(p, 'period', 'Day') as AnchorPeriod, ctx?.tradingDay),
+  },
+  {
     id: 'pivots-standard',
     name: 'Pivot Points Standard',
     category: 'Structure',
@@ -2279,6 +2333,8 @@ export const INDICATORS: readonly IndicatorDef[] = [
       SELECT('londonZone', 'London zone', SESSION_ZONES, SESSION_WINDOWS.london.zone),
       SESSION_INPUT('nySession', 'New York session', SESSION_WINDOWS.newyork),
       SELECT('nyZone', 'New York zone', SESSION_ZONES, SESSION_WINDOWS.newyork.zone),
+      // UA02: Auto = Monday to Friday, or every day on a 24/7 instrument (crypto's Asia / Europe / US hours).
+      { ...SELECT('days', 'Days', SESSION_DAY_CHOICES, 'Auto'), inLabel: false },
     ],
     // Each session's high and low end with the session: a gap overnight, never a line across it.
     plots: [
@@ -2290,8 +2346,11 @@ export const INDICATORS: readonly IndicatorDef[] = [
       { key: 'nyLow', title: 'NY L', kind: 'line', color: '#FF6D00', gaps: 'break' },
     ],
     compute: (bars, p, ctx) => {
-      const w = (key: string, zoneKey: string, fallback: SessionWindow): SessionWindow =>
-        parseSessionWindow(str(p, key, ''), str(p, zoneKey, fallback.zone)) ?? fallback;
+      const days = dayDigitsOf(p['days']) ?? (ctx?.everyDay ? '1234567' : undefined);
+      const w = (key: string, zoneKey: string, fallback: SessionWindow): SessionWindow => {
+        const win = parseSessionWindow(str(p, key, ''), str(p, zoneKey, fallback.zone)) ?? fallback;
+        return days ? { ...win, days } : win;
+      };
       const t = ctx?.utcTimes;
       const a = sessionHighLow(bars, w('asiaSession', 'asiaZone', SESSION_WINDOWS.asia), t);
       const l = sessionHighLow(bars, w('londonSession', 'londonZone', SESSION_WINDOWS.london), t);
@@ -2303,6 +2362,58 @@ export const INDICATORS: readonly IndicatorDef[] = [
         londonLow: l.low,
         nyHigh: n.high,
         nyLow: n.low,
+      };
+    },
+  },
+  {
+    id: 'exchange-sessions',
+    name: 'Exchange sessions (RTH / ETH)',
+    category: 'Sessions',
+    description:
+      "Running high and low of the instrument's own sessions from its trading calendar: pre-market, regular (RTH; " +
+      'Globex on CME) and post-market, on the exchange clock. Nothing on a 24/7 market.',
+    keywords: [
+      'rth',
+      'eth',
+      'regular trading hours',
+      'pre-market',
+      'post-market',
+      'globex',
+      'extended hours',
+    ],
+    target: 'overlay',
+    inputs: [
+      SELECT('days', 'Days', SESSION_DAY_CHOICES, 'Auto'),
+      SELECT('show', 'Show', ['All sessions', 'Regular only'], 'All sessions'),
+    ],
+    plots: [
+      { key: 'preHigh', title: 'Pre H', kind: 'line', color: '#AB47BC', gaps: 'break' },
+      { key: 'preLow', title: 'Pre L', kind: 'line', color: '#AB47BC', gaps: 'break' },
+      { key: 'rthHigh', title: 'Regular H', kind: 'line', color: '#2962FF', gaps: 'break' },
+      { key: 'rthLow', title: 'Regular L', kind: 'line', color: '#2962FF', gaps: 'break' },
+      { key: 'postHigh', title: 'Post H', kind: 'line', color: '#FF6D00', gaps: 'break' },
+      { key: 'postLow', title: 'Post L', kind: 'line', color: '#FF6D00', gaps: 'break' },
+    ],
+    compute: (bars, p, ctx) => {
+      const ex = ctx?.exchangeSessions;
+      const days = dayDigitsOf(p['days']);
+      const t = ctx?.utcTimes;
+      const regularOnly = p['show'] === 'Regular only';
+      const none = { high: bars.map((): Maybe => null), low: bars.map((): Maybe => null) };
+      const of = (kind: 'Pre' | 'Regular' | 'Post') =>
+        !ex || ex.is24x7 || (regularOnly && kind !== 'Regular')
+          ? none
+          : kindHighLow(bars, ex.windows[kind], t, days);
+      const pre = of('Pre');
+      const rth = of('Regular');
+      const post = of('Post');
+      return {
+        preHigh: pre.high,
+        preLow: pre.low,
+        rthHigh: rth.high,
+        rthLow: rth.low,
+        postHigh: post.high,
+        postLow: post.low,
       };
     },
   },
@@ -2424,7 +2535,10 @@ export function defaultParams(def: IndicatorDef): Record<string, number | string
 /** A short label for the legend, e.g. `EMA 20` or `MACD 12 26 9`. */
 export function indicatorLabel(def: IndicatorDef, params: Record<string, number | string>): string {
   const numeric = def.inputs
-    .filter((i) => i.type === 'number' || i.type === 'symbol' || i.type === 'select')
+    .filter(
+      (i) =>
+        i.inLabel !== false && (i.type === 'number' || i.type === 'symbol' || i.type === 'select'),
+    )
     .map((i) => params[i.key])
     .filter((v) => v !== undefined);
   const short = def.plots.length === 1 ? def.plots[0].title : def.name.replace(/\s*\(.*\)$/, '');

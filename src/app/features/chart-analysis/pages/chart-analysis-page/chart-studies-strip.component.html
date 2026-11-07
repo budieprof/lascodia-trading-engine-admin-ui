@@ -35,6 +35,9 @@
           <app-chart-icon [name]="item.visible ? 'eye' : 'eye-off'" [size]="16" />
         </button>
         <span class="study-label">{{ page.labelFor(item) }}</span>
+        @if (page.studyNote(item); as note) {
+          <span class="study-note" [title]="note">{{ note }}</span>
+        }
         @for (input of page.inputsFor(item); track input.key) {
           <label class="study-input">
             {{ input.label }}

@@ -104,12 +104,19 @@ export function groupEventMarks(
   }
   return groups.map(({ items }) => {
     const ranked = [...items].sort(
-      (a, b) => IMPACT_RANK[b.mark.impact] - IMPACT_RANK[a.mark.impact] || a.mark.time - b.mark.time,
+      (a, b) =>
+        IMPACT_RANK[b.mark.impact] - IMPACT_RANK[a.mark.impact] || a.mark.time - b.mark.time,
     );
     const primary = ranked[0];
     return {
       mark: primary.mark,
-      marks: [primary.mark, ...ranked.slice(1).map((r) => r.mark).sort((a, b) => a.time - b.time)],
+      marks: [
+        primary.mark,
+        ...ranked
+          .slice(1)
+          .map((r) => r.mark)
+          .sort((a, b) => a.time - b.time),
+      ],
       x: primary.x,
     };
   });
@@ -315,7 +322,13 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
    * white separator and a 2px ring in the impact colour. An upcoming event (not printed yet) is drawn faded with a
    * dashed ring.
    */
-  private drawBadge(ctx: CanvasRenderingContext2D, mark: EventMark, x: number, y: number, upcoming: boolean): void {
+  private drawBadge(
+    ctx: CanvasRenderingContext2D,
+    mark: EventMark,
+    x: number,
+    y: number,
+    upcoming: boolean,
+  ): void {
     const color = IMPACT_COLOR[mark.impact];
     ctx.save();
     ctx.globalAlpha = (upcoming ? 0.6 : 1) * this.opacity;
@@ -323,7 +336,8 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
     ctx.arc(x, y, BADGE_R, 0, Math.PI * 2);
     ctx.fillStyle = '#FFFFFF';
     ctx.fill();
-    const img = flagImage(mark.currency, () => this.requestUpdate?.());
+    // A market event (earnings, expiry, funding) carries its own text; only a currency has a flag.
+    const img = mark.badge ? null : flagImage(mark.currency, () => this.requestUpdate?.());
     ctx.save();
     ctx.beginPath();
     ctx.arc(x, y, BADGE_R - 2, 0, Math.PI * 2);
@@ -337,7 +351,7 @@ export class EventMarksRenderer implements ISeriesPrimitive<Time> {
       ctx.font = '600 6.5px -apple-system, system-ui, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(mark.currency.slice(0, 3), x, y + 0.5);
+      ctx.fillText(mark.badge ?? mark.currency.slice(0, 3), x, y + 0.5);
     }
     ctx.restore();
     ctx.beginPath();

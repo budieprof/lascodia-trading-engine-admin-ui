@@ -239,6 +239,15 @@ import {
   type BlackoutWindow,
 } from '../../overlays/chart-events';
 import { ChartAlertsService } from '../../alerts/chart-alerts.service';
+import { eventRelevance, sameRelevance } from '../../panels/event-relevance';
+import { MarketPanesService } from '../../panels/market-panes.service';
+import { paneApplies, notApplicable, type PaneScope } from '../../panels/market-panes';
+import { volumeStudyNote } from '../../indicators/volume-labels';
+import {
+  exchangeSessionsNote,
+  exchangeSessionsOf,
+  type ExchangeSessions,
+} from '../../indicators/exchange-sessions';
 import { ChartAlertFormComponent } from '../../alerts/chart-alert-form.component';
 import { ChartAlertManagerComponent } from '../../alerts/chart-alert-manager.component';
 import { ObjectTreeComponent } from '../../drawings/ui/object-tree.component';
@@ -592,6 +601,7 @@ export class ChartAnalysisPageComponent {
   private readonly chartScripts = inject(ChartScriptService);
   private readonly theme = inject(ThemeService);
   private readonly fundamentals = inject(FxFundamentalsService);
+  private readonly marketPanes = inject(MarketPanesService);
   private readonly dailyBars = inject(DailyBarsService);
   /**
    * The engine's clock, for "is the newest bar's period still open" on the session grid: its
@@ -931,7 +941,7 @@ export class ChartAnalysisPageComponent {
   /** Pine scripts + strategies the dialog can add; fetched when the dialog first opens. */
   readonly scriptCatalog = signal<ChartScriptCatalog | null>(null);
   readonly dialogItems = computed<DialogItem[]>(() => {
-    const items = studyDialogItems();
+    const items = studyDialogItems(this.paneScope());
     const cat = this.scriptCatalog();
     if (cat) {
       for (const it of cat.mine)
@@ -1745,22 +1755,88 @@ export class ChartAnalysisPageComponent {
   readonly blackout = signal<BlackoutWindow | null>(null);
   private blackoutAt = 0;
   /**
-   * The pair's two currencies — the events the chart asks for, and the ones the blackout listens to.
-   * From the pair's metadata; otherwise the symbol's first and next three letters, the engine's
-   * `NewsBlackoutRules.CurrenciesOf` (a symbol shorter than six letters has none).
+   * UA01: which scheduled events concern the symbol, by asset class (`panels/event-relevance.ts`): FX its two
+   * currencies (unchanged), crypto the quote's fiat + the coin's events + funding, indices their currency + expiries,
+   * equities USD + earnings, futures + expiry. Drives the chart's marks, the blackout shading and the calendar pane.
    */
-  readonly pairCurrencies = computed(
+  readonly eventRelevance = computed(
     () => {
+      const f = this.facts();
       const pair = this.currentPair();
-      const fromPair = [pair?.baseCurrency, pair?.quoteCurrency]
-        .filter((c): c is string => !!c)
-        .map((c) => c.toUpperCase());
-      if (fromPair.length) return fromPair;
-      const symbol = this.symbol().toUpperCase();
-      return symbol.length >= 6 ? [symbol.slice(0, 3), symbol.slice(3, 6)] : [];
+      return eventRelevance({
+        symbol: this.symbol(),
+        assetClass: f.resolving ? null : f.assetClass,
+        pairBase: pair?.baseCurrency,
+        pairQuote: pair?.quoteCurrency,
+        instrument: f.instrument,
+      });
     },
-    { equal: (a, b) => a.join() === b.join() },
+    { equal: sameRelevance },
   );
+  /**
+   * UA03: what decides the symbol's fundamentals panes — FX panes for pairs, derivatives panes for perpetuals (read
+   * from the chart's venue source), roll yield for futures, COT per currency.
+   */
+  readonly paneScope = computed<PaneScope>(
+    () => {
+      const r = this.eventRelevance();
+      const f = this.facts();
+      const source = this.feed.factsOf(this.symbol())?.source ?? f.instrument.candleSource ?? null;
+      return {
+        symbol: this.symbol().toUpperCase(),
+        kind: r.kind,
+        perpetual: r.funding,
+        sourceId: source && source.kind !== 'mt5' && source.id !== 'mt5' ? source.id : null,
+        futureRoot: f.instrument.future?.root ?? null,
+        currencies: r.kind === 'fx' || r.kind === 'future' ? r.currencies.filter((c) => c.length === 3) : [],
+      };
+    },
+    { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
+  );
+  /**
+   * The line under a study in the studies strip: why a pane is empty (UA03) — the engine's reason or "FX pairs only".
+   */
+  studyNote(item: ActiveIndicator): string | null {
+    if (item.defId === 'exchange-sessions') return exchangeSessionsNote(this.exchangeSessions(), this.symbol());
+    const pane = this.externalPanes().find((p) => p.uid === item.uid)?.note;
+    if (pane) return pane;
+    // UA07: a volume study says what its volume is (and that a delta is estimated). Only once C1 has said it.
+    if (!this.feed.factsOf(this.symbol())) return null;
+    return volumeStudyNote(item.defId, this.volumeKind(), this.facts().instrument.baseCurrency, item.params);
+  }
+  /**
+   * UA02: the symbol's own Pre / Regular / Post sessions, from its trading calendar (C1 `calendarCode`, else the
+   * instrument's) — the Exchange-sessions study and the pre / regular / post session profiles.
+   */
+  readonly exchangeSessions = signal<ExchangeSessions | null>(null);
+  private readonly exchangeCalendarCode = computed(
+    () =>
+      this.feed.factsOf(this.symbol())?.calendarCode ?? this.facts().instrument.tradingCalendarCode ?? null,
+  );
+  private readonly exchangeSessionsLoad = effect(() => {
+    const code = this.exchangeCalendarCode();
+    untracked(() => {
+      if (!code) {
+        this.exchangeSessions.set(null);
+        return;
+      }
+      if (this.exchangeSessions()?.code === code) return;
+      void this.instruments.calendar(code).then((cal) => {
+        if (this.exchangeCalendarCode() !== code) return;
+        this.exchangeSessions.set(cal ? exchangeSessionsOf(cal) : null);
+      });
+    });
+  });
+  /** UA05: how the Technicals view's session bars are cut, in words (FX unchanged). */
+  readonly technicalsSessionWords = computed(() => {
+    if (this.eventRelevance().kind === 'fx') return 'days roll at 17:00 New York';
+    const code = this.feed.factsOf(this.symbol())?.calendarCode;
+    return code ? `trading days of the ${code} calendar` : "the instrument's trading days";
+  });
+  /** The economic-calendar currencies the chart asks for (FX: the pair's two, as before). */
+  readonly pairCurrencies = computed(() => this.eventRelevance().currencies, {
+    equal: (a, b) => a.join() === b.join(),
+  });
   /**
    * The events the chart draws: in replay, none after the head — the calendar of the replayed past,
    * not its future (their actuals would be look-ahead).
@@ -1778,13 +1854,16 @@ export class ChartAnalysisPageComponent {
     if (!w) return 'Shade the news blackout around high-impact events';
     if (!w.active)
       return `The news blackout is off (${w.explanation ?? 'no window'}): nothing is refused around events`;
-    const ccy = this.pairCurrencies().join('/') || 'this symbol';
+    const enforced = this.eventRelevance().blackoutCurrencies;
+    if (!enforced.length)
+      return `Live's news blackout does not block ${this.symbol().toUpperCase()}: no calendar currency is enforced for it`;
+    const ccy = enforced.join('/');
     return `Shade the ${w.minutesBefore} min before and ${w.minutesAfter} min after each high-impact ${ccy} event: live refuses new entries then`;
   });
   /** The blackout spans to shade (UTC ms). */
   readonly eventBands = computed(() =>
     this.showEvents() && this.showBlackout()
-      ? blackoutBands(this.chartEvents(), this.blackout(), this.pairCurrencies())
+      ? blackoutBands(this.chartEvents(), this.blackout(), this.eventRelevance().blackoutCurrencies)
       : [],
   );
 
@@ -1848,7 +1927,11 @@ export class ChartAnalysisPageComponent {
   /** The calendar event whose AI reading is open. */
   readonly calendarEvent = signal<UpcomingEconomicEvent | null>(null);
   readonly calendarCurrencies = computed(
-    () => [this.details().base, this.details().quote].filter((c) => c && c !== '—'),
+    () =>
+      // UA01: FX keeps the pair's two; anything else the currencies its releases come from (AAPL → USD, BTC-USD → USD).
+      this.eventRelevance().kind === 'fx'
+        ? [this.details().base, this.details().quote].filter((c) => c && c !== '—')
+        : this.eventRelevance().currencies,
     { equal: (a, b) => a.join() === b.join() },
   );
   readonly articles = signal<NewsArticleView[]>([]);
@@ -2602,6 +2685,7 @@ export class ChartAnalysisPageComponent {
     effect(() => {
       const items = this.active().filter((a) => a.visible && studyKind(a.defId) === 'fundamental');
       const symbol = this.symbol();
+      this.paneScope();
       untracked(() => this.loadFundamentals(items, symbol));
     });
 
@@ -3008,6 +3092,13 @@ export class ChartAnalysisPageComponent {
         newsTimer = setTimeout(() => this.loadNews(), 1500);
       });
 
+    // UA01: the instrument resolved after the events were read (catalogue lookup, the first chart-bars answer): ask again.
+    effect(() => {
+      this.eventRelevance();
+      untracked(() => {
+        if (this.eventsHeld?.key.startsWith(`${this.symbol().toUpperCase()}|`)) this.loadEvents();
+      });
+    });
     // Ticking clock, and presets applied once their interval's bars are in.
     this.tickClock();
     const clockTimer = setInterval(() => this.tickClock(), 1000);
@@ -3456,7 +3547,9 @@ export class ChartAnalysisPageComponent {
     const currencies = this.pairCurrencies();
     const minImpact = this.minEventImpact();
     const symbol = this.symbol().toUpperCase();
-    const key = `${symbol}|${currencies.join(',')}|${minImpact}`;
+    const relevance = this.eventRelevance();
+    const sourceId = this.feed.factsOf(symbol)?.source?.id ?? null;
+    const key = `${symbol}|${currencies.join(',')}|${minImpact}|${relevance.marketKeys.join(',')}|${relevance.expiryMs}|${relevance.funding}|${sourceId}`;
     const loaded = this.bars();
     const wanted = eventsWindow(loaded.length ? loaded[0].time : null, Date.now());
     const held = this.eventsHeld?.key === key ? this.eventsHeld : null;
@@ -3466,7 +3559,7 @@ export class ChartAnalysisPageComponent {
     if (!extend) this.eventsHeld = null;
     this.refreshBlackout();
     void this.eventsFeed
-      .load({ currencies, minImpact, from: span.from, to: span.to })
+      .load({ currencies, minImpact, from: span.from, to: span.to, relevance, symbol, sourceId })
       .then((marks) => {
         // A newer load (another symbol, importance or toggle) owns the layer now.
         if (load !== this.eventsLoad || !marks) return;
@@ -4034,9 +4127,14 @@ export class ChartAnalysisPageComponent {
     }
     const base = symbol.slice(0, 3);
     const quote = symbol.slice(3, 6);
+    const scope = this.paneScope();
+    const loaded = this.bars();
+    const window = { from: loaded[0]?.time ?? Date.now() - 7 * 86_400_000, to: Date.now() };
     const one = (a: ActiveIndicator): Observable<ExternalPane> => {
       const id = fundamentalIdOf(a.defId);
       const pane = (lines: ExternalPane['lines']): ExternalPane => ({ uid: a.uid, lines });
+      // UA03: a pane saved with a layout on a symbol it does not apply to says why instead of slicing the symbol.
+      if (!paneApplies(id, scope)) return of({ uid: a.uid, lines: [], note: notApplicable(id, scope) });
       switch (id) {
         case 'rate-differential':
           return this.fundamentals
@@ -4092,7 +4190,9 @@ export class ChartAnalysisPageComponent {
           );
         }
         default:
-          return of(pane([]));
+          return from(this.marketPanes.load(id, a.params, scope, window)).pipe(
+            map((r) => ({ uid: a.uid, lines: r.lines, stepped: r.stepped, note: r.note })),
+          );
       }
     };
     forkJoin(

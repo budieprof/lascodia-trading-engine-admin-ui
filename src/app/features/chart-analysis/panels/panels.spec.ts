@@ -169,7 +169,9 @@ describe('technicalRating', () => {
       expect(v.reason.length, v.name).toBeGreaterThan(0);
     }
     const sma200 = short.movingAverages.votes.find((v) => v.name === 'Simple Moving Average (200)');
-    expect(sma200?.reason).toContain('Not enough history');
+    // UA05: says how much history it has and needs.
+    expect(sma200?.reason).toContain('not enough history');
+    expect(sma200?.reason).toContain('of 200 bars');
     const up = technicalRating(trend(260, 0.5));
     expect(up.movingAverages.votes[0].reason).toBe('Price is above the average');
   });
@@ -267,17 +269,18 @@ describe('seasonalYears', () => {
     (t) => 100 + (t - Date.UTC(2023, 6, 1)) / DAY,
   );
 
-  it('returns the latest year and two prior, newest first, aligned on day-of-year', () => {
+  it('returns the latest year and two prior, newest first, aligned on the calendar date', () => {
     const ys = seasonalYears(bars, 2);
     expect(ys.map((y) => y.year)).toEqual([2026, 2025, 2024]);
     for (const y of ys) {
       expect(y.points[0].day).toBe(0);
-      expect(y.points.every((p, i) => i === 0 || p.day > y.points[i - 1].day)).toBe(true);
+      // UA04: never backwards; a leap year's 29 February shares 28 February's slot.
+      expect(y.points.every((p, i) => i === 0 || p.day >= y.points[i - 1].day)).toBe(true);
     }
     // 2026 is partial: ends on Mar 31 (day 89).
     expect(ys[0].points[ys[0].points.length - 1].day).toBe(89);
-    // 2024 is a leap year: Dec 31 is day 365.
-    expect(ys[2].points[ys[2].points.length - 1].day).toBe(365);
+    // 2024 is a leap year: Dec 31 is day 364, the same slot as every other year's.
+    expect(ys[2].points[ys[2].points.length - 1].day).toBe(364);
   });
 
   it('bases each year on the previous year-end close', () => {

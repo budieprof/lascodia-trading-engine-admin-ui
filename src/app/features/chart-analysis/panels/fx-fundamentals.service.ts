@@ -26,7 +26,7 @@ export interface CarryPanes {
 
 /**
  * Data providers for the chart's FX fundamentals panes. Every series comes from
- * a real engine endpoint; COT is reported unavailable rather than invented.
+ * a real engine endpoint; COT (and the market panes) load in `MarketPanesService`.
  */
 @Injectable({ providedIn: 'root' })
 export class FxFundamentalsService {
@@ -52,10 +52,16 @@ export class FxFundamentalsService {
    * Differential plus swap per lot per night (quote currency), priced at each
    * daily close in `dailyBars` (ascending, ms).
    */
-  carryPanes(symbol: string, dailyBars: readonly { time: number; close: number }[]): Observable<CarryPanes> {
+  carryPanes(
+    symbol: string,
+    dailyBars: readonly { time: number; close: number }[],
+  ): Observable<CarryPanes> {
     return this.carry(symbol).pipe(
       map((raw) => {
-        const differential = raw.differential.map((p) => ({ time: utcMs(p.timeUtc), value: p.differentialPct }));
+        const differential = raw.differential.map((p) => ({
+          time: utcMs(p.timeUtc),
+          value: p.differentialPct,
+        }));
         const swap = raw.swap;
         if (!swap || !swap.calibrated) {
           return {
@@ -75,10 +81,12 @@ export class FxFundamentalsService {
   /** GET /news-intel/timeseries — one currency's weighted pressure score. */
   newsPressure(currency: string, hours = 24 * 30): Observable<PanePoint[]> {
     return this.api
-      .getEnvelope<NewsPressurePointDto[]>(
-        `/news-intel/timeseries?currency=${encodeURIComponent(currency.toUpperCase())}&hours=${hours}`,
-      )
-      .pipe(map((pts) => (pts ?? []).map((p) => ({ time: utcMs(p.asOfUtc), value: p.weightedScore }))));
+      .getEnvelope<
+        NewsPressurePointDto[]
+      >(`/news-intel/timeseries?currency=${encodeURIComponent(currency.toUpperCase())}&hours=${hours}`)
+      .pipe(
+        map((pts) => (pts ?? []).map((p) => ({ time: utcMs(p.asOfUtc), value: p.weightedScore }))),
+      );
   }
 
   /** Base − quote news pressure (step difference of the two roll-up series). */
@@ -99,7 +107,9 @@ export class FxFundamentalsService {
       halfLifeDays: String(opts.halfLifeDays ?? 30),
       preReleaseOnly: String(opts.preReleaseOnly ?? false),
     });
-    return this.api.getEnvelope<SurpriseIndexDto>(`/fx-fundamentals/surprise-index?${q.toString()}`);
+    return this.api.getEnvelope<SurpriseIndexDto>(
+      `/fx-fundamentals/surprise-index?${q.toString()}`,
+    );
   }
 
   /** Economic surprise index for one currency. */
@@ -110,10 +120,5 @@ export class FxFundamentalsService {
     return this.surpriseIndexRaw(currency, opts).pipe(
       map((d) => d.points.map((p) => ({ time: utcMs(p.timeUtc), value: p.index }))),
     );
-  }
-
-  /** COT positioning is not ingested engine-side — always empty, with the pane marked unavailable. */
-  cot(): Observable<PanePoint[]> {
-    return of([]);
   }
 }
