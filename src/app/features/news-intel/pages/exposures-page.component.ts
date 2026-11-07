@@ -17,7 +17,7 @@ import {
   parseExposureList,
   parseSearchQueries,
 } from '../news-intel.logic';
-import { NewsConfigEntry } from '../news-intel.types';
+import { NewsConfigEntry, NewsExposureListView, NewsSearchTermView } from '../news-intel.types';
 
 const EXPOSURES = 'NewsIntel:Exposures';
 const CURRENCIES = 'NewsIntel:Currencies';
@@ -197,39 +197,89 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
       </section>
 
       <section class="card">
-        <h2>Search term per tracked key</h2>
-        <p class="muted xsmall">
-          The aggregator query each tracked key is searched with. Keys in
-          <code>{{ queriesKey }}</code> use that term; others use the engine's built-in term (not
-          exposed by the API) or are not searched. Edit the JSON in the
-          <a routerLink="/news-intel">Overview</a> configuration panel (Sourcing section).
-        </p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Key</th>
-                <th>Kind</th>
-                <th>Search term</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (k of tracked(); track k) {
+        <h2>Search term per key</h2>
+        @if (exposureList(); as xl) {
+          <p class="muted xsmall" data-testid="search-terms-engine">
+            The engine's effective term for every tracked and recommended key, and where it comes
+            from: <b>config</b> (your override in <code>{{ queriesKey }}</code
+            >), <b>shipped default</b>, <b>built-in</b> (the exposure catalogue's term) or none.
+            Search is {{ xl.searchEnabled ? 'on' : 'OFF' }}; "polled" means the search source runs
+            that term now. Edit the JSON in the
+            <a routerLink="/news-intel">Overview</a> configuration panel (Sourcing section).
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
                 <tr>
-                  <td class="mono">{{ k }}</td>
-                  <td>{{ kindLabel(k) }}</td>
-                  <td class="mono xsmall">
-                    @if (queries()[k]; as q) {
-                      {{ q }}
-                    } @else {
-                      <span class="muted">engine built-in term, if any</span>
-                    }
-                  </td>
+                  <th>Key</th>
+                  <th>Kind</th>
+                  <th>Tracked</th>
+                  <th>Source</th>
+                  <th>Polled</th>
+                  <th>Search term</th>
                 </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                @for (t of xl.searchTerms; track t.key) {
+                  <tr>
+                    <td class="mono">{{ t.key }}</td>
+                    <td>{{ kindLabel(t.key) }}</td>
+                    <td>
+                      <span class="pill" [class.ok]="t.tracked">{{
+                        t.tracked ? 'tracked' : 'recommended'
+                      }}</span>
+                    </td>
+                    <td>
+                      <span class="pill" [class.info]="t.source === 'config'">{{
+                        sourceLabel(t)
+                      }}</span>
+                    </td>
+                    <td>{{ t.polled ? 'yes' : 'no' }}</td>
+                    <td class="mono xsmall">
+                      {{ t.term ?? '' }}
+                      @if (!t.term) {
+                        <span class="muted">no term — not searched</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <p class="muted xsmall">
+            The aggregator query each tracked key is searched with. Keys in
+            <code>{{ queriesKey }}</code> use that term; others use the engine's built-in term (this
+            engine build does not report it) or are not searched. Edit the JSON in the
+            <a routerLink="/news-intel">Overview</a> configuration panel (Sourcing section).
+          </p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Key</th>
+                  <th>Kind</th>
+                  <th>Search term</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (k of tracked(); track k) {
+                  <tr>
+                    <td class="mono">{{ k }}</td>
+                    <td>{{ kindLabel(k) }}</td>
+                    <td class="mono xsmall">
+                      @if (queries()[k]; as q) {
+                        {{ q }}
+                      } @else {
+                        <span class="muted">engine built-in term, if any</span>
+                      }
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
       </section>
 
       <app-confirm-dialog
@@ -295,6 +345,8 @@ export class NewsExposuresPageComponent {
   protected readonly queriesKey = QUERIES;
 
   readonly entries = signal<NewsConfigEntry[]>([]);
+  /** The engine's exposure lists with effective search terms; null on an engine without the read. */
+  readonly exposureList = signal<NewsExposureListView | null>(null);
   readonly loading = signal(false);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
@@ -346,6 +398,10 @@ export class NewsExposuresPageComponent {
 
   load(): void {
     this.loading.set(true);
+    this.svc.getExposureList().subscribe({
+      next: (x) => this.exposureList.set(x),
+      error: () => this.exposureList.set(null),
+    });
     this.svc.getConfig().subscribe({
       next: (e) => {
         this.entries.set(e);
@@ -356,6 +412,19 @@ export class NewsExposuresPageComponent {
         this.error.set(errorText(e, 'Could not load the module configuration.'));
       },
     });
+  }
+
+  sourceLabel(t: NewsSearchTermView): string {
+    switch (t.source) {
+      case 'config':
+        return 'config';
+      case 'shipped-default':
+        return 'shipped default';
+      case 'built-in':
+        return 'built-in';
+      default:
+        return 'none';
+    }
   }
 
   label(kind: string): string {

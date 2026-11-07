@@ -464,7 +464,13 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
     match: 'Risk:',
     title: 'News as risk',
     blurb:
-      'Stop widening from the news volatility forecast. Never tightens a stop. Observe logs the would-be stop only.',
+      'Stop widening from the news volatility forecast, and the record of every news-as-risk decision (Risk:Observations:*) — what each gate in Observe would have refused. Never tightens a stop.',
+  },
+  {
+    match: 'Coverage:',
+    title: 'Coverage',
+    blurb:
+      'How long the bulk coverage read (every symbol at once) is reused before the engine recomputes it.',
   },
   {
     match: 'Retention:',
@@ -574,6 +580,41 @@ export interface NewsStoryView {
   publisherCount: number;
   /** How the newest member joined: event key or lexical similarity. */
   lastMatchBasis: string | null;
+  /** Distinct publisher names among the members (engine gaps build; absent on older engines). */
+  publishers?: string[];
+}
+
+/** One label of a story member (engine `NewsStoryMemberLabelView`). Novelty is per exposure key. */
+export interface NewsStoryMemberLabelView {
+  exposureKey: string;
+  category: string;
+  direction: string;
+  certainty: string;
+  novelty: string;
+  relevance: number;
+  confidence: number;
+}
+
+/** One member article of a story (engine `NewsStoryMemberView`). */
+export interface NewsStoryMemberView {
+  id: number;
+  title: string;
+  sourceName: string;
+  sourceKind: string;
+  url: string | null;
+  publishedAtUtc: string;
+  firstSeenUtc: string;
+  classificationStatus: string;
+  eventKey: string | null;
+  stance: string;
+  isOrigin: boolean;
+  labels: NewsStoryMemberLabelView[];
+}
+
+/** `GET news-intel/stories/{id}/articles`. */
+export interface NewsStoryMembersView {
+  story: NewsStoryView;
+  articles: NewsStoryMemberView[];
 }
 
 // ── Gold set + evaluation (understanding v2) ─────────────────────────────
@@ -795,4 +836,140 @@ export interface RecommendedSeverityView {
   meanSignedR: number | null;
   /** Why: fitted / shrunk / insufficient data (kept current). */
   basis: string;
+}
+
+// ── Gaps (engine ni/gaps): bulk coverage, exposures + search terms, risk observations, vendor verify ──
+
+/** One leg on the bulk coverage read (engine `NewsCoverageLegView`). */
+export interface NewsCoverageLegView {
+  key: string;
+  kind: string | null;
+  weight: number;
+  basis: string;
+  covered: boolean;
+  score: number | null;
+  contribution: number | null;
+  absolutePressure: number | null;
+  /** Minutes since the newest labelled article on this key (7-day look-back); null when none or untracked. */
+  newestItemAgeMinutes: number | null;
+}
+
+/** One universe symbol on `GET news-intel/coverage` (engine `NewsCoverageSymbolView`). */
+export interface NewsCoverageSymbolView {
+  symbol: string;
+  /** FX | Metal | Energy | Index | Stock | Crypto | Unplaced. */
+  assetClass: string;
+  source: string;
+  legs: NewsCoverageLegView[];
+  coverage: number;
+  symbolBias: number | null;
+  newestItemAgeMinutes: number | null;
+  includedInPrompt: boolean;
+  omissionReason: string | null;
+  calendarKeys: string[];
+  /** Economic-calendar keys the blackout has always refused on, whatever the mode. */
+  legacyEnforced: string[];
+  /** Economic-calendar keys the exposure map added: refuse only under NewsBlackout:MultiAsset:Mode=Enforce. */
+  modeGoverned: string[];
+  /** Keys whose scheduled market events refuse entries — only under Enforce. */
+  scheduledEventKeys: string[];
+  /** What refuses entries under the mode in force. */
+  blockingKeys: string[];
+  riskObservations7d: number;
+  problem: string | null;
+}
+
+/** `GET news-intel/coverage` (engine `NewsCoverageView`). */
+export interface NewsCoverageView {
+  asOfUtc: string;
+  computedAtUtc: string;
+  cached: boolean;
+  moduleEnabled: boolean;
+  multiAssetMode: string;
+  tracked: string[];
+  pressureKeysComputed: number;
+  symbols: NewsCoverageSymbolView[];
+  untrackedKeysNeeded: string[];
+}
+
+/** One key's search term (engine `NewsSearchTermView`). */
+export interface NewsSearchTermView {
+  key: string;
+  kind: string | null;
+  tracked: boolean;
+  recommended: boolean;
+  term: string | null;
+  /** config | shipped-default | built-in | none. */
+  source: string;
+  polled: boolean;
+}
+
+/** `GET news-intel/exposures`. */
+export interface NewsExposureListView {
+  tracked: string[];
+  recommended: string[];
+  searchEnabled: boolean;
+  searchTerms: NewsSearchTermView[];
+}
+
+export type NewsRiskObservationKind =
+  | 'MultiAssetBlackout'
+  | 'ScheduledEventBlackout'
+  | 'BreakingGate'
+  | 'StopWidening';
+
+export const NEWS_RISK_OBSERVATION_KINDS: readonly NewsRiskObservationKind[] = [
+  'MultiAssetBlackout',
+  'ScheduledEventBlackout',
+  'BreakingGate',
+  'StopWidening',
+];
+
+export interface NewsRiskObservationCountView {
+  kind: string;
+  symbol: string;
+  mode: string;
+  count: number;
+  lastObservedAtUtc: string;
+}
+
+export interface NewsRiskObservationView {
+  id: number;
+  kind: string;
+  mode: string;
+  symbol: string;
+  key: string | null;
+  eventRef: string | null;
+  storyId: number | null;
+  observedAtUtc: string;
+  eventAtUtc: string | null;
+  detail: string | null;
+}
+
+/** `GET news-intel/risk-observations`. */
+export interface NewsRiskObservationPage {
+  fromUtc: string;
+  toUtc: string;
+  total: number;
+  countsByKind: Record<string, number>;
+  counts: NewsRiskObservationCountView[];
+  items: NewsRiskObservationView[];
+}
+
+/** `POST news-intel/vendors/{name}/verify` (engine `NewsVendorVerifyResult`) — never carries the key. */
+export interface NewsVendorVerifyResult {
+  vendor: string;
+  keySet: boolean;
+  /** First 8 hex chars of SHA-256(key). */
+  keyFingerprint: string | null;
+  keyLength: number | null;
+  ok: boolean;
+  /** ok | no-key | unknown-vendor | http-error | unparseable | failed | cooldown. */
+  status: string;
+  httpStatus: number | null;
+  itemsParsed: number | null;
+  error: string | null;
+  enabled: boolean;
+  checkedAtUtc: string;
+  elapsedMs: number | null;
 }

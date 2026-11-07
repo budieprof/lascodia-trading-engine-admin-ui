@@ -4,7 +4,9 @@
 // No click in this script presses a write button. Prints a JSON summary; screenshots go to OUT.
 //
 // Usage (repo root, after `npx ng build --configuration production`):
-//   OUT=/tmp/shots node tools/visual-review/news-intel-check.js        (NI_STUDY_404=1: event study answers 404)
+//   OUT=/tmp/shots node tools/visual-review/news-intel-check.js        (NI_STUDY_404=1: event study answers 404;
+//   NI_GAPS_404=1: the gaps endpoints — coverage, exposures, risk-observations, story members, vendor verify — answer 404,
+//   i.e. an engine before ni/gaps, so the fallbacks render)
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
@@ -75,8 +77,56 @@ const RUN = { id: 3, status: 'Completed', trigger: 'nightly', requestedBy: null,
   labelsConsidered: 5400, observations: 21000, alignmentVerdict: 'Inconclusive', alignmentHorizonMinutes: 60, alignmentMean: -0.01, alignmentCiLow: -0.04, alignmentCiHigh: 0.02,
   coverageJson: '{"EURUSD":{"M1":true}}', volCalibrationJson: '{"bands":[]}', summaryJson: '{"lineages":["legacy"]}', error: null, startedAtUtc: iso(300), completedAtUtc: iso(280) };
 
+const UNIVERSE = ['EURUSD', 'GBPUSD', 'USDJPY', 'AAPL', 'USOIL', 'BTCUSD'];
+const coverageRow = (s) => {
+  const f = focus(s);
+  const fx = ['EURUSD', 'GBPUSD', 'USDJPY'].includes(s);
+  return {
+    symbol: s, assetClass: fx ? 'FX' : s === 'AAPL' ? 'Stock' : s === 'USOIL' ? 'Energy' : 'Crypto', source: 'catalogue',
+    legs: f.context.legs.map((l) => ({ key: l.key, kind: null, weight: l.weight, basis: l.basis, covered: l.covered, score: l.score,
+      contribution: l.contribution, absolutePressure: l.absolutePressure, newestItemAgeMinutes: l.covered ? 14 : null })),
+    coverage: f.context.coverage, symbolBias: f.context.symbolBias, newestItemAgeMinutes: 14, includedInPrompt: f.includedInPrompt,
+    omissionReason: f.omissionReason, calendarKeys: f.exposure.calendarKeys,
+    legacyEnforced: fx ? f.exposure.calendarKeys : [], modeGoverned: fx ? [] : ['USD'],
+    scheduledEventKeys: fx ? [] : f.exposure.calendarKeys, blockingKeys: fx ? f.exposure.calendarKeys : [],
+    riskObservations7d: s === 'AAPL' ? 2 : 0, problem: null,
+  };
+};
+const OBS = [
+  { id: 2, kind: 'ScheduledEventBlackout', mode: 'Observe', symbol: 'AAPL', key: 'EQ:AAPL', eventRef: 'sched:7', storyId: null, observedAtUtc: iso(30), eventAtUtc: iso(10), detail: 'Earnings: Apple Q4 earnings' },
+  { id: 1, kind: 'MultiAssetBlackout', mode: 'Observe', symbol: 'AAPL', key: 'USD', eventRef: 'econ:44', storyId: null, observedAtUtc: iso(90), eventAtUtc: iso(80), detail: 'CPI y/y' },
+];
+
 function stub(method, p, q) {
   const notFound = { status: 404 };
+  const gaps404 = !!process.env.NI_GAPS_404;
+  if (p.endsWith('/news-intel/coverage')) return gaps404 ? notFound : ok({ asOfUtc: iso(0), computedAtUtc: iso(0), cached: false, moduleEnabled: true,
+    multiAssetMode: 'Observe', tracked: [...TRACKED], pressureKeysComputed: 14, symbols: UNIVERSE.map(coverageRow), untrackedKeysNeeded: ['EQ:AAPL', 'WTI', 'CR:BTC', 'F:RISK'] });
+  if (p.endsWith('/news-intel/exposures')) return gaps404 ? notFound : ok({ tracked: [...TRACKED], recommended: ['WTI', 'IDX:US500', 'EQ:AAPL', 'F:NOPE'], searchEnabled: true,
+    searchTerms: [
+      { key: 'USD', kind: 'Currency', tracked: true, recommended: true, term: '(Federal Reserve OR "US economy") when:1d', source: 'config', polled: true },
+      { key: 'EUR', kind: 'Currency', tracked: true, recommended: true, term: '(ECB OR eurozone) when:1d', source: 'shipped-default', polled: true },
+      { key: 'XAU', kind: 'Commodity', tracked: true, recommended: true, term: null, source: 'none', polled: false },
+      { key: 'WTI', kind: 'Commodity', tracked: false, recommended: true, term: '("crude oil" OR OPEC) when:1d', source: 'built-in', polled: false },
+      { key: 'EQ:AAPL', kind: 'Equity', tracked: false, recommended: true, term: '("Apple" stock OR "Apple" earnings) when:1d', source: 'built-in', polled: false },
+    ] });
+  if (p.endsWith('/news-intel/risk-observations')) {
+    if (gaps404) return notFound;
+    const sym = (q.get('symbol') || '').toUpperCase();
+    const items = OBS.filter((o) => !sym || o.symbol === sym);
+    return ok({ fromUtc: iso(60 * 24 * 7), toUtc: iso(0), total: items.length, countsByKind: { ScheduledEventBlackout: 1, MultiAssetBlackout: 1 },
+      counts: [{ kind: 'ScheduledEventBlackout', symbol: 'AAPL', mode: 'Observe', count: 1, lastObservedAtUtc: iso(30) }, { kind: 'MultiAssetBlackout', symbol: 'AAPL', mode: 'Observe', count: 1, lastObservedAtUtc: iso(90) }], items });
+  }
+  if (/\/news-intel\/stories\/\d+\/articles$/.test(p)) return gaps404 ? notFound : ok({
+    story: { id: 11, eventKey: 'fed-rate-decision-2026-11', title: 'Fed holds rates steady', firstArticleId: 1, firstSeenUtc: iso(300), lastSeenUtc: iso(30), exposures: 'USD,F:USRATES', state: 'Confirmed', stateChangedAtUtc: iso(200), deniedAtUtc: null, resolvedAtUtc: null, articleCount: 2, publisherCount: 2, lastMatchBasis: 'event-key', publishers: ['Federal Reserve', 'Reuters'] },
+    articles: [
+      { id: 1, title: 'Fed leaves rates unchanged', sourceName: 'Federal Reserve', sourceKind: 'CentralBank', url: null, publishedAtUtc: iso(301), firstSeenUtc: iso(300), classificationStatus: 'Completed', eventKey: 'fed-rate-decision-2026-11', stance: 'Asserts', isOrigin: true,
+        labels: [{ exposureKey: 'USD', category: 'MonetaryPolicy', direction: 'Neutral', certainty: 'Official', novelty: 'New', relevance: 0.95, confidence: 0.9 }] },
+      { id: 2, title: 'FOMC holds steady as officials signal patience', sourceName: 'Reuters', sourceKind: 'Rss', url: 'https://example.com/a', publishedAtUtc: iso(40), firstSeenUtc: iso(30), classificationStatus: 'Completed', eventKey: 'fed-rate-decision-2026-11', stance: 'Asserts', isOrigin: false,
+        labels: [{ exposureKey: 'USD', category: 'MonetaryPolicy', direction: 'Neutral', certainty: 'Confirmed', novelty: 'FollowUp', relevance: 0.9, confidence: 0.85 }] },
+    ] });
+  if (/\/news-intel\/vendors\/[^/]+\/verify$/.test(p)) return gaps404 ? notFound : ok({ vendor: 'Finnhub', keySet: true, keyFingerprint: '3fa9c01b', keyLength: 32, ok: false, status: 'http-error',
+    httpStatus: 401, itemsParsed: null, error: 'vendor answered HTTP 401: {"error":"Invalid API key ***"}', enabled: false, checkedAtUtc: iso(0), elapsedMs: 312 });
   if (p.endsWith('/admin/auth/me')) return ok({ id: 1, username: 'stub', displayName: 'Stub', email: 'stub@local', isSuperAdmin: true, mustChangePassword: false, roles: ['SuperAdmin'], permissions: PERMS });
   if (p.endsWith('/currency-pair/list')) return ok({ data: ['EURUSD', 'GBPUSD', 'USDJPY', 'AAPL', 'USOIL', 'BTCUSD'].map((symbol, id) => ({ id, symbol, isActive: true })), pager: { totalItemCount: 6 } });
   if (p.endsWith('/news-intel/config')) return ok(CONFIG);
@@ -130,7 +180,8 @@ function stub(method, p, q) {
   const ctx = await browser.newContext({ viewport: { width: Number(process.env.WIDTH || 1440), height: 1000 } });
   const blocked = [];
   let answered = 0;
-  const READ_POSTS = [/\/currency-pair\/list$/];
+  // vendors/{name}/verify changes nothing (one stubbed vendor read); it is answered so the Sources result renders.
+  const READ_POSTS = [/\/currency-pair\/list$/, /\/news-intel\/vendors\/[^/]+\/verify$/];
   await ctx.route('**/*', (route) => {
     const req = route.request();
     const url = new URL(req.url());
@@ -176,20 +227,28 @@ function stub(method, p, q) {
   await page.locator('.focus-input .btn').click().catch(() => {});
   await page.waitForTimeout(700);
   results.overview.legsTable = await count('app-news-exposure-legs tbody tr')();
+  results.overview.focusRisk = await count('[data-testid="focus-risk"]')();
   await page.screenshot({ path: path.join(OUT, 'overview-aapl.png'), fullPage: false });
 
-  await visit('/news-intel/coverage', 'coverage', { rows: count('tbody tr.clickable'), demand: count('.key.untracked') });
+  await visit('/news-intel/coverage', 'coverage', { rows: count('tbody tr.clickable'), demand: count('.key.untracked'),
+    bulk: count('[data-testid="coverage-bulk"]'), observations: text('[data-testid="coverage-observations"]') });
   await page.locator('tr.clickable', { hasText: 'AAPL' }).first().click().catch(() => {});
   await page.waitForTimeout(400);
   results.coverage.detail = await text('.detail')().then((t) => t.slice(0, 160)).catch(() => 'missing');
+  results.coverage.exactKeys = await count('[data-testid="coverage-keys"]')();
   await page.screenshot({ path: path.join(OUT, 'coverage-aapl.png'), fullPage: true });
-  await visit('/news-intel/exposures', 'exposures', { missing: count('button.as-btn') });
+  await visit('/news-intel/exposures', 'exposures', { missing: count('button.as-btn'), engineTerms: count('[data-testid="search-terms-engine"]') });
   await visit('/news-intel/sources', 'sources', { channels: count('table >> nth=0 >> tbody tr'), notes: count('.note'), password: count('input[type="password"]') });
+  await page.locator('[data-testid="vendor-verify"] button', { hasText: 'Verify' }).nth(2).click().catch(() => {});
+  await page.waitForTimeout(500);
+  results.sources.verify = await text('[data-testid="vendor-verify"] >> nth=2')().catch(() => 'missing');
+  await page.screenshot({ path: path.join(OUT, 'sources-verify.png'), fullPage: true });
   await visit('/news-intel/calendar', 'calendar', { days: count('section.card h2') });
   await visit('/news-intel/stories', 'stories', { rows: count('tbody tr.clickable') });
   await page.locator('tr.clickable').first().click().catch(() => {});
   await page.waitForTimeout(900);
   results.stories.spark = await count('svg.spark rect')();
+  results.stories.members = await count('[data-testid="story-members"] tbody tr')();
   await page.screenshot({ path: path.join(OUT, 'stories-open.png'), fullPage: true });
   await visit('/news-intel/evals', 'evals', { runs: count('tbody tr.clickable'), gold: count('button:has-text("Confirm")') });
   await page.locator('tr.clickable').first().click().catch(() => {});
@@ -197,7 +256,8 @@ function stub(method, p, q) {
   results.evals.caveat = await text('.banner.warn')().catch(() => 'missing');
   await page.screenshot({ path: path.join(OUT, 'evals-run.png'), fullPage: true });
   await visit('/news-intel/event-study', 'event-study', { ciBars: count('svg.ci'), diff: count('text=Apply via governance'), notDeployed: count('text=not on this engine yet') });
-  await visit('/news-intel/risk', 'risk', { controls: count('.modes'), breaking: count('text=ECB makes unscheduled statement') });
+  await visit('/news-intel/risk', 'risk', { controls: count('.modes'), breaking: count('text=ECB makes unscheduled statement'),
+    observations: count('[data-testid="risk-observations"] tbody tr') });
 
   // Open (never confirm) one write dialog to see it renders; Cancel closes it.
   await page.locator('.modes button', { hasText: 'Enforce' }).first().click().catch(() => {});

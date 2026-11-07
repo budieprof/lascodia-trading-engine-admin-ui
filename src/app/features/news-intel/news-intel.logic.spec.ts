@@ -722,3 +722,80 @@ describe('recommended weights', () => {
     });
   });
 });
+
+// ── gaps: bulk coverage rows + observation labels ─────────────────────────
+import { coverageRowFromBulk, riskObservationKindLabel } from './news-intel.logic';
+import type { NewsCoverageSymbolView } from './news-intel.types';
+
+describe('coverageRowFromBulk', () => {
+  const us30: NewsCoverageSymbolView = {
+    symbol: 'US30',
+    assetClass: 'Index',
+    source: 'catalogue',
+    legs: [
+      {
+        key: 'IDX:US30',
+        kind: 'EquityIndex',
+        weight: 1,
+        basis: 'own',
+        covered: false,
+        score: null,
+        contribution: null,
+        absolutePressure: null,
+        newestItemAgeMinutes: null,
+      },
+      {
+        key: 'F:RISK',
+        kind: 'Factor',
+        weight: 0.4,
+        basis: 'factor:fitted',
+        covered: true,
+        score: 0.2,
+        contribution: 0.08,
+        absolutePressure: 0.3,
+        newestItemAgeMinutes: 12,
+      },
+    ],
+    coverage: 0.2857,
+    symbolBias: null,
+    newestItemAgeMinutes: 12,
+    includedInPrompt: false,
+    omissionReason: 'below the noise floor',
+    calendarKeys: ['USD'],
+    legacyEnforced: [],
+    modeGoverned: ['USD'],
+    scheduledEventKeys: ['USD'],
+    blockingKeys: [],
+    riskObservations7d: 3,
+    problem: null,
+  };
+
+  it('keeps every engine figure and the exact legacy / governed split', () => {
+    const row = coverageRowFromBulk(us30);
+    expect(row.exactKeys).toBe(true);
+    expect(row.legacyEnforcedKeys).toEqual([]);
+    expect(row.modeGovernedKeys).toEqual(['USD']);
+    expect(row.blockingKeys).toEqual([]);
+    expect(row.coverage).toBe(0.2857);
+    expect(row.symbolBias).toBeNull();
+    expect(row.riskObservations7d).toBe(3);
+    expect(row.legs[1].fitted).toBe(true);
+    expect(row.untrackedLegs).toBe(1);
+    expect(row.assetClass).toBe('Index');
+  });
+
+  it('maps an unknown class to Unplaced and an unplaced symbol to null coverage', () => {
+    const row = coverageRowFromBulk({ ...us30, assetClass: 'Weird', legs: [], problem: 'x' });
+    expect(row.assetClass).toBe('Unplaced');
+    expect(row.coverage).toBeNull();
+    expect(row.problem).toBe('x');
+  });
+});
+
+describe('riskObservationKindLabel', () => {
+  it('names each kind and passes an unknown one through', () => {
+    expect(riskObservationKindLabel('MultiAssetBlackout')).toBe('multi-asset blackout');
+    expect(riskObservationKindLabel('BreakingGate')).toBe('breaking-news pause');
+    expect(riskObservationKindLabel('Other')).toBe('Other');
+  });
+});

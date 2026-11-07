@@ -26,9 +26,17 @@ import {
   fmt,
   parseMode,
   parseMultiAssetMode,
+  riskObservationKindLabel,
   signed,
 } from '../news-intel.logic';
-import { NewsConfigEntry, NewsEventStudyRunView, NewsFocusResult } from '../news-intel.types';
+import {
+  NEWS_RISK_OBSERVATION_KINDS,
+  NewsConfigEntry,
+  NewsEventStudyRunView,
+  NewsFocusResult,
+  NewsRiskObservationKind,
+  NewsRiskObservationPage,
+} from '../news-intel.types';
 
 const GATE_MODE = 'NewsIntel:BreakingGate:Mode';
 const STOP_MODE = 'NewsIntel:Risk:StopWidening:Mode';
@@ -146,16 +154,17 @@ interface ModeControl {
                     : 'off'
                 }}) — never an automatic close. Refusals under Enforce appear on
                 <a routerLink="/rejections">Rejections</a> with reason <code>news_breaking</code>;
-                Observe would-blocks are logged and counted in metrics only (not exposed by the
-                API).
+                Observe would-blocks are recorded below under "Recorded observations" once the
+                validation gate is wired to the observation log (older builds: metrics + log only).
               </p>
             }
             @case (stopKey) {
               <p class="muted xsmall">
                 Widens a stop by the news volatility multiplier, capped at ×{{
                   cfg('NewsIntel:Risk:StopWidening:MaxFactor', '1.5')
-                }}. It never tightens a stop and every existing cap still applies. The Observe log
-                of would-be stops is in the engine log, not the API.
+                }}. It never tightens a stop and every existing cap still applies. Would-be stops
+                are recorded below once wired to the observation log (older builds: engine log
+                only).
               </p>
             }
             @case (multiKey) {
@@ -243,6 +252,115 @@ interface ModeControl {
         }
       </section>
 
+      <section class="card" data-testid="risk-observations">
+        <div class="card-head">
+          <h2>Recorded observations</h2>
+          <div class="filters">
+            <select class="sel" aria-label="Kind" (change)="setObsKind($any($event.target).value)">
+              <option value="">All kinds</option>
+              @for (k of obsKinds; track k) {
+                <option [value]="k">{{ kindLabel(k) }}</option>
+              }
+            </select>
+            <select
+              class="sel"
+              aria-label="Window"
+              (change)="setObsDays($any($event.target).value)"
+            >
+              <option value="1">last 24 h</option>
+              <option value="7" selected>last 7 days</option>
+              <option value="30">last 30 days</option>
+            </select>
+            <input
+              class="inp mono"
+              placeholder="Symbol"
+              aria-label="Observation symbol"
+              (change)="setObsSymbol($any($event.target).value)"
+            />
+          </div>
+        </div>
+        <p class="muted xsmall">
+          Every news-as-risk decision the engine took on a live entry: what a gate in Observe WOULD
+          have refused (entry allowed) and what one in Enforce did refuse. One row per symbol, key
+          and event per window — the evaluator's per-tick re-checks are not repeated. Backtests are
+          never recorded.
+        </p>
+        @if (obs(); as o) {
+          <div class="tiles">
+            <div class="tile">
+              <span class="v">{{ o.total }}</span
+              ><span class="k">in window</span>
+            </div>
+            @for (c of obsCountKinds(); track c) {
+              <div class="tile">
+                <span class="v">{{ o.countsByKind[c] }}</span
+                ><span class="k">{{ kindLabel(c) }}</span>
+              </div>
+            }
+          </div>
+          @if (o.counts.length) {
+            <h3>By symbol</h3>
+            <div class="legs">
+              @for (c of o.counts.slice(0, 30); track c.kind + c.symbol + c.mode) {
+                <span
+                  class="key"
+                  [title]="
+                    kindLabel(c.kind) +
+                    ' · last ' +
+                    (c.lastObservedAtUtc | date: 'MMM d HH:mm' : 'UTC') +
+                    'Z'
+                  "
+                  >{{ c.symbol }} · {{ c.mode }} · {{ c.count }}</span
+                >
+              }
+            </div>
+          }
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>When (UTC)</th>
+                  <th>Kind</th>
+                  <th>Mode</th>
+                  <th>Symbol</th>
+                  <th>Key</th>
+                  <th>What</th>
+                  <th>Event at</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (i of o.items; track i.id) {
+                  <tr>
+                    <td class="xsmall">{{ i.observedAtUtc | date: 'MMM d HH:mm' : 'UTC' }}</td>
+                    <td class="xsmall">{{ kindLabel(i.kind) }}</td>
+                    <td>
+                      <span class="pill" [class.bad]="i.mode === 'Enforce'">{{ i.mode }}</span>
+                    </td>
+                    <td class="mono">{{ i.symbol }}</td>
+                    <td class="mono xsmall">{{ i.key ?? '—' }}</td>
+                    <td class="small">{{ i.detail ?? i.eventRef ?? '' }}</td>
+                    <td class="xsmall">
+                      {{ i.eventAtUtc ? (i.eventAtUtc | date: 'MMM d HH:mm' : 'UTC') : '—' }}
+                    </td>
+                  </tr>
+                } @empty {
+                  <tr>
+                    <td colspan="7" class="empty">Nothing recorded in this window.</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else if (obsMissing()) {
+          <p class="muted small">
+            This engine build does not record observations — would-blocks live only in the
+            <code>trading.news_blackout.*</code> metrics and log lines.
+          </p>
+        } @else {
+          <p class="muted xsmall">Loading…</p>
+        }
+      </section>
+
       <app-confirm-dialog
         [open]="pending() !== null"
         [title]="'Change ' + (pending()?.control?.title ?? '') + '?'"
@@ -311,6 +429,14 @@ export class NewsRiskPageComponent {
   readonly checked = signal('EURUSD');
   readonly focus = signal<NewsFocusResult | null>(null);
   readonly focusError = signal<string | null>(null);
+  readonly obs = signal<NewsRiskObservationPage | null>(null);
+  readonly obsMissing = signal(false);
+  readonly obsKind = signal<NewsRiskObservationKind | null>(null);
+  readonly obsDays = signal(7);
+  readonly obsSymbol = signal('');
+  protected readonly obsKinds = NEWS_RISK_OBSERVATION_KINDS;
+  readonly obsCountKinds = computed(() => Object.keys(this.obs()?.countsByKind ?? {}).sort());
+  kindLabel = riskObservationKindLabel;
 
   readonly canEdit = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
   readonly advice = computed(() => directionAdvice(this.latestStudy()?.alignmentVerdict));
@@ -386,8 +512,46 @@ export class NewsRiskPageComponent {
     this.check();
   }
 
+  setObsKind(v: string): void {
+    this.obsKind.set(v ? (v as NewsRiskObservationKind) : null);
+    this.loadObservations();
+  }
+
+  setObsDays(v: string): void {
+    this.obsDays.set(Number(v) || 7);
+    this.loadObservations();
+  }
+
+  setObsSymbol(v: string): void {
+    this.obsSymbol.set(v.trim().toUpperCase());
+    this.loadObservations();
+  }
+
+  loadObservations(): void {
+    const from = new Date(Date.now() - this.obsDays() * 24 * 3600_000).toISOString();
+    this.svc
+      .getRiskObservations({
+        kind: this.obsKind(),
+        symbol: this.obsSymbol() || null,
+        fromUtc: from,
+        take: 200,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (o) => {
+          this.obs.set(o);
+          this.obsMissing.set(false);
+        },
+        error: () => {
+          this.obs.set(null);
+          this.obsMissing.set(true);
+        },
+      });
+  }
+
   load(): void {
     this.loading.set(true);
+    this.loadObservations();
     this.svc
       .getConfig()
       .pipe(takeUntilDestroyed(this.destroyRef))

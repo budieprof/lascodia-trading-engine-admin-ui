@@ -27,6 +27,7 @@ import {
   blackoutModeText,
   configValue,
   coverageRowFrom,
+  coverageRowFromBulk,
   coverageSummary,
   exposureKindOf,
   formatMinutes,
@@ -34,10 +35,18 @@ import {
   parseExposureList,
   parseMultiAssetMode,
   pct,
+  riskObservationKindLabel,
   signed,
   untrackedDemand,
 } from '../news-intel.logic';
-import { NewsArticleView, NewsConfigEntry, NewsFocusResult } from '../news-intel.types';
+import {
+  NewsArticleView,
+  NewsConfigEntry,
+  NewsCoverageView,
+  NewsFocusResult,
+  NewsRiskObservationPage,
+  NewsRiskObservationView,
+} from '../news-intel.types';
 
 /** Focus calls in flight at once while the page walks the symbol universe. */
 const FAN_OUT = 4;
@@ -47,8 +56,10 @@ const FAN_OUT = 4;
  * its legs (static or fitted), which the module tracks, the symbol bias and coverage, the freshness of
  * the newest weighted item on its legs, its calendar keys and what the multi-asset blackout does to it.
  *
- * The engine has no bulk coverage endpoint, so the page asks `GET news-intel/focus` once per symbol
- * (4 at a time, on load and on Refresh — never polled). Every figure is the engine's.
+ * One `GET news-intel/coverage` read (the engine computes pressure once per key, caches ~60 s) gives every
+ * row, the exact legacy-enforced vs mode-governed keys and the recorded risk observations. An engine without
+ * that endpoint falls back to `GET news-intel/focus` once per symbol (4 at a time, on load and on Refresh —
+ * never polled). Every figure is the engine's.
  */
 @Component({
   selector: 'app-news-coverage-page',
@@ -113,12 +124,53 @@ const FAN_OUT = 4;
           @if (progress(); as p) {
             <p class="muted small">Resolving symbols… {{ p.done }} / {{ p.total }}</p>
           }
-          <p class="muted xsmall">
-            Tracked: {{ tracked().length }} keys ({{ trackedSource() }}). "Would have blocked"
-            counts are not reported by the engine API — they live in the
-            <code>trading.news_blackout.multiasset_would_block</code> and
-            <code>scheduled_event_hits</code> metrics and the "would block (Observe)" log lines.
-          </p>
+          @if (bulk(); as b) {
+            <p class="muted xsmall" data-testid="coverage-bulk">
+              Tracked: {{ tracked().length }} keys ({{ trackedSource() }}). One engine read at
+              {{ b.computedAtUtc | date: 'HH:mm:ss' : 'UTC' }}Z{{ b.cached ? ' (cached)' : '' }},
+              pressure computed once for {{ b.pressureKeysComputed }} keys.
+            </p>
+          } @else {
+            <p class="muted xsmall">
+              Tracked: {{ tracked().length }} keys ({{ trackedSource() }}). This engine has no bulk
+              coverage read, so rows come from one focus call per symbol and the legacy/governed
+              split below is approximated (non-currency keys counted as mode-governed).
+            </p>
+          }
+        </section>
+
+        <section class="card" data-testid="coverage-observations">
+          <div class="card-head">
+            <h2>Recorded risk observations (7 days)</h2>
+            <a class="xsmall" routerLink="/news-intel/risk">Risk use →</a>
+          </div>
+          @if (observations(); as o) {
+            <div class="tiles">
+              <div class="tile">
+                <span class="v">{{ o.total }}</span
+                ><span class="k">observations</span>
+              </div>
+              @for (k of kindKeys(o); track k) {
+                <div class="tile">
+                  <span class="v">{{ o.countsByKind[k] }}</span
+                  ><span class="k">{{ kindLabel(k) }}</span>
+                </div>
+              }
+            </div>
+            @if (o.total === 0) {
+              <p class="muted small">
+                Nothing recorded in the window: no gate in Observe or Enforce met an event on a
+                tradable symbol (only live decisions are recorded, never backtests).
+              </p>
+            }
+          } @else if (observationsMissing()) {
+            <p class="muted small">
+              This engine build does not record observations yet — "would have blocked" lives only
+              in the <code>trading.news_blackout.*</code> metrics and log lines.
+            </p>
+          } @else {
+            <p class="muted xsmall">Loading…</p>
+          }
         </section>
 
         @if (demand().length) {
@@ -175,6 +227,7 @@ const FAN_OUT = 4;
                   <th class="num">Newest item</th>
                   <th>Calendar keys</th>
                   <th>Blackout</th>
+                  <th class="num" title="Recorded risk observations, 7 days">Obs 7d</th>
                 </tr>
               </thead>
               <tbody>
@@ -230,12 +283,37 @@ const FAN_OUT = 4;
                         <span class="pill">legacy</span>
                       }
                     </td>
+                    <td class="num">{{ r.riskObservations7d ?? '—' }}</td>
                   </tr>
                   @if (open() === r.symbol) {
                     <tr class="row-detail">
-                      <td colspan="8">
+                      <td colspan="9">
                         <div class="detail">
                           <p class="small">{{ modeText(r) }}</p>
+                          @if (r.exactKeys) {
+                            <p class="xsmall" data-testid="coverage-keys">
+                              Always refuses on:
+                              @for (k of r.legacyEnforcedKeys ?? []; track k) {
+                                <span class="key">{{ k }}</span>
+                              } @empty {
+                                <span class="muted"
+                                  >nothing (the legacy blackout never blocked it)</span
+                                >
+                              }
+                              · Mode-governed:
+                              @for (k of r.modeGovernedKeys; track k) {
+                                <span class="key untracked">{{ k }}</span>
+                              } @empty {
+                                <span class="muted">none</span>
+                              }
+                              · Refusing now ({{ mode() }}):
+                              @for (k of r.blockingKeys ?? []; track k) {
+                                <span class="key">{{ k }}</span>
+                              } @empty {
+                                <span class="muted">none</span>
+                              }
+                            </p>
+                          }
                           <p class="xsmall muted">
                             Resolved from: {{ r.source }}.
                             @if (r.includedInPrompt) {
@@ -284,6 +362,26 @@ const FAN_OUT = 4;
                               }
                             </tbody>
                           </table>
+                          @if (symbolObservations(); as so) {
+                            <h3>Recorded observations for {{ r.symbol }} (7 days)</h3>
+                            @for (o of so; track o.id) {
+                              <div class="xsmall">
+                                <span class="muted"
+                                  >{{ o.observedAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span
+                                >
+                                · {{ kindLabel(o.kind) }} · <span class="pill">{{ o.mode }}</span> ·
+                                <span class="key">{{ o.key ?? '—' }}</span>
+                                {{ o.detail ?? '' }}
+                                @if (o.eventAtUtc) {
+                                  <span class="muted"
+                                    >· event {{ o.eventAtUtc | date: 'MMM d HH:mm' : 'UTC' }}Z</span
+                                  >
+                                }
+                              </div>
+                            } @empty {
+                              <p class="muted xsmall">None recorded.</p>
+                            }
+                          }
                           @if (articleKey(); as k) {
                             <h3>Articles labelled {{ k }} (72 h)</h3>
                             @if (articles(); as list) {
@@ -318,7 +416,7 @@ const FAN_OUT = 4;
                   }
                 } @empty {
                   <tr>
-                    <td colspan="8" class="empty">No symbol matches the filter.</td>
+                    <td colspan="9" class="empty">No symbol matches the filter.</td>
                   </tr>
                 }
               </tbody>
@@ -361,20 +459,31 @@ export class NewsCoveragePageComponent {
   readonly open = signal<string | null>(null);
   readonly articleKey = signal<string | null>(null);
   readonly articles = signal<NewsArticleView[] | null>(null);
+  /** The engine's bulk read; null when the engine has no such endpoint (fan-out fallback in use). */
+  readonly bulk = signal<NewsCoverageView | null>(null);
+  readonly observations = signal<NewsRiskObservationPage | null>(null);
+  readonly observationsMissing = signal(false);
+  readonly symbolObservations = signal<NewsRiskObservationView[] | null>(null);
 
   private fanOut: Subscription | null = null;
 
   readonly tracked = computed(() => {
+    const b = this.bulk();
+    if (b) return b.tracked.map((k) => k.toUpperCase());
     const exp = parseExposureList(configValue(this.config(), 'NewsIntel:Exposures'));
     return exp.length ? exp : parseExposureList(configValue(this.config(), 'NewsIntel:Currencies'));
   });
   readonly trackedSource = computed(() =>
-    parseExposureList(configValue(this.config(), 'NewsIntel:Exposures')).length
-      ? 'NewsIntel:Exposures'
-      : 'NewsIntel:Currencies — Exposures is empty',
+    this.bulk()
+      ? 'as the engine resolves NewsIntel:Exposures'
+      : parseExposureList(configValue(this.config(), 'NewsIntel:Exposures')).length
+        ? 'NewsIntel:Exposures'
+        : 'NewsIntel:Currencies — Exposures is empty',
   );
 
   readonly rows = computed<CoverageRow[]>(() => {
+    const b = this.bulk();
+    if (b) return b.symbols.map(coverageRowFromBulk);
     const tracked = new Set(this.tracked());
     const ages = this.ages();
     const f = this.focus();
@@ -439,6 +548,39 @@ export class NewsCoveragePageComponent {
         error: () => this.mode.set('Observe'),
       });
 
+    this.svc
+      .getRiskObservations({ take: 1 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (o) => {
+          this.observations.set(o);
+          this.observationsMissing.set(false);
+        },
+        error: () => {
+          this.observations.set(null);
+          this.observationsMissing.set(true);
+        },
+      });
+
+    this.svc
+      .getCoverage()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (view) => {
+          this.bulk.set(view);
+          this.symbols.set(view.symbols.map((s) => s.symbol));
+          this.mode.set(parseMultiAssetMode(view.multiAssetMode));
+          this.loading.set(false);
+        },
+        // An engine without the bulk read: one focus call per symbol, as before.
+        error: () => {
+          this.bulk.set(null);
+          this.loadByFanOut();
+        },
+      });
+  }
+
+  private loadByFanOut(): void {
     this.pairs.list({ currentPage: 1, itemCountPerPage: 500 }).subscribe({
       next: (res) => {
         const syms = [
@@ -502,7 +644,23 @@ export class NewsCoveragePageComponent {
     this.open.set(this.open() === symbol ? null : symbol);
     this.articleKey.set(null);
     this.articles.set(null);
+    this.symbolObservations.set(null);
+    if (this.open() === symbol && !this.observationsMissing()) {
+      this.svc
+        .getRiskObservations({ symbol, take: 50 })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (p) => this.symbolObservations.set(p.items),
+          error: () => this.symbolObservations.set(null),
+        });
+    }
   }
+
+  kindKeys(o: NewsRiskObservationPage): string[] {
+    return Object.keys(o.countsByKind).sort();
+  }
+
+  kindLabel = riskObservationKindLabel;
 
   showArticles(key: string): void {
     this.articleKey.set(key);

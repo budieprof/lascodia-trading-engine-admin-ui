@@ -369,6 +369,28 @@ import {
 
             <app-news-exposure-legs [focus]="f" />
 
+            @if (f.risk; as r) {
+              <div class="small focus-risk" data-testid="focus-risk">
+                <strong>News as risk:</strong>
+                expected range ×{{ r.volatility.multiplier | number: '1.2-2' }} vs normal over
+                {{ r.volatility.horizonMinutes }} min · {{ r.volatility.scheduledHighEvents }} High
+                event(s) in horizon · {{ r.breakingStories.length }} breaking stor{{
+                  r.breakingStories.length === 1 ? 'y' : 'ies'
+                }}
+                <span class="muted xsmall">(coefficients from {{ r.volatility.source }})</span>
+                @for (b of r.breakingStories; track b.articleId + b.key) {
+                  <div class="xsmall">
+                    <code class="mono">{{ b.key }}</code> {{ b.headline }}
+                    <span class="muted"
+                      >· {{ b.category }} · {{ b.certainty }} · paused until
+                      {{ b.pauseUntilUtc | date: 'HH:mm' : 'UTC' }}Z</span
+                    >
+                  </div>
+                }
+                <a class="xsmall" routerLink="/news-intel/risk">Risk use →</a>
+              </div>
+            }
+
             <p class="muted small fingerprint">
               Weight params <code class="mono">{{ ctx.paramsFingerprint }}</code> — readings
               computed under different fingerprints are not comparable.

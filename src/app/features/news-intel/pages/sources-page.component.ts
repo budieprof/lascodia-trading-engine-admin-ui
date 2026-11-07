@@ -21,7 +21,7 @@ import {
   pct,
   vendorRows,
 } from '../news-intel.logic';
-import { NewsConfigEntry } from '../news-intel.types';
+import { NewsConfigEntry, NewsVendorVerifyResult } from '../news-intel.types';
 
 const SEC_UA = 'NewsIntel:Ingest:SecUserAgent';
 
@@ -266,9 +266,10 @@ type PendingWrite =
           <h2>Paid vendors</h2>
           <p class="muted xsmall">
             Adapters are built to each vendor's published API and are unproven against a live
-            account until a key is pasted. Keys are write-only and never shown again. The engine has
-            no "verify key" call: after saving, watch this page's source notes and the publisher
-            latency rows for the vendor.
+            account until a key is pasted. Keys are write-only and never shown again. "Verify" makes
+            one bounded call to the vendor with the stored key (at most once per 30 s) and shows the
+            answer plus a fingerprint of the key (first 8 hex of its SHA-256) — never the key — so
+            you can tell which key is stored without reading it.
           </p>
           <div class="table-wrap">
             <table>
@@ -278,6 +279,7 @@ type PendingWrite =
                   <th>Enabled</th>
                   <th>API key</th>
                   <th></th>
+                  <th>Verify</th>
                 </tr>
               </thead>
               <tbody>
@@ -329,6 +331,39 @@ type PendingWrite =
                         </form>
                       } @else {
                         <span class="muted xsmall">needs platform.engine.secrets</span>
+                      }
+                    </td>
+                    <td class="xsmall" data-testid="vendor-verify">
+                      @if (canManage()) {
+                        <button
+                          type="button"
+                          class="btn subtle"
+                          [disabled]="verifying() === v.name"
+                          (click)="verify(v.name)"
+                        >
+                          {{ verifying() === v.name ? 'Checking…' : 'Verify' }}
+                        </button>
+                      }
+                      @if (verified()[v.name]; as r) {
+                        <div>
+                          <span class="pill" [class.ok]="r.ok" [class.warn]="!r.ok">{{
+                            r.status
+                          }}</span>
+                          @if (r.keyFingerprint) {
+                            <span class="mono">
+                              key #{{ r.keyFingerprint }} ({{ r.keyLength }} chars)</span
+                            >
+                          }
+                          @if (r.ok) {
+                            <span class="muted">
+                              · HTTP {{ r.httpStatus }} · {{ r.itemsParsed }} item(s) parsed ·
+                              {{ r.elapsedMs }} ms</span
+                            >
+                          }
+                          @if (r.error) {
+                            <div class="muted">{{ r.error }}</div>
+                          }
+                        </div>
                       }
                     </td>
                   </tr>
@@ -386,6 +421,8 @@ export class NewsSourcesPageComponent {
   readonly notice = signal<string | null>(null);
   readonly secDraft = signal('');
   readonly savedTags = signal<Record<string, string>>({});
+  readonly verifying = signal<string | null>(null);
+  readonly verified = signal<Record<string, NewsVendorVerifyResult>>({});
 
   readonly canManage = computed(() => this.auth.hasPermission(Permission.PlatformEngineManage));
   readonly canSecrets = computed(() => this.auth.hasPermission(Permission.PlatformEngineSecrets));
@@ -460,6 +497,37 @@ export class NewsSourcesPageComponent {
   }
 
   /** Takes the pasted value and clears the field at once, so the key is not left in the DOM. */
+  /** One bounded vendor call with the stored key; the answer carries a fingerprint, never the key. */
+  verify(name: string): void {
+    this.verifying.set(name);
+    this.svc.verifyVendor(name).subscribe({
+      next: (r) => {
+        this.verified.update((v) => ({ ...v, [name]: r }));
+        this.verifying.set(null);
+      },
+      error: (e) => {
+        this.verifying.set(null);
+        this.verified.update((v) => ({
+          ...v,
+          [name]: {
+            vendor: name,
+            keySet: false,
+            keyFingerprint: null,
+            keyLength: null,
+            ok: false,
+            status: 'unavailable',
+            httpStatus: null,
+            itemsParsed: null,
+            error: errorText(e, 'This engine build has no vendor verify call.'),
+            enabled: false,
+            checkedAtUtc: new Date().toISOString(),
+            elapsedMs: null,
+          },
+        }));
+      },
+    });
+  }
+
   askKey(vendor: VendorRow, input: HTMLInputElement): void {
     const value = input.value.trim();
     input.value = '';

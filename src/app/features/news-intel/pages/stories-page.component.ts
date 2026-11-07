@@ -29,6 +29,7 @@ import {
 import {
   NEWS_STORY_STATES,
   NewsConfigEntry,
+  NewsStoryMembersView,
   NewsStoryState,
   NewsStoryView,
 } from '../news-intel.types';
@@ -149,7 +150,12 @@ interface WeightPoint {
                       </div>
                     </td>
                     <td class="num">{{ s.articleCount }}</td>
-                    <td class="num">{{ s.publisherCount }}</td>
+                    <td class="num" [title]="(s.publishers ?? []).join(', ')">
+                      {{ s.publisherCount }}
+                      @if (s.publishers?.length) {
+                        <div class="muted xsmall pubs">{{ publishersText(s.publishers!) }}</div>
+                      }
+                    </td>
                     <td class="xsmall">
                       {{ s.firstSeenUtc | date: 'MMM d HH:mm' : 'UTC' }} →
                       {{ s.lastSeenUtc | date: 'MMM d HH:mm' : 'UTC' }}
@@ -220,10 +226,71 @@ interface WeightPoint {
                               </div>
                             }
                           }
-                          <p class="muted xsmall">
-                            The engine API lists neither every member article nor the publisher
-                            names of a story — only those still weighted are shown here.
-                          </p>
+                          <h3>Member articles</h3>
+                          @if (storyMembers(); as sm) {
+                            <p class="xsmall">
+                              Publishers ({{ sm.story.publishers?.length ?? 0 }}):
+                              {{ (sm.story.publishers ?? []).join(', ') || '—' }}
+                            </p>
+                            <div class="table-wrap" data-testid="story-members">
+                              <table>
+                                <thead>
+                                  <tr>
+                                    <th>First seen (UTC)</th>
+                                    <th>Publisher</th>
+                                    <th>Headline</th>
+                                    <th>Labels (key · direction · novelty)</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  @for (m of sm.articles; track m.id) {
+                                    <tr>
+                                      <td class="xsmall">
+                                        {{ m.firstSeenUtc | date: 'MMM d HH:mm' : 'UTC' }}
+                                        @if (m.isOrigin) {
+                                          <span class="pill info">origin</span>
+                                        }
+                                      </td>
+                                      <td class="xsmall">{{ m.sourceName }}</td>
+                                      <td class="small">
+                                        @if (m.url) {
+                                          <a [href]="m.url" target="_blank" rel="noopener">{{
+                                            m.title
+                                          }}</a>
+                                        } @else {
+                                          {{ m.title }}
+                                        }
+                                        @if (m.stance !== 'Asserts') {
+                                          <span class="pill">{{ m.stance }}</span>
+                                        }
+                                      </td>
+                                      <td class="xsmall">
+                                        @for (l of m.labels; track l.exposureKey) {
+                                          <div>
+                                            <span class="key">{{ l.exposureKey }}</span>
+                                            {{ l.direction }} · {{ l.novelty }} · {{ l.certainty }}
+                                          </div>
+                                        } @empty {
+                                          <span class="muted">{{ m.classificationStatus }}</span>
+                                        }
+                                      </td>
+                                    </tr>
+                                  } @empty {
+                                    <tr>
+                                      <td colspan="4" class="empty">No member article found.</td>
+                                    </tr>
+                                  }
+                                </tbody>
+                              </table>
+                            </div>
+                          } @else if (storyMembersMissing()) {
+                            <p class="muted xsmall">
+                              This engine build does not list a story's members — only those still
+                              weighted are shown above.
+                            </p>
+                          } @else {
+                            <p class="muted xsmall">Loading members…</p>
+                          }
                         </div>
                       </td>
                     </tr>
@@ -275,6 +342,8 @@ export class NewsStoriesPageComponent {
   readonly series = signal<WeightPoint[] | null>(null);
   readonly members = signal<PressureContribution[]>([]);
   readonly config = signal<NewsConfigEntry[]>([]);
+  readonly storyMembers = signal<NewsStoryMembersView | null>(null);
+  readonly storyMembersMissing = signal(false);
 
   readonly stories = createPolledResource(
     () =>
@@ -327,6 +396,19 @@ export class NewsStoriesPageComponent {
     this.open.set(s);
     this.series.set(null);
     this.members.set([]);
+    this.storyMembers.set(null);
+    this.storyMembersMissing.set(false);
+    this.svc
+      .getStoryArticles(s.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (m) => {
+          if (this.open()?.id === s.id) this.storyMembers.set(m);
+        },
+        error: () => {
+          if (this.open()?.id === s.id) this.storyMembersMissing.set(true);
+        },
+      });
     const keys = storyExposures(s);
     const instants = storySampleInstants(s, new Date());
     if (!keys.length || !instants.length) {
@@ -347,6 +429,10 @@ export class NewsStoriesPageComponent {
         this.series.set(pts.map(({ at, total, signed }) => ({ at, total, signed })));
         this.members.set(pts[pts.length - 1]?.members ?? []);
       });
+  }
+
+  publishersText(p: readonly string[]): string {
+    return p.length <= 3 ? p.join(', ') : `${p.slice(0, 3).join(', ')} +${p.length - 3}`;
   }
 
   f(v: number): string {

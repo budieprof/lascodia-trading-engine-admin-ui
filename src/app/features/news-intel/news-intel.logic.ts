@@ -8,6 +8,7 @@
  */
 import {
   ExposureKindName,
+  NewsCoverageSymbolView,
   NewsConfigEntry,
   NewsEvalRunView,
   NewsExposureLegView,
@@ -151,8 +152,21 @@ export interface CoverageRow {
   /** Minutes since the newest weighted item across all legs; null when unknown. */
   newestAgeMinutes: number | null;
   calendarKeys: string[];
-  /** Calendar keys that are not plain currencies — the ones the multi-asset mode governs for this symbol. */
+  /**
+   * Keys the multi-asset mode governs for this symbol. Exact (engine split) when the row came from the bulk
+   * coverage read; otherwise approximated as the non-currency calendar keys (`exact` false).
+   */
   modeGovernedKeys: string[];
+  /** Economic-calendar keys that always refuse (bulk read only; null when the engine did not say). */
+  legacyEnforcedKeys?: string[] | null;
+  /** Keys whose scheduled market events refuse only under Enforce (bulk read only). */
+  scheduledEventKeys?: string[] | null;
+  /** What refuses entries under the mode in force (bulk read only). */
+  blockingKeys?: string[] | null;
+  /** Recorded news-as-risk observations over 7 days (bulk read only). */
+  riskObservations7d?: number | null;
+  /** True when the legacy/governed split is the engine's own, not the page's approximation. */
+  exactKeys?: boolean;
   /** catalogue | instrument | fitted | unresolved. */
   source: string;
   includedInPrompt: boolean;
@@ -226,6 +240,53 @@ export function coverageRowFrom(
     omissionReason: focus?.omissionReason ?? null,
     problem:
       problem ?? (focus && !rawLegs.length ? 'The exposure map cannot place this symbol.' : null),
+  };
+}
+
+/**
+ * A coverage row from the engine's bulk read (`GET news-intel/coverage`) — every figure is the engine's,
+ * including the exact legacy-enforced vs mode-governed split.
+ */
+export function coverageRowFromBulk(v: NewsCoverageSymbolView): CoverageRow {
+  const legs: CoverageLeg[] = v.legs.map((l) => ({
+    key: l.key.toUpperCase(),
+    kind: exposureKindOf(l.key),
+    weight: l.weight,
+    basis: l.basis,
+    fitted: l.basis === 'factor:fitted',
+    covered: l.covered,
+    score: l.score,
+    newestAgeMinutes: l.newestItemAgeMinutes,
+  }));
+  const governed = [
+    ...new Set([...v.modeGoverned, ...v.scheduledEventKeys].map((k) => k.toUpperCase())),
+  ];
+  return {
+    symbol: v.symbol,
+    assetClass: (ASSET_CLASSES as readonly string[]).includes(v.assetClass)
+      ? (v.assetClass as SymbolAssetClass)
+      : 'Unplaced',
+    legs,
+    coveredLegs: legs.filter((l) => l.covered).length,
+    untrackedLegs: legs.filter((l) => !l.covered).length,
+    coverage: legs.length ? v.coverage : null,
+    symbolBias: v.symbolBias,
+    newestAgeMinutes: v.newestItemAgeMinutes,
+    calendarKeys: [
+      ...new Set(
+        [...v.legacyEnforced, ...v.modeGoverned, ...v.calendarKeys].map((k) => k.toUpperCase()),
+      ),
+    ],
+    modeGovernedKeys: governed,
+    legacyEnforcedKeys: v.legacyEnforced.map((k) => k.toUpperCase()),
+    scheduledEventKeys: v.scheduledEventKeys.map((k) => k.toUpperCase()),
+    blockingKeys: v.blockingKeys.map((k) => k.toUpperCase()),
+    riskObservations7d: v.riskObservations7d,
+    exactKeys: true,
+    source: v.source,
+    includedInPrompt: v.includedInPrompt,
+    omissionReason: v.omissionReason,
+    problem: v.problem,
   };
 }
 
@@ -1101,4 +1162,22 @@ export function parseRecommendation(data: unknown): {
     };
   }
   return { rows: [] };
+}
+
+// ── Risk observations (engine gaps build) ────────────────────────────────
+
+/** Operator wording for a recorded observation kind. */
+export function riskObservationKindLabel(kind: string): string {
+  switch (kind) {
+    case 'MultiAssetBlackout':
+      return 'multi-asset blackout';
+    case 'ScheduledEventBlackout':
+      return 'scheduled-event blackout';
+    case 'BreakingGate':
+      return 'breaking-news pause';
+    case 'StopWidening':
+      return 'stop widening';
+    default:
+      return kind;
+  }
 }

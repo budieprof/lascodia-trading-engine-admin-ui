@@ -30,6 +30,12 @@ import {
   NewsEventStudyRunView,
   NewsEventStudyDetail,
   NewsEventStudyResultView,
+  NewsCoverageView,
+  NewsExposureListView,
+  NewsRiskObservationKind,
+  NewsRiskObservationPage,
+  NewsStoryMembersView,
+  NewsVendorVerifyResult,
 } from '@features/news-intel/news-intel.types';
 import type { NewsPressureReadingView } from '@features/news-intel/news-intel.logic';
 
@@ -194,6 +200,66 @@ export class NewsIntelService {
     if (opts?.state) qs.set('state', opts.state);
     qs.set('take', String(opts?.take ?? 200));
     return this.api.getEnvelope<NewsStoryView[]>(`/news-intel/stories?${qs}`, { silent: true });
+  }
+
+  /** A story's member articles, origin first, with publishers and labels (engine gaps build). */
+  getStoryArticles(id: number, take = 200): Observable<NewsStoryMembersView> {
+    return this.api.getEnvelope<NewsStoryMembersView>(
+      `/news-intel/stories/${id}/articles?take=${take}`,
+      { silent: true },
+    );
+  }
+
+  // ── Gaps (engine ni/gaps) ──────────────────────────────────────────────
+
+  /**
+   * Every active universe symbol in one read — legs, coverage, bias, newest-item age, prompt verdict and
+   * the blackout keys split legacy vs mode-governed. The engine computes pressure once per key and caches ~60 s.
+   */
+  getCoverage(opts?: {
+    assetClass?: string | null;
+    asOfUtc?: string | null;
+  }): Observable<NewsCoverageView> {
+    const qs = new URLSearchParams();
+    if (opts?.assetClass) qs.set('assetClass', opts.assetClass);
+    if (opts?.asOfUtc) qs.set('asOf', opts.asOfUtc);
+    const q = qs.toString();
+    return this.api.getEnvelope<NewsCoverageView>(`/news-intel/coverage${q ? '?' + q : ''}`, {
+      silent: true,
+    });
+  }
+
+  /** Tracked + recommended exposure keys with each key's effective search term and its source. */
+  getExposureList(): Observable<NewsExposureListView> {
+    return this.api.getEnvelope<NewsExposureListView>('/news-intel/exposures', { silent: true });
+  }
+
+  /** Recorded news-as-risk decisions (what Observe-mode gates would have refused), with counts. */
+  getRiskObservations(opts?: {
+    kind?: NewsRiskObservationKind | null;
+    symbol?: string | null;
+    fromUtc?: string | null;
+    toUtc?: string | null;
+    take?: number;
+  }): Observable<NewsRiskObservationPage> {
+    const qs = new URLSearchParams();
+    if (opts?.kind) qs.set('kind', opts.kind);
+    if (opts?.symbol) qs.set('symbol', opts.symbol);
+    if (opts?.fromUtc) qs.set('from', opts.fromUtc);
+    if (opts?.toUtc) qs.set('to', opts.toUtc);
+    qs.set('take', String(opts?.take ?? 200));
+    return this.api.getEnvelope<NewsRiskObservationPage>(`/news-intel/risk-observations?${qs}`, {
+      silent: true,
+    });
+  }
+
+  /** One bounded call to a paid vendor with its stored key; answers ok/error + a key fingerprint, never the key. */
+  verifyVendor(name: string): Observable<NewsVendorVerifyResult> {
+    return this.api.postEnvelope<NewsVendorVerifyResult>(
+      `/news-intel/vendors/${encodeURIComponent(name)}/verify`,
+      {},
+      { silent: true },
+    );
   }
 
   /** Gold labels with their article headline, filtered by provenance / exposure. */
