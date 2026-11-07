@@ -13,5 +13,7 @@ export function isBackfillEligible(s: Pick<StrategyDto, 'lifecycleStage'>): bool
 export function backfillCandidates<T extends Pick<StrategyDto, 'lifecycleStage' | 'name'>>(
   strategies: readonly T[],
 ): T[] {
-  return strategies.filter(isBackfillEligible).sort((a, b) => a.name.localeCompare(b.name));
+  return strategies
+    .filter(isBackfillEligible)
+    .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''));
 }

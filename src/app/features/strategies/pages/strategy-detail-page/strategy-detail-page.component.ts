@@ -42,6 +42,7 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
 import { TabsComponent, TabItem } from '@shared/components/ui/tabs/tabs.component';
 import { readTabParam, tabQueryParam } from '../../util/tab-url';
+import { fmtProfitFactor } from '@shared/utils/metric-format';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
@@ -1783,6 +1784,9 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   });
 
   protected strategyId!: number;
+
+  /** PF 9999 = no losing trades → "∞" (U04). */
+  protected readonly fmtProfitFactor = fmtProfitFactor;
 
   readonly detailTabs: TabItem[] = [
     { label: 'Config', value: 'config' },
