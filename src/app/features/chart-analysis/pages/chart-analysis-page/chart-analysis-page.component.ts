@@ -497,6 +497,7 @@ import {
 } from './chart-page.config';
 import { ChartHistoryPager } from './chart-history-pager';
 import { ChartDockState } from './chart-dock-state';
+import { ChartEditorState } from './chart-editor-state';
 import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 
@@ -1105,87 +1106,54 @@ export class ChartAnalysisPageComponent {
 
   // ── Pine Editor ↔ chart script (TradingView: the editor shows the script on the chart) ──
   private readonly strategies = inject(StrategiesService);
-  /** The chart script the editor is showing (its run key), or null for a new script. */
-  readonly editorKey = signal<string | null>(null);
-  /** Engine strategy sources, fetched once per id. */
-  private readonly strategySources = signal<Record<number, string | null>>({});
-  readonly editorTarget = computed(() => {
-    const runs = this.scriptRuns();
-    const key = this.editorKey();
-    const run = runs.find((r) => r.item.key === key) ?? null;
-    // A script whose first run failed is not on the chart yet, but its source can be fixed here.
-    const pending = run || key === null ? null : (this.pendingScripts().get(key) ?? null);
-    const item = run?.item ?? pending?.item;
-    if (!item) return null;
-    const id = item.strategyId ?? null;
-    const source = item.pineSource ?? (id !== null ? (this.strategySources()[id] ?? null) : null);
-    return {
-      key: item.key,
-      name: run?.result.title || item.name,
-      source,
-      strategyId: id,
-      loading: id !== null && source === null,
-    };
-  });
-
   /**
-   * The operator removed the script the editor showed ({@link removeScriptFromChart}): until it
-   * is pointed at a script again, the editor opens on the starter template. Saved with the layout's
-   * dock, so a reload does not bring a chart script back into it.
+   * U13 (fu-ui): which chart script the editor shows, its draft and assistant text — {@link ChartEditorState}. The
+   * members of the same names below are aliases of its signals.
    */
-  private readonly editorCleared = signal(false);
-
-  /** Point the editor at a chart script, loading an engine strategy's source when needed. */
-  openScriptSource(key: string | null): void {
-    if (key !== this.editorKey()) this.assistSource.set(null);
-    const runs = this.scriptRuns();
-    // Unlinked, it shows the chart's strategy or newest script — unless a removal cleared it.
-    const fallback = this.editorCleared()
-      ? null
-      : ((runs.find((r) => r.result.kind === 'strategy') ?? runs[runs.length - 1])?.item.key ??
-        null);
-    const target = key ?? fallback;
-    if (target !== null) this.editorCleared.set(false);
-    this.editorKey.set(target);
-    const item =
-      runs.find((r) => r.item.key === target)?.item ??
-      (target !== null ? this.pendingScripts().get(target)?.item : undefined);
-    const id = item?.strategyId;
-    if (id !== undefined && id !== null && !item?.pineSource && !(id in this.strategySources())) {
+  readonly editor = new ChartEditorState<ChartScriptItem, ChartScriptRun>({
+    scriptRuns: () => this.scriptRuns(),
+    pendingScripts: () => this.pendingScripts(),
+    dock: {
+      editorOpen: this.dock.editorOpen,
+      frontDock: (which) => this.frontDock(which),
+    },
+    fetchStrategySource: (id, done) =>
       this.strategies
         .getById(id)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
-          next: (res) =>
-            this.strategySources.update((m) => ({ ...m, [id]: res?.data?.scriptSource ?? '' })),
-          error: () => this.strategySources.update((m) => ({ ...m, [id]: '' })),
-        });
-    }
-    this.editorOpen.set(true);
-    this.frontDock('editor');
+          next: (res) => done(res?.data?.scriptSource ?? ''),
+          error: () => done(''),
+        }),
+  });
+  /** The chart script the editor is showing (its run key), or null for a new script. */
+  readonly editorKey = this.editor.editorKey;
+  /** Engine strategy sources, fetched once per id. */
+  private readonly strategySources = this.editor.strategySources;
+  readonly editorTarget = this.editor.editorTarget;
+  /** Set when the shown script was removed: the editor opens on the starter template ({@link ChartEditorState}). */
+  private readonly editorCleared = this.editor.editorCleared;
+
+  /** Point the editor at a chart script, loading an engine strategy's source when needed. */
+  openScriptSource(key: string | null): void {
+    this.editor.openScriptSource(key);
   }
   // ── The assistant's view of the Pine Editor (`pine.*` / `strategy.*` page commands) ──
   /** The editor's current text, for the script it shows — kept here so it reads even with the tester in front. */
-  private readonly editorDraft = signal<{ key: string | null; text: string } | null>(null);
+  private readonly editorDraft = this.editor.editorDraft;
   /** Text the assistant wrote, pushed into the editor (a new seq applies it). */
-  readonly assistSource = signal<{ text: string; seq: number } | null>(null);
-  private assistSeq = 0;
+  readonly assistSource = this.editor.assistSource;
 
   onEditorSource(text: string): void {
-    this.editorDraft.set({ key: this.editorKey(), text });
+    this.editor.onEditorSource(text);
   }
 
   private draftText(): string {
-    const d = this.editorDraft();
-    if (d && d.key === this.editorKey()) return d.text;
-    return this.editorTarget()?.source ?? '';
+    return this.editor.draftText();
   }
 
   private writeDraft(text: string): void {
-    if (!this.editorOpen()) this.openScriptSource(this.editorKey());
-    this.frontDock('editor');
-    this.editorDraft.set({ key: this.editorKey(), text });
-    this.assistSource.set({ text, seq: ++this.assistSeq });
+    this.editor.writeDraft(text);
   }
 
   private readonly scriptEditor = viewChild(ScriptEditorPanelComponent);
@@ -2203,7 +2171,7 @@ export class ChartAnalysisPageComponent {
     this.editorKey.set(null);
     this.editorCleared.set(true);
     this.editorDraft.set({ key: null, text: d.source });
-    this.assistSource.set({ text: d.source, seq: ++this.assistSeq });
+    this.editor.pushAssist(d.source);
     this.editorOpen.set(true);
     this.frontDock('editor');
     this.notify.success(`${d.name} is in the Pine Editor as an unsaved draft.`);
@@ -5658,7 +5626,7 @@ export class ChartAnalysisPageComponent {
       this.editorOpen.set(true);
       if (d.editorText) {
         this.editorDraft.set({ key: d.editorKey, text: d.editorText });
-        this.assistSource.set({ text: d.editorText, seq: ++this.assistSeq });
+        this.editor.pushAssist(d.editorText);
       }
     }
   }
