@@ -416,6 +416,7 @@ import {
 import { appStorage } from '@core/storage/app-storage';
 import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
 import { footprintRowChoices } from '../../orderflow/tick-flow';
+import { sourceCarries } from '../../orderflow/flow-source';
 import type { OrderBookSnapshot } from '../../panels/side/chart-panels.types';
 import { bookToSnapshot } from '../../orderflow/stream-depth';
 import { footprintRowsFromTape } from '../../replay/tick-replay';
@@ -1895,7 +1896,10 @@ export class ChartAnalysisPageComponent {
       // The consolidated book has no tick tape: tick replay then reads the automatic source.
       sourceId: () => {
         const s = this.orderFlow().sourceId;
-        return isConsolidatedId(s) ? null : s;
+        if (isConsolidatedId(s)) return null;
+        // UF07: a picked source that does not carry this symbol (a crypto exchange on an FX chart) → automatic.
+        const src = this.orderFlowFeed.mdSources()?.find((x) => x.sourceId === s);
+        return src && !sourceCarries(src, this.symbol()) ? null : s;
       },
       now: () => this.serverClock.now(),
     },

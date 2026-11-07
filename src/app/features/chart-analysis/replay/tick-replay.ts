@@ -414,6 +414,12 @@ export class TickReplay {
             this.note.set(
               'No book snapshot within 2 h before the start: the book is unknown until the first snapshot in the tape.',
             );
+          else if (src && !src.keyframe && !src.book?.length && src.ticks?.t.length)
+            // UF07: quotes were retained but no depth (a source without a book, or its book history ended): say so
+            // rather than replaying an empty ladder as if the book were empty.
+            this.note.set(
+              `No depth history for ${this.deps.symbol()} from ${src.sourceId} here: quotes only — the book stays empty.`,
+            );
         }
         // A truncated answer ends at its last row; the next window starts there.
         const lastRow = Math.max(src?.ticks?.t.at(-1) ?? from, src?.book?.at(-1)?.t ?? from);

@@ -1217,7 +1217,12 @@ export class OrderFlowFeed {
     // Tick replay: the bar forming at the head, from the recorded ticks up to the head (C2 answers stop before it).
     const clipNow = this.deps.replayClip();
     const forming = bars.at(-1);
-    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow) {
+    // UF07: the tape's tick-rule counts only complete a tick-count footprint — never one of traded volume.
+    const countsOnly = flowOrigin(f.data) === 'tickRuleQuotes';
+    let formingSkipped = false;
+    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow && !countsOnly)
+      formingSkipped = this.deps.tickFootprint(forming.time, clipNow) !== null;
+    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow && countsOnly) {
       const rowsNow = this.deps.tickFootprint(forming.time, clipNow);
       if (rowsNow) {
         const at = out.findIndex((b) => b.t === forming.time);
@@ -1242,6 +1247,8 @@ export class OrderFlowFeed {
         `${candleOnly} bar${candleOnly === 1 ? '' : 's'} without retained ticks: no footprint`,
       );
     if (note && this.footState().kind === 'error') lines.push(note);
+    if (formingSkipped)
+      lines.push('The bar forming at the replay head has no footprint: the recorded tape holds quotes, this footprint traded volume');
     const volume = flowOrigin(f.data) !== 'tickRuleQuotes';
     if (volume) lines.push(`Cells in ${flowUnitWord(f.data, base)}; ${f.data.source?.label ?? 'venue'} trades are read for the last 24 h`);
     return { model: { bars: out, rowPrice, ...(volume ? { format: formatFlowVolume } : {}) }, lines };
