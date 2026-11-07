@@ -470,186 +470,29 @@ export interface ComparePanel {
   scripts: PanelScript[];
 }
 
-const RESOLUTION_GROUPS: Array<{
-  label: string;
-  items: Array<{ id: TvResolution; name: string }>;
-}> = [
-  {
-    label: 'Minutes',
-    items: [
-      { id: '1', name: '1 minute' },
-      { id: '2', name: '2 minutes' },
-      { id: '3', name: '3 minutes' },
-      { id: '5', name: '5 minutes' },
-      { id: '10', name: '10 minutes' },
-      { id: '15', name: '15 minutes' },
-      { id: '30', name: '30 minutes' },
-      { id: '45', name: '45 minutes' },
-    ],
-  },
-  {
-    label: 'Hours',
-    items: [
-      { id: '60', name: '1 hour' },
-      { id: '120', name: '2 hours' },
-      { id: '180', name: '3 hours' },
-      { id: '240', name: '4 hours' },
-      { id: '360', name: '6 hours' },
-      { id: '480', name: '8 hours' },
-      { id: '720', name: '12 hours' },
-    ],
-  },
-  {
-    label: 'Days',
-    items: [
-      { id: '1D', name: '1 day' },
-      { id: '1W', name: '1 week' },
-      { id: '1M', name: '1 month' },
-    ],
-  },
-];
+import {
+  RESOLUTION_GROUPS,
+  DAY,
+  GO_TO_DATE_PAGES,
+  RANGE_PRESETS,
+  STYLE_GROUPS,
+  STYLE_STUDY,
+  CHART_STYLES,
+  PAGE_BARS,
+  MAX_SCRIPT_BARS,
+  WATCHLIST_OPEN_KEY,
+  DOCK_WIDTH_KEY,
+  loadDockWidth,
+  loadWatchlistOpen,
+  DRAWING_HOTKEYS,
+  CHART_HOTKEYS,
+  type ToolbarMenu,
+  type StyleChoice,
+} from './chart-page.config';
+import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 
-const DAY = 86_400_000;
-/** Pages of history go-to-date loads at most to reach a date (1,500 bars each). */
-const GO_TO_DATE_PAGES = 12;
-
-/** TradingView's bottom-bar presets: each picks the interval it shows the span at. */
-const RANGE_PRESETS: Array<{
-  id: string;
-  title: string;
-  resolution: TvResolution;
-  spanMs: number | 'ytd' | 'all';
-}> = [
-  { id: '1D', title: '1 day in 1 minute intervals', resolution: '1', spanMs: DAY },
-  { id: '5D', title: '5 days in 5 minute intervals', resolution: '5', spanMs: 5 * DAY },
-  { id: '1M', title: '1 month in 30 minute intervals', resolution: '30', spanMs: 30 * DAY },
-  { id: '3M', title: '3 months in 1 hour intervals', resolution: '60', spanMs: 91 * DAY },
-  { id: '6M', title: '6 months in 4 hour intervals', resolution: '240', spanMs: 182 * DAY },
-  { id: 'YTD', title: 'Year to date in 1 day intervals', resolution: '1D', spanMs: 'ytd' },
-  { id: '1Y', title: '1 year in 1 day intervals', resolution: '1D', spanMs: 365 * DAY },
-  { id: '5Y', title: '5 years in 1 week intervals', resolution: '1W', spanMs: 5 * 365 * DAY },
-  { id: 'All', title: 'All data in 1 month intervals', resolution: '1M', spanMs: 'all' },
-];
-
-type ToolbarMenu =
-  | 'interval'
-  | 'style'
-  | 'templates'
-  | 'overlays'
-  | 'alert'
-  | 'split'
-  | 'more'
-  | BottomBarMenu;
-
-/** The chart-type menu, grouped as TradingView groups it. TPO and Session volume profile toggle studies. */
-type StyleChoice = ChartStyle | 'tpo' | 'session-vp';
-const STYLE_GROUPS: Array<Array<{ id: StyleChoice; label: string }>> = [
-  [
-    { id: 'bars', label: 'Bars' },
-    { id: 'candles', label: 'Candles' },
-    { id: 'hollow', label: 'Hollow candles' },
-    { id: 'vol-candle', label: 'Volume candles' },
-  ],
-  [
-    { id: 'line', label: 'Line' },
-    { id: 'line-markers', label: 'Line with markers' },
-    { id: 'stepline', label: 'Step line' },
-  ],
-  [
-    { id: 'area', label: 'Area' },
-    { id: 'hlc-area', label: 'HLC area' },
-    { id: 'baseline', label: 'Baseline' },
-  ],
-  [
-    { id: 'column', label: 'Columns' },
-    { id: 'hilo', label: 'High-low' },
-    { id: 'hlc-bars', label: 'HLC bars' },
-  ],
-  [
-    { id: 'tpo', label: 'Time price opportunity' },
-    { id: 'session-vp', label: 'Session volume profile' },
-  ],
-  [
-    { id: 'heikin-ashi', label: 'Heikin Ashi' },
-    { id: 'renko', label: 'Renko' },
-    { id: 'line-break', label: 'Line break' },
-    { id: 'kagi', label: 'Kagi' },
-    { id: 'pnf', label: 'Point & figure' },
-    { id: 'range', label: 'Range' },
-  ],
-];
-const STYLE_STUDY: Partial<Record<StyleChoice, string>> = {
-  tpo: 'profile:tpo',
-  'session-vp': 'profile:vp-session',
-};
-
-const CHART_STYLES: Array<{ id: ChartStyle; label: string }> = [
-  { id: 'candles', label: 'Candles' },
-  { id: 'hollow', label: 'Hollow candles' },
-  { id: 'heikin-ashi', label: 'Heikin Ashi' },
-  { id: 'bars', label: 'Bars' },
-  { id: 'hlc-bars', label: 'HLC bars' },
-  { id: 'hilo', label: 'High-Low' },
-  { id: 'vol-candle', label: 'Volume candles' },
-  { id: 'line', label: 'Line' },
-  { id: 'line-markers', label: 'Line with markers' },
-  { id: 'stepline', label: 'Step line' },
-  { id: 'area', label: 'Area' },
-  { id: 'hlc-area', label: 'HLC area' },
-  { id: 'baseline', label: 'Baseline' },
-  { id: 'column', label: 'Columns' },
-  // Price-based: these rebuild the bars rather than re-skinning them.
-  { id: 'renko', label: 'Renko' },
-  { id: 'line-break', label: 'Line Break' },
-  { id: 'kagi', label: 'Kagi' },
-  { id: 'pnf', label: 'Point & Figure' },
-  { id: 'range', label: 'Range' },
-];
-
-/** How many bars to pull per request / per scroll-back page. */
-const PAGE_BARS = 1500;
-/** A chart script run covers the loaded history up to the engine's preview cap. */
-const MAX_SCRIPT_BARS = 20_000;
-
-const WATCHLIST_OPEN_KEY = 'lascodia.chart.watchlistOpen';
-/** TradingView keeps the watchlist docked by default; the operator's last choice wins. */
-const DOCK_WIDTH_KEY = 'lascodia.chart.watchlistWidth';
-function loadDockWidth(): number {
-  try {
-    const w = Number(appStorage.getItem(DOCK_WIDTH_KEY));
-    return w >= 240 && w <= 640 ? w : 380;
-  } catch {
-    return 380;
-  }
-}
-
-function loadWatchlistOpen(): boolean {
-  try {
-    return appStorage.getItem(WATCHLIST_OPEN_KEY) !== '0';
-  } catch {
-    return true;
-  }
-}
-
-/** TradingView's drawing hotkeys (Alt + key), by `KeyboardEvent.code` (DR-I12). */
-const DRAWING_HOTKEYS: Readonly<Record<string, DrawingKind>> = {
-  KeyT: 'trend-line',
-  KeyH: 'horizontal-line',
-  KeyJ: 'horizontal-ray',
-  KeyV: 'vertical-line',
-  KeyC: 'cross-line',
-  KeyF: 'fib-retracement',
-};
-
-/** TradingView's chart hotkeys (Alt + key), by `KeyboardEvent.code` (CC-I11). */
-const CHART_HOTKEYS: Readonly<Record<string, 'reset' | 'invert' | 'log' | 'percent' | 'snapshot'>> =
-  {
-    KeyR: 'reset',
-    KeyI: 'invert',
-    KeyL: 'log',
-    KeyP: 'percent',
-    KeyS: 'snapshot',
-  };
+/** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
+export { normaliseView };
 
 @Component({
   selector: 'app-chart-analysis-page',
@@ -6006,8 +5849,8 @@ export class ChartAnalysisPageComponent {
    */
   addCompare(spec: CompareSeriesSpec): void {
     this.compareSeries.update((l) => [...l, spec]);
-    const mode = this.scaleMode();
-    if (spec.kind === 'compare' && mode !== 'percent' && mode !== 'indexed') {
+    const next = scaleAfterCompare(spec, this.scaleMode());
+    if (next.switched) {
       this.scaleMode.set('percent');
       this.notify.info(
         'The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.',
@@ -7041,13 +6884,6 @@ export class ChartAnalysisPageComponent {
   }
 }
 
-/** Translate a hex colour into an rgba fill at the given alpha. */
-function withAlpha(hex: string, alpha: number): string {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!m) return `rgba(41,98,255,${alpha})`;
-  return `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${alpha})`;
-}
-
 /** Small per-browser drawing preferences (magnet strength, stay-in-drawing). */
 function readPref<T>(key: string, fallback: T): T {
   try {
@@ -7068,26 +6904,4 @@ function writePref(key: string, value: unknown): void {
     } catch {
       /* preference not remembered */
     }
-}
-
-/**
- * A view state as layouts save it: whole bars of scroll and whole pixels, so sub-pixel jitter and
- * fractional scroll positions never register as a change.
- */
-export function normaliseView(v: ChartViewState): ChartViewState {
-  return {
-    barSpacing: Math.round(v.barSpacing * 100) / 100,
-    rightOffset: Math.round(v.rightOffset),
-    // Pane heights are device-local (`withoutDeviceSizes`): a layout read from the engine on a
-    // browser that has none remembered — a new device, cleared storage — has a view WITHOUT
-    // them. `.map` on that threw inside applyState, after the symbol and studies were applied
-    // but before the split charts, Pine scripts and dock — and the half-applied layout became
-    // the baseline the next autosave wrote back.
-    paneHeights: (v.paneHeights ?? []).map((h) => Math.round(h)),
-  };
-}
-
-/** A chart's scripts on a new series: their runs were the old series'. */
-function freshRuns(scripts: readonly PanelScript[]): PanelScript[] {
-  return scripts.map((s) => ({ ...s, result: null, error: null, ranTo: null }));
 }

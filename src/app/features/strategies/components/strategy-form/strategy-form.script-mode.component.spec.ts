@@ -7,6 +7,11 @@ import { signal } from '@angular/core';
 import { of } from 'rxjs';
 
 import { StrategyFormComponent } from './strategy-form.component';
+import { StrategyPreviewPanelComponent } from '../strategy-preview-panel/strategy-preview-panel.component';
+import { declareSignalIo } from '@shared/testing/jit-signal-io';
+
+// U13: the preview panel is a child component now; its signal input needs the JIT metadata.
+declareSignalIo(StrategyPreviewPanelComponent, { inputs: ['form'] });
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { StrategiesService } from '@core/services/strategies.service';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';

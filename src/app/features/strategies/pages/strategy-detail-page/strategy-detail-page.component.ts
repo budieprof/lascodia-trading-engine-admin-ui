@@ -76,6 +76,8 @@ import { RunComparisonComponent } from '@features/scripting/backtest/run-compari
 import { OptimizationWorkbenchComponent } from '@features/scripting/research/optimization-workbench.component';
 import { WalkForwardWorkbenchComponent } from '@features/scripting/research/walk-forward-workbench.component';
 import { ResearchCockpitComponent } from '../../research-cockpit/research-cockpit.component';
+import { StrategySignalsGridComponent } from '../../components/strategy-activity-tabs/strategy-signals-grid.component';
+import { StrategyOrdersGridComponent } from '../../components/strategy-activity-tabs/strategy-orders-grid.component';
 import { StrategyLineageTabComponent } from '../../components/strategy-lineage-tab/strategy-lineage-tab.component';
 import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
@@ -131,6 +133,8 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     WalkForwardWorkbenchComponent,
     ResearchCockpitComponent,
     StrategyLineageTabComponent,
+    StrategySignalsGridComponent,
+    StrategyOrdersGridComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -592,11 +596,9 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                 (openTab)="onContextTab($event)"
               />
             } @else {
-              <app-data-table
-                [columnDefs]="signalColumns"
-                [fetchData]="fetchSignals"
-                emptyTitle="No signals match"
-                emptyDescription="Clear the search to see every signal of this strategy."
+              <app-strategy-signals-grid
+                [strategyId]="strategyId"
+                [currentHash]="$any(strategy())?.strategyConfigHash ?? null"
               />
             }
           }
@@ -617,12 +619,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                 (openTab)="onContextTab($event)"
               />
             } @else {
-              <app-data-table
-                [columnDefs]="orderColumns"
-                [fetchData]="fetchOrders"
-                emptyTitle="No orders match"
-                emptyDescription="Clear the search to see every order of this strategy."
-              />
+              <app-strategy-orders-grid [strategyId]="strategyId" />
             }
           }
 
@@ -1757,105 +1754,11 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
     this.requestTab('promotion');
   }
 
-  readonly signalColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'symbol', headerName: 'Symbol', flex: 1 },
-    { field: 'direction', headerName: 'Direction', width: 100 },
-    {
-      field: 'entryPrice',
-      headerName: 'Entry Price',
-      flex: 1,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
-    },
-    {
-      field: 'stopLoss',
-      headerName: 'SL',
-      flex: 1,
-      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
-    },
-    {
-      field: 'takeProfit',
-      headerName: 'TP',
-      flex: 1,
-      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
-    },
-    {
-      field: 'confidence',
-      headerName: 'Confidence',
-      width: 100,
-      valueFormatter: (p: any) => `${(p.value * 100).toFixed(1)}%`,
-    },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 110,
-      cellRenderer: (p: any) => {
-        const v = this.getSignalStatusVariant(p.value);
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${v.bg};color:${v.color}">${p.value}</span>`;
-      },
-    },
-    {
-      field: 'generatedAt',
-      headerName: 'Generated',
-      flex: 1,
-      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
-    },
-    configHashColumn(
-      () =>
-        (this.strategy() as { strategyConfigHash?: string | null } | null)?.strategyConfigHash ??
-        null,
-    ),
-  ];
-
-  readonly orderColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70 },
-    { field: 'symbol', headerName: 'Symbol', flex: 1 },
-    { field: 'orderType', headerName: 'Side', width: 80 },
-    { field: 'executionType', headerName: 'Exec Type', width: 100 },
-    { field: 'quantity', headerName: 'Qty', width: 80 },
-    {
-      field: 'price',
-      headerName: 'Price',
-      flex: 1,
-      valueFormatter: (p: any) => p.value?.toFixed(5),
-    },
-    {
-      field: 'filledPrice',
-      headerName: 'Filled',
-      flex: 1,
-      valueFormatter: (p: any) => p.value?.toFixed(5) ?? '-',
-    },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 110,
-      cellRenderer: (p: any) => {
-        const v = this.getOrderStatusVariant(p.value);
-        return `<span style="display:inline-flex;align-items:center;padding:2px 10px;border-radius:9999px;font-size:12px;font-weight:600;background:${v.bg};color:${v.color}">${p.value}</span>`;
-      },
-    },
-    {
-      field: 'createdAt',
-      headerName: 'Created',
-      flex: 1,
-      valueFormatter: (p: any) => this.relativeTime.transform(p.value),
-    },
-  ];
-
   // Engine `PagerRequestWithFilterType<TFilter,...>` setters reject any
   // bare-string `filter` value with HTTP 400 (System.Text.Json can't bind a
   // string to TFilter). Pass an object that matches the per-controller
   // filter shape — `{ strategyId }` is a first-class field on the trade-
   // signal, optimization, and (post-engine-update) order filters.
-  readonly fetchSignals = (params: PagerRequest) =>
-    this.signalsService
-      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
-      .pipe(map((res) => res.data!));
-
-  readonly fetchOrders = (params: PagerRequest) =>
-    this.ordersService
-      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
-      .pipe(map((res) => res.data!));
 
   readonly fetchBacktests = (params: PagerRequest) =>
     this.backtestsService
@@ -2381,29 +2284,5 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
           this.totalWalkForwards.set(0);
         },
       });
-  }
-
-  private getSignalStatusVariant(status: string): { bg: string; color: string } {
-    const m: Record<string, { bg: string; color: string }> = {
-      Pending: { bg: 'rgba(255, 149, 0, 0.12)', color: '#C93400' },
-      Approved: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
-      Executed: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
-      Rejected: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015' },
-      Expired: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
-    };
-    return m[status] ?? { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' };
-  }
-
-  private getOrderStatusVariant(status: string): { bg: string; color: string } {
-    const m: Record<string, { bg: string; color: string }> = {
-      Pending: { bg: 'rgba(255, 149, 0, 0.12)', color: '#C93400' },
-      Submitted: { bg: 'rgba(0, 113, 227, 0.12)', color: '#0040DD' },
-      PartialFill: { bg: 'rgba(0, 113, 227, 0.12)', color: '#0040DD' },
-      Filled: { bg: 'rgba(52, 199, 89, 0.12)', color: '#248A3D' },
-      Cancelled: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
-      Rejected: { bg: 'rgba(255, 59, 48, 0.12)', color: '#D70015' },
-      Expired: { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' },
-    };
-    return m[status] ?? { bg: 'rgba(142, 142, 147, 0.12)', color: '#636366' };
   }
 }

@@ -11,6 +11,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { of } from 'rxjs';
 import type { StrategyDto } from '@core/api/api.types';
+import { resolveJitResources } from '@shared/testing/jit-resources';
 
 // Bulk-action handlers exist on the component class and are independent of
 // the table render — they take rows + a clear callback. Driving them
@@ -21,7 +22,9 @@ describe('StrategiesPageComponent (bulk handlers)', () => {
   let strategiesService: { bulkUpdate: ReturnType<typeof vi.fn> };
   let notifications: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // styleUrl: resolved for the JIT runner (it cannot load the .scss).
+    await resolveJitResources();
     strategiesService = {
       bulkUpdate: vi.fn().mockReturnValue(
         of({
@@ -118,7 +121,9 @@ describe('StrategiesPageComponent (create refusals, clone)', () => {
   let create: ReturnType<typeof vi.fn>;
   let notifications: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // styleUrl: resolved for the JIT runner (it cannot load the .scss).
+    await resolveJitResources();
     create = vi.fn();
     notifications = { success: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { normaliseView } from './chart-analysis-page.component';
+import { normaliseView } from './chart-page.helpers';
 import { withDeviceSizes, withoutDeviceSizes } from '../../workspace/device-sizes';
 import type { ChartWorkspaceState } from '../../workspace/workspace-state';
 
@@ -33,5 +33,20 @@ describe('normaliseView', () => {
       rightOffset: 5,
       paneHeights: [],
     });
+  });
+});
+
+describe('scaleAfterCompare (U13: moved from the page with its rule unchanged)', () => {
+  it('turns a plain scale to Percent for a compare symbol and leaves comparing scales and ratios alone', async () => {
+    const { scaleAfterCompare } = await import('./chart-page.helpers');
+    expect(scaleAfterCompare({ kind: 'compare' }, 'normal')).toEqual({
+      mode: 'percent',
+      switched: true,
+    });
+    expect(scaleAfterCompare({ kind: 'compare' }, 'indexed')).toEqual({
+      mode: 'indexed',
+      switched: false,
+    });
+    expect(scaleAfterCompare({ kind: 'ratio' }, 'log')).toEqual({ mode: 'log', switched: false });
   });
 });
