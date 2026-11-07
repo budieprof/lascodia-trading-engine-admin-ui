@@ -1,3 +1,5 @@
+import type { ExchangeSessions } from '../indicators/exchange-sessions';
+import { regularPeriodBars } from './pivots-rth';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -98,6 +100,25 @@ export class TechnicalsViewComponent implements OnInit {
   readonly digits = input(5);
   /** The chart's timeframe: the tab to open on, when TradingView has one for it. */
   readonly initialResolution = input<TvResolution>('1D');
+  /**
+   * UA05: how the session-grid bars are cut, in words — FX "days roll at 17:00 New York"; another instrument its own
+   * calendar's trading days.
+   */
+  readonly sessionWords = input('days roll at 17:00 New York');
+  /** UA06: the instrument's own sessions; with extended hours, pivots can be taken from the regular session only. */
+  readonly exchangeSessions = input<ExchangeSessions | null>(null);
+  /** UA06: pivots from the regular session's high / low / close (off: the engine's whole session day, as before). */
+  readonly regularOnly = signal(false);
+  /** The instrument has extended hours to leave out (NYSE pre/post, Eurex extended); FX and 24/7 do not. */
+  readonly hasExtendedHours = computed(() => {
+    const ex = this.exchangeSessions();
+    return (
+      !!ex &&
+      !ex.is24x7 &&
+      ex.windows.Regular.length > 0 &&
+      ex.windows.Pre.length + ex.windows.Post.length > 0
+    );
+  });
   /** Live price, for placing the pivots; falls back to the last close. */
   readonly livePrice = input<number | null>(null);
 
@@ -143,6 +164,12 @@ export class TechnicalsViewComponent implements OnInit {
     );
   });
 
+  /** UA05: no row of the tab had enough history to vote — the gauges say n/a, not Neutral. */
+  readonly unrated = computed(() => {
+    const r = this.frame()?.rating;
+    return !!r && r.summary.buy + r.summary.neutral + r.summary.sell === 0;
+  });
+
   readonly gauges = computed(() => {
     const r = this.frame()?.rating;
     if (!r) return [];
@@ -186,8 +213,17 @@ export class TechnicalsViewComponent implements OnInit {
     if (!d || f?.lastTime == null) return null;
     const period = pivotPeriodFor(this.selected());
     // The engine's session days (17:00 New York, where TradingView and the FX market close a
-    // day), weeks and months — years folded from the months.
-    const inputs = pivotInputs(pivotPeriodBars(period, d), f.lastTime);
+    // day), weeks and months — years folded from the months. UA06: or the regular session's.
+    const rth =
+      this.regularOnly() && this.hasExtendedHours()
+        ? regularPeriodBars(
+            period,
+            d.intraday ?? [],
+            this.exchangeSessions()!.windows.Regular,
+            15 * 60_000,
+          )
+        : null;
+    const inputs = pivotInputs(rth ?? pivotPeriodBars(period, d), f.lastTime);
     if (!inputs) return null;
     const levels = pivotLevels(inputs.prev, inputs.currentOpen);
     const price = this.livePrice() ?? f.lastClose;
@@ -196,6 +232,7 @@ export class TechnicalsViewComponent implements OnInit {
       brackets[m.id] = price === null ? { above: null, below: null } : bracket(levels[m.id], price);
     }
     return {
+      regular: rth !== null,
       periodName: PERIOD_NAMES[period],
       from: periodLabel(period, inputs.prev),
       levels,
@@ -245,7 +282,8 @@ export class TechnicalsViewComponent implements OnInit {
   }
 
   protected action(v: IndicatorVote): string {
-    if (v.value === null) return '—';
+    // UA05: a row the history is too short for says so ("n/a · 87/200"), not a dash read as "no signal".
+    if (v.value === null) return v.need ? `n/a · ${this.frame()?.barCount ?? 0}/${v.need}` : '—';
     return ({ buy: 'Buy', sell: 'Sell', neutral: 'Neutral' } satisfies Record<Vote, string>)[
       v.vote
     ];
