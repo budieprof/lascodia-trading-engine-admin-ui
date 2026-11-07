@@ -150,12 +150,13 @@ describe('ScriptBacktestLauncherComponent', () => {
     ).toBe('30');
   });
 
-  it('queues a run with overrides, deep mode and the magnifier forced off', () => {
+  it('queues a run with overrides, deep mode, the magnifier forced off and an intrabar order (C3)', () => {
     render();
     openForm();
     set('Symbol override', 'gbpusd', 'input');
     set('Timeframe override', 'H4');
     set('Bar magnifier', 'off');
+    set('Intrabar order', 'Optimistic');
     const deep = el.querySelector<HTMLInputElement>('.check input')!;
     deep.checked = true;
     deep.dispatchEvent(new Event('change'));
@@ -181,6 +182,7 @@ describe('ScriptBacktestLauncherComponent', () => {
       inputs: { in_len: 40 },
       deep: true,
       barMagnifier: false,
+      intrabarResolution: 'Optimistic',
     });
     req.flush(ok(812));
     fixture.detectChanges();

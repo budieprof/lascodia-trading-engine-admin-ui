@@ -71,6 +71,18 @@ export interface ReportMeta {
   magnifierFallbackBars: Num;
   magnifierMissingBars: Num;
   magnifierIncompleteBars: Num;
+  /**
+   * C3 (engine 2026-11-07; null/'' on an older engine, and the engine leaves out zero counts):
+   * the intrabar resolution the run walked bars with ('' = Pine's nearest-extreme path), chart
+   * bars whose extreme order could change the outcome, bars the resolution re-ordered, bars walked,
+   * and of those the ones walked through 1-minute / another lower timeframe.
+   */
+  intrabarResolution: string;
+  ambiguousBars: Num;
+  intrabarReorderedBars: Num;
+  walkedBars: Num;
+  magnifiedM1Bars: Num;
+  magnifiedLowerBars: Num;
   riskHalted: boolean;
   riskHaltReason: string;
   properties: ReportStrategyProperties | null;
@@ -582,6 +594,12 @@ function normalizeMeta(v: unknown): ReportMeta {
     magnifierFallbackBars: num(m['magnifierFallbackBars']),
     magnifierMissingBars: num(m['magnifierMissingBars']),
     magnifierIncompleteBars: num(m['magnifierIncompleteBars']),
+    intrabarResolution: str(m['intrabarResolution']),
+    ambiguousBars: num(m['ambiguousBars']),
+    intrabarReorderedBars: num(m['intrabarReorderedBars']),
+    walkedBars: num(m['walkedBars']),
+    magnifiedM1Bars: num(m['magnifiedM1Bars']),
+    magnifiedLowerBars: num(m['magnifiedLowerBars']),
     riskHalted: m['riskHalted'] === true,
     riskHaltReason: str(m['riskHaltReason']),
     properties: normalizeProperties(m['properties']),

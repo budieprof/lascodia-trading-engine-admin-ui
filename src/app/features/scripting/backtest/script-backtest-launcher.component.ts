@@ -46,6 +46,8 @@ import {
 export const ENGINE_TIMEFRAMES = ['M1', 'M5', 'M15', 'H1', 'H4', 'D1'] as const;
 
 type MagnifierChoice = 'script' | 'on' | 'off';
+/** C3: '' = the engine's evidence policy (`Backtest:Evidence:IntrabarResolution`). */
+type IntrabarChoice = '' | 'ScriptDefault' | 'Pessimistic' | 'Optimistic';
 
 export { validateBacktestForm } from './script-backtest-launcher.model';
 import { validateBacktestForm } from './script-backtest-launcher.model';
@@ -181,6 +183,29 @@ import { validateBacktestForm } from './script-backtest-launcher.model';
                   On — fill on lower-timeframe bars
                 </option>
                 <option value="off" [selected]="magnifier() === 'off'">Off — OHLC path only</option>
+              </select>
+            </label>
+            <label
+              class="field"
+              title="Which extreme of a bar is visited first when its OHLC cannot tell — matters when a stop and a target sit inside one bar"
+            >
+              <span>Intrabar order</span>
+              <select
+                data-testid="intrabar-resolution"
+                (change)="intrabar.set($any($event.target).value)"
+              >
+                <option value="" [selected]="intrabar() === ''">
+                  Evidence policy (engine default: pessimistic)
+                </option>
+                <option value="Pessimistic" [selected]="intrabar() === 'Pessimistic'">
+                  Pessimistic — adverse extreme first
+                </option>
+                <option value="ScriptDefault" [selected]="intrabar() === 'ScriptDefault'">
+                  Pine — nearest extreme first
+                </option>
+                <option value="Optimistic" [selected]="intrabar() === 'Optimistic'">
+                  Optimistic — favourable extreme first
+                </option>
               </select>
             </label>
           </div>
@@ -504,6 +529,7 @@ export class ScriptBacktestLauncherComponent {
   readonly symbolOverride = signal('');
   readonly timeframeOverride = signal('');
   readonly magnifier = signal<MagnifierChoice>('script');
+  readonly intrabar = signal<IntrabarChoice>('');
   readonly deep = signal(false);
 
   readonly compiling = signal(false);
@@ -638,6 +664,8 @@ export class ScriptBacktestLauncherComponent {
     if (Object.keys(inputs).length > 0) req.inputs = inputs;
     if (this.deep()) req.deep = true;
     if (this.magnifier() !== 'script') req.barMagnifier = this.magnifier() === 'on';
+    const ib = this.intrabar();
+    if (ib) req.intrabarResolution = ib;
     return req;
   }
 

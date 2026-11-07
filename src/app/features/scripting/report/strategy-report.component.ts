@@ -35,6 +35,12 @@ import { ReportPropertiesComponent } from './report-properties.component';
 import { ReportRAnalysisComponent, type ReportTestCount } from './report-r-analysis.component';
 import { RunProvenanceComponent } from './run-provenance.component';
 import { parseEngineRun } from './engine-run';
+import {
+  hasIntrabarEvidence,
+  intrabarResolutionLabel,
+  magnifierCoverage,
+  magnifierCoverageText,
+} from './intrabar-evidence';
 
 export type ReportTabId =
   | 'overview'
@@ -117,6 +123,9 @@ let nextReportUid = 0;
               <span class="chip" title="Orders filled along lower-timeframe bars"
                 >Bar magnifier</span
               >
+            }
+            @if (intrabarChip(); as ib) {
+              <span class="chip" data-testid="intrabar-chip" [title]="ib.title">{{ ib.text }}</span>
             }
             @if (backtestRunId()) {
               <div class="exports" role="group" aria-label="Export report">
@@ -508,6 +517,21 @@ export class StrategyReportComponent {
   readonly palette = computed(() => reportPalette(this.theme.theme()));
 
   readonly tradeCount = computed(() => formatInteger(this.data()?.trades.length ?? 0));
+
+  /** C3: the intrabar order the run used and the bars it mattered on (absent on older engines). */
+  readonly intrabarChip = computed<{ text: string; title: string } | null>(() => {
+    const m = this.data()?.meta;
+    if (!m || !hasIntrabarEvidence(m)) return null;
+    const label = intrabarResolutionLabel(m.intrabarResolution).split(' (')[0];
+    const amb = m.ambiguousBars ?? 0;
+    const cov = magnifierCoverageText(magnifierCoverage(m));
+    return {
+      text: `${label} intrabar · ${amb.toLocaleString('en-US')} ambiguous bar${amb === 1 ? '' : 's'}`,
+      title:
+        `${intrabarResolutionLabel(m.intrabarResolution)}; ${m.intrabarReorderedBars ?? 0} bar(s) re-ordered` +
+        (cov ? `; fill path: ${cov}` : ''),
+    };
+  });
 
   readonly metaLine = computed(() => {
     const r = this.data();
