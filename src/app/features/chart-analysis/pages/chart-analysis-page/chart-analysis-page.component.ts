@@ -70,14 +70,13 @@ import {
   SessionRollover,
   applySessionTick,
   currentDayBars,
-  isCurrentPeriod,
   mergeSessionTail,
 } from '../../datafeed/session-bars';
 import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
-import { liveTick } from '../../datafeed/live-tick';
+import { liveTick, tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
-import { priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
+import { priceScaleFor } from '../../datafeed/symbol-info';
 import { resolveInstrument } from '@core/instruments/instrument-math';
 import {
   decimalsOfPrices,
@@ -87,7 +86,7 @@ import {
 } from '../../datafeed/instrument-facts';
 import { InstrumentsService } from '@core/instruments/instruments.service';
 import { venueInstrumentFor } from '@features/venues/venues.logic';
-import type { InstrumentAssetClass } from '@core/instruments/instrument.types';
+import type { InstrumentAssetClass, InstrumentDto } from '@core/instruments/instrument.types';
 import {
   ASSET_CLASS_LABEL,
   InstrumentIconComponent,
@@ -498,6 +497,24 @@ import {
 import { ChartHistoryPager } from './chart-history-pager';
 import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
+import { MarketSessionService } from '../../datafeed/market-session.service';
+import { volumeUnitTag } from '../../datafeed/chart-facts';
+import { continuousInfo, rollMarkers, type FutureRoll } from '../../datafeed/futures-series';
+import { FuturesRollsService } from '../../datafeed/futures-rolls.service';
+import type { SeriesOptions } from '../../datafeed/chart-market-chips.component';
+import { intervalNote, noDataMessage } from '../../datafeed/data-availability';
+import {
+  RemoteSymbolSearch,
+  groupSearch,
+  mergeSearch,
+  searchRowOf,
+} from '../../datafeed/symbol-search';
+import { marketView, type MarketView } from '../../datafeed/market-status';
+import {
+  instrumentDescription,
+  instrumentKindLabel,
+  symbolChips,
+} from '../../datafeed/symbol-chips';
 
 /** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
 export { normaliseView };
@@ -590,6 +607,18 @@ export class ChartAnalysisPageComponent {
   private readonly host = viewChild<ChartHostComponent>('host');
 
   readonly resolutions = SUPPORTED_RESOLUTIONS;
+  /** The catalogue row of `symbol` (C2), or null while unknown / not in the master. */
+  private catalogueRow(symbol: string): InstrumentDto | null {
+    return this.instruments.lookupState(symbol) === 'found' ? this.instruments.get(symbol) : null;
+  }
+  /** UD10: the interval menu's note for `resolution` on this symbol — "no data yet", "no stored bars" — or null. */
+  intervalNote(resolution: TvResolution): string | null {
+    const symbol = this.symbol();
+    return intervalNote({
+      instrument: this.catalogueRow(symbol),
+      firstBarMs: this.feed.firstBarOf(symbol, resolution),
+    });
+  }
   readonly resolutionLabel = (r: TvResolution) => formatResolution(r);
   readonly chartStyles = CHART_STYLES;
   readonly chartStyleGroups = STYLE_GROUPS;
@@ -1410,6 +1439,7 @@ export class ChartAnalysisPageComponent {
     oldestBarTime: () => this.bars()[0]?.time,
     now: () => this.serverClock.now(),
     calendarOf: (symbol) => this.calendarOf(symbol),
+    gridOf: (symbol) => this.feed.gridOf(symbol),
     scaleMode: () => this.scaleMode,
     notify: (text) => this.notify.info(text),
   });
@@ -1488,6 +1518,7 @@ export class ChartAnalysisPageComponent {
     ...this.timelineMarkers(),
     ...this.analysisMarkers(),
     ...this.replay.markers(),
+    ...this.rollMarkers(),
   ]);
 
   // ── SP-I5 (analysis): the analysis panel, its plan / watch overlay and the watches' fire markers ──
@@ -1844,15 +1875,22 @@ export class ChartAnalysisPageComponent {
     const last = bars[bars.length - 1];
     const today = currentDayBars(bars, this.tradingCalendar()?.dayOf);
     const dayOpen = today[0]?.open ?? null;
+    // Bug b1-2 / UI leftover: an equity or index CFD's pair row reads "USD / USD · Forex"; the description, the kind
+    // and the sizing come from the instrument facts (FX: the pair's own numbers, as before).
+    const f = this.facts();
     return {
       symbol,
-      base: pair?.baseCurrency ?? '—',
-      quote: pair?.quoteCurrency ?? '—',
-      digits: this.facts().precision,
-      contractSize: pair?.contractSize ?? null,
-      minLot: pair?.minLotSize ?? null,
-      maxLot: pair?.maxLotSize ?? null,
-      lotStep: pair?.lotStep ?? null,
+      isFx: f.isFx,
+      description: instrumentDescription(f.instrument) ?? symbol,
+      kind: instrumentKindLabel(f.instrument, this.feed.factsOf(symbol)?.assetClass),
+      quantityUnit: f.quantityUnit,
+      base: pair?.baseCurrency ?? f.instrument.baseCurrency ?? '—',
+      quote: pair?.quoteCurrency ?? f.quoteCurrency ?? '—',
+      digits: f.precision,
+      contractSize: f.isFx ? (pair?.contractSize ?? null) : f.contractValue,
+      minLot: f.isFx ? (pair?.minLotSize ?? null) : f.minQuantity,
+      maxLot: f.isFx ? (pair?.maxLotSize ?? null) : f.maxQuantity,
+      lotStep: f.isFx ? (pair?.lotStep ?? null) : f.quantityStep,
       bars: bars.length,
       from: first ? this.barTimeLabel(first) : '—',
       to: last ? this.barTimeLabel(last) : '—',
@@ -2064,31 +2102,118 @@ export class ChartAnalysisPageComponent {
   readonly pipSize = computed(() => this.facts().distanceUnit);
 
   /**
-   * FX market status, from the bar data rather than a clock.
-   *
-   * The week runs Sunday 22:00 UTC to Friday 22:00 UTC, but brokers differ and
-   * holidays are not on any weekday rule. Asking "has a bar closed recently?"
-   * answers the question the operator actually has — is this chart live — and
-   * cannot disagree with the data on screen.
+   * Where the symbol's market stands (UD08): the ENGINE's session state (`MarketSessionService`, read at the next
+   * open / close, paused while hidden) — pre / regular / post / break / closed with a countdown — plus what only the
+   * chart sees: a stale feed, prices arriving while the calendar says closed, the closure's name. It replaced a guess
+   * from the newest bar's age with FX rules (crypto "closed" on a quiet minute). Without an engine answer the old
+   * reading from the data remains, labelled as such ({@link marketView}).
    */
-  readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => {
-    const bars = this.bars();
-    if (bars.length === 0) return 'closed';
-    const last = bars[bars.length - 1];
-    // A session-grid bar says where its period ends: open while it lasts, closed after — a weekly
-    // bar opened on Sunday no longer reads "open" through Saturday.
-    if (last.closeTime !== undefined) {
-      const now = this.serverClock.now();
-      if (isCurrentPeriod(last, now)) return 'open';
-      return now - last.closeTime <= 3 * 86_400_000 ? 'closed' : 'stale';
-    }
-    const step = resolutionMs(this.resolution()) ?? 60_000;
-    const age = Date.now() - last.time;
-    if (age <= step * 2) return 'open';
-    // Beyond two bars but inside a weekend is "closed"; beyond that, the feed
-    // itself is suspect and saying "open" would be a lie.
-    return age <= 3 * 86_400_000 ? 'closed' : 'stale';
+  private readonly marketSessions = inject(MarketSessionService);
+  private readonly marketWatch = effect((onCleanup) => {
+    const symbol = this.symbol();
+    onCleanup(untracked(() => this.marketSessions.watch(symbol)));
   });
+  /** Re-evaluated every 30 s, so "Feed stale" and the data fallback follow the clock without a tick. */
+  private readonly marketClock = (() => {
+    const now = signal(Date.now());
+    const t = setInterval(() => now.set(Date.now()), 30_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(t));
+    return now;
+  })();
+  readonly marketView = computed<MarketView>(() => {
+    const symbol = this.symbol();
+    const bars = this.bars();
+    const last = bars[bars.length - 1];
+    const step = resolutionMs(this.resolution()) ?? 60_000;
+    const state = this.marketSessions.stateOf(symbol);
+    return marketView({
+      state,
+      calendarCode: state?.calendarCode ?? this.feed.factsOf(symbol)?.calendarCode ?? null,
+      closures: this.sessionSpec()?.closures ?? null,
+      liveAt: this.liveAt() ?? 0,
+      lastBarEnd: last ? (last.closeTime ?? last.time + step) : null,
+      nowMs: Math.max(this.marketClock(), this.liveAt() ?? 0),
+    });
+  });
+  // ── UD11: continuous futures (adjusted / raw, roll markers) and equity adjustment ──
+  private readonly futuresRolls = inject(FuturesRollsService);
+  /** The rolls of the continuous future on the chart: null = not one / not read; [] = none recorded. */
+  private readonly rolls = signal<{ root: string; rolls: FutureRoll[] | null } | null>(null);
+  private readonly rollsLoad = effect(() => {
+    const info = continuousInfo(this.symbol());
+    untracked(() => {
+      if (!info) {
+        this.rolls.set(null);
+        return;
+      }
+      if (this.rolls()?.root === info.root) return;
+      this.rolls.set({ root: info.root, rolls: null });
+      void this.futuresRolls.rolls(info.root).then((rolls) => {
+        if (continuousInfo(this.symbol())?.root === info.root)
+          this.rolls.set({ root: info.root, rolls });
+      });
+    });
+  });
+  readonly rollMarkers = computed(() => {
+    const info = continuousInfo(this.symbol());
+    const held = this.rolls();
+    if (!info || !held?.rolls?.length || held.root !== info.root) return [];
+    return rollMarkers(held.rolls, info, this.bars(), this.precision());
+  });
+  readonly seriesOptions = computed<SeriesOptions | null>(() => {
+    const symbol = this.symbol();
+    const info = continuousInfo(symbol);
+    const held = this.rolls();
+    const facts = this.feed.factsOf(symbol);
+    const ac = facts?.assetClass ?? this.facts().assetClass;
+    const n = held?.rolls?.length ?? 0;
+    const continuous = info
+      ? {
+          adjusted: info.adjusted,
+          rollsNote:
+            held?.rolls == null
+              ? 'rolls not read'
+              : n
+                ? `${n} roll${n === 1 ? '' : 's'}`
+                : 'no rolls recorded yet',
+        }
+      : null;
+    const equity =
+      ac === 'Equity' || ac === 'Etf'
+        ? { asked: this.seriesAdjustment(), applied: facts?.adjustment ?? null }
+        : null;
+    return continuous || equity ? { continuous, equity } : null;
+  });
+  /** The equity adjustment asked for the chart's symbol (mirrors the feed's; a signal for the template). */
+  private readonly seriesAdjustment = signal<'none' | 'splits' | 'all' | null>(null);
+  private readonly seriesAdjustmentFollow = effect(() => {
+    const symbol = this.symbol();
+    untracked(() => this.seriesAdjustment.set(this.feed.adjustmentOf(symbol)));
+  });
+  /** Switch a continuous future between its back-adjusted and raw series (`ES1!` ⇄ `ES1!U`). */
+  switchContinuousSeries(): void {
+    const info = continuousInfo(this.symbol());
+    if (info) this.selectSymbol(info.counterpart);
+  }
+  /** An equity's corporate-action adjustment: the feed asks chart-bars with it, and the chart reloads. */
+  setSeriesAdjustment(adjustment: 'none' | 'splits' | 'all' | null): void {
+    const symbol = this.symbol();
+    if (this.feed.adjustmentOf(symbol) === adjustment) return;
+    this.feed.setAdjustment(symbol, adjustment);
+    this.seriesAdjustment.set(adjustment);
+    void this.reload();
+  }
+
+  /** The legend's three-state tone (kept for older bindings): open / closed / stale. */
+  readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => this.marketView().tone);
+  /** What the bars are (UD07): kind, source, exchange, contract, perpetual, volume unit, adjustment. */
+  readonly symbolChips = computed(() =>
+    symbolChips(
+      this.feed.factsOf(this.symbol()),
+      this.catalogueRow(this.symbol()),
+      this.marketClock(),
+    ),
+  );
 
   // ── Split view ───────────────────────────────────────────────────────────
   //
@@ -2306,7 +2431,14 @@ export class ChartAnalysisPageComponent {
   readonly symbolClass = signal<InstrumentAssetClass | null>(null);
   readonly symbolClasses = computed(() =>
     // Only once the engine serves its instrument master: in front of today's engine the menu is unchanged.
-    this.instruments.source() === 'instruments' ? this.instruments.assetClasses() : [],
+    this.instruments.source() === 'instruments'
+      ? [
+          ...new Set([
+            ...this.instruments.assetClasses(),
+            ...this.remoteSearch.rows().map((r) => r.assetClass),
+          ]),
+        ]
+      : [],
   );
   readonly assetClassLabel = ASSET_CLASS_LABEL;
 
@@ -2336,11 +2468,33 @@ export class ChartAnalysisPageComponent {
       : d;
   }
 
-  readonly filteredSymbols = computed(() => {
+  /**
+   * UD09: the engine searches the whole catalogue from two characters (debounced, paged); its rows join the loaded
+   * catalogue's below them, keyed by symbol + exchange, those without data marked "no data yet".
+   */
+  readonly remoteSearch = (() => {
+    const search = new RemoteSymbolSearch((q, o) => this.instruments.search(q, o));
+    inject(DestroyRef).onDestroy(() => search.dispose());
+    return search;
+  })();
+  private readonly remoteSearchFollow = effect(() => {
+    const open = this.symbolMenuOpen();
+    const query = this.symbolQuery();
     const cls = this.symbolClass();
-    const rows = cls ? this.searchable().filter((i) => i.assetClass === cls) : this.searchable();
-    return rankSymbols(rows, this.symbolQuery());
+    // Only once the engine serves its instrument master (in front of an older engine: the menu as it was).
+    const master = this.instruments.source() === 'instruments';
+    untracked(() => this.remoteSearch.set(open && master ? query : '', cls));
   });
+  readonly filteredSymbols = computed(() =>
+    mergeSearch(
+      this.searchable().map((i) => searchRowOf(i as InstrumentDto, true)),
+      this.remoteSearch.rows(),
+      this.symbolQuery(),
+      this.symbolClass(),
+    ),
+  );
+  /** {@link filteredSymbols} by asset class, for the menu (one group: no headers). */
+  readonly symbolGroups = computed(() => groupSearch(this.filteredSymbols()));
 
   /** Enter in the symbol search: the first (best) match, as on TradingView (CC-I13). */
   pickFirstSymbol(): void {
@@ -2902,7 +3056,7 @@ export class ChartAnalysisPageComponent {
     // Live price → update the forming bar. The engine throttles these, so this
     // is a repaint of the last candle rather than a tick stream.
     this.realtime
-      .on<{ symbol?: string; bid?: number; ask?: number; price?: number }>('priceUpdated')
+      .on<PriceTick>('priceUpdated')
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((tick) => {
         this.applyTick(tick);
@@ -3444,9 +3598,10 @@ export class ChartAnalysisPageComponent {
    * the move since this page opened rather than since the previous tick — a
    * per-tick delta reads as permanent noise around zero.
    */
-  private recordQuote(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
+  private recordQuote(tick: PriceTick): void {
     const symbol = tick?.symbol?.toUpperCase();
-    const bid = tick.bid ?? tick.price ?? tick.ask;
+    // UD05: a venue's last trade (its bid/ask may be null); MT5 the bid, as before.
+    const bid = tickPrice(tick);
     if (!symbol || typeof bid !== 'number' || !Number.isFinite(bid)) return;
     this.prices.update((map) => ({
       ...map,
@@ -3547,7 +3702,10 @@ export class ChartAnalysisPageComponent {
       // After the bars, so the calendar window matches what is on screen.
       this.loadEvents();
       if (bars.length === 0) {
-        this.error.set(`No ${this.resolutionLabel(resolution)} candles stored for ${symbol}.`);
+        // UD10: why there is nothing — "no data yet (no source enabled)" from the catalogue — never a blank chart.
+        this.error.set(
+          noDataMessage(symbol, this.resolutionLabel(resolution), this.catalogueRow(symbol)),
+        );
       }
     } catch (e) {
       if (current()) {
@@ -3678,14 +3836,17 @@ export class ChartAnalysisPageComponent {
     this.bars.set(mergeSessionTail(this.bars(), tail, ticked));
   }
 
-  private applyTick(tick: { symbol?: string; bid?: number; ask?: number; price?: number }): void {
+  private applyTick(tick: PriceTick): void {
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
-    const price = tick.bid ?? tick.price ?? tick.ask;
-    if (typeof price !== 'number' || !Number.isFinite(price)) return;
+    // UD04/UD05: MT5 = the bid (bid bars, unchanged); a venue = its last trade / mid. Placed at the tick's own time.
+    const price = tickPrice(tick);
+    if (price === null) return;
+    const at = tickTimeMs(tick, this.serverClock.now());
     this.liveAt.set(Date.now());
     // The open positions' P&L reads both sides: a long exits at the bid, a short at the ask.
     const ask = typeof tick.ask === 'number' && Number.isFinite(tick.ask) ? tick.ask : null;
-    this.liveQuote.set({ bid: price, ask });
+    const bid = typeof tick.bid === 'number' && Number.isFinite(tick.bid) ? tick.bid : price;
+    this.liveQuote.set({ bid, ask });
 
     // Right after a switch the bars on screen are still the previous series': not this tick's.
     if (!sameSeries(this.barsFor(), { symbol: this.symbol(), resolution: this.resolution() }))
@@ -3694,7 +3855,7 @@ export class ChartAnalysisPageComponent {
     if (current.length === 0) return;
 
     if (isSessionResolution(this.resolution())) {
-      this.applyTickOnSessionGrid(current, price);
+      this.applyTickOnSessionGrid(current, price, at);
       return;
     }
 
@@ -3704,7 +3865,7 @@ export class ChartAnalysisPageComponent {
     const next = applyStoredTick(
       current,
       price,
-      this.serverClock.now(),
+      at,
       this.resolution(),
       this.feed.gridOf(this.symbol()),
     );
@@ -3721,13 +3882,13 @@ export class ChartAnalysisPageComponent {
    * a whole period, no session known), it asks for the newest bars instead, once per bar
    * ({@link SessionRollover}).
    */
-  private applyTickOnSessionGrid(current: Bar[], price: number): void {
+  private applyTickOnSessionGrid(current: Bar[], price: number, at: number): void {
     const calendar = this.tradingCalendar();
     const resolution = this.resolution();
     const outcome = applySessionTick(
       current,
       price,
-      this.serverClock.now(),
+      at,
       calendar ? (last, now) => nextSessionPeriod(calendar, resolution, last, now) : undefined,
     );
     if (outcome.kind === 'update' || outcome.kind === 'open') {
@@ -3816,28 +3977,18 @@ export class ChartAnalysisPageComponent {
     return this.compareState.extendBars(oldestMs);
   }
 
-  private applyCompareTick(tick: {
-    symbol?: string;
-    bid?: number;
-    price?: number;
-    ask?: number;
-  }): void {
+  private applyCompareTick(tick: PriceTick): void {
     this.compareState.applyTick(tick);
   }
 
   /** A live price moves the split panels that show its symbol (CC-12: they were static). */
-  private applyPanelTick(tick: {
-    symbol?: string;
-    bid?: number;
-    price?: number;
-    ask?: number;
-  }): void {
+  private applyPanelTick(tick: PriceTick): void {
     const symbol = tick?.symbol?.toUpperCase();
-    const price = tick?.bid ?? tick?.price ?? tick?.ask;
-    if (!symbol || typeof price !== 'number') return;
+    const price = tickPrice(tick);
+    if (!symbol || price === null) return;
     const panels = this.comparePanels();
     if (!panels.some((p) => p.symbol.toUpperCase() === symbol && p.bars.length)) return;
-    const now = this.serverClock.now();
+    const now = tickTimeMs(tick, this.serverClock.now());
     this.comparePanels.set(
       panels.map((p) => {
         if (p.symbol.toUpperCase() !== symbol || !p.bars.length) return p;
@@ -5184,6 +5335,17 @@ export class ChartAnalysisPageComponent {
   readonly legendVolume = computed(() => {
     const v = this.legend()?.volume;
     return v === null || v === undefined ? null : formatVolume(v);
+  });
+  /**
+   * UD06: what the volume counts (C1 `volumeKind`): MT5 tick volume, the coin, contracts, shares. Studies read it
+   * from here (ui-analysis labels them); null before a chart-bars answer / from an engine before C1.
+   */
+  readonly volumeKind = computed(() => this.feed.factsOf(this.symbol())?.volumeKind ?? null);
+  /** The legend's tag after "Vol": `ticks`, `BTC`, `contracts`, `shares`; "unit?" when the engine said it is unknown. */
+  readonly legendVolumeUnit = computed(() => {
+    const facts = this.feed.factsOf(this.symbol());
+    if (!facts) return null;
+    return volumeUnitTag(facts.volumeKind, this.facts().instrument.baseCurrency) ?? 'unit?';
   });
 
   /** The data window's sections at the crosshair (CC-I6), from the chart's value providers. */

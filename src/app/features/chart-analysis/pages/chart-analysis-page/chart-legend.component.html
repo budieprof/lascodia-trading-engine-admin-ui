@@ -2,25 +2,13 @@
   <div class="legend-title">
     <strong>{{ page.symbol() }}</strong>
     <span class="muted">{{ page.resolutionLabel(page.resolution()) }}</span>
-    <span class="market-status" [class]="page.marketStatus()">
-      <app-chart-icon
-        [name]="
-          page.marketStatus() === 'open'
-            ? 'live'
-            : page.marketStatus() === 'closed'
-              ? 'closed'
-              : 'warning'
-        "
-        [size]="12"
-      />
-      {{
-        page.marketStatus() === 'open'
-          ? 'live'
-          : page.marketStatus() === 'closed'
-            ? 'market closed'
-            : 'feed stale'
-      }}
-    </span>
+    <app-chart-market-chips
+      [view]="page.marketView()"
+      [chips]="page.symbolChips()"
+      [options]="page.seriesOptions()"
+      (switchSeries)="page.switchContinuousSeries()"
+      (adjustmentChange)="page.setSeriesAdjustment($event)"
+    />
   </div>
   @if (page.legend(); as l) {
     <div class="legend-ohlc" [class.up]="page.legendUp()" [class.down]="!page.legendUp()">
@@ -40,9 +28,12 @@
         <span class="change" data-testid="legend-change">{{ change }}</span>
       }
       @if (page.legendVolume(); as vol) {
-        <span
-          >Vol<b>{{ vol }}</b></span
-        >
+        <span [title]="'Volume: ' + (page.legendVolumeUnit() ?? 'unit not reported')"
+          >Vol<b>{{ vol }}</b>
+          @if (page.legendVolumeUnit(); as unit) {
+            <span class="muted"> {{ unit }}</span>
+          }
+        </span>
       }
     </div>
     <div class="legend-time muted">{{ l.dateLabel ?? page.formatTime(l.time) }}</div>
