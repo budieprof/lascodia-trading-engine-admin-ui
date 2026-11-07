@@ -15,7 +15,14 @@ import { ThemeService } from '@core/theme/theme.service';
 import { SCRIPTING_UI_STYLES } from '../components/scripting-ui.styles';
 import { reportPalette } from '../report/report-charts';
 import { describeFailure } from '../shared/api-error';
-import { heatmapGrid, plateauReadout, type PlateauGate } from './heatmap.model';
+import {
+  heatmapGrid,
+  mostStableCell,
+  plateauReadout,
+  type HeatmapColourBy,
+  type PlateauGate,
+} from './heatmap.model';
+import { formatNumber, formatPercent } from '../report/report-format';
 import { ResearchApiService } from './research-api.service';
 import type { OptimizationHeatmapDto } from './research.types';
 
@@ -64,6 +71,20 @@ export const HEATMAP_BINS = [5, 8, 10, 15, 20] as const;
                 @for (p of d.parameters; track p.id) {
                   <option [value]="p.id" [selected]="p.id === grid()?.yId">{{ p.id }}</option>
                 }
+              </select>
+            </label>
+            <label>
+              <span class="muted small">Colour by</span>
+              <select
+                class="field-input"
+                (change)="colourBy.set($any($event.target).value)"
+                aria-label="Colour cells by"
+                data-testid="hm-colour-by"
+              >
+                <option value="mean" [selected]="colourBy() === 'mean'">Mean R of the cell</option>
+                <option value="neighbourhood" [selected]="colourBy() === 'neighbourhood'">
+                  Worst mean R of its 3×3 neighbourhood
+                </option>
               </select>
             </label>
             <label>
@@ -116,10 +137,19 @@ export const HEATMAP_BINS = [5, 8, 10, 15, 20] as const;
             </table>
           </div>
           <p class="muted small">
-            Mean R per trade of the candidates in each cell ({{ d.candidates }} candidates with a
-            stop). The outlined cell is the peak; the dotted ones are the neighbours its plateau
-            score is measured over.
+            @if (colourBy() === 'mean') {
+              Mean R per trade of the candidates in each cell ({{ d.candidates }} candidates with a
+              stop).
+            } @else {
+              Each cell shows the WORST mean R among the populated cells of its 3×3 neighbourhood —
+              an edge that survives a step of either parameter in any direction.
+            }
+            The outlined cell is the peak; the dotted ones are the neighbours its plateau score is
+            measured over.
           </p>
+          @if (stable(); as st) {
+            <p class="small" data-testid="hm-most-stable">{{ st }}</p>
+          }
         } @else {
           <p class="muted">{{ d.whyNot ?? 'No heatmap for this run.' }}</p>
         }
@@ -234,10 +264,28 @@ export class ParameterHeatmapComponent {
   readonly x = signal<string | null>(null);
   readonly y = signal<string | null>(null);
   readonly binCount = signal<number>(10);
+  readonly colourBy = signal<HeatmapColourBy>('mean');
 
   readonly grid = computed(() => {
     const d = this.dto();
-    return d ? heatmapGrid(d, reportPalette(this.theme.theme())) : null;
+    return d ? heatmapGrid(d, reportPalette(this.theme.theme()), this.colourBy()) : null;
+  });
+  /** U10: the most stable region, in words (or why there is none). */
+  readonly stable = computed(() => {
+    const d = this.dto();
+    if (!d?.heatmap) return null;
+    const best = mostStableCell(d);
+    const h = d.heatmap;
+    if (!best) return 'No cell has enough populated neighbours to judge its stability.';
+    const at = `${h.x.id} ${h.x.labels[best.x] ?? best.x}, ${h.y.id} ${h.y.labels[best.y] ?? best.y}`;
+    const isPeak = best.x === h.peakX && best.y === h.peakY;
+    return (
+      `Most stable region: ${at} — the worst of its ${best.stability.populated} neighbouring cells averages ` +
+      `${formatNumber(best.stability.worstMeanR, 3)} R, ${formatPercent(best.stability.positiveShare * 100, { decimals: 0 })} above 0R` +
+      (isPeak
+        ? ' (it is also the peak).'
+        : ' (not the peak: prefer settings here over a lone best cell).')
+    );
   });
   readonly readout = computed(() => {
     const d = this.dto();

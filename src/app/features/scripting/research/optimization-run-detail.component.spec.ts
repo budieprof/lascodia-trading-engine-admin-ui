@@ -180,6 +180,22 @@ describe('OptimizationRunDetailComponent (PE-I4, BT-I4, BT-I7)', () => {
     expect(first.querySelectorAll('.fold')).toHaveLength(2);
   });
 
+  it('U10: lists the top candidates with only the inputs that differ from the chosen one', () => {
+    const top = el.querySelector('[data-testid="top-candidates"]');
+    if (!top) {
+      // a fixture with a single candidate has nothing to compare
+      expect(el.querySelectorAll('[data-testid="candidates-table"] tbody tr').length).toBeLessThan(
+        2,
+      );
+      return;
+    }
+    const rows = [...top.querySelectorAll('tbody tr')];
+    expect(rows[0].textContent).toContain('reference');
+    expect(
+      rows.slice(1).some((r) => r.querySelector('.diff') || r.textContent!.includes('same inputs')),
+    ).toBe(true);
+  });
+
   it('draws the IS vs OOS splits and the logit histogram', () => {
     const titles = [...el.querySelectorAll('.chart-stub')].map((c) => c.getAttribute('data-title'));
     expect(titles).toEqual([
