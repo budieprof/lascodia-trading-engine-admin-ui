@@ -12,13 +12,20 @@ import { kindVar, linePath, shortKey, signed as signedText } from './ni-viz';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <span class="i" tabindex="0" role="note" [attr.aria-label]="text()">
+    <span
+      class="i"
+      tabindex="0"
+      role="note"
+      [attr.aria-label]="text()"
+      (mouseenter)="place($event)"
+      (focus)="place($event)"
+    >
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
         <circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.3" />
         <rect x="7.3" y="7" width="1.4" height="4.6" rx="0.7" fill="currentColor" />
         <circle cx="8" cy="4.9" r="0.85" fill="currentColor" />
       </svg>
-      <span class="tip" [class.right]="align() === 'right'">{{ text() }}</span>
+      <span class="tip" [style.left.px]="left()" [class.measuring]="measuring()">{{ text() }}</span>
     </span>
   `,
   styles: [
@@ -39,12 +46,15 @@ import { kindVar, linePath, shortKey, signed as signedText } from './ni-viz';
         color: var(--text-primary);
       }
       .tip {
+        /* Hidden = display:none so a closed tooltip takes no room (an invisible 320px box beside an icon near
+           the right edge used to make the whole page scroll sideways). place() keeps an open one on screen. */
+        display: none;
         position: absolute;
         z-index: 40;
         left: -8px;
         top: calc(100% + 6px);
         width: max-content;
-        max-width: 320px;
+        max-width: min(320px, calc(100vw - 16px));
         padding: 8px 10px;
         border-radius: 8px;
         background: var(--text-primary);
@@ -56,28 +66,50 @@ import { kindVar, linePath, shortKey, signed as signedText } from './ni-viz';
         text-transform: none;
         white-space: normal;
         box-shadow: var(--shadow-lg);
-        opacity: 0;
         pointer-events: none;
-        transform: translateY(-2px);
-        transition:
-          opacity 0.12s ease,
-          transform 0.12s ease;
-      }
-      .tip.right {
-        left: auto;
-        right: -8px;
       }
       .i:hover .tip,
       .i:focus-visible .tip {
-        opacity: 1;
-        transform: none;
+        display: block;
+        animation: ni-tip-in 0.12s ease;
+      }
+      .tip.measuring {
+        visibility: hidden;
+        animation: none;
+      }
+      @keyframes ni-tip-in {
+        from {
+          opacity: 0;
+          transform: translateY(-2px);
+        }
       }
     `,
   ],
 })
 export class NiInfoComponent {
   readonly text = input.required<string>();
+  /** 'left' hangs the tooltip rightwards from the icon, 'right' leftwards; either way it is kept inside the window. */
   readonly align = input<'left' | 'right'>('left');
+  /** Tooltip left offset in px, relative to the icon. */
+  protected readonly left = signal(-8);
+  protected readonly measuring = signal(false);
+
+  protected place(ev: Event): void {
+    const host = ev.currentTarget as HTMLElement;
+    const icon = host.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    // Measure while hidden, parked at the window's left edge so even the measuring frame cannot widen the page.
+    this.measuring.set(true);
+    this.left.set(Math.round(8 - icon.left));
+    requestAnimationFrame(() => {
+      const tip = host.querySelector<HTMLElement>('.tip');
+      const width = tip?.offsetWidth || Math.min(320, vw - 16);
+      let start = this.align() === 'right' ? icon.right + 8 - width : icon.left - 8; // viewport x
+      start = Math.max(8, Math.min(start, vw - 8 - width));
+      this.left.set(Math.round(start - icon.left));
+      this.measuring.set(false);
+    });
+  }
 }
 
 // ── Panel shell ──────────────────────────────────────────────────────────────

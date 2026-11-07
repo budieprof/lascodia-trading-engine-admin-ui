@@ -245,6 +245,45 @@ function stub(method, p, q) {
     }
     const r = { url: page.url().replace(BASE, '') };
     for (const [k, fn] of Object.entries(checks)) r[k] = await fn().catch((e) => `error: ${String(e).slice(0, 120)}`);
+    // Horizontal-overflow probe: the outermost elements whose right edge passes the viewport (or that make any
+    // ancestor scroll sideways). Empty list = no sideways scrolling.
+    r.overflow = await page.evaluate(() => {
+      const vw = document.documentElement.clientWidth;
+      const desc = (el) => el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
+      const scrollers = [...document.querySelectorAll('*')].filter((el) => {
+        const cs = getComputedStyle(el);
+        return el.scrollWidth > el.clientWidth + 1 && /(auto|scroll)/.test(cs.overflowX) && el.clientWidth > vw * 0.5;
+      }).map((el) => `${desc(el)} scroll ${el.scrollWidth}>${el.clientWidth}`);
+      const out = [];
+      for (const el of document.querySelectorAll('body *')) {
+        const rc = el.getBoundingClientRect();
+        if (rc.width === 0 || rc.right <= vw + 1) continue;
+        const pr = el.parentElement?.getBoundingClientRect();
+        if (pr && pr.right > vw + 1) continue; // report the outermost offender only
+        out.push(`${desc(el)} right=${Math.round(rc.right)} w=${Math.round(rc.width)} parent=${el.parentElement ? desc(el.parentElement) : ''}`);
+      }
+      return { vw, docScroll: document.documentElement.scrollWidth, scrollers, offenders: out.slice(0, 15) };
+    }).catch((e) => `error: ${String(e).slice(0, 120)}`);
+    // Open the right-most ⓘ tooltip: it must stay inside the window and not widen the page.
+    r.rightmostTip = await (async () => {
+      const icons = page.locator('app-ni-info .i');
+      const n = await icons.count();
+      let best = -1, bestX = -1;
+      for (let i = 0; i < n; i++) {
+        const b = await icons.nth(i).boundingBox();
+        if (b && b.width > 0 && b.x > bestX) { bestX = b.x; best = i; }
+      }
+      if (best < 0) return null;
+      await icons.nth(best).hover();
+      await page.waitForTimeout(250);
+      const res = await page.evaluate(() => {
+        const t = [...document.querySelectorAll('app-ni-info .tip')].find((e) => e.getBoundingClientRect().width > 0);
+        const rc = t?.getBoundingClientRect();
+        return { vw: document.documentElement.clientWidth, docScroll: document.documentElement.scrollWidth, tipLeft: rc && Math.round(rc.left), tipRight: rc && Math.round(rc.right) };
+      });
+      await page.mouse.move(0, 0);
+      return res;
+    })().catch((e) => `error: ${String(e).slice(0, 120)}`);
     await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: true });
     results[name] = r;
   };
