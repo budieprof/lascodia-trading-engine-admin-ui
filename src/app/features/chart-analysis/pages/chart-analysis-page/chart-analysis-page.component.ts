@@ -490,6 +490,7 @@ import {
   type StyleChoice,
 } from './chart-page.config';
 import { ChartHistoryPager } from './chart-history-pager';
+import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 
 /** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
@@ -1396,7 +1397,17 @@ export class ChartAnalysisPageComponent {
   }
 
   /** Other symbols' bars for compare studies, keyed by symbol. */
-  readonly compareBars = signal<Record<string, Bar[]>>({});
+  /** Compare overlays + compare studies' other symbols (CC-I12, CC-13) — U13: {@link ChartCompareState}. */
+  private readonly compareState = new ChartCompareState({
+    feed: { getBars: (sym, res, from, to, limit) => this.feed.getBars(sym, res, from, to, limit) },
+    resolution: () => this.resolution(),
+    oldestBarTime: () => this.bars()[0]?.time,
+    now: () => this.serverClock.now(),
+    calendarOf: (symbol) => this.calendarOf(symbol),
+    scaleMode: () => this.scaleMode,
+    notify: (text) => this.notify.info(text),
+  });
+  readonly compareBars = this.compareState.bars;
   private readonly compareSymbols = computed(() => {
     const out = new Set<string>();
     for (const a of this.active()) {
@@ -3771,80 +3782,22 @@ export class ChartAnalysisPageComponent {
     void this.reload();
   }
 
-  /**
-   * The compare studies' other symbols, on this resolution, back to the chart's oldest bar (CC-13:
-   * they read the first 1,500 bars only, never extended nor updated). Ticks keep them live
-   * ({@link applyCompareTick}); scroll-back extends them ({@link extendCompareBars}).
-   */
-  private compareRequest = 0;
-  private async loadCompareBars(symbols: string[], resolution: TvResolution): Promise<void> {
-    const request = ++this.compareRequest;
-    const now = Date.now();
-    const next: Record<string, Bar[]> = {};
-    await Promise.all(
-      symbols.map(async (sym) => {
-        try {
-          next[sym] = (await this.feed.getBars(sym, resolution, 0, now, PAGE_BARS)).bars;
-        } catch {
-          // Unknown symbol: the study stays empty rather than failing the chart.
-        }
-      }),
-    );
-    // Drop the result if the operator moved on while it loaded.
-    if (request !== this.compareRequest || resolution !== this.resolution()) return;
-    this.compareBars.set(next);
-    const oldest = this.bars()[0]?.time;
-    if (oldest !== undefined) void this.extendCompareBars(oldest);
+  /** Compare studies' other symbols' bars — {@link ChartCompareState}. */
+  private loadCompareBars(symbols: string[], resolution: TvResolution): Promise<void> {
+    return this.compareState.loadBars(symbols, resolution);
   }
 
-  /** Extend every compare series back to `oldestMs` (the chart's oldest bar), a page at a time. */
-  private async extendCompareBars(oldestMs: number): Promise<void> {
-    const resolution = this.resolution();
-    const request = this.compareRequest;
-    for (const sym of Object.keys(this.compareBars())) {
-      for (let page = 0; page < GO_TO_DATE_PAGES; page++) {
-        const held = this.compareBars()[sym];
-        if (!held?.length || held[0].time <= oldestMs) break;
-        let older: Bar[] = [];
-        try {
-          const res = await this.feed.getBars(sym, resolution, 0, held[0].time - 1, PAGE_BARS);
-          older = res.bars.filter((b) => b.time < held[0].time);
-        } catch {
-          break;
-        }
-        if (request !== this.compareRequest || resolution !== this.resolution()) return;
-        if (!older.length) break;
-        this.compareBars.update((all) => {
-          const current = all[sym] ?? [];
-          return {
-            ...all,
-            [sym]: [...older.filter((b) => b.time < (current[0]?.time ?? Infinity)), ...current],
-          };
-        });
-      }
-    }
+  private extendCompareBars(oldestMs: number): Promise<void> {
+    return this.compareState.extendBars(oldestMs);
   }
 
-  /** A live price of a compare study's other symbol moves its bars (CC-13). */
   private applyCompareTick(tick: {
     symbol?: string;
     bid?: number;
     price?: number;
     ask?: number;
   }): void {
-    const symbol = tick?.symbol?.toUpperCase();
-    const price = tick?.bid ?? tick?.price ?? tick?.ask;
-    if (!symbol || typeof price !== 'number') return;
-    const held = this.compareBars()[symbol];
-    if (!held?.length) return;
-    const next = liveTick(
-      held,
-      price,
-      this.serverClock.now(),
-      this.resolution(),
-      this.calendarOf(symbol),
-    );
-    if (next) this.compareBars.update((all) => ({ ...all, [symbol]: next }));
+    this.compareState.applyTick(tick);
   }
 
   /** A live price moves the split panels that show its symbol (CC-12: they were static). */
@@ -5775,7 +5728,7 @@ export class ChartAnalysisPageComponent {
 
   // ── Compare overlays and synthetic series (CC-I12) ───────────────────────
 
-  readonly compareSeries = signal<CompareSeriesSpec[]>([]);
+  readonly compareSeries = this.compareState.series;
   readonly compareOpen = signal(false);
   readonly compareTitleOf = compareTitle;
   readonly symbolNames = computed(() =>
@@ -5805,23 +5758,13 @@ export class ChartAnalysisPageComponent {
     ...this.comparePaneList(),
   ]);
 
-  /**
-   * Add a compare series. A compare symbol goes on the price's scale, so the scale turns to Percent (each line from
-   * 0 % at the first bar on screen) unless it already compares (percent or indexed to 100).
-   */
+  /** Add a compare series (the scale rule: {@link ChartCompareState.add}). */
   addCompare(spec: CompareSeriesSpec): void {
-    this.compareSeries.update((l) => [...l, spec]);
-    const next = scaleAfterCompare(spec, this.scaleMode());
-    if (next.switched) {
-      this.scaleMode.set('percent');
-      this.notify.info(
-        'The price scale is now Percent: each symbol starts at 0 % on the first bar on screen.',
-      );
-    }
+    this.compareState.add(spec);
   }
 
   removeCompare(id: string): void {
-    this.compareSeries.update((l) => l.filter((c) => c.id !== id));
+    this.compareState.remove(id);
   }
 
   // ── Command palette (CC-I11) ─────────────────────────────────────────────
