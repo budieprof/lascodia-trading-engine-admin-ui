@@ -12,10 +12,7 @@ import {
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
-import { formatDate } from '@angular/common';
 import { distinctUntilChanged, filter, map, of, throttleTime } from 'rxjs';
-import type { ColDef } from 'ag-grid-community';
-import { configHashColumn } from '../../util/config-hash-column';
 
 import { StrategiesService } from '@core/services/strategies.service';
 import { StrategyFeedbackService } from '@core/services/strategy-feedback.service';
@@ -28,14 +25,11 @@ import { RealtimeService } from '@core/realtime/realtime.service';
 import {
   StrategyDto,
   StrategyPerformanceSnapshotDto,
-  BacktestRunDto,
-  PagerRequest,
   UpdateStrategyRequest,
 } from '@core/api/api.types';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { PresenceBadgeComponent } from '@shared/components/presence-badge/presence-badge.component';
-import { DataTableComponent } from '@shared/components/data-table/data-table.component';
 import { StatusBadgeComponent } from '@shared/components/status-badge/status-badge.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { GaugeComponent } from '@shared/components/gauge/gauge.component';
@@ -44,7 +38,6 @@ import { readTabParam, tabQueryParam } from '../../util/tab-url';
 import { fmtProfitFactor } from '@shared/utils/metric-format';
 import { EnumLabelPipe } from '@shared/pipes/enum-label.pipe';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
-import { StatusPillCellComponent } from '@shared/components/data-table/cell-renderers/status-pill-cell.component';
 import { PageContextService } from '@core/assistant/page-context.service';
 
 import { StrategyFormComponent } from '../../components/strategy-form/strategy-form.component';
@@ -67,17 +60,16 @@ import { StrategyScriptCardComponent } from '@features/scripting/components/stra
 import { StrategyExecutionPanelComponent } from '@features/scripting/execution/strategy-execution-panel.component';
 import { ScriptLivePanelComponent } from '@features/scripting/live/script-live-panel.component';
 import { ScriptAlertsTabComponent } from '@features/scripting/alerts/script-alerts-tab.component';
-import { ScriptBacktestLauncherComponent } from '@features/scripting/backtest/script-backtest-launcher.component';
 import { isScriptStrategy } from '@features/scripting/shared/script-strategy';
 import { StrategyExecutionCardComponent } from '@features/execution/components/strategy-execution-card.component';
 import { isNewsBlackoutExempt } from '@features/scripting/execution/news-blackout-exemption.model';
 import { FirstStrategyChecklistComponent } from '@features/scripting/onboarding/first-strategy-checklist.component';
-import { RunComparisonComponent } from '@features/scripting/backtest/run-comparison.component';
 import { OptimizationWorkbenchComponent } from '@features/scripting/research/optimization-workbench.component';
 import { WalkForwardWorkbenchComponent } from '@features/scripting/research/walk-forward-workbench.component';
 import { ResearchCockpitComponent } from '../../research-cockpit/research-cockpit.component';
 import { StrategySignalsGridComponent } from '../../components/strategy-activity-tabs/strategy-signals-grid.component';
 import { StrategyOrdersGridComponent } from '../../components/strategy-activity-tabs/strategy-orders-grid.component';
+import { StrategyBacktestsTabComponent } from '../../components/strategy-backtests-tab/strategy-backtests-tab.component';
 import { StrategyLineageTabComponent } from '../../components/strategy-lineage-tab/strategy-lineage-tab.component';
 import type { ChecklistAction } from '@features/scripting/onboarding/first-strategy-checklist';
 import { AuthService } from '@core/auth/auth.service';
@@ -91,11 +83,6 @@ import {
   type HasUnsavedChanges,
 } from '@features/scripting/shared/unsaved-changes';
 
-/** A backtest row that closed at least one trade; without one its ratios are not measured. */
-function runHasTrades(row: { totalTrades?: number | null } | null | undefined): boolean {
-  return row?.totalTrades == null || row.totalTrades > 0;
-}
-
 @Component({
   selector: 'app-strategy-detail-page',
   standalone: true,
@@ -103,7 +90,6 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     StrategyExecutionCardComponent,
     PageHeaderComponent,
     PresenceBadgeComponent,
-    DataTableComponent,
     StatusBadgeComponent,
     ConfirmDialogComponent,
     GaugeComponent,
@@ -125,16 +111,15 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
     StrategyExecutionPanelComponent,
     ScriptLivePanelComponent,
     ScriptAlertsTabComponent,
-    ScriptBacktestLauncherComponent,
     StrategyScriptCardComponent,
     FirstStrategyChecklistComponent,
-    RunComparisonComponent,
     OptimizationWorkbenchComponent,
     WalkForwardWorkbenchComponent,
     ResearchCockpitComponent,
     StrategyLineageTabComponent,
     StrategySignalsGridComponent,
     StrategyOrdersGridComponent,
+    StrategyBacktestsTabComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -641,26 +626,7 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                Backtests page links to). -->
           @if (activeTab() === 'backtests') {
             @if (!isSentinel()) {
-              @if (isScript()) {
-                <!-- Script strategies: symbol / timeframe / input overrides, deep mode and
-                   the bar magnifier (ADR-0027 §4). -->
-                <app-script-backtest-launcher
-                  [strategy]="strategy()!"
-                  (queued)="backtestTable?.loadData()"
-                />
-              }
-              <!-- Tighter cells: at the grid's default padding the "(override)" marker and the
-                 Started column were clipped and single-word headers broke mid-word. -->
-              <div class="bt-runs">
-                <app-data-table
-                  #backtestTable
-                  [columnDefs]="backtestColumns"
-                  [fetchData]="fetchBacktests"
-                  (rowClick)="onBacktestRowClick($event)"
-                />
-              </div>
-              <!-- PE-I7: two runs side by side — metrics, equity and how each was made. -->
-              <app-run-comparison [strategyId]="strategyId" />
+              <app-strategy-backtests-tab [strategy]="strategy()!" [isScript]="isScript()" />
             }
             <app-strategy-tab-context
               [strategy]="strategy()!"
@@ -1085,9 +1051,6 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
       .json-fold {
         margin-top: var(--space-4);
       }
-      .bt-runs ::ng-deep .ag-theme-alpine {
-        --ag-cell-horizontal-padding: 12px;
-      }
       .json-fold summary {
         cursor: pointer;
         font-size: var(--text-xs);
@@ -1431,7 +1394,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   ];
 
   /** Refreshed when the script launcher queues a run, so the new row shows at once. */
-  @ViewChild('backtestTable') backtestTable?: DataTableComponent<BacktestRunDto>;
 
   private readonly pageContext = inject(PageContextService);
 
@@ -1759,142 +1721,6 @@ export class StrategyDetailPageComponent implements OnInit, HasUnsavedChanges {
   // string to TFilter). Pass an object that matches the per-controller
   // filter shape — `{ strategyId }` is a first-class field on the trade-
   // signal, optimization, and (post-engine-update) order filters.
-
-  readonly fetchBacktests = (params: PagerRequest) =>
-    this.backtestsService
-      .list({ ...params, filter: { ...(params.filter ?? {}), strategyId: this.strategyId } })
-      .pipe(map((res) => res.data!));
-
-  // Minimums sized to each header and widest value at 12px cell padding (.bt-runs): they sum to
-  // ~1,100px, inside the tab's card, so sizeColumnsToFit never squeezes one past its content.
-  readonly backtestColumns: ColDef[] = [
-    { field: 'id', headerName: 'ID', width: 70, minWidth: 60 },
-    {
-      field: 'symbol',
-      headerName: 'Market',
-      width: 176,
-      minWidth: 172,
-      // A run with a symbol/timeframe override tested the rules on another market — never
-      // promotion evidence; the promotion gate ignores it (its verdict says "No completed backtest
-      // on the strategy's own market" and counts the override runs). Say so on the row too.
-      valueFormatter: (p: any) => {
-        const d = p.data as
-          | {
-              symbol?: string;
-              timeframe?: string;
-              symbolOverride?: string | null;
-              timeframeOverride?: string | null;
-            }
-          | undefined;
-        if (!d) return p.value ?? '—';
-        // The timeframe code ("H1"), as on the Backtests page: "1 Hour (override)" did not fit.
-        const market = `${d.symbol ?? '—'} · ${d.timeframe ?? '—'}`;
-        return d.symbolOverride || d.timeframeOverride ? `${market} (override)` : market;
-      },
-      tooltipValueGetter: (p: any) =>
-        p.data?.symbolOverride || p.data?.timeframeOverride
-          ? "Override run: the strategy's rules on another market or timeframe — not promotion evidence"
-          : null,
-    },
-    // UTC dates: toLocaleDateString printed a window ending 2026-09-30T23:00Z as "10/1/2026".
-    // One "from – to" column (sorts by its start) leaves room for the rest.
-    {
-      field: 'fromDate',
-      headerName: 'Window (UTC)',
-      width: 200,
-      minWidth: 196,
-      valueFormatter: (p: any) =>
-        p.data ? `${this.utcDay(p.data.fromDate)} – ${this.utcDay(p.data.toDate)}` : '—',
-    },
-    {
-      field: 'status',
-      headerName: 'Status',
-      width: 112,
-      minWidth: 106,
-      cellRenderer: StatusPillCellComponent,
-      cellRendererParams: { label: 'Backtest status' },
-    },
-    {
-      field: 'totalTrades',
-      headerName: 'Trades',
-      width: 80,
-      minWidth: 76,
-      valueFormatter: (p: any) => (p.value != null ? p.value : '—'),
-    },
-    // A run that closed no trade has no win rate, PF or Sharpe (the engine stores 0.0): "—".
-    {
-      field: 'winRate',
-      headerName: 'Win %',
-      width: 76,
-      minWidth: 70,
-      valueFormatter: (p: any) =>
-        p.value != null && runHasTrades(p.data) ? `${(p.value * 100).toFixed(1)}%` : '—',
-    },
-    {
-      field: 'profitFactor',
-      headerName: 'PF',
-      width: 64,
-      minWidth: 60,
-      // 9999 is the engine's "no losing trade" sentinel, not a measured ratio.
-      valueFormatter: (p: any) =>
-        p.value == null || !runHasTrades(p.data) ? '—' : p.value >= 9999 ? '∞' : p.value.toFixed(2),
-    },
-    {
-      field: 'maxDrawdownPct',
-      headerName: 'Max DD',
-      width: 84,
-      minWidth: 80,
-      valueFormatter: (p: any) => (p.value != null ? `${p.value.toFixed(2)}%` : '—'),
-    },
-    {
-      field: 'sharpeRatio',
-      headerName: 'Sharpe',
-      width: 80,
-      minWidth: 76,
-      valueFormatter: (p: any) =>
-        p.value != null && runHasTrades(p.data) ? p.value.toFixed(2) : '—',
-    },
-    {
-      field: 'totalReturn',
-      headerName: 'Return',
-      width: 92,
-      minWidth: 88,
-      // BacktestEngine stores TotalReturn already in percent (0.1089 = 0.1089%);
-      // multiplying by 100 again printed 10.89% for a $10.89 gain on $10,000.
-      valueFormatter: (p: any) => (p.value != null ? `${Number(p.value).toFixed(2)}%` : '—'),
-    },
-    {
-      // The engine's backtest row has no `startedAt` (a stale typed field), so this column was
-      // blank: it sends `executionStartedAt`, and `claimedAt` for a run not yet executing.
-      colId: 'executionStartedAt',
-      headerName: 'Started (UTC)',
-      flex: 1,
-      minWidth: 112,
-      valueGetter: (p: any) =>
-        p.data?.executionStartedAt ?? p.data?.claimedAt ?? p.data?.startedAt ?? null,
-      // "about 19 hours ago" did not fit the column; the date does, the rest is in the tooltip.
-      valueFormatter: (p: any) => (p.value ? this.utcDay(p.value) : '—'),
-      tooltipValueGetter: (p: any) =>
-        p.value
-          ? `${formatDate(p.value, 'MMM d, yyyy HH:mm', 'en-US', 'UTC')} UTC · ${this.relativeTime.transform(p.value)}`
-          : null,
-    },
-    configHashColumn(
-      () =>
-        (this.strategy() as { strategyConfigHash?: string | null } | null)?.strategyConfigHash ??
-        null,
-    ),
-  ];
-
-  /** "Sep 30, 2026" in UTC — a backtest window is a UTC range. */
-  private utcDay(iso: string | null | undefined): string {
-    if (!iso) return '—';
-    return formatDate(iso, 'MMM d, yyyy', 'en-US', 'UTC');
-  }
-
-  onBacktestRowClick(run: BacktestRunDto): void {
-    this.router.navigate(['/backtests', run.id]);
-  }
 
   ngOnInit(): void {
     // Follow the route, not just its first snapshot: Angular reuses this
