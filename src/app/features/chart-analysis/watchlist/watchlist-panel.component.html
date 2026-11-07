@@ -306,7 +306,7 @@
               @switch (c.key) {
                 @case ('last') {
                   @let t = tick()[r.symbol];
-                  @let parts = tickParts(r.last, r.digits, t?.prev ?? null);
+                  @let parts = tickParts(r.last, r.digits, t?.prev ?? null, r.fractionalPip);
                   <span
                     class="col-num wl-last"
                     [class.up]="t?.dir === 'up'"
@@ -346,17 +346,18 @@
                   }}</span>
                 }
                 @case ('spread') {
-                  <span class="col-num">{{
+                  <span class="col-num" [title]="r.unitLabel">{{
                     r.spread === null ? '' : (r.spread | number: '1.1-1')
-                  }}</span>
+                  }}@if (r.spread !== null && r.unitLabel !== 'pips') {<small class="muted"> {{ unitShort(r.unitLabel) }}</small>}</span>
                 }
                 @case ('dayRange') {
-                  <span class="col-num">{{
+                  <span class="col-num" [title]="r.unitLabel">{{
                     r.dayRange === null ? '' : (r.dayRange | number: '1.0-1')
-                  }}</span>
+                  }}@if (r.dayRange !== null && r.unitLabel !== 'pips') {<small class="muted"> {{ unitShort(r.unitLabel) }}</small>}</span>
                 }
                 @case ('adr') {
-                  <span class="col-num">{{ r.adr === null ? '' : (r.adr | number: '1.0-0') }}</span>
+                  <span class="col-num" [title]="r.unitLabel">{{ r.adr === null ? '' : (r.adr | number: '1.0-0')
+                  }}@if (r.adr !== null && r.unitLabel !== 'pips') {<small class="muted"> {{ unitShort(r.unitLabel) }}</small>}</span>
                 }
                 @case ('adrUsed') {
                   <span class="col-num" [class.down]="(r.adrUsed ?? 0) >= 100">{{
@@ -509,7 +510,7 @@
 
 @let d = detail();
 @let dt = tick()[d.symbol];
-@let dp = tickParts(d.row.last, d.row.digits, dt?.prev ?? null);
+@let dp = tickParts(d.row.last, d.row.digits, dt?.prev ?? null, d.row.fractionalPip);
 <section class="wl-details" aria-label="Symbol details">
   <div class="wl-d-head">
     @if (pairFlags(d.symbol)) {

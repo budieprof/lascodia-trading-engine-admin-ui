@@ -16,6 +16,7 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { ModalA11yDirective } from '@shared/directives/modal-a11y.directive';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
+import { instrumentFacts } from '../datafeed/instrument-facts';
 import { ChartTradingComponent } from './chart-trading.component';
 import { OrderTicketComponent } from './order-ticket.component';
 import { VenueOrderTicketComponent } from './venue-order-ticket.component';
@@ -26,9 +27,8 @@ declareSignalIo(ChartTradingComponent, {
     'host',
     'symbol',
     'precision',
-    'pipSize',
+    'facts',
     'quote',
-    'lotStep',
     'positions',
     'orders',
     'accountIds',
@@ -38,7 +38,7 @@ declareSignalIo(ChartTradingComponent, {
   outputs: ['submitted', 'changed', 'openChange'],
 });
 declareSignalIo(OrderTicketComponent, {
-  inputs: ['symbol', 'precision', 'pipSize', 'quote', 'state'],
+  inputs: ['symbol', 'precision', 'unitLabel', 'quote', 'state'],
   outputs: ['closed', 'submitted', 'previewChange'],
 });
 // `state` is a model(): its change event is the model signal itself (the parent binds [(state)]).
@@ -154,6 +154,26 @@ describe('ChartTradingComponent — which ticket (multi-asset golden)', () => {
     expect((fixture.nativeElement as HTMLElement).textContent).toContain(
       'Send creates a manual signal',
     );
+  });
+
+  it('UI05: every ticket wears its route — MT5 broker / Venue: CME', () => {
+    render('EURUSD');
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
+    ).toContain('MT5 broker');
+    render('ESZ6');
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-route"]')?.textContent,
+    ).toContain('Venue: CME');
+  });
+
+  it('UI05: while the instrument resolves, neither ticket is offered', () => {
+    setInstrumentCatalogue([]);
+    fixture.componentRef.setInput('facts', instrumentFacts('ESZ6', { lookup: 'resolving' }));
+    expect(render('ESZ6')).toEqual({ fx: false, venue: false });
+    expect(
+      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="ticket-resolving"]'),
+    ).not.toBeNull();
   });
 
   it('a ladder click on the contract opens the ticket prefilled; a click for another symbol does not', () => {

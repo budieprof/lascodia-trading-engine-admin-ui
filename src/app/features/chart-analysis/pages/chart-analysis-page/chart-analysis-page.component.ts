@@ -77,8 +77,14 @@ import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calen
 import { liveTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
-import { pipSizeFor, priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
-import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
+import { priceScaleFor, rankSymbols } from '../../datafeed/symbol-info';
+import { resolveInstrument } from '@core/instruments/instrument-math';
+import {
+  decimalsOfPrices,
+  instrumentFacts,
+  sameFacts,
+  type InstrumentFacts,
+} from '../../datafeed/instrument-facts';
 import { InstrumentsService } from '@core/instruments/instruments.service';
 import { venueInstrumentFor } from '@features/venues/venues.logic';
 import type { InstrumentAssetClass } from '@core/instruments/instrument.types';
@@ -1455,7 +1461,7 @@ export class ChartAnalysisPageComponent {
           this.symbol(),
           this.inTradeScope(),
           this.liveQuote(),
-          this.pipSize(),
+          this.facts(),
           (id) => this.accountScope.accounts().find((a) => a.id === id)?.currency ?? null,
         )
       : [],
@@ -1469,7 +1475,7 @@ export class ChartAnalysisPageComponent {
           this.closedPositions(),
           this.symbol(),
           this.inTradeScope(),
-          this.pipSize(),
+          this.facts(),
         )
       : [],
   );
@@ -1842,7 +1848,7 @@ export class ChartAnalysisPageComponent {
       symbol,
       base: pair?.baseCurrency ?? '—',
       quote: pair?.quoteCurrency ?? '—',
-      digits: pair ? Math.trunc(pair.decimalPlaces) : 5,
+      digits: this.facts().precision,
       contractSize: pair?.contractSize ?? null,
       minLot: pair?.minLotSize ?? null,
       maxLot: pair?.maxLotSize ?? null,
@@ -1870,10 +1876,17 @@ export class ChartAnalysisPageComponent {
     bars: () => this.bars(),
     resolution: () => this.resolution(),
     digits: () => this.precision(),
-    symbolFacts: () => ({
-      pipSize: this.pipSize(),
-      contractSize: this.currentPair()?.contractSize || 100_000,
-    }),
+    // UI03: the instrument's own money — 100 000 per FX lot as always, tick value ÷ tick off FX, inverse in the coin.
+    symbolFacts: () => {
+      const f = this.facts();
+      return {
+        pipSize: f.distanceUnit,
+        unitLabel: f.distanceLabel,
+        valuePerPrice: f.valuePerPrice,
+        inverse: f.inverse,
+        contractValue: f.contractValue,
+      };
+    },
     fetchIntrabar: (resolution, fromMs, toMs, count) =>
       this.feed.getBars(this.symbol(), resolution, fromMs, toMs, count).then((r) => r.bars),
     tickData: {
@@ -2047,14 +2060,8 @@ export class ChartAnalysisPageComponent {
   readonly lineBreakLines = signal(3);
   /** Point & Figure: the reversal, in boxes (CC-I10; TradingView's default 3). */
   readonly pnfReversal = signal(3);
-  /** One pip of this symbol, in price (the engine's rule: ten points on fractional FX quotes). */
-  readonly pipSize = computed(() =>
-    pipSizeFor(
-      this.precision(),
-      (this.currentPair() as (CurrencyPairDto & { assetClass?: string | null }) | undefined)
-        ?.assetClass,
-    ),
-  );
+  /** One display unit of this symbol, in price: the pip on FX (ten points on fractional quotes), else its tick/point. */
+  readonly pipSize = computed(() => this.facts().distanceUnit);
 
   /**
    * FX market status, from the bar data rather than a clock.
@@ -2274,10 +2281,19 @@ export class ChartAnalysisPageComponent {
     return VOLUME_PROFILE_MODES.find((m) => m.id === this.volumeProfileMode())?.label ?? '';
   }
 
-  readonly precision = computed(() => {
-    const pair = this.symbols().find((p) => p.symbol === this.symbol());
-    return pair ? Math.trunc(pair.decimalPlaces) || 5 : 5;
-  });
+  /** The chart symbol's instrument facts (UI01): the ONE source of precision, tick, distance unit, sizing, ticket. */
+  readonly facts = computed(
+    () =>
+      instrumentFacts(this.symbol(), {
+        pair: this.currentPair() ?? null,
+        lookup: this.instruments.lookupState(this.symbol()),
+        refPrice: () => this.bars().at(-1)?.close ?? null,
+        digitsHint: () => decimalsOfPrices(this.bars().slice(-50).map((b) => b.close)),
+      }),
+    { equal: sameFacts },
+  );
+
+  readonly precision = computed(() => this.facts().precision);
 
   readonly priceScale = computed(() => priceScaleFor(this.precision()));
 
@@ -2776,7 +2792,8 @@ export class ChartAnalysisPageComponent {
       structureSummary: () =>
         marketStructure(this.visibleBars(), {
           pipSize: this.pipSize(),
-          unitLabel: distanceUnitLabel(resolveInstrument(this.symbol())),
+          unitLabel: this.facts().distanceLabel,
+          precision: this.precision(),
         }).summary,
       // Computed on demand rather than held in a signal: the assistant asks rarely, and a
       // second copy of this would be a second thing that can disagree with the chart.
@@ -5145,7 +5162,9 @@ export class ChartAnalysisPageComponent {
   /** The legend's change from the previous close: "−0.00002 / −0.2 pip (−0.00%)" (CC-18). */
   readonly legendChange = computed(() => {
     const l = this.legend();
-    return l ? changeText(l.change ?? null, l.changePct, this.pipSize(), this.precision()) : null;
+    return l
+      ? changeText(l.change ?? null, l.changePct, this.pipSize(), this.precision(), this.facts())
+      : null;
   });
   readonly legendVolume = computed(() => {
     const v = this.legend()?.volume;
@@ -5499,10 +5518,21 @@ export class ChartAnalysisPageComponent {
   readonly noLayers: ChartScriptLayer[] = [];
 
   panelPrecision(symbol: string): number {
-    const pair = this.symbols().find(
-      (p) => (p.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
-    );
-    return pair ? Math.trunc(pair.decimalPlaces) || 5 : 5;
+    return this.panelFacts(symbol).precision;
+  }
+
+  private readonly panelFactsMemo = new Map<string, InstrumentFacts>();
+  /** A split panel's instrument facts (UI01), the same object while nothing in them changed. */
+  panelFacts(symbol: string): InstrumentFacts {
+    const key = symbol.toUpperCase();
+    const next = instrumentFacts(key, {
+      pair: this.symbols().find((p) => (p.symbol ?? '').toUpperCase() === key) ?? null,
+      lookup: this.instruments.lookupState(key),
+    });
+    const prev = this.panelFactsMemo.get(key);
+    if (prev && sameFacts(prev, next)) return prev;
+    this.panelFactsMemo.set(key, next);
+    return next;
   }
 
   // ── Workspace actions ────────────────────────────────────────────────────

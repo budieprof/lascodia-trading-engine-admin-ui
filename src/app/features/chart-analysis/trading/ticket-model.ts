@@ -1,6 +1,7 @@
 import { ticketAlgoFields } from '@features/execution/execution.logic';
 import type { ExecutionAlgorithm } from '@features/execution/execution.types';
 
+import { shortDistanceLabel } from '../datafeed/instrument-facts';
 import type { LiveQuote } from '../overlays/trade-layer';
 import { roundPrice, type TradeLine } from './trade-lines';
 import type {
@@ -162,10 +163,12 @@ const BLUE = '#2962FF';
 export function ticketLines(
   state: TicketState,
   entry: number | null,
-  pip: number,
+  unit: { distanceUnit: number; distanceLabel: string },
   preview: ManualTradePreview | null,
 ): TradeLine[] {
   const lines: TradeLine[] = [];
+  const pip = unit.distanceUnit;
+  const short = shortDistanceLabel(unit.distanceLabel);
   const pips = (p: number) => (entry !== null && pip > 0 ? Math.abs(p - entry) / pip : null);
   const side = state.direction === 'Buy' ? 'BUY' : 'SELL';
   if (!state.atMarket && state.entry !== null)
@@ -188,7 +191,7 @@ export function ticketLines(
       key: 'ticket:stop',
       kind: 'ticketStop',
       price: state.stop,
-      label: `${side} SL${p !== null ? ` ${p.toFixed(1)}p` : ''}${money}`,
+      label: `${side} SL${p !== null ? ` ${p.toFixed(1)}${short}` : ''}${money}`,
       color: RED,
       draggable: true,
       drawn: true,
@@ -201,7 +204,7 @@ export function ticketLines(
       key: 'ticket:target',
       kind: 'ticketTarget',
       price: state.target,
-      label: `${side} TP${p !== null ? ` ${p.toFixed(1)}p` : ''}${rr}`,
+      label: `${side} TP${p !== null ? ` ${p.toFixed(1)}${short}` : ''}${rr}`,
       color: GREEN,
       draggable: true,
       drawn: true,

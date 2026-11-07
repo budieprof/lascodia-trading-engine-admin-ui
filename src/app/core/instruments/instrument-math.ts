@@ -185,8 +185,16 @@ export function classifySymbol(symbol: string): InstrumentAssetClass {
   if (COMMODITIES.has(s)) return 'Commodity';
   if (CRYPTOS.has(s) || isCoinPair(s) || /^[A-Z0-9]{2,10}-[A-Z0-9]{2,10}(-PERP)?$/.test(s))
     return 'Crypto';
-  if (/^[A-Z0-9]{1,4}\d!$/.test(s)) return 'Future';
+  if (/^[A-Z0-9]{1,4}\d!$/.test(s) || isFuturesContractCode(s)) return 'Future';
   return 'Fx';
+}
+
+/**
+ * A dated futures contract code: a 2-3 character root, a month code and a 1-2 digit year — `ESZ5`, `CLF26`, `6EH6`,
+ * `RTYM5`. A one-letter root is not accepted: `HK50` / `CN50` are index CFDs, not an `H` contract for May.
+ */
+export function isFuturesContractCode(symbol: string): boolean {
+  return /^[A-Z0-9]{2,3}[FGHJKMNQUVXZ]\d{1,2}$/.test(symbol.trim().toUpperCase());
 }
 
 // ── Pips, points, ticks ──────────────────────────────────────────────────────────────────────────────────────────
@@ -205,8 +213,13 @@ export function fxPipSize(decimalPlaces: number): number {
   return digits >= 3 && digits % 2 === 1 ? point * 10 : point;
 }
 
-/** The size of one display-distance unit, in price: the pip (FX), the point, the tick or the cent. */
-export function distanceUnitSize(inst: InstrumentDto): number {
+/**
+ * The size of one display-distance unit, in price: the pip (FX), the point, the tick or the cent. A basis point is a
+ * fraction of the price, so it needs `refPrice`; without one the unit is the point — and {@link distanceUnitLabel}
+ * then says "points", so the number and its label never disagree.
+ */
+export function distanceUnitSize(inst: InstrumentDto, refPrice?: number | null): number {
+  if (inst.displayDistance === 'Bps' && refPrice && refPrice > 0) return refPrice / 10_000;
   switch (inst.displayDistance) {
     case 'Pips':
       return fxPipSize(inst.priceDecimals);
@@ -230,9 +243,7 @@ export function distanceInUnits(
   priceDelta: number,
   refPrice?: number | null,
 ): number {
-  if (inst.displayDistance === 'Bps' && refPrice && refPrice > 0)
-    return (priceDelta / refPrice) * 10_000;
-  return priceDelta / distanceUnitSize(inst);
+  return priceDelta / distanceUnitSize(inst, refPrice);
 }
 
 const UNIT_LABEL: Record<DisplayDistance, string> = {
@@ -243,8 +254,14 @@ const UNIT_LABEL: Record<DisplayDistance, string> = {
   Bps: 'bps',
 };
 
-export function distanceUnitLabel(inst: InstrumentDto | null | undefined): string {
-  return UNIT_LABEL[inst?.displayDistance ?? 'Pips'] ?? 'pips';
+/** The display unit's plural label; a basis-point instrument without a reference price is measured in points. */
+export function distanceUnitLabel(
+  inst: InstrumentDto | null | undefined,
+  refPrice?: number | null,
+): string {
+  const dd = inst?.displayDistance ?? 'Pips';
+  if (dd === 'Bps' && !(refPrice && refPrice > 0)) return UNIT_LABEL.Points;
+  return UNIT_LABEL[dd] ?? 'pips';
 }
 
 // ── Formatting ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -262,7 +279,7 @@ export function formatDistance(
   refPrice?: number | null,
 ): string {
   if (priceDelta == null || !Number.isFinite(priceDelta)) return '-';
-  return `${distanceInUnits(inst, priceDelta, refPrice).toFixed(decimals)} ${distanceUnitLabel(inst)}`;
+  return `${distanceInUnits(inst, priceDelta, refPrice).toFixed(decimals)} ${distanceUnitLabel(inst, refPrice)}`;
 }
 
 /** Decimals a quantity step needs (0.01 → 2, 1 → 0, 0.001 → 3). */
@@ -452,6 +469,17 @@ const catalogue = signal<ReadonlyMap<string, InstrumentDto>>(new Map());
 export function setInstrumentCatalogue(list: readonly InstrumentDto[]): void {
   const map = new Map<string, InstrumentDto>();
   for (const i of list) if (i?.symbol) map.set(i.symbol.toUpperCase(), i);
+  catalogue.set(map);
+}
+
+/**
+ * Adds (or replaces) rows without dropping the rest — a symbol the list did not carry, looked up on its own
+ * (`GET instruments/{symbol}`, InstrumentsService).
+ */
+export function upsertInstrumentCatalogue(rows: readonly InstrumentDto[]): void {
+  if (!rows.length) return;
+  const map = new Map(catalogue());
+  for (const i of rows) if (i?.symbol) map.set(i.symbol.toUpperCase(), i);
   catalogue.set(map);
 }
 

@@ -112,6 +112,9 @@ describe('watchlist columns (SP-I6)', () => {
     // Wednesday 02:00 UTC: Tokyo (11:00) and Sydney (13:00 AEDT) are open.
     expect(openSessions(Date.parse('2026-10-07T02:00:00Z')).map((s) => s.short)).toEqual(['SYD', 'TKY']);
     expect(sessionLabel({ base: 'EUR', quote: 'USD' }, false, overlap)).toEqual({ text: 'Closed', home: false });
+    // UI07: off FX the FX session table does not apply — open or closed only.
+    expect(sessionLabel(null, true, overlap, false)).toEqual({ text: 'Open', home: false });
+    expect(sessionLabel(null, false, overlap, false)).toEqual({ text: 'Closed', home: false });
     // Saturday: nothing.
     expect(openSessions(Date.parse('2026-10-10T13:00:00Z'))).toEqual([]);
   });

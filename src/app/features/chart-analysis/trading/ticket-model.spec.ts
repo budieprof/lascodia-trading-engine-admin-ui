@@ -104,18 +104,22 @@ describe('ticket model (SP-I4)', () => {
     ).toBeNull();
   });
 
+  const FX = { distanceUnit: 0.0001, distanceLabel: 'pips' };
   it('draws the brackets as draggable lines, the entry only away from the market', () => {
-    const lines = ticketLines(state({ stop: 1.097, target: 1.106 }), 1.1001, 0.0001, null);
+    const lines = ticketLines(state({ stop: 1.097, target: 1.106 }), 1.1001, FX, null);
     expect(lines.map((l) => l.kind)).toEqual(['ticketStop', 'ticketTarget']);
     expect(lines.every((l) => l.draggable && l.drawn)).toBe(true);
     expect(lines[0].label).toBe('BUY SL 31.0p');
     const pending = ticketLines(
       state({ atMarket: false, entry: 1.095, stop: 1.092 }),
       1.095,
-      0.0001,
+      FX,
       null,
     );
     expect(pending.map((l) => l.kind)).toEqual(['ticketEntry', 'ticketStop']);
+    // A future's brackets count ticks (UI02).
+    const es = ticketLines(state({ stop: 4990, target: 5020 }), 5000, { distanceUnit: 0.25, distanceLabel: 'ticks' }, null);
+    expect(es[0].label).toBe('BUY SL 40.0t');
   });
 
   it('applies a dragged bracket to the ticket; dragging the entry leaves the market', () => {

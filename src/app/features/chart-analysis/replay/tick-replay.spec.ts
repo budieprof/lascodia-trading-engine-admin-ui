@@ -223,7 +223,7 @@ describe('ReplayController tick mode', () => {
       bars: () => bars,
       resolution: () => '1S' as never,
       digits: () => 5,
-      symbolFacts: () => ({ pipSize: 0.0001, contractSize: 100_000 }),
+      symbolFacts: () => ({ pipSize: 0.0001, unitLabel: 'pips', valuePerPrice: 100_000 }),
       fetchIntrabar: async () => [],
       tickData: {
         history: async (r) => {

@@ -42,6 +42,10 @@ import { MarketDataStreamService, type MdWatch } from '@core/realtime/marketdata
 import { LiveDepthService, type LiveDepth } from '../orderflow/live-depth.service';
 import { pickBookStream } from '../orderflow/stream-depth';
 import { parseDepth } from '../panels/side/depth';
+import { routeBadge, type InstrumentFacts } from '../datafeed/instrument-facts';
+
+const RESOLVING_HINT =
+  'Resolving the instrument: nothing is placed until the engine says whether this is an MT5 broker symbol or a venue\'s.';
 import {
   addTicks,
   buildLadder,
@@ -126,6 +130,10 @@ type LadderAction =
   imports: [DecimalPipe, ModalA11yDirective],
   template: `
     <div class="lp-head">
+      <!-- UI05: which route a click takes, always visible; nothing is placed while the instrument is resolving. -->
+      <p class="lp-note" data-testid="ladder-route">
+        <span class="lp-route">{{ routeLabel() }}</span>
+      </p>
       <p class="lp-note" data-testid="ladder-source">
         {{ sourceLabel() }}
       </p>
@@ -796,6 +804,18 @@ export class LadderPanelComponent {
 
   readonly symbol = input.required<string>();
   readonly digits = input<number>(5);
+  /**
+   * The chart's instrument facts (UI05): while they are still resolving no click places or opens anything — an
+   * exchange-traded symbol must never get the MT5 one-click path for a moment. Null (no facts given): as before.
+   */
+  readonly facts = input<InstrumentFacts | null>(null);
+  readonly resolving = computed(() => this.facts()?.resolving ?? false);
+  readonly routeLabel = computed(() => {
+    const f = this.facts();
+    if (f) return routeBadge(f.route);
+    const v = this.venue();
+    return v ? `Venue: ${v.exchange || 'exchange'}` : 'MT5 broker';
+  });
 
   readonly zooms = [1, 2, 5, 10, 25, 50];
 
@@ -1184,6 +1204,10 @@ export class LadderPanelComponent {
   }
 
   toggleOco(): void {
+    if (this.resolving()) {
+      this.hint.set(RESOLVING_HINT);
+      return;
+    }
     if (this.venue()) {
       this.hint.set('OCO pairs are for MT5 symbols; use the order ticket on an exchange-traded instrument.');
       return;
@@ -1194,6 +1218,10 @@ export class LadderPanelComponent {
   }
 
   askArm(): void {
+    if (this.resolving()) {
+      this.hint.set(RESOLVING_HINT);
+      return;
+    }
     if (!this.canArm() || this.venue()) return;
     this.openAction({ type: 'arm' });
   }
@@ -1214,6 +1242,10 @@ export class LadderPanelComponent {
 
   async onCell(e: MouseEvent, column: LadderColumn, row: LadderRow): Promise<void> {
     this.hint.set(null);
+    if (this.resolving()) {
+      this.hint.set(RESOLVING_HINT);
+      return;
+    }
     if (this.venue()) {
       this.openVenueTicket(column, row, e.shiftKey);
       return;
@@ -1293,6 +1325,10 @@ export class LadderPanelComponent {
   }
 
   async market(direction: 'Buy' | 'Sell'): Promise<void> {
+    if (this.resolving()) {
+      this.hint.set(RESOLVING_HINT);
+      return;
+    }
     if (this.venue()) {
       this.venueBus.open({ symbol: this.symbol(), side: direction, orderType: 'Market', price: null });
       this.hint.set(`Opened the order ticket: ${direction} at market.`);

@@ -86,10 +86,11 @@ function n(value: number | undefined, digits = 0): string {
   return value === undefined || !Number.isFinite(value) ? '—' : value.toFixed(digits);
 }
 
-/** ATR and a multiple of it in pips: "6 × ATR(14) ≈ 52 pips". */
+/** ATR and a multiple of it in the instrument's unit: "6 × ATR(14) ≈ 52 pips" / "≈ 18 ticks"; in price without one. */
 function inPips(mult: number, b: StructureBasis): string {
-  const pips = b.pip > 0 ? (mult * b.atr) / b.pip : Number.NaN;
-  return `${mult} × ATR(14) ≈ ${n(pips, pips < 10 ? 1 : 0)} pips`;
+  if (!(b.pip > 0) || !b.unitLabel) return `${mult} × ATR(14) ≈ ${Number((mult * b.atr).toPrecision(4))} in price`;
+  const units = (mult * b.atr) / b.pip;
+  return `${mult} × ATR(14) ≈ ${n(units, units < 10 ? 1 : 0)} ${b.unitLabel}`;
 }
 
 function bars(f: ProvenanceFacts): string {

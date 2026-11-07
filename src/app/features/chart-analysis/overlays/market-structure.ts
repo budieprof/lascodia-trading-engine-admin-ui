@@ -58,8 +58,10 @@ export interface StructureBasis {
   bars: number;
   /** ATR(14) of the last bar, in price. */
   atr: number;
-  /** One pip in price, as the labels count it. */
+  /** One display unit (the pip on FX) in price, as the labels count it; NaN when the instrument's is not known. */
   pip: number;
+  /** That unit's name (`pips`, `ticks`, `points`); empty when not known (the labels then speak price). */
+  unitLabel: string;
   balanceAtr: number;
   minBalanceBars: number;
   poolAtr: number;
@@ -89,16 +91,23 @@ export interface StructureOptions {
   pipSize?: number | null;
   /** Its unit's name for the labels (`pips` by default; `points` / `ticks` off FX). */
   unitLabel?: string | null;
+  /** Quote decimals for prices in the summary (5 by default). */
+  precision?: number | null;
 }
 
-/**
- * Pip size for the label: the instrument's (`opts.pipSize`, from core/instruments — the chart passes it), else the old
- * guess from the price (0.0001 below 20, else 0.01), which equals it for every live FX pair.
- */
 const UNIT_SHORT: Record<string, string> = { pips: 'p', points: 'pt', ticks: 't' };
 
-function pipSize(price: number, instrumentPip?: number | null): number {
-  return instrumentPip && instrumentPip > 0 ? instrumentPip : price < 20 ? 0.0001 : 0.01;
+/**
+ * A distance for the labels, in the instrument's display unit (`opts.pipSize` + `opts.unitLabel`, from the chart's
+ * instrument facts). Without them it is stated in PRICE — the old guess from the price level (0.0001 below 20, else
+ * 0.01) called a BTC or index range "pips" (UI02).
+ */
+function distanceText(span: number, opts: StructureOptions, short = false): string {
+  const unit = opts.pipSize && opts.pipSize > 0 ? opts.pipSize : null;
+  if (!unit) return `${Number(span.toPrecision(4))} in price`;
+  const n = Math.round(span / unit);
+  const label = opts.unitLabel || 'pips';
+  return short ? `${n}${UNIT_SHORT[label] ?? ` ${label}`}` : `${n} ${label}`;
 }
 
 /**
@@ -185,12 +194,12 @@ export function marketStructure(
   let summary: string | null = null;
   if (balance) {
     const span = balance.high - balance.low;
-    const pips = Math.round(span / pipSize(balance.high, opts.pipSize));
+    const width = distanceText(span, opts);
     const count = bars.length - balance.fromIndex;
     zones.push({
       from: balance.low,
       to: balance.high,
-      label: `Balance — ${pips} ${opts.unitLabel || 'pips'}, ${count} bars`,
+      label: `Balance — ${width}, ${count} bars`,
       kind: 'balance',
     });
     levels.push(
@@ -206,9 +215,10 @@ export function marketStructure(
       { from: balance.low - pool, to: balance.low, label: 'Stop pool (est.)', kind: 'pool' },
     );
 
+    const dp = Math.min(10, Math.max(0, opts.precision ?? 5));
     summary =
-      `Balancing ${pips} ${opts.unitLabel || 'pips'} over ${count} bars, ` +
-      `${balance.low.toFixed(5)}–${balance.high.toFixed(5)}.`;
+      `Balancing ${width} over ${count} bars, ` +
+      `${balance.low.toFixed(dp)}–${balance.high.toFixed(dp)}.`;
 
     // A spring undercuts the range low and closes back inside; an upthrust is the mirror.
     // Both are only meaningful relative to the range they broke, which is why they are
@@ -263,11 +273,10 @@ export function marketStructure(
     if (meanRange === null || meanVolume === null || meanRange <= 0 || meanVolume <= 0) continue;
     if (ranges[i] > meanRange * mult && volumes[i] > meanVolume * mult) {
       const down = bars[i].close < bars[i].open;
-      const pips = Math.round(ranges[i] / pipSize(bars[i].high, opts.pipSize));
       markers.push({
         time: bars[i].time,
         price: down ? bars[i].low : bars[i].high,
-        label: `${down ? 'Selling' : 'Buying'} climax — ${pips}${UNIT_SHORT[opts.unitLabel || 'pips'] ?? 'p'}, ${Math.round(volumes[i] / 1000)}k vol`,
+        label: `${down ? 'Selling' : 'Buying'} climax — ${distanceText(ranges[i], opts, true)}, ${Math.round(volumes[i] / 1000)}k vol`,
         kind: 'climax',
       });
     }
@@ -282,7 +291,8 @@ export function marketStructure(
   const basis: StructureBasis = {
     bars: bars.length,
     atr: atrValue,
-    pip: pipSize(bars[bars.length - 1].close, opts.pipSize),
+    pip: opts.pipSize && opts.pipSize > 0 ? opts.pipSize : Number.NaN,
+    unitLabel: opts.pipSize && opts.pipSize > 0 ? opts.unitLabel || 'pips' : '',
     balanceAtr,
     minBalanceBars,
     poolAtr,

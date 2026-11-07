@@ -1,5 +1,6 @@
 import type { OrderBookSnapshot } from './chart-panels.types';
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
+import type { InstrumentFacts } from '../../datafeed/instrument-facts';
 
 import { AccountStripComponent } from './account-strip.component';
 import { ChartPanelsState } from './chart-panels-state.service';
@@ -64,7 +65,7 @@ const TITLES: Record<SidePanel, string> = {
         />
       }
       @case ('ladder') {
-        <app-ladder-panel [symbol]="symbol()" [digits]="digits()" />
+        <app-ladder-panel [symbol]="symbol()" [digits]="digits()" [facts]="facts()" />
       }
       @case ('multibook') {
         <app-multibook-panel [symbol]="symbol()" [digits]="digits()" />
@@ -113,6 +114,8 @@ export class ChartPanelsDockComponent {
   /** The chart resolution's label ("1h", "1D") — stored with a new note. */
   readonly timeframe = input<string>('');
   readonly digits = input<number>(5);
+  /** The chart's instrument facts, for the ladder's route and resolving state (UI05). */
+  readonly facts = input<InstrumentFacts | null>(null);
   /** The chart's time zone. */
   readonly timeZone = input<string | null>(null);
   /** Bar Replay's head (UTC ms): the depth panel shows the book as of then (OF-5); null when live. */

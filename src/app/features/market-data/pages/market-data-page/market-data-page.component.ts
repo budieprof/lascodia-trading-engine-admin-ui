@@ -40,7 +40,7 @@ import { AccountScopeService } from '@core/scope/account-scope.service';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { WatchlistService } from '@features/chart-analysis/watchlist/watchlist.service';
 import type { WatchQuote } from '@features/chart-analysis/watchlist/watchlist.model';
-import { pipSizeFor } from '@features/chart-analysis/datafeed/symbol-info';
+import { pairDistanceUnit } from '@features/chart-analysis/datafeed/instrument-facts';
 import { CandleHistoryComponent } from '../../components/candle-history/candle-history.component';
 import { MdMarketInsightsComponent } from './md-market-insights.component';
 import { MdRegimeCrossMarketComponent } from './md-regime-cross-market.component';
@@ -1993,7 +1993,7 @@ export class MarketDataPageComponent implements OnInit, OnDestroy {
         for (const p of active) {
           const assetClass = (p as { assetClass?: string | null }).assetClass ?? null;
           meta[p.symbol!.toUpperCase()] = {
-            pipSize: pipSizeFor(p.decimalPlaces, assetClass),
+            pipSize: pairDistanceUnit({ ...p, assetClass }),
             digits: p.decimalPlaces,
             assetClass,
           };

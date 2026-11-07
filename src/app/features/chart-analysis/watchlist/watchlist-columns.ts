@@ -3,7 +3,12 @@
  * cell — spread and ranges in pips, ADR used, ATR %, the next high-impact event, news pressure, open P&L and the FX
  * session. Kept apart from the component so every number is unit-tested.
  */
-import { distanceUnitOf } from '@core/instruments/instrument-math';
+import {
+  distanceUnitLabel,
+  distanceUnitOf,
+  distanceUnitSize,
+  resolveInstrument,
+} from '@core/instruments/instrument-math';
 import { timezoneOffsetMinutes } from '../workspace/layout-store.service';
 
 export type WatchColumnKey =
@@ -51,18 +56,25 @@ export const WATCH_COLUMNS: readonly WatchColumn[] = [
   },
   { key: 'bid', label: 'Bid', title: 'Live bid', sortable: true, width: 76 },
   { key: 'ask', label: 'Ask', title: 'Live ask', sortable: true, width: 76 },
-  { key: 'spread', label: 'Spr', title: 'Live spread in pips', sortable: true, width: 44 },
+  {
+    key: 'spread',
+    label: 'Spr',
+    title: 'Live spread in the symbol’s unit: pips on FX, ticks / points otherwise (marked)',
+    sortable: true,
+    width: 44,
+  },
   {
     key: 'dayRange',
     label: 'Range',
-    title: "Today's high − low in pips (the trading day: 17:00 New York for FX)",
+    title:
+      "Today's high − low in the symbol’s unit: pips on FX, ticks / points otherwise (the trading day: 17:00 New York for FX)",
     sortable: true,
     width: 52,
   },
   {
     key: 'adr',
     label: 'ADR',
-    title: 'Average daily range over the last 14 trading days, pips',
+    title: 'Average daily range over the last 14 trading days, in the symbol’s unit (pips on FX)',
     sortable: true,
     width: 48,
     needs: 'ranges',
@@ -175,7 +187,23 @@ export function pipSizeOf(symbol: string, digits: number, quotedPip?: number | n
   return distanceUnitOf(symbol, { digits });
 }
 
-/** A price distance in pips, one decimal; null without both ends. */
+/**
+ * The unit the row's distances are in (UI07): the instrument's own label when the quoted pip is its unit, else "pips"
+ * on FX and "points" off it (the engine's quoted pip off FX is the point). `fx` says whether FX sessions / fractional
+ * pips apply at all.
+ */
+export function rowUnit(
+  symbol: string,
+  digits: number,
+  pipSize: number,
+): { label: string; fx: boolean } {
+  const inst = resolveInstrument(symbol, { digits });
+  const fx = inst.assetClass === 'Fx';
+  const own = Math.abs(distanceUnitSize(inst) - pipSize) < 1e-12;
+  return { label: own ? distanceUnitLabel(inst) : fx ? 'pips' : 'points', fx };
+}
+
+/** A price distance in the row's unit (pips on FX), one decimal; null without both ends. */
 export function pips(distance: number | null | undefined, pipSize: number): number | null {
   if (distance === null || distance === undefined || !Number.isFinite(distance) || !(pipSize > 0))
     return null;
@@ -362,13 +390,18 @@ export function openSessions(nowMs: number): FxSession[] {
   });
 }
 
-/** The session cell: `Closed` when the market is, else the open sessions with the pair's home ones first. */
+/**
+ * The session cell: `Closed` when the market is, else the open FX sessions with the pair's home ones first. Off FX
+ * (`fx` false) the FX session table means nothing for the instrument: the cell says Open / Closed only (UI07).
+ */
 export function sessionLabel(
   legs: Legs | null,
   marketOpen: boolean,
   nowMs: number,
+  fx = true,
 ): { text: string; home: boolean } {
   if (!marketOpen) return { text: 'Closed', home: false };
+  if (!fx) return { text: 'Open', home: false };
   const open = openSessions(nowMs);
   if (!open.length) return { text: 'Quiet', home: false };
   const isHome = (s: FxSession) =>

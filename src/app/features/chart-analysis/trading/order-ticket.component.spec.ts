@@ -15,7 +15,7 @@ import type { ManualTradePreview, TradeGate } from './manual-trading.types';
 import { DEFAULT_TICKET, type TicketState } from './ticket-model';
 
 declareSignalIo(OrderTicketComponent, {
-  inputs: ['symbol', 'precision', 'pipSize', 'quote', 'state'],
+  inputs: ['symbol', 'precision', 'unitLabel', 'quote', 'state'],
   outputs: ['closed', 'submitted', 'previewChange', 'stateChange'],
 });
 // The ticket's Escape arrives through the directive's `(dismiss)`, which JIT only wires once declared.
@@ -104,7 +104,7 @@ describe('OrderTicketComponent (SP-I4)', () => {
     fixture = TestBed.createComponent(OrderTicketComponent);
     fixture.componentRef.setInput('symbol', 'EURUSD');
     fixture.componentRef.setInput('precision', 5);
-    fixture.componentRef.setInput('pipSize', 0.0001);
+    fixture.componentRef.setInput('unitLabel', 'pips');
     fixture.componentRef.setInput('quote', { bid: 1.1, ask: 1.1001 });
     fixture.componentRef.setInput('state', { ...DEFAULT_TICKET, ...state });
     fixture.detectChanges();

@@ -125,8 +125,8 @@ import {
 import { SeriesSync, sameValueRow, type SyncTarget } from './series-sync';
 import { xAtLogical } from './time-x';
 import { formatResolution, resolutionMs, type TvResolution } from '../datafeed/resolution';
-import { pipSizeFor } from '../datafeed/symbol-info';
 import { distanceUnitLabel, resolveInstrument } from '@core/instruments/instrument-math';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import { DrawingStore } from '../drawings/drawing-store.service';
 import { DrawingController } from '../drawings/drawing-controller';
 import type { MagnetMode } from '../drawings/drawing-ops';
@@ -681,6 +681,24 @@ export class ChartHostComponent implements OnDestroy {
   /** What a new Long / Short Position tool is filled with (DR-I9): the account's and the symbol's facts. */
   readonly positionFacts = input<Record<string, unknown> | null>(null);
   readonly precision = input<number>(5);
+  /**
+   * The symbol's instrument facts (UI01): the price scale's min move is its TICK (0.25 on ES), not a point, and the
+   * structure overlay speaks its distance unit. Null: a point at {@link precision}, as before.
+   */
+  readonly facts = input<InstrumentFacts | null>(null);
+  /**
+   * One display unit in price: the page's {@link pipSize}, else the facts' (split panels), else none — a legend then
+   * shows the change in price only, never a guessed FX pip (UI02).
+   */
+  private unitSize(): number | null {
+    return this.pipSize() ?? this.facts()?.distanceUnit ?? null;
+  }
+  /** The price scale's min move: the instrument's tick when its facts are for this precision, else one point. */
+  private readonly minMove = computed(() => {
+    const p = this.precision();
+    const f = this.facts();
+    return f && f.precision === p && f.tickSize > 0 ? f.tickSize : 1 / 10 ** p;
+  });
   /** Armed drawing tool, or null for the cursor. */
   readonly tool = input<DrawingKind | null>(null);
   /** TradingView magnet: off / weak / strong (Ctrl/Cmd inverts it while drawing). */
@@ -1228,6 +1246,7 @@ export class ChartHostComponent implements OnDestroy {
 
     effect(() => {
       const precision = this.precision();
+      this.minMove();
       untracked(() => this.applyPrecision(precision));
     });
 
@@ -1568,7 +1587,9 @@ export class ChartHostComponent implements OnDestroy {
       wantStructure
         ? marketStructure(window, {
             pipSize: this.pipSize(),
-            unitLabel: distanceUnitLabel(resolveInstrument(this.symbol())),
+            unitLabel:
+              this.facts()?.distanceLabel ?? distanceUnitLabel(resolveInstrument(this.symbol())),
+            precision: this.precision(),
           })
         : null,
     );
@@ -2399,7 +2420,7 @@ export class ChartHostComponent implements OnDestroy {
     const dp = this.precision();
     const tone = s.close >= s.open ? '#089981' : '#F23645';
     const price = (v: number | null) => (v === null ? '—' : v.toFixed(dp));
-    const change = changeText(s.change ?? null, s.changePct, this.pipSize() ?? pipSizeFor(dp), dp);
+    const change = changeText(s.change ?? null, s.changePct, this.unitSize(), dp, this.facts());
     const lines: LegendRun[][] = [
       [
         { text: `O ${price(s.open)}`, color: tone },
@@ -2668,7 +2689,7 @@ export class ChartHostComponent implements OnDestroy {
       bars: raw,
       atrMultiple: this.boxSizeAtr(),
       pips: this.boxPips(),
-      pipSize: this.pipSize() ?? pipSizeFor(this.precision()),
+      pipSize: this.unitSize() ?? 10 ** -this.precision(),
     };
     if (method === 'pips') return boxUnit(opts);
     const key = `${series}|${style}|${this.boxSizeAtr()}`;
@@ -2764,7 +2785,7 @@ export class ChartHostComponent implements OnDestroy {
   private createPriceSeries(chart: IChartApi, style: ChartStyle): PriceSeries {
     const p = this.palette(this.theme.theme() === 'dark');
     const precision = this.precision();
-    const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
+    const priceFormat = { type: 'price' as const, precision, minMove: this.minMove() };
     // TradingView's last-price line: dotted, in the series colour (the
     // library colours it per the last bar's direction for OHLC series), with
     // the value chip on the axis.
@@ -3007,7 +3028,7 @@ export class ChartHostComponent implements OnDestroy {
 
   /** The symbol's decimals on the price scale and every study drawn on it. */
   private applyPrecision(precision: number): void {
-    const priceFormat = { type: 'price' as const, precision, minMove: 1 / 10 ** precision };
+    const priceFormat = { type: 'price' as const, precision, minMove: this.minMove() };
     this.price?.applyOptions({ priceFormat });
     for (const s of this.indicatorSeries)
       if (s.overlay) for (const plot of s.series) plot.api.applyOptions({ priceFormat });
@@ -4324,7 +4345,7 @@ export class ChartHostComponent implements OnDestroy {
           priceFormat: {
             type: 'price' as const,
             precision: this.precision(),
-            minMove: 1 / 10 ** this.precision(),
+            minMove: this.minMove(),
           },
         }
       : {};
@@ -4571,7 +4592,7 @@ export class ChartHostComponent implements OnDestroy {
           {
             label: 'Change',
             value:
-              changeText(change, pct, this.pipSize() ?? pipSizeFor(precision), precision) ?? '—',
+              changeText(change, pct, this.unitSize(), precision, this.facts()) ?? '—',
           },
           { label: 'Volume', value: formatVolume(bar.volume) },
         ],

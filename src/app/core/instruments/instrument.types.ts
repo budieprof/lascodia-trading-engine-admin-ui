@@ -66,6 +66,19 @@ export interface InstrumentDto {
   future?: FutureInstrumentInfo | null;
   crypto?: CryptoInstrumentInfo | null;
   equity?: EquityInstrumentInfo | null;
+  // ── Multi-asset chart program contract C2 (optional: an engine before C2 sends none of them; absent = unknown) ──
+  /** Smallest order value the venue accepts, in the quote currency. */
+  minNotional?: number | null;
+  /** Whether fractional shares can be ordered (equities). */
+  fractionable?: boolean | null;
+  /** Crypto derivatives: linear (quote-margined) or inverse (coin-margined, P&L in the base coin). */
+  contractType?: 'Linear' | 'Inverse' | null;
+  /** Time-in-force values the instrument's execution venue supports; empty / absent = unknown. */
+  timeInForce?: string[] | null;
+  /** The candle source pinned for the symbol (same shape as chart-bars `source`). */
+  candleSource?: { id: string; kind: 'mt5' | 'venue'; label: string } | null;
+  firstCandleUtc?: string | null;
+  hasCandles?: boolean;
 }
 
 export type CalendarSessionKind = 'Regular' | 'Pre' | 'Post' | 'Maintenance';

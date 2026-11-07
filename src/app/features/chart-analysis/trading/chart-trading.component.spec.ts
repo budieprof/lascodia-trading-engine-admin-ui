@@ -9,18 +9,33 @@ import { NotificationService } from '@core/notifications/notification.service';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 
 import type { ChartPosition } from '../overlays/trade-layer';
+import { instrumentFacts } from '../datafeed/instrument-facts';
 import { ChartTradingComponent } from './chart-trading.component';
 import type { OrderEntryMovePreview, PositionChangePreview } from './manual-trading.types';
 import type { TradeLine } from './trade-lines';
+
+const EURUSD_PAIR = {
+  id: 1,
+  symbol: 'EURUSD',
+  baseCurrency: 'EUR',
+  quoteCurrency: 'USD',
+  decimalPlaces: 5,
+  contractSize: 100_000,
+  minLotSize: 0.01,
+  maxLotSize: 100,
+  lotStep: 0.01,
+  isActive: true,
+  assetClass: 'FxMajor',
+};
+const EURUSD_FACTS = instrumentFacts('EURUSD', { pair: EURUSD_PAIR });
 
 declareSignalIo(ChartTradingComponent, {
   inputs: [
     'host',
     'symbol',
     'precision',
-    'pipSize',
+    'facts',
     'quote',
-    'lotStep',
     'positions',
     'orders',
     'accountIds',
@@ -201,7 +216,7 @@ describe('ChartTradingComponent (SP-I3)', () => {
     fixture = TestBed.createComponent(ChartTradingComponent);
     fixture.componentRef.setInput('symbol', 'EURUSD');
     fixture.componentRef.setInput('precision', 5);
-    fixture.componentRef.setInput('pipSize', 0.0001);
+    fixture.componentRef.setInput('facts', EURUSD_FACTS);
     fixture.componentRef.setInput('quote', { bid: 1.1, ask: 1.1001 });
     fixture.componentRef.setInput('positions', [POSITION]);
     fixture.componentRef.setInput('orders', [ORDER]);
@@ -297,6 +312,31 @@ describe('ChartTradingComponent (SP-I3)', () => {
     drag({ kind: 'positionStop', refId: 501, price: 1.097 }, 1.1002);
     expect(notify.warning).toHaveBeenCalledWith(expect.stringContaining('below'));
     http.expectNone(`${BASE}/position/501/change-preview`);
+  });
+
+  it('snaps a partial close to the instrument step and sends it at the step\'s decimals (UI04)', () => {
+    // A 0.001 MT5 lot step: the old 2-decimal rounding sent 0.02 for 0.015.
+    fixture.componentRef.setInput(
+      'facts',
+      instrumentFacts('EURUSD', { pair: { ...EURUSD_PAIR, lotStep: 0.001, minLotSize: 0.001 } }),
+    );
+    fixture.detectChanges();
+    click({ kind: 'positionEntry', refId: 501, price: 1.1 });
+    fixture.detectChanges();
+    http.expectOne(`${BASE}/position/501/change-preview`).flush(ok(preview({ closeLots: 0.5, closePnl: 0 })));
+    fixture.detectChanges();
+    const lots = byId<HTMLInputElement>('close-lots');
+    lots.value = '0.0159';
+    lots.dispatchEvent(new Event('change'));
+    fixture.detectChanges();
+    const pv = http.expectOne(`${BASE}/position/501/change-preview`);
+    expect(pv.request.body).toEqual({ closeLots: 0.015 });
+    pv.flush(ok(preview({ closeLots: 0.015, closePnl: 0 })));
+    fixture.detectChanges();
+    byId<HTMLButtonElement>('trade-action-apply').click();
+    const close = http.expectOne(`${BASE}/position/501/close`);
+    expect(close.request.body).toMatchObject({ id: 501, closeLots: 0.015 });
+    close.flush(ok('PartialClose'));
   });
 
   it('closes part of a position from its entry line at the live price', () => {

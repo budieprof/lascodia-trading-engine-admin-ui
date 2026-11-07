@@ -9,6 +9,7 @@ import {
   normaliseInstrument,
   resolveInstrument,
   setInstrumentCatalogue,
+  upsertInstrumentCatalogue,
 } from './instrument-math';
 import type {
   InstrumentAssetClass,
@@ -19,6 +20,12 @@ import type {
 
 /** Where the catalogue came from: the engine's instrument master, or derived from its currency pairs (FX fallback). */
 export type InstrumentSource = 'instruments' | 'currency-pairs' | null;
+
+/**
+ * Where one symbol stands: in the catalogue, still being resolved (the list is loading, or the symbol is being looked
+ * up on its own), or known to be missing from the engine's instrument master.
+ */
+export type InstrumentLookupState = 'found' | 'resolving' | 'missing';
 
 /** Re-read at most this often. */
 const MAX_AGE_MS = 5 * 60_000;
@@ -43,6 +50,15 @@ export class InstrumentsService {
 
   /** Which endpoint the catalogue came from (null until loaded). */
   readonly source = this.sourceState.asReadonly();
+
+  private readonly settledState = signal(false);
+  /** The first catalogue load has finished (with rows or without): a symbol not in it is now looked up alone. */
+  readonly settled = this.settledState.asReadonly();
+  /** Symbols `GET instruments/{symbol}` did not answer (cleared by a forced reload). */
+  private readonly missedState = signal<ReadonlySet<string>>(new Set());
+  /** Rows found by a single-symbol lookup; kept across list reloads (the list only carries charted symbols). */
+  private readonly lookedUp = new Map<string, InstrumentDto>();
+  private readonly lookups = new Set<string>();
 
   /**
    * Every instrument, in the engine's order (for the FX fallback: the currency-pair list's order, so the chart's symbol
@@ -80,12 +96,18 @@ export class InstrumentsService {
         }
         if (rows.length) {
           setInstrumentCatalogue(rows);
+          upsertInstrumentCatalogue([...this.lookedUp.values()]);
           this.sourceState.set(source);
           this.loadedAt = Date.now();
+        }
+        if (force) {
+          this.missedState.set(new Set());
+          this.lookups.clear();
         }
         return this.all();
       } finally {
         this.inFlight = null;
+        this.settledState.set(true);
       }
     })();
     return this.inFlight;
@@ -95,6 +117,43 @@ export class InstrumentsService {
   get(symbol: string | null | undefined): InstrumentDto {
     if (!this.sourceState() && !this.inFlight) void this.load();
     return resolveInstrument(symbol);
+  }
+
+  /**
+   * Where `symbol` stands (signal reads: a `computed` follows the load and the lookup). A symbol the list does not
+   * carry is looked up once on its own (`GET instruments/{symbol}`) after the list has settled — "resolving" until
+   * that answers. Never throws; starts the list load on first use.
+   */
+  lookupState(symbol: string | null | undefined): InstrumentLookupState {
+    const key = (symbol ?? '').trim().toUpperCase();
+    if (!key) return 'missing';
+    if (instrumentCatalogue().has(key)) return 'found';
+    if (!this.settledState()) {
+      if (!this.inFlight) void this.load();
+      return 'resolving';
+    }
+    if (this.missedState().has(key)) return 'missing';
+    this.lookUp(key);
+    return 'resolving';
+  }
+
+  private lookUp(key: string): void {
+    if (this.lookups.has(key)) return;
+    this.lookups.add(key);
+    // Every signal write happens after the request answers, so this is safe to start from a `computed`.
+    void firstValueFrom(
+      this.api.getEnvelope<unknown>(`/instruments/${encodeURIComponent(key)}`, { silent: true }),
+    )
+      .then((raw) => (raw ? normaliseInstrument(raw as Partial<InstrumentDto>) : null))
+      .catch(() => null)
+      .then((row) => {
+        if (row && row.symbol === key) {
+          this.lookedUp.set(key, row);
+          upsertInstrumentCatalogue([row]);
+        } else {
+          this.missedState.update((m) => new Set(m).add(key));
+        }
+      });
   }
 
   /** The calendar for `code` (cached; null when the engine does not serve it). */

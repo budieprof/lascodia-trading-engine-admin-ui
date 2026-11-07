@@ -11,6 +11,10 @@ describe('legend formatting (CC-18)', () => {
 
   it('leaves the pips out without a pip, and everything out without a previous bar', () => {
     expect(changeText(1.5, 0.03, null, 2)).toBe('+1.50 (+0.03%)');
+    // Off FX the change is in the instrument's own unit (UI02).
+    expect(changeText(1.5, 0.03, 0.25, 2, { distanceLabelOne: 'tick', distanceLabel: 'ticks' })).toBe(
+      '+1.50 / +6.0 ticks (+0.03%)',
+    );
     expect(changeText(null, null, 0.0001, 5)).toBeNull();
   });
 

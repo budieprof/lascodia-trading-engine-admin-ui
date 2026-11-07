@@ -1,5 +1,6 @@
 import type { OrderDto, PositionDto } from '@core/api/api.types';
 import type { ChartMarker } from '../chart/chart-host.component';
+import { shortDistanceLabel } from '../datafeed/instrument-facts';
 import type { PriceOverlay } from './overlay-renderer';
 
 /**
@@ -28,8 +29,20 @@ export interface LiveQuote {
   ask: number | null;
 }
 
+/**
+ * The instrument's units the trade layer speaks (UI02, from the chart's instrument facts): the distance unit (the pip
+ * on FX, else the tick / point) and its label, and the quantity decimals (2 for lots, 3 for a 0.001 BTC step).
+ */
+export interface TradeUnits {
+  distanceUnit: number;
+  distanceLabel: string;
+  quantityDecimals: number;
+}
+
+
 /** A position's open P&L at the live quote. */
 export interface PositionPnl {
+  /** In the instrument's display unit (pips on FX). */
   pips: number;
   /** In multiples of the risk it opened with (entry → initial stop); null without an opening stop. */
   r: number | null;
@@ -63,10 +76,10 @@ export function positionPnl(p: ChartPosition, quote: LiveQuote, pip: number): Po
   return { pips, r, money };
 }
 
-/** "+12.4 pips · +0.62R · ≈ +12.40 USD" (the money part only when known). */
-export function pnlText(pnl: PositionPnl, currency: string | null): string {
+/** "+12.4 pips · +0.62R · ≈ +12.40 USD" (the money part only when known); "+6.0 ticks" on a future. */
+export function pnlText(pnl: PositionPnl, currency: string | null, unitLabel: string): string {
   const sign = (v: number) => (v >= 0 ? '+' : '−');
-  const parts = [`${sign(pnl.pips)}${Math.abs(pnl.pips).toFixed(1)} pips`];
+  const parts = [`${sign(pnl.pips)}${Math.abs(pnl.pips).toFixed(1)} ${unitLabel}`];
   if (pnl.r !== null) parts.push(`${sign(pnl.r)}${Math.abs(pnl.r).toFixed(2)}R`);
   if (pnl.money !== null)
     parts.push(
@@ -85,9 +98,11 @@ export function positionLines(
   symbol: string,
   inScope: (accountId: number | null | undefined) => boolean,
   quote: LiveQuote | null,
-  pip: number,
+  units: TradeUnits,
   currencyOf: (accountId: number) => string | null,
 ): PriceOverlay[] {
+  const pip = units.distanceUnit;
+  const qtyDp = Math.min(8, Math.max(0, units.quantityDecimals));
   const out: PriceOverlay[] = [];
   for (const p of rows) {
     if ((p.symbol ?? '').toUpperCase() !== symbol.toUpperCase() || !inScope(p.tradingAccountId))
@@ -98,9 +113,14 @@ export function positionLines(
     out.push({
       kind: 'entry',
       price: p.averageEntryPrice,
-      label: `${p.isPaper ? 'PAPER ' : ''}${long ? 'LONG' : 'SHORT'} ${lots.toFixed(2)}`,
+      label: `${p.isPaper ? 'PAPER ' : ''}${long ? 'LONG' : 'SHORT'} ${lots.toFixed(qtyDp)}`,
       color: long ? GREEN : RED,
-      ...(pnl ? { pnl: pnlText(pnl, currencyOf(p.tradingAccountId)), pnlUp: pnl.pips >= 0 } : {}),
+      ...(pnl
+        ? {
+            pnl: pnlText(pnl, currencyOf(p.tradingAccountId), units.distanceLabel),
+            pnlUp: pnl.pips >= 0,
+          }
+        : {}),
     });
     if (p.stopLoss) out.push({ kind: 'stop', price: p.stopLoss, label: 'SL', color: RED });
     if (p.takeProfit) out.push({ kind: 'target', price: p.takeProfit, label: 'TP', color: GREEN });
@@ -141,15 +161,17 @@ export function orderLines(
 
 /**
  * Fill markers of closed trades (CC-I3): the entry under (long) / over (short) the bar it opened on,
- * the exit on the other side of the bar it closed on, with its result in pips when the close price is
- * known. Paper trades are drawn in their own colour and say "paper": they never reached a broker.
+ * the exit on the other side of the bar it closed on, with its result in the instrument's unit (pips on FX) when the
+ * close price is known. Paper trades are drawn in their own colour and say "paper": they never reached a broker.
  */
 export function closedTradeMarkers(
   rows: readonly ChartPosition[],
   symbol: string,
   inScope: (accountId: number | null | undefined) => boolean,
-  pip: number,
+  units: Pick<TradeUnits, 'distanceUnit' | 'distanceLabel'>,
 ): ChartMarker[] {
+  const pip = units.distanceUnit;
+  const short = shortDistanceLabel(units.distanceLabel);
   const out: ChartMarker[] = [];
   for (const p of rows) {
     if ((p.symbol ?? '').toUpperCase() !== symbol.toUpperCase() || !inScope(p.tradingAccountId))
@@ -179,7 +201,7 @@ export function closedTradeMarkers(
       color: p.isPaper ? PAPER : won ? GREEN : RED,
       text:
         pips !== null
-          ? `${tag}exit ${pips >= 0 ? '+' : '−'}${Math.abs(pips).toFixed(1)}p`
+          ? `${tag}exit ${pips >= 0 ? '+' : '−'}${Math.abs(pips).toFixed(1)}${short}`
           : `${tag}exit`,
     });
   }

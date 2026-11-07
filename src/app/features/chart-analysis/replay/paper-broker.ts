@@ -41,10 +41,13 @@ export interface PaperUnit {
   spread: number;
 }
 
-/** What a trade made: pips, money in the quote currency, R against its opening stop (null without one). */
+/**
+ * What a trade made: distance in the instrument's display unit (pips on FX), money in its P&L currency (null when the
+ * instrument's money facts are not known — never an FX lot's), R against its opening stop (null without one).
+ */
 export interface PaperPnl {
   pips: number;
-  money: number;
+  money: number | null;
   r: number | null;
 }
 
@@ -53,19 +56,28 @@ export interface PaperTally {
   wins: number;
   losses: number;
   pips: number;
-  money: number;
+  /** Null when any counted trade's money is not known. */
+  money: number | null;
   /** Sum of R over the closed trades that had a stop. */
   r: number;
   /** Open trades' P&L at the head. */
   openPips: number;
-  openMoney: number;
+  openMoney: number | null;
 }
 
-/** The symbol facts a P&L needs. */
+/** The symbol facts a P&L needs (the chart's instrument facts, UI03). */
 export interface PaperSymbol {
+  /** One display unit (the pip on FX) in price, and its label (`pips`, `ticks`, `points`). */
   pipSize: number;
-  /** Units per lot (100,000 on FX). */
-  contractSize: number;
+  unitLabel: string;
+  /**
+   * Money one quantity unit makes on a 1.0 price move (100 000 per FX lot, 50 per ES contract, 1 per coin); null =
+   * not known (money is then shown as unknown, never as an FX lot's).
+   */
+  valuePerPrice: number | null;
+  /** Coin-margined contract: P&L = qty × contract value × (1/entry − 1/exit), in the coin. */
+  inverse?: boolean;
+  contractValue?: number | null;
 }
 
 const dirOf = (side: PaperSide): 1 | -1 => (side === 'buy' ? 1 : -1);
@@ -90,9 +102,17 @@ export function unitOf(bar: Bar, digits: number, fallbackPoints: number | null):
 export function pnlOf(t: PaperTrade, exit: number, sym: PaperSymbol): PaperPnl {
   const diff = (exit - t.entry) * dirOf(t.side);
   const risk = t.stop !== null ? Math.abs(t.entry - t.stop) : 0;
+  let money: number | null = null;
+  if (sym.inverse) {
+    if (sym.contractValue && t.entry > 0 && exit > 0)
+      money = t.lots * sym.contractValue * (1 / t.entry - 1 / exit) * dirOf(t.side);
+  } else if (sym.valuePerPrice != null) {
+    // Linear: exactly the FX formula replay always used (diff × lots × 100 000 on a lot).
+    money = diff * t.lots * sym.valuePerPrice;
+  }
   return {
     pips: sym.pipSize > 0 ? diff / sym.pipSize : 0,
-    money: diff * t.lots * sym.contractSize,
+    money,
     r: risk > 0 ? diff / risk : null,
   };
 }
@@ -205,15 +225,17 @@ export class PaperBook {
       if (t.exit !== undefined) {
         const p = pnlOf(t, t.exit, sym);
         out.trades++;
-        if (p.money > 0) out.wins++;
-        else if (p.money < 0) out.losses++;
+        // Won / lost by money; by the price move when the money is not known.
+        const result = p.money ?? p.pips;
+        if (result > 0) out.wins++;
+        else if (result < 0) out.losses++;
         out.pips += p.pips;
-        out.money += p.money;
+        out.money = out.money === null || p.money === null ? null : out.money + p.money;
         out.r += p.r ?? 0;
       } else if (head) {
         const p = pnlOf(t, markOf(t, head), sym);
         out.openPips += p.pips;
-        out.openMoney += p.money;
+        out.openMoney = out.openMoney === null || p.money === null ? null : out.openMoney + p.money;
       }
     }
     return out;

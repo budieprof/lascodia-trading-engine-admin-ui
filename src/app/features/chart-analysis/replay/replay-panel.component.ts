@@ -1,3 +1,8 @@
+import {
+  quantityWord,
+  snapQuantityDown,
+  type InstrumentFacts,
+} from '../datafeed/instrument-facts';
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { ChartIconComponent } from '../icons/chart-icon.component';
@@ -121,9 +126,9 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
     }
     <div class="rp-row rp-paper" aria-label="Paper trading">
       <span class="rp-tag" title="Simulated in this browser tab only: nothing is sent to the engine or a broker">Paper</span>
-      <label class="rp-muted">Lots <input class="rp-num" type="number" min="0.01" step="0.01" [value]="lots()" (input)="lots.set(+$any($event.target).value)" /></label>
-      <label class="rp-muted">Stop <input class="rp-num" type="number" min="0" step="1" placeholder="pips" [value]="stopPips() ?? ''" (input)="stopPips.set(num($any($event.target).value))" /></label>
-      <label class="rp-muted">Target <input class="rp-num" type="number" min="0" step="1" placeholder="pips" [value]="targetPips() ?? ''" (input)="targetPips.set(num($any($event.target).value))" /></label>
+      <label class="rp-muted">{{ qtyTitle() }} <input class="rp-num" type="number" [min]="qtyStep() ?? 0" [step]="qtyStep() ?? 'any'" [value]="size() ?? ''" (input)="lots.set(num($any($event.target).value))" /></label>
+      <label class="rp-muted">Stop <input class="rp-num" type="number" min="0" step="1" [placeholder]="unitLabel()" [value]="stopPips() ?? ''" (input)="stopPips.set(num($any($event.target).value))" /></label>
+      <label class="rp-muted">Target <input class="rp-num" type="number" min="0" step="1" [placeholder]="unitLabel()" [value]="targetPips() ?? ''" (input)="targetPips.set(num($any($event.target).value))" /></label>
       <button type="button" class="rp-btn rp-buy" (click)="order('buy')" [disabled]="!head()">
         Buy {{ head() ? (head()!.close + head()!.spread | number: digitsFormat()) : '' }}
       </button>
@@ -138,7 +143,7 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
     @if (replay().openRows().length || tally().trades) {
       <div class="rp-row rp-trades">
         @for (t of replay().openRows(); track t.id) {
-          <span class="rp-trade" [class.up]="t.money >= 0" [class.down]="t.money < 0">
+          <span class="rp-trade" [class.up]="(t.money ?? t.pips) >= 0" [class.down]="(t.money ?? t.pips) < 0">
             {{ t.side === 'buy' ? 'Buy' : 'Sell' }} {{ t.lots }} &#64; {{ t.entry | number: digitsFormat() }}
             @if (t.stop !== null) {
               · SL {{ t.stop | number: digitsFormat() }}
@@ -146,16 +151,16 @@ const SPEEDS = [1, 2, 4, 10, 30, 60] as const;
             @if (t.target !== null) {
               · TP {{ t.target | number: digitsFormat() }}
             }
-            · {{ signed(t.pips, 1) }} pips · {{ signed(t.money, 2) }} {{ currency() }}
+            · {{ signed(t.pips, 1) }} {{ unitLabel() }} · {{ money(t.money) }}
             <button type="button" class="rp-link" (click)="replay().close(t.id)">Close</button>
           </span>
         }
         <span class="rp-grow"></span>
         <span class="rp-tally" data-testid="paper-tally">
-          Closed {{ tally().trades }} · won {{ tally().wins }} · {{ signed(tally().pips, 1) }} pips ·
-          {{ signed(tally().money, 2) }} {{ currency() }} · {{ signed(tally().r, 2) }}R
+          Closed {{ tally().trades }} · won {{ tally().wins }} · {{ signed(tally().pips, 1) }} {{ unitLabel() }} ·
+          {{ money(tally().money) }} · {{ signed(tally().r, 2) }}R
           @if (replay().openRows().length) {
-            · open {{ signed(tally().openPips, 1) }} pips
+            · open {{ signed(tally().openPips, 1) }} {{ unitLabel() }}
           }
         </span>
         @if (replay().openRows().length) {
@@ -289,10 +294,18 @@ export class ReplayPanelComponent {
   readonly headLabel = input<string>('');
   /** Price digits of the symbol. */
   readonly digits = input<number>(5);
-  /** The pip size, for the spread readout. */
-  readonly pipSize = input<number>(0.0001);
-  /** The quote currency the money P&L is in. */
-  readonly currency = input<string>('');
+  /**
+   * The symbol's instrument facts (UI03): the distance unit and its label, the quantity step and unit, the P&L
+   * currency. Null = not known: sizes and distances show "—" and an order is refused.
+   */
+  readonly facts = input<InstrumentFacts | null>(null);
+  readonly unitLabel = computed(() => this.facts()?.distanceLabel ?? '—');
+  readonly qtyStep = computed(() => this.facts()?.quantityStep ?? null);
+  readonly qtyTitle = computed(() => {
+    const f = this.facts();
+    const w = f ? quantityWord(f) : 'size';
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  });
 
   /** Choose the start with a click on the chart. */
   readonly pickStart = output<void>();
@@ -307,7 +320,15 @@ export class ReplayPanelComponent {
     const h = this.replay().tickHead();
     return h === null ? null : formatUtcMs(h);
   });
-  readonly lots = signal(0.1);
+  /** The size typed in; null = the default (0.1 lot on FX as always, else the instrument's minimum / one step). */
+  readonly lots = signal<number | null>(null);
+  readonly size = computed(() => {
+    const typed = this.lots();
+    if (typed !== null) return typed;
+    const f = this.facts();
+    if (!f) return null;
+    return f.isFx ? 0.1 : (f.minQuantity ?? f.quantityStep);
+  });
   readonly stopPips = signal<number | null>(null);
   readonly targetPips = signal<number | null>(null);
   /** Why the last order was refused. */
@@ -320,8 +341,10 @@ export class ReplayPanelComponent {
   readonly spreadText = computed(() => {
     const points = this.replay().headSpreadPoints();
     if (points === null) return 'Spread: not recorded (0 charged)';
-    const pips = (points * 10 ** -this.digits()) / (this.pipSize() || 1);
-    return `Spread ${pips.toFixed(1)} pips`;
+    const unit = this.facts()?.distanceUnit ?? 0;
+    if (!(unit > 0)) return `Spread ${points} broker points`;
+    const pips = (points * 10 ** -this.digits()) / unit;
+    return `Spread ${pips.toFixed(1)} ${this.unitLabel()}`;
   });
   readonly spreadTitle = computed(() =>
     this.replay().headSpreadPoints() === null
@@ -330,12 +353,29 @@ export class ReplayPanelComponent {
   );
 
   order(side: PaperSide): void {
-    this.refusal.set(this.replay().place(side, this.lots(), this.stopPips(), this.targetPips()));
+    const size = this.size();
+    const f = this.facts();
+    // On the instrument's step (floored), as a real order would be; an unknown step keeps what was typed.
+    const snapped = size !== null && f?.quantityStep ? snapQuantityDown(f, size) : size;
+    if (snapped === null || !(snapped > 0)) {
+      this.refusal.set(
+        f?.quantityStep ? `Below one step (${f.quantityStep}).` : 'Enter a size above 0.',
+      );
+      return;
+    }
+    this.refusal.set(this.replay().place(side, snapped, this.stopPips(), this.targetPips()));
   }
 
   num(raw: string): number | null {
     const v = Number(raw);
     return raw === '' || !Number.isFinite(v) || v <= 0 ? null : v;
+  }
+
+  /** Money in the P&L currency, or "money unknown" when the instrument's money facts are not known. */
+  money(v: number | null): string {
+    if (v === null) return 'money unknown';
+    const ccy = this.facts()?.pnlCurrency ?? '';
+    return `${this.signed(v, 2)}${ccy ? ` ${ccy}` : ''}`;
   }
 
   signed(v: number, digits: number): string {

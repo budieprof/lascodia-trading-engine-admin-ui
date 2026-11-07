@@ -11,6 +11,7 @@ import {
 } from './trade-layer';
 
 const PIP = 0.0001;
+const FX_UNITS = { distanceUnit: PIP, distanceLabel: 'pips', quantityDecimals: 2 };
 
 const position = (over: Partial<ChartPosition> = {}): ChartPosition =>
   ({
@@ -75,16 +76,16 @@ describe('positionPnl — live P&L in pips, R and money (CC-I3)', () => {
   });
 
   it('prints pips, R and money with signs', () => {
-    expect(pnlText({ pips: -3.24, r: -0.16, money: -16.2 }, 'USD')).toBe(
+    expect(pnlText({ pips: -3.24, r: -0.16, money: -16.2 }, 'USD', 'pips')).toBe(
       '−3.2 pips · −0.16R · ≈ −16.20 USD',
     );
-    expect(pnlText({ pips: 15, r: null, money: null }, null)).toBe('+15.0 pips');
+    expect(pnlText({ pips: 15, r: null, money: null }, null, 'pips')).toBe('+15.0 pips');
   });
 });
 
 describe('positionLines / orderLines — the lines of this symbol and account only (CC-09, CC-10)', () => {
   it('labels a long LONG — the old page read Long/Short as Buy/Sell and labelled every position SHORT', () => {
-    const lines = positionLines([position()], 'EURUSD', inScope, null, PIP, () => 'USD');
+    const lines = positionLines([position()], 'EURUSD', inScope, null, FX_UNITS, () => 'USD');
     expect(lines.map((l) => [l.kind, l.label])).toEqual([
       ['entry', 'LONG 0.50'],
       ['stop', 'SL'],
@@ -103,7 +104,7 @@ describe('positionLines / orderLines — the lines of this symbol and account on
       'EURUSD',
       inScope,
       { bid: 1.0915, ask: 1.0916 },
-      PIP,
+      FX_UNITS,
       () => 'USD',
     );
     const entries = lines.filter((l) => l.kind === 'entry');
@@ -144,7 +145,7 @@ describe('closedTradeMarkers — fills of closed trades, paper apart (CC-I3)', (
       closePrice: 1.0912,
       realizedPnL: 60,
     });
-    const [entry, exit] = closedTradeMarkers([closed], 'EURUSD', inScope, PIP);
+    const [entry, exit] = closedTradeMarkers([closed], 'EURUSD', inScope, FX_UNITS);
     expect(entry).toMatchObject({
       time: Date.parse('2026-10-08T10:15:00Z'),
       position: 'belowBar',
@@ -161,7 +162,7 @@ describe('closedTradeMarkers — fills of closed trades, paper apart (CC-I3)', (
 
   it('paints paper trades purple and says so; an unknown close price leaves the pips out', () => {
     const paper = position({ isPaper: true, closedAt: '2026-10-08T14:40:00Z', closePrice: null });
-    const [entry, exit] = closedTradeMarkers([paper], 'EURUSD', inScope, PIP);
+    const [entry, exit] = closedTradeMarkers([paper], 'EURUSD', inScope, FX_UNITS);
     expect(entry.color).toBe('#7E57C2');
     expect(entry.text).toBe('paper Buy 1.09');
     expect(exit.text).toBe('paper exit');
@@ -176,3 +177,20 @@ describe('concernsSymbol', () => {
     expect(concernsSymbol(null, 'EURUSD')).toBe(true);
   });
 });
+
+describe('trade layer in the instrument\'s units (UI02)', () => {
+  it('a BTC position: a points label and 3-decimal coins', () => {
+    const lines = positionLines(
+      [position({ symbol: 'BTC-USD', averageEntryPrice: 60_000, openLots: 0.015, currentPrice: null })],
+      'BTC-USD',
+      inScope,
+      { bid: 60_100, ask: 60_101 },
+      { distanceUnit: 0.01, distanceLabel: 'points', quantityDecimals: 3 },
+      () => 'USD',
+    );
+    const entry = lines.find((l) => l.kind === 'entry')!;
+    expect(entry.label).toBe('LONG 0.015');
+    expect(entry.pnl).toMatch(/^\+10000\.0 points/);
+  });
+});
+
