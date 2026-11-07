@@ -187,6 +187,35 @@ export class InstrumentsService {
     return this.calendarState().get((code ?? '').trim()) ?? null;
   }
 
+  /**
+   * Server-side catalogue search (multi-asset chart program UD09, contract C2): `GET instruments?search=&assetClass=&
+   * skip=&take=` over the WHOLE master (not only symbols with candles — each row says `hasCandles`), with the matching
+   * total from the envelope's `total`. Rows are not added to the catalogue. Rejects when the engine cannot be reached.
+   */
+  async search(
+    query: string,
+    opts: { assetClass?: InstrumentAssetClass | null; skip?: number; take?: number } = {},
+  ): Promise<{ rows: InstrumentDto[]; total: number | null }> {
+    const q = new URLSearchParams();
+    q.set('search', query.trim());
+    if (opts.assetClass) q.set('assetClass', opts.assetClass);
+    q.set('skip', String(Math.max(0, opts.skip ?? 0)));
+    q.set('take', String(Math.min(1000, Math.max(1, opts.take ?? 50))));
+    const res = await firstValueFrom(
+      this.api.get<{ status?: boolean; data?: unknown; total?: number; message?: string }>(
+        `/instruments?${q.toString()}`,
+        { silent: true },
+      ),
+    );
+    if (res && res.status === false) throw new Error(res.message || 'The engine refused the search.');
+    const list = Array.isArray(res?.data) ? res.data : [];
+    const rows = list
+      .map((r) => normaliseInstrument(r as Partial<InstrumentDto>))
+      .filter((r): r is InstrumentDto => !!r);
+    const total = typeof res?.total === 'number' && Number.isFinite(res.total) ? res.total : null;
+    return { rows, total };
+  }
+
   /** `GET instruments/{symbol}/session-state?at=` — null when not served. */
   async sessionState(symbol: string, at?: Date): Promise<SessionStateDto | null> {
     const q = at ? `?at=${encodeURIComponent(at.toISOString())}` : '';

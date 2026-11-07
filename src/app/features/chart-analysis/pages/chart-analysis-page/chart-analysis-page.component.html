@@ -51,24 +51,61 @@
             </div>
           }
           <ul class="menu-list">
-            @for (p of filteredSymbols(); track p.symbol) {
+            @for (g of symbolGroups(); track g.assetClass) {
+              @if (symbolGroups().length > 1) {
+                <li class="menu-group" role="presentation">{{ assetClassLabel[g.assetClass] }}</li>
+              }
+              @for (p of g.rows; track p.key) {
+                <li>
+                  <button
+                    type="button"
+                    class="sym-row"
+                    [class.current]="p.symbol === symbol()"
+                    [class.no-data]="p.hasData === false"
+                    [title]="
+                      p.symbol +
+                      ' — ' +
+                      symbolDescription(p.symbol, p.description) +
+                      (p.noDataReason ? ' (' + p.noDataReason + ')' : '')
+                    "
+                    (click)="selectSymbol(p.symbol)"
+                  >
+                    <span class="sym-icon">
+                      <app-instrument-icon [symbol]="p.symbol" [assetClass]="p.assetClass" />
+                    </span>
+                    <span class="sym-name">{{ p.symbol }}</span>
+                    <span class="sym-desc"
+                      >{{ symbolDescription(p.symbol, p.description) }}
+                      @if (p.exchange || p.source) {
+                        <span class="sym-venue">· {{ p.exchange || p.source }}</span>
+                      }
+                      @if (p.noDataReason) {
+                        <span class="sym-nodata" data-testid="symbol-no-data">· {{ p.noDataReason }}</span>
+                      }
+                    </span>
+                  </button>
+                </li>
+              }
+            } @empty {
+              <li class="menu-empty">
+                {{ remoteSearch.loading() ? 'Searching the catalogue…' : 'No symbols match.' }}
+              </li>
+            }
+            @if (remoteSearch.error(); as err) {
+              <li class="menu-empty">Catalogue search failed: {{ err }}</li>
+            } @else if (remoteSearch.hasMore()) {
               <li>
                 <button
                   type="button"
-                  class="sym-row"
-                  [class.current]="p.symbol === symbol()"
-                  [title]="p.symbol + ' — ' + symbolDescription(p.symbol, p.description)"
-                  (click)="selectSymbol(p.symbol)"
+                  class="sym-more"
+                  [disabled]="remoteSearch.loading()"
+                  (click)="remoteSearch.more()"
                 >
-                  <span class="sym-icon">
-                    <app-instrument-icon [symbol]="p.symbol" [assetClass]="p.assetClass" />
-                  </span>
-                  <span class="sym-name">{{ p.symbol }}</span>
-                  <span class="sym-desc">{{ symbolDescription(p.symbol, p.description) }}</span>
+                  Show more ({{ remoteSearch.rows().length }} of {{ remoteSearch.total() }})
                 </button>
               </li>
-            } @empty {
-              <li class="menu-empty">No symbols match.</li>
+            } @else if (remoteSearch.loading() && filteredSymbols().length) {
+              <li class="menu-empty">Searching the catalogue…</li>
             }
           </ul>
         </div>
@@ -120,6 +157,9 @@
                   (click)="selectResolution(r.id); openMenu.set(null)"
                 >
                   {{ r.name }}
+                  @if (intervalNote(r.id); as note) {
+                    <span class="sym-nodata" data-testid="interval-note">· {{ note }}</span>
+                  }
                 </button>
                 <button
                   type="button"
