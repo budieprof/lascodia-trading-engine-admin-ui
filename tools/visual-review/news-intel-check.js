@@ -238,6 +238,11 @@ function stub(method, p, q) {
   const visit = async (route, name, checks) => {
     await page.goto(BASE + route, { waitUntil: 'networkidle' }).catch(() => {});
     await page.waitForTimeout(900);
+    // NI_THEME=dark: render the dark theme (the app keys it off <html data-theme>).
+    if (process.env.NI_THEME === 'dark') {
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark')).catch(() => {});
+      await page.waitForTimeout(150);
+    }
     const r = { url: page.url().replace(BASE, '') };
     for (const [k, fn] of Object.entries(checks)) r[k] = await fn().catch((e) => `error: ${String(e).slice(0, 120)}`);
     await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage: true });
@@ -254,6 +259,7 @@ function stub(method, p, q) {
   results.overview.focusRisk = await count('[data-testid="focus-risk"]')();
   await page.screenshot({ path: path.join(OUT, 'overview-aapl.png'), fullPage: false });
 
+  await visit('/news-intel/settings', 'settings', { groups: count('details.cfg-group') });
   await visit('/news-intel/coverage', 'coverage', { rows: count('tbody tr.clickable'), demand: count('.key.untracked'),
     bulk: count('[data-testid="coverage-bulk"]'), observations: text('[data-testid="coverage-observations"]') });
   await page.locator('tr.clickable', { hasText: 'AAPL' }).first().click().catch(() => {});

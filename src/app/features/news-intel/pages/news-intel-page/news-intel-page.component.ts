@@ -1509,18 +1509,14 @@ import {
       .cfg-card {
         gap: 12px;
       }
+      /* Flowing columns (not a grid row), so an expanded group never leaves a hole beside it. */
       .cfg-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 8px;
-        align-items: start;
-      }
-      @media (max-width: 1100px) {
-        .cfg-grid {
-          grid-template-columns: minmax(0, 1fr);
-        }
+        columns: 2 420px;
+        column-gap: 8px;
       }
       .cfg-group {
+        break-inside: avoid;
+        margin-bottom: 8px;
         border: 1px solid var(--border);
         border-radius: 10px;
         background: var(--ni-panel);
