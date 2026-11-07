@@ -376,13 +376,13 @@ export class NiSparkComponent {
   template: `
     <div class="st" [class]="'st ' + (tone() ?? '')">
       <div class="lab">
-        <span>{{ label() }}</span>
+        <span [title]="label()">{{ label() }}</span>
         @if (info()) {
           <app-ni-info [text]="info()!" />
         }
       </div>
       <div class="row">
-        <span class="v">{{ value() }}</span>
+        <span class="v" [title]="value() ?? ''">{{ value() }}</span>
         @if (unit()) {
           <span class="u">{{ unit() }}</span>
         }
@@ -400,7 +400,7 @@ export class NiSparkComponent {
         />
       }
       @if (sub()) {
-        <div class="sub">{{ sub() }}</div>
+        <div class="sub" [title]="sub()">{{ sub() }}</div>
       }
     </div>
   `,
