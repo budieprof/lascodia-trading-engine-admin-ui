@@ -19,6 +19,7 @@ describe('readApprovalOutcome', () => {
       verdict: 'approved',
       stage: 'Approved',
       gates: [GATES[0]],
+      rows: [],
       message: 'Approved. Strategy 7 now paper-trades (Approved + Paused); …',
     });
   });
@@ -115,6 +116,7 @@ describe('readApprovalJob', () => {
       verdict: 'approved',
       stage: 'Approved',
       gates: [GATES[0]],
+      rows: [],
       message: 'Approved. Strategy 7 now paper-trades.',
     });
     const rejected = readApprovalJob({
@@ -139,6 +141,7 @@ describe('readApprovalJob', () => {
       verdict: 'not-judged',
       stage: 'Draft',
       gates: [],
+      rows: [],
       message: 'No verdict was recorded for job 1790253600000: the engine restarted …',
     });
     const refused = readApprovalJob({
@@ -151,5 +154,35 @@ describe('readApprovalJob', () => {
     });
     expect(refused?.verdict).toBe('refused');
     expect(refused?.stage).toBe('Approved');
+  });
+
+  it('carries the C2 gate rows of a verdict through, on a job and on an envelope', () => {
+    const rows = [
+      {
+        gate: 'dsr',
+        outcome: 'NotMeasurable',
+        value: null,
+        threshold: 0.95,
+        unit: 'probability',
+        comparator: '>=',
+        detail: 'fewer than two trades',
+        displayName: 'Deflated Sharpe',
+      },
+    ];
+    const job = readApprovalJob({
+      ...base,
+      status: 'done',
+      result: { approved: false, stage: 'Draft', gates: GATES, rows },
+      message: 'Not approved',
+      responseCode: '00',
+    });
+    expect(job?.rows).toEqual(rows);
+    const env = readApprovalOutcome({
+      status: true,
+      responseCode: '00',
+      message: 'Not approved',
+      data: { approved: false, stage: 'Draft', gates: GATES, rows },
+    });
+    expect(env?.rows).toEqual(rows);
   });
 });

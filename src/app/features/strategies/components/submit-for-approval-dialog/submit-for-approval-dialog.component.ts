@@ -16,6 +16,8 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import { failureMessage } from '../../util/api-failure';
 import { readApprovalJob, type ApprovalOutcome } from '../../util/approval';
+import { gateOutcome, gateOutcomeLabel } from '../../util/gate-rows';
+import { GateRowsTableComponent } from '../gate-rows-table/gate-rows-table.component';
 
 type Phase = 'confirm' | 'running' | 'result' | 'failed';
 
@@ -40,6 +42,7 @@ export const APPROVAL_MAX_POLL_FAILURES = 5;
  */
 @Component({
   selector: 'app-submit-for-approval-dialog',
+  imports: [GateRowsTableComponent],
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -123,7 +126,9 @@ export const APPROVAL_MAX_POLL_FAILURES = 5;
                   @if (o.message) {
                     <p class="engine-message">{{ o.message }}</p>
                   }
-                  @if (o.gates.length > 0) {
+                  @if (o.rows.length > 0) {
+                    <app-gate-rows-table [rows]="o.rows" ariaLabel="Promotion gates" />
+                  } @else if (o.gates.length > 0) {
                     <table class="gates" aria-label="Promotion gates">
                       <thead>
                         <tr>
@@ -138,7 +143,7 @@ export const APPROVAL_MAX_POLL_FAILURES = 5;
                             <td class="gate-name">{{ g.name }}</td>
                             <td>
                               <span class="pill" [class.pass]="g.passed" [class.fail]="!g.passed">
-                                {{ g.passed ? 'Pass' : 'Fail' }}
+                                {{ gateResultLabel(g) }}
                               </span>
                             </td>
                             <td class="gate-detail">{{ g.detail || '—' }}</td>
@@ -415,6 +420,12 @@ export class SubmitForApprovalDialogComponent {
     });
   }
 
+  /** The gate's C2 outcome when the engine sent one ("Not measurable" ≠ "Pass"), else Pass / Fail. */
+  gateResultLabel(g: { passed: boolean; outcome?: string | null }): string {
+    const o = gateOutcome(g.outcome);
+    return o ? gateOutcomeLabel(o) : g.passed ? 'Pass' : 'Fail';
+  }
+
   readonly verdictTitle = computed(() => {
     switch (this.outcome()?.verdict) {
       case 'approved':
@@ -435,8 +446,12 @@ export class SubmitForApprovalDialogComponent {
       return 'Every gate passed. The strategy now paper-trades (Approved + Paused); activate it once it has paper evidence.';
     }
     if (o.verdict === 'rejected') {
-      const failed = o.gates.filter((g) => !g.passed).length;
-      return `${failed} of ${o.gates.length} gate${o.gates.length === 1 ? '' : 's'} failed. The strategy stays ${o.stage ?? 'a Draft'}.`;
+      const total = o.rows.length > 0 ? o.rows.length : o.gates.length;
+      const failed =
+        o.rows.length > 0
+          ? o.rows.filter((r) => gateOutcome(r.outcome) === 'Fail').length
+          : o.gates.filter((g) => !g.passed).length;
+      return `${failed} of ${total} gate${total === 1 ? '' : 's'} failed. The strategy stays ${o.stage ?? 'a Draft'}.`;
     }
     if (o.verdict === 'refused') {
       return `The engine did not run the gates${o.stage ? ` — the strategy is ${o.stage}` : ''}.`;

@@ -1,4 +1,5 @@
 import type {
+  PromotionGateRowDto,
   ResponseData,
   StrategyApprovalGateDto,
   StrategyApprovalJobDto,
@@ -21,6 +22,8 @@ export interface ApprovalOutcome {
   /** Lifecycle stage after the evaluation (the engine's spelling). */
   stage: string | null;
   gates: StrategyApprovalGateDto[];
+  /** C2 structured rows (outcome, value vs threshold); empty from engines/verdicts before 2026-11-07. */
+  rows: PromotionGateRowDto[];
   /** The engine's own sentence about it. */
   message: string | null;
 }
@@ -48,6 +51,7 @@ export function readApprovalOutcome(
     verdict,
     stage: typeof data.stage === 'string' && data.stage ? data.stage : null,
     gates,
+    rows: Array.isArray(data.rows) ? data.rows : [],
     message: res.message && res.message.toLowerCase() !== 'successful' ? res.message : null,
   };
 }
@@ -66,14 +70,15 @@ export function readApprovalJob(
   const gates = Array.isArray(result?.gates) ? result.gates : [];
   const stage = typeof result?.stage === 'string' && result.stage ? result.stage : null;
   const message = job.message ?? null;
+  const rows = Array.isArray(result?.rows) ? result.rows : [];
   if (job.status === 'done') {
     return readApprovalOutcome({
       status: true,
       responseCode: job.responseCode ?? '00',
       message: message ?? '',
-      data: { approved: !!result?.approved, stage: stage ?? '', gates },
+      data: { approved: !!result?.approved, stage: stage ?? '', gates, rows },
     } as ResponseData<StrategyApprovalResultDto>);
   }
   const refused = job.responseCode === '-11' || job.responseCode === '-14';
-  return { verdict: refused ? 'refused' : 'not-judged', stage, gates, message };
+  return { verdict: refused ? 'refused' : 'not-judged', stage, gates, rows, message };
 }

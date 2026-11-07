@@ -15,6 +15,7 @@ import { StrategiesService } from '@core/services/strategies.service';
 import type { CpcvDistributionDto, PromotionGateEvaluationDto } from '@core/api/api.types';
 import { DecimalPipe } from '@angular/common';
 import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
+import { GateRowsTableComponent } from '../gate-rows-table/gate-rows-table.component';
 
 /**
  * What the promotion gate actually decided, attempt by attempt.
@@ -31,7 +32,7 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
 @Component({
   selector: 'app-promotion-gate-history-card',
   standalone: true,
-  imports: [RelativeTimePipe, DecimalPipe],
+  imports: [RelativeTimePipe, DecimalPipe, GateRowsTableComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Promotion gate history">
@@ -183,10 +184,21 @@ import { RelativeTimePipe } from '@shared/pipes/relative-time.pipe';
               }
 
               <!-- Every gate that ran, not only the ones that failed. A pass with no numbers
-                   behind it is an assertion; with them it is evidence. -->
+                   behind it is an assertion; with them it is evidence. Structured rows (C2,
+                   attempts from 2026-11-07) first; the text lines stay for older attempts. -->
+              @if (a.rows && a.rows.length > 0) {
+                <details [open]="$first">
+                  <summary>{{ a.rows.length }} gate result(s)</summary>
+                  <app-gate-rows-table [rows]="a.rows" ariaLabel="Gate results of this attempt" />
+                </details>
+              }
               @if (a.diagnostics.length > 0) {
                 <details>
-                  <summary>{{ a.diagnostics.length }} gate measurement(s)</summary>
+                  <summary>
+                    {{ a.diagnostics.length }} gate measurement(s){{
+                      a.rows && a.rows.length > 0 ? ' (engine text)' : ''
+                    }}
+                  </summary>
                   <ul class="diagnostics">
                     @for (d of a.diagnostics; track d) {
                       <li>{{ d }}</li>
