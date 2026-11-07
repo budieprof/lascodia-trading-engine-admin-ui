@@ -532,6 +532,7 @@ import {
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
 import { ChartAnnouncer } from './chart-announcer';
+import { ChartScheduler, browserSchedulerEnv } from './chart-scheduler';
 import {
   ASSET_CLASS_NAME,
   AssetClassDefaultsService,
@@ -922,6 +923,15 @@ export class ChartAnalysisPageComponent {
   }
 
   readonly currentLayoutName = computed(() => this.workspace.active().name);
+  /**
+   * US06: the page's periodic work (clock, headline age, market-status clock, script re-runs, forming-bar resync) on
+   * one timer that stops while the tab is hidden and catches up when it shows ({@link ChartScheduler}).
+   */
+  private readonly scheduler = (() => {
+    const s = new ChartScheduler(browserSchedulerEnv());
+    inject(DestroyRef).onDestroy(() => s.dispose());
+    return s;
+  })();
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
@@ -1915,12 +1925,9 @@ export class ChartAnalysisPageComponent {
   });
   /** Ticks every 30 s while the tab is visible, so the headline's age keeps moving (SP-11: it was computed once). */
   private readonly headlineClock = signal(Date.now());
-  private readonly headlineTick = effect((onCleanup) => {
-    const t = setInterval(() => {
-      if (!document.hidden) this.headlineClock.set(Date.now());
-    }, 30_000);
-    onCleanup(() => clearInterval(t));
-  });
+  private readonly headlineTick = this.scheduler.every('headline-age', 30_000, () =>
+    this.headlineClock.set(Date.now()),
+  );
   readonly watchHeadline = computed<WatchHeadline | null>(() => {
     const a = this.articles()[0];
     if (!a) return null;
@@ -2265,8 +2272,7 @@ export class ChartAnalysisPageComponent {
   /** Re-evaluated every 30 s, so "Feed stale" and the data fallback follow the clock without a tick. */
   private readonly marketClock = (() => {
     const now = signal(Date.now());
-    const t = setInterval(() => now.set(Date.now()), 30_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(t));
+    this.scheduler.every('market-clock', 30_000, () => now.set(Date.now()));
     return now;
   })();
   readonly marketView = computed<MarketView>(() => {
@@ -2903,14 +2909,13 @@ export class ChartAnalysisPageComponent {
     // during replay. Strategies (which backtest closed bars) are kept current by this alone. Through
     // the scheduler like every other re-run: a slow script's minute re-run used to start beside its
     // live re-run still in flight.
-    const liveTimer = setInterval(() => {
+    this.scheduler.every('script-reruns', 60_000, () => {
       if (this.replayActive()) return;
       // PC-I1: a script whose warm session the hub keeps current is not run again — it is asked what changed instead
       // (a quiet market pushes nothing, and this is how a session that ended is found).
       rerunScripts((r) => !this.warmCovered(r.item.key));
       for (const s of this.warmSessions.all()) if (this.warmCovered(s.key)) this.resyncWarm(s.key);
-    }, 60_000);
-    this.destroyRef.onDestroy(() => clearInterval(liveTimer));
+    });
 
     // TradingView behaviour: an indicator's last value sits on the forming bar and moves with it.
     // Every change to the chart's newest bar (a tick, an M1 resync, a new period opening) re-runs
@@ -3203,8 +3208,7 @@ export class ChartAnalysisPageComponent {
     });
     // Ticking clock, and presets applied once their interval's bars are in.
     this.tickClock();
-    const clockTimer = setInterval(() => this.tickClock(), 1000);
-    this.destroyRef.onDestroy(() => clearInterval(clockTimer));
+    this.scheduler.every('clock', 1_000, () => this.tickClock());
     effect(() => {
       this.bars();
       this.timezone();
@@ -3286,8 +3290,8 @@ export class ChartAnalysisPageComponent {
     // the live bar's high or low; and a bar that closed while the page was open was built entirely
     // from those throttled ticks. One small request a minute keeps the newest candle honest without
     // waiting for a reload.
-    const resync = setInterval(() => void this.syncFormingBars(), 60_000);
-    this.destroyRef.onDestroy(() => clearInterval(resync));
+    // US06: on the page's scheduler — not while the tab is hidden; re-read at once when it shows again.
+    this.scheduler.every('forming-resync', 60_000, () => void this.syncFormingBars());
   }
 
   /**
