@@ -1017,12 +1017,14 @@ export class ChartHostComponent implements OnDestroy {
   /** The session's identity, so an equal spec from a later answer changes nothing downstream. */
   private readonly sessionKey = computed(() => {
     const s = this.session();
-    return s ? `${s.session}|${s.timeZone}` : '';
+    // UD01: the engine's closures (holidays, early closes) are part of the calendar's identity.
+    return s ? `${s.session}|${s.timeZone}|${s.closures?.length ?? 0}` : '';
   });
   /** The symbol's trading days; null without a session — the studies then count UTC days. */
   private readonly calendar = computed(() => {
     const [session, timeZone] = this.sessionKey().split('|');
-    return session ? new TradingCalendar({ session, timeZone }) : null;
+    const closures = untracked(() => this.session()?.closures);
+    return session ? new TradingCalendar({ session, timeZone, closures }) : null;
   });
 
   /**

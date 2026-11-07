@@ -1,11 +1,15 @@
 import type { CandleDto } from '@core/api/api.types';
 import { resolutionSource, timeframeMs, type TvResolution } from './resolution';
+import type { TradingCalendar } from './session-calendar';
 
 /**
  * Client-side bar aggregation — for the STORED grid only (`resolution.ts`).
  *
  * The engine persists M1/M5/M15/H1/H4/D1, so `30` is built here from M15, and the bar still forming
  * on 5m … 1h is folded from M1. Fixed-width buckets on the UTC epoch grid are exact there.
+ *
+ * A venue instrument on an exchange calendar (a NYSE stock: 1h bars from 09:30) is bucketed on that calendar instead
+ * ({@link BarGrid}); FX and every MT5 symbol stay on the epoch grid.
  *
  * 2h, 4h, 1D, 1W and 1M are NOT bucketed here, nor anywhere in the client: they sit on the engine's
  * FX session grid (17:00 New York days, Monday–Friday weeks, DST-shifted UTC opens, the weekend
@@ -14,16 +18,41 @@ import { resolutionSource, timeframeMs, type TvResolution } from './resolution';
  */
 
 /**
- * Bucket key for a source bar at `ms`, given the target resolution: the bucket's START time, which is
- * also the aggregated bar's time. Null for an unknown or a session-grid resolution.
+ * Where a symbol's STORED bars fall, and so where the client buckets them and its live price (UD02).
+ *
+ * - `epoch` — fixed widths on the UTC epoch grid: every MT5 symbol (FX, CFDs: the broker's bars are on the hour) and
+ *   any symbol whose session is not known. FX's grid; the default everywhere.
+ * - `session` — a venue instrument whose stored bars the engine builds on its trading calendar
+ *   (`InstrumentCandleAggregator`: intraday bars from each regular session's open, the last cut at its close — 09:30
+ *   New York for a NYSE stock, so its 1h bars open at :30). The calendar is the session chart-bars reports for it.
  */
-export function bucketStartFor(resolution: TvResolution, ms: number): number | null {
+export type BarGrid =
+  | { kind: 'epoch' }
+  | { kind: 'session'; calendar: Pick<TradingCalendar, 'periodAt'> };
+
+export const EPOCH_GRID: BarGrid = { kind: 'epoch' };
+
+/**
+ * Bucket key for a source bar at `ms`, given the target resolution: the bucket's START time, which is
+ * also the aggregated bar's time. Null for an unknown or a session-grid resolution — and, on a session
+ * `grid`, for an instant outside every trading period (no bar holds it).
+ */
+export function bucketStartFor(
+  resolution: TvResolution,
+  ms: number,
+  grid: BarGrid = EPOCH_GRID,
+): number | null {
   const src = resolutionSource(resolution);
   if (!src || src.kind !== 'stored') return null;
+  const width = timeframeMs(src.timeframe) * src.aggregate;
+  if (grid.kind === 'session') {
+    const period = grid.calendar.periodAt(ms);
+    if (!period) return null;
+    return Math.max(period.open, period.anchor + Math.floor((ms - period.anchor) / width) * width);
+  }
   // Fixed-width buckets align to the UTC epoch grid, which is also where the
   // brokers emit (M30 → :00 and :30). Flooring is therefore exact, not an
   // approximation of the broker's own boundaries.
-  const width = timeframeMs(src.timeframe) * src.aggregate;
   return Math.floor(ms / width) * width;
 }
 
@@ -38,7 +67,11 @@ export function bucketStartFor(resolution: TvResolution, ms: number): number | n
  * closed AND the bucket has a successor, i.e. we have positive evidence the
  * bucket is complete rather than merely the newest thing we fetched.
  */
-export function aggregateCandles(candles: CandleDto[], resolution: TvResolution): CandleDto[] {
+export function aggregateCandles(
+  candles: CandleDto[],
+  resolution: TvResolution,
+  grid: BarGrid = EPOCH_GRID,
+): CandleDto[] {
   const src = resolutionSource(resolution);
   if (!src || src.kind !== 'stored') return [];
   if (src.aggregate === 1) return candles;
@@ -51,7 +84,7 @@ export function aggregateCandles(candles: CandleDto[], resolution: TvResolution)
   for (const c of candles) {
     const ms = Date.parse(c.timestamp);
     if (Number.isNaN(ms)) continue;
-    const key = bucketStartFor(resolution, ms);
+    const key = bucketStartFor(resolution, ms, grid);
     if (key === null) continue;
 
     if (key !== bucketKey) {
@@ -111,10 +144,14 @@ export interface FoldBar {
  *
  * <p>Input must be ascending. Output is ascending, one bar per bucket.</p>
  */
-export function foldBars(bars: readonly FoldBar[], resolution: TvResolution): FoldBar[] {
+export function foldBars(
+  bars: readonly FoldBar[],
+  resolution: TvResolution,
+  grid: BarGrid = EPOCH_GRID,
+): FoldBar[] {
   const out: FoldBar[] = [];
   for (const b of bars) {
-    const key = bucketStartFor(resolution, b.time);
+    const key = bucketStartFor(resolution, b.time, grid);
     if (key === null) continue;
     const tail = out[out.length - 1];
     if (tail && tail.time === key) {
@@ -158,9 +195,10 @@ export function applyStoredTick(
   price: number,
   nowMs: number,
   resolution: TvResolution,
+  grid: BarGrid = EPOCH_GRID,
 ): FoldBar[] | null {
   const last = bars[bars.length - 1];
-  const bucket = bucketStartFor(resolution, nowMs);
+  const bucket = bucketStartFor(resolution, nowMs, grid);
   if (!last || bucket === null || bucket < last.time) return null;
   if (bucket > last.time) {
     return [

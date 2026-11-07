@@ -3628,7 +3628,9 @@ export class ChartAnalysisPageComponent {
     )
       return;
 
-    this.bars.set(mergeForming(this.bars(), foldBars(minutes, resolution), stored));
+    this.bars.set(
+      mergeForming(this.bars(), foldBars(minutes, resolution, this.feed.gridOf(symbol)), stored),
+    );
   }
 
   /** Ticks applied to the chart's newest bar, ever; against {@link tailMergedAt}: any since the last merge. */
@@ -3699,7 +3701,13 @@ export class ChartAnalysisPageComponent {
     // The same bucketing the stored history uses — the UTC epoch grid, exact for 1m … 1h — on the
     // engine's clock, as the countdown and a run's live bar read it. A price past the newest bar's
     // bucket opens its own bucket's bar, so the chart never stalls a timeframe behind the market.
-    const next = applyStoredTick(current, price, this.serverClock.now(), this.resolution());
+    const next = applyStoredTick(
+      current,
+      price,
+      this.serverClock.now(),
+      this.resolution(),
+      this.feed.gridOf(this.symbol()),
+    );
     if (next) this.bars.set(next);
   }
 
@@ -3833,7 +3841,14 @@ export class ChartAnalysisPageComponent {
     this.comparePanels.set(
       panels.map((p) => {
         if (p.symbol.toUpperCase() !== symbol || !p.bars.length) return p;
-        const next = liveTick(p.bars, price, now, p.resolution, this.calendarOf(symbol));
+        const next = liveTick(
+          p.bars,
+          price,
+          now,
+          p.resolution,
+          this.calendarOf(symbol),
+          this.feed.gridOf(symbol),
+        );
         return next ? { ...p, bars: next } : p;
       }),
     );

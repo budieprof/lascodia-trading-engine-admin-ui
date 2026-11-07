@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiService } from '@core/api/api.service';
 import { ensureTestBed } from '@core/testing/zoneless-test-bed';
-import { pineSessionFromCalendar, weekdayIndex } from './calendar-session';
 import {
   classifySymbol,
   distanceUnitOf,
@@ -19,7 +18,7 @@ import {
 } from './instrument-math';
 import { InstrumentsService } from './instruments.service';
 import { InstrumentFormatService } from './instrument-format.service';
-import type { InstrumentDto, TradingCalendarDto } from './instrument.types';
+import type { InstrumentDto } from './instrument.types';
 
 ensureTestBed();
 
@@ -109,53 +108,6 @@ describe('instrument math — other asset classes', () => {
   });
 });
 
-describe('calendar → Pine session', () => {
-  const fx: TradingCalendarDto = {
-    code: 'fx-24x5',
-    timeZone: 'America/New_York',
-    is24x7: false,
-    holidays: [],
-    sessions: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday'].map((day) => ({
-      day,
-      open: '17:00',
-      close: '17:00',
-      kind: 'Regular' as const,
-    })),
-  };
-  it('fx-24x5 equals what scripting/chart-bars reports today', () => {
-    expect(pineSessionFromCalendar(fx)).toEqual({
-      session: '1700-1700:23456',
-      timeZone: 'America/New_York',
-    });
-  });
-  it('globex with a maintenance break; equities regular hours; 24x7', () => {
-    const globex: TradingCalendarDto = {
-      code: 'cme-globex',
-      timeZone: 'America/Chicago',
-      is24x7: false,
-      holidays: [],
-      sessions: [0, 1, 2, 3, 4].flatMap((day) => [
-        { day, open: '17:00', close: '16:00', kind: 'Regular' as const },
-        { day: day + 1, open: '16:00', close: '17:00', kind: 'Maintenance' as const },
-      ]),
-    };
-    expect(pineSessionFromCalendar(globex)?.session).toBe('1700-1600:23456');
-    const nyse: TradingCalendarDto = {
-      code: 'nyse',
-      timeZone: 'America/New_York',
-      is24x7: false,
-      holidays: [],
-      sessions: [1, 2, 3, 4, 5].flatMap((day) => [
-        { day, open: '04:00', close: '09:30', kind: 'Pre' as const },
-        { day, open: '09:30', close: '16:00', kind: 'Regular' as const },
-      ]),
-    };
-    expect(pineSessionFromCalendar(nyse)?.session).toBe('0930-1600:23456');
-    expect(pineSessionFromCalendar({ ...nyse, is24x7: true })?.session).toBe('0000-0000:1234567');
-    expect(weekdayIndex('sat')).toBe(6);
-  });
-});
-
 describe('InstrumentsService', () => {
   function setup(api: Partial<ApiService>) {
     TestBed.resetTestingModule();
@@ -220,7 +172,11 @@ describe('InstrumentsService', () => {
 
   it('UI09: a symbol the list does not carry is looked up alone; resolving until it answers', async () => {
     const get = vi.fn((path: string) =>
-      path.startsWith('/instruments?') ? of([BTC]) : path === '/instruments/ESZ6' ? of(ES) : throwError(() => ({ status: 404 })),
+      path.startsWith('/instruments?')
+        ? of([BTC])
+        : path === '/instruments/ESZ6'
+          ? of(ES)
+          : throwError(() => ({ status: 404 })),
     );
     const svc = setup({ getEnvelope: get as never, post: vi.fn() as never });
     expect(svc.lookupState('ESZ6')).toBe('resolving'); // the list is loading

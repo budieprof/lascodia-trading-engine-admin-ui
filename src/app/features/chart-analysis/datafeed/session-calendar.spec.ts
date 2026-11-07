@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { TradingCalendar, nextSessionPeriod, tradingMsBetween } from './session-calendar';
+import {
+  TradingCalendar,
+  nextSessionPeriod,
+  parseSessionPeriods,
+  tradingMsBetween,
+} from './session-calendar';
 import { tradingDayMs } from './session-bars';
 
 /**
@@ -182,6 +187,153 @@ describe('tradingMsBetween — the bars still to come open only while the market
     );
     expect(tradingMsBetween(UTC, at('2026-10-09T21:00:00Z'), at('2026-10-12T12:30:00Z'))).toBe(
       63.5 * H,
+    );
+  });
+});
+
+/**
+ * UD01: the engine's session string as it is — several periods (a NYSE CFD's pre, regular and post hours), the
+ * maintenance hour CME leaves out, and the holidays / early closes / breaks chart-bars reports as `closures`.
+ */
+describe('TradingCalendar — the engine’s sessions with periods and closures (UD01)', () => {
+  const NYSE_X = '0400-0930,0930-1600,1600-2000:23456';
+  const aapl = new TradingCalendar({ session: NYSE_X, timeZone: 'America/New_York' });
+  const block = (openIso: string, closeIso: string) => ({
+    time: at(openIso),
+    closeTime: at(closeIso),
+  });
+
+  it('reads every period and the trading days of a multi-period string', () => {
+    expect(parseSessionPeriods(NYSE_X)).toEqual({
+      periods: [
+        { open: 240, length: 330 },
+        { open: 570, length: 390 },
+        { open: 960, length: 240 },
+      ],
+      days: '23456',
+    });
+    expect(parseSessionPeriods('1700-1700:23456').periods).toEqual([{ open: 1020, length: 1440 }]);
+    expect(parseSessionPeriods('24x7')).toEqual({
+      periods: [{ open: 0, length: 1440 }],
+      days: null,
+    });
+  });
+
+  it('trades only inside its periods: not at night, not on Saturday (days were lost before)', () => {
+    // Tuesday 6 Oct 2026 (EDT): 04:00 New York = 08:00 UTC, 20:00 = 00:00 UTC.
+    expect(aapl.periodAt(at('2026-10-06T07:59:00Z'))).toBeNull();
+    expect(aapl.periodAt(at('2026-10-06T08:00:00Z'))).toMatchObject({
+      open: at('2026-10-06T08:00:00Z'),
+      close: at('2026-10-06T13:30:00Z'),
+    });
+    expect(aapl.periodAt(at('2026-10-07T00:30:00Z'))).toBeNull();
+    expect(aapl.isTradingDay(at('2026-10-10T00:00:00Z'))).toBe(false);
+    expect(aapl.isTradingDay(at('2026-10-06T00:00:00Z'))).toBe(true);
+    // The trading day is the New York date, midnight to midnight.
+    expect(aapl.dayOf(at('2026-10-06T23:00:00Z'))).toBe(at('2026-10-06T00:00:00Z'));
+    expect(tradingMsBetween(aapl, at('2026-10-06T00:00:00Z'), at('2026-10-07T12:00:00Z'))).toBe(
+      16 * H + 4 * H,
+    );
+  });
+
+  it('lays 1h bars from each period’s open: 09:00 is cut at 09:30, the regular session starts at 09:30', () => {
+    expect(
+      nextSessionPeriod(
+        aapl,
+        '60',
+        block('2026-10-06T12:00:00Z', '2026-10-06T13:00:00Z'),
+        at('2026-10-06T13:05:00Z'),
+      ),
+    ).toEqual({ time: at('2026-10-06T13:00:00Z'), closeTime: at('2026-10-06T13:30:00Z') });
+    expect(
+      nextSessionPeriod(
+        aapl,
+        '60',
+        block('2026-10-06T13:00:00Z', '2026-10-06T13:30:00Z'),
+        at('2026-10-06T13:31:00Z'),
+      ),
+    ).toEqual({ time: at('2026-10-06T13:30:00Z'), closeTime: at('2026-10-06T14:30:00Z') });
+    // After the night: the first bar of the pre-market, not the bar after yesterday's last.
+    expect(
+      nextSessionPeriod(
+        aapl,
+        '60',
+        block('2026-10-06T23:00:00Z', '2026-10-07T00:00:00Z'),
+        at('2026-10-07T08:00:10Z'),
+      ),
+    ).toEqual({ time: at('2026-10-07T08:00:00Z'), closeTime: at('2026-10-07T09:00:00Z') });
+    // A price at night opens nothing.
+    expect(
+      nextSessionPeriod(
+        aapl,
+        '60',
+        block('2026-10-06T23:00:00Z', '2026-10-07T00:00:00Z'),
+        at('2026-10-07T03:00:00Z'),
+      ),
+    ).toBeNull();
+    // The day: from the first open to the last close.
+    expect(
+      nextSessionPeriod(
+        aapl,
+        '1D',
+        block('2026-10-05T08:00:00Z', '2026-10-06T00:00:00Z'),
+        at('2026-10-06T08:00:05Z'),
+      ),
+    ).toEqual({ time: at('2026-10-06T08:00:00Z'), closeTime: at('2026-10-07T00:00:00Z') });
+  });
+
+  it('a holiday does not trade, an early close cuts the day short (C1 closures)', () => {
+    const closures = [
+      // Thanksgiving, Thursday 26 Nov 2026 (EST): the whole day.
+      {
+        fromMs: at('2026-11-26T05:00:00Z'),
+        toMs: at('2026-11-27T05:00:00Z'),
+        kind: 'Holiday',
+        label: 'Thanksgiving',
+      },
+      // The Friday after: closes at 13:00 New York (18:00 UTC).
+      {
+        fromMs: at('2026-11-27T18:00:00Z'),
+        toMs: at('2026-11-28T01:00:00Z'),
+        kind: 'EarlyClose',
+        label: 'Early close',
+      },
+    ];
+    const cal = new TradingCalendar({ session: NYSE_X, timeZone: 'America/New_York', closures });
+    expect(cal.isTradingDay(at('2026-11-26T00:00:00Z'))).toBe(false);
+    expect(cal.isTradingDay(at('2026-11-27T00:00:00Z'))).toBe(true);
+    expect(
+      nextSessionPeriod(
+        cal,
+        '60',
+        block('2026-11-25T23:00:00Z', '2026-11-26T01:00:00Z'),
+        at('2026-11-26T15:00:00Z'),
+      ),
+    ).toBeNull();
+    expect(cal.tradingBounds(cal.sessionAt(at('2026-11-27T15:00:00Z')))).toEqual({
+      open: at('2026-11-27T09:00:00Z'),
+      close: at('2026-11-27T18:00:00Z'),
+    });
+    expect(
+      nextSessionPeriod(
+        cal,
+        '60',
+        block('2026-11-27T16:30:00Z', '2026-11-27T17:30:00Z'),
+        at('2026-11-27T17:31:00Z'),
+      ),
+    ).toEqual({ time: at('2026-11-27T17:30:00Z'), closeTime: at('2026-11-27T18:00:00Z') });
+    expect(tradingMsBetween(cal, at('2026-11-26T05:00:00Z'), at('2026-11-27T05:00:00Z'))).toBe(0);
+    // FX ignores nothing it was not told: no closures, every weekday trades.
+    expect(FX.isTradingDay(at('2026-11-26T00:00:00Z'))).toBe(true);
+  });
+
+  it('CME’s 16:00-17:00 Chicago maintenance hour is not trading time', () => {
+    const cme = new TradingCalendar({ session: '1700-1600:23456', timeZone: 'America/Chicago' });
+    // Tuesday 6 Oct 2026 (CDT): 16:00 Chicago = 21:00 UTC.
+    expect(cme.periodAt(at('2026-10-06T21:30:00Z'))).toBeNull();
+    expect(cme.periodAt(at('2026-10-06T22:00:00Z'))?.open).toBe(at('2026-10-06T22:00:00Z'));
+    expect(tradingMsBetween(cme, at('2026-10-06T22:00:00Z'), at('2026-10-07T22:00:00Z'))).toBe(
+      23 * H,
     );
   });
 });
