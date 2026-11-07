@@ -399,6 +399,29 @@ describe('CandleFeedService — the stored grid reports failures (CC-14) and for
     });
   });
 
+  it('UD03: two loads that do not touch never answer the gap between them', async () => {
+    const page = (iso: string[]) =>
+      of({ status: true, data: { data: iso.map((t) => row(t, 1, 1, 1, 1)) } });
+    const listCandles = vi
+      .fn()
+      .mockReturnValueOnce(page(['2026-03-02T11:00:00Z', '2026-03-02T10:00:00Z']))
+      .mockReturnValueOnce(page(['2026-10-07T13:00:00Z', '2026-10-07T12:00:00Z']))
+      .mockReturnValue(page(['2026-06-01T10:00:00Z', '2026-06-01T09:00:00Z']));
+    const feed = storedFeed(listCandles);
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-03-02T11:00:00Z'), 2);
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-10-07T13:00:00Z'), 2);
+    // March is held: served without asking.
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-03-02T11:00:00Z'), 2);
+    expect(listCandles).toHaveBeenCalledTimes(2);
+    // June lies between the two loads: asked for, not answered from the cache with March's bars.
+    const june = await feed.getBars('EURUSD', '60', 0, Date.parse('2026-06-01T10:00:00Z'), 2);
+    expect(listCandles).toHaveBeenCalledTimes(3);
+    expect(june.bars.map((b) => new Date(b.time).toISOString())).toEqual([
+      '2026-06-01T09:00:00.000Z',
+      '2026-06-01T10:00:00.000Z',
+    ]);
+  });
+
   it(`keeps at most ${MAX_CACHED_SERIES} series, dropping the least recently used`, async () => {
     const listCandles = vi.fn(() =>
       of({ status: true, data: { data: [row('2026-10-07T13:00:00Z', 1, 1, 1, 1)] } }),

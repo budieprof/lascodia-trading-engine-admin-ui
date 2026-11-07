@@ -12,6 +12,7 @@ import {
   type TvResolution,
 } from './resolution';
 import { MAX_CHART_BARS, asBar, tailCount } from './session-bars';
+import { addCoverage, coverageOf, serveFromCache, type Coverage } from './bar-cache';
 import { TradingCalendar, type SessionClosure, type SessionSpec } from './session-calendar';
 import {
   isVenueSource,
@@ -52,6 +53,26 @@ export interface BarsResult {
   bars: Bar[];
   /** True when the range holds no data AND none is expected further back. */
   noData: boolean;
+}
+
+/** One cached series: its bars and the spans they cover completely (UD03, `bar-cache.ts`). */
+interface CachedSeries {
+  bars: Bar[];
+  spans: Coverage[];
+}
+
+/**
+ * What a session-grid answer covers: up to `toMs` (a live answer: up to its newest CLOSED bar — the forming one is
+ * never served from the cache), from its oldest bar or, when it came back short of `count`, from the start of history.
+ */
+function sessionCoverage(
+  bars: readonly SessionBar[],
+  toMs: number,
+  live: boolean,
+  count: number,
+): Coverage | null {
+  const closed = live ? bars.filter((b) => !b.forming) : bars;
+  return coverageOf(closed, { toMs, live, reachedStart: bars.length < count });
 }
 
 /** Hard ceiling on rows per request, so a wide window can't ask for millions. */
@@ -105,7 +126,7 @@ export class CandleFeedService {
    * their aggregated form — aggregating a long M15 range into `30` on every
    * pan is the other half of the same cost.
    */
-  private readonly cache = new Map<string, Bar[]>();
+  private readonly cache = new Map<string, CachedSeries>();
 
   /**
    * `symbol|resolution|source`: the candle source the engine reads the symbol's bars from (C1 `source.id`, once an
@@ -114,7 +135,23 @@ export class CandleFeedService {
    */
   private key(symbol: string, resolution: TvResolution): string {
     const source = untracked(() => this.factsOf(symbol)?.source?.id ?? '');
-    return `${symbol}|${resolution}|${source}`;
+    const adjustment = this.adjustments.get(symbol.toUpperCase());
+    return `${symbol}|${resolution}|${source}${adjustment ? `|${adjustment}` : ''}`;
+  }
+
+  /** UD11: the corporate-action adjustment asked for per symbol (equities / ETFs); absent = the engine's default. */
+  private readonly adjustments = new Map<string, 'none' | 'splits' | 'all'>();
+
+  /** Ask chart-bars for `symbol`'s bars with `adjustment` (null: the engine's default). Callers reload after. */
+  setAdjustment(symbol: string, adjustment: 'none' | 'splits' | 'all' | null): void {
+    const key = symbol.toUpperCase();
+    if (adjustment) this.adjustments.set(key, adjustment);
+    else this.adjustments.delete(key);
+  }
+
+  /** The adjustment asked for `symbol`, or null for the engine's default. */
+  adjustmentOf(symbol: string): 'none' | 'splits' | 'all' | null {
+    return this.adjustments.get(symbol.toUpperCase()) ?? null;
   }
 
   /**
@@ -318,9 +355,9 @@ export class CandleFeedService {
     const src = resolutionSource(resolution);
     if (!src || src.kind !== 'stored') return { bars: [], noData: true };
 
-    const cached = this.cached(symbol, resolution);
-    const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
+    const servedFromCache = this.fromCache(symbol, resolution, fromMs, toMs, countBack);
     if (servedFromCache) return { bars: servedFromCache, noData: false };
+    const live = toMs >= Date.now() - LIVE_EDGE_MS;
 
     // Over-fetch by the aggregation factor: 10 thirty-minute bars need 20 M15
     // ones, and asking for 10 would render a chart half as long.
@@ -345,10 +382,22 @@ export class CandleFeedService {
     if (!res?.status || !res.data)
       throw new Error(res?.message || 'the engine refused the candle request');
 
-    const bars = normaliseRows(res.data.data ?? [], resolution, this.gridOf(symbol));
+    const page = res.data.data ?? [];
+    const bars = normaliseRows(page, resolution, this.gridOf(symbol));
     if (bars.length === 0) return { bars: [], noData: true };
 
-    this.mergeIntoCache(symbol, resolution, bars);
+    this.mergeIntoCache(
+      symbol,
+      resolution,
+      bars,
+      coverageOf(bars, {
+        toMs,
+        live,
+        reachedStart: page.length < rows,
+        // A fold's oldest bucket may lack the source rows before the page (30m from one M15).
+        oldestPartial: src.aggregate !== 1,
+      }),
+    );
 
     const windowed = bars.filter((b) => b.time >= fromMs && b.time <= toMs);
     // An empty window with bars present means the request reached past the
@@ -371,21 +420,16 @@ export class CandleFeedService {
   ): Promise<BarsResult> {
     const live = toMs >= Date.now() - LIVE_EDGE_MS;
     if (!live) {
-      const cached = this.cached(symbol, resolution);
-      const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
+      const servedFromCache = this.fromCache(symbol, resolution, fromMs, toMs, countBack);
       if (servedFromCache) return { bars: servedFromCache, noData: false };
     }
 
-    const fetched = await this.fetchSession(
-      symbol,
-      resolution,
-      live ? null : toMs + 1,
-      Math.min(MAX_CHART_BARS, Math.max(1, Math.round(countBack))),
-    );
+    const count = Math.min(MAX_CHART_BARS, Math.max(1, Math.round(countBack)));
+    const fetched = await this.fetchSession(symbol, resolution, live ? null : toMs + 1, count);
     const bars = fetched.map(asBar);
     if (bars.length === 0) return { bars: [], noData: true };
 
-    this.mergeIntoCache(symbol, resolution, bars);
+    this.mergeIntoCache(symbol, resolution, bars, sessionCoverage(fetched, toMs, live, count));
 
     // A live window is "up to now" on the engine's clock: a period it opened is not cut off for
     // starting after a browser clock that runs behind.
@@ -412,7 +456,13 @@ export class CandleFeedService {
       null,
       tailCount(resolution, sinceMs, Date.now()),
     ).catch(() => null);
-    if (bars?.length) this.mergeIntoCache(symbol, resolution, bars.map(asBar));
+    if (bars?.length)
+      this.mergeIntoCache(
+        symbol,
+        resolution,
+        bars.map(asBar),
+        sessionCoverage(bars, Date.now(), true, Number.POSITIVE_INFINITY),
+      );
     return bars;
   }
 
@@ -433,40 +483,39 @@ export class CandleFeedService {
         to,
         count,
         includeForming: to === null,
+        ...(this.adjustmentOf(symbol) ? { adjustment: this.adjustmentOf(symbol) } : {}),
       }),
     );
     this.recordSession(symbol, res, resolution);
     return res.bars.map(toSessionBar);
   }
 
-  /**
-   * Serve from cache only when the cache demonstrably covers the request: it
-   * holds a bar at or before `fromMs` (so we know we are not missing older
-   * data) and enough bars in the window. Anything less falls through to a
-   * fetch, because a partially-filled window renders as a chart that simply
-   * stops.
-   */
-  private sliceCache(cached: Bar[], fromMs: number, toMs: number, countBack: number): Bar[] | null {
-    if (cached.length === 0) return null;
-    if (cached[0].time > fromMs) return null;
-    const windowed = cached.filter((b) => b.time >= fromMs && b.time <= toMs);
-    return windowed.length >= Math.min(countBack, 1) && windowed.length > 0 ? windowed : null;
+  /** The cached answer to a window, when one span of the cache covers it with no gap ({@link serveFromCache}). */
+  private fromCache(
+    symbol: string,
+    resolution: TvResolution,
+    fromMs: number,
+    toMs: number,
+    countBack: number,
+  ): Bar[] | null {
+    const held = this.cached(symbol, resolution);
+    return held ? serveFromCache(held.bars, held.spans, fromMs, toMs, countBack) : null;
   }
 
   /** A series' cached bars, marked as just used (CC-24). */
-  private cached(symbol: string, resolution: TvResolution): Bar[] {
+  private cached(symbol: string, resolution: TvResolution): CachedSeries | null {
     const k = this.key(symbol, resolution);
-    const bars = this.cache.get(k);
-    if (!bars) return [];
+    const held = this.cache.get(k);
+    if (!held) return null;
     this.cache.delete(k);
-    this.cache.set(k, bars);
-    return bars;
+    this.cache.set(k, held);
+    return held;
   }
 
-  /** Keep `bars` for a series as its most recently used, dropping the least recently used past the cap. */
-  private store(k: string, bars: Bar[]): void {
+  /** Keep a series as the most recently used, dropping the least recently used past the cap. */
+  private store(k: string, series: CachedSeries): void {
     this.cache.delete(k);
-    this.cache.set(k, bars);
+    this.cache.set(k, series);
     while (this.cache.size > MAX_CACHED_SERIES) {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined) break;
@@ -479,22 +528,27 @@ export class CandleFeedService {
     return this.cache.size;
   }
 
-  private mergeIntoCache(symbol: string, resolution: TvResolution, incoming: Bar[]): void {
+  private mergeIntoCache(
+    symbol: string,
+    resolution: TvResolution,
+    incoming: Bar[],
+    covered: Coverage | null,
+  ): void {
     const k = this.key(symbol, resolution);
     const existing = this.cache.get(k);
-    if (!existing || existing.length === 0) {
-      this.store(k, incoming);
+    if (!existing || existing.bars.length === 0) {
+      this.store(k, { bars: incoming, spans: addCoverage([], covered) });
       return;
     }
     const byTime = new Map<number, Bar>();
-    for (const b of existing) byTime.set(b.time, b);
+    for (const b of existing.bars) byTime.set(b.time, b);
     // Incoming wins: a re-fetched bar is fresher than a cached one, which
     // matters for the most recent bar while it is still forming.
     for (const b of incoming) byTime.set(b.time, b);
-    this.store(
-      k,
-      [...byTime.values()].sort((a, b) => a.time - b.time),
-    );
+    this.store(k, {
+      bars: [...byTime.values()].sort((a, b) => a.time - b.time),
+      spans: addCoverage(existing.spans, covered),
+    });
   }
 }
 
