@@ -2797,7 +2797,7 @@ export class ChartAnalysisPageComponent {
     // chart nobody is looking at.
     this.destroyRef.onDestroy(() => {
       this.replay.pause();
-      this.replayScripts.stopAll();
+      this.engine.replayRuns.stopAll();
     });
 
     // Deep link: /chart-analysis/EURUSD?tf=60 so a chart can be linked to from
@@ -3099,7 +3099,7 @@ export class ChartAnalysisPageComponent {
 
   /** The series changed in replay: history back to the head's instant, and the head on its bar there. */
   private async reanchorReplay(anchor: number): Promise<void> {
-    this.replayScripts.stopAll();
+    this.engine.replayRuns.stopAll();
     this.replay.reanchor(anchor);
     if ((this.bars()[0]?.time ?? anchor) > anchor) {
       await this.loadBackTo(anchor);
@@ -3110,7 +3110,7 @@ export class ChartAnalysisPageComponent {
   exitReplay(): void {
     this.host()?.cancelPick();
     this.replay.exit();
-    this.replayScripts.stopAll();
+    this.engine.replayRuns.stopAll();
   }
 
   stepReplay(delta: number): void {

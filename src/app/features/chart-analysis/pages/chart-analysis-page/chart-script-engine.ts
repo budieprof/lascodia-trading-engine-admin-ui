@@ -8,18 +8,12 @@ import type { ScriptingRealtimeService } from '@core/realtime/scripting-realtime
 import type { ScriptingService } from '@core/services/scripting.service';
 import type { ServerClock } from '@core/time/server-clock';
 import { pruneInputValues } from '@features/scripting/pine/pine-inputs';
-import type { PineRunRequest } from '@shared/pine-chart/model/pine-outputs.types';
 import type { Bar } from '../../datafeed/candle-feed.service';
 import type { TvResolution } from '../../datafeed/resolution';
 import type { ReplayController } from '../../replay/replay-controller';
 import type { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import type { ChartScriptItem, ChartScriptService } from '../../scripts/chart-script.service';
-import {
-  editorReport,
-  runTimeframeFor,
-  type ChartScriptResult,
-  type ScriptBasis,
-} from '../../scripts/chart-script.model';
+import { editorReport, type ChartScriptResult, type ScriptBasis } from '../../scripts/chart-script.model';
 import {
   LiveRerunScheduler,
   barCloseMs,
@@ -43,6 +37,7 @@ import type { ScriptSettings } from '../../scripts/script-settings';
 import { WarmSessionBook, applyFrame, formingIndexOf } from '../../scripts/warm-sessions';
 import type { WorkspaceScript } from '../../workspace/workspace-state';
 import type { ChartScriptRun } from './chart-analysis-page.component';
+import { ChartReplayRuns } from './chart-replay-runs';
 import { MAX_SCRIPT_BARS, PAGE_BARS } from './chart-page.config';
 
 /**
@@ -95,7 +90,7 @@ export interface ScriptEngineHost {
   readonly replayClosedHead: () => Bar | null;
   readonly replayHead: () => number | null;
   readonly replay: Pick<ReplayController, 'cursor'>;
-  readonly replayScripts: Pick<ReplayScriptSessions, 'usable' | 'step' | 'stop'>;
+  readonly replayScripts: Pick<ReplayScriptSessions, 'usable' | 'step' | 'stop' | 'stopAll'>;
   readonly serverClock: Pick<ServerClock, 'now'>;
   readonly chartScripts: Pick<ChartScriptService, 'runOnChart'>;
   readonly scriptHub: Pick<
@@ -182,6 +177,8 @@ export class ChartScriptEngine {
   readonly formingByKey: Map<string, number | null>;
   /** Resyncs in flight, by script. */
   readonly resyncing: Set<string>;
+  /** Bar Replay (CC-I4): runs that follow the head through the engine's replay sessions. */
+  readonly replayRuns: ChartReplayRuns;
 
   constructor(
     private readonly host: ScriptEngineHost,
@@ -208,6 +205,11 @@ export class ChartScriptEngine {
     this.scriptRepaints = state.scriptRepaints ?? signal<ReadonlyMap<string, string>>(new Map());
     this.formingByKey = state.formingByKey ?? new Map();
     this.resyncing = state.resyncing ?? new Set();
+    this.replayRuns = new ChartReplayRuns(host, {
+      scheduler: () => this.runScheduler,
+      runScript: (item, values, replace, done, quiet) =>
+        this.runScript(item, values, replace, done, quiet),
+    });
   }
 
   /**
@@ -225,90 +227,9 @@ export class ChartScriptEngine {
     this.runScript(run.item, run.values, true, undefined, ticket);
   }
 
-  /**
-   * Bar Replay moved forward (CC-I4): an indicator's run on the chart follows through its engine replay session —
-   * only the bars the head moved over are executed — instead of a full run to the new head. False (the caller runs
-   * it in full) for a strategy (its tester result is not in a frame), a basis other than the standard bars, a run
-   * that is not at an earlier head, or a move the step endpoint does not take; a step that fails also ends in a full
-   * run.
-   */
+  /** Bar Replay moved forward (CC-I4): the run follows through its engine replay session ({@link ChartReplayRuns}). */
   stepReplayRun(run: ChartScriptRun, ticket: number): boolean {
-    const head = this.host.replayClosedHead();
-    const until = run.until ?? null;
-    const runBars = run.result.run?.bars ?? [];
-    if (
-      run.result.kind === 'strategy' ||
-      (run.chartType ?? 'standard') !== 'standard' ||
-      until === null ||
-      !head ||
-      head.time <= until ||
-      !runBars.length
-    )
-      return false;
-    const bars = this.host.bars();
-    const untilIdx = bars.findIndex((b) => b.time === until);
-    const headIdx = this.host.replay.cursor().index - 1;
-    const steps = headIdx - untilIdx;
-    // The session's window reaches the last closed bar loaded, so later steps need no new session.
-    const now = this.host.serverClock.now();
-    let lastClosed = bars.length - 1;
-    while (lastClosed > headIdx && barCloseMs(bars[lastClosed], run.resolution) > now) lastClosed--;
-    const lastBars = runBars.length + (lastClosed - untilIdx);
-    const signature = JSON.stringify([
-      run.item.strategyId ?? run.item.pineSource ?? '',
-      run.values,
-      run.symbol,
-      run.resolution,
-    ]);
-    if (untilIdx < 0 || lastBars > MAX_SCRIPT_BARS || !this.host.replayScripts.usable(signature, steps))
-      return false;
-    const request: PineRunRequest = {
-      symbol: run.symbol,
-      timeframe: runTimeframeFor(run.resolution),
-      lastBars,
-      mode: 'preview',
-      toUtc: new Date(barCloseMs(bars[lastClosed], run.resolution)).toISOString(),
-      ...(run.item.strategyId !== undefined
-        ? { strategyId: run.item.strategyId }
-        : { source: run.item.pineSource ?? '' }),
-      ...(Object.keys(run.values).length ? { inputs: run.values } : {}),
-    };
-    const key = run.item.key;
-    void this.host.replayScripts
-      .step(
-        {
-          key,
-          signature,
-          request,
-          startBar: runBars.length - 1,
-          firstTime: runBars[0].t,
-          fromTime: until,
-          toTime: head.time,
-          steps,
-        },
-        run.result,
-      )
-      .then((result) => {
-        if (!this.runScheduler.isCurrent(key, ticket)) {
-          this.runScheduler.settle(key, ticket);
-          return;
-        }
-        const held = this.host.scriptRuns().find((r) => r.item.key === key);
-        if (!result || held !== run) {
-          // The step failed, or the run changed meanwhile: in full, as before.
-          this.runScript(run.item, run.values, true, undefined, ticket);
-          return;
-        }
-        this.host.scriptRuns.update((list) =>
-          list.map((r) =>
-            r === run ? { ...r, result, until: head.time, landedAt: Date.now() } : r,
-          ),
-        );
-        this.runScheduler.settle(key, ticket);
-        // The head moved on (or replay ended) while it stepped: once more, to where it is now.
-        if (head.time !== this.host.replayHead()) this.runScheduler.request(key);
-      });
-    return true;
+    return this.replayRuns.step(run, ticket);
   }
 
   /**
@@ -864,7 +785,7 @@ export class ChartScriptEngine {
   /** Abort the run of `key` in flight, if any; whoever waits on it is told `why`. */
   abortRun(key: string, why: string): void {
     // Its replay session follows the run on the chart; an explicit run replaces that run.
-    this.host.replayScripts.stop(key);
+    this.replayRuns.stop(key);
     const run = this.runsInFlight.get(key);
     if (!run) return;
     this.runsInFlight.delete(key);
