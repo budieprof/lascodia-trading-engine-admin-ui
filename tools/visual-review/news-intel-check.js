@@ -97,7 +97,31 @@ const OBS = [
   { id: 1, kind: 'MultiAssetBlackout', mode: 'Observe', symbol: 'AAPL', key: 'USD', eventRef: 'econ:44', storyId: null, observedAtUtc: iso(90), eventAtUtc: iso(80), detail: 'CPI y/y' },
 ];
 
+// NI_FIXTURES=<dir>: answer news-intel GETs from captured engine responses (one JSON envelope per file, named by
+// path: `status.json`, `eval_runs_2.json`, `focus_<SYMBOL>.json`, `stories_X_articles.json`, `config_blackout.json`)
+// so the cockpit renders at real density. Capture them read-only from a live engine; anything not captured falls
+// back to the stubs below. Fixtures hold live headlines — keep them outside the repo.
+const FIX = process.env.NI_FIXTURES;
+function fixture(p, q) {
+  if (!FIX) return null;
+  let name = null;
+  if (p.includes('/config/NewsBlackout')) name = 'config_blackout';
+  const at = p.indexOf('/news-intel/');
+  if (!name && at >= 0) {
+    const rest = p.slice(at + '/news-intel/'.length);
+    if (rest === 'focus') name = `focus_${(q.get('symbol') || 'EURUSD').toUpperCase()}`;
+    else if (/^stories\/\d+\/articles$/.test(rest)) name = 'stories_X_articles';
+    else name = rest.replace(/\//g, '_');
+  }
+  if (!name) return null;
+  const file = path.join(FIX, `${name}.json`);
+  if (!fs.existsSync(file)) return null;
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
 function stub(method, p, q) {
+  const fx = fixture(p, q);
+  if (fx) return fx;
   const notFound = { status: 404 };
   const gaps404 = !!process.env.NI_GAPS_404;
   if (p.endsWith('/news-intel/coverage')) return gaps404 ? notFound : ok({ asOfUtc: iso(0), computedAtUtc: iso(0), cached: false, moduleEnabled: true,

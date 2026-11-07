@@ -48,7 +48,7 @@ interface NavTab {
         flex-wrap: wrap;
         align-items: center;
         gap: var(--space-2) var(--space-3);
-        padding: 4px;
+        padding: 3px;
         background: var(--bg-secondary);
         border: 1px solid var(--border);
         border-radius: var(--radius-md);
@@ -61,9 +61,9 @@ interface NavTab {
         min-width: 0;
       }
       .ni-tab {
-        padding: 6px 12px;
-        border-radius: var(--radius-sm);
-        font-size: 13px;
+        padding: 4px 10px;
+        border-radius: 7px;
+        font-size: 12px;
         font-weight: 500;
         color: var(--text-secondary);
         text-decoration: none;
@@ -99,5 +99,6 @@ export class NewsIntelNavComponent {
     { label: 'Gold set & evals', path: '/news-intel/evals', exact: false },
     { label: 'Event study', path: '/news-intel/event-study', exact: false },
     { label: 'Risk use', path: '/news-intel/risk', exact: false },
+    { label: 'Settings', path: '/news-intel/settings', exact: false },
   ];
 }

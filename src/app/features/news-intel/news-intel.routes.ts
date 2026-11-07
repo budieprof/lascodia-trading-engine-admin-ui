@@ -60,6 +60,15 @@ export const NEWS_INTEL_ROUTES: Routes = [
       import('./pages/event-study-page.component').then((m) => m.NewsEventStudyPageComponent),
   },
   {
+    path: 'settings',
+    // The configuration editor that used to sit under the overview — same component, settings view.
+    data: { breadcrumb: 'Settings', view: 'settings' },
+    loadComponent: () =>
+      import('./pages/news-intel-page/news-intel-page.component').then(
+        (m) => m.NewsIntelPageComponent,
+      ),
+  },
+  {
     path: 'risk',
     data: { breadcrumb: 'Risk use' },
     loadComponent: () => import('./pages/risk-page.component').then((m) => m.NewsRiskPageComponent),
