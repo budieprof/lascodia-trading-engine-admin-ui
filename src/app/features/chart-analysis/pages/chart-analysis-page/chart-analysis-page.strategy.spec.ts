@@ -9,6 +9,7 @@ import { LiveRerunScheduler } from '../../scripts/live-bar';
 import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysis-page.component';
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
 import { dockPageState } from './chart-analysis-page.dock.testing';
+import { attachScriptEngine } from './chart-analysis-page.engine.testing';
 
 // The page's own runScript, run against just the state it touches (as the editor and dock specs
 // do): the component's prototype with the runs' signals, a scheduler, and an engine that answers
@@ -83,6 +84,8 @@ function page(runs: ChartScriptRun[] = []) {
     settings: { loadStoredInputs: vi.fn() },
     replacedNotice: signal(null),
   });
+  // The script-run engine (U13 fu-ui: ChartScriptEngine) over this page and the run state above.
+  attachScriptEngine(p);
   return { p, runOnChart, held };
 }
 

@@ -12,6 +12,7 @@ import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysi
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
 import { dockPageState } from './chart-analysis-page.dock.testing';
 import { editorPageState } from './chart-analysis-page.editor.testing';
+import { attachScriptEngine } from './chart-analysis-page.engine.testing';
 import { ReplayController } from '../../replay/replay-controller';
 import { ReplayScriptSessions } from '../../replay/replay-script-sessions';
 import { normalizeOutputs } from '@shared/pine-chart/model/normalize';
@@ -160,6 +161,8 @@ function page(runs: ChartScriptRun[] = [], saved: Partial<SavedChartScript>[] = 
     scriptEditor: () => ({ showCompile, revealLine: vi.fn() }),
     notify: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
   });
+  // The script-run engine (U13 fu-ui: ChartScriptEngine) over this page and the run state above.
+  attachScriptEngine(p);
   return { p, runOnChart, answers, showCompile };
 }
 

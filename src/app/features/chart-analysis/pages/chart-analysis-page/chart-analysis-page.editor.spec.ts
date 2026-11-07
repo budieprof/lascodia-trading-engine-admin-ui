@@ -10,6 +10,7 @@ import { ChartAnalysisPageComponent, type ChartScriptRun } from './chart-analysi
 import { realtimePageState } from './chart-analysis-page.realtime.testing';
 import { dockPageState } from './chart-analysis-page.dock.testing';
 import { editorPageState } from './chart-analysis-page.editor.testing';
+import { attachScriptEngine } from './chart-analysis-page.engine.testing';
 
 // The page's own methods, run against just the state they touch: the component's prototype with
 // the editor's, the runs' and the settings' signals — no template, no chart, no engine. runScript
@@ -85,6 +86,8 @@ function page(runs: ChartScriptRun[]): Page {
       notify: vi.fn(),
     }),
   });
+  // The script-run engine (U13 fu-ui: ChartScriptEngine) over this page and the run state above.
+  attachScriptEngine(p);
   return p;
 }
 
