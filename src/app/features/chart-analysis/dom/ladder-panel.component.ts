@@ -34,7 +34,11 @@ import type {
 } from '../trading/manual-trading.types';
 import { DEFAULT_STOP_ATR, DEFAULT_TARGET_R, firstRefusal } from '../trading/ticket-model';
 import { newCorrelationId } from '../trading/position-lines';
-import { LadderArmingService } from './ladder-arming.service';
+import {
+  ARM_IDLE_CHOICES,
+  LadderArmingService,
+  armingStaleReason,
+} from './ladder-arming.service';
 import { VenueTicketBus } from '../trading/venue-ticket-bus.service';
 import { unitWord, venueInstrumentFor } from '@features/venues/venues.logic';
 import { MarketDataApiService } from '@core/realtime/marketdata-api.service';
@@ -43,6 +47,8 @@ import { LiveDepthService, type LiveDepth } from '../orderflow/live-depth.servic
 import { pickBookStream } from '../orderflow/stream-depth';
 import { parseDepth } from '../panels/side/depth';
 import { routeBadge, type InstrumentFacts } from '../datafeed/instrument-facts';
+import type { MdSource } from '@core/realtime/marketdata.types';
+import { ladderQuantityText, ladderQuantityTitle, ladderSourceLabel } from './ladder-source';
 
 const RESOLVING_HINT =
   'Resolving the instrument: nothing is placed until the engine says whether this is an MT5 broker symbol or a venue\'s.';
@@ -127,6 +133,8 @@ type LadderAction =
   selector: 'app-ladder-panel',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // UF05: any interaction with the ladder is activity (restarts one-click's idle timeout; an expired arming disarms).
+  host: { '(pointerdown)': 'onActivity()', '(keydown)': 'onActivity()' },
   imports: [DecimalPipe, ModalA11yDirective],
   template: `
     <div class="lp-head">
@@ -224,7 +232,11 @@ type LadderAction =
             class="lp-armed"
             (click)="disarm()"
             data-testid="ladder-armed"
-            title="Click to disarm"
+            [title]="
+              'Click to disarm. Disarms by itself after ' +
+              arming.idleMinutes() +
+              ' min without a ladder click, when the tab is hidden, or when the account or the book goes stale.'
+            "
           >
             ARMED · one-click
           </button>
@@ -243,7 +255,22 @@ type LadderAction =
             One-click
           </button>
         }
+        <label title="One-click disarms itself after this long without a ladder click">
+          <span class="sr">One-click idle timeout</span>
+          <select
+            [value]="arming.idleMinutes()"
+            (change)="arming.setIdleMinutes(+$any($event.target).value)"
+            data-testid="ladder-arm-idle"
+          >
+            @for (m of armIdleChoices; track m) {
+              <option [value]="m">idle {{ m }} min</option>
+            }
+          </select>
+        </label>
       </div>
+      @if (!armedHere() && arming.lastDisarm(); as d) {
+        <p class="lp-note" data-testid="ladder-disarmed">One-click disarmed: {{ d.reason }}.</p>
+      }
       <div class="lp-controls lp-small">
         <label title="Stop distance of a ladder order, in ATRs (the ticket's default)"
           >SL
@@ -339,7 +366,7 @@ type LadderAction =
                 [class.oco]="o.ocoGroupId !== null"
                 [title]="chipTitle(o)"
                 (pointerdown)="startDrag($event, o)"
-                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
+                >{{ qty(o.lots) }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
                 }}<button
                   type="button"
                   class="x"
@@ -366,8 +393,8 @@ type LadderAction =
           <span class="lp-price" [class.avg]="r.positions.length > 0">
             {{ r.price | number: fmt() }}
             @for (p of r.positions; track $index) {
-              <small class="avg-tag" [class.long]="p.direction === 'Buy'"
-                >{{ p.direction === 'Buy' ? 'L' : 'S' }} {{ p.lots }}</small
+              <small class="avg-tag" [class.long]="p.direction === 'Buy'" [title]="qtyTitle(p.lots)"
+                >{{ p.direction === 'Buy' ? 'L' : 'S' }} {{ qty(p.lots) }}</small
               >
             }
           </span>
@@ -390,7 +417,7 @@ type LadderAction =
                 [class.oco]="o.ocoGroupId !== null"
                 [title]="chipTitle(o)"
                 (pointerdown)="startDrag($event, o)"
-                >{{ o.lots ?? '·' }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
+                >{{ qty(o.lots) }}{{ o.ocoGroupId !== null ? ' ⇄' : ''
                 }}<button
                   type="button"
                   class="x"
@@ -514,10 +541,11 @@ type LadderAction =
             @case ('arm') {
               <h3>Arm one-click trading?</h3>
               <p class="fail">
-                Until you disarm it (or reload the page), every click on this ladder sends a LIVE
-                order on account
+                Until you disarm it, every click on this ladder sends a LIVE order on account
                 {{ accountLabel() }} for {{ symbol() }} without asking. The engine still checks
-                every order.
+                every order. It disarms by itself after {{ arming.idleMinutes() }} min without a
+                ladder click, when you leave or hide this tab, on a reload, and when the account or
+                the book goes stale.
               </p>
             }
           }
@@ -798,7 +826,11 @@ export class LadderPanelComponent {
   private readonly scope = inject(AccountScopeService);
   private readonly auth = inject(AuthService);
   private readonly notify = inject(NotificationService);
-  private readonly arming = inject(LadderArmingService);
+  readonly arming = inject(LadderArmingService);
+  readonly armIdleChoices = ARM_IDLE_CHOICES;
+  /** UF05: when the account strip was last read successfully, and since when the ladder has had no book. */
+  private stripOkAt: number | null = null;
+  private bookLostSince: number | null = null;
   private readonly zone = inject(NgZone);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -920,7 +952,8 @@ export class LadderPanelComponent {
     if (st?.notEntitled) return st.notEntitled;
     const err = this.depth()?.error() ?? null;
     if (err && /entitled/i.test(err)) return err;
-    if (this.stream.entitlements.isEntitled('broker-dom') === false)
+    // The broker DOM licence only matters for an MT5 symbol; a venue's book has its own feed (the hub says so).
+    if (!this.venue() && this.stream.entitlements.isEntitled('broker-dom') === false)
       return "Your organisation is not entitled to the broker DOM feed ('broker-dom').";
     return null;
   });
@@ -933,21 +966,22 @@ export class LadderPanelComponent {
   readonly canOco = computed(() => this.canPlace() && this.mode() === 'Live');
   readonly canArm = computed(() => this.canPlace() && this.mode() === 'Live');
 
+  /** UF03: the registry (`md/sources`, cached), to name a venue's book as the venue's — never "one broker's MT5 depth". */
+  private readonly mdSources = signal<MdSource[] | null>(null);
   readonly sourceLabel = computed(() => {
     const v = this.view();
     if (!this.md()) return '';
-    const src = v.sourceId ?? 'the broker';
-    switch (v.mode) {
-      case 'stream':
-        return `Live book from ${src} (one broker's MT5 depth, every change) — not the whole market.`;
-      case 'poll':
-        return `Broker depth polled every 1.5 s (the live stream is not available) — one broker's MT5 book.`;
-      case 'connecting':
-        return 'Connecting to the market-data stream…';
-      default:
-        return 'No depth for this symbol.';
-    }
+    const src = this.mdSources()?.find((s) => s.sourceId === v.sourceId) ?? null;
+    const unit = this.venue() ? this.venueUnit() : (this.facts()?.instrument.baseCurrency ?? null);
+    return ladderSourceLabel(v.mode, v.sourceId, src, unit);
   });
+  /** UF03: an order / position size in the instrument's unit (MT5: the lot number as before). */
+  qty(v: number | null | undefined): string {
+    return ladderQuantityText(v, this.facts());
+  }
+  qtyTitle(v: number | null | undefined): string {
+    return ladderQuantityTitle(v, this.facts());
+  }
 
   readonly rows = computed<LadderRow[]>(() => {
     const v = this.view();
@@ -1001,6 +1035,10 @@ export class LadderPanelComponent {
   });
 
   constructor() {
+    this.mdApi.sources().then(
+      (list) => this.mdSources.set(list),
+      () => this.mdSources.set([]),
+    );
     // The feed of the symbol, while the panel is open.
     effect((onCleanup) => {
       const symbol = this.symbol();
@@ -1090,7 +1128,58 @@ export class LadderPanelComponent {
       onCleanup(() => clearInterval(timer));
     });
 
+    // UF05: while armed here, disarm the moment the account or the book goes stale (checked every 2 s, and before
+    // every armed send).
+    effect(() => {
+      const mode = this.view().mode;
+      untracked(() => {
+        if (mode === 'stream' || mode === 'poll') this.bookLostSince = null;
+        else this.bookLostSince ??= Date.now();
+      });
+    });
+    effect((onCleanup) => {
+      if (!this.armedHere()) return;
+      const timer = this.zone.runOutsideAngular(() => setInterval(() => this.checkArmedHealth(), 2_000));
+      onCleanup(() => clearInterval(timer));
+    });
+
     this.destroyRef.onDestroy(() => (this.drag = null));
+  }
+
+  /** UF05: a ladder interaction — an expired arming disarms first, a live one restarts its idle timeout. */
+  onActivity(): void {
+    if (!this.arming.armed()) return;
+    this.arming.checkIdle();
+    this.arming.touch();
+  }
+
+  /** UF05: disarm when the armed account or the book went stale; true while still armed here. */
+  private checkArmedHealth(now = Date.now()): boolean {
+    const a = this.arming.arming();
+    if (!a || !this.armedHere()) return false;
+    const account = this.scope.accounts().find((x) => x.id === a.accountId) ?? null;
+    const reason = armingStaleReason(
+      a,
+      {
+        accountLive: this.scope.liveAccounts().some((x) => x.id === a.accountId),
+        accountActive: account ? account.isActive : null,
+        lastStripOkAt: this.stripOkAt,
+        bookLostSince: this.bookLostSince,
+      },
+      now,
+    );
+    if (reason) {
+      this.arming.expire(reason, now);
+      return false;
+    }
+    return true;
+  }
+
+  /** Armed for this account + symbol AND still fresh (idle and health checked now): the gate of every armed send. */
+  private armedNow(): boolean {
+    if (!this.armedHere()) return false;
+    this.arming.checkIdle();
+    return this.checkArmedHealth();
   }
 
   // ── Data ──────────────────────────────────────────────────────────────────
@@ -1104,6 +1193,7 @@ export class LadderPanelComponent {
         firstValueFrom(this.trading.ocoGroups(symbol, account)).catch(() => null),
       ]);
       if (n !== this.orderSeq) return;
+      this.stripOkAt = Date.now();
       this.strip.set(strip);
       this.ocoGroups.set(oco?.status && oco.data ? oco.data : []);
     } catch {
@@ -1235,7 +1325,8 @@ export class LadderPanelComponent {
       ? `manual signal ${o.id} (${o.status}, not placed yet)`
       : `order ${o.id} ${o.kind} ${o.status}`;
     const oco = o.ocoGroupId !== null ? ` · OCO pair #${o.ocoGroupId}` : '';
-    return `${o.direction} ${what} at ${o.price}${oco}. ${o.isSignal ? '' : 'Drag to move · '}× to cancel.`;
+    const size = this.facts() && !this.facts()!.resolving && this.facts()!.origin !== 'pair' ? ` · ${this.qtyTitle(o.lots)}` : '';
+    return `${o.direction} ${what} at ${o.price}${size}${oco}. ${o.isSignal ? '' : 'Drag to move · '}× to cancel.`;
   }
 
   // ── Clicks ────────────────────────────────────────────────────────────────
@@ -1293,7 +1384,7 @@ export class LadderPanelComponent {
 
     const request = await this.requestFor(intent.direction, intent.price);
     if (!request) return;
-    if (this.armedHere()) {
+    if (this.armedNow()) {
       await this.sendPlace(request);
       return;
     }
@@ -1337,7 +1428,7 @@ export class LadderPanelComponent {
     if (!this.canPlace()) return;
     const request = await this.requestFor(direction, null);
     if (!request) return;
-    if (this.armedHere() && request.mode === 'Live') {
+    if (request.mode === 'Live' && this.armedNow()) {
       await this.sendPlace(request);
       return;
     }
@@ -1429,7 +1520,7 @@ export class LadderPanelComponent {
     const r2 = await this.requestFor(second.direction, second.price);
     if (!r1 || !r2) return;
     const legs: [ManualTradeRequest, ManualTradeRequest] = [r1, r2];
-    if (this.armedHere()) {
+    if (this.armedNow()) {
       await this.sendOco(legs);
       return;
     }
@@ -1481,7 +1572,7 @@ export class LadderPanelComponent {
       this.hint.set(problem);
       return;
     }
-    if (this.armedHere()) {
+    if (this.armedNow()) {
       await this.sendMove(d.order, row.price);
       return;
     }
@@ -1517,7 +1608,7 @@ export class LadderPanelComponent {
       );
       return;
     }
-    if (this.armedHere()) {
+    if (this.armedNow()) {
       void this.sendCancel(o);
       return;
     }
