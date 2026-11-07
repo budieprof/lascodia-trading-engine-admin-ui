@@ -31,7 +31,7 @@ import {
 } from './dock-layout';
 import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { RealtimeService } from '@core/realtime/realtime.service';
-import type { CurrencyPairDto, OrderDto } from '@core/api/api.types';
+import type { CurrencyPairDto } from '@core/api/api.types';
 import { CandleFeedService, type Bar } from '../../datafeed/candle-feed.service';
 import {
   LiveRerunScheduler,
@@ -73,8 +73,8 @@ import {
   currentDayBars,
   mergeSessionTail,
 } from '../../datafeed/session-bars';
-import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
-import { liveTick, tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
+import { TradingCalendar, nextSessionPeriod, type SessionSpec } from '../../datafeed/session-calendar';
+import { tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
 import { priceScaleFor } from '../../datafeed/symbol-info';
@@ -308,7 +308,6 @@ import {
   concernsSymbol,
   orderLines,
   positionLines,
-  type ChartPosition,
   type LiveQuote,
 } from '../../overlays/trade-layer';
 import type { ChartMarker } from '../../chart/chart-host.component';
@@ -328,7 +327,23 @@ import {
   type NewsArticleIngestedPayload,
 } from '../../panels/news-pane';
 import { ReplayController } from '../../replay/replay-controller';
-import { CHART_PAGE } from './chart-page.token';
+import {
+  pageSlice,
+  CHART_LEGEND,
+  LEGEND_KEYS,
+  CHART_STUDIES_STRIP,
+  STUDIES_STRIP_KEYS,
+  CHART_CONTEXT_MENUS,
+  CONTEXT_MENUS_KEYS,
+  CHART_PANEL_STRIP,
+  PANEL_STRIP_KEYS,
+  CHART_OVERLAYS_MENU,
+  OVERLAYS_MENU_KEYS,
+  CHART_DRAWING_RAIL,
+  DRAWING_RAIL_KEYS,
+  CHART_SIDE_PANE,
+  SIDE_PANE_KEYS,
+} from './chart-page.token';
 import { ChartDrawingRailComponent } from './chart-drawing-rail.component';
 import { ChartPanelStripComponent } from './chart-panel-strip.component';
 import { ChartLegendComponent } from './chart-legend.component';
@@ -472,20 +487,7 @@ interface ScriptUpdate {
 }
 
 /** One of a multi-chart layout's other charts (CC-12, CC-I5). */
-export interface ComparePanel {
-  id: string;
-  symbol: string;
-  resolution: TvResolution;
-  bars: Bar[];
-  /** Its oldest bar is the start of the engine's history: scroll-back stops asking (CC-14). */
-  historyComplete?: boolean;
-  /** Its own built-in studies (CC-I5). */
-  indicators: ActiveIndicator[];
-  /** Its link group, 1 … 3; 0: not linked (CC-I5). */
-  link: number;
-  /** Its own Pine indicators (CC-I5). */
-  scripts: PanelScript[];
-}
+export type { ComparePanel } from '../../compare/split-panels.controller';
 
 import {
   RESOLUTION_GROUPS,
@@ -510,11 +512,42 @@ import { ChartHistoryPager } from './chart-history-pager';
 import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 import { MarketSessionService } from '../../datafeed/market-session.service';
-import { volumeUnitTag } from '../../datafeed/chart-facts';
+import { volumeUnitTag, type VolumeKind } from '../../datafeed/chart-facts';
 import { continuousInfo, rollMarkers, type FutureRoll } from '../../datafeed/futures-series';
 import { FuturesRollsService } from '../../datafeed/futures-rolls.service';
 import type { SeriesOptions } from '../../datafeed/chart-market-chips.component';
 import { intervalNote, noDataMessage } from '../../datafeed/data-availability';
+import {
+  panelCandidates,
+  panelLook,
+  panelSymbolGroups,
+  PANEL_SCALES,
+  restoredPanelView,
+  type PanelView,
+} from '../../compare/split-panels';
+import { PanelStateComponent } from '../../compare/panel-state.component';
+import {
+  SPLIT_LAYOUTS,
+  SplitPanelsController,
+  type ComparePanel,
+  type SplitLayoutId,
+} from '../../compare/split-panels.controller';
+import { ChartAnnouncer } from './chart-announcer';
+import { TradeLayersLoader } from './trade-layers-loader';
+import { ChartScheduler, browserSchedulerEnv } from './chart-scheduler';
+import {
+  ASSET_CLASS_NAME,
+  AssetClassDefaultsService,
+  defaultOnSwitch,
+} from '../../workspace/asset-class-defaults';
+import {
+  parseSynthetic,
+  syntheticNotice,
+  syntheticSymbol,
+  syntheticTitle,
+  SyntheticTicks,
+  type SyntheticSpec,
+} from '../../compare/synthetic';
 import {
   RemoteSymbolSearch,
   groupSearch,
@@ -526,6 +559,7 @@ import {
   instrumentDescription,
   instrumentKindLabel,
   symbolChips,
+  type SymbolChip,
 } from '../../datafeed/symbol-chips';
 
 /** Re-exported for existing importers; the function lives in chart-page.helpers.ts. */
@@ -536,6 +570,7 @@ export { normaliseView };
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    PanelStateComponent,
     InstrumentIconComponent,
     DecimalPipe,
     ModalA11yDirective,
@@ -576,7 +611,44 @@ export { normaliseView };
     ChartStudiesStripComponent,
   ],
   // The template's sections (rail, strip, legend, menus, side pane, studies) render this page's state.
-  providers: [{ provide: CHART_PAGE, useExisting: forwardRef(() => ChartAnalysisPageComponent) }],
+  // US02: each template section gets its slice of the page, not the page.
+  providers: [
+    {
+      provide: CHART_LEGEND,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, LEGEND_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_STUDIES_STRIP,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, STUDIES_STRIP_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_CONTEXT_MENUS,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, CONTEXT_MENUS_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_PANEL_STRIP,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, PANEL_STRIP_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_OVERLAYS_MENU,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, OVERLAYS_MENU_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_DRAWING_RAIL,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, DRAWING_RAIL_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+    {
+      provide: CHART_SIDE_PANE,
+      useFactory: (page: ChartAnalysisPageComponent) => pageSlice(page, SIDE_PANE_KEYS),
+      deps: [forwardRef(() => ChartAnalysisPageComponent)],
+    },
+  ],
   templateUrl: './chart-analysis-page.component.html',
   styleUrl: './chart-analysis-page.component.scss',
   host: {
@@ -763,6 +835,7 @@ export class ChartAnalysisPageComponent {
     const d = this.drawings.allDrawings().find((x) => x.id === e.id);
     const draft = d
       ? drawingAlertDraft(d, {
+          symbol: this.symbol(),
           timeframe: this.resolution(),
           level: e.level,
           logScale: this.scaleMode() === 'log',
@@ -889,6 +962,15 @@ export class ChartAnalysisPageComponent {
   }
 
   readonly currentLayoutName = computed(() => this.workspace.active().name);
+  /**
+   * US06: the page's periodic work (clock, headline age, market-status clock, script re-runs, forming-bar resync) on
+   * one timer that stops while the tab is hidden and catches up when it shows ({@link ChartScheduler}).
+   */
+  private readonly scheduler = (() => {
+    const s = new ChartScheduler(browserSchedulerEnv());
+    inject(DestroyRef).onDestroy(() => s.dispose());
+    return s;
+  })();
   readonly catalogue = INDICATORS;
 
   readonly symbols = signal<CurrencyPairDto[]>([]);
@@ -1483,11 +1565,25 @@ export class ChartAnalysisPageComponent {
    * martingale-rung markers. The position lines are re-drawn from these on every live price (their
    * P&L), never re-fetched for it.
    */
-  protected readonly openPositions = signal<ChartPosition[]>([]);
-  protected readonly workingOrders = signal<OrderDto[]>([]);
-  private readonly closedPositions = signal<ChartPosition[]>([]);
-  private readonly signalMarkers = signal<ChartMarker[]>([]);
-  private readonly rungMarkers = signal<ChartMarker[]>([]);
+  private readonly tradeLayers = new TradeLayersLoader({
+    symbol: () => this.symbol(),
+    accountScope: this.accountScope,
+    showPositions: () => this.showPositions(),
+    showOrders: () => this.showOrders(),
+    showClosedTrades: () => this.showClosedTrades(),
+    showOverlays: () => this.showOverlays(),
+    inTradeScope: () => this.inTradeScope(),
+    positions: this.positions,
+    orders: inject(OrdersService),
+    signals: this.signals,
+    martingale: inject(MartingaleService),
+    destroyRef: inject(DestroyRef),
+  });
+  protected readonly openPositions = this.tradeLayers.openPositions;
+  protected readonly workingOrders = this.tradeLayers.workingOrders;
+  private readonly closedPositions = this.tradeLayers.closedPositions;
+  private readonly signalMarkers = this.tradeLayers.signalMarkers;
+  private readonly rungMarkers = this.tradeLayers.rungMarkers;
   /** The chart symbol's live quote (bid and ask), for the open positions' P&L at the exit side. */
   protected readonly liveQuote = signal<LiveQuote | null>(null);
 
@@ -1882,12 +1978,9 @@ export class ChartAnalysisPageComponent {
   });
   /** Ticks every 30 s while the tab is visible, so the headline's age keeps moving (SP-11: it was computed once). */
   private readonly headlineClock = signal(Date.now());
-  private readonly headlineTick = effect((onCleanup) => {
-    const t = setInterval(() => {
-      if (!document.hidden) this.headlineClock.set(Date.now());
-    }, 30_000);
-    onCleanup(() => clearInterval(t));
-  });
+  private readonly headlineTick = this.scheduler.every('headline-age', 30_000, () =>
+    this.headlineClock.set(Date.now()),
+  );
   readonly watchHeadline = computed<WatchHeadline | null>(() => {
     const a = this.articles()[0];
     if (!a) return null;
@@ -2075,10 +2168,10 @@ export class ChartAnalysisPageComponent {
         : live.length === 1
           ? live[0]
           : null;
+    // US07: the instrument's facts (UI01), not the pair's contract size — a non-pair symbol had no money at all.
     const facts = positionAccountFacts({
       account,
-      pair: this.currentPair() ?? null,
-      pipSize: this.pipSize(),
+      facts: this.facts(),
       price: this.bars().at(-1)?.close ?? 0,
     });
     return facts ? { ...facts } : null;
@@ -2106,7 +2199,7 @@ export class ChartAnalysisPageComponent {
    */
   stageOrder(id: string): void {
     const d = this.drawings.allDrawings().find((x) => x.id === id);
-    const prefill = d ? positionOrderPrefill(d) : null;
+    const prefill = d ? positionOrderPrefill(d, this.symbol()) : null;
     if (!prefill?.direction) return;
     this.ticketPrefill.set({
       direction: prefill.direction,
@@ -2141,6 +2234,33 @@ export class ChartAnalysisPageComponent {
 
   // ── Workspace: layouts, templates, timezone, chrome ──────────────────────
   readonly layoutStore = inject(ChartLayoutStore);
+  /** US07: per asset class, the timeframe and study template a symbol of that class opens with (opt-in). */
+  readonly classDefaults = inject(AssetClassDefaultsService);
+  readonly assetClassName = ASSET_CLASS_NAME;
+  /** US07: the chart symbol's asset class, as the instrument facts say (null while resolving). */
+  readonly symbolClass_ = computed(() => (this.facts().resolving ? null : this.facts().assetClass));
+  /** US07: this class's default (the templates menu shows and edits it). */
+  readonly classDefault = computed(() => {
+    const cls = this.symbolClass_();
+    return cls ? (this.classDefaults.defaults()[cls] ?? null) : null;
+  });
+
+  /** US07: use the current timeframe (or, again, none) for every symbol of this class. */
+  toggleClassResolution(): void {
+    const cls = this.symbolClass_();
+    if (!cls) return;
+    const on = this.classDefault()?.resolution === this.resolution();
+    this.classDefaults.set(cls, 'resolution', on ? undefined : this.resolution());
+  }
+
+  /** US07: open every symbol of this class with `templateId` (or, again, with none). */
+  toggleClassTemplate(templateId: string, ev: Event): void {
+    ev.stopPropagation();
+    const cls = this.symbolClass_();
+    if (!cls) return;
+    const on = this.classDefault()?.templateId === templateId;
+    this.classDefaults.set(cls, 'templateId', on ? undefined : templateId);
+  }
   readonly timezones = CHART_TIMEZONES;
   readonly timezone = signal<string>('UTC');
   readonly layoutMenuOpen = signal(false);
@@ -2205,8 +2325,7 @@ export class ChartAnalysisPageComponent {
   /** Re-evaluated every 30 s, so "Feed stale" and the data fallback follow the clock without a tick. */
   private readonly marketClock = (() => {
     const now = signal(Date.now());
-    const t = setInterval(() => now.set(Date.now()), 30_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(t));
+    this.scheduler.every('market-clock', 30_000, () => now.set(Date.now()));
     return now;
   })();
   readonly marketView = computed<MarketView>(() => {
@@ -2295,35 +2414,79 @@ export class ChartAnalysisPageComponent {
 
   /** The legend's three-state tone (kept for older bindings): open / closed / stale. */
   readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => this.marketView().tone);
+
+  /** US05: the polite live region's message (symbol + market state on a change, the price at most every 30 s). */
+  readonly liveMessage = signal('');
+  private readonly announcer = new ChartAnnouncer();
+  private readonly announce = effect(() => {
+    const close = this.bars().at(-1)?.close;
+    const input = {
+      symbol: this.synthetic() ? syntheticTitle(this.synthetic()!) : this.symbol(),
+      interval: this.resolutionLabel(this.resolution()),
+      market: this.marketView().label || null,
+      price: close === undefined ? null : close.toFixed(this.precision()),
+    };
+    untracked(() => {
+      const message = this.announcer.next(input, Date.now());
+      if (message) this.liveMessage.set(message);
+    });
+  });
   /** What the bars are (UD07): kind, source, exchange, contract, perpetual, volume unit, adjustment. */
-  readonly symbolChips = computed(() =>
-    symbolChips(
+  readonly symbolChips = computed((): SymbolChip[] => {
+    // US04: a spread / ratio symbol says what it is and how it was built.
+    const syn = this.synthetic();
+    if (syn)
+      return [
+        {
+          id: 'synthetic',
+          text: syn.kind === 'ratio' ? 'Synthetic ratio' : 'Synthetic spread',
+          title: this.syntheticNote() ?? syntheticNotice(syn, { carriedA: 0, carriedB: 0, dropped: 0 }),
+        },
+      ];
+    return symbolChips(
       this.feed.factsOf(this.symbol()),
       this.catalogueRow(this.symbol()),
       this.marketClock(),
-    ),
-  );
+    );
+  });
+
+  /** US04: the main symbol as a spread / ratio of two symbols (`RATIO(A,B)`, `SPREAD(A,B,m)`), or null. */
+  readonly synthetic = computed(() => parseSynthetic(this.symbol()));
+  /** US04: what the synthetic was built from (the legs held as of each bar), for its chip. */
+  readonly syntheticNote = signal<string | null>(null);
+  /** US04: the synthetic's live price from its legs' ticks. */
+  private readonly syntheticTicks = new SyntheticTicks();
+
+  /** US04: open a compare dialog's ratio / spread as the main chart's symbol. */
+  openSynthetic(spec: SyntheticSpec): void {
+    this.selectSymbol(syntheticSymbol(spec));
+  }
 
   // ── Split view ───────────────────────────────────────────────────────────
   //
   // The primary chart keeps every tool. Comparison panels are their own charts
   // with their own symbol, timeframe, bars and drawings — drawings are scoped
   // per symbol+timeframe, so each panel renders only its own.
-  readonly splitLayout = signal<'1' | '2h' | '2v' | '4' | '6' | '8'>('1');
-  readonly comparePanels = signal<ComparePanel[]>([]);
-
-  readonly splitLayouts: Array<{
-    id: '1' | '2h' | '2v' | '4' | '6' | '8';
-    label: string;
-    panels: number;
-  }> = [
-    { id: '1', label: '▢', panels: 0 },
-    { id: '2h', label: '◫', panels: 1 },
-    { id: '2v', label: '⊟', panels: 1 },
-    { id: '4', label: '⊞', panels: 3 },
-    { id: '6', label: '⊟⊞', panels: 5 },
-    { id: '8', label: '⊞⊞', panels: 7 },
-  ];
+  /** US02: the split view's other charts ({@link SplitPanelsController}); the page keeps their ties to the main chart. */
+  readonly split = new SplitPanelsController({
+    feed: this.feed,
+    isSessionResolution: (r) => isSessionResolution(r),
+    noDataMessage: (symbol, r) => noDataMessage(symbol, this.resolutionLabel(r), this.catalogueRow(symbol)),
+    candidates: (taken) => panelCandidates(this.symbols(), this.instruments.all(), taken),
+    mainSymbol: () => this.symbol(),
+    mainResolution: () => this.resolution(),
+    hostAt: (index) => this.panelHosts()[index],
+    now: () => this.serverClock.now(),
+    calendarOf: (symbol) => this.calendarOf(symbol),
+    calendarCodeOf: (symbol) =>
+      this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null,
+    loadCalendar: (code) => this.instruments.calendar(code).then((cal) => (cal ? exchangeSessionsOf(cal) : null)),
+    linkSymbol: (id, symbol) => this.linkSymbol(id, symbol),
+    linkInterval: (id, r) => this.linkInterval(id, r),
+  });
+  readonly splitLayout = this.split.layout;
+  readonly comparePanels = this.split.panels;
+  readonly splitLayouts = SPLIT_LAYOUTS;
 
   /**
    * The left rail, grouped as TradingView groups it: one button per family, the rest of the
@@ -2500,7 +2663,9 @@ export class ChartAnalysisPageComponent {
     () =>
       instrumentFacts(this.symbol(), {
         pair: this.currentPair() ?? null,
-        lookup: this.instruments.lookupState(this.symbol()),
+        // US04: a synthetic is no instrument — never looked up, and (as while resolving) no ticket, ladder or proposal
+        // can place anything on it.
+        lookup: this.synthetic() ? 'resolving' : this.instruments.lookupState(this.symbol()),
         refPrice: () => this.bars().at(-1)?.close ?? null,
         digitsHint: () => decimalsOfPrices(this.bars().slice(-50).map((b) => b.close)),
       }),
@@ -2619,6 +2784,7 @@ export class ChartAnalysisPageComponent {
     drawingTemplates.useStorage(this.prefs.storage);
     prefsRef = this.prefs;
     this.layoutStore.reload();
+    this.classDefaults.reload();
     this.favoriteTools.reload();
     this.magnetStrength.set(readPref('magnetStrength', 'weak'));
     this.stayInDrawing.set(readPref('stayInDrawing', false));
@@ -2801,14 +2967,13 @@ export class ChartAnalysisPageComponent {
     // during replay. Strategies (which backtest closed bars) are kept current by this alone. Through
     // the scheduler like every other re-run: a slow script's minute re-run used to start beside its
     // live re-run still in flight.
-    const liveTimer = setInterval(() => {
+    this.scheduler.every('script-reruns', 60_000, () => {
       if (this.replayActive()) return;
       // PC-I1: a script whose warm session the hub keeps current is not run again — it is asked what changed instead
       // (a quiet market pushes nothing, and this is how a session that ended is found).
       rerunScripts((r) => !this.warmCovered(r.item.key));
       for (const s of this.warmSessions.all()) if (this.warmCovered(s.key)) this.resyncWarm(s.key);
-    }, 60_000);
-    this.destroyRef.onDestroy(() => clearInterval(liveTimer));
+    });
 
     // TradingView behaviour: an indicator's last value sits on the forming bar and moves with it.
     // Every change to the chart's newest bar (a tick, an M1 resync, a new period opening) re-runs
@@ -3101,8 +3266,7 @@ export class ChartAnalysisPageComponent {
     });
     // Ticking clock, and presets applied once their interval's bars are in.
     this.tickClock();
-    const clockTimer = setInterval(() => this.tickClock(), 1000);
-    this.destroyRef.onDestroy(() => clearInterval(clockTimer));
+    this.scheduler.every('clock', 1_000, () => this.tickClock());
     effect(() => {
       this.bars();
       this.timezone();
@@ -3184,188 +3348,13 @@ export class ChartAnalysisPageComponent {
     // the live bar's high or low; and a bar that closed while the page was open was built entirely
     // from those throttled ticks. One small request a minute keeps the newest candle honest without
     // waiting for a reload.
-    const resync = setInterval(() => void this.syncFormingBars(), 60_000);
-    this.destroyRef.onDestroy(() => clearInterval(resync));
+    // US06: on the page's scheduler — not while the tab is hidden; re-read at once when it shows again.
+    this.scheduler.every('forming-resync', 60_000, () => void this.syncFormingBars());
   }
 
-  /**
-   * Each trade layer's newest request: a reply for an older one — another symbol, another account
-   * scope, a toggle since switched off — is dropped (CC-09: a slow EURUSD reply painted EURUSD's
-   * stop and target on GBPUSD).
-   */
-  private readonly tradeLoads = { positions: 0, orders: 0, closed: 0, rungs: 0, signals: 0 };
-
-  /**
-   * Load this symbol's trade layers onto the chart: open positions, working orders, closed trades,
-   * martingale rungs and signals — each only when its toggle is on. Called on a symbol switch, an
-   * account switch, a toggle, and whenever the engine reports a fill, a position change or a new
-   * signal (realtime, {@link scheduleTradeRefresh}); before CC-09 they loaded once and never
-   * followed a fill.
-   *
-   * Filtered by symbol and account server-side via the nested `filter` object — sent flat the
-   * criteria are discarded in silence and the handler answers with page 1 of the whole table — and
-   * re-checked here (`positionLines` / `orderLines`).
-   */
+  /** US02: the trade layers' loads ({@link TradeLayersLoader}). */
   private loadTradingOverlays(): void {
-    const symbol = this.symbol();
-    // The header's account scope. Positions and orders belong to an account, so only the selected
-    // account's are drawn (an aggregate scope draws its accounts'). An empty scope means no live
-    // account — draw none rather than falling back to the whole fleet.
-    const accountIds = Array.from(this.accountScope.accountIds());
-    const accountKey = this.accountScope.accountIdsKey();
-    /** The chart still shows what this request was for. */
-    const current = () =>
-      symbol === this.symbol() && accountKey === this.accountScope.accountIdsKey();
-    const loads = this.tradeLoads;
-
-    if (!this.showPositions()) {
-      loads.positions++;
-      this.openPositions.set([]);
-    } else {
-      const seq = ++loads.positions;
-      this.positions
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 50,
-          filter: { symbol, status: 'Open', tradingAccountIds: accountIds },
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe((res) => {
-          if (seq !== loads.positions || !current() || !res?.status || !res.data) return;
-          this.openPositions.set((res.data.data ?? []) as ChartPosition[]);
-        });
-    }
-
-    // ── Working orders ────────────────────────────────────────────────────
-    //
-    // Only orders that can still fill (orderLines). A filled order is already a
-    // position and is drawn as one; a cancelled one is history.
-    if (!this.showOrders()) {
-      loads.orders++;
-      this.workingOrders.set([]);
-    } else {
-      const seq = ++loads.orders;
-      this.orders
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 50,
-          filter: { symbol, tradingAccountIds: accountIds },
-          sortBy: 'id',
-          sortDirection: 'desc',
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe((res) => {
-          if (seq !== loads.orders || !current() || !res?.status || !res.data) return;
-          this.workingOrders.set(res.data.data ?? []);
-        });
-    }
-
-    // ── Closed trades ─────────────────────────────────────────────────────
-    //
-    // The most recent closed positions of the symbol in scope; their fills are pinned to the bars
-    // they happened in, and those before the loaded history drop off the chart (applyMarkers).
-    if (!this.showClosedTrades()) {
-      loads.closed++;
-      this.closedPositions.set([]);
-    } else {
-      const seq = ++loads.closed;
-      this.positions
-        .list({
-          currentPage: 1,
-          itemCountPerPage: 200,
-          filter: { symbol, status: 'Closed', tradingAccountIds: accountIds },
-          sortBy: 'openedAt',
-          sortDirection: 'desc',
-        })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe((res) => {
-          if (seq !== loads.closed || !current() || !res?.status || !res.data) return;
-          this.closedPositions.set((res.data.data ?? []) as ChartPosition[]);
-        });
-    }
-
-    if (!this.showOverlays()) {
-      loads.rungs++;
-      loads.signals++;
-      this.signalMarkers.set([]);
-      this.rungMarkers.set([]);
-      return;
-    }
-    const inScope = this.inTradeScope();
-
-    // ── Martingale rungs ──────────────────────────────────────────────────
-    //
-    // Each closed rung is pinned to the BAR it closed on, not to a price line:
-    // a chain's rungs are events in sequence, and stacking six horizontal lines
-    // on the price scale buries the candles the operator is reading.
-    const rungSeq = ++loads.rungs;
-    this.martingale
-      .getOverview({ maxChains: 40 })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (overview) => {
-          if (rungSeq !== loads.rungs || !current()) return;
-          const chains = (overview?.chains ?? []).filter(
-            (c) =>
-              (c.symbol ?? '').toUpperCase() === symbol.toUpperCase() &&
-              inScope(c.tradingAccountId),
-          );
-          const marks: ChartMarker[] = [];
-          for (const chain of chains) {
-            for (const entry of chain.ledger ?? []) {
-              const at = Date.parse(entry.closedAtUtc ?? '');
-              if (Number.isNaN(at)) continue;
-              const loss = String(entry.outcome) === 'Loss';
-              marks.push({
-                time: at,
-                position: 'belowBar',
-                shape: 'square',
-                color: loss ? '#EF5350' : '#26A69A',
-                text: `R${entry.depthAfter}`,
-              });
-            }
-          }
-          this.rungMarkers.set(marks);
-        },
-        // The ladder module can be off entirely; that is not an error worth a
-        // toast, it just means there are no rungs to draw.
-        error: () => {
-          if (rungSeq === loads.rungs) this.rungMarkers.set([]);
-        },
-      });
-
-    const signalSeq = ++loads.signals;
-    this.signals
-      .list({
-        currentPage: 1,
-        itemCountPerPage: 100,
-        filter: { symbol },
-        sortBy: 'id',
-        sortDirection: 'desc',
-      })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((res) => {
-        if (signalSeq !== loads.signals || !current() || !res?.status || !res.data) return;
-        const rows = (res.data.data ?? []).filter(
-          (s) => (s.symbol ?? '').toUpperCase() === symbol.toUpperCase(),
-        );
-        const marks: ChartMarker[] = [];
-        for (const s of rows) {
-          const at = Date.parse(s.generatedAt ?? '');
-          // A signal with no readable timestamp cannot be pinned to a bar; a
-          // NaN time makes the library drop the whole batch silently.
-          if (Number.isNaN(at)) continue;
-          const long = String(s.direction).toLowerCase().includes('buy');
-          marks.push({
-            time: at,
-            position: long ? 'belowBar' : 'aboveBar',
-            shape: long ? 'arrowUp' : 'arrowDown',
-            color: long ? '#26A69A' : '#EF5350',
-            text: `#${s.id}`,
-          });
-        }
-        this.signalMarkers.set(marks);
-      });
+    this.tradeLayers.load();
   }
 
   /**
@@ -3783,7 +3772,7 @@ export class ChartAnalysisPageComponent {
     this.rollover.reset();
     // The symbol's session, which the day-based studies count trading days by, comes with every
     // session-grid load; the stored grid's candles carry none, so it is asked for once beside them.
-    if (!isSessionResolution(resolution)) void this.feed.learnSession(symbol);
+    if (!isSessionResolution(resolution) && !parseSynthetic(symbol)) void this.feed.learnSession(symbol);
     const now = Date.now();
     try {
       const { bars } = await this.feed.getBars(symbol, resolution, 0, now, PAGE_BARS);
@@ -3792,6 +3781,11 @@ export class ChartAnalysisPageComponent {
       this.historyStart.set(null);
       this.bars.set(bars);
       this.barsFor.set({ symbol, resolution });
+      // US04: a synthetic's legs seed its live price; its chip says how it was built.
+      const syn = parseSynthetic(symbol);
+      const build = syn ? this.feed.syntheticBuildOf(symbol, resolution) : null;
+      this.syntheticTicks.reset(syn, build?.lastA ?? null, build?.lastB ?? null);
+      this.syntheticNote.set(syn && build ? syntheticNotice(syn, build) : null);
       if (this.replayActive() && replayAnchor !== null) void this.reanchorReplay(replayAnchor);
       this.tailMergedAt = this.ticksApplied;
       this.lastStored = lastCompleteBarTime(bars, resolution);
@@ -3936,6 +3930,13 @@ export class ChartAnalysisPageComponent {
   }
 
   private applyTick(tick: PriceTick): void {
+    // US04: a leg of the synthetic main series moves it (its price from both legs' latest).
+    if (this.synthetic() && tick?.symbol && this.syntheticTicks.isLeg(tick.symbol)) {
+      const leg = tickPrice(tick);
+      const price = leg === null ? null : this.syntheticTicks.price(tick.symbol, leg);
+      if (price === null) return;
+      tick = { symbol: this.symbol(), bid: price, timeUtc: tick.timeUtc };
+    }
     if (!tick?.symbol || tick.symbol.toUpperCase() !== this.symbol().toUpperCase()) return;
     // UD04/UD05: MT5 = the bid (bid bars, unchanged); a venue = its last trade / mid. Placed at the tick's own time.
     const price = tickPrice(tick);
@@ -4040,6 +4041,18 @@ export class ChartAnalysisPageComponent {
     );
     const memory = this.rememberPerSymbol() ? recalled(this.symbolMemory(), symbol) : null;
     if (memory && isSupportedResolution(memory.resolution)) this.resolution.set(memory.resolution);
+    // US07: a symbol of another asset class opens with that class's default, when the operator set one.
+    const classDefault = defaultOnSwitch(
+      this.classDefaults.defaults(),
+      this.facts().resolving ? null : this.facts().assetClass,
+      this.panelFacts(symbol).resolving ? null : this.panelFacts(symbol).assetClass,
+      !!memory,
+    );
+    if (classDefault?.resolution) this.resolution.set(classDefault.resolution);
+    const classTemplate = classDefault?.templateId
+      ? this.layoutStore.templates().find((t) => t.id === classDefault.templateId)
+      : undefined;
+    if (classTemplate) this.active.set(this.layoutStore.instantiate(classTemplate));
     if (memory?.view) {
       this.pendingView = memory.view;
       this.pendingViewFor = { symbol, resolution: this.resolution() };
@@ -4082,26 +4095,7 @@ export class ChartAnalysisPageComponent {
 
   /** A live price moves the split panels that show its symbol (CC-12: they were static). */
   private applyPanelTick(tick: PriceTick): void {
-    const symbol = tick?.symbol?.toUpperCase();
-    const price = tickPrice(tick);
-    if (!symbol || price === null) return;
-    const panels = this.comparePanels();
-    if (!panels.some((p) => p.symbol.toUpperCase() === symbol && p.bars.length)) return;
-    const now = tickTimeMs(tick, this.serverClock.now());
-    this.comparePanels.set(
-      panels.map((p) => {
-        if (p.symbol.toUpperCase() !== symbol || !p.bars.length) return p;
-        const next = liveTick(
-          p.bars,
-          price,
-          now,
-          p.resolution,
-          this.calendarOf(symbol),
-          this.feed.gridOf(symbol),
-        );
-        return next ? { ...p, bars: next } : p;
-      }),
-    );
+    this.split.applyTick(tick);
   }
 
   /** A symbol's trading calendar, once the engine has reported its session. */
@@ -5459,123 +5453,69 @@ export class ChartAnalysisPageComponent {
 
   // ── Split view ───────────────────────────────────────────────────────────
 
-  setSplitLayout(id: '1' | '2h' | '2v' | '4' | '6' | '8'): void {
-    this.splitLayout.set(id);
-    const wanted = this.splitLayouts.find((l) => l.id === id)?.panels ?? 0;
-    const current = this.comparePanels();
-    if (current.length === wanted) return;
-
-    if (current.length > wanted) {
-      this.comparePanels.set(current.slice(0, wanted));
-      return;
-    }
-    // New panels open on a different symbol from the primary chart: two
-    // identical charts side by side is never what the operator wanted.
-    const taken = new Set([this.symbol(), ...current.map((p) => p.symbol)]);
-    const candidates = this.symbols()
-      .map((s) => (s.symbol ?? '').toUpperCase())
-      .filter((s) => s && !taken.has(s));
-    const added: ComparePanel[] = [];
-    for (let i = current.length; i < wanted; i++) {
-      const symbol = candidates[i - current.length] ?? this.symbol();
-      added.push({
-        id: `p${Date.now().toString(36)}${i}`,
-        symbol,
-        resolution: this.resolution(),
-        bars: [],
-        indicators: [],
-        link: 0,
-        scripts: [],
-      });
-    }
-    this.comparePanels.set([...current, ...added]);
-    for (const panel of added) void this.loadPanel(panel.id);
+  setSplitLayout(id: SplitLayoutId): void {
+    this.split.setLayout(id);
   }
 
-  private async loadPanel(id: string): Promise<void> {
-    const panel = this.comparePanels().find((p) => p.id === id);
-    if (!panel) return;
-    const { bars } = await this.feed
-      .getBars(panel.symbol, panel.resolution, 0, Date.now(), PAGE_BARS)
-      .catch(() => ({ bars: [] as Bar[], noData: true }));
-    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, bars } : p)));
+  private loadPanel(id: string): Promise<void> {
+    return this.split.load(id);
   }
+
+  /** US03: ask again for a panel that failed or had nothing. */
+  retryPanel(id: string): void {
+    void this.split.load(id);
+  }
+
+  /** US03: the symbols a panel's select offers — the broker's, then the catalogue's chartable instruments. */
+  readonly panelSymbolChoices = computed(() => panelSymbolGroups(this.symbols(), this.instruments.all()));
+  readonly panelSymbolKnown = computed(
+    () => new Set(this.panelSymbolChoices().flatMap((g) => g.options.map((o) => o.symbol))),
+  );
+
+  readonly panelScales = PANEL_SCALES;
+
+  /** US03: what a panel draws — its own style / scale / volume over the main chart's. */
+  panelLook(panel: ComparePanel) {
+    return panelLook(panel.view, { style: this.style(), scaleMode: this.scaleMode() });
+  }
+
+  setPanelView<K extends keyof PanelView>(id: string, key: K, value: PanelView[K] | '' | undefined): void {
+    this.split.setView(id, key, value);
+  }
+
+  /** US03: a panel symbol's trading session (the day-based studies, the time axis), as the main chart has its own. */
+  panelSession(symbol: string): SessionSpec | null {
+    return this.feed.sessionOf(symbol);
+  }
+
+  /** US03 (UA02/UA07 on panels): what a panel's volume counts, for its studies. */
+  panelVolumeKind(symbol: string): VolumeKind | null {
+    return this.feed.factsOf(symbol)?.volumeKind ?? null;
+  }
+
+  panelExchangeSessions(symbol: string): ExchangeSessions | null {
+    return this.split.exchangeSessionsOf(symbol);
+  }
+  private readonly panelCalendarsLoad = effect(() => this.split.loadCalendars());
 
   /** The split panels' chart hosts, in panel order. */
   private readonly panelHosts = viewChildren<ChartHostComponent>('panelHost');
 
-  /**
-   * Scroll-back on a split panel (CC-12: panels held their first 1,500 bars and never loaded more):
-   * the page before its oldest bar, prepended; an empty page is the start of its history.
-   */
-  async loadPanelOlder(id: string): Promise<void> {
-    const index = this.comparePanels().findIndex((p) => p.id === id);
-    const panel = this.comparePanels()[index];
-    const host = () => this.panelHosts()[index];
-    if (!panel?.bars.length || panel.historyComplete) {
-      host()?.historyLoaded();
-      return;
-    }
-    const oldest = panel.bars[0].time;
-    try {
-      const { bars } = await this.feed.getBars(
-        panel.symbol,
-        panel.resolution,
-        0,
-        oldest - 1,
-        PAGE_BARS,
-      );
-      const older = bars.filter((b) => b.time < oldest);
-      this.comparePanels.update((list) =>
-        list.map((p) => {
-          // A panel switched meanwhile has bars of its own.
-          if (p.id !== id || p.symbol !== panel.symbol || p.resolution !== panel.resolution)
-            return p;
-          return older.length
-            ? { ...p, bars: [...older, ...p.bars.filter((b) => b.time >= oldest)] }
-            : { ...p, historyComplete: true };
-        }),
-      );
-    } catch {
-      // Unreachable: the panel keeps what it has, and the next scroll to the edge asks again.
-    } finally {
-      host()?.historyLoaded();
-    }
+  loadPanelOlder(id: string): Promise<void> {
+    return this.split.loadOlder(id);
   }
 
-  /** Each split panel's legend: the bar under its crosshair (CC-12). */
-  readonly panelLegends = signal<Record<string, LegendSnapshot>>({});
+  readonly panelLegends = this.split.legends;
   onPanelLegend(id: string, snapshot: LegendSnapshot): void {
-    this.panelLegends.update((all) => ({ ...all, [id]: snapshot }));
+    this.split.onLegend(id, snapshot);
   }
 
   setPanelSymbol(id: string, symbol: string, propagate = true): void {
-    if (propagate) this.linkSymbol(id, symbol.toUpperCase());
-    this.comparePanels.update((list) =>
-      list.map((p) =>
-        p.id === id
-          ? { ...p, symbol: symbol.toUpperCase(), bars: [], scripts: freshRuns(p.scripts) }
-          : p,
-      ),
-    );
-    void this.loadPanel(id);
+    this.split.setSymbol(id, symbol, propagate);
   }
 
   setPanelResolution(id: string, resolution: string, propagate = true): void {
-    if (propagate) this.linkInterval(id, resolution);
-    this.comparePanels.update((list) =>
-      list.map((p) =>
-        p.id === id
-          ? {
-              ...p,
-              resolution: resolution as TvResolution,
-              bars: [],
-              scripts: freshRuns(p.scripts),
-            }
-          : p,
-      ),
-    );
-    void this.loadPanel(id);
+    this.split.setResolution(id, resolution, propagate);
   }
 
   /** Promote a comparison panel to the primary chart. */
@@ -5841,6 +5781,7 @@ export class ChartAnalysisPageComponent {
           ? { scripts: p.scripts.map((s) => workspaceScriptOf({ item: s.item, values: s.values })) }
           : {}),
         ...(p.link ? { link: p.link } : {}),
+        ...(p.view ? { view: { ...p.view } } : {}),
       })),
     { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );
@@ -5866,6 +5807,7 @@ export class ChartAnalysisPageComponent {
       bars: [],
       indicators: (p.indicators ?? []).map((ind) => ({ ...ind, params: { ...ind.params } })),
       link: linkGroupOf(p.link),
+      ...(p.view ? { view: restoredPanelView(p.view) } : {}),
       scripts: (p.scripts ?? []).map((w) => ({
         item: restoredScriptItem(w, this.chartScripts.savedScripts()),
         values: { ...w.values },
@@ -6062,14 +6004,39 @@ export class ChartAnalysisPageComponent {
     return comparePanes(
       specs,
       (sym) => (sym === own ? bars : others[sym]),
-      (sym) => digits.get(sym) ?? 5,
+      // A pair's digits as before; any other symbol at its instrument's precision (US04), not 5.
+      (sym) => digits.get(sym) ?? this.panelFacts(sym).precision,
+      (sym) => this.joinCalendarOf(sym),
     );
   });
+  /**
+   * US04: the calendar a compare leg trades on, for the join — every FX pair the same (so FX legs join exactly as
+   * before), else the instrument's calendar (C1, then the catalogue), else its own (unknown: joined as of).
+   */
+  private joinCalendarOf(symbol: string): string {
+    const facts = this.panelFacts(symbol);
+    if (facts.isFx) return 'fx';
+    return this.feed.factsOf(symbol)?.calendarCode ?? facts.instrument.tradingCalendarCode ?? `own:${symbol}`;
+  }
+
   /** What the chart draws in panes of their own or over the price: the fundamentals and the compare series. */
   readonly chartExternalPanes = computed(() => [
     ...this.externalPanes(),
     ...this.comparePaneList(),
   ]);
+
+  /** US04: what the compare dialog offers — the broker's symbols, then the catalogue's chartable instruments. */
+  readonly compareSymbolNames = computed(() =>
+    this.panelSymbolChoices().flatMap((g) => g.options.map((o) => o.symbol)),
+  );
+
+  /** US04: a ratio / spread from the compare dialog, charted as the main symbol. */
+  openCompareAsChart(spec: CompareSeriesSpec): void {
+    const [a, b] = spec.symbols.map((x) => x.toUpperCase());
+    if (!a || !b || (spec.kind !== 'ratio' && spec.kind !== 'spread')) return;
+    this.compareOpen.set(false);
+    this.openSynthetic({ kind: spec.kind, a, b, mult: spec.kind === 'spread' ? (spec.mult ?? 1) : 1 });
+  }
 
   /** Add a compare series (the scale rule: {@link ChartCompareState.add}). */
   addCompare(spec: CompareSeriesSpec): void {

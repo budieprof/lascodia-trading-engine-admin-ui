@@ -41,13 +41,35 @@ describe('symbolChips (UD07: where the bars come from, what they are)', () => {
       btc,
       NOW,
     );
-    expect(chips.map((c) => c.text)).toEqual([
-      'Crypto perpetual',
-      'OKX',
-      'OKX',
-      'PERP',
-      'volume (BTC)',
-    ]);
+    // US08: the listing exchange IS the source here — said once, as the source.
+    expect(chips.map((c) => c.text)).toEqual(['Crypto perpetual', 'OKX', 'PERP', 'volume (BTC)']);
+  });
+
+  it('US08: a listing exchange that differs from the candle source is a reference, never the venue', () => {
+    const btc = inst({
+      symbol: 'BTC-USD',
+      assetClass: 'Crypto',
+      exchange: 'BINANCE',
+      description: 'BTC/USD (Binance)',
+      baseCurrency: 'BTC',
+      crypto: { kind: 'Spot' },
+    });
+    const chips = symbolChips(
+      {
+        assetClass: 'Crypto',
+        calendarCode: 'crypto-24x7',
+        volumeKind: 'base',
+        source: { id: 'crypto-coinbase', kind: 'venue', label: 'Coinbase Advanced Trade' },
+        adjustment: 'none',
+      },
+      btc,
+      NOW,
+    );
+    expect(chips.map((c) => c.text)).toEqual(['Crypto spot', 'Coinbase Advanced Trade', 'ref: Binance', 'volume (BTC)']);
+    expect(chips.find((c) => c.id === 'exchange')!.title).toContain('the bars come from Coinbase Advanced Trade');
+    expect(instrumentDescription(btc)).toBe('BTC/USD');
+    // A description naming something else keeps it.
+    expect(instrumentDescription({ ...btc, description: 'Bitcoin (spot)' })).toBe('Bitcoin (spot)');
   });
 
   it('a futures contract: expiry, front month; an expiring one is flagged', () => {

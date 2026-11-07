@@ -40,6 +40,18 @@ import {
                 <span class="cd-swatch" [style.background]="s.color"></span>
                 <span class="cd-name">{{ title(s) }}</span>
                 <span class="cd-kind">{{ kindLabel(s.kind) }}</span>
+                @if (s.kind === 'ratio' || s.kind === 'spread') {
+                  <!-- US04: the ratio / spread as the main chart's series, with open, high, low and close. -->
+                  <button
+                    type="button"
+                    class="cd-link"
+                    (click)="openAsChart.emit(s)"
+                    [attr.aria-label]="'Open ' + title(s) + ' as the chart'"
+                    title="Chart it as a symbol of its own (bars built from both legs)"
+                  >
+                    Open as chart
+                  </button>
+                }
                 <button type="button" class="cd-link" (click)="remove.emit(s.id)" [attr.aria-label]="'Remove ' + title(s)">
                   Remove
                 </button>
@@ -269,6 +281,8 @@ export class CompareDialogComponent {
   readonly chartSymbol = input<string>('');
   readonly add = output<CompareSeriesSpec>();
   readonly remove = output<string>();
+  /** US04: chart a ratio / spread series as the main symbol. */
+  readonly openAsChart = output<CompareSeriesSpec>();
   readonly closed = output<void>();
 
   readonly maxBasket = MAX_BASKET;

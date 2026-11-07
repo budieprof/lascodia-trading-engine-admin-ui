@@ -1,9 +1,28 @@
 import { describe, expect, it } from 'vitest';
+import type { CurrencyPairDto } from '@core/api/api.types';
+import type { InstrumentDto } from '@core/instruments/instrument.types';
+import { instrumentFacts } from '../datafeed/instrument-facts';
 import { positionAccountFacts, positionOrderPrefill, quoteToAccountRate } from './position-link';
 import { positionStats } from './tools/forecast-math';
 import { styleFor, type Drawing } from './model';
 
 const T = Date.UTC(2026, 9, 5, 8);
+
+/** The facts of an MT5 FX pair, as the page builds them (UI01). */
+function fx(symbol: string, pip: number) {
+  return instrumentFacts(symbol, {
+    pair: {
+      symbol,
+      baseCurrency: symbol.slice(0, 3),
+      quoteCurrency: symbol.slice(3),
+      contractSize: 100_000,
+      decimalPlaces: pip === 0.01 ? 3 : 5,
+      lotStep: 0.01,
+      minLotSize: 0.01,
+      maxLotSize: 100,
+    } as unknown as CurrencyPairDto,
+  });
+}
 const H = 3_600_000;
 
 function position(
@@ -46,8 +65,7 @@ describe('position tool linked to trading (DR-I9)', () => {
   it('places the tool with the account’s equity and the symbol’s contract size, pip and rate', () => {
     const facts = positionAccountFacts({
       account: { equity: 10_250.456, balance: 10_000, currency: 'usd', leverage: 500 },
-      pair: { contractSize: 100_000, baseCurrency: 'USD', quoteCurrency: 'JPY' },
-      pipSize: 0.01,
+      facts: fx('USDJPY', 0.01),
       price: 150,
     });
     expect(facts).toEqual({
@@ -64,12 +82,11 @@ describe('position tool linked to trading (DR-I9)', () => {
     expect(
       positionAccountFacts({
         account: { equity: 5000, balance: 5000, currency: 'USD', leverage: 100 },
-        pair: { contractSize: 100_000, baseCurrency: 'EUR', quoteCurrency: 'GBP' },
-        pipSize: 0.0001,
+        facts: fx('EURGBP', 0.0001),
         price: 0.85,
       }),
     ).toEqual({ lotSize: 100_000, pipSize: 0.0001 });
-    expect(positionAccountFacts({ account: null, pair: null, pipSize: 0, price: 0 })).toBeNull();
+    expect(positionAccountFacts({ account: null, facts: null, price: 0 })).toBeNull();
   });
 
   it('sizes in lots from the risk in the account currency', () => {
@@ -114,5 +131,30 @@ describe('position tool linked to trading (DR-I9)', () => {
     expect(positionOrderPrefill(short)).toMatchObject({ direction: 'Sell', lotSize: null });
     expect(positionOrderPrefill({ ...linked, kind: 'trend-line' })).toBeNull();
     expect(positionOrderPrefill({ ...linked, pane: 'rsi-1' })).toBeNull();
+  });
+
+  it('US07: a non-pair instrument sizes from its facts (ES: 50 a point), an inverse contract gives no lot money', () => {
+    const es = {
+      valuePerPrice: 50,
+      distanceUnit: 0.25,
+      inverse: false,
+      pnlCurrency: 'USD',
+      instrument: { baseCurrency: null } as unknown as InstrumentDto,
+    };
+    expect(
+      positionAccountFacts({
+        account: { equity: 20_000, balance: 20_000, currency: 'USD', leverage: 0 },
+        facts: es,
+        price: 5000,
+      }),
+    ).toEqual({ lotSize: 50, pipSize: 0.25, accountSize: 20_000, accountCurrency: 'USD', quoteRate: 1 });
+    expect(
+      positionAccountFacts({ account: null, facts: { ...es, inverse: true }, price: 5000 }),
+    ).toEqual({ pipSize: 0.25 });
+  });
+
+  it('US07: the position prefill names the chart symbol, not the drawing key (ESZ6, not ES1!)', () => {
+    const d = { ...position('long-position', 5000, 5010, 4990), symbol: 'ES1!' };
+    expect(positionOrderPrefill(d, 'esz6')?.symbol).toBe('ESZ6');
   });
 });

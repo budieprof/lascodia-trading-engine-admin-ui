@@ -30,7 +30,7 @@
           class="study-toggle"
           (click)="page.toggleIndicator(item.uid)"
           [attr.aria-pressed]="item.visible"
-          [title]="item.visible ? 'Hide' : 'Show'"
+          [title]="item.visible ? 'Hide' : 'Show'" [attr.aria-label]="item.visible ? 'Hide' : 'Show'"
         >
           <app-chart-icon [name]="item.visible ? 'eye' : 'eye-off'" [size]="16" />
         </button>
@@ -134,7 +134,7 @@
           type="button"
           class="study-remove"
           (click)="page.removeIndicator(item.uid)"
-          title="Remove"
+          title="Remove" aria-label="Remove"
         >
           <app-chart-icon name="close" [size]="14" />
         </button>

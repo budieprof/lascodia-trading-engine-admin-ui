@@ -563,3 +563,80 @@ describe('colours', () => {
     expect(formatColor('#2962FF', 0.5)).toBe('rgba(41,98,255,0.5)');
   });
 });
+
+describe('US07 drawings keyed by instrument (futures by continuous root)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const row = (engine: FakeEngine, id: string, symbol: string) =>
+    engine.dto(id, {
+      symbol,
+      resolution: '60',
+      kind: 'horizontal-line',
+      pointsJson: JSON.stringify([P(1, 5000)]),
+      styleJson: JSON.stringify(styleFor('horizontal-line')),
+      locked: false,
+      optionsJson: '{}',
+      hidden: false,
+      visibleOn: '',
+      zIndex: 1,
+      createdAt: new Date(5).toISOString(),
+    });
+
+  it('a level drawn on ESZ6 is on ESH7 and ES1! too; FX keys are unchanged', () => {
+    const { store } = makeStore();
+    store.setScope('ESZ6', '60');
+    const a = store.add('horizontal-line', [P(1, 5000)], styleFor('horizontal-line'));
+    expect(a.symbol).toBe('ES1!');
+    store.setScope('ESH7', '60');
+    expect(store.symbolDrawings().map((d) => d.id)).toEqual([a.id]);
+    expect(store.forSymbol('ES1!U').map((d) => d.id)).toEqual([a.id]);
+    store.setScope('eurusd', '60');
+    expect(store.add('trend-line', [P(1, 1), P(2, 2)], styleFor('trend-line')).symbol).toBe('EURUSD');
+  });
+
+  it('migrates drawings cached under a contract symbol: a new drawing under the key, the old one deleted', () => {
+    const engine = new FakeEngine();
+    const { store } = makeStore(engine);
+    // An older build saved this under the bare contract and the engine acknowledged it.
+    engine.rows.set('old1', row(engine, 'old1', 'ESZ6'));
+    store.setScope('ESZ6', '60');
+    vi.advanceTimersByTime(2000);
+    // Opening ESZ6 found the engine's row under the old key and moved it.
+    expect(store.symbolDrawings()).toHaveLength(1);
+    const moved = store.symbolDrawings()[0];
+    expect(moved.symbol).toBe('ES1!');
+    expect(moved.id).not.toBe('old1');
+    expect(engine.rows.has('old1')).toBe(false);
+    expect(engine.rows.get(moved.id)?.symbol).toBe('ES1!');
+
+    // Reload: nothing moves twice.
+    const { store: after } = makeStore(engine, true);
+    after.setScope('ESZ6', '60');
+    vi.advanceTimersByTime(2000);
+    expect(after.symbolDrawings().map((d) => d.id)).toEqual([moved.id]);
+  });
+
+  it('migrates the browser cache at start-up, the engine copy deleted only where it had one', () => {
+    const engine = new FakeEngine();
+    localStorage.clear();
+    const legacy: Drawing = {
+      id: 'loc1',
+      kind: 'horizontal-line',
+      symbol: 'CLF26',
+      resolution: '60',
+      points: [P(1, 70)],
+      style: styleFor('horizontal-line'),
+      locked: false,
+      createdAt: 5,
+    };
+    localStorage.setItem('lascodia.chart.drawings.v1', JSON.stringify([legacy]));
+    const { store } = makeStore(engine, true);
+    store.setScope('CL1!', '60');
+    expect(store.symbolDrawings().map((d) => d.symbol)).toEqual(['CL1!']);
+    vi.advanceTimersByTime(2000);
+    const sent = engine.sent.map((o) => [o.op, o.drawing?.symbol ?? null]);
+    // Never acknowledged by the engine: saved under the key, no delete sent.
+    expect(sent).toEqual([['upsert', 'CL1!']]);
+  });
+});

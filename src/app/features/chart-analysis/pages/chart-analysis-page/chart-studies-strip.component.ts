@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { ScriptChipComponent } from '../../scripts/script-chip.component';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_STUDIES_STRIP } from './chart-page.token';
 
 /**
  * The active-studies strip under the chart: each Pine script's chip and each indicator with its inline inputs.
@@ -19,5 +19,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-studies-strip.component.scss',
 })
 export class ChartStudiesStripComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_STUDIES_STRIP);
 }

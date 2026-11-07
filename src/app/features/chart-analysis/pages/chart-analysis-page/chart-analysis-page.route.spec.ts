@@ -41,6 +41,15 @@ function setup(url: { tf?: string } = {}) {
     route: { snapshot: { queryParamMap: convertToParamMap(url) } },
     router,
     drawings: { setScope: vi.fn() },
+    // US07: per-asset-class defaults (none unless a spec sets one); every symbol here FX unless a spec says otherwise.
+    classDefaults: { defaults: signal({}) },
+    facts: signal({ resolving: false, assetClass: 'Fx' }),
+    panelFacts: (s: string) => ({ resolving: false, assetClass: /-USD$/.test(s) ? 'Crypto' : 'Fx' }),
+    layoutStore: {
+      templates: signal([{ id: 't1', name: 'Crypto', indicators: [], savedAt: 1 }]),
+      instantiate: vi.fn(() => [{ uid: 'rsi-x', defId: 'rsi', params: {}, visible: true }]),
+    },
+    active: signal([]),
     loadTradingOverlays: vi.fn(),
     rollover: { reset: vi.fn() },
     feed,
@@ -52,6 +61,30 @@ function setup(url: { tf?: string } = {}) {
   const loads = (): string[] => feed.getBars.mock.calls.map((c: unknown[]) => c[0] as string);
   return { p, feed, router, follow, loads };
 }
+
+describe('chart page — per-asset-class defaults (US07)', () => {
+  it('a symbol of another class opens with its class default; another of the same class never does', () => {
+    const { p } = setup();
+    p.classDefaults.defaults.set({ Crypto: { resolution: '240', templateId: 't1' } });
+    p.selectSymbol('BTC-USD');
+    expect(p.resolution()).toBe('240');
+    expect(p.active().map((a: { defId: string }) => a.defId)).toEqual(['rsi']);
+    p.resolution.set('60');
+    p.active.set([]);
+    p.facts.set({ resolving: false, assetClass: 'Crypto' });
+    p.selectSymbol('ETH-USD');
+    expect(p.resolution()).toBe('60');
+    expect(p.active()).toEqual([]);
+  });
+
+  it('without a default for the class (the default), nothing changes', () => {
+    const { p } = setup();
+    p.resolution.set('15');
+    p.selectSymbol('BTC-USD');
+    expect(p.resolution()).toBe('15');
+    expect(p.active()).toEqual([]);
+  });
+});
 
 describe('chart page — layout memory per symbol (CC-I11)', () => {
   it('with it on, a symbol opens on the timeframe and zoom it was left on', () => {

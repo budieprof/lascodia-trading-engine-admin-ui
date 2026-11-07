@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import { resolveJitResources } from '@shared/testing/jit-resources';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_OVERLAYS_MENU } from './chart-page.token';
 import { ChartOverlaysMenuComponent } from './chart-overlays-menu.component';
 
 declareSignalIo(ChartIconComponent, { inputs: ['name', 'size'] });
@@ -31,7 +31,7 @@ describe('ChartOverlaysMenuComponent (U13 split)', () => {
     };
     TestBed.configureTestingModule({
       imports: [ChartOverlaysMenuComponent],
-      providers: [{ provide: CHART_PAGE, useValue: page }],
+      providers: [{ provide: CHART_OVERLAYS_MENU, useValue: page }],
     });
     const fixture = TestBed.createComponent(ChartOverlaysMenuComponent);
     fixture.detectChanges();

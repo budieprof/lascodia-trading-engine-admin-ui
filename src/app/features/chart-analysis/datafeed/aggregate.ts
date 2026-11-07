@@ -212,7 +212,10 @@ export function applyStoredTick(
     low: Math.min(last.low, price),
     close: price,
   };
-  return [...bars.slice(0, -1), updated];
+  // US01: one copy of the array (a tick ran two: the slice and the spread), the newest bar replaced.
+  const out = bars.slice();
+  out[out.length - 1] = updated;
+  return out;
 }
 
 /**

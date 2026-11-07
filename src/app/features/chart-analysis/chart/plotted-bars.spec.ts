@@ -7,6 +7,7 @@ import {
   heikinAshiFrom,
   indexAtTime,
   isPrepend,
+  lastIndexAtTime,
   shiftedFrom,
 } from './plotted-bars';
 import { toRenko } from './price-transforms';
@@ -119,5 +120,14 @@ describe('helpers', () => {
     expect(indexAtTime(a, 3 * H)).toBe(3);
     expect(indexAtTime(a, 3 * H + 1)).toBe(-1);
     expect(shiftedFrom(a, [], 0, null)).toBe(a);
+  });
+
+  it('lastIndexAtTime finds the last bar at a time (US01: the map by time it replaces kept the last)', () => {
+    const at = (times: number[]) => times.map((time) => ({ time }));
+    expect(lastIndexAtTime(at([1, 2, 2, 3]), 2)).toBe(2);
+    expect(lastIndexAtTime(at([1, 2, 2, 3]), 3)).toBe(3);
+    expect(lastIndexAtTime(at([1, 2, 2, 3]), 0)).toBe(-1);
+    expect(lastIndexAtTime(at([1, 2, 2, 3]), 2.5)).toBe(-1);
+    expect(lastIndexAtTime([], 1)).toBe(-1);
   });
 });

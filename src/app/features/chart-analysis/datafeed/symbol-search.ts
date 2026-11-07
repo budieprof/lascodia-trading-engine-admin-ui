@@ -1,6 +1,7 @@
 import { signal } from '@angular/core';
 import type { InstrumentAssetClass, InstrumentDto } from '@core/instruments/instrument.types';
 import { rankSymbols } from './symbol-info';
+import { referenceExchange, venueWords, withoutListingSuffix } from './venue-label';
 
 /**
  * The chart's symbol search over the WHOLE catalogue (multi-asset chart program UD09). The menu used to filter the
@@ -17,6 +18,8 @@ export interface SearchRow {
   description: string | null;
   assetClass: InstrumentAssetClass;
   exchange: string | null;
+  /** US08: the venue words the row shows — the candle source, "ref: <listing>" where that differs. */
+  venue: string | null;
   /** Where its bars come from ("MT5 broker", "Coinbase"); null: not said. */
   source: string | null;
   /** False: the engine has no candles for it (the chart will show "no data yet"). Null: not said (older engine). */
@@ -65,10 +68,12 @@ export function searchRowOf(
     : null;
   return {
     symbol: i.symbol.toUpperCase(),
-    description: i.description ?? null,
+    // US08: a description's "(Binance)" names the reference listing, not where the bars come from.
+    description: i.description ? withoutListingSuffix(i.description, exchange) : null,
     assetClass: i.assetClass,
     exchange,
     source,
+    venue: venueWords(source, referenceExchange(i, i.candleSource ?? null)),
     hasData,
     noDataReason:
       hasData === false

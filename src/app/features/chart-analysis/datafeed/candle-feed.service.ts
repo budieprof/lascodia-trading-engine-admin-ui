@@ -5,6 +5,7 @@ import { ScriptingService } from '@core/services/scripting.service';
 import type { CandleDto } from '@core/api/api.types';
 import type { ChartBarDto, ChartBarsResult } from '@core/api/scripting.types';
 import { aggregateCandles, EPOCH_GRID, type BarGrid } from './aggregate';
+import { parseSynthetic, syntheticBars, type SyntheticBuild, type SyntheticSpec } from '../compare/synthetic';
 import {
   isSessionResolution,
   resolutionSource,
@@ -332,6 +333,30 @@ export class CandleFeedService {
     return all.filter((b) => b.time >= sinceMs).sort((a, b) => a.time - b.time);
   }
 
+  /** US04: each synthetic series' last build (`symbol|resolution`): what the chart's notice says about it. */
+  private readonly syntheticBuilds = new Map<string, SyntheticBuild>();
+  syntheticBuildOf(symbol: string, resolution: TvResolution): SyntheticBuild | null {
+    return this.syntheticBuilds.get(`${symbol.toUpperCase()}|${resolution}`) ?? null;
+  }
+
+  /** US04: a synthetic's bars from both legs' (each read, cached and refused as any symbol's), joined as of each bar. */
+  private async getSyntheticBars(
+    symbol: string,
+    spec: SyntheticSpec,
+    resolution: TvResolution,
+    fromMs: number,
+    toMs: number,
+    countBack: number,
+  ): Promise<BarsResult> {
+    const [a, b] = await Promise.all([
+      this.getBars(spec.a, resolution, fromMs, toMs, countBack),
+      this.getBars(spec.b, resolution, fromMs, toMs, countBack),
+    ]);
+    const build = syntheticBars(spec, a.bars, b.bars);
+    this.syntheticBuilds.set(`${symbol.toUpperCase()}|${resolution}`, build);
+    return { bars: build.bars, noData: a.noData || b.noData };
+  }
+
   /**
    * Bars at or before `toMs`, at least `countBack` of them where they exist.
    *
@@ -349,6 +374,9 @@ export class CandleFeedService {
     toMs: number,
     countBack: number,
   ): Promise<BarsResult> {
+    // US04: a spread / ratio symbol is built from its legs' bars (compare/synthetic.ts).
+    const synthetic = parseSynthetic(symbol);
+    if (synthetic) return this.getSyntheticBars(symbol, synthetic, resolution, fromMs, toMs, countBack);
     if (isSessionResolution(resolution)) {
       return this.getSessionBars(symbol, resolution, fromMs, toMs, countBack);
     }

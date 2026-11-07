@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { DrawingSettingsDialogComponent } from '../../drawings/ui/drawing-settings-dialog.component';
 import { DecimalPipe } from '@angular/common';
-import { CHART_PAGE } from './chart-page.token';
+import { CHART_CONTEXT_MENUS } from './chart-page.token';
 
 /**
  * The chart's right-click menus — on a drawing and on the chart — and the drawing settings dialog they open.
@@ -20,5 +20,5 @@ import { CHART_PAGE } from './chart-page.token';
   styleUrl: './chart-context-menus.component.scss',
 })
 export class ChartContextMenusComponent {
-  protected readonly page = inject(CHART_PAGE);
+  protected readonly page = inject(CHART_CONTEXT_MENUS);
 }
