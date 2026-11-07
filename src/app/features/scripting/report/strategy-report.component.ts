@@ -251,6 +251,7 @@ let nextReportUid = 0;
                 [strategyId]="run()?.strategyId ?? null"
                 [testCount]="testCount()"
                 [currency]="currency()"
+                [backtestRunId]="backtestRunId()"
               />
             }
             @case ('capital') {

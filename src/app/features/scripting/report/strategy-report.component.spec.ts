@@ -14,6 +14,8 @@ import { ReportMetricListComponent } from './report-metric-list.component';
 import { ReportTradesGridComponent } from './report-trades-grid.component';
 import { ReportMonthlyHeatmapComponent } from './report-monthly-heatmap.component';
 import { ReportPropertiesComponent } from './report-properties.component';
+import { MonteCarloPanelComponent } from '../research/monte-carlo-panel.component';
+import { RollingRChartComponent } from './rolling-r-chart.component';
 import { ReportRAnalysisComponent } from './report-r-analysis.component';
 import { RunProvenanceComponent } from './run-provenance.component';
 import { scriptSourceHash } from '../shared/sha256';
@@ -38,8 +40,10 @@ declareSignalIo(StrategyReportComponent, {
   outputs: ['tradeClick'],
 });
 declareSignalIo(ReportRAnalysisComponent, {
-  inputs: ['report', 'engine', 'strategyId', 'testCount', 'currency'],
+  inputs: ['report', 'engine', 'strategyId', 'testCount', 'currency', 'backtestRunId'],
 });
+declareSignalIo(MonteCarloPanelComponent, { inputs: ['source'] });
+declareSignalIo(RollingRChartComponent, { inputs: ['points', 'closed', 'title', 'source'] });
 declareSignalIo(RunProvenanceComponent, { inputs: ['provenance', 'strategyId'] });
 declareSignalIo(ReportOverviewComponent, { inputs: ['report', 'currency', 'palette'] });
 declareSignalIo(ReportSplitTableComponent, { inputs: ['groups', 'splits', 'currency', 'caption'] });
@@ -94,7 +98,12 @@ describe('StrategyReportComponent', () => {
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
       ],
     });
-    for (const cmp of [StrategyReportComponent, ReportOverviewComponent]) {
+    for (const cmp of [
+      StrategyReportComponent,
+      ReportOverviewComponent,
+      RollingRChartComponent,
+      MonteCarloPanelComponent,
+    ]) {
       TestBed.overrideComponent(cmp, {
         remove: { imports: [ChartCardComponent] },
         add: { imports: [ChartCardStubComponent] },
@@ -128,8 +137,13 @@ describe('StrategyReportComponent', () => {
     expect(tiles[4]).toContain('6.967');
     expect(tiles[5]).toContain('Open P&L');
     // The equity chart gets a real options object, not the empty state.
-    expect(el.querySelector('.chart-stub')!.getAttribute('data-title')).toBe('Equity');
-    expect(el.querySelector('.chart-stub-empty')).toBeNull();
+    const equity = el.querySelector('.chart-stub')!;
+    expect(equity.getAttribute('data-title')).toBe('Equity');
+    expect(equity.querySelector('.chart-stub-empty')).toBeNull();
+    // U08: the rolling chart says how few R trades there are instead of drawing a half window.
+    expect(el.querySelector('[data-testid="rolling-r"] .chart-stub-empty')!.textContent).toContain(
+      'Needs at least 21',
+    );
   });
 
   it('reads a PascalCase report and JSON text the same way', () => {
@@ -363,10 +377,10 @@ describe('StrategyReportComponent', () => {
       expect(el.querySelector('[data-testid="r-empty"]')!.textContent).toContain(
         'cannot be measured',
       );
-      expect(el.querySelector('[data-testid="r-monte-carlo"]')).toBeNull();
+      expect(el.querySelector('[data-testid="r-mc-note"]')).toBeNull();
     });
 
-    it('shows the expectancy with its interval, the tests counted, the distribution and a Monte Carlo', () => {
+    it('shows the expectancy with its interval, the tests counted, the distribution and points an unstored run to the engine Monte Carlo', () => {
       render(withR(), null, {
         testCount: { count: 5, label: 'variants previewed in this editor session' },
       });
@@ -380,11 +394,14 @@ describe('StrategyReportComponent', () => {
       expect(el.querySelector('[data-testid="r-dsr"]')!.textContent).toContain('best of 5');
       expect(el.textContent).toContain('Fewer than 30 trades');
       expect(el.querySelectorAll('.hist-col').length).toBeGreaterThan(3);
-      expect(el.querySelector('[data-testid="r-monte-carlo"]')).not.toBeNull();
-      expect(el.querySelector('[data-testid="r-ruin"]')!.textContent).toContain('Risk of ruin');
+      // U07: no browser Monte Carlo any more — one source of truth, the engine's, for stored runs.
+      expect(el.querySelector('[data-testid="r-monte-carlo"]')).toBeNull();
+      expect(el.querySelector('[data-testid="r-mc-note"]')!.textContent).toContain(
+        'runs on the engine',
+      );
     });
 
-    it('reads a stored run: its provenance, the engine trades’ R, its costs and the ledger’s test count', () => {
+    it('reads a stored run: its provenance, the engine trades’ R, its costs and the ledger’s test count', async () => {
       const source = '//@version=6\nstrategy("Breakout")\n';
       const resultJson = JSON.stringify({
         TotalCommission: 18.5,
@@ -424,7 +441,20 @@ describe('StrategyReportComponent', () => {
       http
         .expectOne(`${BASE}/strategy-feedback/41/trials`)
         .flush(ok({ effectiveTrials: 12, ledgerTrials: 9, peerStrategies: 12 }));
+      // U07: a stored run's Monte Carlo is the engine's (here it declines — too few trades).
+      http
+        .expectOne((r) => r.url.startsWith(`${BASE}/backtest/812/monte-carlo`))
+        .flush({
+          data: null,
+          status: false,
+          message: 'Too few trades with a stop',
+          responseCode: '-11',
+        });
+      await fixture.whenStable();
       fixture.detectChanges();
+      expect(el.querySelector('[data-testid="mc-refusal"]')!.textContent).toContain(
+        'Too few trades',
+      );
       // The engine's own trade list (costs included) wins over the report's trades.
       expect(el.textContent).toContain("from the engine's trade list");
       expect(el.querySelector('[data-testid="r-expectancy"]')!.textContent).toContain('+0.38R');

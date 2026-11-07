@@ -15,7 +15,7 @@ import type { StrategyTrialLedgerDto } from '@core/api/scripting.types';
 import { ScriptingService } from '@core/services/scripting.service';
 
 import type { EngineRun } from './engine-run';
-import { MONTE_CARLO_DEFAULTS, monteCarloR } from './monte-carlo';
+import { MonteCarloPanelComponent } from '../research/monte-carlo-panel.component';
 import {
   R_BASIS_TEXT,
   bootstrapMeanInterval,
@@ -51,10 +51,9 @@ interface CostRow {
 
 /** Fewer trades than this and every figure is flagged as a rough guide. */
 const SMALL_SAMPLE = 30;
-const RISK_CHOICES = [0.25, 0.5, 1, 2, 3] as const;
 
 /**
- * Resamples for the interval and the Monte Carlo: 2000, fewer for very long trade lists so the
+ * Resamples for the interval: 2000, fewer for very long trade lists so the
  * tab stays responsive (each resample walks every trade) — never below 200.
  */
 export function resampleCount(trades: number): number {
@@ -65,12 +64,13 @@ export function resampleCount(trades: number): number {
  * The Strategy report's "R analysis" tab (PE-I1, PE-I8): every closed trade in units of what it
  * risked at its entry stop — expectancy with a bootstrap interval, the distribution, how many
  * configurations were tried and the deflated Sharpe the promotion gate computes, the cost totals,
- * and a Monte Carlo of the same trades in other orders. Everything hides gracefully: a run whose
+ * and, for a stored backtest, the engine's Monte Carlo (U07). Everything hides gracefully: a run whose
  * trades carry no stop explains why there is no R.
  */
 @Component({
   selector: 'app-report-r-analysis',
   standalone: true,
+  imports: [MonteCarloPanelComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="r-analysis">
@@ -184,71 +184,19 @@ export function resampleCount(trades: number): number {
         }
       }
 
-      @if (monteCarlo(); as mc) {
+      <!-- U07: one Monte Carlo — the engine's (block bootstrap of the stored run's R). A run that is not stored
+           (editor preview, chart tester, live emulator) has no engine Monte Carlo; the console does not compute its own. -->
+      @if (summary()) {
         <h4 class="section-title">Monte Carlo</h4>
-        <div class="mc-controls">
-          <label>
-            <span class="muted small">Risk per trade</span>
-            <select
-              class="field-input"
-              [value]="riskPct()"
-              (change)="riskPct.set(+$any($event.target).value)"
-            >
-              @for (c of riskChoices; track c) {
-                <option [value]="c" [selected]="c === riskPct()">{{ c }}% of equity</option>
-              }
-            </select>
-          </label>
-          <span class="muted small">
-            {{ int(mc.runs) }} reorderings of the {{ int(mc.trades) }} trades
-            {{
-              mc.blockSize > 1
-                ? 'in blocks of ' + mc.blockSize + ' (streaks kept)'
-                : 'one by one (too few for blocks)'
-            }}; ruin = a {{ mc.ruinDrawdownPct }}% drawdown.
-          </span>
-        </div>
-        <table class="mc" data-testid="r-monte-carlo">
-          <caption class="sr-only">
-            Monte Carlo percentiles
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col"></th>
-              <th scope="col" class="num">This run</th>
-              <th scope="col" class="num">Typical (median)</th>
-              <th scope="col" class="num">Bad (1 in 20)</th>
-              <th scope="col" class="num">Good (1 in 20)</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th scope="row">Deepest drawdown</th>
-              <td class="num">{{ pct(mc.observed.maxDrawdownPct, 1) }}</td>
-              <td class="num">{{ pct(mc.maxDrawdownPct.p50, 1) }}</td>
-              <td class="num">{{ pct(mc.maxDrawdownPct.p95, 1) }}</td>
-              <td class="num">{{ pct(mc.maxDrawdownPct.p5, 1) }}</td>
-            </tr>
-            <tr>
-              <th scope="row">Return</th>
-              <td class="num">{{ signedPct(mc.observed.finalReturnPct) }}</td>
-              <td class="num">{{ signedPct(mc.finalReturnPct.p50) }}</td>
-              <td class="num">{{ signedPct(mc.finalReturnPct.p5) }}</td>
-              <td class="num">{{ signedPct(mc.finalReturnPct.p95) }}</td>
-            </tr>
-            <tr>
-              <th scope="row">Longest losing streak</th>
-              <td class="num">{{ int(mc.observed.longestLosingStreak) }}</td>
-              <td class="num">{{ int(mc.longestLosingStreak.p50) }}</td>
-              <td class="num">{{ int(mc.longestLosingStreak.p95) }}</td>
-              <td class="num">{{ int(mc.longestLosingStreak.p5) }}</td>
-            </tr>
-          </tbody>
-        </table>
-        <p class="ruin" [attr.data-tone]="ruinTone()" data-testid="r-ruin">
-          Risk of ruin: <strong>{{ pct(mc.riskOfRuin * 100, 1) }}</strong> of the reorderings fell
-          {{ mc.ruinDrawdownPct }}% or more below their peak at {{ mc.riskPct }}% risk per trade.
-        </p>
+        @if (backtestRunId(); as id) {
+          <app-monte-carlo-panel [source]="{ kind: 'backtest', id: id }" />
+        } @else {
+          <p class="muted small" data-testid="r-mc-note">
+            The Monte Carlo runs on the engine, over a stored backtest's trades: queue this as a
+            backtest (or open one from the strategy's Backtests tab) to see the drawdown, growth and
+            risk-of-ruin percentiles and the equity cone.
+          </p>
+        }
       }
     </div>
   `,
@@ -264,8 +212,7 @@ export function resampleCount(trades: number): number {
       }
       .basis,
       .verdict,
-      .empty,
-      .ruin {
+      .empty {
         margin: 0;
         font-size: var(--text-sm);
         line-height: 1.5;
@@ -375,20 +322,6 @@ export function resampleCount(trades: number): number {
         text-align: right;
         font-variant-numeric: tabular-nums;
       }
-      .mc-controls {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: var(--space-3);
-      }
-      .mc-controls label {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .ruin[data-tone='warn'] {
-        color: var(--loss);
-      }
       .muted {
         color: var(--text-secondary);
       }
@@ -418,11 +351,11 @@ export class ReportRAnalysisComponent {
   /** A test count the host keeps when there is no ledger (the editor's previews). */
   readonly testCount = input<ReportTestCount | null>(null);
   readonly currency = input('');
+  /** The stored backtest behind the report: its id turns on the engine's Monte Carlo (U07). */
+  readonly backtestRunId = input<number | null>(null);
 
   readonly NA = NA;
   readonly smallSample = SMALL_SAMPLE;
-  readonly riskChoices = RISK_CHOICES;
-  readonly riskPct = signal<number>(MONTE_CARLO_DEFAULTS.riskPct);
 
   readonly ledger = signal<StrategyTrialLedgerDto | null>(null);
   readonly ledgerError = signal<string | null>(null);
@@ -537,14 +470,6 @@ export class ReportRAnalysisComponent {
     }
     return parts.join(' ');
   });
-
-  readonly monteCarlo = computed(() =>
-    monteCarloR(this.sample().values, {
-      riskPct: this.riskPct(),
-      runs: resampleCount(this.sample().values.length),
-    }),
-  );
-  readonly ruinTone = computed(() => ((this.monteCarlo()?.riskOfRuin ?? 0) > 0.01 ? 'warn' : ''));
 
   constructor() {
     effect(() => {

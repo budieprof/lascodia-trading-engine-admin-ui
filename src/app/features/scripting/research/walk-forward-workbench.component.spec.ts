@@ -253,10 +253,12 @@ describe('WalkForwardAnalysisComponent (BT-I5, BT-I6)', () => {
 
   beforeEach(async () => {
     TestBed.configureTestingModule({ imports: [WalkForwardAnalysisComponent], providers });
-    TestBed.overrideComponent(WalkForwardAnalysisComponent, {
-      remove: { imports: [ChartCardComponent] },
-      add: { imports: [ChartCardStubComponent] },
-    });
+    for (const cmp of [WalkForwardAnalysisComponent, MonteCarloPanelComponent]) {
+      TestBed.overrideComponent(cmp, {
+        remove: { imports: [ChartCardComponent] },
+        add: { imports: [ChartCardStubComponent] },
+      });
+    }
     http = TestBed.inject(HttpTestingController);
     fixture = TestBed.createComponent(WalkForwardAnalysisComponent);
     fixture.componentRef.setInput('runId', 9);
@@ -320,6 +322,8 @@ describe('WalkForwardAnalysisComponent (BT-I5, BT-I6)', () => {
     );
     expect(panel.querySelector('[data-testid="mc-table"]')!.textContent).toContain('9.9%');
     expect(panel.textContent).toContain('without a stop');
+    // U07: this engine answer has no cone — the panel says so and draws nothing of its own.
+    expect(panel.querySelector('[data-testid="mc-cone-missing"]')).not.toBeNull();
 
     const risk = panel.querySelector<HTMLInputElement>('input[type="number"]')!;
     risk.value = '2';
@@ -329,8 +333,20 @@ describe('WalkForwardAnalysisComponent (BT-I5, BT-I6)', () => {
       .expectOne(
         `${BASE}/walk-forward/9/monte-carlo?iterations=2000&riskPerTradePct=2&ruinDrawdownPct=50`,
       )
-      .flush(ok(mc()));
+      .flush(
+        ok({
+          ...mc(),
+          result: {
+            ...mc().result,
+            equityCone: { trades: [1, 2], p5: [-2, -3], p50: [0.5, 1], p95: [2, 4] },
+          },
+        }),
+      );
     await settle();
+    fixture.detectChanges();
+    // …and draws the engine's cone when the engine sends one.
+    expect(panel.querySelector('.chart-stub')!.getAttribute('data-title')).toBe('Equity cone');
+    expect(panel.querySelector('[data-testid="mc-cone-missing"]')).toBeNull();
   });
 });
 

@@ -10,9 +10,14 @@ import {
 } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
+import { ThemeService } from '@core/theme/theme.service';
+import { ChartCardComponent } from '@shared/components/chart-card/chart-card.component';
+
 import { SCRIPTING_UI_STYLES } from '../components/scripting-ui.styles';
 import { formatDate, formatInteger, formatNumber, formatPercent } from '../report/report-format';
 import { describeFailure } from '../shared/api-error';
+import { reportPalette } from '../report/report-charts';
+import { buildConeOptions, validCone } from './monte-carlo-cone';
 import { ResearchApiService } from './research-api.service';
 import type { MonteCarloDto, MonteCarloParams, MonteCarloPercentiles } from './research.types';
 
@@ -81,6 +86,7 @@ export function mcValue(v: number, unit: McRow['unit']): string {
 @Component({
   selector: 'app-monte-carlo-panel',
   standalone: true,
+  imports: [ChartCardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-labelledby="mc-title" data-testid="monte-carlo-panel">
@@ -148,6 +154,20 @@ export function mcValue(v: number, unit: McRow['unit']): string {
             >Still under water at the end in {{ pct(d.result.unrecoveredShare) }}</span
           >
         </div>
+        @if (coneOptions(); as cone) {
+          <app-chart-card
+            title="Equity cone"
+            subtitle="Percentile bands of the resampled paths' equity, trade by trade (the engine's paths)"
+            [options]="cone"
+            alt="Monte Carlo equity cone: 5th to 95th and 25th to 75th percentile bands of the paths' equity change by trade, with the median path"
+            height="300px"
+            data-testid="mc-cone"
+          />
+        } @else {
+          <p class="muted small" data-testid="mc-cone-missing">
+            Equity cone: this engine build sends only the percentiles below, not the paths' bands.
+          </p>
+        }
         <div class="table-wrap">
           <table data-testid="mc-table">
             <thead>
@@ -279,6 +299,7 @@ export function mcValue(v: number, unit: McRow['unit']): string {
 })
 export class MonteCarloPanelComponent {
   private readonly api = inject(ResearchApiService);
+  private readonly theme = inject(ThemeService);
 
   readonly source = input.required<{ kind: 'backtest' | 'walk-forward'; id: number }>();
 
@@ -293,6 +314,11 @@ export class MonteCarloPanelComponent {
   readonly rows = computed(() => {
     const d = this.dto();
     return d ? monteCarloRows(d) : [];
+  });
+  /** U07: the engine's cone, when it sent a well-formed one. */
+  readonly coneOptions = computed(() => {
+    const cone = validCone(this.dto()?.result.equityCone);
+    return cone ? buildConeOptions(cone, reportPalette(this.theme.theme())) : null;
   });
   readonly sourceLabel = computed(() =>
     this.source().kind === 'walk-forward'
