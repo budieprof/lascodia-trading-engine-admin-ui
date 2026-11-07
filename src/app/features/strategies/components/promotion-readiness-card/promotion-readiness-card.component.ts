@@ -16,8 +16,10 @@ import { StrategiesService } from '@core/services/strategies.service';
 import { NotificationService } from '@core/notifications/notification.service';
 import type { PromotionGatesDto } from '@core/api/api.types';
 import { activationRefusalMessage } from '../../util/activation';
+import { failedGateLines, gateRowViews } from '../../util/gate-rows';
+import { GateRowsTableComponent } from '../gate-rows-table/gate-rows-table.component';
 
-interface ParsedDiagnostic {
+export interface ParsedDiagnostic {
   raw: string;
   /** Inferred gate label, e.g. `Adversarial`, `Edge posterior`, `CPCV`, etc. */
   gate: string;
@@ -32,6 +34,7 @@ interface ParsedDiagnostic {
 @Component({
   selector: 'app-promotion-readiness-card',
   standalone: true,
+  imports: [GateRowsTableComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section class="card" aria-label="Promotion readiness">
@@ -77,6 +80,13 @@ interface ParsedDiagnostic {
             }
             @if (g.passed) {
               <p class="muted">Strategy is ready for activation.</p>
+              @if (unmeasuredCount() > 0) {
+                <p class="muted" data-testid="unmeasured-note">
+                  {{ unmeasuredCount() }} gate{{ unmeasuredCount() === 1 ? '' : 's' }} could not be
+                  measured — see the rows below; the engine's policy let
+                  {{ unmeasuredCount() === 1 ? 'it' : 'them' }} through.
+                </p>
+              }
             }
           </div>
           <button
@@ -92,39 +102,53 @@ interface ParsedDiagnostic {
           </button>
         </div>
 
-        <table class="diagnostics" aria-label="Per-gate diagnostics">
-          <thead>
-            <tr>
-              <th class="g">Gate</th>
-              <th class="t">Status</th>
-              <th>Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (row of parsedDiagnostics(); track row.raw) {
-              <tr [class]="'tone-' + row.tone">
-                <td class="g">{{ row.gate }}</td>
-                <td class="t">
-                  <span [class]="'pill pill-' + row.tone">{{ toneLabel(row.tone) }}</span>
-                </td>
-                <td>
-                  @if (row.values.length > 0) {
-                    <div class="kv">
-                      @for (kv of row.values; track kv.k) {
-                        <span class="kv-pair"
-                          ><span class="k">{{ kv.k }}</span
-                          ><span class="v">{{ kv.v }}</span></span
-                        >
-                      }
-                    </div>
-                  } @else {
-                    <span class="raw">{{ row.detail }}</span>
-                  }
-                </td>
+        @if (rowViews().length > 0) {
+          <app-gate-rows-table [rows]="g.rows" ariaLabel="Per-gate results" />
+          @if (g.diagnostics.length > 0) {
+            <details class="raw-diagnostics">
+              <summary>Engine diagnostics (text, {{ g.diagnostics.length }})</summary>
+              <ul>
+                @for (d of g.diagnostics; track $index) {
+                  <li>{{ d }}</li>
+                }
+              </ul>
+            </details>
+          }
+        } @else {
+          <table class="diagnostics" aria-label="Per-gate diagnostics">
+            <thead>
+              <tr>
+                <th class="g">Gate</th>
+                <th class="t">Status</th>
+                <th>Detail</th>
               </tr>
-            }
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              @for (row of parsedDiagnostics(); track row.raw) {
+                <tr [class]="'tone-' + row.tone">
+                  <td class="g">{{ row.gate }}</td>
+                  <td class="t">
+                    <span [class]="'pill pill-' + row.tone">{{ toneLabel(row.tone) }}</span>
+                  </td>
+                  <td>
+                    @if (row.values.length > 0) {
+                      <div class="kv">
+                        @for (kv of row.values; track kv.k) {
+                          <span class="kv-pair"
+                            ><span class="k">{{ kv.k }}</span
+                            ><span class="v">{{ kv.v }}</span></span
+                          >
+                        }
+                      </div>
+                    } @else {
+                      <span class="raw">{{ row.detail }}</span>
+                    }
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        }
       } @else {
         <div class="muted">No data yet.</div>
       }
@@ -275,6 +299,17 @@ interface ParsedDiagnostic {
         color: var(--text-secondary);
         cursor: not-allowed;
       }
+      details.raw-diagnostics {
+        margin-top: 10px;
+        font-size: 12px;
+        color: var(--text-secondary);
+      }
+      details.raw-diagnostics ul {
+        margin: 6px 0 0;
+        padding-left: 18px;
+        font-family: var(--font-mono, ui-monospace, monospace);
+        word-break: break-word;
+      }
       table.diagnostics {
         width: 100%;
         border-collapse: collapse;
@@ -386,6 +421,12 @@ export class PromotionReadinessCardComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly gates = signal<PromotionGatesDto | null>(null);
 
+  /** C2 structured rows (engine 2026-11-07+); empty → the text fallback below renders. */
+  readonly rowViews = computed(() => gateRowViews(this.gates()?.rows));
+  readonly unmeasuredCount = computed(
+    () => this.rowViews().filter((v) => v.outcome === 'NotMeasurable').length,
+  );
+
   readonly parsedDiagnostics = computed<ParsedDiagnostic[]>(() => {
     const g = this.gates();
     if (!g) return [];
@@ -395,6 +436,9 @@ export class PromotionReadinessCardComponent {
       // A gate named in the failure summary IS a failed gate, whatever the
       // free-form line says — the keyword sniff alone left failed gates
       // pilled "Info" under a "Promotion gates failed" banner.
+      // On an all-pass answer an unclassified gate line is a passed gate — the card never
+      // showed "Pass" at all before the C2 rows.
+      if (g.passed && row.tone === 'info') row.tone = 'pass';
       if (!g.passed && row.tone === 'info') {
         const gate = row.gate.toLowerCase();
         if (failed.some((f) => f.includes(gate) || gate.includes(f.split(/[:(]/)[0].trim()))) {
@@ -408,7 +452,10 @@ export class PromotionReadinessCardComponent {
   /** Failure summary split into one entry per gate (engine joins them with ';' or newlines). */
   readonly failureItems = computed<string[]>(() => {
     const g = this.gates();
-    if (!g || g.passed || !g.failureSummary) return [];
+    if (!g || g.passed) return [];
+    const fromRows = failedGateLines(this.rowViews());
+    if (fromRows.length > 0) return fromRows;
+    if (!g.failureSummary) return [];
     return g.failureSummary
       .split(/\s*(?:;|\n|\|)\s*|(?<=\.)\s+(?=[A-Z])/)
       .map((x) => x.trim().replace(/\.$/, ''))
@@ -510,21 +557,23 @@ export class PromotionReadinessCardComponent {
  * `"EdgePosterior: μ=0.170 σ=0.129 P(edge>0)=0.907"`); we sniff common shapes for
  * tabular display, falling back to "Info" + raw text.
  */
-function parseDiagnostic(raw: string): ParsedDiagnostic {
+export function parseDiagnostic(raw: string): ParsedDiagnostic {
   const trimmed = raw.trim();
   const lower = trimmed.toLowerCase();
 
   // Tone classification — keyword sniff against known phrases.
+  // A failure keyword wins over "skip": "… failed (skip remaining checks)" is a failure. The old
+  // order pilled such lines "Skipped".
   let tone: ParsedDiagnostic['tone'] = 'info';
-  if (lower.includes('bypassed') || lower.includes('grandfathered')) tone = 'bypass';
-  else if (lower.includes('auto-skipped') || lower.includes('skip')) tone = 'skip';
-  else if (
+  if (
     lower.includes('failed') ||
     lower.includes('< min') ||
     lower.includes('> max') ||
     lower.includes('fragile')
   )
     tone = 'fail';
+  else if (lower.includes('bypassed') || lower.includes('grandfathered')) tone = 'bypass';
+  else if (lower.includes('auto-skipped') || lower.includes('skip')) tone = 'skip';
   else if (lower.includes('warn') || lower.includes('cold-start')) tone = 'warn';
 
   // Gate label — first phrase before colon / "=" / "(" / specific known words.

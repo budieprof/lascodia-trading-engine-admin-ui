@@ -29,6 +29,16 @@ import {
   RiskProfileDto,
 } from '@core/api/api.types';
 import { RiskProfilesService } from '@core/services/risk-profiles.service';
+import { fmtProfitFactor, fractionToPct, isNoLossProfitFactor } from '@shared/utils/metric-format';
+import {
+  MONITOR_ROLLING_WINDOW,
+  type MonitorTrade,
+  equityCurveChart,
+  monthlyPnlChart,
+  rollingProfitFactorChart,
+  rollingWinRateChart,
+  toMonitorTrades,
+} from './monitor-charts';
 
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
@@ -571,13 +581,18 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
             <div class="monitor-kpis">
               <app-metric-card
                 label="Win Rate"
-                [value]="perf.winRate"
+                [value]="fractionToPct(perf.winRate)"
                 format="percent"
                 dotColor="#34C759"
               />
               <app-metric-card
                 label="Profit Factor"
                 [value]="perf.profitFactor"
+                [displayValue]="
+                  isNoLossProfitFactor(perf.profitFactor)
+                    ? fmtProfitFactor(perf.profitFactor, 2, perf.windowTrades > 0)
+                    : null
+                "
                 format="number"
                 dotColor="#0071E3"
               />
@@ -702,26 +717,38 @@ import { ImportScriptButtonComponent } from '@features/scripting/components/impo
             <div class="chart-grid">
               <app-chart-card
                 title="Equity Curve"
-                subtitle="Cumulative P&L over time · sample series"
-                [options]="equityCurveOptions"
+                subtitle="Cumulative realised P&L of closed trades · all accounts, live + paper"
+                [options]="equityCurveOptions() ?? {}"
+                [loading]="monitorTradesLoading()"
+                [emptyMessage]="monitorChartEmpty(equityCurveOptions(), 'needs 2')"
                 height="320px"
               />
               <app-chart-card
                 title="Win Rate Over Time"
-                subtitle="Rolling 20-trade win rate · sample series"
-                [options]="winRateOptions"
+                [subtitle]="'Rolling ' + monitorWindow + '-trade win rate (P&L > 0)'"
+                [options]="winRateOptions() ?? {}"
+                [loading]="monitorTradesLoading()"
+                [emptyMessage]="monitorChartEmpty(winRateOptions(), 'needs ' + (monitorWindow + 1))"
                 height="320px"
               />
               <app-chart-card
                 title="Profit Factor Trend"
-                subtitle="Rolling profit factor with quality bands · sample series"
-                [options]="profitFactorOptions"
+                [subtitle]="
+                  'Rolling ' + monitorWindow + '-trade profit factor · gaps = no losing trade'
+                "
+                [options]="profitFactorOptions() ?? {}"
+                [loading]="monitorTradesLoading()"
+                [emptyMessage]="
+                  monitorChartEmpty(profitFactorOptions(), 'needs ' + (monitorWindow + 1))
+                "
                 height="320px"
               />
               <app-chart-card
-                title="Monthly Returns"
-                subtitle="Return distribution by month · sample series"
-                [options]="monthlyReturnsOptions"
+                title="Monthly P&L"
+                subtitle="Realised P&L per UTC month (account currency)"
+                [options]="monthlyReturnsOptions() ?? {}"
+                [loading]="monitorTradesLoading()"
+                [emptyMessage]="monitorChartEmpty(monthlyReturnsOptions(), 'needs 1')"
                 height="320px"
               />
             </div>
@@ -890,6 +917,11 @@ export class StrategiesPageComponent {
   // get a real time-series with no extra round-trips when the user has
   // already seen this row in the table.
   healthSeries = signal<number[]>([]);
+
+  // Closed trades of the selected strategy (oldest first) behind the four monitor charts.
+  monitorTrades = signal<MonitorTrade[]>([]);
+  monitorTradesLoading = signal(false);
+  monitorTradesFailed = signal(false);
 
   // Strategy dropdown options — prefer the broader analytics sample (up to
   // 500 rows) over the per-page list because the user lands on Monitor
@@ -1678,13 +1710,38 @@ export class StrategiesPageComponent {
       this.selectedStrategyId.set(null);
       this.performance.set(null);
       this.healthSeries.set([]);
+      this.monitorTrades.set([]);
+      this.monitorTradesLoading.set(false);
       this.loadingPerformance.set(false);
       return;
     }
     this.selectedStrategyId.set(id);
     this.performance.set(null);
     this.healthSeries.set([]);
+    this.monitorTrades.set([]);
+    this.monitorTradesFailed.set(false);
     this.loadingPerformance.set(true);
+    this.monitorTradesLoading.set(true);
+
+    // Closed trades → equity curve, rolling win rate / PF, monthly P&L. Ignore a late answer
+    // for a strategy that is no longer selected.
+    this.strategiesService
+      .getEquityCurve(id)
+      .pipe(
+        finalize(() => {
+          if (this.selectedStrategyId() === id) this.monitorTradesLoading.set(false);
+        }),
+      )
+      .subscribe({
+        next: (res) => {
+          if (this.selectedStrategyId() !== id) return;
+          this.monitorTrades.set(toMonitorTrades(res?.data?.points));
+        },
+        error: () => {
+          if (this.selectedStrategyId() !== id) return;
+          this.monitorTradesFailed.set(true);
+        },
+      });
 
     // Fetch perf snapshot. The empty-state branch differentiates "we asked
     // and there's just no snapshot yet" from "still in flight" via the
@@ -2072,206 +2129,24 @@ export class StrategiesPageComponent {
 
   // ---- Chart Options ----
 
-  readonly equityCurveOptions: EChartsOption = (() => {
-    const dates: string[] = [];
-    const values: number[] = [];
-    let cumulative = 0;
-    const base = new Date('2025-01-02');
-    for (let i = 0; i < 120; i++) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + i);
-      dates.push(d.toISOString().slice(0, 10));
-      cumulative += (Math.random() - 0.42) * 150;
-      values.push(Math.round(cumulative * 100) / 100);
-    }
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 60, right: 20, top: 20, bottom: 40 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', axisLabel: { formatter: '${value}' } },
-      series: [
-        {
-          type: 'line',
-          data: values,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { color: '#0071E3', width: 2 },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: 'rgba(0, 113, 227, 0.25)' },
-                { offset: 1, color: 'rgba(0, 113, 227, 0.02)' },
-              ],
-            },
-          },
-        },
-      ],
-    } as EChartsOption;
-  })();
-
-  readonly winRateOptions: EChartsOption = (() => {
-    const dates: string[] = [];
-    const values: number[] = [];
-    const base = new Date('2025-01-02');
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + i * 2);
-      dates.push(d.toISOString().slice(0, 10));
-      values.push(Math.round((45 + Math.random() * 25) * 100) / 100);
-    }
-    return {
-      tooltip: { trigger: 'axis', formatter: '{b}<br/>Win Rate: {c}%' },
-      grid: { left: 50, right: 20, top: 20, bottom: 40 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', min: 30, max: 80, axisLabel: { formatter: '{value}%' } },
-      series: [
-        {
-          type: 'line',
-          data: values,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { color: '#34C759', width: 2 },
-          markLine: {
-            silent: true,
-            data: [
-              {
-                yAxis: 50,
-                lineStyle: { color: '#FF9500', type: 'dashed' },
-                label: { formatter: '50%' },
-              },
-            ],
-          },
-        },
-      ],
-    } as EChartsOption;
-  })();
-
-  readonly profitFactorOptions: EChartsOption = (() => {
-    const dates: string[] = [];
-    const values: number[] = [];
-    const base = new Date('2025-01-02');
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + i * 2);
-      dates.push(d.toISOString().slice(0, 10));
-      values.push(Math.round((0.8 + Math.random() * 1.4) * 100) / 100);
-    }
-    return {
-      tooltip: { trigger: 'axis' },
-      grid: { left: 50, right: 20, top: 20, bottom: 40 },
-      xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, fontSize: 10 } },
-      yAxis: { type: 'value', min: 0, max: 3, axisLabel: { formatter: '{value}' } },
-      visualMap: {
-        show: false,
-        pieces: [
-          { lt: 1.0, color: '#FF3B30' },
-          { gte: 1.0, lt: 1.5, color: '#FF9500' },
-          { gte: 1.5, color: '#34C759' },
-        ],
-      },
-      series: [
-        {
-          type: 'line',
-          data: values,
-          smooth: true,
-          showSymbol: false,
-          lineStyle: { width: 2 },
-          markLine: {
-            silent: true,
-            data: [
-              {
-                yAxis: 1.0,
-                lineStyle: { color: '#FF3B30', type: 'dashed' },
-                label: { formatter: '1.0' },
-              },
-              {
-                yAxis: 1.5,
-                lineStyle: { color: '#34C759', type: 'dashed' },
-                label: { formatter: '1.5' },
-              },
-            ],
-          },
-          markArea: {
-            silent: true,
-            data: [
-              [{ yAxis: 0, itemStyle: { color: 'rgba(255, 59, 48, 0.06)' } }, { yAxis: 1.0 }],
-              [{ yAxis: 1.0, itemStyle: { color: 'rgba(255, 149, 0, 0.06)' } }, { yAxis: 1.5 }],
-              [{ yAxis: 1.5, itemStyle: { color: 'rgba(52, 199, 89, 0.06)' } }, { yAxis: 3.0 }],
-            ],
-          },
-        },
-      ],
-    } as EChartsOption;
-  })();
-
-  readonly monthlyReturnsOptions: EChartsOption = (() => {
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    const years = ['2024', '2025'];
-    const data: [number, number, number][] = [];
-    for (let yi = 0; yi < years.length; yi++) {
-      for (let mi = 0; mi < 12; mi++) {
-        const val = Math.round((Math.random() - 0.35) * 12 * 100) / 100;
-        data.push([mi, yi, val]);
-      }
-    }
-    return {
-      tooltip: {
-        formatter: (p: any) => {
-          const d = p.data;
-          return `${months[d[0]]} ${years[d[1]]}<br/>Return: ${d[2] >= 0 ? '+' : ''}${d[2]}%`;
-        },
-      },
-      grid: { left: 60, right: 40, top: 20, bottom: 40 },
-      xAxis: { type: 'category', data: months, splitArea: { show: true } },
-      yAxis: { type: 'category', data: years, splitArea: { show: true } },
-      visualMap: {
-        min: -10,
-        max: 10,
-        calculable: true,
-        orient: 'horizontal',
-        left: 'center',
-        bottom: 0,
-        inRange: {
-          color: ['#FF3B30', '#FF6961', '#FFD4D1', '#FFFFFF', '#D1F2D9', '#69D97A', '#34C759'],
-        },
-      },
-      series: [
-        {
-          type: 'heatmap',
-          data: data,
-          label: {
-            show: true,
-            formatter: (p: any) => {
-              const v = p.data[2];
-              return `${v >= 0 ? '+' : ''}${v}%`;
-            },
-            fontSize: 10,
-          },
-          emphasis: {
-            itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.3)' },
-          },
-        },
-      ],
-    } as EChartsOption;
-  })();
+  // Monitor charts — the strategy's REAL closed trades (equity-curve endpoint). Before 2026-11-07
+  // these were random-number "sample" lines; an empty state now replaces a chart with too little data.
+  readonly monitorWindow = MONITOR_ROLLING_WINDOW;
+  /** Wire units: snapshot winRate is a FRACTION; profitFactor 9999 = no losing trades. */
+  protected readonly fractionToPct = fractionToPct;
+  protected readonly fmtProfitFactor = fmtProfitFactor;
+  protected readonly isNoLossProfitFactor = isNoLossProfitFactor;
+  readonly equityCurveOptions = computed(() => equityCurveChart(this.monitorTrades()));
+  readonly winRateOptions = computed(() => rollingWinRateChart(this.monitorTrades()));
+  readonly profitFactorOptions = computed(() => rollingProfitFactorChart(this.monitorTrades()));
+  readonly monthlyReturnsOptions = computed(() => monthlyPnlChart(this.monitorTrades()));
+  /** Empty-state text for a monitor chart whose builder returned null. */
+  monitorChartEmpty(options: EChartsOption | null, need: string): string | null {
+    if (options) return null;
+    if (this.monitorTradesLoading()) return null;
+    if (this.monitorTradesFailed()) return 'Closed trades could not be loaded';
+    return `Not enough closed trades yet (${this.monitorTrades().length} so far; ${need})`;
+  }
 }
 
 // ── Helpers for the strategy-list inline metrics ──────────────────────────

@@ -335,10 +335,37 @@ export type StrategyStatus = 'Active' | 'Paused' | 'Backtesting' | 'Stopped';
  * detail breakdown the engine emits during evaluation; the UI renders one row
  * per entry, parsing common shapes (`Key=Value`) where possible.
  */
+/** A promotion gate's outcome in a structured row (engine contract C2, 2026-11-07); sent as its name. */
+export type PromotionGateOutcomeName =
+  | 'Pass'
+  | 'Fail'
+  | 'Skipped'
+  | 'NotMeasurable'
+  | 'Bypassed'
+  | 'Observe';
+
+/**
+ * One gate's structured verdict (engine contract C2): `value comparator threshold` is what passing
+ * means (e.g. `">="`). NotMeasurable is NOT a pass — the engine's `Promotion:NotMeasurablePolicy`
+ * decides whether it blocks. Absent on answers recorded before 2026-11-07.
+ */
+export interface PromotionGateRowDto {
+  gate: string;
+  outcome: PromotionGateOutcomeName | string;
+  value: number | null;
+  threshold: number | null;
+  unit: string | null;
+  comparator: string | null;
+  detail: string;
+  displayName?: string | null;
+}
+
 export interface PromotionGatesDto {
   passed: boolean;
   failureSummary: string;
   diagnostics: string[];
+  /** C2 rows, one per gate in evaluation order; absent/empty from engines before 2026-11-07. */
+  rows?: PromotionGateRowDto[] | null;
 }
 
 /** One promotion gate's verdict from `POST strategy/{id}/submit-for-approval` (skipped gates pass, with the reason). */
@@ -346,6 +373,8 @@ export interface StrategyApprovalGateDto {
   name: string;
   passed: boolean;
   detail: string;
+  /** C2 outcome; null/absent for verdicts recorded before 2026-11-07. */
+  outcome?: PromotionGateOutcomeName | string | null;
 }
 
 /**
@@ -359,6 +388,8 @@ export interface StrategyApprovalResultDto {
   stage: StrategyLifecycleStage | string;
   /** Every gate's verdict; a gate named `evaluation` means the run was not judged (timeout / error). */
   gates: StrategyApprovalGateDto[];
+  /** C2 structured rows; absent/empty for verdicts recorded before 2026-11-07. */
+  rows?: PromotionGateRowDto[] | null;
 }
 
 /** `running`; `done` — a verdict (approved or rejected); `failed` — no verdict. */
@@ -1565,6 +1596,9 @@ export interface PromotionGateEvaluationDto {
    * that reached no verdict and for attempts recorded before the engine stored them.
    */
   gates?: StrategyApprovalGateDto[];
+
+  /** C2 structured rows (outcome, value vs threshold); empty for attempts recorded before 2026-11-07. */
+  rows?: PromotionGateRowDto[] | null;
 
   /** The breached gates, split out of the summary for listing. */
   failures: string[];

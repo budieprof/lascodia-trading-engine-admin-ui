@@ -59,6 +59,7 @@ import { failureMessage } from '../../util/api-failure';
 import type { StrategyVersionFields } from '../../util/version-diff';
 import { SUB_CONFIG_SCHEMAS } from '../../util/sub-config-schema';
 import { SubConfigEditorComponent } from '../sub-config-editor/sub-config-editor.component';
+import { fmtFraction, fmtProfitFactor, isNoLossProfitFactor } from '@shared/utils/metric-format';
 
 /**
  * Strategy types authored as Pine v6 scripts. Their Parameters JSON used to hold the retired JSON
@@ -618,9 +619,9 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                       <span class="preview-stat-label">Win rate</span>
                       <span
                         class="preview-stat-value mono"
-                        [class.positive]="r.winRate >= 50"
-                        [class.negative]="r.winRate < 50 && r.totalTrades > 0"
-                        >{{ r.winRate.toFixed(1) }}%</span
+                        [class.positive]="r.winRate >= 0.5"
+                        [class.negative]="r.winRate < 0.5 && r.totalTrades > 0"
+                        >{{ fmtFraction(r.winRate) }}</span
                       >
                     </div>
                     <div class="preview-stat">
@@ -638,7 +639,12 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                         class="preview-stat-value mono"
                         [class.positive]="r.profitFactor >= 1.5"
                         [class.negative]="r.profitFactor < 1 && r.totalTrades > 0"
-                        >{{ r.profitFactor.toFixed(2) }}</span
+                        [title]="
+                          isNoLossProfitFactor(r.profitFactor)
+                            ? 'No losing trades in the window'
+                            : ''
+                        "
+                        >{{ fmtProfitFactor(r.profitFactor, 2, r.totalTrades > 0) }}</span
                       >
                     </div>
                     <div class="preview-stat">
@@ -751,7 +757,7 @@ const TIMEFRAME_LABELS: Record<string, string> = {
                               {{ s.symbol }}/{{ s.timeframe }} · {{ s.strategyType }}
                             </td>
                             <td class="mono">{{ s.sharpeRatio.toFixed(2) }}</td>
-                            <td class="mono">{{ s.winRate.toFixed(1) }}%</td>
+                            <td class="mono">{{ fmtFraction(s.winRate) }}</td>
                             <td class="mono">{{ s.maxDrawdownPct.toFixed(1) }}%</td>
                             <td class="mono">{{ s.totalReturn.toFixed(1) }}%</td>
                             <td>
@@ -1938,7 +1944,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
         id: 'live',
         label: 'Live preview',
         values: live.equityCurve,
-        metrics: `S ${live.sharpeRatio.toFixed(2)} · W ${live.winRate.toFixed(0)}% · DD ${live.maxDrawdownPct.toFixed(1)}% · R ${live.totalReturn.toFixed(1)}%`,
+        metrics: `S ${live.sharpeRatio.toFixed(2)} · W ${fmtFraction(live.winRate, 0)} · DD ${live.maxDrawdownPct.toFixed(1)}% · R ${live.totalReturn.toFixed(1)}%`,
       });
     }
     for (const s of this.previewSnapshots()) {
@@ -1951,7 +1957,7 @@ export class StrategyFormComponent implements OnInit, OnChanges {
             id: `s${s.id}`,
             label,
             values: v as number[],
-            metrics: `S ${s.sharpeRatio.toFixed(2)} · W ${s.winRate.toFixed(0)}% · DD ${s.maxDrawdownPct.toFixed(1)}% · R ${s.totalReturn.toFixed(1)}%`,
+            metrics: `S ${s.sharpeRatio.toFixed(2)} · W ${fmtFraction(s.winRate, 0)} · DD ${s.maxDrawdownPct.toFixed(1)}% · R ${s.totalReturn.toFixed(1)}%`,
           });
         }
       } catch {
@@ -2113,6 +2119,10 @@ export class StrategyFormComponent implements OnInit, OnChanges {
     };
   });
 
+  /** Wire units: winRate is a FRACTION, profitFactor 9999 = no losing trades. */
+  protected readonly fmtFraction = fmtFraction;
+  protected readonly fmtProfitFactor = fmtProfitFactor;
+  protected readonly isNoLossProfitFactor = isNoLossProfitFactor;
   readonly strategyTypes = STRATEGY_TYPES;
   readonly classicHint = CLASSIC_PINE_LIBRARY_HINT;
   readonly eventHint = EVENT_PINE_HINT;
