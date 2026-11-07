@@ -237,6 +237,8 @@ function stub(method, p, q) {
   const results = {};
   const visit = async (route, name, checks) => {
     await page.goto(BASE + route, { waitUntil: 'networkidle' }).catch(() => {});
+    // NI_THEME=dark: render the page in the dark theme (presentation only).
+    if (process.env.NI_THEME) await page.evaluate((t) => (document.documentElement.dataset.theme = t), process.env.NI_THEME);
     await page.waitForTimeout(900);
     const r = { url: page.url().replace(BASE, '') };
     for (const [k, fn] of Object.entries(checks)) r[k] = await fn().catch((e) => `error: ${String(e).slice(0, 120)}`);

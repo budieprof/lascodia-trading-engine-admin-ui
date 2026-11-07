@@ -8,6 +8,13 @@ import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confir
 import { errorText } from '@features/iam/iam.logic';
 import { NewsIntelNavComponent } from '../components/news-intel-nav.component';
 import {
+  NiInfoComponent,
+  NiKeyComponent,
+  NiPanelComponent,
+  NiStatComponent,
+} from '../components/viz/ni-primitives';
+import { kindColor, kindVar } from '../components/viz/ni-viz';
+import {
   EXPOSURE_KIND_LABEL,
   configValue,
   editExposureList,
@@ -17,7 +24,12 @@ import {
   parseExposureList,
   parseSearchQueries,
 } from '../news-intel.logic';
-import { NewsConfigEntry, NewsExposureListView, NewsSearchTermView } from '../news-intel.types';
+import {
+  ExposureKindName,
+  NewsConfigEntry,
+  NewsExposureListView,
+  NewsSearchTermView,
+} from '../news-intel.types';
 
 const EXPOSURES = 'NewsIntel:Exposures';
 const CURRENCIES = 'NewsIntel:Currencies';
@@ -36,17 +48,23 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
   selector: 'app-news-exposures-page',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterLink, NewsIntelNavComponent, ConfirmDialogComponent],
+  imports: [
+    RouterLink,
+    NewsIntelNavComponent,
+    ConfirmDialogComponent,
+    NiInfoComponent,
+    NiKeyComponent,
+    NiPanelComponent,
+    NiStatComponent,
+  ],
   styleUrls: ['../news-intel-shared.scss'],
   template: `
     <div class="page">
-      <header>
-        <h1>Tracked exposures</h1>
-        <p class="muted small">
-          What the module classifies news for. Every tracked key costs classification (model calls
-          shared with spot analysis) and, where it has a search term, an aggregator search every
-          cycle. An untracked key is never scored as zero — symbols that need it read as partial.
-        </p>
+      <header class="page-head">
+        <div class="title">
+          <h1>Tracked exposures</h1>
+          <app-ni-info text="What the module classifies news for. Every tracked key costs classification (model calls shared with spot analysis) and, where it has a search term, an aggregator search every cycle. An untracked key is never scored as zero — symbols that need it read as partial." />
+        </div>
       </header>
       <app-news-intel-nav [showRefresh]="true" [refreshing]="loading()" (refresh)="load()" />
 
@@ -61,184 +79,139 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
         </div>
       }
 
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>Tracked now ({{ tracked().length }})</h2>
-            <p class="muted xsmall">
-              @if (usingCurrencies()) {
-                <code>{{ exposuresKey }}</code> is empty, so the module tracks
-                <code>{{ currenciesKey }}</code
-                >. Adding a key here writes the full list into
-                <code>{{ exposuresKey }}</code> (currencies included).
-              } @else {
-                From <code>{{ exposuresKey }}</code
-                >.
-              }
-            </p>
-          </div>
+      <div class="ni-kpis kpi6">
+        <app-ni-stat label="Tracked" [value]="tracked().length" [sub]="usingCurrencies() ? 'from Currencies (Exposures empty)' : 'NewsIntel:Exposures'" info="Keys the classifier labels news against right now." />
+        <app-ni-stat label="Recommended" [value]="recommended().length" sub="derived from the universe" info="Derived by the engine from the active symbol universe through the exposure map (NewsIntel:Exposures:Recommended, read-only)." />
+        <app-ni-stat label="Not tracked" [value]="missing().length" [sub]="recommended().length ? pctOf(missing().length, recommended().length) + ' of recommended' : null" [tone]="missing().length ? 'warn' : 'ok'" info="Recommended keys the module does not track — the symbols that need them read as partial." />
+        <app-ni-stat label="Searched" [value]="searchStats().polled" [sub]="searchStats().enabled" info="Keys whose search term the aggregator search source runs every cycle." />
+        <app-ni-stat label="Overrides" [value]="searchStats().overrides" sub="search terms from config" info="Search terms set in NewsIntel:Ingest:SearchQueriesJson (your override) rather than built-in or shipped defaults." />
+        <app-ni-stat label="Pending edit" [value]="dirty() ? '+' + added().length + ' / −' + removed().length : '—'" [sub]="dirty() ? 'review & save to apply' : 'no changes'" [tone]="dirty() ? 'warn' : null" info="Changes go through PUT news-intel/config: audit row, cache invalidation and risk-loosening governance; the engine answers per key." />
+      </div>
+
+      <div class="ni-grid-2">
+        <app-ni-panel title="Tracked now" [info]="usingCurrencies() ? exposuresKey + ' is empty, so the module tracks ' + currenciesKey + '. Adding a key here writes the full list into ' + exposuresKey + ' (currencies included).' : 'From ' + exposuresKey + '. Click × to mark a key for removal, ↺ to keep it.'">
+          <span meta>{{ tracked().length }} keys</span>
           @if (dirty()) {
-            <div class="filters">
+            <div actions class="filters">
               <button type="button" class="btn subtle" (click)="discard()">Discard</button>
-              <button
-                type="button"
-                class="btn primary"
-                [disabled]="!canEdit() || saving()"
-                (click)="confirmOpen.set(true)"
-              >
-                Review &amp; save
-              </button>
+              <button type="button" class="btn primary" [disabled]="!canEdit() || saving()" (click)="confirmOpen.set(true)">Review &amp; save</button>
             </div>
           }
-        </div>
-        @for (g of trackedGroups(); track g.kind) {
-          <div>
-            <h3>{{ label(g.kind) }}</h3>
-            <div class="legs">
-              @for (k of g.keys; track k) {
-                <span class="key" [class.untracked]="removed().includes(k)">
-                  {{ k }}
-                  @if (canEdit()) {
-                    <button
-                      type="button"
-                      class="x"
-                      [attr.aria-label]="(removed().includes(k) ? 'Keep ' : 'Remove ') + k"
-                      (click)="toggleRemove(k)"
-                    >
-                      {{ removed().includes(k) ? '↺' : '×' }}
-                    </button>
+          <div class="board">
+            @for (g of trackedGroups(); track g.kind) {
+              <div class="brow">
+                <div class="bk"><i [style.background]="kc(g.kind)"></i>{{ label(g.kind) }}<span>{{ g.keys.length }}</span></div>
+                <div class="legs">
+                  @for (k of g.keys; track k) {
+                    <span class="key chip" [class.untracked]="removed().includes(k)" [class.gone]="removed().includes(k)">
+                      <i [style.background]="kc(g.kind)"></i>{{ k }}
+                      @if (canEdit()) {
+                        <button type="button" class="x" [attr.aria-label]="(removed().includes(k) ? 'Keep ' : 'Remove ') + k" (click)="toggleRemove(k)">{{ removed().includes(k) ? '↺' : '×' }}</button>
+                      }
+                    </span>
                   }
-                </span>
-              }
-            </div>
-          </div>
-        }
-        @if (added().length) {
-          <div>
-            <h3>To add</h3>
-            <div class="legs">
-              @for (k of added(); track k) {
-                <span class="key"
-                  >+ {{ k }}
-                  <button
-                    type="button"
-                    class="x"
-                    [attr.aria-label]="'Drop ' + k"
-                    (click)="toggleAdd(k)"
-                  >
-                    ×
-                  </button></span
-                >
-              }
-            </div>
-          </div>
-        }
-        @if (canEdit()) {
-          <div class="filters">
-            <input
-              class="inp mono"
-              placeholder="Add keys: WTI, IDX:US500, EQ:AAPL"
-              aria-label="Exposure keys to add"
-              [value]="draft()"
-              (input)="draft.set($any($event.target).value)"
-              (keydown.enter)="addDraft()"
-            />
-            <button type="button" class="btn" (click)="addDraft()">Add</button>
-            @if (draftInvalid().length) {
-              <span class="neg xsmall">Not exposure keys: {{ draftInvalid().join(', ') }}</span>
+                </div>
+              </div>
+            }
+            @if (added().length) {
+              <div class="brow add">
+                <div class="bk"><i class="plus"></i>To add<span>{{ added().length }}</span></div>
+                <div class="legs">
+                  @for (k of added(); track k) {
+                    <span class="key chip picked"><i [style.background]="kcKey(k)"></i>+ {{ k }}<button type="button" class="x" [attr.aria-label]="'Drop ' + k" (click)="toggleAdd(k)">×</button></span>
+                  }
+                </div>
+              </div>
             }
           </div>
-        } @else {
-          <p class="muted xsmall">Changing the list needs <code>platform.engine.manage</code>.</p>
-        }
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <div>
-            <h2>Recommended — not tracked ({{ missing().length }})</h2>
-            <p class="muted xsmall">
-              Read-only, derived by the engine from the active symbol universe through the exposure
-              map (<code>{{ recommendedKey }}</code
-              >). Pick what is worth the classification cost.
-            </p>
-          </div>
-          @if (canEdit() && missing().length) {
-            <button type="button" class="btn" (click)="addAllOfKind(null)">Add all</button>
-          }
-        </div>
-        @for (g of missingGroups(); track g.kind) {
-          <div>
-            <h3>
-              {{ label(g.kind) }} ({{ g.keys.length }})
-              @if (canEdit()) {
-                <button type="button" class="btn subtle xsmall" (click)="addAllOfKind(g.kind)">
-                  add all
-                </button>
-              }
-            </h3>
-            <div class="legs">
-              @for (k of g.keys; track k) {
-                <button
-                  type="button"
-                  class="key untracked as-btn"
-                  [disabled]="!canEdit()"
-                  [class.picked]="added().includes(k)"
-                  (click)="toggleAdd(k)"
-                >
-                  {{ added().includes(k) ? '✓ ' : '' }}{{ k }}
-                </button>
+          @if (canEdit()) {
+            <div class="filters addrow">
+              <input class="inp mono" placeholder="Add keys: WTI, IDX:US500, EQ:AAPL" aria-label="Exposure keys to add" [value]="draft()" (input)="draft.set($any($event.target).value)" (keydown.enter)="addDraft()" />
+              <button type="button" class="btn" (click)="addDraft()">Add</button>
+              @if (draftInvalid().length) {
+                <span class="neg xsmall">Not exposure keys: {{ draftInvalid().join(', ') }}</span>
               }
             </div>
-          </div>
-        } @empty {
-          <p class="empty">Every recommended key is tracked.</p>
-        }
-      </section>
+          } @else {
+            <p class="faint xsmall">Changing the list needs <code>platform.engine.manage</code>.</p>
+          }
+        </app-ni-panel>
 
-      <section class="card">
-        <h2>Search term per key</h2>
+        <app-ni-panel title="Recommended — not tracked" [info]="'Read-only, derived by the engine from the active symbol universe (' + recommendedKey + '). Click a key to stage it for adding; pick what is worth the classification cost.'">
+          <span meta>{{ missing().length }} keys</span>
+          @if (canEdit() && missing().length) {
+            <button actions type="button" class="btn" (click)="addAllOfKind(null)">Add all</button>
+          }
+          <div class="board">
+            @for (g of missingGroups(); track g.kind) {
+              <div class="brow">
+                <div class="bk">
+                  <i [style.background]="kc(g.kind)"></i>{{ label(g.kind) }}<span>{{ g.keys.length }}</span>
+                  @if (canEdit()) {
+                    <button type="button" class="lnkbtn" (click)="addAllOfKind(g.kind)">add all</button>
+                  }
+                </div>
+                <div class="legs">
+                  @for (k of g.keys; track k) {
+                    <button type="button" class="key untracked as-btn chip" [disabled]="!canEdit()" [class.picked]="added().includes(k)" (click)="toggleAdd(k)">
+                      <i [style.background]="kc(g.kind)"></i>{{ added().includes(k) ? '✓ ' : '' }}{{ k }}
+                    </button>
+                  }
+                </div>
+              </div>
+            } @empty {
+              <p class="empty">Every recommended key is tracked.</p>
+            }
+          </div>
+        </app-ni-panel>
+      </div>
+
+      <app-ni-panel title="Search term per key" [info]="'The aggregator query each key is searched with, and where it comes from: config (your override in ' + queriesKey + '), shipped default, built-in (the exposure catalogue term) or none. Polled = the search source runs that term now. Edit the JSON on the Settings tab (Sourcing).'" [flush]="true">
         @if (exposureList(); as xl) {
-          <p class="muted xsmall" data-testid="search-terms-engine">
-            The engine's effective term for every tracked and recommended key, and where it comes
-            from: <b>config</b> (your override in <code>{{ queriesKey }}</code
-            >), <b>shipped default</b>, <b>built-in</b> (the exposure catalogue's term) or none.
-            Search is {{ xl.searchEnabled ? 'on' : 'OFF' }}; "polled" means the search source runs
-            that term now. Edit the JSON in the
-            <a routerLink="/news-intel">Overview</a> configuration panel (Sourcing section).
-          </p>
-          <div class="table-wrap">
+          <span meta data-testid="search-terms-engine">search {{ xl.searchEnabled ? 'on' : 'OFF' }} · {{ filteredTerms().length }} of {{ xl.searchTerms.length }} keys</span>
+        } @else {
+          <span meta>engine does not report effective terms</span>
+        }
+        <div actions class="filters">
+          @if (exposureList()) {
+            <span class="seg">
+              @for (f of termFilters; track f) {
+                <button type="button" [class.on]="termFilter() === f" (click)="termFilter.set(f)">{{ f }}</button>
+              }
+            </span>
+          }
+          <a class="lnk" routerLink="/news-intel/settings">Edit in Settings →</a>
+        </div>
+        @if (exposureList(); as xl) {
+          <div class="table-wrap scroll terms">
             <table>
               <thead>
                 <tr>
                   <th>Key</th>
-                  <th>Kind</th>
-                  <th>Tracked</th>
+                  <th>Status</th>
                   <th>Source</th>
                   <th>Polled</th>
                   <th>Search term</th>
                 </tr>
               </thead>
               <tbody>
-                @for (t of xl.searchTerms; track t.key) {
+                @for (t of filteredTerms(); track t.key) {
                   <tr>
-                    <td class="mono">{{ t.key }}</td>
-                    <td>{{ kindLabel(t.key) }}</td>
+                    <td><app-ni-key [key]="t.key" [untracked]="!t.tracked" /></td>
+                    <td><span class="pill" [class.ok]="t.tracked" [class.plain]="!t.tracked">{{ t.tracked ? 'tracked' : 'recommended' }}</span></td>
+                    <td><span class="pill plain" [class.info]="t.source === 'config'">{{ sourceLabel(t) }}</span></td>
                     <td>
-                      <span class="pill" [class.ok]="t.tracked">{{
-                        t.tracked ? 'tracked' : 'recommended'
-                      }}</span>
+                      @if (t.polled) {
+                        <span class="pill ok">yes</span>
+                      } @else {
+                        <span class="faint xsmall">no</span>
+                      }
                     </td>
-                    <td>
-                      <span class="pill" [class.info]="t.source === 'config'">{{
-                        sourceLabel(t)
-                      }}</span>
-                    </td>
-                    <td>{{ t.polled ? 'yes' : 'no' }}</td>
-                    <td class="mono xsmall">
-                      {{ t.term ?? '' }}
-                      @if (!t.term) {
-                        <span class="muted">no term — not searched</span>
+                    <td class="mono term ellipsis" [title]="t.term ?? ''">
+                      @if (t.term) {
+                        {{ t.term }}
+                      } @else {
+                        <span class="faint">no term — not searched</span>
                       }
                     </td>
                   </tr>
@@ -247,31 +220,23 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
             </table>
           </div>
         } @else {
-          <p class="muted xsmall">
-            The aggregator query each tracked key is searched with. Keys in
-            <code>{{ queriesKey }}</code> use that term; others use the engine's built-in term (this
-            engine build does not report it) or are not searched. Edit the JSON in the
-            <a routerLink="/news-intel">Overview</a> configuration panel (Sourcing section).
-          </p>
-          <div class="table-wrap">
+          <div class="table-wrap scroll terms">
             <table>
               <thead>
                 <tr>
                   <th>Key</th>
-                  <th>Kind</th>
                   <th>Search term</th>
                 </tr>
               </thead>
               <tbody>
                 @for (k of tracked(); track k) {
                   <tr>
-                    <td class="mono">{{ k }}</td>
-                    <td>{{ kindLabel(k) }}</td>
-                    <td class="mono xsmall">
+                    <td><app-ni-key [key]="k" /></td>
+                    <td class="mono term">
                       @if (queries()[k]; as q) {
                         {{ q }}
                       } @else {
-                        <span class="muted">engine built-in term, if any</span>
+                        <span class="faint">engine built-in term, if any</span>
                       }
                     </td>
                   </tr>
@@ -280,7 +245,7 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
             </table>
           </div>
         }
-      </section>
+      </app-ni-panel>
 
       <app-confirm-dialog
         [open]="confirmOpen()"
@@ -293,38 +258,142 @@ const QUERIES = 'NewsIntel:Ingest:SearchQueriesJson';
       >
         <label class="small reason">
           Reason (recorded with the change)
-          <input
-            class="inp"
-            [value]="reason()"
-            (input)="reason.set($any($event.target).value)"
-            placeholder="e.g. track WTI/BRENT for the oil CFDs"
-          />
+          <input class="inp" [value]="reason()" (input)="reason.set($any($event.target).value)" placeholder="e.g. track WTI/BRENT for the oil CFDs" />
         </label>
       </app-confirm-dialog>
     </div>
   `,
   styles: [
     `
+      .title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .kpi6 {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+      }
+      @media (max-width: 1100px) {
+        .kpi6 {
+          grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+        }
+      }
+      .lnk {
+        font-size: 11px;
+        color: var(--accent);
+        text-decoration: none;
+      }
+      .board {
+        display: flex;
+        flex-direction: column;
+      }
+      .brow {
+        display: grid;
+        grid-template-columns: 112px minmax(0, 1fr);
+        gap: 10px;
+        padding: 7px 0;
+        border-top: 1px solid var(--border);
+        align-items: start;
+      }
+      .brow:first-child {
+        border-top: 0;
+        padding-top: 0;
+      }
+      .bk {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 5px;
+        font-size: 10.5px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-secondary);
+        line-height: 20px;
+      }
+      .bk i {
+        width: 8px;
+        height: 8px;
+        border-radius: 2px;
+      }
+      .bk i.plus {
+        background: var(--accent);
+      }
+      .bk span {
+        font-weight: 500;
+        color: var(--text-tertiary);
+      }
+      .lnkbtn {
+        border: 0;
+        background: transparent;
+        color: var(--accent);
+        font-size: 10.5px;
+        text-transform: none;
+        letter-spacing: 0;
+        cursor: pointer;
+        padding: 0;
+        font-weight: 500;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        line-height: 20px;
+      }
+      .chip i {
+        width: 6px;
+        height: 6px;
+        border-radius: 2px;
+      }
+      .chip.gone {
+        text-decoration: line-through;
+        opacity: 0.7;
+      }
       .x {
         border: 0;
         background: transparent;
-        color: inherit;
+        color: var(--text-tertiary);
         cursor: pointer;
-        padding: 0 0 0 4px;
+        padding: 0 0 0 2px;
+        font-size: 12px;
+        line-height: 1;
+      }
+      .x:hover {
+        color: var(--ni-bad);
       }
       .as-btn {
         cursor: pointer;
+        font: inherit;
+        font-family: var(--ni-mono);
+        font-size: 11px;
+        color: var(--text-secondary);
       }
-      .as-btn.picked {
+      .as-btn:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--text-primary);
+      }
+      .as-btn.picked,
+      .chip.picked {
         border-style: solid;
         border-color: var(--accent);
         color: var(--accent);
+        background: color-mix(in oklab, var(--accent) 8%, transparent);
       }
-      h3 {
-        display: flex;
-        align-items: center;
-        gap: var(--space-2);
-        margin-bottom: 4px;
+      .addrow .inp {
+        flex: 1;
+        min-width: 200px;
+      }
+      .terms {
+        max-height: 460px;
+      }
+      .terms th:first-child,
+      .terms td:first-child {
+        padding-left: 12px;
+      }
+      .term {
+        font-size: 11px;
+        max-width: 1px;
+        width: 60%;
       }
       .reason {
         display: flex;
@@ -485,5 +554,43 @@ export class NewsExposuresPageComponent {
           else this.error.set(text);
         },
       });
+  }
+
+  // ── Dense layout helpers ──
+  readonly termFilters = ['all', 'tracked', 'recommended', 'no term'] as const;
+  readonly termFilter = signal<(typeof this.termFilters)[number]>('all');
+  readonly filteredTerms = computed(() => {
+    const ts = this.exposureList()?.searchTerms ?? [];
+    switch (this.termFilter()) {
+      case 'tracked':
+        return ts.filter((t) => t.tracked);
+      case 'recommended':
+        return ts.filter((t) => !t.tracked);
+      case 'no term':
+        return ts.filter((t) => !t.term);
+      default:
+        return ts;
+    }
+  });
+  readonly searchStats = computed(() => {
+    const xl = this.exposureList();
+    if (!xl) {
+      return { polled: '—', overrides: String(Object.keys(this.queries()).length), enabled: 'engine does not report' };
+    }
+    return {
+      polled: String(xl.searchTerms.filter((t) => t.polled).length),
+      overrides: String(xl.searchTerms.filter((t) => t.source === 'config').length),
+      enabled: xl.searchEnabled ? 'search on' : 'search OFF',
+    };
+  });
+
+  pctOf(n: number, d: number): string {
+    return d ? `${Math.round((n / d) * 100)}%` : '—';
+  }
+  kc(kind: string): string {
+    return kindColor(kind as ExposureKindName);
+  }
+  kcKey(key: string): string {
+    return kindVar(key);
   }
 }
