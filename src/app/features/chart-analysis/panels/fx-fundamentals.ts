@@ -96,7 +96,10 @@ export function utcMs(iso: string): number {
 }
 
 /** Step-hold resample onto bars (ascending `time`, ms). */
-export function alignToBars(points: readonly PanePoint[], bars: readonly { time: number }[]): Maybe[] {
+export function alignToBars(
+  points: readonly PanePoint[],
+  bars: readonly { time: number }[],
+): Maybe[] {
   const out: Maybe[] = new Array(bars.length).fill(null);
   let j = -1;
   for (let i = 0; i < bars.length; i++) {
@@ -107,11 +110,38 @@ export function alignToBars(points: readonly PanePoint[], bars: readonly { time:
 }
 
 /**
+ * Points SUMMED per bar (UA03: liquidations per minute → per bar): each point counts in the bar whose open is the
+ * latest at or before it (the last bar takes everything after its open); points before the first bar are dropped.
+ * A bar with no point is 0 — for a summed flow, a minute without liquidations is a real zero, unlike a level.
+ * Bars before the first point are null (nothing was read there).
+ */
+export function sumToBars(
+  points: readonly PanePoint[],
+  bars: readonly { time: number }[],
+): Maybe[] {
+  const out: Maybe[] = new Array(bars.length).fill(null);
+  if (!points.length || !bars.length) return out;
+  const first = points[0].time;
+  let j = 0;
+  for (let i = 0; i < bars.length; i++) {
+    const end = i + 1 < bars.length ? bars[i + 1].time : Infinity;
+    if (end <= first) continue;
+    let sum = 0;
+    while (j < points.length && points[j].time < bars[i].time) j++;
+    while (j < points.length && points[j].time < end) sum += points[j++].value;
+    out[i] = sum;
+  }
+  return out;
+}
+
+/**
  * base − quote of two independently sampled step series: a point at every
  * instant either leg changes, from the first instant both are known.
  */
 export function stepDifference(a: readonly PanePoint[], b: readonly PanePoint[]): PanePoint[] {
-  const times = [...new Set([...a.map((p) => p.time), ...b.map((p) => p.time)])].sort((x, y) => x - y);
+  const times = [...new Set([...a.map((p) => p.time), ...b.map((p) => p.time)])].sort(
+    (x, y) => x - y,
+  );
   const out: PanePoint[] = [];
   let i = -1;
   let j = -1;
@@ -135,7 +165,11 @@ export function swapPerLotSeries(
   contractSize: number,
   dailyBars: readonly { time: number; close: number }[],
 ): { long: PanePoint[]; short: PanePoint[] } {
-  const steps = swap.map((p) => ({ time: utcMs(p.timeUtc), l: p.longAnnualPct, s: p.shortAnnualPct }));
+  const steps = swap.map((p) => ({
+    time: utcMs(p.timeUtc),
+    l: p.longAnnualPct,
+    s: p.shortAnnualPct,
+  }));
   const long: PanePoint[] = [];
   const short: PanePoint[] = [];
   let j = -1;
@@ -156,7 +190,14 @@ export type FundamentalPaneId =
   | 'swap-carry'
   | 'news-pressure'
   | 'economic-surprise'
-  | 'cot';
+  | 'cot'
+  // UA03: market panes (`market-panes.ts`), offered where their data can exist.
+  | 'funding-rate'
+  | 'open-interest'
+  | 'basis'
+  | 'liquidations'
+  | 'term-structure'
+  | 'funding-times';
 
 export interface FundamentalPaneInfo {
   id: FundamentalPaneId;
@@ -164,6 +205,8 @@ export interface FundamentalPaneInfo {
   available: boolean;
   endpoint: string | null;
   description: string;
+  /** The dialog's group: the FX panes, or the market (derivatives / futures / positioning) panes. */
+  group?: 'FX fundamentals' | 'Market data';
 }
 
 export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
@@ -173,8 +216,8 @@ export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
     available: true,
     endpoint: 'GET /fx-fundamentals/carry?symbol=',
     description:
-      'Base minus quote central-bank policy rate (percent), point in time: each step appears at the decision\'s ' +
-      'release, never earlier. Built from the economic calendar\'s rate decisions (Fed upper bound, ECB deposit ' +
+      "Base minus quote central-bank policy rate (percent), point in time: each step appears at the decision's " +
+      "release, never earlier. Built from the economic calendar's rate decisions (Fed upper bound, ECB deposit " +
       'rate, BoE, BoJ, RBA, BoC, RBNZ, SNB). Blank before the calendar covers both currencies.',
   },
   {
@@ -184,7 +227,7 @@ export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
     endpoint: 'GET /fx-fundamentals/carry?symbol=',
     description:
       'Overnight swap per standard lot (quote currency, long and short) from the policy-rate swap model: the ' +
-      'differential in force less the broker\'s markup, calibrated once against today\'s broker swap. Positive is ' +
+      "differential in force less the broker's markup, calibrated once against today's broker swap. Positive is " +
       'credited. Empty when the model cannot calibrate (no swap stored, swap-free quote, rate missing) — the reason is returned.',
   },
   {
@@ -193,7 +236,7 @@ export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
     available: true,
     endpoint: 'GET /news-intel/timeseries?currency=&hours=',
     description:
-      'Difference of the two currencies\' decay-weighted news pressure scores ([−1, +1] each, + = currency-bullish) ' +
+      "Difference of the two currencies' decay-weighted news pressure scores ([−1, +1] each, + = currency-bullish) " +
       'from the news-intelligence roll-ups (ADR-0024). History is capped at 30 days by the endpoint.',
   },
   {
@@ -202,7 +245,7 @@ export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
     available: true,
     endpoint: 'GET /fx-fundamentals/surprise-index?currency=&days=&halfLifeDays=',
     description:
-      'Per currency: each release\'s surprise (actual − consensus) in standard deviations of its own series\' ' +
+      "Per currency: each release's surprise (actual − consensus) in standard deviations of its own series' " +
       'prior surprises, signed for the currency, clamped to ±3σ and summed with exponential decay (30-day half-life ' +
       'by default). Forecasts recorded before 2026-08-28 have unknown provenance; pass preReleaseOnly for a strictly ' +
       'point-in-time index.',
@@ -210,10 +253,72 @@ export const FUNDAMENTAL_PANES: readonly FundamentalPaneInfo[] = [
   {
     id: 'cot',
     title: 'COT positioning',
-    available: false,
-    endpoint: null,
+    available: true,
+    group: 'Market data',
+    endpoint: 'POST /sentiment/cot/list',
     description:
-      'Not available: the engine has a COT table and an ingest endpoint, but no reports have been ingested (0 rows). ' +
-      'Nothing is drawn rather than a fabricated series.',
+      'CFTC Commitments of Traders: net non-commercial (speculative) positioning per weekly report, for each currency ' +
+      'of an FX pair or currency future (contracts). Reports are dated Tuesday and published Friday; a currency the ' +
+      'engine has not ingested draws nothing and says so.',
+  },
+  {
+    id: 'funding-rate',
+    title: 'Funding rate',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /md/crypto/derivatives?symbol=&sourceId=',
+    description:
+      "Crypto perpetuals: the venue's funding rate, percent per funding interval, per minute it was reported (the last " +
+      '28 days at most). Positive: longs pay shorts.',
+  },
+  {
+    id: 'open-interest',
+    title: 'Open interest',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /md/crypto/derivatives?symbol=&sourceId=',
+    description:
+      "Crypto perpetuals: open interest in the venue's unit, and its percent change over the window you set. Needs " +
+      'the engine to persist derivatives minutes.',
+  },
+  {
+    id: 'basis',
+    title: 'Basis / premium',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /md/crypto/derivatives · GET /md/basis',
+    description:
+      'Crypto perpetuals: (mark − index) / index, percent. FX majors: the CME future − spot basis in price (rolling ' +
+      'median of paired quotes), the last 7 days.',
+  },
+  {
+    id: 'liquidations',
+    title: 'Liquidations',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /md/crypto/derivatives?symbol=&sourceId=',
+    description:
+      'Crypto perpetuals: liquidated notional per bar in the quote currency — buy side (shorts closed) and sell side ' +
+      "(longs closed), summed from the venue's liquidation stream.",
+  },
+  {
+    id: 'funding-times',
+    title: 'Funding times',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /md/crypto/derivatives?symbol=&sourceId=',
+    description:
+      'Crypto perpetuals: a bar at each funding instant the venue reported (its own schedule — hourly on some venues, ' +
+      'every 8 hours on others), sized by the rate charged, percent per interval.',
+  },
+  {
+    id: 'term-structure',
+    title: 'Term structure (roll yield)',
+    available: true,
+    group: 'Market data',
+    endpoint: 'GET /futures/statistics?root= · GET /instrument-fundamentals/futures/{root}',
+    description:
+      "Futures: the front two contracts' settlements per trading date as an annualised roll yield, percent — " +
+      'positive in backwardation, negative in contango. Needs exchange settlement statistics for the root.',
   },
 ];
