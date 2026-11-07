@@ -9,6 +9,11 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
+import {
+  PF_SENSITIVITY_NO_LOSS,
+  fmtProfitFactor,
+  profitFactorTitle,
+} from '@shared/utils/metric-format';
 import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpErrorResponse } from '@angular/common/http';
@@ -511,7 +516,7 @@ const WINDOW_OPTIONS = [
           </div>
           <div class="kpi">
             <div class="kpi-label">Profit factor</div>
-            <div class="kpi-value">{{ r.aggregate.profitFactor | number: '1.2-2' }}</div>
+            <div class="kpi-value" [title]="pfTitle(r.aggregate.profitFactor)">{{ pf(r.aggregate.profitFactor) }}</div>
             <div class="kpi-sub">
               avg W {{ r.aggregate.avgWinPnL | currency: 'USD' }} / avg L
               {{ r.aggregate.avgLossPnL | currency: 'USD' }}
@@ -596,7 +601,7 @@ const WINDOW_OPTIONS = [
               </div>
               <div class="kpi kpi--optimal">
                 <div class="kpi-label">Profit factor</div>
-                <div class="kpi-value">{{ opt.profitFactor | number: '1.2-2' }}</div>
+                <div class="kpi-value" [title]="pfTitle(opt.profitFactor)">{{ pf(opt.profitFactor) }}</div>
                 <div class="kpi-sub">
                   avg W {{ opt.avgWinPnL | currency: 'USD' }} / avg L
                   {{ opt.avgLossPnL | currency: 'USD' }}
@@ -742,7 +747,7 @@ const WINDOW_OPTIONS = [
                       >
                         {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
                       </td>
-                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                      <td class="num" [title]="pfTitle(row.aggregate.profitFactor)">{{ pf(row.aggregate.profitFactor) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -792,7 +797,7 @@ const WINDOW_OPTIONS = [
                       >
                         {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
                       </td>
-                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                      <td class="num" [title]="pfTitle(row.aggregate.profitFactor)">{{ pf(row.aggregate.profitFactor) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -842,7 +847,7 @@ const WINDOW_OPTIONS = [
                       >
                         {{ row.aggregate.unrealizedPnL | currency: 'USD' : 'symbol' : '1.0-0' }}
                       </td>
-                      <td class="num">{{ row.aggregate.profitFactor | number: '1.2-2' }}</td>
+                      <td class="num" [title]="pfTitle(row.aggregate.profitFactor)">{{ pf(row.aggregate.profitFactor) }}</td>
                     </tr>
                   }
                 </tbody>
@@ -1339,7 +1344,7 @@ const WINDOW_OPTIONS = [
                         </td>
                         <td class="num">{{ p.winRatePct | number: '1.0-1' }}</td>
                         <td class="num">{{ p.walkable | number }}</td>
-                        <td class="num">{{ p.profitFactor | number: '1.2-2' }}</td>
+                        <td class="num" [title]="pfTitle(p.profitFactor)">{{ pf(p.profitFactor) }}</td>
                       </tr>
                     }
                   </tbody>
@@ -2367,6 +2372,12 @@ const WINDOW_OPTIONS = [
   ],
 })
 export class SignalSensitivityPageComponent implements OnInit {
+  /** Profit factor: this analysis writes 999 for "no losing trades" — shown as "∞", never as a ratio. */
+  protected readonly pf = (v: number | null | undefined): string =>
+    fmtProfitFactor(v, 2, true, PF_SENSITIVITY_NO_LOSS);
+  protected readonly pfTitle = (v: number | null | undefined): string =>
+    profitFactorTitle(v, PF_SENSITIVITY_NO_LOSS);
+
   private readonly svc = inject(SignalSensitivityService);
   private readonly route = inject(ActivatedRoute);
   private readonly riskProfilesSvc = inject(RiskProfilesService);
@@ -2909,7 +2920,7 @@ export class SignalSensitivityPageComponent implements OnInit {
             Win rate: ${fmt(a.winRatePct)}% (${a.winCount}/${a.lossCount})<br/>
             Realized: ${cur(a.realizedPnL)}<br/>
             Unrealized: ${cur(a.unrealizedPnL)}<br/>
-            Profit factor: ${fmt(a.profitFactor)}<br/>
+            Profit factor: ${this.pf(a.profitFactor)}<br/>
             Walkable: ${a.walkable} · Open: ${a.expiredCount}
           `;
         },
@@ -2956,7 +2967,9 @@ export class SignalSensitivityPageComponent implements OnInit {
             formatter: (params: any) => {
               const v = params.value[2] as number;
               if (this.heatmapMetric() === 'winRatePct') return v.toFixed(0) + '%';
-              if (this.heatmapMetric() === 'profitFactor') return v.toFixed(2);
+              // The colour value is capped at 5; the label shows the cell's own profit factor ("∞" = no losses).
+              if (this.heatmapMetric() === 'profitFactor')
+                return this.pf(r.heatmap[params.dataIndex]?.aggregate.profitFactor ?? v);
               return Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + 'k' : v.toFixed(0);
             },
             fontSize: 10,

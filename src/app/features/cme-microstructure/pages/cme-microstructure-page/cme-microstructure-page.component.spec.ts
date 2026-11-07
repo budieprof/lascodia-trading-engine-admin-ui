@@ -7,6 +7,7 @@ import { provideRouter } from '@angular/router';
 import { CmeMicrostructurePageComponent } from './cme-microstructure-page.component';
 import { RUNTIME_CONFIG } from '@core/config/runtime-config';
 import { declareSignalIo } from '@shared/testing/jit-signal-io';
+import { resolveJitResources } from '@shared/testing/jit-resources';
 import { PageHeaderComponent } from '@shared/components/page-header/page-header.component';
 import { MetricCardComponent } from '@shared/components/metric-card/metric-card.component';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
@@ -57,7 +58,9 @@ describe('CmeMicrostructurePageComponent', () => {
   let cmp: CmeMicrostructurePageComponent;
   let fixture: ComponentFixture<CmeMicrostructurePageComponent>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    // The page has a styleUrl: resolve it for the JIT runner (it was "not resolved" before fu-ui).
+    await resolveJitResources();
     TestBed.configureTestingModule({
       imports: [CmeMicrostructurePageComponent],
       providers: [
