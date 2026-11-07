@@ -3,6 +3,7 @@ import { ScriptStatusLineComponent } from '../../scripts/script-status-line.comp
 import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { DecimalPipe } from '@angular/common';
 import { CHART_PAGE } from './chart-page.token';
+import { legendDigitsFormat } from '../../indicators/study-format';
 import { ChartMarketChipsComponent } from '../../datafeed/chart-market-chips.component';
 
 /**
@@ -27,4 +28,6 @@ import { ChartMarketChipsComponent } from '../../datafeed/chart-market-chips.com
 })
 export class ChartLegendComponent {
   protected readonly page = inject(CHART_PAGE);
+  /** UA10: a study value's decimals — FX keeps `1.2-5`, other instruments their own. */
+  protected readonly digitsFormat = legendDigitsFormat;
 }
