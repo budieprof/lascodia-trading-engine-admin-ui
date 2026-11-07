@@ -267,6 +267,11 @@ interface ModeControl {
         flex-wrap: wrap;
         gap: 4px;
       }
+      /* The option in force is disabled (nothing to change to) but must not read as unavailable. */
+      .modes .btn.primary:disabled {
+        opacity: 1;
+        cursor: default;
+      }
       .study {
         display: flex;
         flex-wrap: wrap;
