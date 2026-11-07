@@ -15,6 +15,8 @@ import {
   FormFieldControlDirective,
 } from '@shared/components/form-field/form-field.component';
 
+import { backfillCandidates } from './backfill-eligibility';
+
 @Component({
   selector: 'app-paper-trading-page',
   standalone: true,
@@ -107,12 +109,23 @@ import {
             [control]="backfillForm.controls.strategyId"
           >
             <select appFormFieldControl formControlName="strategyId">
-              <option [ngValue]="null">Select a strategy…</option>
+              <option [ngValue]="null">
+                {{
+                  strategiesLoaded() && strategies().length === 0
+                    ? 'No approved strategy'
+                    : 'Select a strategy…'
+                }}
+              </option>
               @for (s of strategies(); track s.id) {
                 <option [ngValue]="s.id">{{ s.name }} ({{ s.symbol }} {{ s.timeframe }})</option>
               }
             </select>
           </app-form-field>
+          @if (listTruncated()) {
+            <p class="muted" data-testid="backfill-truncated">
+              Only the first {{ scanned() }} strategies were checked for approved ones.
+            </p>
+          }
           <button type="submit" class="btn btn-primary" [disabled]="busy() || backfillForm.invalid">
             @if (busy()) {
               <span class="spin"></span>
@@ -150,7 +163,11 @@ export class PaperTradingPageComponent implements OnInit {
   readonly busy = signal(false);
   readonly showConfirm = signal(false);
   readonly pendingValue = signal(false);
+  /** Approved strategies only — what the backfill is for (U06). */
   readonly strategies = signal<StrategyDto[]>([]);
+  readonly strategiesLoaded = signal(false);
+  readonly scanned = signal(0);
+  readonly listTruncated = signal(false);
 
   readonly backfillForm = this.fb.nonNullable.group({
     strategyId: [null as number | null, Validators.required],
@@ -160,8 +177,14 @@ export class PaperTradingPageComponent implements OnInit {
     this.service.getStatus().subscribe({
       error: () => this.notifications.error('Failed to load paper-trading status'),
     });
-    this.strategiesService.list({ currentPage: 1, itemCountPerPage: 200 }).subscribe((res) => {
-      this.strategies.set(res.data?.data ?? []);
+    // The list endpoint has no lifecycle filter: read a wide page and keep the Approved ones.
+    const pageSize = 500;
+    this.strategiesService.list({ currentPage: 1, itemCountPerPage: pageSize }).subscribe((res) => {
+      const rows = res.data?.data ?? [];
+      this.strategies.set(backfillCandidates(rows));
+      this.scanned.set(rows.length);
+      this.listTruncated.set((res.data?.pager?.totalItemCount ?? rows.length) > rows.length);
+      this.strategiesLoaded.set(true);
     });
   }
 

@@ -29,6 +29,13 @@ import {
 } from '@features/ea-instances/components/ea-trade-chart-modal/ea-trade-chart-modal.component';
 import { researchTradeSelection } from '@features/backtests/backtest-trade-chart';
 import type { EChartsOption } from 'echarts';
+import {
+  fmtFraction,
+  fmtProfitFactor,
+  fractionToPct,
+  isNoLossProfitFactor,
+} from '@shared/utils/metric-format';
+import { pooledOos } from './walk-forward-aggregates';
 
 // ── Window record ─────────────────────────────────────────────────────────
 // Mirrors WalkForwardWorker.WindowResult. PascalCase to match wire format.
@@ -135,16 +142,28 @@ interface WindowDerived extends WindowResult {
             format="number"
             [colorByValue]="true"
           />
+          <!-- Pooled over every fold's OOS trades (Σ wins ÷ Σ trades), not the mean of the
+               folds' rates: a 2-trade fold no longer weighs as much as a 200-trade one. -->
           <app-metric-card
-            label="Avg OOS Win Rate"
-            [value]="hasWindows() ? aggregates().avgWr : null"
+            label="OOS Win Rate (pooled)"
+            [value]="hasWindows() ? fractionToPct(aggregates().winRate) : null"
             format="percent"
+            caption="Σ wins ÷ Σ trades over all folds"
           />
           <app-metric-card
-            label="Avg OOS PF"
-            [value]="hasWindows() ? aggregates().avgPf : null"
+            [label]="
+              aggregates().profitFactorBasis === 'median'
+                ? 'OOS PF (median fold)'
+                : 'OOS PF (pooled)'
+            "
+            [value]="hasWindows() ? aggregates().profitFactor : null"
+            [displayValue]="hasWindows() ? pfDisplay() : null"
             format="number"
-            [colorByValue]="true"
+            [caption]="
+              aggregates().profitFactorBasis === 'median'
+                ? 'fold trade lists missing — median of fold PFs'
+                : 'Σ gross profit ÷ Σ gross loss'
+            "
           />
           <app-metric-card
             label="Total OOS Trades"
@@ -157,14 +176,14 @@ interface WindowDerived extends WindowResult {
           <!-- ── Score timeline ───────────────────────────────────────── -->
           <div class="charts-grid">
             <app-chart-card
-              title="OOS Health Score per Window"
-              subtitle="Annualised Sharpe over each out-of-sample slice — sign indicates bias"
+              title="OOS Sharpe per Window"
+              subtitle="Sharpe ratio of each out-of-sample slice (the run's OOS score is their mean)"
               [options]="scoreOptions()"
               height="320px"
             />
             <app-chart-card
               title="OOS Profit Factor per Window"
-              subtitle="Gross profit ÷ gross loss, by fold (1.0 break-even)"
+              subtitle="Gross profit ÷ gross loss, by fold (1.0 break-even; no bar = no losing trade)"
               [options]="pfOptions()"
               height="320px"
             />
@@ -391,7 +410,7 @@ interface WindowDerived extends WindowResult {
                     <th>#</th>
                     <th>In-Sample</th>
                     <th>Out-of-Sample</th>
-                    <th class="num">Score</th>
+                    <th class="num" title="OOS Sharpe ratio of the fold">Sharpe</th>
                     <th class="num">PF</th>
                     <th class="num">Win Rate</th>
                     <th class="num">Trades</th>
@@ -418,8 +437,19 @@ interface WindowDerived extends WindowResult {
                       >
                         {{ w.OosHealthScore | number: '1.2-2' }}
                       </td>
-                      <td class="num mono">{{ w.OosProfitFactor | number: '1.2-2' }}</td>
-                      <td class="num mono">{{ w.OosWinRate * 100 | number: '1.1-1' }}%</td>
+                      <td
+                        class="num mono"
+                        [title]="
+                          isNoLossProfitFactor(w.OosProfitFactor)
+                            ? 'No losing trade in this fold'
+                            : ''
+                        "
+                      >
+                        {{ fmtProfitFactor(w.OosProfitFactor, 2, w.OosTotalTrades > 0) }}
+                      </td>
+                      <td class="num mono">
+                        {{ w.OosTotalTrades > 0 ? fmtFraction(w.OosWinRate) : '—' }}
+                      </td>
                       <td class="num mono">{{ w.OosTotalTrades }}</td>
                     </tr>
                   }
@@ -1057,18 +1087,21 @@ export class WalkForwardDetailPageComponent implements OnInit {
 
   readonly hasWindows = computed(() => this.windows().length > 0);
 
-  readonly aggregates = computed(() => {
-    const w = this.windows();
-    if (!w.length) return { avgWr: 0, avgPf: 0, totalTrades: 0 };
-    const totalTrades = w.reduce((acc, x) => acc + x.OosTotalTrades, 0);
-    const wrSum = w.reduce((acc, x) => acc + x.OosWinRate, 0);
-    const pfSum = w.reduce((acc, x) => acc + x.OosProfitFactor, 0);
-    return {
-      avgWr: +((wrSum / w.length) * 100).toFixed(2),
-      avgPf: +(pfSum / w.length).toFixed(2),
-      totalTrades,
-    };
+  /** OOS win rate / PF pooled by trades over every fold (U05). */
+  readonly aggregates = computed(() => pooledOos(this.windows()));
+
+  /** "∞" for a pooled PF with no losing trade, "—" when it cannot be computed. */
+  readonly pfDisplay = computed<string | null>(() => {
+    const a = this.aggregates();
+    if (a.profitFactor == null) return '—';
+    if (!Number.isFinite(a.profitFactor)) return '∞';
+    return null;
   });
+
+  protected readonly fmtFraction = fmtFraction;
+  protected readonly fmtProfitFactor = fmtProfitFactor;
+  protected readonly fractionToPct = fractionToPct;
+  protected readonly isNoLossProfitFactor = isNoLossProfitFactor;
 
   readonly parameterKeys = computed<string[]>(() => {
     const w = this.windows();
@@ -1130,8 +1163,10 @@ export class WalkForwardDetailPageComponent implements OnInit {
       series: [
         {
           type: 'bar',
+          // A fold with no losing trade (9999 sentinel) has no finite PF: no bar, not a
+          // 9999-tall one that flattens every other fold.
           data: w.map((x) => ({
-            value: +x.OosProfitFactor.toFixed(2),
+            value: isNoLossProfitFactor(x.OosProfitFactor) ? null : +x.OosProfitFactor.toFixed(2),
             itemStyle: {
               color: x.OosProfitFactor >= 1 ? '#34C759' : '#FF3B30',
               borderRadius: [4, 4, 0, 0],
