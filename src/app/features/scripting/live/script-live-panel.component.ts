@@ -504,6 +504,9 @@ const STALE_MINUTES = 240;
           }
         </section>
 
+        <!-- BT-I3 / PE-I2: live fills vs the emulator, and a session reconciled with a backtest. -->
+        <app-script-parity-panel [strategyId]="strategyId()" [accountNames]="accountNames()" />
+
         <!-- U08 / U09: the session's trades against the backtest's expectation, rolling R, slippage. -->
         <app-live-vs-backtest-panel
           [strategyId]="strategyId()"
@@ -512,9 +515,6 @@ const STALE_MINUTES = 240;
           [lifecycleStage]="lifecycleStage()"
           [lifecycleStageEnteredAt]="lifecycleStageEnteredAt()"
         />
-
-        <!-- BT-I3 / PE-I2: live fills vs the emulator, and a session reconciled with a backtest. -->
-        <app-script-parity-panel [strategyId]="strategyId()" [accountNames]="accountNames()" />
 
         @if (hasReport()) {
           <app-strategy-report
