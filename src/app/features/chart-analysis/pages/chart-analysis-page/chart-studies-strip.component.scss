@@ -153,3 +153,13 @@
 :host-context(.chart-page.dock-side) .studies {
   grid-column: 1 / -1;
 }
+
+/* UA03/UA07: what a study is built from, or why its pane is empty — one muted line, truncated, full text on hover. */
+.study-note {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--tv-text-muted, #787b86);
+}

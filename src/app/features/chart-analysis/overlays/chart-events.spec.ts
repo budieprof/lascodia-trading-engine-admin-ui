@@ -18,6 +18,7 @@ import {
   type EventMark,
 } from './chart-events';
 import { ChartEventsService } from './chart-events.service';
+import { DerivativesDataService } from '../panels/derivatives-data.service';
 
 const H = 3_600_000;
 const NOW = Date.parse('2026-10-09T09:00:00Z');
@@ -148,6 +149,8 @@ describe('ChartEventsService — the pair’s events filtered on the engine (con
       providers: [
         { provide: EconomicEventsService, useValue: { list } },
         { provide: ApiService, useValue: { getEnvelope } },
+        // UA01: market events / funding are read only with a relevance (none here: economic releases only).
+        { provide: DerivativesDataService, useValue: {} },
         { provide: ChartEventsService, useClass: ChartEventsService },
       ],
     });
@@ -186,11 +189,15 @@ describe('ChartEventsService — the pair’s events filtered on the engine (con
       providers: [
         { provide: EconomicEventsService, useValue: { list: () => of({ status: false }) } },
         { provide: ApiService, useValue: {} },
+        // UA01: market events / funding are read only with a relevance (none here: economic releases only).
+        { provide: DerivativesDataService, useValue: {} },
         { provide: ChartEventsService, useClass: ChartEventsService },
       ],
     });
     const svc = runInInjectionContext(injector, () => injector.get(ChartEventsService));
-    expect(await svc.load({ currencies: [], minImpact: 'Low', from: 0, to: 1 })).toBeNull();
+    expect(await svc.load({ currencies: ['USD'], minImpact: 'Low', from: 0, to: 1 })).toBeNull();
+    // UA01: no currency concerns the symbol — nothing is asked for (an empty filter used to mean every currency).
+    expect(await svc.load({ currencies: [], minImpact: 'Low', from: 0, to: 1 })).toEqual([]);
   });
 
   it('reads the blackout window', async () => {

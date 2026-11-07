@@ -173,6 +173,8 @@
   <aside class="side-pane">
     <app-economic-calendar-pane
       [currencies]="page.calendarCurrencies()"
+      [scope]="page.eventRelevance().summary"
+      [marketKeys]="page.eventRelevance().marketKeys"
       [timeZone]="page.timezone()"
       [(allCurrencies)]="page.calendarAll"
       [(minImpact)]="page.calendarMinImpact"
