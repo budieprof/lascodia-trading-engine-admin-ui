@@ -3,7 +3,7 @@
   "version": "1.0",
   "source": "Generated from the engine's OpenAPI document (Swashbuckle) joined with each action's authorization and rate-limit metadata by ApiReferenceDocumentTests. Do not edit by hand.",
   "basePath": "/api/v1/lascodia-trading-engine",
-  "endpointCount": 1131,
+  "endpointCount": 1163,
   "groups": [
     {
       "name": "Admin auth",
@@ -8334,7 +8334,7 @@
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/instruments",
-          "summary": "Instruments, filtered by asset class (Fx|Future|Crypto|Equity|Index|Commodity|Etf), symbol/description search and exchange.",
+          "summary": "Instruments, filtered by asset class (Fx|Future|Crypto|Equity|Index|Commodity|Etf), symbol/description search, exchange, and `hasCandles` (only instruments with stored candles — the chart's symbol list).",
           "access": "permission",
           "permission": "marketdata.read",
           "rateLimit": "api",
@@ -8359,6 +8359,12 @@
             },
             {
               "name": "includeInactive",
+              "in": "query",
+              "required": false,
+              "type": "bool"
+            },
+            {
+              "name": "hasCandles",
               "in": "query",
               "required": false,
               "type": "bool"
@@ -11678,6 +11684,41 @@
         },
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/scheduled-events",
+          "summary": "Scheduled market events (earnings, EIA inventories, rig counts, expiries, OPEC+, promoted central-bank decisions) in a window — what the multi-asset blackout reads. key filters to one exposure key (`EQ:AAPL`, `WTI`, `IDX:US500`); omitted, every key. Window capped at 120 days.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "key",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<IReadOnlyList<ScheduledMarketEventRowView>>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/news-intel/status",
           "summary": "Ingestion and classification health: article counts by status and by source over the window. This is where a silently dead feed shows up — a source whose count went to zero looks exactly like a quiet news day in the pressure score alone.",
           "access": "permission",
@@ -11738,6 +11779,398 @@
             }
           ],
           "response": "ResponseData<IReadOnlyList<NewsCurrencySeriesView>>"
+        }
+      ]
+    },
+    {
+      "name": "News intel operations",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/coverage",
+          "summary": "Every active universe symbol in one read: legs (static / fitted, tracked / not), coverage, symbol bias, newest-item age, prompt verdict, and the blackout's calendar keys split into `legacyEnforced` (always refuse) vs `modeGoverned` + `scheduledEventKeys` (refuse only under `NewsBlackout:MultiAsset:Mode=Enforce`), with the mode in force. Pressure is computed ONCE per exposure key, not per symbol; a \"now\" read is cached `NewsIntel:Coverage:CacheSeconds` (60 s). asOf = a point-in-time read (never cached).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "assetClass",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "asOf",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            }
+          ],
+          "response": "ResponseData<NewsCoverageView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/exposures",
+          "summary": "The exposure lists and the search term each key is (or would be) polled with: tracked + recommended keys, each with its term and where it comes from — `config` (an operator override in `NewsIntel:Ingest:SearchQueriesJson`), `shipped-default` (the shipped map, no override), `built-in` (the exposure catalogue's term) or none.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [],
+          "response": "ResponseData<NewsExposureListView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/risk-observations",
+          "summary": "Recorded news-as-risk decisions (`NewsRiskObservation`): what the multi-asset blackout, the scheduled-event blackout, the breaking gate and stop widening decided — chiefly what an Observe-mode gate WOULD have refused. Window defaults to the last 7 days, capped at 90; `counts` covers the whole filtered window, `items` the newest take (≤ 500).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "kind",
+              "in": "query",
+              "required": false,
+              "type": "NewsRiskObservationKind?"
+            },
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "from",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "to",
+              "in": "query",
+              "required": false,
+              "type": "datetime?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<NewsRiskObservationPage>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/vendors/{name}/verify",
+          "summary": "Checks a paid vendor's stored key with ONE bounded call (10 s, at most once per 30 s per vendor) and answers ok / error plus a key fingerprint (first 8 hex of SHA-256) — never the key. With no key stored it answers `no-key` without calling anyone.",
+          "access": "permission",
+          "permission": "platform.engine.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "name",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<NewsVendorVerifyResult>"
+        }
+      ]
+    },
+    {
+      "name": "News intel understanding",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/eval/run",
+          "summary": "Starts an evaluation of the current classifier configuration over the gold set and returns the run row immediately; poll `GET eval/runs/{id}`. One run at a time. Costs one model call per `Classify:BatchSize` articles per pass on the classification provider.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "rateLimit": "api",
+          "parameters": [],
+          "body": "NewsEvalRunRequest",
+          "response": "ResponseData<NewsEvalRunView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/eval/runs",
+          "summary": "Recent evaluation runs, newest first.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<IReadOnlyList<NewsEvalRunView>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/eval/runs/{id}",
+          "summary": "One evaluation run with its full metric set.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<NewsEvalRunView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/gold",
+          "summary": "Gold labels with their article headline. Filter by provenance to work through the agent drafts still awaiting review.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "provenance",
+              "in": "query",
+              "required": false,
+              "type": "NewsGoldProvenance?"
+            },
+            {
+              "name": "exposure",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "skip",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<NewsGoldPage>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/gold/seed",
+          "summary": "Applies the shipped agent-drafted gold fixture (matched by article content hash). Idempotent and non-destructive: rows that already exist — including every operator review — are kept.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "rateLimit": "api",
+          "parameters": [],
+          "response": "ResponseData<NewsGoldSeedResult>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/gold/{id}",
+          "summary": "Edits a gold label. A change to any judged field makes it OperatorEdited; an edit that changes nothing is a confirmation.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "NewsGoldEditRequest",
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/gold/{id}/confirm",
+          "summary": "Confirms a gold label as it stands (provenance → OperatorConfirmed).",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<string>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/stories",
+          "summary": "Story clusters active in the window, newest first, optionally for one exposure key or state. The state shown is the LIVE reading; historical pressure re-derives lifecycle point-in-time.",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "hours",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            },
+            {
+              "name": "exposure",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "in": "query",
+              "required": false,
+              "type": "NewsStoryState?"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<IReadOnlyList<NewsStoryView>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/stories/{id}/articles",
+          "summary": "A story's member articles, origin first (first-seen, id order — the order novelty uses), each with its publisher, first-seen time, classification status and its labels (exposure key, category, direction, certainty, novelty). Capped at take (≤ 500).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<NewsStoryMembersView>"
+        }
+      ]
+    },
+    {
+      "name": "News intel validation",
+      "endpoints": [
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/event-study/run",
+          "summary": "Starts an event-study run over a bounded window (default the last `Study:WindowDays`, capped at `Study:MaxWindowDays`) and returns the run immediately; poll `GET event-study/runs/{id}`. One at a time. Read-only on news, candles and snapshots.",
+          "access": "permission",
+          "permission": "platform.data.manage",
+          "rateLimit": "api",
+          "parameters": [],
+          "body": "NewsEventStudyRunRequest",
+          "response": "ResponseData<NewsEventStudyRunView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/event-study/runs",
+          "summary": "Recent event-study runs, newest first (headline numbers only).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<IReadOnlyList<NewsEventStudyRunView>>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/event-study/runs/{id}",
+          "summary": "One run with its result rows (filter by `section` = group|term-ic, `dimension`, `horizon`).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "section",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "dimension",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "horizon",
+              "in": "query",
+              "required": false,
+              "type": "int?"
+            }
+          ],
+          "response": "ResponseData<NewsEventStudyRunView>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/event-study/{id}/recommended-weights",
+          "summary": "Recommended `NewsIntel:Weight:CategorySeverityJson` from a completed run (headline horizon, by category): fitted severity ∝ mean signed return (floored at 0), shrunk toward the current value by story-day clusters; categories below `Study:MinClusters` keep their current severity. NOT applied — the operator applies it through the normal config upsert (governance included).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "id",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<NewsSeverityRecommendation>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/news-intel/exposure-loadings",
+          "summary": "Fitted exposure loadings, newest fit first (optionally one symbol).",
+          "access": "permission",
+          "permission": "access.operator",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "symbol",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            },
+            {
+              "name": "take",
+              "in": "query",
+              "required": false,
+              "type": "int"
+            }
+          ],
+          "response": "ResponseData<IReadOnlyList<NewsExposureLoading>>"
         }
       ]
     },
@@ -12433,6 +12866,34 @@
       "endpoints": [
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/add-ons",
+          "summary": "Every add-on, offered or not, with what it grants.",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "rateLimit": "api",
+          "parameters": [],
+          "response": "ResponseData<List<AddOnDto>>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/add-ons/{slug}",
+          "summary": "Creates or changes an add-on and replaces what it grants.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "slug",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "body": "SaveAddOnCommand",
+          "response": "ResponseData<AddOnDto>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/platform/billing/invoices",
           "access": "permission",
           "permission": "platform.usage.read",
@@ -12586,6 +13047,41 @@
         },
         {
           "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/plans/{planId}/allowances",
+          "summary": "A plan's allowance per priced unit (null = unlimited).",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "planId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<Dictionary<string, decimal?>>"
+        },
+        {
+          "method": "PUT",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/plans/{planId}/allowances",
+          "summary": "Sets a plan's allowance per priced unit (null or absent = unlimited).",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "planId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "SetPlanAllowancesCommand",
+          "response": "ResponseData<Dictionary<string, decimal?>>"
+        },
+        {
+          "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/platform/billing/price-books",
           "access": "permission",
           "permission": "platform.usage.read",
@@ -12661,6 +13157,82 @@
             }
           ],
           "response": "ResponseData<PriceBookDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/tenants/{tenantId}/add-ons",
+          "summary": "Every add-on an organisation has held.",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "tenantId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "response": "ResponseData<List<TenantAddOnDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/tenants/{tenantId}/add-ons",
+          "summary": "Gives an organisation an add-on (until a date, or until ended).",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "tenantId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "GrantTenantAddOnBody",
+          "response": "ResponseData<TenantAddOnDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/tenants/{tenantId}/add-ons/{tenantAddOnId}/end",
+          "summary": "Ends an organisation's add-on now.",
+          "access": "permission",
+          "permission": "platform.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "tenantId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            },
+            {
+              "name": "tenantAddOnId",
+              "in": "path",
+              "required": true,
+              "type": "long"
+            }
+          ],
+          "body": "EndTenantAddOnBody",
+          "response": "ResponseData<TenantAddOnDto>"
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/platform/billing/unit-costs",
+          "summary": "What each priced unit (AI analysis, backtest, training run) cost the platform in a month, across organisations.",
+          "access": "permission",
+          "permission": "platform.usage.read",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "month",
+              "in": "query",
+              "required": false,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<UsageUnitCostReportDto>"
         },
         {
           "method": "GET",
@@ -18355,6 +18927,78 @@
       "name": "Tenant billing",
       "endpoints": [
         {
+          "method": "GET",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/add-ons",
+          "summary": "The organisation's plan, its card subscription (status, renewal, cancellation) and the plans it can buy.",
+          "access": "permission",
+          "permission": "tenant.billing.read",
+          "rateLimit": "api",
+          "parameters": [],
+          "response": "ResponseData<List<AddOnDto>>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/add-ons/paystack/confirm",
+          "summary": "Back from Paystack's page after paying for an add-on: `{reference}` → `{state, message}`.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "rateLimit": "api",
+          "parameters": [],
+          "body": "ConfirmAddOnPaystackCommand",
+          "response": "ResponseData<PaystackConfirmDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/add-ons/{slug}/checkout",
+          "summary": "Start paying for an add-on by card: `{url}` of the payment page. The add-on turns on when the payment is confirmed.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "slug",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/add-ons/{slug}/manage",
+          "summary": "Where to update the card or cancel a paid add-on: `{url}`.",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "slug",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<BillingRedirectDto>"
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/lascodia-trading-engine/tenant/billing/add-ons/{slug}/trial",
+          "summary": "Starts an add-on's free trial (once per organisation per add-on).",
+          "access": "permission",
+          "permission": "tenant.billing.manage",
+          "rateLimit": "api",
+          "parameters": [
+            {
+              "name": "slug",
+              "in": "path",
+              "required": true,
+              "type": "string"
+            }
+          ],
+          "response": "ResponseData<TenantAddOnDto>"
+        },
+        {
           "method": "POST",
           "path": "/api/v1/lascodia-trading-engine/tenant/billing/checkout",
           "summary": "Start paying for a plan by card: `{planSlug}` → `{url}` of a Stripe Checkout page. The plan changes when Stripe confirms the payment. Already subscribed → `-11` (use the portal); unknown or unpriced plan → `-14`; card payment unavailable → `-503`.",
@@ -18436,7 +19080,6 @@
         {
           "method": "GET",
           "path": "/api/v1/lascodia-trading-engine/tenant/billing/subscription",
-          "summary": "The organisation's plan, its card subscription (status, renewal, cancellation) and the plans it can buy.",
           "access": "permission",
           "permission": "tenant.billing.read",
           "rateLimit": "api",
