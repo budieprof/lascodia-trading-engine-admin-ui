@@ -12,6 +12,7 @@ import {
 
 import { ScriptLivePanelComponent } from './script-live-panel.component';
 import { ScriptParityPanelComponent } from './script-parity-panel.component';
+import { LiveVsBacktestPanelComponent } from './live-vs-backtest-panel.component';
 import { StrategyReportComponent } from '../report/strategy-report.component';
 import { normalizeStrategyReport, type ReportTrade } from '../report/strategy-report.model';
 import type { TradeOriginOf } from '../report/report-trades-columns';
@@ -59,6 +60,21 @@ class TradeChartModalStubComponent {
 class ParityPanelStubComponent {
   @Input() strategyId: number | null = null;
   @Input() accountNames: ReadonlyMap<string, string> = new Map();
+}
+
+/** U09 overlay: fetches on its own (its spec covers it); here only its wiring is checked. */
+@Component({
+  selector: 'app-live-vs-backtest-panel',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: '',
+})
+class LiveVsBacktestStubComponent {
+  @Input() strategyId: number | null = null;
+  @Input() trades: unknown[] = [];
+  @Input() divergences: unknown[] = [];
+  @Input() lifecycleStage: string | null = null;
+  @Input() lifecycleStageEnteredAt: string | null = null;
 }
 
 /** The report's List-of-trades rows, as the real report would emit them on a click. */
@@ -181,10 +197,20 @@ describe('ScriptLivePanelComponent', () => {
     });
     TestBed.overrideComponent(ScriptLivePanelComponent, {
       remove: {
-        imports: [StrategyReportComponent, EATradeChartModalComponent, ScriptParityPanelComponent],
+        imports: [
+          StrategyReportComponent,
+          EATradeChartModalComponent,
+          ScriptParityPanelComponent,
+          LiveVsBacktestPanelComponent,
+        ],
       },
       add: {
-        imports: [ReportStubComponent, TradeChartModalStubComponent, ParityPanelStubComponent],
+        imports: [
+          ReportStubComponent,
+          TradeChartModalStubComponent,
+          ParityPanelStubComponent,
+          LiveVsBacktestStubComponent,
+        ],
       },
     });
     http = TestBed.inject(HttpTestingController);

@@ -819,6 +819,8 @@ function runHasTrades(row: { totalTrades?: number | null } | null | undefined): 
                 [strategyId]="strategyId"
                 [symbol]="strategy()?.symbol ?? null"
                 [timeframe]="strategy()?.timeframe ?? null"
+                [lifecycleStage]="strategy()?.lifecycleStage ?? null"
+                [lifecycleStageEnteredAt]="strategy()?.lifecycleStageEnteredAt ?? null"
               />
             } @loading (minimum 150ms) {
               <p class="muted small"><span class="spinner"></span> Loading the live session…</p>
