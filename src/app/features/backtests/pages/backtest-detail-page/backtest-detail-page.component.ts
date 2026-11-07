@@ -41,6 +41,8 @@ import { ScriptRunChartComponent } from '@features/scripting/backtest/script-run
 import { MonteCarloPanelComponent } from '@features/scripting/research/monte-carlo-panel.component';
 import { fileStamp, saveBlob } from '@features/scripting/shared/download';
 import { RunManifestCardComponent } from '../../components/run-manifest-card/run-manifest-card.component';
+import { EvidenceInvalidatedComponent } from '../../components/evidence-invalidated/evidence-invalidated.component';
+import { queueSourceHint, queueSourceLabel } from '../../run-provenance';
 import {
   hasExcursions,
   legacyTradeRows,
@@ -165,6 +167,7 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
     DatePipe,
     DecimalPipe,
     RunManifestCardComponent,
+    EvidenceInvalidatedComponent,
   ],
   template: `
     <div class="page">
@@ -173,10 +176,18 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         subtitle="Trade-level analysis derived from the run's full execution log"
       >
         <app-status-badge [status]="backtest()?.status ?? 'Queued'" type="run" />
+        <app-evidence-invalidated [run]="backtest()" />
+        @if (backtest()?.queueSource; as qs) {
+          <span class="queue-source" data-testid="queue-source" [attr.title]="queueSourceHint(qs)"
+            >Queued by: {{ queueSourceLabel(qs) }}</span
+          >
+        }
         <button type="button" class="btn-back" (click)="goBack()">← Back to list</button>
       </app-page-header>
 
       @if (backtest(); as bt) {
+        <app-evidence-invalidated [run]="bt" mode="notice" />
+
         <!-- How a script run modelled the engine's high-impact news blackout
              (resultJson.script.newsBlackout). Older runs carry none and show nothing. -->
         @if (newsBlackout(); as nb) {
@@ -898,6 +909,11 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
         flex-direction: column;
         gap: var(--space-4);
       }
+      .queue-source {
+        font-size: var(--text-xs);
+        color: var(--text-secondary);
+        white-space: nowrap;
+      }
       .btn-back {
         margin-left: auto;
         height: 32px;
@@ -1379,6 +1395,9 @@ const MIN_TRADES_FOR_SAMPLE_CHARTS = 3;
   ],
 })
 export class BacktestDetailPageComponent implements OnInit {
+  protected readonly queueSourceLabel = queueSourceLabel;
+  protected readonly queueSourceHint = queueSourceHint;
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private backtestsService = inject(BacktestsService);

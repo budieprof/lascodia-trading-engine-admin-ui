@@ -36,9 +36,8 @@ import {
   stageTimeline,
   type Expectation,
 } from './live-vs-backtest';
-
-/** Queue sources whose runs are not the strategy's own evidence (parity reconciles, lab reproductions). */
-const NOT_EVIDENCE = new Set(['Parity', 'LabReproduction']);
+// Runs that are not the strategy's own evidence (parity reconciles, lab reproductions, invalidated runs) are skipped.
+import { isEvidenceRun } from '@features/backtests/run-provenance';
 
 /**
  * U08 (live) + U09 — a script strategy's paper and live trades against its backtest: cumulative R vs the backtest's
@@ -272,7 +271,7 @@ export class LiveVsBacktestPanelComponent {
       );
       if (id !== this.strategyId()) return;
       const run = (res?.data?.data ?? []).find(
-        (r) => !NOT_EVIDENCE.has(String(r.queueSource ?? '')),
+        (r) => isEvidenceRun(r),
       );
       if (!run) {
         this.expectationNote.set('No completed backtest of this strategy to compare with.');

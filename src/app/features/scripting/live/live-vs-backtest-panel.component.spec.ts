@@ -73,7 +73,7 @@ describe('LiveVsBacktestPanelComponent (U08 live / U09)', () => {
       ok({
         pager: {},
         data: [
-          { id: 11, queueSource: 'Parity', resultJson: '{}', fromDate: 'a', toDate: 'b' },
+          { id: 11, queueSource: 'ParityReconcile', resultJson: '{}', fromDate: 'a', toDate: 'b' },
           {
             id: 10,
             queueSource: 'Manual',
