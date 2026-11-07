@@ -116,4 +116,6 @@ export interface SessionStateDto {
   nextOpen: string | null;
   nextClose: string | null;
   tradingDay: string | null;
+  /** The calendar the answer came from (engine `InstrumentSessionStateDto`). */
+  calendarCode?: string | null;
 }

@@ -5,7 +5,8 @@ import type { ScaleMode } from '../../chart/chart-host.component';
 import type { Bar } from '../../datafeed/candle-feed.service';
 import type { TvResolution } from '../../datafeed/resolution';
 import type { TradingCalendar } from '../../datafeed/session-calendar';
-import { liveTick } from '../../datafeed/live-tick';
+import type { BarGrid } from '../../datafeed/aggregate';
+import { liveTick, tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { GO_TO_DATE_PAGES, PAGE_BARS } from './chart-page.config';
 import { scaleAfterCompare } from './chart-page.helpers';
 
@@ -24,6 +25,8 @@ export interface ChartCompareStateDeps {
   oldestBarTime: () => number | undefined;
   now: () => number;
   calendarOf: (symbol: string) => TradingCalendar | null;
+  /** Where a symbol's stored bars fall (UD02); absent = the UTC epoch grid. */
+  gridOf?: (symbol: string) => BarGrid;
   scaleMode: () => WritableSignal<ScaleMode>;
   notify: (text: string) => void;
 }
@@ -115,18 +118,20 @@ export class ChartCompareState {
   }
 
   /** A live price of a compare study's other symbol moves its bars (CC-13). */
-  applyTick(tick: { symbol?: string; bid?: number; price?: number; ask?: number }): void {
+  applyTick(tick: PriceTick): void {
     const symbol = tick?.symbol?.toUpperCase();
-    const price = tick?.bid ?? tick?.price ?? tick?.ask;
-    if (!symbol || typeof price !== 'number') return;
+    // UD05: a venue's last trade / mid, MT5's bid (`tickPrice`).
+    const price = tickPrice(tick);
+    if (!symbol || price === null) return;
     const held = this.bars()[symbol];
     if (!held?.length) return;
     const next = liveTick(
       held,
       price,
-      this.deps.now(),
+      tickTimeMs(tick, this.deps.now()),
       this.deps.resolution(),
       this.deps.calendarOf(symbol),
+      this.deps.gridOf?.(symbol),
     );
     if (next) this.bars.update((all) => ({ ...all, [symbol]: next }));
   }

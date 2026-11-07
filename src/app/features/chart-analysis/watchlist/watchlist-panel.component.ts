@@ -2,6 +2,8 @@ import { PairIconComponent, pairFlags, pairName } from './pair-icon.component';
 import { InstrumentIconComponent } from './instrument-icon.component';
 import { resolveInstrument } from '@core/instruments/instrument-math';
 import { shortDistanceLabel } from '../datafeed/instrument-facts';
+import { MarketSessionService } from '../datafeed/market-session.service';
+import { instrumentDescription, instrumentKindLabel } from '../datafeed/symbol-chips';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -175,6 +177,8 @@ export class WatchlistPanelComponent {
   private readonly alerts = inject(ChartAlertsService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly dialogs = inject(ScriptDialogService);
+  /** UD08: the engine's session state for the symbol in the details block (not the FX quote's flag). */
+  private readonly marketSessions = inject(MarketSessionService);
 
   readonly pairs = input<CurrencyPairDto[]>([]);
   readonly current = input.required<string>();
@@ -402,21 +406,31 @@ export class WatchlistPanelComponent {
     const q = this.quotes()[sym];
     const row = this.row({ symbol: sym, flag: null }, '', q);
     const legs = this.legs(sym);
+    // Bug b1-2: a non-FX symbol is named and classed by its INSTRUMENT (AAPL read "U.S. Dollar / U.S. Dollar ·
+    // Forex", BTC-USD "CFD"); FX keeps the pair's currency names.
+    const inst = resolveInstrument(sym);
+    const fx = inst.assetClass === 'Fx';
+    const session = this.marketSessions.stateOf(sym);
     return {
       symbol: sym,
-      name: pair
-        ? (pairName(pair.baseCurrency, pair.quoteCurrency) ??
-          `${pair.baseCurrency} / ${pair.quoteCurrency}`)
-        : sym,
+      name:
+        !fx
+          ? (instrumentDescription(inst) ?? sym)
+          : pair
+            ? (pairName(pair.baseCurrency, pair.quoteCurrency) ??
+              `${pair.baseCurrency} / ${pair.quoteCurrency}`)
+            : sym,
       // From the engine's asset class (SP-11): it said "Forex" for gold and indices alike.
-      kind: instrumentKind(pair?.assetClass, sym, legs),
+      kind: fx ? instrumentKind(pair?.assetClass, sym, legs) : instrumentKindLabel(inst),
       quote: pair?.quoteCurrency ?? '',
       row,
       high: q?.dayHigh ?? null,
       low: q?.dayLow ?? null,
       open: q?.dayOpen ?? null,
       prevClose: q?.prevClose ?? null,
-      marketOpen: q?.marketOpen ?? false,
+      // UD08: the engine's session state when it has one for the symbol (calendar-true: crypto 24x7, NYSE hours);
+      // else the quote's flag as before.
+      marketOpen: session ? session.open : (q?.marketOpen ?? false),
       tradingDay: q?.tradingDay ?? null,
       /** "22:22 GMT+1": when the quote was last updated, in the viewer's zone (TradingView's "Last update at"). */
       asOf: q?.asOfUtc ? lastUpdateLabel(q.asOfUtc) : null,
@@ -424,6 +438,10 @@ export class WatchlistPanelComponent {
   });
 
   constructor() {
+    effect((onCleanup) => {
+      const sym = this.current().toUpperCase();
+      onCleanup(untracked(() => this.marketSessions.watch(sym)));
+    });
     void this.store.load();
     this.alerts.ensureLoaded();
     this.destroyRef.onDestroy(() => {

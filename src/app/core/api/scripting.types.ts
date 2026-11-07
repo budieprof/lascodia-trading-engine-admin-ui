@@ -403,6 +403,11 @@ export interface ChartBarsRequest {
    * M1). Engine default: true when `to` is null.
    */
   includeForming?: boolean | null;
+  /**
+   * Contract C1: corporate-action adjustment for equities / ETFs — `none`, `splits` (the engine's default there) or
+   * `all` (splits and cash dividends). Ignored for other asset classes.
+   */
+  adjustment?: 'none' | 'splits' | 'all' | null;
 }
 
 export interface ChartBarDto {
@@ -428,6 +433,21 @@ export interface ChartBarsResult {
   timeZone: string;
   /** Ascending by `t`. */
   bars: ChartBarDto[];
+  // ── Contract C1 (multi-asset chart program): what the bars ARE. Optional: an engine before C1 sends none. ──
+  /** Fx | Future | Crypto | Equity | Index | Commodity | Etf; null when unknown. */
+  assetClass?: string | null;
+  /** The instrument's trading calendar (`fx-24x5`, `nyse`, `cme-globex`, `crypto-24x7`, …). */
+  calendarCode?: string | null;
+  /** What `v` counts: MT5 tick volume, the crypto base asset, contracts, shares; null = unknown. */
+  volumeKind?: 'tick' | 'base' | 'contracts' | 'shares' | null;
+  /** The candle source the bars were read from. */
+  source?: { id: string; kind: 'mt5' | 'venue' | string; label: string } | null;
+  /** Holidays, early closes and (intraday timeframes) daily breaks inside the returned window. */
+  closures?: { fromMs: number; toMs: number; kind: string; label: string }[] | null;
+  /** Unix ms of the oldest stored bar of this symbol/timeframe; null when none. */
+  firstBarMs?: number | null;
+  /** The corporate-action adjustment applied: `none`, `splits` or `all`. */
+  adjustment?: string | null;
 }
 
 // ── §7 Libraries — scripting/libraries ────────────────────────────────────

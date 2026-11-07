@@ -3,13 +3,24 @@
   <aside class="side-pane">
     <div class="tree-title">{{ page.details().symbol }} details</div>
     <dl class="detail-list">
-      <dt>Pair</dt>
-      <dd>{{ page.details().base }} / {{ page.details().quote }}</dd>
+      @if (page.details().isFx) {
+        <dt>Pair</dt>
+        <dd>{{ page.details().base }} / {{ page.details().quote }}</dd>
+      } @else {
+        <dt>Instrument</dt>
+        <dd data-testid="details-instrument">
+          {{ page.details().description }} <span class="muted">· {{ page.details().kind }}</span>
+        </dd>
+      }
+      <dt>Market</dt>
+      <dd data-testid="details-market" [title]="page.marketView().title">
+        {{ page.marketView().label }}
+      </dd>
       <dt>Digits</dt>
       <dd>{{ page.details().digits }}</dd>
       <dt>Contract</dt>
       <dd>{{ page.details().contractSize ?? '—' }}</dd>
-      <dt>Lots</dt>
+      <dt>{{ page.details().isFx ? 'Lots' : page.details().quantityUnit }}</dt>
       <dd>
         {{ page.details().minLot ?? '—' }} – {{ page.details().maxLot ?? '—' }} step
         {{ page.details().lotStep ?? '—' }}

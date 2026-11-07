@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
-import { ChartIconComponent } from '../../icons/chart-icon.component';
 import { ScriptStatusLineComponent } from '../../scripts/script-status-line.component';
 import { MeasuredBottomDirective } from '../../chart/measured-bottom.directive';
 import { DecimalPipe } from '@angular/common';
 import { CHART_PAGE } from './chart-page.token';
+import { ChartMarketChipsComponent } from '../../datafeed/chart-market-chips.component';
 
 /**
  * The floating legend over the main chart: symbol, interval and market status, OHLC, indicator values, compare series and overlay scripts' status lines.
@@ -16,7 +16,12 @@ import { CHART_PAGE } from './chart-page.token';
 @Component({
   selector: 'app-chart-legend',
   changeDetection: ChangeDetectionStrategy.Eager,
-  imports: [ChartIconComponent, ScriptStatusLineComponent, MeasuredBottomDirective, DecimalPipe],
+  imports: [
+    ScriptStatusLineComponent,
+    MeasuredBottomDirective,
+    DecimalPipe,
+    ChartMarketChipsComponent,
+  ],
   templateUrl: './chart-legend.component.html',
   styleUrl: './chart-legend.component.scss',
 })

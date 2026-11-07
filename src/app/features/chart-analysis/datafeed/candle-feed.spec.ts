@@ -399,6 +399,29 @@ describe('CandleFeedService — the stored grid reports failures (CC-14) and for
     });
   });
 
+  it('UD03: two loads that do not touch never answer the gap between them', async () => {
+    const page = (iso: string[]) =>
+      of({ status: true, data: { data: iso.map((t) => row(t, 1, 1, 1, 1)) } });
+    const listCandles = vi
+      .fn()
+      .mockReturnValueOnce(page(['2026-03-02T11:00:00Z', '2026-03-02T10:00:00Z']))
+      .mockReturnValueOnce(page(['2026-10-07T13:00:00Z', '2026-10-07T12:00:00Z']))
+      .mockReturnValue(page(['2026-06-01T10:00:00Z', '2026-06-01T09:00:00Z']));
+    const feed = storedFeed(listCandles);
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-03-02T11:00:00Z'), 2);
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-10-07T13:00:00Z'), 2);
+    // March is held: served without asking.
+    await feed.getBars('EURUSD', '60', 0, Date.parse('2026-03-02T11:00:00Z'), 2);
+    expect(listCandles).toHaveBeenCalledTimes(2);
+    // June lies between the two loads: asked for, not answered from the cache with March's bars.
+    const june = await feed.getBars('EURUSD', '60', 0, Date.parse('2026-06-01T10:00:00Z'), 2);
+    expect(listCandles).toHaveBeenCalledTimes(3);
+    expect(june.bars.map((b) => new Date(b.time).toISOString())).toEqual([
+      '2026-06-01T09:00:00.000Z',
+      '2026-06-01T10:00:00.000Z',
+    ]);
+  });
+
   it(`keeps at most ${MAX_CACHED_SERIES} series, dropping the least recently used`, async () => {
     const listCandles = vi.fn(() =>
       of({ status: true, data: { data: [row('2026-10-07T13:00:00Z', 1, 1, 1, 1)] } }),
@@ -418,67 +441,100 @@ describe('CandleFeedService — the stored grid reports failures (CC-14) and for
   });
 });
 
-describe('CandleFeedService — sessions from the instrument calendar (multi-asset WS2/WS7)', () => {
-  it('a non-FX instrument takes its calendar session; FX keeps the one chart-bars reports', async () => {
-    const { setInstrumentCatalogue, normaliseInstrument } =
-      await import('@core/instruments/instrument-math');
-    const { InstrumentsService } = await import('@core/instruments/instruments.service');
-    setInstrumentCatalogue([
-      normaliseInstrument({
-        symbol: 'ESZ6',
-        assetClass: 'Future',
-        tickSize: 0.25,
-        priceDecimals: 2,
-        tradingCalendarCode: 'cme-globex',
-      })!,
-      normaliseInstrument({
-        symbol: 'EURUSD',
-        assetClass: 'Fx',
-        tickSize: 0.00001,
-        priceDecimals: 5,
-        tradingCalendarCode: 'fx-24x5',
-      })!,
-    ]);
-    const calendar = vi.fn(async (code: string) =>
-      code === 'cme-globex'
-        ? {
-            code,
-            timeZone: 'America/Chicago',
-            is24x7: false,
-            holidays: [],
-            sessions: [0, 1, 2, 3, 4].map((day) => ({
-              day,
-              open: '17:00',
-              close: '16:00',
-              kind: 'Regular' as const,
-            })),
-          }
-        : null,
-    );
-    const chartBars = vi.fn(() =>
-      of({ session: '1700-1700:23456', timeZone: 'America/New_York', bars: [], forming: null }),
-    );
+describe('CandleFeedService — the engine is the session authority (UD01) + C1 facts', () => {
+  function sessionFeed(chartBars: ReturnType<typeof vi.fn>) {
     const injector = Injector.create({
       providers: [
         { provide: ScriptingService, useValue: { chartBars } },
         { provide: MarketDataService, useValue: { listCandles: vi.fn() } },
-        { provide: InstrumentsService, useValue: { calendar } },
         { provide: CandleFeedService, useClass: CandleFeedService },
       ],
     });
-    const feed = runInInjectionContext(injector, () => injector.get(CandleFeedService));
+    return runInInjectionContext(injector, () => injector.get(CandleFeedService));
+  }
+
+  it('keeps the session chart-bars reports — a CFD’s pre/post periods too — and never asks for a calendar', async () => {
+    const chartBars = vi.fn(() =>
+      of({
+        session: '0400-0930,0930-1600,1600-2000:23456',
+        timeZone: 'America/New_York',
+        bars: [],
+      }),
+    );
+    const feed = sessionFeed(chartBars);
+    await feed.learnSession('AAPL');
+    expect(feed.sessionOf('AAPL')).toEqual({
+      session: '0400-0930,0930-1600,1600-2000:23456',
+      timeZone: 'America/New_York',
+    });
+    // FX exactly as before: no closures key, no facts from an engine before C1.
+    chartBars.mockReturnValueOnce(
+      of({ session: '1700-1700:23456', timeZone: 'America/New_York', bars: [] }),
+    );
     await feed.learnSession('EURUSD');
     expect(feed.sessionOf('EURUSD')).toEqual({
       session: '1700-1700:23456',
       timeZone: 'America/New_York',
     });
-    await feed.learnSession('ESZ6');
-    await Promise.resolve();
-    expect(feed.sessionOf('ESZ6')).toEqual({
-      session: '1700-1600:23456',
-      timeZone: 'America/Chicago',
+    expect(feed.factsOf('EURUSD')).toBeNull();
+  });
+
+  it('remembers C1 closures (merged across answers), facts and the first stored bar', async () => {
+    const thanksgiving = { fromMs: 1, toMs: 2, kind: 'Holiday', label: 'Thanksgiving' };
+    const early = { fromMs: 5, toMs: 6, kind: 'EarlyClose', label: 'Early close' };
+    const answer = (closures: unknown[]) =>
+      of({
+        session: '0930-1600:23456',
+        timeZone: 'America/New_York',
+        bars: [],
+        assetClass: 'Equity',
+        calendarCode: 'nyse',
+        volumeKind: 'shares',
+        source: { id: 'mt5', kind: 'mt5', label: 'MT5 broker feed' },
+        closures,
+        firstBarMs: 1_700_000_000_000,
+        adjustment: 'splits',
+      });
+    const chartBars = vi.fn(() => answer([thanksgiving]));
+    const feed = sessionFeed(chartBars);
+    await feed.learnSession('AAPL');
+    expect(feed.sessionOf('AAPL')?.closures).toEqual([thanksgiving]);
+    expect(feed.factsOf('AAPL')).toEqual({
+      assetClass: 'Equity',
+      calendarCode: 'nyse',
+      volumeKind: 'shares',
+      source: { id: 'mt5', kind: 'mt5', label: 'MT5 broker feed' },
+      adjustment: 'splits',
     });
-    expect(calendar).toHaveBeenCalledTimes(1);
-    setInstrumentCatalogue([]);
+    expect(feed.firstBarOf('AAPL', '1D')).toBe(1_700_000_000_000);
+    expect(feed.firstBarOf('AAPL', '60')).toBeUndefined();
+    chartBars.mockReturnValueOnce(answer([thanksgiving, early]));
+    await feed.sessionTail('AAPL', '240', Date.now() - 3_600_000);
+    expect(feed.sessionOf('AAPL')?.closures).toEqual([thanksgiving, early]);
+    expect(feed.firstBarOf('AAPL', '240')).toBe(1_700_000_000_000);
+  });
+
+  it('UD02: stores-grid buckets on the calendar only for a venue source off the UTC clock', async () => {
+    const answer = (session: string, timeZone: string, kind: string) =>
+      of({
+        session,
+        timeZone,
+        bars: [],
+        source: { id: kind === 'mt5' ? 'mt5' : 'eq-x', kind, label: 'x' },
+      });
+    const chartBars = vi.fn((req: ChartBarsRequest) =>
+      req.symbol === 'AAPL'
+        ? answer('0400-0930,0930-1600,1600-2000:23456', 'America/New_York', 'mt5')
+        : req.symbol === 'MSFT'
+          ? answer('0930-1600:23456', 'America/New_York', 'venue')
+          : answer('0000-0000:1234567', 'Etc/UTC', 'venue'),
+    );
+    const feed = sessionFeed(chartBars);
+    expect(feed.gridOf('MSFT').kind).toBe('epoch'); // not known yet
+    await Promise.all(['AAPL', 'MSFT', 'BTC-USD'].map((s) => feed.learnSession(s)));
+    expect(feed.gridOf('AAPL').kind).toBe('epoch'); // MT5 CFD: the broker's hourly bars
+    expect(feed.gridOf('MSFT').kind).toBe('session');
+    expect(feed.gridOf('BTC-USD').kind).toBe('epoch'); // 24x7 = the UTC clock
+    expect(feed.gridOf('EURUSD').kind).toBe('epoch');
   });
 });

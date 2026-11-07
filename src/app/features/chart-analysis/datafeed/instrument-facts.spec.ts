@@ -5,6 +5,7 @@ import { fxPipSize, normaliseInstrument, setInstrumentCatalogue } from '@core/in
 import type { InstrumentDto } from '@core/instruments/instrument.types';
 import {
   decimalsOfPrices,
+  distanceIn,
   exactStepDecimals,
   formatFactsDistance,
   formatFactsQuantity,
@@ -119,21 +120,36 @@ describe('instrumentFacts — FX pinned (UI01)', () => {
     expect(f.distanceLabel).toBe('pips');
   });
 
-  it('XAUUSD (Commodity CFD): 2 decimals, the point, 100 oz per lot', () => {
+  it('XAUUSD (Commodity CFD): 2 decimals, measured in its tick, 100 oz per lot', () => {
     const f = instrumentFacts('XAUUSD', { pair: XAUUSD });
     expect(f.precision).toBe(2);
     expect(f.distanceUnit).toBe(10 ** -2);
-    expect(f.distanceLabel).toBe('points');
+    expect(f.distanceLabel).toBe('ticks');
+    expect(f.distanceLabelOne).toBe('tick');
     expect(f.valuePerPrice).toBe(100);
     expect(f.route.kind).toBe('mt5');
   });
 
   it('a pair without an asset class takes the catalogue / symbol class, not a blind FX pip', () => {
-    // XAUUSD at 3 decimals: the FX rule would make the "pip" 0.01; it is a commodity, measured in points.
+    // XAUUSD at 3 decimals: the FX rule would make the "pip" 0.01; it is a commodity, measured in its tick.
     const f = instrumentFacts('XAUUSD', { pair: { ...XAUUSD, decimalPlaces: 3, assetClass: null } });
     expect(f.assetClass).toBe('Commodity');
     expect(f.distanceUnit).toBeCloseTo(0.001, 12);
-    expect(f.distanceLabel).toBe('points');
+    expect(f.distanceLabel).toBe('ticks');
+  });
+
+  it('index CFDs in index points, equity CFDs in their currency — never MT5 points (browser check b1)', () => {
+    // US500 legend read "+2.76 / +276.0 points"; AAPL "+22.0 points" for a 0.22 move.
+    const us500 = instrumentFacts('US500', { pair: pair({ symbol: 'US500', decimalPlaces: 2, assetClass: 'Index', baseCurrency: 'USD', quoteCurrency: 'USD' }) });
+    expect(us500.distanceUnit).toBe(1);
+    expect([us500.distanceLabel, us500.distanceLabelOne]).toEqual(['points', 'point']);
+    expect(distanceIn(us500, 2.76)).toBeCloseTo(2.76, 12);
+    const aapl = instrumentFacts('AAPL', { pair: pair({ symbol: 'AAPL', decimalPlaces: 2, assetClass: 'Equity', baseCurrency: 'USD', quoteCurrency: 'USD' }) });
+    expect(aapl.distanceUnit).toBe(1);
+    expect(aapl.distanceLabel).toBe('USD');
+    expect(formatFactsDistance(aapl, 0.22, 2)).toBe('0.22 USD');
+    // FX untouched.
+    expect(instrumentFacts('EURUSD', { pair: EURUSD }).distanceLabel).toBe('pips');
   });
 
   it('FX replay money is exactly diff × lots × 100 000', () => {
@@ -235,7 +251,7 @@ describe('pairDistanceUnit (UI08: replaces symbol-info pipSizeFor)', () => {
     expect(pairDistanceUnit({ symbol: 'USDJPY', decimalPlaces: 3, assetClass: 'FxMajor' })).toBeCloseTo(0.01, 12);
     expect(pairDistanceUnit({ symbol: 'EURUSD', decimalPlaces: 5 })).toBeCloseTo(0.0001, 12);
     expect(pairDistanceUnit({ symbol: 'XAUUSD', decimalPlaces: 3, assetClass: null })).toBeCloseTo(0.001, 12);
-    expect(pairDistanceUnit({ symbol: 'US500', decimalPlaces: 1, assetClass: 'Index' })).toBeCloseTo(0.1, 12);
+    expect(pairDistanceUnit({ symbol: 'US500', decimalPlaces: 1, assetClass: 'Index' })).toBe(1);
   });
 });
 

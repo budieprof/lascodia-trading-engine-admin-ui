@@ -1,10 +1,10 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, inject, signal, untracked } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { MarketDataService } from '@core/services/market-data.service';
 import { ScriptingService } from '@core/services/scripting.service';
 import type { CandleDto } from '@core/api/api.types';
 import type { ChartBarDto, ChartBarsResult } from '@core/api/scripting.types';
-import { aggregateCandles } from './aggregate';
+import { aggregateCandles, EPOCH_GRID, type BarGrid } from './aggregate';
 import {
   isSessionResolution,
   resolutionSource,
@@ -12,10 +12,16 @@ import {
   type TvResolution,
 } from './resolution';
 import { MAX_CHART_BARS, asBar, tailCount } from './session-bars';
-import type { SessionSpec } from './session-calendar';
-import { InstrumentsService } from '@core/instruments/instruments.service';
-import { resolveInstrument } from '@core/instruments/instrument-math';
-import { pineSessionFromCalendar } from '@core/instruments/calendar-session';
+import { addCoverage, coverageOf, serveFromCache, type Coverage } from './bar-cache';
+import { TradingCalendar, type SessionClosure, type SessionSpec } from './session-calendar';
+import {
+  isVenueSource,
+  mergeClosures,
+  readChartFacts,
+  readClosures,
+  readFirstBarMs,
+  type SymbolFacts,
+} from './chart-facts';
 
 /** One bar in TradingView's shape. `time` is the bar's open, in ms. */
 export interface Bar {
@@ -47,6 +53,26 @@ export interface BarsResult {
   bars: Bar[];
   /** True when the range holds no data AND none is expected further back. */
   noData: boolean;
+}
+
+/** One cached series: its bars and the spans they cover completely (UD03, `bar-cache.ts`). */
+interface CachedSeries {
+  bars: Bar[];
+  spans: Coverage[];
+}
+
+/**
+ * What a session-grid answer covers: up to `toMs` (a live answer: up to its newest CLOSED bar — the forming one is
+ * never served from the cache), from its oldest bar or, when it came back short of `count`, from the start of history.
+ */
+function sessionCoverage(
+  bars: readonly SessionBar[],
+  toMs: number,
+  live: boolean,
+  count: number,
+): Coverage | null {
+  const closed = live ? bars.filter((b) => !b.forming) : bars;
+  return coverageOf(closed, { toMs, live, reachedStart: bars.length < count });
 }
 
 /** Hard ceiling on rows per request, so a wide window can't ask for millions. */
@@ -92,7 +118,7 @@ export class CandleFeedService {
   private readonly scripting = inject(ScriptingService);
 
   /**
-   * Cache of ascending bars per `symbol|resolution`.
+   * Cache of ascending bars per `symbol|resolution|source` ({@link key}).
    *
    * Scroll-back re-asks for windows it has already seen, so without this the
    * chart refetches the same thousands of rows every time the operator drags
@@ -100,28 +126,49 @@ export class CandleFeedService {
    * their aggregated form — aggregating a long M15 range into `30` on every
    * pan is the other half of the same cost.
    */
-  private readonly cache = new Map<string, Bar[]>();
+  private readonly cache = new Map<string, CachedSeries>();
 
+  /**
+   * `symbol|resolution|source`: the candle source the engine reads the symbol's bars from (C1 `source.id`, once an
+   * answer said it) is part of the series' identity (UD07) — when the engine pins another source (MT5 → a venue, one
+   * venue → another), bars cached from the old one are never served as the new one's.
+   */
   private key(symbol: string, resolution: TvResolution): string {
-    return `${symbol}|${resolution}`;
+    const source = untracked(() => this.factsOf(symbol)?.source?.id ?? '');
+    const adjustment = this.adjustments.get(symbol.toUpperCase());
+    return `${symbol}|${resolution}|${source}${adjustment ? `|${adjustment}` : ''}`;
+  }
+
+  /** UD11: the corporate-action adjustment asked for per symbol (equities / ETFs); absent = the engine's default. */
+  private readonly adjustments = new Map<string, 'none' | 'splits' | 'all'>();
+
+  /** Ask chart-bars for `symbol`'s bars with `adjustment` (null: the engine's default). Callers reload after. */
+  setAdjustment(symbol: string, adjustment: 'none' | 'splits' | 'all' | null): void {
+    const key = symbol.toUpperCase();
+    if (adjustment) this.adjustments.set(key, adjustment);
+    else this.adjustments.delete(key);
+  }
+
+  /** The adjustment asked for `symbol`, or null for the engine's default. */
+  adjustmentOf(symbol: string): 'none' | 'splits' | 'all' | null {
+    return this.adjustments.get(symbol.toUpperCase()) ?? null;
   }
 
   /**
-   * Each symbol's session as the engine reported it with its chart bars (`session`, `timeZone`):
-   * the trading days its day-based studies count in (`TradingCalendar`). A signal, so a chart that
-   * learns it after drawing recomputes them. A symbol whose session never came stays out, and
-   * counts UTC days.
+   * Each symbol's session as the engine reported it with its chart bars (`session`, `timeZone`, and C1 `closures`):
+   * the trading days its day-based studies count in (`TradingCalendar`). A signal, so a chart that learns it after
+   * drawing recomputes them. A symbol whose session never came stays out, and counts UTC days.
+   *
+   * The engine is the ONLY authority (multi-asset chart program UD01): the session it lays the bars out on — FX's
+   * 17:00 New York day, a CFD's exchange hours with pre/post-market (C6), a venue instrument's calendar — with the
+   * holidays, early closes and breaks of the windows it answered for. The client used to replace it with a session it
+   * derived from `GET calendars/{code}` (one open-close pair, no holidays, no pre/post): deleted, not layered.
    */
   private readonly sessions = signal<ReadonlyMap<string, SessionSpec>>(new Map());
-  /** The instrument catalogue + calendars (multi-asset WS2/WS7); optional so bare test injectors need not provide it. */
-  private readonly instruments = inject(InstrumentsService, { optional: true });
-  /**
-   * Sessions taken from a NON-FX instrument's trading calendar (`GET calendars/{code}`), by symbol: they win over the
-   * session `scripting/chart-bars` reports. FX keeps chart-bars' session (`1700-1700:23456` New York — what `fx-24x5`
-   * converts to as well), so FX charts are unchanged whether or not the engine serves calendars.
-   */
-  private readonly calendarSpecs = new Map<string, SessionSpec>();
-  private readonly calendarAsked = new Set<string>();
+  /** C1 facts per symbol (asset class, calendar, volume kind, source, adjustment), from the newest chart-bars answer. */
+  private readonly factsState = signal<ReadonlyMap<string, SymbolFacts>>(new Map());
+  /** C1 `firstBarMs` per `SYMBOL|resolution` (the oldest stored bar), from chart-bars answers. */
+  private readonly firstBars = signal<ReadonlyMap<string, number | null>>(new Map());
 
   /** {@link learnSession} requests in flight, by symbol. */
   private readonly learning = new Map<string, Promise<SessionSpec | null>>();
@@ -129,6 +176,46 @@ export class CandleFeedService {
   /** `symbol`'s session, once the engine has reported it; null until then (or if it has none). */
   sessionOf(symbol: string): SessionSpec | null {
     return this.sessions().get(symbol.toUpperCase()) ?? null;
+  }
+
+  /** `symbol`'s C1 facts, once a chart-bars answer carried them; null until then (or from an engine before C1). */
+  factsOf(symbol: string): SymbolFacts | null {
+    return this.factsState().get(symbol.toUpperCase()) ?? null;
+  }
+
+  /**
+   * The oldest stored bar of `symbol` at `resolution` (C1 `firstBarMs`): a number once known, null when the engine said
+   * it has none, undefined while not known.
+   */
+  firstBarOf(symbol: string, resolution: TvResolution): number | null | undefined {
+    const map = this.firstBars();
+    const key = `${symbol.toUpperCase()}|${resolution}`;
+    return map.has(key) ? map.get(key)! : undefined;
+  }
+
+  /** Calendars built for {@link gridOf}, by session identity. */
+  private readonly gridCalendars = new Map<string, TradingCalendar>();
+
+  /**
+   * Where `symbol`'s stored bars fall (UD02, {@link BarGrid}): its session's periods for a VENUE instrument whose
+   * session is not the UTC clock (the engine builds those bars on the calendar — 1h from 09:30 on NYSE), else the UTC
+   * epoch grid: every MT5 symbol (FX unchanged), crypto's 24x7, and any symbol whose source or session is not known yet.
+   * Reads signals: a `computed` follows the answer that teaches it.
+   */
+  gridOf(symbol: string): BarGrid {
+    const facts = this.factsOf(symbol);
+    const spec = this.sessionOf(symbol);
+    if (!facts || !spec || !isVenueSource(facts.source)) return EPOCH_GRID;
+    if (/^0000-0000(:1234567)?$/.test(spec.session) && /^(etc\/)?utc$/i.test(spec.timeZone))
+      return EPOCH_GRID;
+    const key = `${spec.session}|${spec.timeZone}|${spec.closures?.length ?? 0}`;
+    let calendar = this.gridCalendars.get(key);
+    if (!calendar) {
+      calendar = new TradingCalendar(spec);
+      if (this.gridCalendars.size > 32) this.gridCalendars.clear();
+      this.gridCalendars.set(key, calendar);
+    }
+    return { kind: 'session', calendar };
   }
 
   /**
@@ -139,7 +226,6 @@ export class CandleFeedService {
    */
   learnSession(symbol: string): Promise<SessionSpec | null> {
     const key = symbol.toUpperCase();
-    this.askCalendar(key);
     const known = this.sessionOf(key);
     if (known) return Promise.resolve(known);
     let pending = this.learning.get(key);
@@ -147,7 +233,7 @@ export class CandleFeedService {
       pending = firstValueFrom(
         this.scripting.chartBars({ symbol: key, timeframe: '1D', count: 1, includeForming: false }),
       )
-        .then((res) => this.recordSession(key, res))
+        .then((res) => this.recordSession(key, res, '1D'))
         .catch(() => null)
         .finally(() => this.learning.delete(key));
       this.learning.set(key, pending);
@@ -155,45 +241,45 @@ export class CandleFeedService {
     return pending;
   }
 
-  /** Keep the session a `scripting/chart-bars` answer reports for `symbol`. */
+  /** Keep what a `scripting/chart-bars` answer reports for `symbol`: its session + closures, and its C1 facts. */
   private recordSession(
     symbol: string,
-    res: Pick<ChartBarsResult, 'session' | 'timeZone'>,
+    res: Pick<ChartBarsResult, 'session' | 'timeZone'> & Partial<ChartBarsResult>,
+    resolution?: TvResolution,
   ): SessionSpec | null {
+    const key = symbol.toUpperCase();
+    this.recordFacts(key, res, resolution);
     const session = typeof res?.session === 'string' ? res.session.trim() : '';
     if (!session) return null;
-    const key = symbol.toUpperCase();
-    this.askCalendar(key);
-    const fromCalendar = this.calendarSpecs.get(key);
-    if (fromCalendar) return fromCalendar;
     const zone = typeof res.timeZone === 'string' ? res.timeZone.trim() : '';
     const timeZone = zone || 'Etc/UTC';
     const held = this.sessions().get(key);
-    if (held?.session === session && held.timeZone === timeZone) return held;
-    const spec: SessionSpec = { session, timeZone };
+    const sameLayout = held?.session === session && held.timeZone === timeZone;
+    const closures: SessionClosure[] = mergeClosures(
+      sameLayout ? (held?.closures ?? []) : [],
+      readClosures(res),
+    );
+    if (sameLayout && (held?.closures?.length ?? 0) === closures.length) return held!;
+    const spec: SessionSpec = closures.length
+      ? { session, timeZone, closures }
+      : { session, timeZone };
     this.sessions.update((m) => new Map(m).set(key, spec));
     return spec;
   }
 
-  /**
-   * For a non-FX instrument with a trading calendar, ask the engine for it once (per page life; a calendar it does not
-   * serve is asked again on the next symbol switch) and, when it answers, use its session for the symbol's trading days.
-   */
-  private askCalendar(key: string): void {
-    if (!this.instruments || this.calendarAsked.has(key)) return;
-    const inst = resolveInstrument(key);
-    const code = inst.tradingCalendarCode;
-    if (inst.assetClass === 'Fx' || !code) return;
-    this.calendarAsked.add(key);
-    void this.instruments.calendar(code).then((cal) => {
-      const spec = pineSessionFromCalendar(cal);
-      if (!spec) {
-        this.calendarAsked.delete(key);
-        return;
-      }
-      this.calendarSpecs.set(key, spec);
-      this.sessions.update((m) => new Map(m).set(key, spec));
-    });
+  private recordFacts(key: string, res: Partial<ChartBarsResult>, resolution?: TvResolution): void {
+    const facts = readChartFacts(res);
+    if (facts) {
+      const held = this.factsState().get(key);
+      if (!held || JSON.stringify(held) !== JSON.stringify(facts))
+        this.factsState.update((m) => new Map(m).set(key, facts));
+    }
+    if (resolution && 'firstBarMs' in (res ?? {})) {
+      const k = `${key}|${resolution}`;
+      const first = readFirstBarMs(res);
+      if (this.firstBars().get(k) !== first || !this.firstBars().has(k))
+        this.firstBars.update((m) => new Map(m).set(k, first));
+    }
   }
 
   /** Drop cached bars. Call when the symbol's data is known to have changed. */
@@ -203,7 +289,9 @@ export class CandleFeedService {
       return;
     }
     if (resolution) {
-      this.cache.delete(this.key(symbol, resolution));
+      for (const k of [...this.cache.keys()]) {
+        if (k.startsWith(`${symbol}|${resolution}|`)) this.cache.delete(k);
+      }
       return;
     }
     for (const k of [...this.cache.keys()]) {
@@ -267,9 +355,9 @@ export class CandleFeedService {
     const src = resolutionSource(resolution);
     if (!src || src.kind !== 'stored') return { bars: [], noData: true };
 
-    const cached = this.cached(symbol, resolution);
-    const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
+    const servedFromCache = this.fromCache(symbol, resolution, fromMs, toMs, countBack);
     if (servedFromCache) return { bars: servedFromCache, noData: false };
+    const live = toMs >= Date.now() - LIVE_EDGE_MS;
 
     // Over-fetch by the aggregation factor: 10 thirty-minute bars need 20 M15
     // ones, and asking for 10 would render a chart half as long.
@@ -294,10 +382,22 @@ export class CandleFeedService {
     if (!res?.status || !res.data)
       throw new Error(res?.message || 'the engine refused the candle request');
 
-    const bars = normaliseRows(res.data.data ?? [], resolution);
+    const page = res.data.data ?? [];
+    const bars = normaliseRows(page, resolution, this.gridOf(symbol));
     if (bars.length === 0) return { bars: [], noData: true };
 
-    this.mergeIntoCache(symbol, resolution, bars);
+    this.mergeIntoCache(
+      symbol,
+      resolution,
+      bars,
+      coverageOf(bars, {
+        toMs,
+        live,
+        reachedStart: page.length < rows,
+        // A fold's oldest bucket may lack the source rows before the page (30m from one M15).
+        oldestPartial: src.aggregate !== 1,
+      }),
+    );
 
     const windowed = bars.filter((b) => b.time >= fromMs && b.time <= toMs);
     // An empty window with bars present means the request reached past the
@@ -320,21 +420,16 @@ export class CandleFeedService {
   ): Promise<BarsResult> {
     const live = toMs >= Date.now() - LIVE_EDGE_MS;
     if (!live) {
-      const cached = this.cached(symbol, resolution);
-      const servedFromCache = this.sliceCache(cached, fromMs, toMs, countBack);
+      const servedFromCache = this.fromCache(symbol, resolution, fromMs, toMs, countBack);
       if (servedFromCache) return { bars: servedFromCache, noData: false };
     }
 
-    const fetched = await this.fetchSession(
-      symbol,
-      resolution,
-      live ? null : toMs + 1,
-      Math.min(MAX_CHART_BARS, Math.max(1, Math.round(countBack))),
-    );
+    const count = Math.min(MAX_CHART_BARS, Math.max(1, Math.round(countBack)));
+    const fetched = await this.fetchSession(symbol, resolution, live ? null : toMs + 1, count);
     const bars = fetched.map(asBar);
     if (bars.length === 0) return { bars: [], noData: true };
 
-    this.mergeIntoCache(symbol, resolution, bars);
+    this.mergeIntoCache(symbol, resolution, bars, sessionCoverage(fetched, toMs, live, count));
 
     // A live window is "up to now" on the engine's clock: a period it opened is not cut off for
     // starting after a browser clock that runs behind.
@@ -361,7 +456,13 @@ export class CandleFeedService {
       null,
       tailCount(resolution, sinceMs, Date.now()),
     ).catch(() => null);
-    if (bars?.length) this.mergeIntoCache(symbol, resolution, bars.map(asBar));
+    if (bars?.length)
+      this.mergeIntoCache(
+        symbol,
+        resolution,
+        bars.map(asBar),
+        sessionCoverage(bars, Date.now(), true, Number.POSITIVE_INFINITY),
+      );
     return bars;
   }
 
@@ -382,40 +483,39 @@ export class CandleFeedService {
         to,
         count,
         includeForming: to === null,
+        ...(this.adjustmentOf(symbol) ? { adjustment: this.adjustmentOf(symbol) } : {}),
       }),
     );
-    this.recordSession(symbol, res);
+    this.recordSession(symbol, res, resolution);
     return res.bars.map(toSessionBar);
   }
 
-  /**
-   * Serve from cache only when the cache demonstrably covers the request: it
-   * holds a bar at or before `fromMs` (so we know we are not missing older
-   * data) and enough bars in the window. Anything less falls through to a
-   * fetch, because a partially-filled window renders as a chart that simply
-   * stops.
-   */
-  private sliceCache(cached: Bar[], fromMs: number, toMs: number, countBack: number): Bar[] | null {
-    if (cached.length === 0) return null;
-    if (cached[0].time > fromMs) return null;
-    const windowed = cached.filter((b) => b.time >= fromMs && b.time <= toMs);
-    return windowed.length >= Math.min(countBack, 1) && windowed.length > 0 ? windowed : null;
+  /** The cached answer to a window, when one span of the cache covers it with no gap ({@link serveFromCache}). */
+  private fromCache(
+    symbol: string,
+    resolution: TvResolution,
+    fromMs: number,
+    toMs: number,
+    countBack: number,
+  ): Bar[] | null {
+    const held = this.cached(symbol, resolution);
+    return held ? serveFromCache(held.bars, held.spans, fromMs, toMs, countBack) : null;
   }
 
   /** A series' cached bars, marked as just used (CC-24). */
-  private cached(symbol: string, resolution: TvResolution): Bar[] {
+  private cached(symbol: string, resolution: TvResolution): CachedSeries | null {
     const k = this.key(symbol, resolution);
-    const bars = this.cache.get(k);
-    if (!bars) return [];
+    const held = this.cache.get(k);
+    if (!held) return null;
     this.cache.delete(k);
-    this.cache.set(k, bars);
-    return bars;
+    this.cache.set(k, held);
+    return held;
   }
 
-  /** Keep `bars` for a series as its most recently used, dropping the least recently used past the cap. */
-  private store(k: string, bars: Bar[]): void {
+  /** Keep a series as the most recently used, dropping the least recently used past the cap. */
+  private store(k: string, series: CachedSeries): void {
     this.cache.delete(k);
-    this.cache.set(k, bars);
+    this.cache.set(k, series);
     while (this.cache.size > MAX_CACHED_SERIES) {
       const oldest = this.cache.keys().next().value;
       if (oldest === undefined) break;
@@ -428,22 +528,27 @@ export class CandleFeedService {
     return this.cache.size;
   }
 
-  private mergeIntoCache(symbol: string, resolution: TvResolution, incoming: Bar[]): void {
+  private mergeIntoCache(
+    symbol: string,
+    resolution: TvResolution,
+    incoming: Bar[],
+    covered: Coverage | null,
+  ): void {
     const k = this.key(symbol, resolution);
     const existing = this.cache.get(k);
-    if (!existing || existing.length === 0) {
-      this.store(k, incoming);
+    if (!existing || existing.bars.length === 0) {
+      this.store(k, { bars: incoming, spans: addCoverage([], covered) });
       return;
     }
     const byTime = new Map<number, Bar>();
-    for (const b of existing) byTime.set(b.time, b);
+    for (const b of existing.bars) byTime.set(b.time, b);
     // Incoming wins: a re-fetched bar is fresher than a cached one, which
     // matters for the most recent bar while it is still forming.
     for (const b of incoming) byTime.set(b.time, b);
-    this.store(
-      k,
-      [...byTime.values()].sort((a, b) => a.time - b.time),
-    );
+    this.store(k, {
+      bars: [...byTime.values()].sort((a, b) => a.time - b.time),
+      spans: addCoverage(existing.spans, covered),
+    });
   }
 }
 
@@ -457,10 +562,14 @@ export class CandleFeedService {
  * folding a descending page does not throw — it silently inverts every candle.
  * That is a wrong chart, not a broken one, which is far worse.
  */
-export function normaliseRows(rows: CandleDto[], resolution: TvResolution): Bar[] {
+export function normaliseRows(
+  rows: CandleDto[],
+  resolution: TvResolution,
+  grid: BarGrid = EPOCH_GRID,
+): Bar[] {
   const ascending = rows.slice().sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
   if (ascending.length === 0) return [];
-  return aggregateCandles(ascending, resolution)
+  return aggregateCandles(ascending, resolution, grid)
     .map(toBar)
     .filter((b) => Number.isFinite(b.time));
 }
