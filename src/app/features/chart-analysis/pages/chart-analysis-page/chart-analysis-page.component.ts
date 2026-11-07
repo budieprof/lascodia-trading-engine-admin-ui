@@ -2,6 +2,7 @@ import {
   consolidatedId,
   consolidatedSubset,
   isConsolidatedId,
+  type MdSource,
 } from '@core/realtime/marketdata.types';
 import {
   ChangeDetectionStrategy,
@@ -414,6 +415,8 @@ import {
 } from '../../drawings/model';
 import { appStorage } from '@core/storage/app-storage';
 import { OrderFlowFeed } from '../../orderflow/orderflow-feed';
+import { footprintRowChoices } from '../../orderflow/tick-flow';
+import { sourceCarries } from '../../orderflow/flow-source';
 import type { OrderBookSnapshot } from '../../panels/side/chart-panels.types';
 import { bookToSnapshot } from '../../orderflow/stream-depth';
 import { footprintRowsFromTape } from '../../replay/tick-replay';
@@ -1685,14 +1688,12 @@ export class ChartAnalysisPageComponent {
   setHeatmapOpacity(value: number): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, heatmapOpacity: value }));
   }
-  /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height in MT5 points. */
-  readonly footprintRowChoices = [
-    { label: 'Auto rows', points: null, hint: 'About ten rows across a typical visible bar' },
-    { label: '1 pt', points: 1, hint: 'One MT5 point per row (0.1 pip on a 5-digit pair)' },
-    { label: '2 pt', points: 2, hint: 'Two points per row' },
-    { label: '5 pt', points: 5, hint: 'Five points per row' },
-    { label: '10 pt', points: 10, hint: 'Ten points per row (1 pip on a 5-digit pair)' },
-  ];
+  /** Footprint rows: adaptive (about ten rows a typical bar) or a fixed height — MT5 points, else instrument ticks (UF02). */
+  readonly footprintRowUnit = computed<'points' | 'ticks'>(() => {
+    const f = this.facts();
+    return !f.resolving && f.origin !== 'pair' && f.tickSize > 0 ? 'ticks' : 'points';
+  });
+  readonly footprintRowChoices = computed(() => footprintRowChoices(this.footprintRowUnit()));
   setFootprintRows(points: number | null): void {
     this.orderFlow.update((s) => restoredOrderFlow({ ...s, footprintRowPoints: points }));
   }
@@ -1719,6 +1720,7 @@ export class ChartAnalysisPageComponent {
     precision: () => this.precision(),
     pipSize: () => this.pipSize(),
     now: () => this.serverClock.now(),
+    facts: () => this.facts(),
     tickFootprint: (from, to) => {
       const tick = this.replay.tick;
       if (!tick || this.replay.tickHead() === null || !tick.tape) return null;
@@ -1931,9 +1933,13 @@ export class ChartAnalysisPageComponent {
       history: (req) => this.mdApi.history(req),
       symbol: () => this.symbol(),
       // The consolidated book has no tick tape: tick replay then reads the automatic source.
-      sourceId: () => {
+      sourceId: (): string | null => {
         const s = this.orderFlow().sourceId;
-        return isConsolidatedId(s) ? null : s;
+        if (isConsolidatedId(s)) return null;
+        // UF07: a picked source that does not carry this symbol (a crypto exchange on an FX chart) → automatic.
+        const list: readonly MdSource[] = this.orderFlowFeed.mdSources() ?? [];
+        const src = list.find((x) => x.sourceId === s);
+        return src && !sourceCarries(src, this.symbol()) ? null : s;
       },
       now: () => this.serverClock.now(),
     },

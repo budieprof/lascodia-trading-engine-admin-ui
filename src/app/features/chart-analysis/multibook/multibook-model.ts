@@ -1,3 +1,4 @@
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import type {
   MdConsolidatedLevelWire,
   MdConsolidatedSourceWire,
@@ -7,8 +8,9 @@ import type {
 /**
  * The multibook (engine `ConsolidatedBookService`, hub source `consolidated`) as the panel draws it — pure, so the
  * arithmetic is tested without Angular. Prices are spot-equivalent (inverted futures flipped, futures basis-adjusted),
- * sizes are BASE-CURRENCY UNITS (the engine converts lots/contracts; a source whose unit cannot be converted shows its
- * price with no size — never a guess). A per-source toggle filters the entitled sources client-side: the engine sends
+ * sizes are BASE-CURRENCY UNITS (the engine converts lots / contracts × contract size; units, coins and shares are
+ * already base units — a crypto exchange's book is in coins; a source whose unit cannot be converted shows its price
+ * with no size — never a guess). Nothing here rescales a size: the engine's numbers are summed as they are. A per-source toggle filters the entitled sources client-side: the engine sends
  * every source's share of every level, so turning one off needs no new subscription.
  */
 
@@ -323,4 +325,21 @@ export function stateLabel(state: string): string {
     default:
       return state;
   }
+}
+
+/**
+ * UF06: the words for the panel's numbers. Sizes are base-currency units — for a crypto / exchange-traded symbol that is
+ * its base coin (`BTC`). Price distances are in the engine's `point`: 10^-digits on an MT5 symbol (`pts`), the
+ * instrument's tick on a venue symbol (the engine snaps venue books to the instrument tick, EF05) — `ticks`.
+ */
+export interface MultibookUnits {
+  size: string;
+  point: string;
+}
+
+export function multibookUnits(f: Pick<InstrumentFacts, 'resolving' | 'origin' | 'instrument'> | null | undefined): MultibookUnits {
+  const venue = !!f && !f.resolving && f.origin !== 'pair';
+  if (!venue) return { size: 'base-currency units', point: 'pts' };
+  const base = f.instrument.baseCurrency?.trim();
+  return { size: base ? base.toUpperCase() : 'base units', point: 'ticks' };
 }

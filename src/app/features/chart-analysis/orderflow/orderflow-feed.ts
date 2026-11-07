@@ -20,7 +20,6 @@ import { CmeFlowFeed, cmeBarsAsTickBars, cmeFootprintRows } from './cme-flow';
 import type { CmeFlowLayerModel } from './cme-flow-primitive';
 import { CmeSpotService } from '@core/realtime/cme-spot.service';
 import { cmeSpotLabel, futuresSymbolOf } from '@core/realtime/cme-spot';
-import type { MdSourceSymbol } from '@core/realtime/marketdata.types';
 import type { TradeBubblesModel } from './trade-bubbles-primitive';
 import type { Bar } from '../datafeed/candle-feed.service';
 import { resolutionMs, type TvResolution } from '../datafeed/resolution';
@@ -58,12 +57,23 @@ import {
   footprintCells,
   footprintRowPoints,
   formatRowSize,
+  formatRowTicks,
   medianBarRange,
   liquidityPulled,
   tickBarsRequest,
   barEnd,
 } from './tick-flow';
 import { entitlementRefusalMessage } from '@core/market-data/entitlement-refusal';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
+import { coverageNote, cvdTitle, flowOrigin, flowUnitWord, footprintCaption } from './flow-labels';
+import {
+  cryptoFlowLabel,
+  formatFlowVolume,
+  realFlowSource,
+  realFlowUnit,
+  sourceCarries,
+  type RealFlowSource,
+} from './flow-source';
 
 /** Styles whose bars are built from price, not time: no time-keyed flow can be laid on them. */
 export const PRICE_BASED_STYLES: ReadonlySet<string> = new Set([
@@ -102,6 +112,11 @@ export interface OrderFlowFeedDeps {
    * head exactly); null outside tick replay.
    */
   tickFootprint?: (fromUtc: number, toUtc: number) => FootprintRowDto[] | null;
+  /**
+   * The symbol's instrument facts (ui-instrument): tick size, asset class, base coin, pinned candle source. Absent or
+   * still resolving: the feed behaves as before (MT5 points, FX words).
+   */
+  facts?: () => InstrumentFacts | null;
 }
 
 let gpuProbe: boolean | null = null;
@@ -130,7 +145,11 @@ interface FlowFetched {
   endUtc: number;
   /** The newest bar the chart held then. */
   lastBarUtc: number;
+  /** Footprint row height: MT5 points, or instrument ticks when `rowTicks` (C4, every non-MT5 symbol). */
   rowPoints?: number;
+  rowTicks?: boolean;
+  /** The price of one row unit when asked (the tick or the point). */
+  rowUnit?: number;
 }
 
 /** The newest-first refresh while the live edge is on screen (ticks keep arriving). */
@@ -199,7 +218,7 @@ export class OrderFlowFeed {
   });
   /** cme-tier2: the engine's analysis of the real CME tape + book for the window (md/orderflow). */
   private readonly cmeFlow = new CmeFlowFeed({
-    orderFlow: (r) => this.mdApi.orderFlow(r),
+    orderFlow: (r, venue) => (venue === 'crypto' ? this.api.cryptoOrderFlow(r) : this.mdApi.orderFlow(r)),
     now: () => this.deps.now(),
     changed: () => this.cmeChanged(),
   });
@@ -353,7 +372,7 @@ export class OrderFlowFeed {
       const view = deps.view();
       const clip = deps.replayClip();
       const symbol = deps.symbol();
-      const src = this.cmeSource();
+      const src = this.realSource();
       const res = deps.resolution();
       untracked(() => {
         if (!want || !view || !symbol || !src) {
@@ -367,9 +386,10 @@ export class OrderFlowFeed {
         this.cmeFlow.update({
           symbol,
           sourceId: src.source.sourceId,
+          venue: src.venue,
           fromUtc: view.fromUtc,
           toUtc: view.toUtc + barMs,
-          // CME bars of at most an hour, summed into the chart's bars (a 2h / 4h / daily bar opens on an hour).
+          // Analysis bars of at most an hour, summed into the chart's bars (a 2h / 4h / daily bar opens on an hour).
           barSeconds: Math.max(1, Math.min(3_600, Math.round(barMs / 1000))),
           live: view.rightEdgeInView && clip === null,
           head: clip,
@@ -380,13 +400,14 @@ export class OrderFlowFeed {
       if (typeof document !== 'undefined' && document.hidden) return;
       const v = this.deps.view();
       if (!v?.rightEdgeInView || this.deps.replayClip() !== null || !this.cmeWanted()) return;
-      const src = this.cmeSource();
+      const src = this.realSource();
       const symbol = this.deps.symbol();
       if (!src || !symbol) return;
       const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
       this.cmeFlow.update({
         symbol,
         sourceId: src.source.sourceId,
+        venue: src.venue,
         fromUtc: v.fromUtc,
         toUtc: v.toUtc + barMs,
         barSeconds: Math.max(1, Math.min(3_600, Math.round(barMs / 1000))),
@@ -406,7 +427,9 @@ export class OrderFlowFeed {
       () =>
         this.heatMode() === 'grid' &&
         deps.view()?.rightEdgeInView === true &&
-        deps.replayClip() === null,
+        deps.replayClip() === null &&
+        // UF03: the poll folds a broker DOM; a venue symbol's grid is the venue's book (C5) and is not mixed with it.
+        !this.venueSymbol(),
     );
     effect((onCleanup) => {
       const want = wantLive();
@@ -493,37 +516,68 @@ export class OrderFlowFeed {
     return sourceRefusal(src, this.mdStream.entitlements.entitlements());
   }
 
-  /** The source the trade layer reads: the picked one when it publishes trades, else the first that does. */
+  /** The facts when known and settled (null while the instrument is resolving or without facts). */
+  private factsNow(): InstrumentFacts | null {
+    const f = this.deps.facts?.() ?? null;
+    return f && !f.resolving ? f : null;
+  }
+
+  /** A symbol with instrument facts but no MT5 pair row: its depth is a venue's book, never a broker DOM. */
+  private readonly venueSymbol = computed(() => {
+    const f = this.factsNow();
+    return !!f && f.origin !== 'pair';
+  });
+
+  /** "Broker DOM depth" (FX / MT5, as always) or "Depth" (a venue symbol, before its source is known). */
+  private depthWord(): string {
+    return this.venueSymbol() ? 'Depth' : 'Broker DOM depth';
+  }
+
+  /** The symbol's pinned candle source id (C2 `candleSource`), e.g. `crypto-coinbase`; null for MT5 / unknown. */
+  private readonly pinnedSourceId = computed(() => this.factsNow()?.instrument.candleSource?.id ?? null);
+
+  /**
+   * The source the trade layer reads: one that publishes trades AND carries this symbol — the picked one, else the
+   * symbol's own (pinned) venue, else the first. A crypto exchange's tape on an FX chart would only ever be empty.
+   */
   readonly tradeSource = computed<MdSource | null>(() => {
     const list = this.mdSources() ?? [];
-    const withTrades = list.filter((s) => sourceKinds(s).includes('trades'));
+    const symbol = this.deps.symbol();
+    const withTrades = list.filter((s) => sourceKinds(s).includes('trades') && sourceCarries(s, symbol));
     const picked = this.deps.settings().sourceId;
-    return withTrades.find((s) => s.sourceId === picked) ?? withTrades[0] ?? null;
+    const pinned = this.pinnedSourceId();
+    return (
+      withTrades.find((s) => s.sourceId === picked) ??
+      withTrades.find((s) => s.sourceId === pinned) ??
+      withTrades[0] ??
+      null
+    );
   });
 
   /**
-   * cme-tier2: the CME source the order-flow analysis reads — the picked source when it is a CME futures source holding
-   * this symbol, else (for the markers only) the first such source. Null without one (or before md/sources answered).
+   * UF01: the REAL order-flow source the analysis reads (see {@link realFlowSource}) — a CME futures source mapping this
+   * symbol (`md/orderflow`) or a crypto exchange streaming it (`md/crypto/orderflow`). The picked one drives the CVD pane
+   * and the footprint too. Null without one (or before md/sources answered).
    */
-  readonly cmeSource = computed<{ source: MdSource; spec: MdSourceSymbol; picked: boolean } | null>(() => {
-    const list = this.mdSources() ?? [];
-    const symbol = this.deps.symbol();
-    const picked = this.deps.settings().sourceId;
-    const pickedSrc = list.find((s) => s.sourceId === picked);
-    const pickedSpec = futuresSymbolOf(pickedSrc, symbol);
-    if (pickedSrc && pickedSpec) return { source: pickedSrc, spec: pickedSpec, picked: true };
-    for (const s of list) {
-      const spec = futuresSymbolOf(s, symbol);
-      if (spec) return { source: s, spec, picked: false };
-    }
-    return null;
-  });
+  readonly realSource = computed<RealFlowSource | null>(() =>
+    realFlowSource(this.mdSources(), this.deps.symbol(), this.deps.settings().sourceId, this.pinnedSourceId()),
+  );
 
-  /** The CVD pane / footprint show the REAL CME delta: a CME source is picked and the layer is on. */
+  /** The CVD pane / footprint show the REAL aggressor delta: a CME / crypto source is picked and the layer is on. */
   private readonly cmeDrivesFlow = computed(() => {
     const s = this.deps.settings();
-    return this.cmeSource()?.picked === true && (s.cvd || s.footprint);
+    return this.realSource()?.picked === true && (s.cvd || s.footprint);
   });
+
+  /** The size word of the real source's volumes: `contracts` (CME) or the base coin (`BTC`). */
+  private realUnit(src: RealFlowSource): string {
+    return realFlowUnit(src, this.factsNow()?.instrument.baseCurrency ?? null);
+  }
+
+  /** "CME order flow" / "Exchange order flow". */
+  private realWord(src: RealFlowSource | null): string {
+    return src?.venue === 'crypto' ? 'Exchange order flow' : 'CME order flow';
+  }
 
   /** Whether the CME analysis is needed at all (markers on, or it drives the CVD / footprint). */
   private readonly cmeWanted = computed(() => this.deps.settings().cmeFlow || this.cmeDrivesFlow());
@@ -533,40 +587,60 @@ export class OrderFlowFeed {
     for (const l of this.redrawListeners) l();
   }
 
-  /** "CME 6E 6EZ6 (futures, basis-adjusted)" for the analysis on screen. */
+  /** "CME 6E 6EZ6 (futures, basis-adjusted)" / "Coinbase BTC-USD (exchange trades)" for the analysis on screen. */
   private cmeLabel(): string {
-    const src = this.cmeSource();
+    const src = this.realSource();
     const d = this.cmeFlow.data;
     if (!src) return 'CME';
+    if (src.venue === 'crypto' || !src.spec) return cryptoFlowLabel(src.source, this.deps.symbol());
     return cmeSpotLabel(src.spec.sourceSymbol, d?.spot.basisAdjusted ?? false, d?.contracts.at(-1) ?? src.spec.frontContract);
   }
 
-  /** The CME markers layer + its captions. */
+  /** The real order-flow markers layer (CME or a crypto exchange) + its captions. */
   private cmeLayer(): { model: CmeFlowLayerModel | null; lines: string[] } {
     this.cmeState();
     const symbol = this.deps.symbol();
-    if (this.mdSources() === null) return { model: null, lines: ['CME order flow: loading sources…'] };
-    const src = this.cmeSource();
+    const fxLike = this.factsNow()?.isFx ?? true;
+    if (this.mdSources() === null)
+      return { model: null, lines: [`${fxLike ? 'CME' : 'Exchange'} order flow: loading sources…`] };
+    const src = this.realSource();
     if (!src)
       return {
         model: null,
-        lines: [`CME order flow: no CME source you are entitled to carries ${symbol} (needs cme-trades / cme-l2 and an enabled CME feed)`],
+        lines: [
+          fxLike
+            ? `CME order flow: no CME source you are entitled to carries ${symbol} (needs cme-trades / cme-l2 and an enabled CME feed)`
+            : `Exchange order flow: no CME or crypto exchange source you are entitled to carries ${symbol} — real trades come only from those feeds`,
+        ],
       };
+    const word = this.realWord(src);
+    const crypto = src.venue === 'crypto';
+    const unit = this.realUnit(src);
     const st = this.cmeFlow.state;
-    if (st.kind === 'error') return { model: null, lines: [`CME order flow unavailable — ${st.message}`] };
+    if (st.kind === 'error') return { model: null, lines: [`${word} unavailable — ${st.message}`] };
     if (st.kind === 'idle' && st.message) return { model: null, lines: [st.message] };
     const d = this.cmeFlow.data;
     const label = this.cmeLabel();
     const lines: string[] = [];
-    if (!d) lines.push(`CME order flow — ${label}: ${st.kind === 'loading' ? 'loading…' : 'waiting for the chart'}`);
+    if (!d) lines.push(`${word} — ${label}: ${st.kind === 'loading' ? 'loading…' : 'waiting for the chart'}`);
     else {
       const th = d.thresholds;
+      const large = crypto ? formatFlowVolume(th.largeLotContracts) : th.largeLotContracts;
       lines.push(
-        `CME order flow — ${label}: ◆ large lots ≥ ${th.largeLotContracts} contracts (${d.largeLots.length}), ↗ sweeps ≥ ${th.sweepMinLevels} levels (${d.sweeps.length})` +
+        `${word} — ${label}: ◆ large lots ≥ ${large} ${unit} (${d.largeLots.length}), ↗ sweeps ≥ ${th.sweepMinLevels} levels (${d.sweeps.length})` +
           (d.bookAnalysed ? `, ICE iceberg-like (${d.icebergs.length}), ABS absorption (${d.absorptions.length})` : ' · book not analysed (window > 2 h)'),
       );
-      if (d.bookAnalysed) lines.push('Iceberg-like = traded beyond what the level showed while refilling; MBP-10 cannot prove a hidden order (MBO can)');
-      if (!d.spot.basisAdjusted) lines.push('CME basis not estimated yet for this window: futures prices sit at their premium to spot');
+      if (d.bookAnalysed)
+        lines.push(
+          crypto
+            ? 'Iceberg-like = traded beyond what the level showed while refilling; an aggregated L2 book has no order ids, so a refill may be a new order'
+            : 'Iceberg-like = traded beyond what the level showed while refilling; MBP-10 cannot prove a hidden order (MBO can)',
+        );
+      if (crypto) {
+        if (!d.bars.length) lines.push(`No ${sourceLabel(src.source)} trades for ${symbol} in this window`);
+        else lines.push(`Thresholds are notional, converted to ${unit} at the window's volume-weighted price`);
+      } else if (!d.spot.basisAdjusted)
+        lines.push('CME basis not estimated yet for this window: futures prices sit at their premium to spot');
     }
     return {
       model: {
@@ -574,6 +648,7 @@ export class OrderFlowFeed {
         label,
         show: { large: true, sweeps: true, levels: true },
         clipUtc: this.deps.replayClip(),
+        ...(crypto ? { sizeUnit: unit, book: 'L2' as const } : {}),
       },
       lines,
     };
@@ -768,13 +843,30 @@ export class OrderFlowFeed {
   ): number {
     const manual = this.deps.settings().footprintRowPoints;
     if (manual !== null) return manual;
+    const ticks = this.rowsInTicks();
     const sameSeries =
-      held?.symbol === this.deps.symbol() && held?.resolution === this.deps.resolution();
+      held?.symbol === this.deps.symbol() &&
+      held?.resolution === this.deps.resolution() &&
+      (held?.rowTicks ?? false) === ticks;
     return footprintRowPoints(
       medianBarRange(bars, view.fromIndex, view.toIndex),
-      this.point(),
+      this.rowUnitPrice(ticks),
       sameSeries ? (held?.rowPoints ?? null) : null,
     );
+  }
+
+  /**
+   * UF02: footprint rows are counted in the instrument's TICKS (C4 `footprintRowTicks`) for every symbol that is not an
+   * MT5 pair; an MT5 symbol (and a chart whose instrument is still resolving) keeps MT5 points, exactly as before.
+   */
+  private rowsInTicks(): boolean {
+    const f = this.factsNow();
+    return !!f && f.origin !== 'pair' && f.tickSize > 0;
+  }
+
+  /** The price of one row unit: the instrument tick, else the MT5 point. */
+  private rowUnitPrice(ticks: boolean): number {
+    return ticks ? this.factsNow()!.tickSize : this.point();
   }
 
   private refreshFootprint(symbol: string, view: OrderFlowView, force: boolean): void {
@@ -784,9 +876,23 @@ export class OrderFlowFeed {
     if (!span?.allowed) return;
     const held = this.foot()?.span ?? null;
     const rowPoints = this.rowPointsFor(view, bars, held);
-    if (!force && held?.rowPoints === rowPoints && this.covers(held, view, bars, symbol)) return;
+    const rowTicks = this.rowsInTicks();
+    if (
+      !force &&
+      held?.rowPoints === rowPoints &&
+      (held?.rowTicks ?? false) === rowTicks &&
+      this.covers(held, view, bars, symbol)
+    )
+      return;
     const barMs = resolutionMs(this.deps.resolution() as TvResolution);
-    const req = tickBarsRequest(symbol, bars, span, barMs, this.cap(), { rowPoints });
+    const req = tickBarsRequest(
+      symbol,
+      bars,
+      span,
+      barMs,
+      this.cap(),
+      rowTicks ? { rowTicks: rowPoints } : { rowPoints },
+    );
     if (!req) return;
     const fetched: FlowFetched = {
       symbol,
@@ -796,6 +902,7 @@ export class OrderFlowFeed {
       endUtc: span.endUtc,
       lastBarUtc: bars.at(-1)!.time,
       rowPoints,
+      ...(rowTicks ? { rowTicks: true, rowUnit: this.rowUnitPrice(true) } : {}),
     };
     const n = ++this.seq.foot;
     this.footState.set({ kind: 'loading' });
@@ -851,6 +958,7 @@ export class OrderFlowFeed {
     bars: TickBarDto[];
     coverage: number | null;
     fromUtc: number;
+    dto: TickBarsDto;
   } | null>(
     () => {
       const f = this.flow();
@@ -864,6 +972,7 @@ export class OrderFlowFeed {
         bars: f.data.bars,
         coverage: Number.isFinite(coverage) ? coverage : null,
         fromUtc: f.span.fromUtc,
+        dto: f.data,
       };
     },
     // The same answer stays the same value while the replay head moves, so the panes are not rewritten per step.
@@ -895,9 +1004,9 @@ export class OrderFlowFeed {
     const st = this.streamHeat.state;
     const sourceId = this.streamHeat.sourceId();
     if (st.kind === 'loading' && !sourceId)
-      return { model: null, lines: ['Broker DOM depth: loading every book event…'] };
+      return { model: null, lines: [`${this.depthWord()}: loading every book event…`] };
     if (st.kind === 'idle' && !sourceId)
-      return { model: null, lines: ['Broker DOM depth: waiting for the chart'] };
+      return { model: null, lines: [`${this.depthWord()}: waiting for the chart`] };
     const src = this.mdSources()?.find((s) => s.sourceId === sourceId) ?? null;
     const live =
       this.deps.replayClip() === null && this.deps.view()?.rightEdgeInView ? ' · live' : '';
@@ -912,7 +1021,12 @@ export class OrderFlowFeed {
       if (note) lines.push(note);
       return { model: { stream: this.streamSource, opacity: this.deps.settings().heatmapOpacity }, lines };
     }
-    const kind = src?.kind === 'CmeFutures' ? 'CME' : src?.kind === 'FixVenue' ? 'Venue' : 'Broker';
+    const kind =
+      src?.kind === 'CmeFutures'
+        ? 'CME'
+        : src?.kind === 'FixVenue' || src?.kind === 'CryptoExchange'
+          ? 'Venue'
+          : 'Broker';
     this.streamSource.label = `${this.labelOf(sourceId)} ${kind === 'Broker' ? 'DOM' : 'book'}`;
     const futures = futuresSymbolOf(src, this.deps.symbol());
     const spotState = futures && sourceId ? this.cmeSpot.stateOf(this.deps.symbol(), sourceId) : null;
@@ -923,7 +1037,9 @@ export class OrderFlowFeed {
       `${kind} depth — ${who}, every book event (event-level, WebGL)${live}${st.kind === 'loading' ? ' · loading…' : ''}`,
       futures
         ? `Sizes in contracts of ${futures.contractSize.toLocaleString('en-US')} ${futures.contractCurrency}${futures.priceTransform === 'Invert' ? '; prices inverted (1 / futures) with the book sides swapped' : ''}; CME book history is kept 400 days`
-        : `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
+        : src?.kind === 'CryptoExchange'
+          ? `Sizes in ${this.factsNow()?.instrument.baseCurrency ?? 'coins'} (the exchange's L2 book, aggregated per price); book history is kept 90 days`
+          : `Sizes as the source reports them${src?.sizeUnit ? ` (registered unit: ${src.sizeUnit})` : ''}; book history is kept 90 days`,
     ];
     const note = this.streamHeat.note();
     if (note) lines.push(note);
@@ -953,11 +1069,19 @@ export class OrderFlowFeed {
     const min = this.deps.settings().tradeMinSize;
     const futures = futuresSymbolOf(src, symbol);
     const spotState = futures ? this.cmeSpot.stateOf(symbol, src.sourceId) : null;
+    const crypto = src.kind === 'CryptoExchange';
     const label = futures
       ? cmeSpotLabel(futures.sourceSymbol, spotState?.mapping.basis != null, futures.frontContract)
-      : sourceLabel(src);
+      : crypto
+        ? cryptoFlowLabel(src, symbol)
+        : sourceLabel(src);
+    const unit = futures
+      ? ' (contracts)'
+      : crypto
+        ? ` (${realFlowUnit({ venue: 'crypto' }, this.factsNow()?.instrument.baseCurrency ?? null)})`
+        : '';
     const lines = [
-      `Trades — ${label}, each print: size = area${futures ? ' (contracts)' : ''}, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
+      `Trades — ${label}, each print: size = area${unit}, green buyer- / red seller-initiated${min > 0 ? `, ≥ ${min}` : ''}${st.kind === 'loading' ? ' · loading…' : ''}`,
     ];
     return {
       model: {
@@ -978,13 +1102,18 @@ export class OrderFlowFeed {
     const symbol = this.deps.symbol();
     const lines: string[] = [];
     const h = this.heat();
-    const note = this.stateNote(this.heatState(), 'Broker DOM depth');
+    const note = this.stateNote(this.heatState(), this.depthWord());
     if (!h || h.grid.symbol !== symbol) {
-      lines.push(note ?? 'Broker DOM depth: waiting for the chart');
+      lines.push(note ?? `${this.depthWord()}: waiting for the chart`);
       return { model: null, lines };
     }
+    if (h.grid.source?.kind === 'venue') return this.venueHeatCaptions(h.grid, view, note);
     if (h.grid.oldestAvailableUtc === null) {
-      lines.push(`Broker DOM depth — none stored for ${symbol} (no EA streams its book)`);
+      lines.push(
+        this.venueSymbol()
+          ? `Depth — no book stored for ${symbol}: no MT5 broker streams it and no venue book was found`
+          : `Broker DOM depth — none stored for ${symbol} (no EA streams its book)`,
+      );
       return { model: null, lines };
     }
     const grid = clipHeatGrid(h.grid, this.deps.replayClip());
@@ -1008,6 +1137,38 @@ export class OrderFlowFeed {
         );
       }
     }
+    if (note && this.heatState().kind === 'error') lines.push(note);
+    return { model: { grid, opacity: this.deps.settings().heatmapOpacity }, lines };
+  }
+
+  /**
+   * UF03 / C5: the bucketed heatmap of a VENUE's book (the symbol's source in the market-data store): named by the venue,
+   * sizes in the instrument's unit, and only the span the engine read (≤ 2 h before the window's end) — buckets before it
+   * were not read, which is not the same as "no book".
+   */
+  private venueHeatCaptions(
+    g: HeatGrid,
+    view: OrderFlowView | null,
+    note: string | null,
+  ): { model: OrderFlowModel['heatmap']; lines: string[] } {
+    const name = g.source?.label || g.source?.id || 'venue';
+    const unit = this.factsNow()?.instrument.baseCurrency ?? null;
+    const lines: string[] = [];
+    if (g.oldestAvailableUtc === null) {
+      lines.push(`${name} book — none stored for ${this.deps.symbol()}`);
+      return { model: null, lines };
+    }
+    const grid = clipHeatGrid(g, this.deps.replayClip());
+    lines.push(
+      `${name} book (venue L2) — last book in each ${formatBucket(grid.bucketMs)}${unit ? `, sizes in ${unit}` : ''}`,
+    );
+    if (grid.readFromUtc != null && view && view.fromUtc < grid.readFromUtc)
+      lines.push(
+        `Read from ${formatUtcShort(grid.readFromUtc)} only (venue books are read 2 h at a time): earlier buckets were not read — zoom in or pan to see them`,
+      );
+    else if (view && view.fromUtc < g.oldestAvailableUtc)
+      lines.push(`${name} book history starts ${formatUtcShort(g.oldestAvailableUtc)}`);
+    if (grid.columns.length === 0) lines.push(`No ${name} book in this window`);
     if (note && this.heatState().kind === 'error') lines.push(note);
     return { model: { grid, opacity: this.deps.settings().heatmapOpacity }, lines };
   }
@@ -1040,7 +1201,7 @@ export class OrderFlowFeed {
       (clip !== null && f.span.endUtc > clip)
     )
       return { model: null, lines: note ? [note] : [] };
-    const rowPrice = (f.span.rowPoints ?? 10) * this.point();
+    const rowPrice = (f.span.rowPoints ?? 10) * (f.span.rowUnit ?? this.point());
     const out: FootprintBar[] = [];
     let candleOnly = 0;
     f.data.bars.forEach((b, i) => {
@@ -1056,7 +1217,12 @@ export class OrderFlowFeed {
     // Tick replay: the bar forming at the head, from the recorded ticks up to the head (C2 answers stop before it).
     const clipNow = this.deps.replayClip();
     const forming = bars.at(-1);
-    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow) {
+    // UF07: the tape's tick-rule counts only complete a tick-count footprint — never one of traded volume.
+    const countsOnly = flowOrigin(f.data) === 'tickRuleQuotes';
+    let formingSkipped = false;
+    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow && !countsOnly)
+      formingSkipped = this.deps.tickFootprint(forming.time, clipNow) !== null;
+    if (this.deps.tickFootprint && clipNow !== null && forming && forming.time <= clipNow && countsOnly) {
       const rowsNow = this.deps.tickFootprint(forming.time, clipNow);
       if (rowsNow) {
         const at = out.findIndex((b) => b.t === forming.time);
@@ -1069,50 +1235,74 @@ export class OrderFlowFeed {
         else out.push(fb);
       }
     }
-    const rows = formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
+    const rows = f.span.rowTicks
+      ? formatRowTicks(f.span.rowPoints ?? 10)
+      : formatRowSize(f.span.rowPoints ?? 10, this.point(), this.deps.pipSize());
     const mode = this.deps.settings().footprintRowPoints === null ? ' (auto)' : '';
-    const lines = [
-      `Footprint — tick counts (down × up, tick rule on broker quotes), rows of ${rows}${mode}; shaded: 3:1 diagonal imbalance`,
-    ];
+    const base = this.factsNow()?.instrument.baseCurrency ?? null;
+    // UF02: real aggressor trades vs the estimated tick rule, named in the caption; traded volume gets a fraction.
+    const lines = [footprintCaption(f.data, `rows of ${rows}${mode}`, base)];
     if (candleOnly > 0)
       lines.push(
         `${candleOnly} bar${candleOnly === 1 ? '' : 's'} without retained ticks: no footprint`,
       );
     if (note && this.footState().kind === 'error') lines.push(note);
-    return { model: { bars: out, rowPrice }, lines };
+    if (formingSkipped)
+      lines.push('The bar forming at the replay head has no footprint: the recorded tape holds quotes, this footprint traded volume');
+    const volume = flowOrigin(f.data) !== 'tickRuleQuotes';
+    if (volume) lines.push(`Cells in ${flowUnitWord(f.data, base)}; ${f.data.source?.label ?? 'venue'} trades are read for the last 24 h`);
+    return { model: { bars: out, rowPrice, ...(volume ? { format: formatFlowVolume } : {}) }, lines };
   }
 
-  /** cme-tier2: the CVD pane from the REAL CME aggressor delta (a CME source is picked). */
+  /** cme-tier2 / UF01: the CVD pane from the REAL aggressor delta (a CME or crypto exchange source is picked). */
   private cmeCvdPane(): FlowPaneModel {
     this.cmeState();
     const st = this.cmeFlow.state;
     const d = this.cmeFlow.data;
-    const title = `Real aggressor delta (CVD) — ${this.cmeLabel()}, contracts`;
+    const src = this.realSource();
+    const crypto = src?.venue === 'crypto';
+    const title = `Real aggressor delta (CVD) — ${this.cmeLabel()}, ${src ? this.realUnit(src) : 'contracts'}`;
     if (st.kind === 'error') return { bars: [], notes: [`unavailable — ${st.message}`], title };
     if (st.kind === 'idle' && st.message) return { bars: [], notes: [st.message], title };
     if (!d) return { bars: [], notes: [st.kind === 'loading' ? 'loading…' : 'waiting for the chart'], title };
     const bars = this.deps.bars();
     const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
-    const notes = [`from ${d.cvdAnchor === 'session' ? 'the CME session open' : 'the first bar of the window'}; CME's own aggressor flag, not a tick rule`];
+    const notes = [
+      crypto
+        ? `from the first bar of the window; the exchange's own aggressor side of each trade, not a tick rule`
+        : `from ${d.cvdAnchor === 'session' ? 'the CME session open' : 'the first bar of the window'}; CME's own aggressor flag, not a tick rule`,
+    ];
     if (d.spot.inverted) notes.push('inverted contract: a buyer of the future sells the spot pair (delta sign follows the spot pair)');
     return { bars: cmeBarsAsTickBars(d, bars.map((b) => b.time), barMs), notes, title };
   }
 
-  /** cme-tier2: the footprint from the REAL CME prints (contracts by price, spot terms). */
+  /** cme-tier2 / UF01: the footprint from the REAL prints (CME contracts in spot terms, or a crypto exchange's coins). */
   private cmeFootprint(view: OrderFlowView): { model: FootprintLayerModel | null; lines: string[] } {
     this.cmeState();
     const d = this.cmeFlow.data;
     const st = this.cmeFlow.state;
-    const src = this.cmeSource();
-    if (st.kind === 'error') return { model: null, lines: [`CME footprint unavailable — ${st.message}`] };
-    if (!d || !src) return { model: null, lines: [st.kind === 'loading' ? 'CME footprint: loading…' : 'CME footprint: waiting for the chart'] };
+    const src = this.realSource();
+    const crypto = src?.venue === 'crypto';
+    const word = crypto ? 'Exchange footprint' : 'CME footprint';
+    if (st.kind === 'error') return { model: null, lines: [`${word} unavailable — ${st.message}`] };
+    if (!d || !src) return { model: null, lines: [st.kind === 'loading' ? `${word}: loading…` : `${word}: waiting for the chart`] };
     const bars = this.barsNow();
     const barMs = resolutionMs(this.deps.resolution() as TvResolution) ?? 60_000;
-    // Row = one CME tick in spot terms (inverted: dp ≈ tick × spot²), or the operator's rows when set.
-    const last = d.bars.at(-1)?.c ?? 0;
-    const tick = src.spec.priceTransform === 'Invert' ? src.spec.tickSize * last * last : src.spec.tickSize;
     const manual = this.deps.settings().footprintRowPoints;
-    const rowPrice = manual !== null ? manual * this.point() : tick > 0 ? tick : this.point() * 5;
+    let rowPrice: number;
+    let rowText = '';
+    if (crypto || !src.spec) {
+      // Rows in the instrument's ticks: the operator's count, else about ten rows across a typical visible bar.
+      const tick = this.factsNow()?.tickSize ?? this.point();
+      const n = manual ?? footprintRowPoints(medianBarRange(bars, view.fromIndex, view.toIndex), tick);
+      rowPrice = n * tick;
+      rowText = `, rows of ${n} tick${n === 1 ? '' : 's'}${manual === null ? ' (auto)' : ''}`;
+    } else {
+      // Row = one CME tick in spot terms (inverted: dp ≈ tick × spot²), or the operator's rows when set.
+      const last = d.bars.at(-1)?.c ?? 0;
+      const tick = src.spec.priceTransform === 'Invert' ? src.spec.tickSize * last * last : src.spec.tickSize;
+      rowPrice = manual !== null ? manual * this.point() : tick > 0 ? tick : this.point() * 5;
+    }
     const out: FootprintBar[] = [];
     for (let i = 0; i < bars.length; i++) {
       const t = bars[i].time;
@@ -1122,8 +1312,10 @@ export class OrderFlowFeed {
       if (rows) out.push({ t, end, cells: footprintCells(rows, rowPrice) });
     }
     return {
-      model: { bars: out, rowPrice },
-      lines: [`Footprint — ${this.cmeLabel()}: real aggressor contracts (sell × buy) per price; shaded: 3:1 diagonal imbalance`],
+      model: { bars: out, rowPrice, ...(crypto ? { format: formatFlowVolume } : {}) },
+      lines: [
+        `Footprint — ${this.cmeLabel()}: real aggressor ${this.realUnit(src)} (sell × buy) per price${rowText}; shaded: 3:1 diagonal imbalance`,
+      ],
     };
   }
 
@@ -1138,18 +1330,14 @@ export class OrderFlowFeed {
     const note = this.stateNote(this.flowState(), 'tick flow');
     const notes: string[] = [];
     if (!f) return { bars: [], notes: note ? [note] : ['waiting for the chart'] };
-    if (f.coverage === null) notes.push('no ticks retained for this symbol');
-    else if (f.fromUtc < f.coverage)
-      notes.push(
-        kind === 'cvd'
-          ? `no ticks before ${formatUtcShort(f.coverage)} (ticks are kept 14 days)`
-          : `ticks from ${formatUtcShort(f.coverage)} (kept 14 days); older bars: candle spread only`,
-      );
+    const cover = coverageNote(f.dto, kind, f.coverage, f.fromUtc, formatUtcShort);
+    if (cover) notes.push(cover);
     if (kind === 'ribbon') notes.push('● liquidity pulled: spread ≥ 2× median while ticks spike');
     if (note && this.flowState().kind === 'error') notes.push(note);
+    // UF02: the title says whether the delta is real (trades) or estimated (tick rule), and its unit.
     return kind === 'ribbon'
       ? { bars: f.bars, pulled: this.pulled(), notes }
-      : { bars: f.bars, notes };
+      : { bars: f.bars, notes, title: cvdTitle(f.dto, this.factsNow()?.instrument.baseCurrency ?? null) };
   }
 
   /** The panes' models, recomputed only when their answer or load state changes — not on a pan. */

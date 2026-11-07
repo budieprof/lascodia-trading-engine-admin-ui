@@ -15,6 +15,8 @@ export interface FootprintLayerModel {
   bars: FootprintBar[];
   /** Price height of a row. */
   rowPrice: number;
+  /** How a cell's number is written (default `String`: tick counts, contracts); traded coin volumes get a fraction. */
+  format?: (v: number) => string;
 }
 
 const UP = '#26A69A';
@@ -22,7 +24,8 @@ const DOWN = '#EF5350';
 
 /**
  * OF-3 — the footprint: inside each bar, one cell per price row with its down (left) and up (right) TICK COUNTS (tick rule over the
- * broker's quotes — not traded volume, which spot FX does not publish). Diagonal 3:1 imbalances are shaded (green:
+ * broker's quotes — not traded volume, which spot FX does not publish) or, where a venue publishes trades, the
+ * aggressor SELL (left) and BUY (right) volume (UF02; the caption says which). Diagonal 3:1 imbalances are shaded (green:
  * up-ticks against the row below, red: down-ticks against the row above) and the bar's busiest row is outlined.
  * Drawn above the candles; the page only hands it bars wide enough to read (≥ 60 px).
  */
@@ -118,14 +121,17 @@ export class FootprintPrimitive implements ISeriesPrimitive<Time> {
             // visible and the numbers stay legible over it.
             ctx.lineWidth = 3;
             ctx.strokeStyle = dark ? 'rgba(19,23,34,0.85)' : 'rgba(255,255,255,0.9)';
+            const fmt = model.format ?? String;
+            const down = fmt(c.down);
+            const up = fmt(c.up);
             ctx.textAlign = 'left';
-            ctx.strokeText(String(c.down), left + 3, cy);
+            ctx.strokeText(down, left + 3, cy);
             ctx.fillStyle = DOWN;
-            ctx.fillText(String(c.down), left + 3, cy);
+            ctx.fillText(down, left + 3, cy);
             ctx.textAlign = 'right';
-            ctx.strokeText(String(c.up), left + w - 3, cy);
+            ctx.strokeText(up, left + w - 3, cy);
             ctx.fillStyle = UP;
-            ctx.fillText(String(c.up), left + w - 3, cy);
+            ctx.fillText(up, left + w - 3, cy);
             ctx.textAlign = 'center';
           }
         }

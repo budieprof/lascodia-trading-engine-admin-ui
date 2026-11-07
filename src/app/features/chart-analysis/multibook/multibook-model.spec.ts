@@ -1,7 +1,8 @@
 import type { MdConsolidatedWire } from '@core/realtime/marketdata.types';
 import { consolidatedId, consolidatedLabel, consolidatedSubset, isConsolidatedId } from '@core/realtime/marketdata.types';
 import { restoredOrderFlow } from '../orderflow/orderflow.types';
-import { DispersionStrip, buildMultibook, formatAge, formatPoints, sourceColour } from './multibook-model';
+import { DispersionStrip, buildMultibook, formatAge, formatPoints, multibookUnits, sourceColour } from './multibook-model';
+import type { InstrumentFacts } from '../datafeed/instrument-facts';
 import { hourStats } from './multibook-panel.component';
 
 /** A consolidated view as the engine sends it. Sources named test-* are synthetic TEST sources (specs only). */
@@ -151,5 +152,46 @@ describe('consolidated ids', () => {
     expect(s['a'].meanAbsDevPoints).toBeCloseTo((1 * 8 + 6 * 2) / 10, 6);
     expect(s['a'].stalePct).toBeCloseTo(10, 6);
     expect(s['a'].meanLagMs).toBe(40);
+  });
+
+  describe('UF06 crypto venues', () => {
+    /** BTC-USD: two exchanges' books in coins, the engine's point = the instrument tick 0.01 (EF05). */
+    function btc(): MdConsolidatedWire {
+      const v = view();
+      return {
+        ...v,
+        point: 0.01,
+        b: [{ p: 75_000, s: 1.75, partial: false, src: ['crypto-coinbase', 'crypto-kraken'], sz: [1.25, 0.5] }],
+        a: [{ p: 75_000.5, s: 0.3, partial: false, src: ['crypto-kraken'], sz: [0.3] }],
+        sources: [
+          { ...src('crypto-coinbase', 'Coinbase Advanced Trade (spot)', 'book', 75_000, 75_000.6), kind: 'CryptoExchange', sizeUnit: 'Coins' },
+          { ...src('crypto-kraken', 'Kraken', 'book', 75_000, 75_000.5), kind: 'CryptoExchange', sizeUnit: 'Coins' },
+        ],
+      };
+    }
+
+    it('sums the exchanges’ coin sizes as they are (no rescaling) and measures in ticks', () => {
+      const v = buildMultibook(btc(), new Set(), ['crypto-coinbase', 'crypto-kraken']);
+      const bid = v.rows.find((r) => r.side === 'bid')!;
+      expect(bid.total).toBeCloseTo(1.75, 10);
+      expect(bid.segments.map((g) => [g.sourceId, g.size])).toEqual([
+        ['crypto-coinbase', 1.25],
+        ['crypto-kraken', 0.5],
+      ]);
+      // Mids 75000.30 and 75000.25 → 0.05 apart = 5 ticks of 0.01.
+      expect(v.midRangePoints).toBeCloseTo(5, 6);
+      expect(v.sources[0]).toMatchObject({ kind: 'CryptoExchange', sizeKnown: true, name: 'Coinbase Advanced Trade' });
+      // Turning one exchange off leaves the other's coins.
+      const off = buildMultibook(btc(), new Set(['crypto-kraken']), ['crypto-coinbase', 'crypto-kraken']);
+      expect(off.rows.find((r) => r.side === 'bid')!.total).toBeCloseTo(1.25, 10);
+    });
+
+    it('names the units: base coin + ticks on a venue symbol, MT5 words unchanged', () => {
+      const btcFacts = { resolving: false, origin: 'catalogue', instrument: { baseCurrency: 'btc' } } as unknown as InstrumentFacts;
+      expect(multibookUnits(btcFacts)).toEqual({ size: 'BTC', point: 'ticks' });
+      expect(multibookUnits({ ...btcFacts, origin: 'pair' } as InstrumentFacts)).toEqual({ size: 'base-currency units', point: 'pts' });
+      expect(multibookUnits(null)).toEqual({ size: 'base-currency units', point: 'pts' });
+      expect(multibookUnits({ ...btcFacts, resolving: true } as InstrumentFacts).point).toBe('pts');
+    });
   });
 });

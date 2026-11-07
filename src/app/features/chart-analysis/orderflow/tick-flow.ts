@@ -60,14 +60,17 @@ export function barEnd(
   return Math.max(bar.time + 1, Math.min(close, capUtc));
 }
 
-/** The C2 body for bars `[from, to]` of the chart's own series. */
+/**
+ * The C2 body for bars `[from, to]` of the chart's own series. Footprint rows go as MT5 points (`rowPoints`, an MT5
+ * symbol — the body is exactly what it always was) or as instrument ticks (`rowTicks`, C4, every other symbol).
+ */
 export function tickBarsRequest(
   symbol: string,
   bars: readonly FlowBar[],
   span: { from: number; to: number },
   barMs: number | null,
   capUtc: number,
-  footprint: { rowPoints: number } | null,
+  footprint: { rowPoints: number } | { rowTicks: number } | null,
 ): TickBarsRequest | null {
   const from = Math.max(0, span.from);
   const to = Math.min(bars.length - 1, span.to);
@@ -79,7 +82,11 @@ export function tickBarsRequest(
     barTimes: slice.map((b) => new Date(b.time).toISOString()),
     endUtc: new Date(endUtc).toISOString(),
     footprint: footprint !== null,
-    ...(footprint ? { footprintRowPoints: footprint.rowPoints } : {}),
+    ...(footprint
+      ? 'rowTicks' in footprint
+        ? { footprintRowTicks: footprint.rowTicks }
+        : { footprintRowPoints: footprint.rowPoints }
+      : {}),
   };
 }
 
@@ -266,6 +273,33 @@ export function formatRowSize(points: number, point: number, pip: number): strin
   const pips = pip > 0 ? (points * point) / pip : points;
   const text = pips >= 10 ? String(Math.round(pips)) : String(Math.round(pips * 10) / 10);
   return `${text} pip${pips === 1 || pips < 1 ? '' : 's'}`;
+}
+
+/** "1 tick", "5 ticks" — a row size in instrument ticks (C4) for the caption. */
+export function formatRowTicks(ticks: number): string {
+  return `${ticks} tick${ticks === 1 ? '' : 's'}`;
+}
+
+/** The Order-flow menu's footprint row choices: MT5 points on an MT5 symbol, instrument ticks on every other one. */
+export function footprintRowChoices(
+  unit: 'points' | 'ticks',
+): { label: string; points: number | null; hint: string }[] {
+  const auto = { label: 'Auto rows', points: null, hint: 'About ten rows across a typical visible bar' };
+  if (unit === 'points')
+    return [
+      auto,
+      { label: '1 pt', points: 1, hint: 'One MT5 point per row (0.1 pip on a 5-digit pair)' },
+      { label: '2 pt', points: 2, hint: 'Two points per row' },
+      { label: '5 pt', points: 5, hint: 'Five points per row' },
+      { label: '10 pt', points: 10, hint: 'Ten points per row (1 pip on a 5-digit pair)' },
+    ];
+  return [
+    auto,
+    { label: '1 tick', points: 1, hint: "One of the instrument's ticks (its smallest price step) per row" },
+    { label: '2 ticks', points: 2, hint: 'Two ticks per row' },
+    { label: '5 ticks', points: 5, hint: 'Five ticks per row' },
+    { label: '10 ticks', points: 10, hint: 'Ten ticks per row' },
+  ];
 }
 
 /** Bars at least this wide (px) can hold a footprint's numbers. */

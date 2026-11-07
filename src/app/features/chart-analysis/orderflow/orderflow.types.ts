@@ -35,6 +35,17 @@ export interface OrderBookHeatmapDto {
   sourceInstanceIds: string[];
   columns: HeatmapColumnDto[];
   maxLevelVolume: number;
+  /**
+   * C5 (additive): whose book the columns are — `{id:"mt5",kind:"mt5",label:"broker DOM, <instance>"}` or the venue
+   * (`{id:"crypto-okx",kind:"venue",label:"OKX"}`, sizes in the venue's own unit).
+   */
+  source?: ChartFlowSourceDto | null;
+  /**
+   * C5 (additive), venue books only: the span actually read from the store (≤ 2 h, ending at the window's end). Buckets
+   * outside it were NOT READ — not "no book". Null / absent for MT5 (every bucket is read).
+   */
+  readFromUtc?: string | null;
+  readToUtc?: string | null;
 }
 
 // ── C2: POST chart-flow/tick-bars ─────────────────────────────────────────────
@@ -46,11 +57,37 @@ export interface TickBarsRequest {
   /** Exclusive end of the last bar (UTC ISO). */
   endUtc: string;
   footprint: boolean;
-  /** Footprint row height in MT5 points (10^-digits); absent: one pip. */
+  /** Footprint row height in MT5 points (10^-digits); absent: one pip. MT5 symbols. */
   footprintRowPoints?: number;
+  /**
+   * C4 (multi-asset): footprint row height as N × the instrument's tick size; wins over `footprintRowPoints`. Sent for
+   * every symbol that is not an MT5 pair; absent: the engine's default (≈ 1 bp of price in 1/2/5 × 10^k ticks).
+   */
+  footprintRowTicks?: number;
 }
 
-/** One footprint row of a bar: up- and down-ticks whose mid fell in `[price, price + row)`. */
+/** C4: what a tick-flow answer's up / down / delta / footprint are built from. */
+export type DeltaSource = 'trades' | 'tickRule';
+
+/**
+ * C4: the unit of `upTicks` / `downTicks` / `delta` / `cumDelta` and the footprint's `up` / `down`: quote counts
+ * (`ticks`) or traded volume in the instrument's own unit (`base` coins / base units, `contracts`, `shares`).
+ */
+export type FlowVolumeUnit = 'ticks' | 'base' | 'contracts' | 'shares';
+
+/** C1/C4/C5 `source`: whose data a chart-flow answer was read from. */
+export interface ChartFlowSourceDto {
+  id: string;
+  /** `mt5` | `venue`. */
+  kind: string;
+  /** "MT5 broker ticks", "broker DOM, <instance>", "Coinbase". */
+  label: string;
+}
+
+/**
+ * One footprint row of a bar: up- and down-ticks whose mid fell in `[price, price + row)` — or, with
+ * `deltaSource: "trades"`, the aggressor buy (`up`) and sell (`down`) volume traded there.
+ */
 export interface FootprintRowDto {
   price: number;
   up: number;
@@ -82,6 +119,12 @@ export interface TickBarsDto {
   /** Oldest retained tick for the symbol (retention is ~14 days); null when none. */
   tickCoverageFromUtc: string | null;
   bars: TickBarDto[];
+  /** C4 (additive; absent from older engines = the tick rule): real aggressor trades or the estimated tick rule. */
+  deltaSource?: DeltaSource;
+  /** C4 (additive; absent = `ticks`). With trades, `ticks` on a bar is the number of prints. */
+  volumeUnit?: FlowVolumeUnit;
+  /** C4 (additive): `{id:"mt5",kind:"mt5",label:"MT5 broker ticks"}` or the venue. */
+  source?: ChartFlowSourceDto | null;
 }
 
 // ── Settings (saved with the layout) ──────────────────────────────────────────
@@ -95,7 +138,10 @@ export interface OrderFlowSettings {
   cvd: boolean;
   /** OF-3: per-bar tick-count footprint on the price pane. */
   footprint: boolean;
-  /** The footprint's row height in MT5 points; null: adaptive (about ten rows per typical visible bar). */
+  /**
+   * The footprint's row height in MT5 points (an MT5 symbol) or in the instrument's ticks (every other symbol, C4
+   * `footprintRowTicks`); null: adaptive (about ten rows per typical visible bar).
+   */
   footprintRowPoints: number | null;
   /** OF-4: spread and tick-rate ribbon pane. */
   ribbon: boolean;

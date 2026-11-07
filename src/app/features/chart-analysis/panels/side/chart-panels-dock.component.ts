@@ -68,7 +68,7 @@ const TITLES: Record<SidePanel, string> = {
         <app-ladder-panel [symbol]="symbol()" [digits]="digits()" [facts]="facts()" />
       }
       @case ('multibook') {
-        <app-multibook-panel [symbol]="symbol()" [digits]="digits()" />
+        <app-multibook-panel [symbol]="symbol()" [digits]="digits()" [facts]="facts()" />
       }
       @case ('sentiment') {
         <app-sentiment-panel [symbol]="symbol()" [timeZone]="timeZone()" />

@@ -11,6 +11,16 @@ import { declareSignalIo } from '@shared/testing/jit-signal-io';
 import { ChartAlertFormComponent } from './chart-alert-form.component';
 import { ChartAlertsService } from './chart-alerts.service';
 import type { ChartAlertDto } from './chart-alerts.types';
+import type { MetricAvailability } from './metric-alerts';
+import { MetricAvailabilityService } from './metric-availability.service';
+
+/** What the fake availability service answers per symbol (UF04). */
+const AVAILABLE: Record<string, MetricAvailability[]> = {
+  'BTC-USDT-PERP': [
+    { kind: 'Funding', sources: [{ sourceId: 'crypto-okx', label: 'OKX' }], current: 0.0074, currentSource: 'crypto-okx' },
+    { kind: 'Liquidations', sources: [{ sourceId: 'crypto-okx', label: 'OKX' }], current: null, currentSource: 'crypto-okx' },
+  ],
+};
 
 declareSignalIo(ChartAlertFormComponent, {
   inputs: ['symbol', 'timeframe', 'precision', 'lastClose', 'presetPrice', 'edit', 'copy', 'draft'],
@@ -100,6 +110,10 @@ describe('ChartAlertFormComponent', () => {
         provideHttpClientTesting(),
         { provide: RUNTIME_CONFIG, useValue: { apiBaseUrl: 'http://test' } },
         { provide: RealtimeService, useValue: realtime },
+        {
+          provide: MetricAvailabilityService,
+          useValue: { forSymbol: (sym: string) => Promise.resolve(AVAILABLE[sym.toUpperCase()] ?? []) },
+        },
       ],
     });
     http = TestBed.inject(HttpTestingController);
@@ -271,5 +285,65 @@ describe('ChartAlertFormComponent', () => {
       name: 'Ray',
     });
     post.flush(ok(dto({ id: 40, kind: 'Drawing', geometry })));
+  });
+
+  describe('UF04 derivatives alerts', () => {
+    const settle = async () => {
+      for (let i = 0; i < 3; i++) {
+        await Promise.resolve();
+        fixture.detectChanges();
+      }
+    };
+
+    it('an FX symbol without derivatives data offers price alerts only', async () => {
+      render();
+      await settle();
+      expect(q('[data-testid="caf-kind"]')).toBeNull();
+    });
+
+    it('offers only the kinds the symbol has data for, and sends the metric condition', async () => {
+      render({ symbol: 'BTC-USDT-PERP', lastClose: 75_000, precision: 1 });
+      await settle();
+      const kind = q<HTMLSelectElement>('[data-testid="caf-kind"]');
+      expect([...kind.options].map((o) => o.value)).toEqual(['Price', 'Funding', 'Liquidations']);
+      kind.value = 'Liquidations';
+      kind.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+      expect(q('[data-testid="caf-level"]')).toBeNull();
+      expect(q<HTMLInputElement>('[data-testid="caf-metric-window"]').valueAsNumber).toBe(60);
+      const freqs = [...q<HTMLSelectElement>('[data-testid="caf-frequency"]').options].map((o) => o.value);
+      expect(freqs).not.toContain('once_per_bar_close');
+      expect(q('[data-testid="caf-problem"]')?.textContent).toContain('Enter the liquidations value');
+      type('caf-metric-value', '-5');
+      expect(q('[data-testid="caf-problem"]')?.textContent).toContain('cannot be negative');
+      type('caf-metric-value', '1000000');
+      expect(q('[data-testid="caf-problem"]')).toBeNull();
+      q<HTMLButtonElement>('[data-testid="caf-save"]').click();
+      const post = http.expectOne(`${BASE}/chart-alert`);
+      expect(post.request.body).toMatchObject({
+        symbol: 'BTC-USDT-PERP',
+        kind: 'Liquidations',
+        price: null,
+        condition: 'CrossingUp',
+        metric: { comparator: 'crossesAbove', value: 1_000_000, windowMinutes: 60, sourceId: null },
+      });
+      post.flush(ok(dto({ id: 40, symbol: 'BTC-USDT-PERP', kind: 'Liquidations', price: null })));
+    });
+
+    it('funding shows the current value and takes no window', async () => {
+      render({ symbol: 'BTC-USDT-PERP', lastClose: 75_000, precision: 1 });
+      await settle();
+      const kind = q<HTMLSelectElement>('[data-testid="caf-kind"]');
+      kind.value = 'Funding';
+      kind.dispatchEvent(new Event('change'));
+      fixture.detectChanges();
+      expect(q('[data-testid="caf-metric-window"]')).toBeNull();
+      expect(q('[data-testid="caf-metric-now"]')?.textContent).toContain('0.0074 % per interval (OKX)');
+      type('caf-metric-value', '0.01');
+      q<HTMLButtonElement>('[data-testid="caf-save"]').click();
+      const post = http.expectOne(`${BASE}/chart-alert`);
+      expect(post.request.body.metric).toEqual({ comparator: 'crossesAbove', value: 0.01, windowMinutes: null, sourceId: null });
+      post.flush(ok(dto({ id: 41, symbol: 'BTC-USDT-PERP', kind: 'Funding', price: null })));
+    });
   });
 });

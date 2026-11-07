@@ -92,6 +92,28 @@ function harness(now = T1 + 1) {
   };
 }
 
+describe('TickReplay (UF07): no depth history', () => {
+  it('a source that kept quotes but no book says so instead of showing an empty book as real', async () => {
+    const tr = new TickReplay({
+      history: async (r) => ({
+        sources: [{ sourceId: 'crypto-coinbase', ticks: { t: [r.from + 10], b: [75_000], a: [75_000.5] } }],
+        truncated: false,
+        message: null,
+      }),
+      symbol: () => 'BTC-USD',
+      sourceId: () => null,
+      now: () => T1 + 1,
+      raf: () => 0,
+      caf: () => undefined,
+      wall: () => 0,
+      moved: () => undefined,
+    });
+    await tr.start(T0);
+    await Promise.resolve();
+    expect(tr.note()).toBe('No depth history for BTC-USD from crypto-coinbase here: quotes only — the book stays empty.');
+  });
+});
+
 describe('TickTape', () => {
   it('finds the next / previous event across ticks and book, and the last tick at an instant', () => {
     const tape = new TickTape(T0);

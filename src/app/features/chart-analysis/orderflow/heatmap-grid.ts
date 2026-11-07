@@ -1,6 +1,11 @@
 import { utcMs } from '../panels/fx-fundamentals';
 import type { OrderBookSnapshot } from '../panels/side/chart-panels.types';
-import type { HeatmapColumnDto, HeatmapLevel, OrderBookHeatmapDto } from './orderflow.types';
+import type {
+  ChartFlowSourceDto,
+  HeatmapColumnDto,
+  HeatmapLevel,
+  OrderBookHeatmapDto,
+} from './orderflow.types';
 
 /**
  * OF-1 — the liquidity heatmap's maths, kept free of the chart so it can be tested: the engine's per-bucket broker DOM
@@ -36,6 +41,10 @@ export interface HeatGrid {
   rowStep: number;
   /** The volume the colour scale tops out at: the 98th percentile of the binned cells, not the single largest. */
   robustMax: number;
+  /** C5: whose book the columns are (`mt5` broker DOM or a `venue`); null from an engine that does not say. */
+  source?: ChartFlowSourceDto | null;
+  /** C5, venue books: the start of the span actually read (≤ 2 h before the window's end); null = every bucket read. */
+  readFromUtc?: number | null;
 }
 
 /** The percentile the colour scale saturates at: a single outsized wall does not wash every other level out. */
@@ -141,7 +150,15 @@ export function buildHeatGrid(dto: OrderBookHeatmapDto, pointSize: number): Heat
     columns,
     rowStep,
     robustMax: robustMaxOf(columns),
+    source: dto.source ?? null,
+    readFromUtc: readFrom(dto),
   };
+}
+
+/** C5 `readFromUtc` as UTC ms; null when absent (MT5: every bucket is read). */
+function readFrom(dto: OrderBookHeatmapDto): number | null {
+  const t = dto.readFromUtc ? utcMs(dto.readFromUtc) : NaN;
+  return Number.isFinite(t) ? t : null;
 }
 
 /** The colour scale's top: the 98th percentile of every non-empty cell. */
