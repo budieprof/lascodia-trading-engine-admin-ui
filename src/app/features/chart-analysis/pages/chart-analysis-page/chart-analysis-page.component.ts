@@ -73,7 +73,7 @@ import {
   currentDayBars,
   mergeSessionTail,
 } from '../../datafeed/session-bars';
-import { TradingCalendar, nextSessionPeriod } from '../../datafeed/session-calendar';
+import { TradingCalendar, nextSessionPeriod, type SessionSpec } from '../../datafeed/session-calendar';
 import { liveTick, tickPrice, tickTimeMs, type PriceTick } from '../../datafeed/live-tick';
 import { ServerClock } from '@core/time/server-clock';
 import { tradingDateLabel } from '../../chart/trading-date';
@@ -485,6 +485,10 @@ export interface ComparePanel {
   link: number;
   /** Its own Pine indicators (CC-I5). */
   scripts: PanelScript[];
+  /** US03: its own style / scale / volume (absent: the main chart's style and scale, no volume). */
+  view?: PanelView;
+  /** US03: loading, on screen, nothing to show (and why), or failed. */
+  load?: PanelLoad;
 }
 
 import {
@@ -510,11 +514,23 @@ import { ChartHistoryPager } from './chart-history-pager';
 import { ChartCompareState } from './chart-compare-state';
 import { freshRuns, normaliseView, scaleAfterCompare, withAlpha } from './chart-page.helpers';
 import { MarketSessionService } from '../../datafeed/market-session.service';
-import { volumeUnitTag } from '../../datafeed/chart-facts';
+import { volumeUnitTag, type VolumeKind } from '../../datafeed/chart-facts';
 import { continuousInfo, rollMarkers, type FutureRoll } from '../../datafeed/futures-series';
 import { FuturesRollsService } from '../../datafeed/futures-rolls.service';
 import type { SeriesOptions } from '../../datafeed/chart-market-chips.component';
 import { intervalNote, noDataMessage } from '../../datafeed/data-availability';
+import {
+  panelCandidates,
+  panelLoadError,
+  panelLook,
+  panelSymbolGroups,
+  PANEL_SCALES,
+  restoredPanelView,
+  withView,
+  type PanelLoad,
+  type PanelView,
+} from '../../compare/split-panels';
+import { PanelStateComponent } from '../../compare/panel-state.component';
 import {
   RemoteSymbolSearch,
   groupSearch,
@@ -536,6 +552,7 @@ export { normaliseView };
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
+    PanelStateComponent,
     InstrumentIconComponent,
     DecimalPipe,
     ModalA11yDirective,
@@ -5471,10 +5488,11 @@ export class ChartAnalysisPageComponent {
     }
     // New panels open on a different symbol from the primary chart: two
     // identical charts side by side is never what the operator wanted.
-    const taken = new Set([this.symbol(), ...current.map((p) => p.symbol)]);
-    const candidates = this.symbols()
-      .map((s) => (s.symbol ?? '').toUpperCase())
-      .filter((s) => s && !taken.has(s));
+    // US03: the broker's symbols first, as before, then the catalogue's chartable instruments.
+    const candidates = panelCandidates(this.symbols(), this.instruments.all(), [
+      this.symbol(),
+      ...current.map((p) => p.symbol),
+    ]);
     const added: ComparePanel[] = [];
     for (let i = current.length; i < wanted; i++) {
       const symbol = candidates[i - current.length] ?? this.symbol();
@@ -5492,14 +5510,101 @@ export class ChartAnalysisPageComponent {
     for (const panel of added) void this.loadPanel(panel.id);
   }
 
+  /**
+   * A panel's bars (US03): says it is loading, then shows them — or why there are none, or that the request failed,
+   * with a retry (a failure used to leave an empty panel saying nothing). An answer for a series the panel has left
+   * meanwhile is dropped.
+   */
   private async loadPanel(id: string): Promise<void> {
     const panel = this.comparePanels().find((p) => p.id === id);
     if (!panel) return;
-    const { bars } = await this.feed
-      .getBars(panel.symbol, panel.resolution, 0, Date.now(), PAGE_BARS)
-      .catch(() => ({ bars: [] as Bar[], noData: true }));
-    this.comparePanels.update((list) => list.map((p) => (p.id === id ? { ...p, bars } : p)));
+    const { symbol, resolution } = panel;
+    const land = (patch: Partial<ComparePanel>): void =>
+      this.comparePanels.update((list) =>
+        list.map((p) =>
+          p.id === id && p.symbol === symbol && p.resolution === resolution ? { ...p, ...patch } : p,
+        ),
+      );
+    land({ load: { kind: 'loading' } });
+    // As on the main chart: the stored grid's candles carry no session (nor the C1 facts), so they are asked for once.
+    if (!isSessionResolution(resolution)) void this.feed.learnSession(symbol);
+    try {
+      const { bars } = await this.feed.getBars(symbol, resolution, 0, Date.now(), PAGE_BARS);
+      land({
+        bars,
+        load: bars.length
+          ? { kind: 'ready' }
+          : {
+              kind: 'empty',
+              message: noDataMessage(symbol, this.resolutionLabel(resolution), this.catalogueRow(symbol)),
+            },
+      });
+    } catch (e) {
+      land({ bars: [], load: { kind: 'error', message: panelLoadError(e) } });
+    }
   }
+
+  /** US03: ask again for a panel that failed or had nothing. */
+  retryPanel(id: string): void {
+    void this.loadPanel(id);
+  }
+
+  /** US03: the symbols a panel's select offers — the broker's, then the catalogue's chartable instruments. */
+  readonly panelSymbolChoices = computed(() => panelSymbolGroups(this.symbols(), this.instruments.all()));
+  readonly panelSymbolKnown = computed(
+    () => new Set(this.panelSymbolChoices().flatMap((g) => g.options.map((o) => o.symbol))),
+  );
+
+  readonly panelScales = PANEL_SCALES;
+
+  /** US03: what a panel draws — its own style / scale / volume over the main chart's. */
+  panelLook(panel: ComparePanel) {
+    return panelLook(panel.view, { style: this.style(), scaleMode: this.scaleMode() });
+  }
+
+  /** US03: one of a panel's own settings; '' follows the main chart again. */
+  setPanelView<K extends keyof PanelView>(id: string, key: K, value: PanelView[K] | '' | undefined): void {
+    this.comparePanels.update((list) =>
+      list.map((p) => (p.id === id ? { ...p, view: withView(p.view, key, value === '' ? undefined : value) } : p)),
+    );
+  }
+
+  /** US03: a panel symbol's trading session (the day-based studies, the time axis), as the main chart has its own. */
+  panelSession(symbol: string): SessionSpec | null {
+    return this.feed.sessionOf(symbol);
+  }
+
+  /** US03 (UA02/UA07 on panels): what a panel's volume counts, for its studies. */
+  panelVolumeKind(symbol: string): VolumeKind | null {
+    return this.feed.factsOf(symbol)?.volumeKind ?? null;
+  }
+
+  /** US03: each panel symbol's Pre / Regular / Post sessions, by calendar code (loaded once per code). */
+  private readonly panelCalendars = signal<Record<string, ExchangeSessions | null>>({});
+  private panelCalendarCode(symbol: string): string | null {
+    return this.feed.factsOf(symbol)?.calendarCode ?? this.panelFacts(symbol).instrument.tradingCalendarCode ?? null;
+  }
+  panelExchangeSessions(symbol: string): ExchangeSessions | null {
+    const code = this.panelCalendarCode(symbol);
+    return code ? (this.panelCalendars()[code] ?? null) : null;
+  }
+  private readonly panelCalendarsLoad = effect(() => {
+    const codes = new Set<string>();
+    for (const p of this.comparePanels()) {
+      const code = this.panelCalendarCode(p.symbol);
+      if (code) codes.add(code);
+    }
+    untracked(() => {
+      const have = this.panelCalendars();
+      for (const code of codes) {
+        if (code in have) continue;
+        this.panelCalendars.update((all) => ({ ...all, [code]: null }));
+        void this.instruments.calendar(code).then((cal) =>
+          this.panelCalendars.update((all) => ({ ...all, [code]: cal ? exchangeSessionsOf(cal) : null })),
+        );
+      }
+    });
+  });
 
   /** The split panels' chart hosts, in panel order. */
   private readonly panelHosts = viewChildren<ChartHostComponent>('panelHost');
@@ -5841,6 +5946,7 @@ export class ChartAnalysisPageComponent {
           ? { scripts: p.scripts.map((s) => workspaceScriptOf({ item: s.item, values: s.values })) }
           : {}),
         ...(p.link ? { link: p.link } : {}),
+        ...(p.view ? { view: { ...p.view } } : {}),
       })),
     { equal: (a, b) => JSON.stringify(a) === JSON.stringify(b) },
   );
@@ -5866,6 +5972,7 @@ export class ChartAnalysisPageComponent {
       bars: [],
       indicators: (p.indicators ?? []).map((ind) => ({ ...ind, params: { ...ind.params } })),
       link: linkGroupOf(p.link),
+      ...(p.view ? { view: restoredPanelView(p.view) } : {}),
       scripts: (p.scripts ?? []).map((w) => ({
         item: restoredScriptItem(w, this.chartScripts.savedScripts()),
         values: { ...w.values },

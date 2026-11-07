@@ -37,7 +37,14 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
       { id: '2h', label: '', panels: 1 },
       { id: '4', label: '', panels: 3 },
     ],
-    feed: { getBars, sessionOf: () => null, gridOf: () => ({ kind: 'epoch' }) },
+    feed: {
+      getBars,
+      sessionOf: () => null,
+      gridOf: () => ({ kind: 'epoch' }),
+      learnSession: () => Promise.resolve(null),
+    },
+    instruments: { all: () => [], lookupState: () => 'missing', get: () => null },
+    resolutionLabel: (r: string) => r,
     serverClock: { now: () => NOW },
     panelHosts: () => [],
     calendars: new Map(),
@@ -114,6 +121,64 @@ describe('chart page — split panels (CC-12)', () => {
     older.mockImplementation(() => Promise.resolve({ bars: [], noData: true }));
     await p.loadPanelOlder('a');
     expect(p.comparePanels()[0].historyComplete).toBe(true);
+  });
+});
+
+describe('chart page — split panel states (US03)', () => {
+  const panel = (): ComparePanel => ({
+    id: 'a',
+    symbol: 'BTC-USD',
+    resolution: '60',
+    bars: [],
+    indicators: [],
+    link: 0,
+    scripts: [],
+  });
+
+  it('a failed load says so (it used to leave an empty panel), and Retry asks again', async () => {
+    const getBars = vi.fn(() => Promise.reject(new Error('engine unreachable')));
+    const { p } = setup(getBars as never);
+    p.comparePanels.set([panel()]);
+    const loading = p['loadPanel']('a');
+    expect(p.comparePanels()[0].load).toEqual({ kind: 'loading' });
+    await loading;
+    expect(p.comparePanels()[0].load).toEqual({
+      kind: 'error',
+      message: 'Could not load candles: engine unreachable',
+    });
+
+    getBars.mockImplementation((() => Promise.resolve({ bars: hours(2, 3), noData: false })) as never);
+    p.retryPanel('a');
+    await vi.waitFor(() => expect(p.comparePanels()[0].load).toEqual({ kind: 'ready' }));
+    expect(p.comparePanels()[0].bars).toHaveLength(3);
+  });
+
+  it('no bars says why, never a silently empty chart', async () => {
+    const { p } = setup(vi.fn(() => Promise.resolve({ bars: [], noData: true })));
+    p.comparePanels.set([panel()]);
+    await p['loadPanel']('a');
+    const load = p.comparePanels()[0].load;
+    expect(load.kind).toBe('empty');
+    expect(load.message).toContain('BTC-USD');
+  });
+
+  it('an answer for a series the panel has left is dropped', async () => {
+    let resolve!: (v: { bars: Bar[]; noData: boolean }) => void;
+    const { p } = setup(vi.fn(() => new Promise<{ bars: Bar[]; noData: boolean }>((r) => (resolve = r))));
+    p.comparePanels.set([panel()]);
+    const loading = p['loadPanel']('a');
+    p.comparePanels.update((l: ComparePanel[]) => l.map((x) => ({ ...x, symbol: 'ETH-USD' })));
+    resolve({ bars: hours(2, 3), noData: false });
+    await loading;
+    expect(p.comparePanels()[0].bars).toEqual([]);
+  });
+
+  it('keeps a panel\'s own style / scale / volume in the layout and restores it', () => {
+    const { p } = setup();
+    p['restoreSplit']({ layout: '2h' }, [
+      { symbol: 'BTC-USD', resolution: '60', view: { style: 'line', showVolume: true, scaleMode: 'bogus' } },
+    ]);
+    expect(p.comparePanels()[0].view).toEqual({ style: 'line', showVolume: true });
   });
 });
 

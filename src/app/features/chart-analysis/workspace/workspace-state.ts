@@ -1,3 +1,4 @@
+import type { PanelView } from '../compare/split-panels';
 import type { ActiveIndicator, ChartStyle, ChartViewState } from '../chart/chart-host.component';
 import type { OrderFlowSettings } from '../orderflow/orderflow.types';
 import type { TvResolution } from '../datafeed/resolution';
@@ -80,6 +81,8 @@ export interface ChartPanelState {
   scripts?: WorkspaceScript[];
   /** Its link group, 1 … 3 (absent or 0: not linked): charts in one group follow each other (`sync`). */
   link?: number;
+  /** US03: its own style / scale / volume; absent fields follow the main chart (volume: off). */
+  view?: PanelView;
 }
 
 /** What linked charts follow of each other (CC-I5); absent: symbol and interval no, crosshair and time yes. */
