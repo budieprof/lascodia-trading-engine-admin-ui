@@ -72,7 +72,14 @@ export function invalidExposureTokens(raw: string | null | undefined): string[] 
 
 // ── Asset class of a symbol ──────────────────────────────────────────────
 
-export type SymbolAssetClass = 'FX' | 'Metal' | 'Energy' | 'Index' | 'Stock' | 'Crypto' | 'Unplaced';
+export type SymbolAssetClass =
+  | 'FX'
+  | 'Metal'
+  | 'Energy'
+  | 'Index'
+  | 'Stock'
+  | 'Crypto'
+  | 'Unplaced';
 
 export const ASSET_CLASSES: readonly SymbolAssetClass[] = [
   'FX',
@@ -90,7 +97,9 @@ const METALS = new Set(['XAU', 'XAG', 'XPT', 'XPD']);
  * Asset class from the symbol's exposure legs: the leg the symbol IS (weight +1, basis own/base).
  * Pure presentation — the engine's own classification decides nothing here.
  */
-export function assetClassOf(legs: readonly { key: string; weight: number; basis: string }[]): SymbolAssetClass {
+export function assetClassOf(
+  legs: readonly { key: string; weight: number; basis: string }[],
+): SymbolAssetClass {
   if (!legs.length) return 'Unplaced';
   const primary =
     legs.find((l) => l.basis === 'own') ??
@@ -215,7 +224,8 @@ export function coverageRowFrom(
     source,
     includedInPrompt: focus?.includedInPrompt ?? false,
     omissionReason: focus?.omissionReason ?? null,
-    problem: problem ?? (focus && !rawLegs.length ? 'The exposure map cannot place this symbol.' : null),
+    problem:
+      problem ?? (focus && !rawLegs.length ? 'The exposure map cannot place this symbol.' : null),
   };
 }
 
@@ -270,7 +280,9 @@ export function newestAgeByKey(
 ): Map<string, number> {
   const out = new Map<string, number>();
   for (const r of readings) {
-    const ages = (r.topContributors ?? []).map((c) => c.ageMinutes).filter((a) => Number.isFinite(a));
+    const ages = (r.topContributors ?? [])
+      .map((c) => c.ageMinutes)
+      .filter((a) => Number.isFinite(a));
     if (ages.length) out.set(r.currency.toUpperCase(), Math.round(Math.min(...ages)));
   }
   return out;
@@ -326,7 +338,10 @@ const SECRET_SUFFIXES = [
 
 /** Mirror of engine `SecretConfigKeys.IsSecret`: the key's last segment ends with a secret suffix. */
 export function isSecretKey(key: string): boolean {
-  const leaf = key.trim().slice(key.trim().lastIndexOf(':') + 1).toLowerCase();
+  const leaf = key
+    .trim()
+    .slice(key.trim().lastIndexOf(':') + 1)
+    .toLowerCase();
   return SECRET_SUFFIXES.some((s) => leaf.endsWith(s.toLowerCase()));
 }
 
@@ -356,16 +371,30 @@ export function parseSearchQueries(json: string | null | undefined): Record<stri
 }
 
 /** Adds or removes keys from a tracked list; returns the comma list the engine stores. */
-export function editExposureList(current: readonly string[], add: readonly string[], remove: readonly string[]): string {
+export function editExposureList(
+  current: readonly string[],
+  add: readonly string[],
+  remove: readonly string[],
+): string {
   const drop = new Set(remove.map((k) => k.toUpperCase()));
   const out = current.filter((k) => !drop.has(k));
-  for (const k of add.map((x) => x.toUpperCase())) if (exposureKindOf(k) && !out.includes(k)) out.push(k);
+  for (const k of add.map((x) => x.toUpperCase()))
+    if (exposureKindOf(k) && !out.includes(k)) out.push(k);
   return out.join(',');
 }
 
 /** Groups keys by kind, in the kind order the classifier prompt uses. */
-export function groupKeysByKind(keys: readonly string[]): { kind: ExposureKindName; keys: string[] }[] {
-  const order: ExposureKindName[] = ['Currency', 'Commodity', 'EquityIndex', 'Equity', 'Crypto', 'Factor'];
+export function groupKeysByKind(
+  keys: readonly string[],
+): { kind: ExposureKindName; keys: string[] }[] {
+  const order: ExposureKindName[] = [
+    'Currency',
+    'Commodity',
+    'EquityIndex',
+    'Equity',
+    'Crypto',
+    'Factor',
+  ];
   return order
     .map((kind) => ({ kind, keys: keys.filter((k) => exposureKindOf(k) === kind) }))
     .filter((g) => g.keys.length > 0);
@@ -395,8 +424,21 @@ export function vendorRows(entries: readonly NewsConfigEntry[]): VendorRow[] {
     const k = configValue(entries, apiKeyKey);
     const enabled = en === null ? null : en.trim().toLowerCase() === 'true';
     const keyState: VendorRow['keyState'] =
-      k === null ? 'unknown' : k === SECRET_SET ? 'set' : k === SECRET_UNSET || k === '' ? 'unset' : 'set';
-    return { name, enabledKey, apiKeyKey, enabled, keyState, blocked: enabled === true && keyState !== 'set' };
+      k === null
+        ? 'unknown'
+        : k === SECRET_SET
+          ? 'set'
+          : k === SECRET_UNSET || k === ''
+            ? 'unset'
+            : 'set';
+    return {
+      name,
+      enabledKey,
+      apiKeyKey,
+      enabled,
+      keyState,
+      blocked: enabled === true && keyState !== 'set',
+    };
   });
 }
 
@@ -521,10 +563,14 @@ export function calendarDays(
 }
 
 /** Counts per kind, most frequent first. */
-export function countByKind(events: readonly ScheduledMarketEventRow[]): { kind: string; count: number }[] {
+export function countByKind(
+  events: readonly ScheduledMarketEventRow[],
+): { kind: string; count: number }[] {
   const m = new Map<string, number>();
   for (const e of events) m.set(e.kind, (m.get(e.kind) ?? 0) + 1);
-  return [...m.entries()].map(([kind, count]) => ({ kind, count })).sort((a, b) => b.count - a.count);
+  return [...m.entries()]
+    .map(([kind, count]) => ({ kind, count }))
+    .sort((a, b) => b.count - a.count);
 }
 
 /** Human label for a scheduled-event kind. */
@@ -575,10 +621,14 @@ export function storySampleInstants(
   const start = Date.parse(story.firstSeenUtc);
   const end = Math.min(now.getTime(), Date.parse(story.lastSeenUtc) + tailHours * 3_600_000);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
-    return Number.isFinite(start) ? [new Date(Math.min(start + 60_000, now.getTime())).toISOString()] : [];
+    return Number.isFinite(start)
+      ? [new Date(Math.min(start + 60_000, now.getTime())).toISOString()]
+      : [];
   }
   const n = Math.max(2, points);
-  return Array.from({ length: n }, (_, i) => new Date(start + ((end - start) * (i + 1)) / n).toISOString());
+  return Array.from({ length: n }, (_, i) =>
+    new Date(start + ((end - start) * (i + 1)) / n).toISOString(),
+  );
 }
 
 /** Contributor shape the pressure endpoint returns (engine `NewsWeightContribution`). */
@@ -672,7 +722,12 @@ export interface EvalMetrics {
     categoryAndDirection: number | null;
     overall: number | null;
   } | null;
-  triage: { mode: string; precision: number | null; recall: number | null; screenedOut: number } | null;
+  triage: {
+    mode: string;
+    precision: number | null;
+    recall: number | null;
+    screenedOut: number;
+  } | null;
 }
 
 /** Reads a property in camelCase or PascalCase (the engine serialises the records with default naming). */
@@ -703,7 +758,8 @@ function field(o: unknown): FieldScore | null {
   const per = pick(o, 'perClassF1');
   const perClassF1: Record<string, number> = {};
   if (per && typeof per === 'object') {
-    for (const [k, v] of Object.entries(per as Record<string, unknown>)) if (typeof v === 'number') perClassF1[k] = v;
+    for (const [k, v] of Object.entries(per as Record<string, unknown>))
+      if (typeof v === 'number') perClassF1[k] = v;
   }
   return {
     pairs: num(pick(o, 'pairs')) ?? 0,
@@ -774,7 +830,10 @@ export function evalRunActive(run: Pick<NewsEvalRunView, 'status'> | null | unde
 }
 
 /** Caveat line for a run graded mostly against agent drafts. */
-export function draftCaveat(run: Pick<NewsEvalRunView, 'draftLabelCount' | 'articleCount'>, draftShare: number | null): string | null {
+export function draftCaveat(
+  run: Pick<NewsEvalRunView, 'draftLabelCount' | 'articleCount'>,
+  draftShare: number | null,
+): string | null {
   if (draftShare !== null && draftShare > 0) {
     return `${Math.round(draftShare * 100)}% of the gold labels this run used are agent drafts nobody has reviewed — read the scores as version-vs-version, not absolute.`;
   }
@@ -793,11 +852,253 @@ export function fmt(v: number | null | undefined, digits = 3): string {
 
 /** "78%" or "—". */
 export function pct(v: number | null | undefined, digits = 0): string {
-  return v === null || v === undefined || !Number.isFinite(v) ? '—' : `${(v * 100).toFixed(digits)}%`;
+  return v === null || v === undefined || !Number.isFinite(v)
+    ? '—'
+    : `${(v * 100).toFixed(digits)}%`;
 }
 
 /** "+0.123" / "−0.045" / "—". */
 export function signed(v: number | null | undefined, digits = 3): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(v).toFixed(digits)}`;
+}
+
+// ── Event study ──────────────────────────────────────────────────────────
+
+/** Result rows of one section/dimension/horizon, largest n first. */
+export function studyRows<
+  T extends { section: string; dimension: string; horizonMinutes: number; n: number },
+>(results: readonly T[], section: string, dimension: string | null, horizon: number | null): T[] {
+  return results
+    .filter(
+      (r) =>
+        r.section === section &&
+        (dimension === null || r.dimension === dimension) &&
+        (horizon === null || r.horizonMinutes === horizon),
+    )
+    .sort((a, b) => b.n - a.n);
+}
+
+/** Distinct values of a field, in first-seen order (horizons ascending). */
+export function studyDimensions(
+  results: readonly { section: string; dimension: string }[],
+): string[] {
+  return [...new Set(results.filter((r) => r.section === 'group').map((r) => r.dimension))];
+}
+export function studyHorizons(results: readonly { horizonMinutes: number }[]): number[] {
+  return [...new Set(results.map((r) => r.horizonMinutes))].sort((a, b) => a - b);
+}
+
+/**
+ * Geometry for a row of CI bars on one shared, zero-centred axis: x of the mean, of the CI ends and of
+ * zero, in [0, width]. The axis is symmetric so "above zero" always reads on the same side.
+ */
+export function ciGeometry(
+  rows: readonly { mean: number; ciLow: number | null; ciHigh: number | null }[],
+  width: number,
+): { scale: (v: number) => number; zero: number; extent: number } {
+  let extent = 0;
+  for (const r of rows) {
+    for (const v of [r.mean, r.ciLow, r.ciHigh])
+      if (v !== null && Number.isFinite(v)) extent = Math.max(extent, Math.abs(v));
+  }
+  if (extent === 0) extent = 1;
+  extent *= 1.1;
+  const scale = (v: number) =>
+    ((Math.max(-extent, Math.min(extent, v)) + extent) / (2 * extent)) * width;
+  return { scale, zero: scale(0), extent };
+}
+
+/** A bucket's verdict from its CI: above zero, below zero, or spanning it (or too thin to say). */
+export function ciVerdict(
+  r: { ciLow: number | null; ciHigh: number | null; n: number },
+  minN = 30,
+): 'positive' | 'negative' | 'none' | 'thin' {
+  if (r.n < minN || r.ciLow === null || r.ciHigh === null) return 'thin';
+  if (r.ciLow > 0) return 'positive';
+  if (r.ciHigh < 0) return 'negative';
+  return 'none';
+}
+
+/** Category → severity from `Weight:CategorySeverityJson` (or a recommendation body); bad JSON → {}. */
+export function parseSeverityMap(
+  json: string | Record<string, unknown> | null | undefined,
+): Record<string, number> {
+  let obj: unknown = json;
+  if (typeof json === 'string') {
+    try {
+      obj = JSON.parse(json);
+    } catch {
+      return {};
+    }
+  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>))
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  return out;
+}
+
+export interface SeverityDiffRow {
+  category: string;
+  current: number | null;
+  recommended: number | null;
+  delta: number | null;
+  changed: boolean;
+}
+
+/** Current vs recommended severity per category; changed rows first, by |delta|. */
+export function severityDiff(
+  current: Record<string, number>,
+  recommended: Record<string, number>,
+): SeverityDiffRow[] {
+  const cats = [...new Set([...Object.keys(current), ...Object.keys(recommended)])];
+  return cats
+    .map((category) => {
+      const c = category in current ? current[category] : null;
+      const r = category in recommended ? recommended[category] : null;
+      const delta = c !== null && r !== null ? r - c : null;
+      return {
+        category,
+        current: c,
+        recommended: r,
+        delta,
+        changed: r !== null && (c === null || Math.abs(r - c) > 1e-9),
+      };
+    })
+    .sort(
+      (a, b) =>
+        Number(b.changed) - Number(a.changed) ||
+        Math.abs(b.delta ?? 0) - Math.abs(a.delta ?? 0) ||
+        a.category.localeCompare(b.category),
+    );
+}
+
+/**
+ * The value to write: the current map with the recommended values laid over it. Keys absent from the
+ * recommendation keep their current value (a category with too little data keeps today's severity).
+ */
+export function mergedSeverityJson(
+  current: Record<string, number>,
+  recommended: Record<string, number>,
+): string {
+  return JSON.stringify({ ...current, ...recommended });
+}
+
+export type DirectionMode = 'Full' | 'RiskOnly' | 'Auto';
+export const DIRECTION_MODES: readonly DirectionMode[] = ['Full', 'RiskOnly', 'Auto'];
+
+/**
+ * What the latest study says about the prompt's direction mode. Only a significantly positive
+ * alignment (CI above zero) supports signed direction; anything else argues for RiskOnly.
+ */
+export function directionAdvice(verdict: string | null | undefined): {
+  mode: DirectionMode;
+  text: string;
+} {
+  switch ((verdict ?? '').toLowerCase()) {
+    case 'positive':
+      return {
+        mode: 'Full',
+        text: 'The study finds trades aligned with news pressure did significantly better — signed direction is supported.',
+      };
+    case 'negative':
+      return {
+        mode: 'RiskOnly',
+        text: 'The study finds aligning with news pressure did significantly WORSE — keep direction out of the prompt.',
+      };
+    case 'inconclusive':
+      return {
+        mode: 'RiskOnly',
+        text: 'The study cannot tell aligned from opposed — direction is unvalidated; RiskOnly (or Auto) is the honest setting.',
+      };
+    default:
+      return {
+        mode: 'RiskOnly',
+        text: 'No study verdict yet (or too little data) — direction is unvalidated.',
+      };
+  }
+}
+
+/** Generic mode parsing for the validation keys: case-insensitive match against the allowed names, else the default. */
+export function parseMode<T extends string>(
+  raw: string | null | undefined,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  const v = (raw ?? '').trim().toLowerCase();
+  return allowed.find((a) => a.toLowerCase() === v) ?? fallback;
+}
+
+/**
+ * Reads a recommended-weights answer in any of the shapes the endpoint may take: a list of
+ * RecommendedSeverity rows, `{ rows | categories | items, json }`, or a bare category → value map.
+ */
+export function parseRecommendation(data: unknown): {
+  rows: {
+    category: string;
+    current: number | null;
+    recommended: number;
+    n: number | null;
+    clusters: number | null;
+    basis: string | null;
+  }[];
+} {
+  const fromRow = (r: unknown) => {
+    const o = r as Record<string, unknown>;
+    const g = (n: string) => o[n] ?? o[n.charAt(0).toUpperCase() + n.slice(1)];
+    const rec = g('recommended');
+    const cat = g('category');
+    if (typeof cat !== 'string' || typeof rec !== 'number') return null;
+    const cur = g('current');
+    const n = g('n');
+    const cl = g('clusters');
+    const b = g('basis');
+    return {
+      category: cat,
+      current: typeof cur === 'number' ? cur : null,
+      recommended: rec,
+      n: typeof n === 'number' ? n : null,
+      clusters: typeof cl === 'number' ? cl : null,
+      basis: typeof b === 'string' ? b : null,
+    };
+  };
+  const list = (v: unknown) =>
+    Array.isArray(v)
+      ? v.map(fromRow).filter((x): x is NonNullable<ReturnType<typeof fromRow>> => x !== null)
+      : null;
+
+  const direct = list(data);
+  if (direct) return { rows: direct };
+  if (data && typeof data === 'object') {
+    const o = data as Record<string, unknown>;
+    for (const k of [
+      'rows',
+      'Rows',
+      'categories',
+      'Categories',
+      'items',
+      'Items',
+      'recommendations',
+      'Recommendations',
+    ]) {
+      const l = list(o[k]);
+      if (l) return { rows: l };
+    }
+    const json = o['json'] ?? o['Json'] ?? o['severityJson'] ?? o['SeverityJson'];
+    const map = parseSeverityMap(
+      typeof json === 'string' ? json : (data as Record<string, unknown>),
+    );
+    return {
+      rows: Object.entries(map).map(([category, recommended]) => ({
+        category,
+        current: null,
+        recommended,
+        n: null,
+        clusters: null,
+        basis: null,
+      })),
+    };
+  }
+  return { rows: [] };
 }

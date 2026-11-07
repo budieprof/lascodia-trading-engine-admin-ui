@@ -165,6 +165,8 @@ export interface NewsFocusResult {
   quoteCurrency: string | null;
   /** How the symbol resolved through the exposure map; null for a single-key request. */
   exposure?: SymbolExposureDto | null;
+  /** News as risk (validation vertical): vol forecast, breaking stories, scheduled events. */
+  risk?: NewsRiskBlockView | null;
 }
 
 /** One label as returned by the article listing. */
@@ -441,10 +443,16 @@ export const NEWS_CONFIG_SECTIONS: { match: string; title: string; blurb: string
     blurb: 'Bounds for operator-triggered classifier evaluations over the gold set.',
   },
   {
-    match: 'EventStudy:',
+    match: 'Study:',
     title: 'Event study',
     blurb:
       'The nightly study of what the market did after news, which the recommended severities and the direction verdict come from.',
+  },
+  {
+    match: 'Loadings:',
+    title: 'Fitted loadings',
+    blurb:
+      'Weekly regression of each symbol on the factor proxies (risk, US rates, crypto market), shrunk toward the static weights and capped. Point-in-time: a loading is used only after it was computed.',
   },
   {
     match: 'BreakingGate:',
@@ -495,7 +503,9 @@ export interface NewsArticleAnalysis {
 }
 
 /** Config keys the engine lists but refuses to write (derived values). */
-export const NEWS_READ_ONLY_KEYS: ReadonlySet<string> = new Set(['NewsIntel:Exposures:Recommended']);
+export const NEWS_READ_ONLY_KEYS: ReadonlySet<string> = new Set([
+  'NewsIntel:Exposures:Recommended',
+]);
 
 /** The engine's masked placeholders for a secret value (`SecretConfigKeys`). */
 export const SECRET_SET = '***SET';
@@ -679,3 +689,110 @@ export const NEWS_STORY_STATES: readonly NewsStoryState[] = [
   'Denied',
   'Resolved',
 ];
+
+// ── Validation (wave 2: event study, fitted severities, news as risk) ────
+// Mirrors the engine entities `NewsEventStudyRun` / `NewsEventStudyResult` on branch ni/validation.
+// The endpoints are optional: an engine without them answers 404 and the pages say so.
+
+/** One event-study run. JSON columns arrive as strings. */
+export interface NewsEventStudyRunView {
+  id: number;
+  /** Running / Completed / Failed. */
+  status: string;
+  /** manual | nightly. */
+  trigger: string | null;
+  requestedBy: string | null;
+  fromUtc: string;
+  toUtc: string;
+  /** A PromptVersion, `legacy`, or null = every lineage reported separately. */
+  lineageFilter: string | null;
+  paramsFingerprint: string | null;
+  labelsConsidered: number;
+  observations: number;
+  /** Positive / Negative / Inconclusive / InsufficientData. */
+  alignmentVerdict: string | null;
+  alignmentHorizonMinutes: number | null;
+  alignmentMean: number | null;
+  alignmentCiLow: number | null;
+  alignmentCiHigh: number | null;
+  coverageJson?: string | null;
+  volCalibrationJson?: string | null;
+  summaryJson?: string | null;
+  error: string | null;
+  startedAtUtc: string;
+  completedAtUtc: string | null;
+}
+
+/** One aggregate row (`section` = group | term-ic). Mean is signed return in ATR units, or the rank IC. */
+export interface NewsEventStudyResultView {
+  section: string;
+  dimension: string;
+  bucket: string;
+  horizonMinutes: number;
+  n: number;
+  clusters: number;
+  mean: number;
+  hitRate: number | null;
+  tStat: number | null;
+  ciLow: number | null;
+  ciHigh: number | null;
+}
+
+/** A run with its result rows. */
+export interface NewsEventStudyDetail {
+  run: NewsEventStudyRunView;
+  results: NewsEventStudyResultView[];
+}
+
+/** Expected-volatility forecast for one symbol (engine `NewsVolatilityForecast`). */
+export interface NewsVolatilityForecastView {
+  /** Expected range relative to normal, ≥ 1, ≤ cap. */
+  multiplier: number;
+  absolutePressure: number;
+  scheduledHighEvents: number;
+  horizonMinutes: number;
+  pressureCoefficient: number;
+  eventCoefficient: number;
+  /** `study:#id` or `config`. */
+  source: string;
+}
+
+/** A breaking story on one of a symbol's legs (engine `BreakingStory`). */
+export interface BreakingStoryView {
+  articleId: number;
+  headline: string;
+  source: string | null;
+  key: string;
+  legWeight: number;
+  category: string;
+  certainty: string;
+  severity: number;
+  magnitude: number;
+  firstSeenUtc: string;
+  pauseUntilUtc: string;
+}
+
+export interface NewsRiskBlockView {
+  volatility: NewsVolatilityForecastView;
+  breakingStories: BreakingStoryView[];
+  scheduledEvents: {
+    key: string;
+    title: string;
+    scheduledAtUtc: string;
+    impact: string;
+    source: string;
+  }[];
+}
+
+/** One recommended severity (engine `RecommendedSeverity`). */
+export interface RecommendedSeverityView {
+  category: string;
+  current: number;
+  recommended: number;
+  fitted: number | null;
+  n: number;
+  clusters: number;
+  meanSignedR: number | null;
+  /** Why: fitted / shrunk / insufficient data (kept current). */
+  basis: string;
+}

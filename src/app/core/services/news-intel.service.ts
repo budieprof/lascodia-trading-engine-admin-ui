@@ -27,7 +27,11 @@ import {
   NewsStoryState,
   NewsStoryView,
   ScheduledMarketEventRow,
+  NewsEventStudyRunView,
+  NewsEventStudyDetail,
+  NewsEventStudyResultView,
 } from '@features/news-intel/news-intel.types';
+import type { NewsPressureReadingView } from '@features/news-intel/news-intel.logic';
 
 /**
  * Data access for the News Intelligence cockpit — `/news-intel/*` on the engine.
@@ -135,6 +139,24 @@ export class NewsIntelService {
     });
   }
 
+  /**
+   * Pressure readings with their weighted contributors (engine `NewsPressureReading`). `asOfUtc` reads
+   * point-in-time. Used for freshness per key and for a story's weight over time.
+   */
+  getPressureReadings(opts: {
+    keys?: string[];
+    asOfUtc?: string;
+    topItems?: number;
+  }): Observable<NewsPressureReadingView[]> {
+    const qs = new URLSearchParams();
+    if (opts.keys?.length) qs.set('currencies', opts.keys.join(','));
+    if (opts.asOfUtc) qs.set('asOfUtc', opts.asOfUtc);
+    qs.set('topItems', String(opts.topItems ?? 20));
+    return this.api.getEnvelope<NewsPressureReadingView[]>(`/news-intel/pressure?${qs}`, {
+      silent: true,
+    });
+  }
+
   // ── Sourcing v2: scheduled market events ──────────────────────────────
 
   /**
@@ -152,10 +174,9 @@ export class NewsIntelService {
     if (opts?.to) qs.set('to', opts.to);
     if (opts?.key) qs.set('key', opts.key);
     qs.set('take', String(opts?.take ?? 1000));
-    return this.api.getEnvelope<ScheduledMarketEventRow[]>(
-      `/news-intel/scheduled-events?${qs}`,
-      { silent: true },
-    );
+    return this.api.getEnvelope<ScheduledMarketEventRow[]>(`/news-intel/scheduled-events?${qs}`, {
+      silent: true,
+    });
   }
 
   // ── Understanding v2: stories, gold set, evaluation ───────────────────
@@ -220,6 +241,59 @@ export class NewsIntelService {
   /** One evaluation run with its full metric set. */
   getEvalRun(id: number): Observable<NewsEvalRunView> {
     return this.api.getEnvelope<NewsEvalRunView>(`/news-intel/eval/runs/${id}`, { silent: true });
+  }
+
+  // ── Validation (wave 2): event study ──────────────────────────────────
+  // Routes follow the eval pattern (`eval/run`, `eval/runs`, `eval/runs/{id}`) plus the brief's
+  // `event-study/{id}/recommended-weights`. An engine without them answers 404; callers show that.
+
+  /** Starts an event-study run over [fromUtc, toUtc) (async; poll the run). */
+  runEventStudy(body: {
+    fromUtc?: string;
+    toUtc?: string;
+    lineage?: string | null;
+  }): Observable<NewsEventStudyRunView> {
+    return this.api.postEnvelope<NewsEventStudyRunView>('/news-intel/event-study/run', body, {
+      silent: true,
+    });
+  }
+
+  /** Recent event-study runs, newest first. */
+  getEventStudyRuns(take = 20): Observable<NewsEventStudyRunView[]> {
+    return this.api.getEnvelope<NewsEventStudyRunView[]>(
+      `/news-intel/event-study/runs?take=${take}`,
+      {
+        silent: true,
+      },
+    );
+  }
+
+  /**
+   * One run with its result rows. Accepts either `{ run, results }` or a run object carrying
+   * `results`, so the page does not depend on which envelope the engine settles on.
+   */
+  getEventStudyRun(id: number): Observable<NewsEventStudyDetail> {
+    return this.api
+      .getEnvelope<
+        NewsEventStudyDetail | (NewsEventStudyRunView & { results?: NewsEventStudyResultView[] })
+      >(`/news-intel/event-study/runs/${id}`, { silent: true })
+      .pipe(
+        map((d) =>
+          'run' in d && d.run
+            ? { run: d.run, results: d.results ?? [] }
+            : {
+                run: d as NewsEventStudyRunView,
+                results: (d as { results?: NewsEventStudyResultView[] }).results ?? [],
+              },
+        ),
+      );
+  }
+
+  /** The recommended `Weight:CategorySeverityJson` for a run (shape read by `parseRecommendation`). */
+  getRecommendedWeights(id: number): Observable<unknown> {
+    return this.api.getEnvelope<unknown>(`/news-intel/event-study/${id}/recommended-weights`, {
+      silent: true,
+    });
   }
 
   /** Every `NewsIntel:` knob with its current value and description. */

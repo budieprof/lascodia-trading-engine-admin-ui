@@ -5,6 +5,10 @@ import { CurrencyPairsService } from '@core/services/currency-pairs.service';
 import { createPolledResource } from '@core/polling/polled-resource';
 import { ConfirmDialogComponent } from '@shared/components/confirm-dialog/confirm-dialog.component';
 import { RefreshButtonComponent } from '@shared/components/refresh-button/refresh-button.component';
+import { RouterLink } from '@angular/router';
+import { NewsIntelNavComponent } from '@features/news-intel/components/news-intel-nav.component';
+import { NewsExposureLegsComponent } from '@features/news-intel/components/news-exposure-legs.component';
+import { isMaskedValue, isSecretKey } from '@features/news-intel/news-intel.logic';
 import {
   NewsArticleView,
   NewsClassificationStatus,
@@ -16,6 +20,7 @@ import {
   NewsPressureSummaryView,
   NewsCurrencySeries,
   NewsIngestBucket,
+  NEWS_READ_ONLY_KEYS,
 } from '@features/news-intel/news-intel.types';
 
 /**
@@ -30,7 +35,16 @@ import {
 @Component({
   selector: 'app-news-intel-page',
   standalone: true,
-  imports: [DatePipe, DecimalPipe, PercentPipe, ConfirmDialogComponent, RefreshButtonComponent],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    PercentPipe,
+    ConfirmDialogComponent,
+    RefreshButtonComponent,
+    RouterLink,
+    NewsIntelNavComponent,
+    NewsExposureLegsComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="page">
@@ -76,6 +90,8 @@ import {
         </div>
       </header>
 
+      <app-news-intel-nav />
+
       @if (error(); as e) {
         <div class="banner error">{{ e }}</div>
       }
@@ -101,8 +117,10 @@ import {
           <div>
             <h2>Focus</h2>
             <p class="muted small">
-              Exactly what an analysis of this instrument would be told. Enter a pair
-              (<code>EURUSD</code>) or a single currency (<code>USD</code>).
+              Exactly what an analysis of this instrument would be told. Enter any symbol
+              (<code>EURUSD</code>, <code>NAS100</code>, <code>AAPL</code>, <code>USOIL</code>,
+              <code>BTCUSD</code>) or one exposure key (<code>USD</code>, <code>WTI</code>,
+              <code>IDX:US500</code>).
             </p>
           </div>
           <div class="focus-input">
@@ -113,7 +131,7 @@ import {
               [value]="focusInput()"
               (input)="onFocusInput($event)"
               (keydown.enter)="applyFocus()"
-              maxlength="12"
+              maxlength="32"
               aria-label="Symbol or currency to focus on"
             />
             <button type="button" class="btn" (click)="applyFocus()">Focus</button>
@@ -348,6 +366,8 @@ import {
                 }
               </div>
             }
+
+            <app-news-exposure-legs [focus]="f" />
 
             <p class="muted small fingerprint">
               Weight params <code class="mono">{{ ctx.paramsFingerprint }}</code> — readings
@@ -1012,7 +1032,28 @@ import {
                     }
                   </div>
                   <div class="cfg-input">
-                    @if (entry.dataType === 'Bool') {
+                    @if (isReadOnly(entry.key)) {
+                      <textarea
+                        class="ta mono"
+                        [id]="entry.key"
+                        rows="3"
+                        readonly
+                        [value]="entry.value"
+                        title="Derived by the engine — read-only"
+                      ></textarea>
+                      <span class="muted xsmall"
+                        >Read-only (derived). Track keys on the
+                        <a routerLink="/news-intel/exposures">Exposures</a> tab.</span
+                      >
+                    } @else if (isSecret(entry)) {
+                      <span class="muted small mono">{{
+                        entry.value === '***SET' ? 'set' : 'not set'
+                      }}</span>
+                      <span class="muted xsmall"
+                        >Write-only secret — change it on the
+                        <a routerLink="/news-intel/sources">Sources</a> tab.</span
+                      >
+                    } @else if (entry.dataType === 'Bool') {
                       <select
                         class="sel"
                         [id]="entry.key"
@@ -2459,6 +2500,16 @@ export class NewsIntelPageComponent {
 
   label(key: string): string {
     return NewsIntelService.shortLabel(key);
+  }
+
+  /** Derived keys the engine lists but refuses to write (e.g. Exposures:Recommended). */
+  isReadOnly(key: string): boolean {
+    return NEWS_READ_ONLY_KEYS.has(key);
+  }
+
+  /** Secrets are never edited in the bulk panel: their value is a ***SET/***UNSET mask. */
+  isSecret(entry: NewsConfigEntry): boolean {
+    return isSecretKey(entry.key) || isMaskedValue(entry.value);
   }
 
   currentValue(entry: NewsConfigEntry): string {

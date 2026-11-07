@@ -29,6 +29,16 @@ import {
   storyWeightIn,
   untrackedDemand,
   vendorRows,
+  ciGeometry,
+  ciVerdict,
+  directionAdvice,
+  mergedSeverityJson,
+  parseMode,
+  parseSeverityMap,
+  severityDiff,
+  studyDimensions,
+  studyHorizons,
+  studyRows,
 } from './news-intel.logic';
 import { NewsFocusResult, ScheduledMarketEventRow } from './news-intel.types';
 import { NewsIntelService } from '@core/services/news-intel.service';
@@ -48,7 +58,12 @@ describe('exposure keys', () => {
   });
 
   it('parses a tracked list: valid, upper-case, de-duplicated, in order', () => {
-    expect(parseExposureList('usd, eur  XAU,usd,bogus1,IDX:US500')).toEqual(['USD', 'EUR', 'XAU', 'IDX:US500']);
+    expect(parseExposureList('usd, eur  XAU,usd,bogus1,IDX:US500')).toEqual([
+      'USD',
+      'EUR',
+      'XAU',
+      'IDX:US500',
+    ]);
     expect(invalidExposureTokens('USD,bogus1, EQ:')).toEqual(['bogus1', 'EQ:']);
   });
 
@@ -68,9 +83,24 @@ describe('exposure keys', () => {
 
 describe('asset class', () => {
   it('reads the leg the symbol is', () => {
-    expect(assetClassOf([{ key: 'EUR', weight: 1, basis: 'base' }, { key: 'USD', weight: -1, basis: 'quote' }])).toBe('FX');
-    expect(assetClassOf([{ key: 'XAU', weight: 1, basis: 'base' }, { key: 'USD', weight: -1, basis: 'quote' }])).toBe('Metal');
-    expect(assetClassOf([{ key: 'WTI', weight: 1, basis: 'own' }, { key: 'F:RISK', weight: 0.2, basis: 'factor:static' }])).toBe('Energy');
+    expect(
+      assetClassOf([
+        { key: 'EUR', weight: 1, basis: 'base' },
+        { key: 'USD', weight: -1, basis: 'quote' },
+      ]),
+    ).toBe('FX');
+    expect(
+      assetClassOf([
+        { key: 'XAU', weight: 1, basis: 'base' },
+        { key: 'USD', weight: -1, basis: 'quote' },
+      ]),
+    ).toBe('Metal');
+    expect(
+      assetClassOf([
+        { key: 'WTI', weight: 1, basis: 'own' },
+        { key: 'F:RISK', weight: 0.2, basis: 'factor:static' },
+      ]),
+    ).toBe('Energy');
     expect(assetClassOf([{ key: 'EQ:AAPL', weight: 1, basis: 'own' }])).toBe('Stock');
     expect(assetClassOf([{ key: 'IDX:US500', weight: 1, basis: 'own' }])).toBe('Index');
     expect(assetClassOf([{ key: 'CR:BTC', weight: 1, basis: 'own' }])).toBe('Crypto');
@@ -89,8 +119,26 @@ const aaplFocus: NewsFocusResult = {
     coverage: 0.4,
     symbolBias: null,
     legs: [
-      { key: 'EQ:AAPL', weight: 1, basis: 'own', covered: false, score: null, contribution: null, absolutePressure: null, storyCount: null },
-      { key: 'USD', weight: 0.5, basis: 'factor:static', covered: true, score: 0.2, contribution: 0.1, absolutePressure: 0.3, storyCount: 2 },
+      {
+        key: 'EQ:AAPL',
+        weight: 1,
+        basis: 'own',
+        covered: false,
+        score: null,
+        contribution: null,
+        absolutePressure: null,
+        storyCount: null,
+      },
+      {
+        key: 'USD',
+        weight: 0.5,
+        basis: 'factor:static',
+        covered: true,
+        score: 0.2,
+        contribution: 0.1,
+        absolutePressure: 0.3,
+        storyCount: 2,
+      },
     ],
   },
   includedInPrompt: false,
@@ -109,42 +157,83 @@ const aaplFocus: NewsFocusResult = {
 };
 
 describe('coverage', () => {
-  it('uses the engine\'s coverage and covered flags, never zero for an untracked leg', () => {
+  it("uses the engine's coverage and covered flags, never zero for an untracked leg", () => {
     const row = coverageRowFrom('AAPL', aaplFocus, new Set(['EQ:AAPL']), new Map([['USD', 42]]));
     expect(row.assetClass).toBe('Stock');
     expect(row.coverage).toBe(0.4);
     expect(row.symbolBias).toBeNull();
-    expect(row.legs[0]).toMatchObject({ key: 'EQ:AAPL', covered: false, score: null, newestAgeMinutes: null });
-    expect(row.legs[1]).toMatchObject({ key: 'USD', covered: true, score: 0.2, newestAgeMinutes: 42 });
+    expect(row.legs[0]).toMatchObject({
+      key: 'EQ:AAPL',
+      covered: false,
+      score: null,
+      newestAgeMinutes: null,
+    });
+    expect(row.legs[1]).toMatchObject({
+      key: 'USD',
+      covered: true,
+      score: 0.2,
+      newestAgeMinutes: 42,
+    });
     expect(row.calendarKeys).toEqual(['USD', 'EQ:AAPL']);
     expect(row.modeGovernedKeys).toEqual(['EQ:AAPL']);
     expect(row.newestAgeMinutes).toBe(42);
   });
 
   it('falls back to the tracked list and a computed share for an engine without legs', () => {
-    const f: NewsFocusResult = { ...aaplFocus, context: { ...aaplFocus.context!, legs: null, coverage: null } };
+    const f: NewsFocusResult = {
+      ...aaplFocus,
+      context: { ...aaplFocus.context!, legs: null, coverage: null },
+    };
     const row = coverageRowFrom('AAPL', f, new Set(['EQ:AAPL']));
     expect(row.legs.map((l) => l.covered)).toEqual([true, false]);
     expect(row.coverage).toBeCloseTo(1 / 1.5);
   });
 
   it('marks a failed or unplaced symbol instead of inventing legs', () => {
-    expect(coverageRowFrom('ZZZ', null, new Set(), new Map(), 'focus failed').problem).toBe('focus failed');
-    const unplaced = coverageRowFrom('ZZZ', { ...aaplFocus, context: null, exposure: null }, new Set());
+    expect(coverageRowFrom('ZZZ', null, new Set(), new Map(), 'focus failed').problem).toBe(
+      'focus failed',
+    );
+    const unplaced = coverageRowFrom(
+      'ZZZ',
+      { ...aaplFocus, context: null, exposure: null },
+      new Set(),
+    );
     expect(unplaced.problem).toMatch(/cannot place/);
     expect(unplaced.coverage).toBeNull();
   });
 
   it('summarises and ranks untracked demand', () => {
     const a = coverageRowFrom('AAPL', aaplFocus, new Set());
-    const b = coverageRowFrom('MSFT', { ...aaplFocus, exposure: { ...aaplFocus.exposure!, legs: [{ key: 'EQ:MSFT', weight: 1, basis: 'own' }, { key: 'USD', weight: 0.5, basis: 'factor:static' }] }, context: null }, new Set(['USD']));
+    const b = coverageRowFrom(
+      'MSFT',
+      {
+        ...aaplFocus,
+        exposure: {
+          ...aaplFocus.exposure!,
+          legs: [
+            { key: 'EQ:MSFT', weight: 1, basis: 'own' },
+            { key: 'USD', weight: 0.5, basis: 'factor:static' },
+          ],
+        },
+        context: null,
+      },
+      new Set(['USD']),
+    );
     const s = coverageSummary([a, b]);
-    expect(s).toMatchObject({ symbols: 2, partlyCovered: 2, fullyCovered: 0, withModeGovernedKeys: 2 });
+    expect(s).toMatchObject({
+      symbols: 2,
+      partlyCovered: 2,
+      fullyCovered: 0,
+      withModeGovernedKeys: 2,
+    });
     expect(untrackedDemand([a, b])[0]).toEqual({ key: 'EQ:AAPL', symbols: 1 });
   });
 
   it('takes the youngest weighted contributor per key', () => {
-    const m = newestAgeByKey([{ currency: 'usd', topContributors: [{ ageMinutes: 90.4 }, { ageMinutes: 12.6 }] }, { currency: 'EUR', topContributors: [] }]);
+    const m = newestAgeByKey([
+      { currency: 'usd', topContributors: [{ ageMinutes: 90.4 }, { ageMinutes: 12.6 }] },
+      { currency: 'EUR', topContributors: [] },
+    ]);
     expect(m.get('USD')).toBe(13);
     expect(m.has('EUR')).toBe(false);
   });
@@ -181,12 +270,38 @@ describe('config helpers', () => {
 
   it('derives vendor rows and flags enabled-without-key', () => {
     const rows = vendorRows([
-      { key: 'NewsIntel:Vendor:Polygon:Enabled', value: 'true', dataType: 'Bool', description: null, isHotReloadable: true },
-      { key: 'NewsIntel:Vendor:Polygon:ApiKey', value: '***UNSET', dataType: 'String', description: null, isHotReloadable: true },
-      { key: 'NewsIntel:Vendor:Finnhub:ApiKey', value: '***SET', dataType: 'String', description: null, isHotReloadable: true },
+      {
+        key: 'NewsIntel:Vendor:Polygon:Enabled',
+        value: 'true',
+        dataType: 'Bool',
+        description: null,
+        isHotReloadable: true,
+      },
+      {
+        key: 'NewsIntel:Vendor:Polygon:ApiKey',
+        value: '***UNSET',
+        dataType: 'String',
+        description: null,
+        isHotReloadable: true,
+      },
+      {
+        key: 'NewsIntel:Vendor:Finnhub:ApiKey',
+        value: '***SET',
+        dataType: 'String',
+        description: null,
+        isHotReloadable: true,
+      },
     ]);
-    expect(rows.find((r) => r.name === 'Polygon')).toMatchObject({ enabled: true, keyState: 'unset', blocked: true });
-    expect(rows.find((r) => r.name === 'Finnhub')).toMatchObject({ enabled: null, keyState: 'set', blocked: false });
+    expect(rows.find((r) => r.name === 'Polygon')).toMatchObject({
+      enabled: true,
+      keyState: 'unset',
+      blocked: true,
+    });
+    expect(rows.find((r) => r.name === 'Finnhub')).toMatchObject({
+      enabled: null,
+      keyState: 'set',
+      blocked: false,
+    });
     expect(rows.find((r) => r.name === 'Benzinga')).toMatchObject({ keyState: 'unknown' });
   });
 
@@ -196,7 +311,13 @@ describe('config helpers', () => {
   });
 
   it('puts the bare Exposures key and the new prefixes in their own sections', () => {
-    const e = (key: string) => ({ key, value: '', dataType: 'String', description: null, isHotReloadable: true });
+    const e = (key: string) => ({
+      key,
+      value: '',
+      dataType: 'String',
+      description: null,
+      isHotReloadable: true,
+    });
     const groups = NewsIntelService.groupConfig([
       e('NewsIntel:Enabled'),
       e('NewsIntel:Exposures'),
@@ -206,7 +327,8 @@ describe('config helpers', () => {
       e('NewsIntel:Story:Mode'),
       e('NewsIntel:Eval:MaxArticles'),
     ]);
-    const titleOf = (key: string) => groups.find((g) => g.entries.some((x) => x.key === key))?.title;
+    const titleOf = (key: string) =>
+      groups.find((g) => g.entries.some((x) => x.key === key))?.title;
     expect(titleOf('NewsIntel:Enabled')).toBe('Module');
     expect(titleOf('NewsIntel:Exposures')).toBe('Exposures');
     expect(titleOf('NewsIntel:Exposures:Recommended')).toBe('Exposures');
@@ -222,8 +344,22 @@ describe('sources', () => {
     const { channels, publishers } = latencyRows([
       { channel: 'Rss', source: null, windowHours: 24, count: 10, p50Minutes: 18, p90Minutes: 60 },
       { channel: 'Rss', source: null, windowHours: 168, count: 70, p50Minutes: 20, p90Minutes: 70 },
-      { channel: 'Search', source: null, windowHours: 168, count: 300, p50Minutes: 70, p90Minutes: 1020 },
-      { channel: 'Rss', source: 'Reuters', windowHours: 24, count: 5, p50Minutes: 9, p90Minutes: 30 },
+      {
+        channel: 'Search',
+        source: null,
+        windowHours: 168,
+        count: 300,
+        p50Minutes: 70,
+        p90Minutes: 1020,
+      },
+      {
+        channel: 'Rss',
+        source: 'Reuters',
+        windowHours: 24,
+        count: 5,
+        p50Minutes: 9,
+        p90Minutes: 30,
+      },
     ]);
     expect(channels.map((c) => c.channel)).toEqual(['Search', 'Rss']);
     expect(channels[1].day?.p50).toBe(18);
@@ -246,7 +382,13 @@ describe('sources', () => {
       { url: 'b', lastStatus: 200, lastPolledUtc: '', notModifiedStreak: 0, hasValidators: false },
       { url: 'c', lastStatus: 403, lastPolledUtc: '', notModifiedStreak: 0, hasValidators: false },
     ]);
-    expect(s).toEqual({ feeds: 3, withValidators: 1, lastNotModified: 1, hitRate: 1 / 3, failing: 1 });
+    expect(s).toEqual({
+      feeds: 3,
+      withValidators: 1,
+      lastNotModified: 1,
+      hitRate: 1 / 3,
+      failing: 1,
+    });
     expect(feedSummary([]).hitRate).toBeNull();
   });
 
@@ -259,8 +401,23 @@ describe('sources', () => {
 });
 
 describe('scheduled events', () => {
-  const ev = (id: number, at: string, key: string, kind: string, impact = 'High'): ScheduledMarketEventRow => ({
-    id, exposureKey: key, kind, scheduledAtUtc: at, impact, title: `${kind} ${key}`, source: 's', firstSeenUtc: at, notes: null, actual: null,
+  const ev = (
+    id: number,
+    at: string,
+    key: string,
+    kind: string,
+    impact = 'High',
+  ): ScheduledMarketEventRow => ({
+    id,
+    exposureKey: key,
+    kind,
+    scheduledAtUtc: at,
+    impact,
+    title: `${kind} ${key}`,
+    source: 's',
+    firstSeenUtc: at,
+    notes: null,
+    actual: null,
   });
   const events = [
     ev(2, '2026-11-09T21:05:00Z', 'EQ:AAPL', 'Earnings', 'Medium'),
@@ -281,22 +438,73 @@ describe('scheduled events', () => {
 describe('stories', () => {
   it('samples instants inside the story life, never in the future', () => {
     const now = new Date('2026-11-07T12:00:00Z');
-    const pts = storySampleInstants({ firstSeenUtc: '2026-11-07T08:00:00Z', lastSeenUtc: '2026-11-07T10:00:00Z' }, now, 4);
+    const pts = storySampleInstants(
+      { firstSeenUtc: '2026-11-07T08:00:00Z', lastSeenUtc: '2026-11-07T10:00:00Z' },
+      now,
+      4,
+    );
     expect(pts).toHaveLength(4);
     expect(pts[3]).toBe('2026-11-07T12:00:00.000Z');
     expect(pts.every((p) => Date.parse(p) <= now.getTime())).toBe(true);
   });
 
-  it('sums a story\'s contribution across keys', () => {
+  it("sums a story's contribution across keys", () => {
     const r = storyWeightIn(
       [
-        { currency: 'USD', asOfUtc: '', weightedScore: 0, absolutePressure: 0, articleCount: 0, storyCount: 0, dominantCategory: null, paramsFingerprint: '',
+        {
+          currency: 'USD',
+          asOfUtc: '',
+          weightedScore: 0,
+          absolutePressure: 0,
+          articleCount: 0,
+          storyCount: 0,
+          dominantCategory: null,
+          paramsFingerprint: '',
           topContributors: [
-            { articleId: 1, title: 'a', sourceName: null, currency: 'USD', ageMinutes: 1, weight: 0.4, signedWeight: -0.4, storyId: 7 },
-            { articleId: 2, title: 'b', sourceName: null, currency: 'USD', ageMinutes: 1, weight: 0.2, signedWeight: 0.2, storyId: 8 },
-          ] },
-        { currency: 'EUR', asOfUtc: '', weightedScore: 0, absolutePressure: 0, articleCount: 0, storyCount: 0, dominantCategory: null, paramsFingerprint: '',
-          topContributors: [{ articleId: 1, title: 'a', sourceName: null, currency: 'EUR', ageMinutes: 1, weight: 0.1, signedWeight: 0.1, storyId: 7 }] },
+            {
+              articleId: 1,
+              title: 'a',
+              sourceName: null,
+              currency: 'USD',
+              ageMinutes: 1,
+              weight: 0.4,
+              signedWeight: -0.4,
+              storyId: 7,
+            },
+            {
+              articleId: 2,
+              title: 'b',
+              sourceName: null,
+              currency: 'USD',
+              ageMinutes: 1,
+              weight: 0.2,
+              signedWeight: 0.2,
+              storyId: 8,
+            },
+          ],
+        },
+        {
+          currency: 'EUR',
+          asOfUtc: '',
+          weightedScore: 0,
+          absolutePressure: 0,
+          articleCount: 0,
+          storyCount: 0,
+          dominantCategory: null,
+          paramsFingerprint: '',
+          topContributors: [
+            {
+              articleId: 1,
+              title: 'a',
+              sourceName: null,
+              currency: 'EUR',
+              ageMinutes: 1,
+              weight: 0.1,
+              signedWeight: 0.1,
+              storyId: 7,
+            },
+          ],
+        },
       ],
       7,
     );
@@ -314,14 +522,33 @@ describe('evaluation metrics', () => {
       draftShare: 0.9,
       passes: [
         {
-          Articles: 80, ArticlesWithVerdict: 78,
-          Relevance: { TruePositive: 50, FalsePositive: 10, FalseNegative: 2, TrueNegative: 16, Precision: 0.8333, Recall: 0.9615, F1: 0.8929 },
+          Articles: 80,
+          ArticlesWithVerdict: 78,
+          Relevance: {
+            TruePositive: 50,
+            FalsePositive: 10,
+            FalseNegative: 2,
+            TrueNegative: 16,
+            Precision: 0.8333,
+            Recall: 0.9615,
+            F1: 0.8929,
+          },
           ExposurePairs: null,
           Category: { Pairs: 40, Accuracy: 0.7, MacroF1: 0.6, PerClassF1: { Inflation: 0.8 } },
-          Direction: null, Certainty: null, RelevanceMae: 0.12, StanceAccuracy: null, SameEventPairs: null,
+          Direction: null,
+          Certainty: null,
+          RelevanceMae: 0.12,
+          StanceAccuracy: null,
+          SameEventPairs: null,
         },
       ],
-      agreement: { Articles: 78, Relevance: 0.97, ExposureSet: 0.9, CategoryAndDirection: 0.85, Overall: 0.88 },
+      agreement: {
+        Articles: 78,
+        Relevance: 0.97,
+        ExposureSet: 0.9,
+        CategoryAndDirection: 0.85,
+        Overall: 0.88,
+      },
       triage: null,
     });
     const m = parseEvalMetrics(json)!;
@@ -343,5 +570,114 @@ describe('evaluation metrics', () => {
     expect(signed(-0.0451)).toBe('−0.045');
     expect(signed(0.1)).toBe('+0.100');
     expect(signed(null)).toBe('—');
+  });
+});
+
+describe('event study', () => {
+  const rows = [
+    {
+      section: 'group',
+      dimension: 'category',
+      bucket: 'Inflation',
+      horizonMinutes: 60,
+      n: 40,
+      clusters: 30,
+      mean: 0.1,
+      hitRate: 0.55,
+      tStat: 2,
+      ciLow: 0.02,
+      ciHigh: 0.18,
+    },
+    {
+      section: 'group',
+      dimension: 'category',
+      bucket: 'Growth',
+      horizonMinutes: 60,
+      n: 90,
+      clusters: 60,
+      mean: -0.05,
+      hitRate: 0.48,
+      tStat: -1,
+      ciLow: -0.12,
+      ciHigh: 0.02,
+    },
+    {
+      section: 'group',
+      dimension: 'channel',
+      bucket: 'Rss',
+      horizonMinutes: 15,
+      n: 10,
+      clusters: 8,
+      mean: 0.3,
+      hitRate: null,
+      tStat: null,
+      ciLow: -0.4,
+      ciHigh: 0.9,
+    },
+    {
+      section: 'term-ic',
+      dimension: 'severity',
+      bucket: 'severity',
+      horizonMinutes: 60,
+      n: 120,
+      clusters: 90,
+      mean: 0.04,
+      hitRate: null,
+      tStat: null,
+      ciLow: null,
+      ciHigh: null,
+    },
+  ];
+
+  it('filters and orders result rows', () => {
+    expect(studyRows(rows, 'group', 'category', 60).map((r) => r.bucket)).toEqual([
+      'Growth',
+      'Inflation',
+    ]);
+    expect(studyDimensions(rows)).toEqual(['category', 'channel']);
+    expect(studyHorizons(rows)).toEqual([15, 60]);
+  });
+
+  it('puts zero in the middle of a symmetric axis', () => {
+    const g = ciGeometry(rows.slice(0, 2), 200);
+    expect(g.zero).toBe(100);
+    expect(g.scale(0.18)).toBeGreaterThan(100);
+    expect(g.scale(-0.12)).toBeLessThan(100);
+    expect(ciGeometry([], 100).zero).toBe(50);
+  });
+
+  it('reads a CI verdict and refuses thin buckets', () => {
+    expect(ciVerdict(rows[0])).toBe('positive');
+    expect(ciVerdict(rows[1])).toBe('none');
+    expect(ciVerdict(rows[2])).toBe('thin');
+  });
+
+  it('diffs severities and merges the recommendation over the current map', () => {
+    const current = parseSeverityMap('{"Inflation":0.8,"Growth":0.6,"Other":0.25}');
+    const rec = parseSeverityMap({ Inflation: 0.7, Growth: 0.6 });
+    const diff = severityDiff(current, rec);
+    expect(diff[0]).toMatchObject({ category: 'Inflation', changed: true });
+    expect(diff[0].delta).toBeCloseTo(-0.1);
+    expect(diff.find((d) => d.category === 'Other')).toMatchObject({
+      recommended: null,
+      changed: false,
+    });
+    expect(JSON.parse(mergedSeverityJson(current, rec))).toEqual({
+      Inflation: 0.7,
+      Growth: 0.6,
+      Other: 0.25,
+    });
+    expect(parseSeverityMap('nope')).toEqual({});
+  });
+
+  it('only a positive verdict supports Full direction', () => {
+    expect(directionAdvice('Positive').mode).toBe('Full');
+    expect(directionAdvice('Negative').mode).toBe('RiskOnly');
+    expect(directionAdvice(null).mode).toBe('RiskOnly');
+  });
+
+  it('parses modes case-insensitively with a default', () => {
+    expect(parseMode('enforce', ['Off', 'Observe', 'Enforce'] as const, 'Observe')).toBe('Enforce');
+    expect(parseMode('x', ['Off', 'Observe', 'Enforce'] as const, 'Observe')).toBe('Observe');
   });
 });
