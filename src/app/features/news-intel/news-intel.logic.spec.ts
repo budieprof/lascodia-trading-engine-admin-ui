@@ -34,6 +34,7 @@ import {
   directionAdvice,
   mergedSeverityJson,
   parseMode,
+  parseRecommendation,
   parseSeverityMap,
   severityDiff,
   studyDimensions,
@@ -679,5 +680,45 @@ describe('event study', () => {
   it('parses modes case-insensitively with a default', () => {
     expect(parseMode('enforce', ['Off', 'Observe', 'Enforce'] as const, 'Observe')).toBe('Enforce');
     expect(parseMode('x', ['Off', 'Observe', 'Enforce'] as const, 'Observe')).toBe('Observe');
+  });
+});
+
+describe('recommended weights', () => {
+  it('reads the engine NewsSeverityRecommendation shape', () => {
+    const r = parseRecommendation({
+      runId: 3,
+      configKey: 'NewsIntel:Weight:CategorySeverityJson',
+      recommendedJson: '{"Inflation":0.7}',
+      categories: [
+        {
+          category: 'Inflation',
+          current: 0.8,
+          recommended: 0.7,
+          fitted: 0.6,
+          n: 90,
+          clusters: 63,
+          meanSignedR: 0.02,
+          basis: 'shrunk',
+        },
+      ],
+      lineage: 'all lineages',
+    });
+    expect(r.rows).toEqual([
+      {
+        category: 'Inflation',
+        current: 0.8,
+        recommended: 0.7,
+        n: 90,
+        clusters: 63,
+        basis: 'shrunk',
+      },
+    ]);
+    expect(parseRecommendation([{ Category: 'Growth', Recommended: 0.5 }]).rows[0].category).toBe(
+      'Growth',
+    );
+    expect(parseRecommendation({ json: '{"Growth":0.4}' }).rows[0]).toMatchObject({
+      category: 'Growth',
+      recommended: 0.4,
+    });
   });
 });
