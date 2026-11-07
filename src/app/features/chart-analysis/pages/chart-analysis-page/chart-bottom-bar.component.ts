@@ -109,8 +109,10 @@ type ScaleMode = 'normal' | 'log' | 'percent' | 'indexed';
         type="button"
         class="bb-btn"
         [class.on]="scaleMode() === 'percent'"
+        [attr.aria-pressed]="scaleMode() === 'percent'"
         (click)="scaleModeChange.emit(scaleMode() === 'percent' ? 'normal' : 'percent')"
         title="Percentage scale"
+        aria-label="Percentage scale"
       >
         %
       </button>
@@ -118,8 +120,10 @@ type ScaleMode = 'normal' | 'log' | 'percent' | 'indexed';
         type="button"
         class="bb-btn"
         [class.on]="scaleMode() === 'log'"
+        [attr.aria-pressed]="scaleMode() === 'log'"
         (click)="scaleModeChange.emit(scaleMode() === 'log' ? 'normal' : 'log')"
         title="Logarithmic scale"
+        aria-label="Logarithmic scale"
       >
         log
       </button>

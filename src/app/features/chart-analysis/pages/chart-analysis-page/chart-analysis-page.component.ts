@@ -531,6 +531,7 @@ import {
   type PanelView,
 } from '../../compare/split-panels';
 import { PanelStateComponent } from '../../compare/panel-state.component';
+import { ChartAnnouncer } from './chart-announcer';
 import {
   ASSET_CLASS_NAME,
   AssetClassDefaultsService,
@@ -540,6 +541,7 @@ import {
   parseSynthetic,
   syntheticNotice,
   syntheticSymbol,
+  syntheticTitle,
   SyntheticTicks,
   type SyntheticSpec,
 } from '../../compare/synthetic';
@@ -2353,6 +2355,23 @@ export class ChartAnalysisPageComponent {
 
   /** The legend's three-state tone (kept for older bindings): open / closed / stale. */
   readonly marketStatus = computed<'open' | 'closed' | 'stale'>(() => this.marketView().tone);
+
+  /** US05: the polite live region's message (symbol + market state on a change, the price at most every 30 s). */
+  readonly liveMessage = signal('');
+  private readonly announcer = new ChartAnnouncer();
+  private readonly announce = effect(() => {
+    const close = this.bars().at(-1)?.close;
+    const input = {
+      symbol: this.synthetic() ? syntheticTitle(this.synthetic()!) : this.symbol(),
+      interval: this.resolutionLabel(this.resolution()),
+      market: this.marketView().label || null,
+      price: close === undefined ? null : close.toFixed(this.precision()),
+    };
+    untracked(() => {
+      const message = this.announcer.next(input, Date.now());
+      if (message) this.liveMessage.set(message);
+    });
+  });
   /** What the bars are (UD07): kind, source, exchange, contract, perpetual, volume unit, adjustment. */
   readonly symbolChips = computed((): SymbolChip[] => {
     // US04: a spread / ratio symbol says what it is and how it was built.
