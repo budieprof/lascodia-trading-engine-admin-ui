@@ -37,7 +37,7 @@ function setup(getBars = vi.fn(() => Promise.resolve({ bars: hours(5, 6), noData
       { id: '2h', label: '', panels: 1 },
       { id: '4', label: '', panels: 3 },
     ],
-    feed: { getBars, sessionOf: () => null },
+    feed: { getBars, sessionOf: () => null, gridOf: () => ({ kind: 'epoch' }) },
     serverClock: { now: () => NOW },
     panelHosts: () => [],
     calendars: new Map(),
